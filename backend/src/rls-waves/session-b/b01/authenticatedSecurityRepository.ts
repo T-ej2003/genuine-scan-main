@@ -88,12 +88,18 @@ export const loadRecentAuthSessionRiskInputs = async (db: AuthQueryClient) => {
   const rows = await db.$queryRaw<Array<{
     createdIpHash: string | null;
     createdUserAgent: string | null;
-    createdAt: Date;
+    createdAt: Date | null;
+    actorState: Record<string, unknown>;
   }>>`
     SELECT * FROM app_rls.load_recent_auth_session_risk_inputs(5::integer)
   `;
-  if (rows.length > 5) throw new Error("app_rls.load_recent_auth_session_risk_inputs returned too many rows");
-  return rows;
+  if (rows.length < 1 || rows.length > 5 || !rows[0]?.actorState) {
+    throw new Error("app_rls.load_recent_auth_session_risk_inputs returned an invalid projection");
+  }
+  return {
+    actorState: rows[0].actorState,
+    recentSessions: rows.filter((row): row is typeof row & { createdAt: Date } => row.createdAt instanceof Date),
+  };
 };
 
 export const recordAuthSessionRiskSignal = async (
@@ -104,6 +110,14 @@ export const recordAuthSessionRiskSignal = async (
     ipHash: string | null;
     userAgentHash: string | null;
     recordedAt: Date;
+    passwordHash?: string | null;
+    challenge?: {
+      ticketHash: string;
+      sessionBindingHash: string;
+      expiresAt: Date;
+      maxAttempts: number;
+    } | null;
+    requestId: string;
   },
   db: AuthQueryClient
 ) => {
@@ -111,18 +125,26 @@ export const recordAuthSessionRiskSignal = async (
     throw new Error("Invalid auth-session risk score");
   }
   if (input.reasons.length > 12) throw new Error("Too many auth-session risk reasons");
-  const rows = await db.$queryRaw<Array<{ recorded: boolean }>>`
+  const rows = await db.$queryRaw<Array<{ recorded: boolean; challengeCreated: boolean }>>`
     SELECT * FROM app_rls.record_auth_session_risk_signal(
       ${input.riskScore}::integer,
       ${input.riskLevel},
       ${input.reasons}::text[],
       ${input.ipHash},
       ${input.userAgentHash},
-      ${input.recordedAt}::timestamp without time zone
+      ${input.recordedAt}::timestamp without time zone,
+      ${input.passwordHash || null},
+      ${input.challenge?.ticketHash || null},
+      ${input.challenge?.sessionBindingHash || null},
+      ${input.challenge?.expiresAt || null}::timestamp without time zone,
+      ${input.challenge?.maxAttempts || null}::integer,
+      ${input.requestId}
     )
   `;
   const result = one(rows, "app_rls.record_auth_session_risk_signal");
   if (!result.recorded) throw new Error("Auth-session risk signal was not recorded");
+  if (Boolean(input.challenge) !== result.challengeCreated) throw new Error("Auth-session MFA challenge was not created");
+  return result;
 };
 
 export const updateAuthenticatedProfile = async (

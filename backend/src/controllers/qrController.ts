@@ -1,12 +1,13 @@
 //File: backend/src/controllers/qrController.ts  
 import { Response } from "express";
+import { mkdtemp, open, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 import { Prisma, QRStatus, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
-import { getQRStats } from "../services/qrService";
-import { allocateQrRange, getNextLicenseeQrNumber, lockLicenseeAllocation } from "../services/qrAllocationService";
 import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { createUserNotification } from "../services/notificationService";
 import { buildLineageSuccessMessage } from "../services/batchAllocationService";
@@ -18,13 +19,24 @@ import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 import { listLatestDecisionByQrCodeIds } from "../services/verificationDecisionReadService";
 import { recordBreakGlassIssuanceMetric } from "../observability/verificationTrustMetrics";
-import { getLegacyQrReport, rotateEligibleLegacyQrCodes, serializeLegacyQrReportCsv } from "../services/legacyQrRotationService";
 import { getBatchReleaseApprovalContext, releaseBatchForSupplyChain } from "../services/batchReleaseService";
 import { assertBatchTransitionAllowedFromDb } from "../services/batchStateMachineService";
 import {
   formatPrintValidationEvidenceMarkdown,
   generatePrintValidationEvidenceReport,
 } from "../services/printValidationEvidenceService";
+import {
+  allocateRange as allocateQrRangeBoundary,
+  bindBreakGlassTokens,
+  deleteCodes as deleteQrCodesBoundary,
+  getCodeScope,
+  isQrBoundaryDenied,
+  mutateBatch as mutateQrBatch,
+  readCodes as readQrCodesBoundary,
+  readStats as readQrStatsBoundary,
+  visitQrCodePages,
+  withQrBoundaryTransaction,
+} from "../rls-waves/session-c/c01/qrSystemRepository";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -103,12 +115,6 @@ const generateQRCodesSchema = z.object({
   quantity: z.number().int().positive().max(200000),
 }).strict();
 
-const rotateLegacyQrCodesSchema = z.object({
-  ids: z.array(z.string().uuid()).max(500).optional(),
-  limit: z.number().int().positive().max(500).optional(),
-  dryRun: z.boolean().optional(),
-}).strict();
-
 const generateSignedLinksSchema = z.object({
   codes: z.array(z.string().trim().min(2).max(128)).min(1).max(2000),
 });
@@ -137,6 +143,9 @@ const ensureAuth = (req: AuthRequest) => {
   if (!role || !userId) return null;
   return { role, userId };
 };
+
+const qrRequestId = (req: AuthRequest) =>
+  String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
 
 const isManufacturerRole = (role?: UserRole | null) =>
   role === UserRole.MANUFACTURER ||
@@ -182,40 +191,9 @@ export const allocateQRRange = async (req: AuthRequest, res: Response) => {
 
     const { licenseeId, startNumber, endNumber, receivedBatchName } = parsed.data;
 
-    const result = await prisma.$transaction(
-      async (tx) => {
-        await lockLicenseeAllocation(tx, licenseeId);
-        return allocateQrRange({
-          licenseeId,
-          startNumber,
-          endNumber,
-          createdByUserId: auth.userId,
-          source: "ADMIN_TOPUP",
-          createReceivedBatch: true,
-          receivedBatchName: receivedBatchName || null,
-          tx,
-        });
-      },
-      {
-        maxWait: ALLOCATION_TX_MAX_WAIT_MS,
-        timeout: ALLOCATION_TX_TIMEOUT_MS,
-      }
-    );
-
-    await createAuditLog({
-      userId: auth.userId,
-      action: "ALLOCATED",
-      entityType: "QRRange",
-      entityId: result.range.id,
-      details: {
-        context: "ALLOCATE_QR_RANGE",
-        startCode: result.startCode,
-        endCode: result.endCode,
-        created: result.createdCount,
-        receivedBatchId: result.receivedBatch?.id || null,
-        receivedBatchName: result.receivedBatch?.name || null,
-      },
-      ipAddress: req.ip,
+    const result = await allocateQrRangeBoundary<any>({
+      capability: String(req.databaseSessionCapability || ""), requestId: qrRequestId(req),
+      licenseeId, startNumber, endNumber, receivedBatchName: receivedBatchName || null, source: "ADMIN_TOPUP",
     });
 
     return res.status(201).json({
@@ -225,8 +203,8 @@ export const allocateQRRange = async (req: AuthRequest, res: Response) => {
         startCode: result.startCode,
         endCode: result.endCode,
         totalCodes: result.totalCodes,
-        receivedBatchId: result.receivedBatch?.id || null,
-        receivedBatchName: result.receivedBatch?.name || null,
+        receivedBatchId: result.receivedBatchId || null,
+        receivedBatchName: result.receivedBatchName || null,
       },
     });
   } catch (e) {
@@ -257,66 +235,24 @@ export const allocateQRRangeForLicensee = async (req: AuthRequest, res: Response
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const result = await prisma.$transaction(
-      async (tx) => {
-        await lockLicenseeAllocation(tx, licenseeId);
-
-        const startNumber =
-          parsed.data.quantity != null
-            ? await getNextLicenseeQrNumber(tx, licenseeId)
-            : (parsed.data.startNumber as number);
-        const endNumber =
-          parsed.data.quantity != null
-            ? startNumber + parsed.data.quantity - 1
-            : (parsed.data.endNumber as number);
-
-        const allocation = await allocateQrRange({
-          licenseeId,
-          startNumber,
-          endNumber,
-          createdByUserId: auth.userId,
-          source: "ADMIN_TOPUP",
-          createReceivedBatch: true,
-          receivedBatchName: parsed.data.receivedBatchName || null,
-          tx,
-        });
-
-        return { allocation, startNumber, endNumber };
-      },
-      {
-        maxWait: ALLOCATION_TX_MAX_WAIT_MS,
-        timeout: ALLOCATION_TX_TIMEOUT_MS,
-      }
-    );
-
-    await createAuditLog({
-      userId: auth.userId,
-      action: "ALLOCATED",
-      entityType: "QRRange",
-      entityId: result.allocation.range.id,
-      details: {
-        context: "ALLOCATE_QR_RANGE_LICENSEE",
-        licenseeId,
-        startCode: result.allocation.startCode,
-        endCode: result.allocation.endCode,
-        created: result.allocation.createdCount,
-        receivedBatchId: result.allocation.receivedBatch?.id || null,
-        receivedBatchName: result.allocation.receivedBatch?.name || null,
-      },
-      ipAddress: req.ip,
+    const startNumber = parsed.data.quantity != null ? 0 : parsed.data.startNumber as number;
+    const endNumber = parsed.data.quantity != null ? parsed.data.quantity : parsed.data.endNumber as number;
+    const allocation = await allocateQrRangeBoundary<any>({
+      capability: String(req.databaseSessionCapability || ""), requestId: qrRequestId(req), licenseeId,
+      startNumber, endNumber, receivedBatchName: parsed.data.receivedBatchName || null, source: "ADMIN_TOPUP",
     });
 
     return res.status(201).json({
       success: true,
       data: {
-        range: result.allocation.range,
-        startCode: result.allocation.startCode,
-        endCode: result.allocation.endCode,
-        startNumber: result.startNumber,
-        endNumber: result.endNumber,
-        totalCodes: result.allocation.totalCodes,
-        receivedBatchId: result.allocation.receivedBatch?.id || null,
-        receivedBatchName: result.allocation.receivedBatch?.name || null,
+        range: allocation.range,
+        startCode: allocation.startCode,
+        endCode: allocation.endCode,
+        startNumber: Number(String(allocation.startCode).slice(-10)),
+        endNumber: Number(String(allocation.endCode).slice(-10)),
+        totalCodes: allocation.totalCodes,
+        receivedBatchId: allocation.receivedBatchId || null,
+        receivedBatchName: allocation.receivedBatchName || null,
       },
     });
   } catch (e: any) {
@@ -335,30 +271,20 @@ export const bulkDeleteQRCodes = async (req: AuthRequest, res: Response) => {
   try {
     const auth = ensureAuth(req);
     if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
+    if (!["SUPER_ADMIN","PLATFORM_SUPER_ADMIN","LICENSEE_ADMIN"].includes(auth.role)) {
+      return res.status(403).json({ success:false,error:"Access denied" });
+    }
 
     const parsed = bulkDeleteQRCodesSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const where = (await buildScopedWhere(req.user!, {
-      relationManufacturerField: "batch",
-    })) as Prisma.QRCodeWhereInput;
-    if (parsed.data.ids?.length) where.id = { in: parsed.data.ids };
-    if (parsed.data.codes?.length) where.code = { in: parsed.data.codes };
-
-    const deleted = await prisma.qRCode.deleteMany({ where });
-
-    await createAuditLog({
-      userId: auth.userId,
-      action: "BULK_DELETE_QR_CODES",
-      entityType: "QRCode",
-      entityId: undefined,
-      details: { ...parsed.data, deleted: deleted.count },
-      ipAddress: req.ip,
+    const deleted = await deleteQrCodesBoundary({
+      capability: String(req.databaseSessionCapability || ""), requestId: qrRequestId(req),
+      ids: parsed.data.ids, codes: parsed.data.codes,
     });
-
-    return res.json({ success: true, data: { deleted: deleted.count } });
+    return res.json({ success: true, data: { deleted } });
   } catch (e: any) {
     console.error("bulkDeleteQRCodes error:", e);
     return res.status(500).json({ success: false, error: e.message || "Internal server error" });
@@ -377,93 +303,13 @@ export const createBatch = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const licenseeId = req.user?.licenseeId;
-    if (!licenseeId) return res.status(403).json({ success: false, error: "No licensee association" });
-
-    const licensee = await prisma.licensee.findUnique({
-      where: { id: licenseeId },
-      select: { id: true, prefix: true },
-    });
-    if (!licensee) return res.status(404).json({ success: false, error: "Licensee not found" });
-
     const { name, quantity, manufacturerId } = parsed.data;
-
-    // manufacturer is optional but must belong to same tenant if provided
-    let mfgId: string | null = null;
-    if (manufacturerId) {
-      const m = await prisma.user.findFirst({
-        where: {
-          id: manufacturerId,
-          role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
-          isActive: true,
-          OR: [{ licenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId } } }],
-        },
-        select: { id: true },
-      });
-      if (!m) return res.status(404).json({ success: false, error: "Manufacturer invalid" });
-      mfgId = m.id;
-    }
-
-    const batch = await prisma.$transaction(async (tx) => {
-      const pool = await tx.qRCode.findMany({
-        where: { licenseeId, batchId: null, status: QRStatus.DORMANT },
-        orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
-        take: quantity,
-        select: { id: true, code: true, displayCode: true },
-      });
-
-      if (pool.length < quantity) {
-        throw new Error(`Not enough available codes. Available: ${pool.length}, requested: ${quantity}.`);
-      }
-
-      const startCode = pool[0].displayCode || pool[0].code;
-      const endCode = pool[pool.length - 1].displayCode || pool[pool.length - 1].code;
-
-      const createdBatch = await tx.batch.create({
-        data: {
-          name,
-          licenseeId,
-          startCode,
-          endCode,
-          totalCodes: pool.length,
-          manufacturerId: mfgId,
-          lifecycleState: "CODES_GENERATED",
-        },
-      });
-
-      const updated = await tx.qRCode.updateMany({
-        where: { id: { in: pool.map((p) => p.id) } },
-        data: {
-          batchId: createdBatch.id,
-          status: QRStatus.ALLOCATED,
-          printJobId: null,
-          tokenNonce: null,
-          tokenIssuedAt: null,
-          tokenExpiresAt: null,
-          tokenHash: null,
-          printedAt: null,
-          printedByUserId: null,
-          redeemedAt: null,
-          redeemedDeviceFingerprint: null,
-        },
-      });
-
-      if (updated.count !== pool.length) {
-        throw new Error("BATCH_BUSY");
-      }
-
-      return createdBatch;
+    const batch = await mutateQrBatch<Record<string, unknown>>({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: qrRequestId(req),
+      operation: "CREATE_BATCH",
+      payload: { name, quantity, manufacturerId: manufacturerId || null },
     });
-
-    await createAuditLog({
-      userId: auth.userId,
-      action: "ALLOCATED",
-      entityType: "Batch",
-      entityId: batch.id,
-      details: { context: "CREATE_BATCH", name, quantity, manufacturerId: mfgId },
-      ipAddress: req.ip,
-    });
-
     return res.status(201).json({ success: true, data: batch });
   } catch (e: any) {
     const msg = e?.message || "Internal server error";
@@ -493,83 +339,19 @@ export const adminAllocateBatch = async (req: AuthRequest, res: Response) => {
 
 export const deleteBatch = async (req: AuthRequest, res: Response) => {
   try {
-    const auth = ensureAuth(req);
-    if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
+    if (!ensureAuth(req)) return res.status(401).json({ success: false, error: "Not authenticated" });
 
     const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
     }
-    const batchId = paramsParsed.data.id;
-
-    const batch = await findScopedBatch(req.user!, batchId, {
-      select: { id: true, name: true, licenseeId: true, printedAt: true },
+    const result = await mutateQrBatch<Record<string, unknown>>({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: qrRequestId(req),
+      operation: "DELETE_BATCH",
+      payload: { batchId: paramsParsed.data.id },
     });
-    if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
-
-    if (
-      auth.role === UserRole.MANUFACTURER ||
-      auth.role === UserRole.MANUFACTURER_ADMIN ||
-      auth.role === UserRole.MANUFACTURER_USER
-    ) {
-      return res.status(403).json({ success: false, error: "Manufacturers cannot delete batches" });
-    }
-
-    if (auth.role === UserRole.LICENSEE_ADMIN || auth.role === UserRole.ORG_ADMIN) {
-      if (!req.user?.licenseeId || req.user.licenseeId !== batch.licenseeId) {
-        return res.status(403).json({ success: false, error: "Access denied" });
-      }
-    }
-
-    if (batch.printedAt) {
-      return res.status(400).json({ success: false, error: "Cannot delete a printed batch" });
-    }
-
-    const dependentAllocations = await prisma.batch.count({
-      where: {
-        OR: [{ parentBatchId: batch.id }, { rootBatchId: batch.id }],
-      },
-    });
-    if (dependentAllocations > 0) {
-      return res.status(409).json({
-        success: false,
-        error: "This source batch still has assigned manufacturer allocations. Manage allocations from the batch workspace instead of deleting the source row.",
-      });
-    }
-
-    const result = await prisma.$transaction(async (tx) => {
-      const unassigned = await tx.qRCode.updateMany({
-        where: { batchId: batch.id, licenseeId: batch.licenseeId },
-        data: {
-          batchId: null,
-          status: QRStatus.DORMANT,
-          printJobId: null,
-          tokenNonce: null,
-          tokenIssuedAt: null,
-          tokenExpiresAt: null,
-          tokenHash: null,
-          printedAt: null,
-          printedByUserId: null,
-          redeemedAt: null,
-          redeemedDeviceFingerprint: null,
-        },
-      });
-
-      await tx.batch.delete({ where: { id: batch.id } });
-
-      return { unassignedCount: unassigned.count };
-    });
-
-    await createAuditLog({
-      userId: auth.userId,
-      action: "DELETE_BATCH",
-      entityType: "Batch",
-      entityId: batch.id,
-      details: { batchName: batch.name, unassignedCount: result.unassignedCount },
-      ipAddress: req.ip,
-    });
-
-    return res.json({ success: true, data: { deletedBatchId: batch.id, ...result } });
+    return res.json({ success: true, data: result });
   } catch (e) {
     console.error("deleteBatch error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
@@ -580,98 +362,19 @@ export const deleteBatch = async (req: AuthRequest, res: Response) => {
 
 export const bulkDeleteBatches = async (req: AuthRequest, res: Response) => {
   try {
-    const auth = ensureAuth(req);
-    if (!auth) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    if (
-      auth.role === UserRole.MANUFACTURER ||
-      auth.role === UserRole.MANUFACTURER_ADMIN ||
-      auth.role === UserRole.MANUFACTURER_USER
-    ) {
-      return res.status(403).json({ success: false, error: "Manufacturers cannot delete batches" });
-    }
+    if (!ensureAuth(req)) return res.status(401).json({ success: false, error: "Not authenticated" });
 
     const parsed = bulkDeleteBatchesSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const batchIds = parsed.data.ids;
-
-    const scopedBatchWhere = await buildScopedWhere(req.user!, {
-      base: { id: { in: batchIds } },
-      manufacturerField: "manufacturerId",
+    const txResult = await mutateQrBatch<Record<string, unknown>>({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: qrRequestId(req),
+      operation: "BULK_DELETE_BATCHES",
+      payload: { batchIds: parsed.data.ids },
     });
-
-    const visibleBatchCount = await prisma.batch.count({ where: scopedBatchWhere });
-    if (visibleBatchCount !== new Set(batchIds).size) {
-      return res.status(404).json({ success: false, error: "Batch not found" });
-    }
-
-    // disallow deleting printed batches
-    const printed = await prisma.batch.findFirst({
-      where: { ...scopedBatchWhere, printedAt: { not: null } },
-      select: { id: true },
-    });
-    if (printed) {
-      return res.status(400).json({ success: false, error: "Cannot bulk delete: some batches are printed" });
-    }
-
-    const dependentAllocationWhere = await buildScopedWhere(req.user!, {
-      base: {
-        OR: [{ parentBatchId: { in: batchIds } }, { rootBatchId: { in: batchIds } }],
-      },
-      manufacturerField: "manufacturerId",
-    });
-
-    const dependentAllocation = await prisma.batch.findFirst({
-      where: dependentAllocationWhere,
-      select: { id: true },
-    });
-    if (dependentAllocation) {
-      return res.status(409).json({
-        success: false,
-        error: "Some selected source batches still have assigned manufacturer allocations. Remove those allocations first.",
-      });
-    }
-
-    const txResult = await prisma.$transaction(async (tx) => {
-      const unassigned = await tx.qRCode.updateMany({
-        where: {
-          batchId: { in: batchIds },
-          ...(scopedBatchWhere.licenseeId ? { licenseeId: scopedBatchWhere.licenseeId } : {}),
-        },
-        data: {
-          batchId: null,
-          status: QRStatus.DORMANT,
-          printJobId: null,
-          tokenNonce: null,
-          tokenIssuedAt: null,
-          tokenExpiresAt: null,
-          tokenHash: null,
-          printedAt: null,
-          printedByUserId: null,
-          redeemedAt: null,
-          redeemedDeviceFingerprint: null,
-        },
-      });
-
-      const deleted = await tx.batch.deleteMany({
-        where: scopedBatchWhere,
-      });
-
-      return { unassignedCount: unassigned.count, deletedCount: deleted.count };
-    });
-
-    await createAuditLog({
-      userId: auth.userId,
-      action: "BULK_DELETE_BATCHES",
-      entityType: "Batch",
-      entityId: undefined,
-      details: { batchIds, ...txResult },
-      ipAddress: req.ip,
-    });
-
     return res.json({ success: true, data: txResult });
   } catch (e) {
     console.error("bulkDeleteBatches error:", e);
@@ -697,176 +400,26 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
     }
     const batchId = paramsParsed.data.id;
 
-    const batch = await findScopedBatch(req.user!, batchId, {
-      select: { id: true, name: true, licenseeId: true, printedAt: true, manufacturerId: true },
-    });
-    if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
-
-    if (batch.printedAt) {
-      return res.status(400).json({ success: false, error: "Already printed; cannot reassign" });
-    }
-
-    if (batch.manufacturerId) {
-      return res.status(400).json({ success: false, error: "Batch already assigned to a manufacturer" });
-    }
-
-    const manufacturer = await prisma.user.findFirst({
-      where: {
-        id: parsed.data.manufacturerId,
-        role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
-        isActive: true,
-        OR: [
-          { licenseeId: batch.licenseeId },
-          { manufacturerLicenseeLinks: { some: { licenseeId: batch.licenseeId } } },
-        ],
-      },
-      select: { id: true, name: true },
-    });
-    if (!manufacturer) return res.status(404).json({ success: false, error: "Manufacturer invalid" });
-
-    const quantity = parsed.data.quantity;
-    const requestedChildBatchName = String(parsed.data.name || "").trim();
-
-    const result = await prisma.$transaction(async (tx) => {
-      const sourceBatch = await tx.batch.findUnique({
-        where: { id: batch.id },
-        select: { id: true, name: true, rootBatchId: true },
-      });
-      if (!sourceBatch) throw new Error("Batch not found");
-
-      const eligible = await tx.qRCode.findMany({
-        where: {
-          batchId: batch.id,
-          status: { in: [QRStatus.DORMANT, QRStatus.ACTIVE, QRStatus.ALLOCATED] },
-          printJobId: null,
-        },
-        orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
-        take: quantity,
-        select: { id: true, code: true, displayCode: true },
-      });
-
-      if (eligible.length < quantity) {
-        throw new Error(
-          `Not enough available codes in this batch. Available: ${eligible.length}, requested: ${quantity}.`
-        );
-      }
-
-      const startCode = eligible[0].displayCode || eligible[0].code;
-      const endCode = eligible[eligible.length - 1].displayCode || eligible[eligible.length - 1].code;
-      const totalCodes = eligible.length;
-
-      const newName = (
-        requestedChildBatchName ||
-        `${batch.name} -> ${manufacturer.name} (${totalCodes})`
-      )
-        .replace(/\s+/g, " ")
-        .slice(0, 120);
-
-      const newBatch = await tx.batch.create({
-        data: {
-          name: newName,
-          licenseeId: batch.licenseeId,
-          manufacturerId: manufacturer.id,
-          parentBatchId: sourceBatch.id,
-          rootBatchId: sourceBatch.rootBatchId || sourceBatch.id,
-          startCode,
-          endCode,
-          totalCodes,
-          lifecycleState: "CODES_GENERATED",
-        },
-      });
-
-      const updated = await tx.qRCode.updateMany({
-        where: { id: { in: eligible.map((e) => e.id) } },
-        data: {
-          batchId: newBatch.id,
-          status: QRStatus.ALLOCATED,
-          printJobId: null,
-          tokenNonce: null,
-          tokenIssuedAt: null,
-          tokenExpiresAt: null,
-          tokenHash: null,
-          printedAt: null,
-          printedByUserId: null,
-          redeemedAt: null,
-          redeemedDeviceFingerprint: null,
-        },
-      });
-      if (updated.count !== eligible.length) {
-        throw new Error("BATCH_BUSY");
-      }
-
-      const remaining = await tx.qRCode.findMany({
-        where: { batchId: batch.id },
-        orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
-        select: { code: true, displayCode: true },
-      });
-
-      await tx.batch.update({
-        where: { id: batch.id },
-        data:
-          remaining.length === 0
-            ? {
-                totalCodes: 0,
-              }
-            : {
-                startCode: remaining[0].displayCode || remaining[0].code,
-                endCode: remaining[remaining.length - 1].displayCode || remaining[remaining.length - 1].code,
-                totalCodes: remaining.length,
-              },
-      });
-
-      return {
-        newBatchId: newBatch.id,
-        newBatchName: newBatch.name,
-        allocated: totalCodes,
-        startCode,
-        endCode,
-        sourceBatchId: sourceBatch.id,
-        sourceBatchName: sourceBatch.name,
-        sourceRemainingCodes: remaining.length,
-        sourceRemainingStartCode: remaining[0]?.displayCode || remaining[0]?.code || null,
-        sourceRemainingEndCode:
-          remaining[remaining.length - 1]?.displayCode || remaining[remaining.length - 1]?.code || null,
-      };
-    });
-
-    await createAuditLog({
-      userId: auth.userId,
-      action: "ALLOCATED",
-      entityType: "Batch",
-      entityId: batch.id,
-      details: {
-        context: "ASSIGN_MANUFACTURER_QUANTITY_PARENT",
-        manufacturerId: manufacturer.id,
-        quantity: result.allocated,
-        childBatchId: result.newBatchId,
-        childBatchName: result.newBatchName,
-      },
-      ipAddress: req.ip,
-    });
-
-    await createAuditLog({
-      userId: auth.userId,
-      action: "ALLOCATED",
-      entityType: "Batch",
-      entityId: result.newBatchId,
-      details: {
-        context: "ASSIGN_MANUFACTURER_QUANTITY_CHILD",
-        manufacturerId: manufacturer.id,
-        quantity: result.allocated,
-        parentBatchId: batch.id,
-        childBatchName: result.newBatchName,
-        startCode: result.startCode,
-        endCode: result.endCode,
-      },
-      ipAddress: req.ip,
+    const result = await mutateQrBatch<{
+      newBatchId: string;
+      newBatchName: string;
+      allocated: number;
+      sourceBatchId: string;
+      sourceBatchName: string;
+      sourceRemainingCodes: number;
+      manufacturerId: string;
+      licenseeId: string;
+    }>({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: qrRequestId(req),
+      operation: "ASSIGN_MANUFACTURER",
+      payload: { batchId, ...parsed.data },
     });
 
     try {
       await createUserNotification({
-        userId: manufacturer.id,
-        licenseeId: batch.licenseeId,
+        userId: result.manufacturerId,
+        licenseeId: result.licenseeId,
         type: "manufacturer_batch_assigned",
         title: "New batch assigned",
         body: `${result.newBatchName} is ready for printing (${result.allocated} codes).`,
@@ -1019,85 +572,32 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
 
     const { licenseeId, quantity } = parsed.data;
 
-    const result = await prisma.$transaction(
-      async (tx) => {
-        await lockLicenseeAllocation(tx, licenseeId);
-        const startNumber = await getNextLicenseeQrNumber(tx, licenseeId);
-        const endNumber = startNumber + quantity - 1;
-
-        const allocation = await allocateQrRange({
-          licenseeId,
-          startNumber,
-          endNumber,
-          createdByUserId: req.user?.userId,
-          source: "ADMIN_GENERATE",
-          createReceivedBatch: true,
-          tx,
-        });
-
-        return { allocation, startNumber, endNumber };
-      },
-      {
-        maxWait: ALLOCATION_TX_MAX_WAIT_MS,
-        timeout: ALLOCATION_TX_TIMEOUT_MS,
+    const { allocation, tokens } = await withQrBoundaryTransaction(async (tx) => {
+      const allocation = await allocateQrRangeBoundary<any>({
+        capability: String(req.databaseSessionCapability || ""), requestId: qrRequestId(req),
+        licenseeId, startNumber: 0, endNumber: quantity, source: "ADMIN_GENERATE",
+      }, tx);
+      const rows = Array.isArray(allocation.codes) ? allocation.codes : [];
+      const now = new Date();
+      const expAt = getQrTokenExpiryDate(now);
+      const tokens: { qrId: string; token: string }[] = [];
+      const bindings: Array<{ id: string; nonce: string; hash: string; issuedAt: Date; expiresAt: Date }> = [];
+      for (const qr of rows) {
+        const nonce = qr.tokenNonce || randomNonce();
+        const payload = {
+          qr_id: qr.id, batch_id: qr.batchId ?? null, licensee_id: qr.licenseeId,
+          manufacturer_id: null, epoch: Number(qr.replayEpoch || 1),
+          iat: Math.floor(now.getTime() / 1000), exp: Math.floor(expAt.getTime() / 1000), nonce,
+        };
+        const token = signQrPayload(payload);
+        tokens.push({ qrId: qr.id, token });
+        bindings.push({ id: qr.id, nonce, hash: hashToken(token), issuedAt: now, expiresAt: expAt });
       }
-    );
-
-    const rows = await prisma.qRCode.findMany({
-      where: { licenseeId, displayCode: { gte: result.allocation.startCode, lte: result.allocation.endCode } },
-      select: {
-        id: true,
-        licenseeId: true,
-        batchId: true,
-        replayEpoch: true,
-        tokenNonce: true,
-        tokenIssuedAt: true,
-        tokenExpiresAt: true,
-      },
-      orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
-    });
-
-    const now = new Date();
-    const expAt = getQrTokenExpiryDate(now);
-
-    const tokens: { qrId: string; token: string }[] = [];
-    for (const qr of rows) {
-      const nonce = qr.tokenNonce || randomNonce();
-      const payload = {
-        qr_id: qr.id,
-        batch_id: qr.batchId ?? null,
-        licensee_id: qr.licenseeId,
-        manufacturer_id: null,
-        epoch: Number(qr.replayEpoch || 1),
-        iat: Math.floor(now.getTime() / 1000),
-        exp: Math.floor(expAt.getTime() / 1000),
-        nonce,
-      };
-      const token = signQrPayload(payload);
-      const tokenHash = hashToken(token);
-      tokens.push({ qrId: qr.id, token });
-
-      await prisma.qRCode.update({
-        where: { id: qr.id },
-        data: {
-          tokenNonce: nonce,
-          tokenIssuedAt: now,
-          tokenExpiresAt: expAt,
-          tokenHash,
-          issuanceMode: "BREAK_GLASS_DIRECT",
-          customerVerifiableAt: null,
-        },
-      });
-    }
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId,
-      action: "CREATED",
-      entityType: "QRCode",
-      details: { startNumber: result.startNumber, endNumber: result.endNumber, quantity },
-      ipAddress: req.ip,
-    });
+      await bindBreakGlassTokens({
+        capability: String(req.databaseSessionCapability || ""), requestId: qrRequestId(req), licenseeId, tokens: bindings,
+      }, tx);
+      return { allocation, tokens };
+    }, { timeout:ALLOCATION_TX_TIMEOUT_MS,maxWait:ALLOCATION_TX_MAX_WAIT_MS });
     recordBreakGlassIssuanceMetric({
       licenseeId,
       quantity,
@@ -1107,8 +607,10 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
     return res.status(201).json({
       success: true,
       data: {
-        range: result.allocation.range,
-        receivedBatch: result.allocation.receivedBatch,
+        range: allocation.range,
+        receivedBatch: allocation.receivedBatchId
+          ? { id: allocation.receivedBatchId, name: allocation.receivedBatchName }
+          : null,
         tokens,
       },
     });
@@ -1140,9 +642,8 @@ export const blockQRCode = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid QR id" });
     }
     const id = paramsParsed.data.id;
-    const qr = await prisma.qRCode.findUnique({
-      where: { id },
-      select: { id: true, licenseeId: true, batchId: true },
+    const qr = await getCodeScope<{ id: string; licenseeId: string; batchId: string | null }>({
+      capability: String(req.databaseSessionCapability || ""), requestId: qrRequestId(req), qrId: id,
     });
     if (!qr) {
       return res.status(404).json({ success: false, error: "QR code not found" });
@@ -1262,6 +763,7 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
       user: req.user,
       requestedLicenseeId,
       requestId: (req as AuthRequest & { requestId?: string }).requestId,
+      databaseSessionCapability: req.databaseSessionCapability,
       limit,
       offset,
     });
@@ -1297,6 +799,7 @@ export const getBatchAllocationMap = async (req: AuthRequest, res: Response) => 
       batchId: parsed.data.id,
       requestedLicenseeId: (req.query.licenseeId as string | undefined) || null,
       requestId: (req as AuthRequest & { requestId?: string }).requestId,
+      databaseSessionCapability: req.databaseSessionCapability,
     });
     if (allocationPayload.status === "batch_not_found") {
       return res.status(404).json({ success: false, error: "Batch not found" });
@@ -1330,30 +833,10 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
     const limit = Math.min(parseInt(String(req.query.limit ?? "500"), 10) || 500, 2000);
     const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
 
-    const where = (await buildScopedWhere(req.user, {
-      requestedLicenseeId: (req.query.licenseeId as string | undefined) || null,
-      relationManufacturerField: "batch",
-    })) as Prisma.QRCodeWhereInput;
-    if (status) where.status = status;
-    if (q) {
-      where.OR = [
-        { code: { contains: q, mode: "insensitive" } },
-        { displayCode: { contains: q, mode: "insensitive" } },
-      ];
-    }
-
-    const [total, qrCodes] = await Promise.all([
-      prisma.qRCode.count({ where }),
-      prisma.qRCode.findMany({
-        where,
-        orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
-        take: limit,
-        skip: offset,
-        include: {
-          batch: { select: { id: true, name: true, printedAt: true } },
-        },
-      }),
-    ]);
+    const { total, qrCodes } = await readQrCodesBoundary<any[]>({
+      capability: String(req.databaseSessionCapability || ""), requestId: qrRequestId(req),
+      licenseeId: (req.query.licenseeId as string | undefined) || null, status, query: q, limit, offset,
+    });
 
     const decisionMap = await listLatestDecisionByQrCodeIds(qrCodes.map((row) => row.id));
     const enrichedQRCodes = qrCodes.map((row) => ({
@@ -1387,43 +870,11 @@ export const getStats = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
 
-    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
-    const licenseeId = scope.scopeLicenseeId || undefined;
-
-    if (
-      (role === UserRole.MANUFACTURER ||
-        role === UserRole.MANUFACTURER_ADMIN ||
-        role === UserRole.MANUFACTURER_USER) &&
-      userId
-    ) {
-      const where = (await buildScopedWhere(req.user, {
-        requestedLicenseeId: (req.query.licenseeId as string | undefined) || null,
-        relationManufacturerField: "batch",
-      })) as Prisma.QRCodeWhereInput;
-
-      const grouped = await prisma.qRCode.groupBy({
-        by: ["status"],
-        where,
-        _count: true,
-      });
-      const total = await prisma.qRCode.count({ where });
-      const byStatus = grouped.reduce((acc, s) => {
-        acc[s.status] = s._count;
-        return acc;
-      }, {} as Record<string, number>);
-
-      return res.json({
-        success: true,
-        data: {
-          total,
-          byStatus,
-          ...summarizeQrStatusCounts(byStatus),
-        },
-      });
-    }
-
-    const stats = await getQRStats(licenseeId);
-    return res.json({ success: true, data: stats });
+    const stats = await readQrStatsBoundary<{ total: number; byStatus: Record<string, number> }>({
+      capability: String(req.databaseSessionCapability || ""), requestId: qrRequestId(req),
+      licenseeId: (req.query.licenseeId as string | undefined) || null,
+    });
+    return res.json({ success: true, data: { ...stats, ...summarizeQrStatusCounts(stats.byStatus || {}) } });
   } catch (e) {
     if (isScopeError(e)) {
       return res.status(404).json({ success: false, error: "QR stats not found" });
@@ -1434,22 +885,10 @@ export const getStats = async (req: AuthRequest, res: Response) => {
 };
 
 export const getLegacyPublicCodeReport = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user?.userId) {
-      return res.status(401).json({ success: false, error: "Not authenticated" });
-    }
-
-    const report = await getLegacyQrReport();
-    if (String(req.query.format || "").trim().toLowerCase() === "csv") {
-      res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", 'attachment; filename="mscqr-legacy-public-code-report.csv"');
-      return res.send(`${serializeLegacyQrReportCsv(report)}\n`);
-    }
-    return res.json({ success: true, data: report });
-  } catch (e) {
-    console.error("getLegacyPublicCodeReport error:", e);
-    return res.status(500).json({ success: false, error: "Legacy QR report is temporarily unavailable." });
-  }
+  return res.status(410).json({
+    success: false,
+    error: "Legacy QR identity reports are retired; QRCode.code is immutable.",
+  });
 };
 
 export const getPrintValidationEvidence = async (req: AuthRequest, res: Response) => {
@@ -1664,45 +1103,14 @@ export const releaseBatch = async (req: AuthRequest, res: Response) => {
 };
 
 export const rotateLegacyPublicCodes = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user?.userId) {
-      return res.status(401).json({ success: false, error: "Not authenticated" });
-    }
-
-    const parsed = rotateLegacyQrCodesSchema.safeParse(req.body || {});
-    if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid rotation payload" });
-    }
-
-    const result = await rotateEligibleLegacyQrCodes({
-      actorId: req.user.userId,
-      ids: parsed.data.ids,
-      limit: parsed.data.limit,
-      dryRun: parsed.data.dryRun,
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
-      action: parsed.data.dryRun ? "QR_LEGACY_ROTATION_DRY_RUN" : "QR_LEGACY_ROTATION_EXECUTED",
-      entityType: "QRCode",
-      details: {
-        dryRun: result.dryRun,
-        scanned: result.scanned,
-        rotatedCount: result.rotated.length,
-        skippedCount: result.skipped.length,
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
-    });
-
-    return res.json({ success: true, data: result });
-  } catch (e) {
-    console.error("rotateLegacyPublicCodes error:", e);
-    return res.status(500).json({ success: false, error: "Legacy QR rotation failed safely. No unsafe rows were rotated." });
-  }
+  return res.status(410).json({
+    success: false,
+    error: "Legacy QR rotation is retired because QRCode.code is immutable.",
+  });
 };
 
 export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
+  let exportDirectory: string | null = null;
   try {
     const role = req.user?.role;
     const userId = req.user?.userId;
@@ -1711,87 +1119,61 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
     const q = (req.query.q as string | undefined)?.trim();
     const status = (req.query.status as QRStatus | undefined) || undefined;
 
-    const where = (await buildScopedWhere(req.user, {
-      requestedLicenseeId: (req.query.licenseeId as string | undefined) || null,
-      relationManufacturerField: "batch",
-    })) as Prisma.QRCodeWhereInput;
-    if (status) where.status = status;
-    if (q) {
-      where.OR = [
-        { code: { contains: q, mode: "insensitive" } },
-        { displayCode: { contains: q, mode: "insensitive" } },
-      ];
+    const header = [
+      "code","scanUrlPolicy","status","licenseeName","licenseePrefix","batchId","batchName",
+      "productName","productCode","printedAt","scanCount","createdAt","scannedAt",
+    ];
+    exportDirectory = await mkdtemp(join(tmpdir(),"mscqr-qr-export-"));
+    const exportPath=join(exportDirectory,"qr-codes.csv");
+    const file=await open(exportPath,"wx",0o600);
+    let exportedCount=0;
+    try {
+      await file.write(`${header.join(",")}\n`);
+      exportedCount = await withQrBoundaryTransaction(
+        (tx) => visitQrCodePages<any>(
+          (limit, offset) => readQrCodesBoundary<any[]>({
+            capability: String(req.databaseSessionCapability || ""), requestId: qrRequestId(req),
+            licenseeId: (req.query.licenseeId as string | undefined) || null, status, query: q, limit, offset,
+          }, tx),
+          async (rows) => {
+            const lines=rows.map((r) => [
+              r.code,"SIGNED_SCAN_URL_REQUIRED",r.status,r.licensee?.name ?? "",r.licensee?.prefix ?? "",
+              r.batchId ?? "",r.batch?.name ?? "","","",r.batch?.printedAt ?? "",r.scanCount ?? 0,
+              r.createdAt,r.scannedAt ?? "",
+            ].map(escapeCsv).join(","));
+            if (lines.length) await file.write(`${lines.join("\n")}\n`);
+          }
+        ),
+        {
+          timeout: ALLOCATION_TX_TIMEOUT_MS,
+          maxWait: ALLOCATION_TX_MAX_WAIT_MS,
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        }
+      );
+    } finally {
+      await file.close();
     }
-
-    const rows = await prisma.qRCode.findMany({
-      where,
-      orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
-      include: {
-        licensee: { select: { name: true, prefix: true } },
-        batch: { select: { id: true, name: true, printedAt: true } },
-      },
-    });
 
     await createAuditLog({
       userId,
-      licenseeId: typeof where.licenseeId === "string" ? where.licenseeId : undefined,
+      licenseeId: (req.query.licenseeId as string | undefined) || undefined,
       action: "EXPORT_QR_CODES",
       entityType: "QRCode",
-      details: { status: status || null, query: q || null, count: rows.length },
+      details: { status: status || null, query: q || null, count: exportedCount },
       ipAddress: req.ip,
     });
 
-    const header = [
-      "code",
-      "scanUrlPolicy",
-      "status",
-      "licenseeName",
-      "licenseePrefix",
-      "batchId",
-      "batchName",
-      // "productBatchId",
-      "productName",
-      "productCode",
-      "printedAt",
-      "scanCount",
-      "createdAt",
-      "scannedAt",
-    ];
-
-    const csv =
-      header.join(",") +
-      "\n" +
-      rows
-        .map((r) =>
-          [
-            r.code,
-            "SIGNED_SCAN_URL_REQUIRED",
-            r.status,
-            r.licensee?.name ?? "",
-            r.licensee?.prefix ?? "",
-            r.batchId ?? "",
-            r.batch?.name ?? "",
-            "",
-            "",
-            "",
-            r.batch?.printedAt ?? "",
-            r.scanCount ?? 0,
-            r.createdAt,
-            r.scannedAt ?? "",
-          ]
-            .map(escapeCsv)
-            .join(",")
-        )
-        .join("\n");
-
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="qr-codes.csv"`);
-    return res.status(200).send(csv);
+    await new Promise<void>((resolve,reject)=>res.sendFile(exportPath,(error)=>error?reject(error):resolve()));
+    return res;
   } catch (e) {
     if (isScopeError(e)) {
       return res.status(404).json({ success: false, error: "QR codes not found" });
     }
     console.error("exportQRCodesCsv error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
+  } finally {
+    if (exportDirectory) await rm(exportDirectory,{recursive:true,force:true});
   }
 };

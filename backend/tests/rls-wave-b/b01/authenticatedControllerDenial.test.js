@@ -41,6 +41,7 @@ let boundaryError = new canonical.CanonicalAuthDenial();
 mockModule("rls-waves/session-b/b01/canonicalAuthContext.js", {
   ...canonical,
   withCanonicalAuthClaims: async () => { throw boundaryError; },
+  withDatabaseAuthenticatedSession: async () => { throw boundaryError; },
 });
 
 const validSchema = { safeParse: (value) => ({ success: true, data: value || {} }) };
@@ -98,7 +99,10 @@ mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
 });
 mockModule("services/auth/inviteService.js", {
   acceptInvite: async () => ({}),
-  createInvite: (input) => input.databaseBoundary.run(async () => ({})),
+  createInvite: async (input) => {
+    assert.equal(input.databaseCapability, "");
+    throw boundaryError;
+  },
   getInvitePreview: async () => ({}),
 });
 mockModule("services/auth/passwordResetService.js", {
@@ -148,6 +152,9 @@ for (const [name, controller, req] of deniedRoutes) {
   await controller(req, res);
   assert.equal(res.statusCode, 401, `${name} must map failed revalidation to 401`);
   assert.equal(res.cleared, 1, `${name} must clear unusable session cookies`);
+  if (name === "invite") {
+    assert.deepEqual(res.body, { success: false, error: "Not authenticated" });
+  }
   assert.doesNotMatch(JSON.stringify(res.body), /AUTHENTICATED_SESSION_DENIED|CanonicalAuthDenial|disabled|revoked|expired/i);
 }
 

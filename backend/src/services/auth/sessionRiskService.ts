@@ -58,7 +58,7 @@ export const assessAuthSessionRisk = async (input: {
     reasons.push(`Recent failed login attempts: ${input.failedLoginAttempts}`);
   }
 
-  const recentSessions = await loadRecentAuthSessionRiskInputs(db);
+  const { recentSessions, actorState } = await loadRecentAuthSessionRiskInputs(db);
 
   const currentUserAgentHash = safeHash(input.userAgent);
 
@@ -104,11 +104,23 @@ export const assessAuthSessionRisk = async (input: {
     reasons,
     shouldStepUp: score >= stepupThreshold,
     shouldBlock: score >= blockThreshold,
+    actorState,
   };
 };
 
 export const persistAuthSessionRisk = (
-  input: { ipHash: string | null; userAgent: string | null },
+  input: {
+    ipHash: string | null;
+    userAgent: string | null;
+    requestId: string;
+    passwordHash?: string | null;
+    challenge?: {
+      ticketHash: string;
+      sessionBindingHash: string;
+      expiresAt: Date;
+      maxAttempts: number;
+    } | null;
+  },
   risk: Awaited<ReturnType<typeof assessAuthSessionRisk>>,
   db: Pick<Prisma.TransactionClient, "$queryRaw">
 ) => recordAuthSessionRiskSignal({
@@ -118,4 +130,7 @@ export const persistAuthSessionRisk = (
   ipHash: input.ipHash,
   userAgentHash: safeHash(input.userAgent),
   recordedAt: new Date(),
+  requestId: input.requestId,
+  passwordHash: input.passwordHash,
+  challenge: input.challenge,
 }, db);

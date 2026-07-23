@@ -1,23 +1,20 @@
 import { Prisma, UserRole, UserStatus } from "@prisma/client";
 
-import type { CanonicalDbContext } from "../../../lib/canonicalDbContext";
+import { getB01AuthenticatedPrisma } from "./runtimeClients";
 
-type QueryClient = Pick<Prisma.TransactionClient, "$queryRaw">;
-
-const roles = new Set<string>(Object.values(UserRole));
+const roles = new Set<string>([
+  UserRole.SUPER_ADMIN,
+  UserRole.PLATFORM_SUPER_ADMIN,
+  UserRole.LICENSEE_ADMIN,
+  UserRole.MANUFACTURER_ADMIN,
+]);
 const statuses = new Set<string>(Object.values(UserStatus));
 const platformRoles = new Set<string>([UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN]);
-const licenseeAdminRoles = new Set<string>([UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN]);
-const manufacturerRoles = new Set<string>([UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER]);
+const licenseeAdminRoles = new Set<string>([UserRole.LICENSEE_ADMIN]);
+const manufacturerRoles = new Set<string>([UserRole.MANUFACTURER_ADMIN]);
 const invitePurposes = new Set(["auth-invite-create", "licensee-admin-invite-resend"]);
 const HASH_PATTERN = /^(?:[a-f0-9]{12}:)?[a-f0-9]{64}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const canonicalRoleFamily = (role: UserRole) => {
-  if (licenseeAdminRoles.has(role)) return UserRole.LICENSEE_ADMIN;
-  if (manufacturerRoles.has(role)) return UserRole.MANUFACTURER;
-  return role;
-};
 
 const required = (value: unknown, field: string, maximum = 320) => {
   const normalized = typeof value === "string" ? value.trim() : "";
@@ -88,7 +85,7 @@ export type PreparedInvitation = {
 };
 
 const validateAuthority = (
-  context: CanonicalDbContext,
+  context: { role: UserRole; purpose: string; licenseeId: string | null },
   input: {
     requestedRole: UserRole;
     requestedLicenseeId: string | null;
@@ -100,10 +97,6 @@ const validateAuthority = (
   if (!platformRoles.has(context.role) && !licenseeAdminRoles.has(context.role)) {
     throw new Error("INVITE_ROLE_DENIED");
   }
-  if (context.authAssurance !== "mfa-verified" && context.authAssurance !== "step-up-verified") {
-    throw new Error("INVITE_ASSURANCE_DENIED");
-  }
-
   if (context.purpose === "licensee-admin-invite-resend") {
     if (
       !platformRoles.has(context.role) ||
@@ -129,9 +122,13 @@ const validateAuthority = (
 };
 
 export const prepareInvitation = async (
-  db: QueryClient,
-  context: CanonicalDbContext,
   input: {
+    capability: string;
+    actorUserId: string;
+    requestId: string;
+    purpose: string;
+    actorRole: UserRole;
+    actorLicenseeId: string | null;
     requestedEmail: string | null;
     requestedName: string;
     requestedRole: UserRole;
@@ -147,7 +144,7 @@ export const prepareInvitation = async (
     userAgent: string | null;
   }
 ): Promise<PreparedInvitation> => {
-  validateAuthority(context, input);
+  validateAuthority({ role: input.actorRole, purpose: input.purpose, licenseeId: input.actorLicenseeId }, input);
   const requestedEmail = normalizedEmail(input.requestedEmail, "requested email", input.requireExistingUser);
   if (!input.requireExistingUser && !requestedEmail) throw new Error("INVITE_EMAIL_REQUIRED");
   const requestedName = required(input.requestedName, "requested name", 120);
@@ -175,12 +172,13 @@ export const prepareInvitation = async (
     throw new Error("INVITE_USER_AGENT_INVALID");
   }
 
-  const rows = await db.$queryRaw<PreparedInvitation[]>`
+  const rows = await getB01AuthenticatedPrisma().$queryRaw<PreparedInvitation[]>`
     SELECT * FROM app_rls.prepare_invitation(
-      ${context.userId},
+      ${required(input.capability, "database capability", 256)},
+      ${required(input.actorUserId, "actor user ID", 64)},
       ${actorSessionId},
-      ${context.requestId},
-      ${context.purpose},
+      ${required(input.requestId, "request ID", 64)},
+      ${input.purpose},
       ${requestedEmail},
       ${requestedName},
       ${input.requestedRole}::text,
@@ -220,14 +218,14 @@ export const prepareInvitation = async (
   row.userStatus = required(row.userStatus, "user status", 32) as UserStatus;
   row.workspaceOrganizationId = optional(row.workspaceOrganizationId, "workspace organization ID", 64);
 
-  if (row.actorUserId !== context.userId) throw new Error("app_rls.prepare_invitation returned a foreign actor");
+  if (row.actorUserId !== input.actorUserId) throw new Error("app_rls.prepare_invitation returned a foreign actor");
   if (!roles.has(row.inviteRole) || !roles.has(row.userRole) || !statuses.has(row.userStatus)) {
     throw new Error("app_rls.prepare_invitation returned an unsupported account state");
   }
   if (row.inviteRole !== input.requestedRole || (requestedEmail && row.inviteEmail !== requestedEmail)) {
     throw new Error("app_rls.prepare_invitation returned a foreign invitation");
   }
-  if (canonicalRoleFamily(row.userRole) !== canonicalRoleFamily(input.requestedRole)) {
+  if (row.userRole !== input.requestedRole) {
     throw new Error("app_rls.prepare_invitation returned a foreign role family");
   }
   if (requestedManufacturerId && row.userId !== requestedManufacturerId) {

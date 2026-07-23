@@ -1,15 +1,11 @@
 import { Response } from "express";
 import { z } from "zod";
-import { Prisma, UserRole } from "@prisma/client";
+import { UserRole } from "@prisma/client";
 import { AuthRequest } from "../middleware/auth";
 import { createInvite } from "../services/auth/inviteService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 import { hashIp, normalizeUserAgent } from "../utils/security";
-import {
-  isCanonicalAuthDenial,
-  withCanonicalAuthClaims,
-} from "../rls-waves/session-b/b01/canonicalAuthContext";
-import type { CanonicalDbContext } from "../lib/canonicalDbContext";
+import { isCanonicalAuthDenial } from "../rls-waves/session-b/b01/canonicalAuthContext";
 import { clearAuthCookies } from "./authControllerShared";
 
 const licenseeIdParamSchema = z
@@ -47,15 +43,6 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
     }
     const requestId = String((req as AuthRequest & { requestId?: string }).requestId || req.get("x-request-id") || "").trim();
-    const databaseBoundary = {
-      run: <T>(callback: (db: Prisma.TransactionClient, context: CanonicalDbContext) => Promise<T>) =>
-        withCanonicalAuthClaims(
-          req.user!,
-          { requestId, purpose: "licensee-admin-invite-resend" },
-          callback
-        ),
-    };
-
     const invite = await createInvite({
       email: parsed.data.email || null,
       role: UserRole.LICENSEE_ADMIN,
@@ -64,9 +51,11 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
       requireExistingUser: true,
       createdByUserId: req.user!.userId,
       actorSessionId: req.user!.sessionId,
+      databaseCapability: String(req.databaseSessionCapability || ""),
+      requestId,
+      actorRole: req.user!.role,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
-      databaseBoundary,
     });
 
     if (!invite.inviteId) {

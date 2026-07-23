@@ -100,6 +100,7 @@ export const createBackendApp = () => {
       allowedHeaders: [
         "Content-Type",
         "Authorization",
+        "X-Database-Session-Capability",
         "X-Device-Fp",
         "X-CSRF-Token",
         "X-Captcha-Token",

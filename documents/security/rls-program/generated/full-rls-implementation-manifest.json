@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda",
+  "sourceContractSha256": "aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
@@ -27,7 +27,7 @@
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "7826d94607f1f9a3415786a51b9e747888a946352e3ccb41ccc839418e51466a"
+      "sha256": "8b3a34a4de02045a9a02659de50c1ae9e7212d0e62719c76777872bcf96f991b"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -59,11 +59,11 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "1fd85f58d6fc9ea63dcd6f99002d6b7f5bec751b5f63bde527368622a0248be8"
+      "sha256": "1c91053ca3d9cc83d493b3979b8177073b6d9af04378ed02b88041b99f18f17f"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
-      "sha256": "14d78f5da2dd03a75963faa54f555855fdc9320d1c5ce0d7dd8d8ad980d28e27"
+      "sha256": "6c512239c42f82bbf3dc92a82dd9b2520807f7e06ca75b9e85f0b7e6fd43056b"
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
@@ -71,15 +71,15 @@
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "d8e5b3b00da7dd2beb345207eccb1ad7ccd36361921ff8c60f077fe12f7d5e4b"
+      "sha256": "7911f6ac1339c494dfe5e1ecef028c80e43b04cf06f35f208aba0240da025731"
     },
     {
       "path": "scripts/rls/lib/application-path-certifications.mjs",
-      "sha256": "d704bf7fc0e91b44fcf7a20577b5027758726907cafd8ddc6740788fec5565ae"
+      "sha256": "bc0d4e5a4c6013f1f3e02f7eab050336c79bc074df39b16b25d120a7c0be6b55"
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "681f7eed93e3de63c27a611dbfd53438ce1e3ac75f7c7d336eaaf85270a52d36"
+      "sha256": "e46957d58946ebcc33f8a8b7d076dd3705bcc433f9c244dfd4a44c415377761f"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -98,16 +98,40 @@
       "sha256": "77e59f8ec15003feeee419d532acbf0252d7b792fdf259d5c62db0bc7c8b6fbc"
     },
     {
+      "path": "backend/src/rls-waves/session-a/operationalReadBoundaries.sql",
+      "sha256": "5850898937c82e971f7c1882bb003a57bb38672bae02839544218b769eaa94f1"
+    },
+    {
+      "path": "backend/src/rls-waves/session-a/operationalReadBoundariesRollback.sql",
+      "sha256": "908f5d19079f8308ad5f062752a6561085fb8a0faf44e89b07d7a0f74e6b5722"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c01/administration.sql",
+      "sha256": "f977417467071f67064b21e31a5c3ed46dd04e3f2793d376e8336c6b0d5ad3e1"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c01/administrationRollback.sql",
+      "sha256": "6ec2102cfce05692a39b42e06bad27e196f60c0383e1017c2cf67dc21249271b"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c01/qrSystem.sql",
+      "sha256": "184226c35f95496407b093769ccb32a66918e21bcedd08e713981af6ac0c5365"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c01/qrSystemRollback.sql",
+      "sha256": "c8e614df73b97baad766204b07a7f94aac5ffec3ebbfbdf73d39ce80620c2bb8"
+    },
+    {
       "path": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
       "sha256": "6dedb97efcf719d70e06f92a2594c16711739faf742f861906998525b5e9c54c"
     },
     {
       "path": "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js",
-      "sha256": "e7cf5dda35b9cc032b063be6f842f5de299e2d010a7534a23681d6ca34b34efd"
+      "sha256": "37fb6030271fdbe36960afbad2041326d958b68fd73c1938798f8ef732c229b2"
     },
     {
       "path": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
-      "sha256": "8c574ee6cf64de488c59fe3a6d16017da13df9ab254733e92216fe709a005745"
+      "sha256": "9c1267085db771b3c04c61abef19d3c6cefabbfcf2f3e4baae25b4563b636890"
     }
   ],
   "greenDatabasePattern": "^mscqr_full_rls_cert_[a-z0-9_]+$",
@@ -117,8 +141,8 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 31,
-    "generatedPolicies": 109,
-    "columnPrivilegeCells": 78,
+    "generatedPolicies": 195,
+    "columnPrivilegeCells": 74,
     "prismaMigrations": 52,
     "prismaEnums": 58,
     "registeredWorkflowCallPaths": 401,
@@ -135,7 +159,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
@@ -1314,22 +1338,7 @@
         "slice_sql_profile_risk_analytics_licensee_admin_comm_09d9526992",
         "slice_sql_profile_risk_analytics_platform_admin_comm_64d1e45a47"
       ],
-      "columnGrants": [
-        {
-          "tableId": "table-qrcode",
-          "table": "QRCode",
-          "command": "SELECT",
-          "columns": [
-            "batchId",
-            "id",
-            "licenseeId",
-            "scanCount"
-          ],
-          "sourceCommandRuleIds": [
-            "command-qrcode-select-509547f03abe"
-          ]
-        }
-      ],
+      "columnGrants": [],
       "disposition": "exact-policy-certification-candidate",
       "postgresqlCertification": "pending"
     },

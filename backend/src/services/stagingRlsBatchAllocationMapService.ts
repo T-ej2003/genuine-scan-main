@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import prisma from "../config/database";
-import { withCanonicalDbContext } from "../lib/canonicalDbContext";
+import { CanonicalTransactionClient } from "../lib/canonicalDbContext";
 import { getBatchAllocationMap } from "./batchAllocationService";
 import { buildBatchOperationalReadBoundary } from "./stagingRlsBatchReadService";
 import {
@@ -17,6 +17,7 @@ type LoadScopedBatchAllocationMapParams = {
   batchId: unknown;
   requestedLicenseeId: unknown;
   requestId: unknown;
+  databaseSessionCapability: unknown;
 };
 
 export type ScopedBatchAllocationMapPayload =
@@ -37,10 +38,8 @@ export const getScopedBatchAllocationMapPayload = async (
       ...params,
       routeSurface: "GET /api/qr/batches/:id/allocation-map",
     });
-    const allocationMap = await withCanonicalDbContext(
-      prisma,
-      boundary.context,
-      (tx) => getBatchAllocationMap(boundary.batchId!, { boundary: boundary.repository, db: tx }),
+    const allocationMap = await prisma.$transaction(
+      (tx) => getBatchAllocationMap(boundary.batchId!, { boundary: boundary.repository, db: tx as CanonicalTransactionClient }),
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
     );
     const payload: ScopedBatchAllocationMapPayload = allocationMap

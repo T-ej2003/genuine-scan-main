@@ -38,38 +38,6 @@ type QrStatsDashboardExtras = QrStatsDTO & {
   scansToday?: number;
   todayScans?: number;
 };
-type LegacyPublicCodeReport = {
-  totalLegacyCodes: number;
-  knownUnsafeLegacyCodes: number;
-  potentiallyRotatableLegacyCodes: number;
-  note?: string;
-  groups: Array<{
-    brandName: string | null;
-    brandPrefix: string | null;
-    batchName: string | null;
-    batchLifecycleState: string | null;
-    batchReleasedAt: string | null;
-    status: string;
-    count: number;
-    knownUnsafeCount: number;
-    potentiallyRotatableCount: number;
-    batchPrintedAt: string | null;
-    batchPrintPackDownloadedAt: string | null;
-  }>;
-};
-
-const normalizeLegacyPublicCodeReport = (value: unknown): LegacyPublicCodeReport | null => {
-  if (!value || typeof value !== "object") return null;
-  const raw = value as Partial<LegacyPublicCodeReport>;
-  return {
-    totalLegacyCodes: Number(raw.totalLegacyCodes || 0),
-    knownUnsafeLegacyCodes: Number(raw.knownUnsafeLegacyCodes || 0),
-    potentiallyRotatableLegacyCodes: Number(raw.potentiallyRotatableLegacyCodes || 0),
-    note: typeof raw.note === "string" ? raw.note : undefined,
-    groups: Array.isArray(raw.groups) ? raw.groups : [],
-  };
-};
-
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -90,10 +58,6 @@ export default function Dashboard() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [statusFocus, setStatusFocus] = useState<StatusFocus>("all");
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
-  const [legacyReport, setLegacyReport] = useState<LegacyPublicCodeReport | null>(null);
-  const [legacyReportLoading, setLegacyReportLoading] = useState(false);
-  const [legacyRotationBusy, setLegacyRotationBusy] = useState(false);
-  const [legacyRotationSummary, setLegacyRotationSummary] = useState<string | null>(null);
 
   const pollRef = useRef<number | null>(null);
   const stopSseRef = useRef<(() => void) | null>(null);
@@ -289,65 +253,6 @@ export default function Dashboard() {
   const qrLabelsAvailable = qrStatusData.dormant + qrStatusData.allocated;
 
   const roleLabel = useMemo(() => getRoleDisplayLabel(user?.role, user?.rawRole), [user?.rawRole, user?.role]);
-  const normalizedRole = String(user?.role || "").toLowerCase();
-  const isPlatformAdmin = normalizedRole === "super_admin" || normalizedRole === "platform_super_admin";
-
-  const loadLegacyReport = useCallback(async () => {
-    if (!isPlatformAdmin) return;
-    setLegacyReportLoading(true);
-    try {
-      const response = await apiClient.getLegacyPublicCodeReport();
-      if (response.success && response.data) {
-        setLegacyReport(normalizeLegacyPublicCodeReport(response.data));
-      }
-    } finally {
-      setLegacyReportLoading(false);
-    }
-  }, [isPlatformAdmin]);
-
-  useEffect(() => {
-    void loadLegacyReport();
-  }, [loadLegacyReport]);
-
-  const runLegacyRotation = async (dryRun: boolean) => {
-    if (!isPlatformAdmin) return;
-    setLegacyRotationBusy(true);
-    setLegacyRotationSummary(null);
-    try {
-      const response = await apiClient.rotateLegacyPublicCodes({ dryRun, limit: 250 });
-      if (!response.success || !response.data) {
-        setLegacyRotationSummary(response.error || "Legacy code rotation could not complete.");
-        return;
-      }
-      const result = response.data;
-      setLegacyRotationSummary(
-        dryRun
-          ? `Dry run checked ${result.scanned} rows: ${result.rotated.length} eligible, ${result.skipped.length} protected.`
-          : `Rotated ${result.rotated.length} safe rows; ${result.skipped.length} protected rows were left unchanged.`
-      );
-      await loadLegacyReport();
-    } finally {
-      setLegacyRotationBusy(false);
-    }
-  };
-
-  const downloadLegacyReportCsv = async () => {
-    if (!isPlatformAdmin) return;
-    const response = await apiClient.getLegacyPublicCodeReportCsv();
-    if (!response.success || !response.data) {
-      setLegacyRotationSummary(response.error || "Legacy report export could not complete.");
-      return;
-    }
-    const blob = new Blob([response.data], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "mscqr-legacy-public-code-report.csv";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  };
 
   const quickActions = useMemo(() => {
     if (user?.role === "super_admin") {
@@ -586,91 +491,6 @@ export default function Dashboard() {
               ))}
             </CardContent>
           </Card>
-
-          {isPlatformAdmin ? (
-            <Card className="border-mscqr-border bg-mscqr-surface/92">
-              <CardHeader>
-                <CardTitle className="text-lg font-semibold text-mscqr-primary">Legacy public code report</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-2xl font-semibold text-mscqr-primary">
-                      {(legacyReport?.totalLegacyCodes || 0).toLocaleString()}
-                    </div>
-                    <div className="text-xs text-mscqr-secondary">Predictable public codes not starting with c_</div>
-                    {legacyReport ? (
-                      <div className="mt-1 text-xs text-mscqr-secondary">
-                        {(legacyReport.potentiallyRotatableLegacyCodes || 0).toLocaleString()} potentially rotatable ·{" "}
-                        {(legacyReport.knownUnsafeLegacyCodes || 0).toLocaleString()} protected by print/scan/release evidence
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" onClick={() => void downloadLegacyReportCsv()} disabled={legacyReportLoading}>
-                      Export CSV
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => void loadLegacyReport()} disabled={legacyReportLoading}>
-                      Refresh
-                    </Button>
-                  </div>
-                </div>
-                <div className="max-h-60 space-y-2 overflow-y-auto pr-1">
-                  {(legacyReport?.groups || []).slice(0, 8).map((row) => (
-                    <div
-                      key={`${row.brandPrefix || row.brandName}-${row.batchName || "unbatched"}-${row.status}`}
-                      className="rounded-md border border-mscqr-border bg-mscqr-surface-elevated p-3 text-sm"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-medium text-mscqr-primary">
-                          {row.brandName || row.brandPrefix || "Unknown brand"}
-                        </span>
-                        <Badge variant="outline">{row.count.toLocaleString()}</Badge>
-                      </div>
-                      <div className="mt-1 text-xs text-mscqr-secondary">
-                        {row.batchName || "Unbatched"} · {row.status}
-                        {row.batchLifecycleState ? ` · ${row.batchLifecycleState}` : ""}
-                        {row.batchPrintedAt ? " · printed batch" : ""}
-                        {row.batchPrintPackDownloadedAt ? " · pack downloaded" : ""}
-                        {row.batchReleasedAt ? " · released" : ""}
-                      </div>
-                      <div className="mt-1 text-xs text-mscqr-secondary">
-                        {row.potentiallyRotatableCount.toLocaleString()} potentially rotatable ·{" "}
-                        {row.knownUnsafeCount.toLocaleString()} protected
-                      </div>
-                    </div>
-                  ))}
-                  {legacyReport && (legacyReport.groups || []).length === 0 ? (
-                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-                      No legacy predictable public codes found.
-                    </div>
-                  ) : null}
-                </div>
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void runLegacyRotation(true)}
-                    disabled={legacyRotationBusy || legacyReportLoading}
-                  >
-                    Dry run rotation
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => void runLegacyRotation(false)}
-                    disabled={legacyRotationBusy || legacyReportLoading || !legacyReport?.totalLegacyCodes}
-                  >
-                    Rotate safe rows
-                  </Button>
-                </div>
-                {legacyRotationSummary ? (
-                  <div className="rounded-md border border-mscqr-border bg-mscqr-surface-muted p-3 text-xs text-mscqr-secondary">
-                    {legacyRotationSummary}
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-          ) : null}
 
           <Card className="border-mscqr-border bg-mscqr-surface/92">
             <CardHeader>

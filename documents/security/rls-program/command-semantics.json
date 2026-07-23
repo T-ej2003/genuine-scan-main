@@ -8202,6 +8202,67 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-auth-session-risk-signal-insert-auth-release",
+      "tableId": "table-auth-session-risk-signal",
+      "command": "INSERT",
+      "actorClasses": [
+        "pre-auth"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "pre-auth": "password-verified"
+      },
+      "scopeRule": "The reviewed password lookup binds one live User row; AuthSessionRiskSignal.userId must equal that bound row and cannot be selected by a caller GUC.",
+      "allowedColumns": [
+        "createdAt",
+        "id",
+        "ipHash",
+        "reasons",
+        "riskLevel",
+        "riskScore",
+        "userAgentHash",
+        "userId"
+      ],
+      "protectedColumns": [],
+      "allowedLifecycleStates": [
+        "PASSWORD_VERIFIED_SUBJECT"
+      ],
+      "forbiddenLifecycleStates": [
+        "MISSING_OR_INACTIVE_SUBJECT",
+        "FOREIGN_SUBJECT"
+      ],
+      "lifecycleColumns": [],
+      "withCheckRule": "The inserted userId equals the live password-verified subject bound by app_auth.lookup_password_user in the same transaction.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "pre-auth-security-definer-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-session-risk-service-ts-assess-auth-session-risk"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:recordAuthSessionRiskSignal",
+        "backend/src/rls-waves/session-b/b01/b01AuthenticationClosureFunctions.sql"
+      ],
+      "allowScenarios": [
+        "The pre-auth runtime calls the exact SECURITY DEFINER boundary after password verification and inserts one bounded risk record for the database-bound subject."
+      ],
+      "denyScenarios": [
+        "Missing password proof, inactive users, foreign users, direct runtime INSERT, forged GUCs, malformed risk values, and PUBLIC execution are denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-auth-session-risk-signal-delete-prohibited",
       "tableId": "table-auth-session-risk-signal",
       "command": "DELETE",

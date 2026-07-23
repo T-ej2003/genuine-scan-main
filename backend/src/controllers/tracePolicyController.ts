@@ -468,23 +468,17 @@ export const exportBatchAuditPackageController = async (req: AuthRequest, res: R
     const parsed = batchAuditExportParamSchema.safeParse(req.params || {});
     if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid batch id" });
 
-    const batch = await prisma.batch.findFirst({
-      where:
-        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-          ? { id: parsed.data.id }
-          : { id: parsed.data.id, licenseeId: req.user.licenseeId || "__none__" },
-      select: { id: true, licenseeId: true },
+    const pkg = await buildImmutableBatchAuditPackage(parsed.data.id,{
+      capability:String(req.databaseSessionCapability || ""),
+      requestId:String((req as AuthRequest & {requestId?:string}).requestId || req.get("x-request-id") || ""),
     });
-    if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
-
-    const pkg = await buildImmutableBatchAuditPackage(batch.id);
 
     await createAuditLog({
       userId: req.user.userId,
-      licenseeId: batch.licenseeId,
+      licenseeId: pkg.metadata.licenseeId,
       action: "EXPORT_IMMUTABLE_AUDIT_PACKAGE",
       entityType: "Batch",
-      entityId: batch.id,
+      entityId: parsed.data.id,
       details: pkg.metadata,
       ipAddress: req.ip,
     });

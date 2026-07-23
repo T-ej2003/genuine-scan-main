@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Prisma, UserRole } from "@prisma/client";
 
 import prisma from "../config/database";
-import { CanonicalDbContext, CanonicalTransactionClient, withCanonicalDbContext } from "../lib/canonicalDbContext";
+import { CanonicalDbContext, CanonicalTransactionClient } from "../lib/canonicalDbContext";
 import { AuthRequest } from "../middleware/auth";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
 import { summarizeQrStatusCounts } from "./qrStatusMetrics";
@@ -35,6 +35,7 @@ export type DashboardSnapshot = {
 };
 
 type DashboardBoundary = {
+  databaseSessionCapability: string;
   context: CanonicalDbContext;
   auditId: string;
   requestedLicenseeId: string | null;
@@ -87,7 +88,8 @@ export const buildDashboardSnapshotBoundary = (
   const user = req.user;
   const userId = String(user?.userId || "").trim().toLowerCase();
   const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
-  if (!user || !UUID.test(userId) || user.sessionStage !== "ACTIVE" || !REQUEST_ID.test(requestId)) {
+  const databaseSessionCapability = String(req.databaseSessionCapability || "").trim();
+  if (!user || !UUID.test(userId) || user.sessionStage !== "ACTIVE" || !REQUEST_ID.test(requestId) || !/^[A-Za-z0-9_-]{43}$/.test(databaseSessionCapability)) {
     throw new DashboardSnapshotAccessError();
   }
 
@@ -121,6 +123,7 @@ export const buildDashboardSnapshotBoundary = (
   }
 
   return {
+    databaseSessionCapability,
     auditId: randomUUID(),
     requestedLicenseeId: selector,
     routeSurface: routeSurface(req),
@@ -153,6 +156,9 @@ export const loadInventoryAggregate = async (
   const [row] = await tx.$queryRaw<DashboardDataRow[]>`
     SELECT *
     FROM app_rls.dashboard_snapshot_data(
+      ${boundary.databaseSessionCapability},
+      ${DASHBOARD_PURPOSE},
+      ${boundary.context.requestId},
       ${boundary.auditId},
       ${boundary.requestedLicenseeId},
       ${boundary.routeSurface},
@@ -193,6 +199,9 @@ export const computeDashboardSnapshot = async (
   const [scope] = await tx.$queryRaw<Array<{ scope_fingerprint: string }>>`
     SELECT scope_fingerprint
     FROM app_rls.dashboard_snapshot_scope(
+      ${boundary.databaseSessionCapability},
+      ${DASHBOARD_PURPOSE},
+      ${boundary.context.requestId},
       ${boundary.auditId},
       ${boundary.requestedLicenseeId},
       ${boundary.routeSurface}
@@ -210,16 +219,14 @@ export const computeDashboardSnapshot = async (
 export const getDashboardSnapshot = async (req: AuthRequest) => {
   const boundary = buildDashboardSnapshotBoundary(req);
   try {
-    const snapshot = await withCanonicalDbContext(
-      prisma,
-      boundary.context,
-      (tx) => computeDashboardSnapshot(tx, boundary),
+    const snapshot = await prisma.$transaction(
+      (tx) => computeDashboardSnapshot(tx as CanonicalTransactionClient, boundary),
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
     );
     if (!snapshot) throw new Error("Dashboard snapshot function returned no result");
     return snapshot;
   } catch (error) {
-    if (error instanceof DashboardSnapshotAccessError || /dashboard access denied/i.test(String((error as Error)?.message))) {
+    if (error instanceof DashboardSnapshotAccessError || /dashboard access denied|AUTH_SESSION_CAPABILITY_DENIED/i.test(String((error as Error)?.message))) {
       throw new DashboardSnapshotAccessError();
     }
     throw error;
@@ -233,10 +240,8 @@ export const canDeliverDashboardAuditDelta = async (req: AuthRequest, eventLicen
     if (eventLicenseeId == null || eventLicenseeId === "") {
       if (originalSelector || !platformRoles.has(req.user.role)) return false;
       const boundary = buildDashboardSnapshotBoundary(req);
-      await withCanonicalDbContext(
-        prisma,
-        boundary.context,
-        (tx) => computeDashboardSnapshot(tx, boundary, { scopeOnly: true }),
+      await prisma.$transaction(
+        (tx) => computeDashboardSnapshot(tx as CanonicalTransactionClient, boundary, { scopeOnly: true }),
         { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
       );
       return true;
@@ -245,10 +250,8 @@ export const canDeliverDashboardAuditDelta = async (req: AuthRequest, eventLicen
     const eventScope = String(eventLicenseeId).trim().toLowerCase();
     if (!UUID.test(eventScope) || originalSelector && originalSelector !== eventScope) return false;
     const boundary = buildDashboardSnapshotBoundary(req, Date.now(), eventScope);
-    await withCanonicalDbContext(
-      prisma,
-      boundary.context,
-      (tx) => computeDashboardSnapshot(tx, boundary, { scopeOnly: true }),
+    await prisma.$transaction(
+      (tx) => computeDashboardSnapshot(tx as CanonicalTransactionClient, boundary, { scopeOnly: true }),
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
     );
     return true;

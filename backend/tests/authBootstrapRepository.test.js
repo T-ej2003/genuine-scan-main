@@ -29,7 +29,7 @@ const run = async () => {
     emailVerifiedAt: new Date(),
   };
   let lookupFallbacks = 0;
-  const fallbackDb = {
+  const missingDb = {
     $queryRaw: async () => { throw missingBoundaryError(); },
     user: {
       findMany: async (query) => {
@@ -40,8 +40,8 @@ const run = async () => {
       },
     },
   };
-  assert.equal(await lookupPasswordBootstrapUser(row.email, fallbackDb), row);
-  assert.equal(lookupFallbacks, 1, "only an absent function may use baseline compatibility lookup");
+  await assert.rejects(lookupPasswordBootstrapUser(row.email, missingDb), /boundary absent/);
+  assert.equal(lookupFallbacks, 0, "an absent reviewed boundary must fail closed without direct-table fallback");
 
   let permissionFallbacks = 0;
   const deniedDb = {
@@ -60,14 +60,13 @@ const run = async () => {
     },
     user: { findMany: async () => [] },
   };
-  const failure = await recordPasswordLoginFailure({
+  await assert.rejects(recordPasswordLoginFailure({
     normalizedEmail: row.email,
     attemptedAt: new Date(),
     maxAttempts: 5,
     lockoutMinutes: 15,
-  }, mutationDb);
-  assert.deepEqual(failure, { failedLoginAttempts: 1, lockedUntil: null });
-  assert.equal(mutationCalls, 2, "baseline failure mutation must remain one atomic SQL update");
+  }, mutationDb), /boundary absent/);
+  assert.equal(mutationCalls, 1, "an absent failure boundary must not retry through a direct mutation");
 
   console.log("auth bootstrap repository compatibility tests passed");
 };

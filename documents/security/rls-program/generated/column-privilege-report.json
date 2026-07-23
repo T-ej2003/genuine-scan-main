@@ -136,20 +136,6 @@
       ]
     },
     {
-      "tableId": "table-qrcode",
-      "table": "QRCode",
-      "command": "SELECT",
-      "columns": [
-        "batchId",
-        "id",
-        "licenseeId",
-        "scanCount"
-      ],
-      "sourceCommandRuleIds": [
-        "command-qrcode-select-509547f03abe"
-      ]
-    },
-    {
       "tableId": "table-qr-scan-log",
       "table": "QrScanLog",
       "command": "SELECT",
@@ -221,7 +207,7 @@
       ]
     }
   ],
-  "cells": 78,
+  "cells": 74,
   "functionOwnerRows": [
     {
       "table": "RefreshToken",
@@ -840,6 +826,380 @@
       ]
     },
     {
+      "table": "User",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "email",
+        "pendingEmail",
+        "name",
+        "role",
+        "orgId",
+        "licenseeId",
+        "status",
+        "isActive",
+        "disabledAt",
+        "deletedAt",
+        "emailVerifiedAt",
+        "pendingEmailRequestedAt",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "User",
+      "command": "UPDATE",
+      "columns": [
+        "passwordHash",
+        "failedLoginAttempts",
+        "lockedUntil",
+        "lastLoginAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "RefreshToken",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "orgId",
+        "tokenHash",
+        "expiresAt",
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "lastUsedAt",
+        "revokedAt",
+        "revokedReason",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityRevokedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "RefreshToken",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "orgId",
+        "userId",
+        "tokenHash",
+        "expiresAt",
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "lastUsedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "RefreshToken",
+      "command": "UPDATE",
+      "columns": [
+        "revokedAt",
+        "revokedReason",
+        "lastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "sessionCapabilityRevokedReason"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "name",
+        "prefix",
+        "brandName",
+        "isActive",
+        "suspendedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "Organization",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "command": "SELECT",
+      "columns": [
+        "manufacturerId",
+        "licenseeId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "AdminMfaCredential",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "isEnabled",
+        "lastUsedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "AdminWebAuthnCredential",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "lastUsedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "UserMfaFactor",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "type",
+        "lastUsedAt",
+        "disabledAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "UserBackupCode",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "usedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "AuthSessionRiskSignal",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "userId",
+        "riskScore",
+        "riskLevel",
+        "reasons",
+        "ipHash",
+        "userAgentHash",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "MfaLoginChallenge",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "userId",
+        "ticketHash",
+        "purpose",
+        "riskScore",
+        "riskLevel",
+        "reasons",
+        "createdIpHash",
+        "createdUserAgentHash",
+        "attempts",
+        "maxAttempts",
+        "createdAt",
+        "updatedAt",
+        "expiresAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
+      "table": "AuditLogOutbox",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "payload",
+        "requestId",
+        "organizationId",
+        "initiatingUserId",
+        "initiatingActorRoleSnapshot",
+        "expiresAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-create-login-refresh-token",
+        "b01-find-capability-refresh-token",
+        "b01-load-capability-actor",
+        "b01-load-login-risk-inputs",
+        "b01-record-login-risk",
+        "b01-require-capability-recent-mfa",
+        "b01-revalidate-capability-actor",
+        "b01-revoke-capability-refresh-token"
+      ]
+    },
+    {
       "table": "RefreshToken",
       "command": "SELECT",
       "columns": [
@@ -1209,6 +1569,1681 @@
         "c03-get-incident-evidence-file",
         "c03-revalidate-compliance-pack-job-actor",
         "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "User",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "email",
+        "name",
+        "role",
+        "orgId",
+        "licenseeId",
+        "status",
+        "isActive",
+        "disabledAt",
+        "deletedAt",
+        "passwordHash",
+        "location",
+        "website",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "User",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "email",
+        "passwordHash",
+        "name",
+        "role",
+        "orgId",
+        "licenseeId",
+        "location",
+        "website",
+        "status",
+        "isActive",
+        "emailVerifiedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "User",
+      "command": "UPDATE",
+      "columns": [
+        "email",
+        "passwordHash",
+        "name",
+        "orgId",
+        "licenseeId",
+        "location",
+        "website",
+        "status",
+        "isActive",
+        "disabledAt",
+        "deletedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "User",
+      "command": "DELETE",
+      "columns": [],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "Organization",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "name",
+        "isActive"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "Organization",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "name",
+        "isActive",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "name",
+        "prefix",
+        "description",
+        "brandName",
+        "location",
+        "website",
+        "supportEmail",
+        "supportPhone",
+        "isActive",
+        "suspendedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "Licensee",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "orgId",
+        "name",
+        "prefix",
+        "description",
+        "brandName",
+        "location",
+        "website",
+        "supportEmail",
+        "supportPhone",
+        "isActive",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "Licensee",
+      "command": "UPDATE",
+      "columns": [
+        "name",
+        "description",
+        "brandName",
+        "location",
+        "website",
+        "supportEmail",
+        "supportPhone",
+        "isActive",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "Licensee",
+      "command": "DELETE",
+      "columns": [],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "command": "SELECT",
+      "columns": [
+        "manufacturerId",
+        "licenseeId",
+        "isPrimary",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "command": "INSERT",
+      "columns": [
+        "manufacturerId",
+        "licenseeId",
+        "isPrimary",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "command": "UPDATE",
+      "columns": [
+        "isPrimary",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "command": "DELETE",
+      "columns": [],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "RefreshToken",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "expiresAt",
+        "revokedAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityRevokedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "RefreshToken",
+      "command": "UPDATE",
+      "columns": [
+        "revokedAt",
+        "revokedReason",
+        "sessionCapabilityRevokedAt",
+        "sessionCapabilityRevokedReason"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "Batch",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "manufacturerId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "Batch",
+      "command": "UPDATE",
+      "columns": [
+        "manufacturerId",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "QRRange",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "QRCode",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "ActionIdempotencyKey",
+      "command": "SELECT",
+      "columns": [
+        "keyHash",
+        "requestHash",
+        "completedAt",
+        "responsePayload"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "ActionIdempotencyKey",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "keyHash",
+        "action",
+        "scope",
+        "requestHash",
+        "expiresAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "ActionIdempotencyKey",
+      "command": "UPDATE",
+      "columns": [
+        "statusCode",
+        "responsePayload",
+        "completedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "AuditLog",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "userId",
+        "orgId",
+        "licenseeId",
+        "action",
+        "entityType",
+        "entityId",
+        "details",
+        "ipHash",
+        "userAgent",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "SecurityEventOutbox",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "eventType",
+        "payload",
+        "requestId",
+        "organizationId",
+        "licenseeId",
+        "initiatingUserId",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "Invite",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "licenseeId",
+        "email",
+        "role",
+        "manufacturerId",
+        "tokenHash",
+        "expiresAt",
+        "usedAt",
+        "createdByUserId",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "Invite",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "orgId",
+        "licenseeId",
+        "email",
+        "role",
+        "manufacturerId",
+        "tokenHash",
+        "expiresAt",
+        "createdByUserId",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "Invite",
+      "command": "UPDATE",
+      "columns": [
+        "usedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "RefreshToken",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "expiresAt",
+        "revokedAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityRevokedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "RefreshToken",
+      "command": "UPDATE",
+      "columns": [
+        "sessionCapabilityLastUsedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "User",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "email",
+        "name",
+        "role",
+        "orgId",
+        "licenseeId",
+        "status",
+        "isActive",
+        "disabledAt",
+        "deletedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "Organization",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "name",
+        "prefix",
+        "isActive",
+        "suspendedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "command": "SELECT",
+      "columns": [
+        "manufacturerId",
+        "licenseeId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "QRRange",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "startCode",
+        "endCode",
+        "totalCodes",
+        "usedCodes",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "QRRange",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "startCode",
+        "endCode",
+        "totalCodes",
+        "usedCodes",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "QRCode",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "code",
+        "displayCode",
+        "licenseeId",
+        "batchId",
+        "status",
+        "scanCount",
+        "createdAt",
+        "updatedAt",
+        "scannedAt",
+        "printedAt",
+        "blockedAt",
+        "redeemedAt",
+        "printJobId",
+        "replayEpoch",
+        "tokenNonce",
+        "tokenIssuedAt",
+        "tokenExpiresAt",
+        "tokenHash"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "QRCode",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "code",
+        "displayCode",
+        "licenseeId",
+        "batchId",
+        "status",
+        "tokenNonce",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "QRCode",
+      "command": "UPDATE",
+      "columns": [
+        "batchId",
+        "status",
+        "printJobId",
+        "tokenNonce",
+        "tokenIssuedAt",
+        "tokenExpiresAt",
+        "tokenHash",
+        "issuanceMode",
+        "customerVerifiableAt",
+        "printedAt",
+        "printedByUserId",
+        "redeemedAt",
+        "redeemedDeviceFingerprint",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "QRCode",
+      "command": "DELETE",
+      "columns": [],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "Batch",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "name",
+        "manufacturerId",
+        "parentBatchId",
+        "rootBatchId",
+        "startCode",
+        "endCode",
+        "totalCodes",
+        "lifecycleState",
+        "printedAt",
+        "releasedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "Batch",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "name",
+        "licenseeId",
+        "manufacturerId",
+        "parentBatchId",
+        "rootBatchId",
+        "startCode",
+        "endCode",
+        "totalCodes",
+        "lifecycleState",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "Batch",
+      "command": "UPDATE",
+      "columns": [
+        "startCode",
+        "endCode",
+        "totalCodes",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "Batch",
+      "command": "DELETE",
+      "columns": [],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "QrAllocationRequest",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "requestedByUserId",
+        "quantity",
+        "startNumber",
+        "endNumber",
+        "batchName",
+        "status"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "QrAllocationRequest",
+      "command": "UPDATE",
+      "columns": [
+        "status",
+        "approvedByUserId",
+        "approvedAt",
+        "decisionNote",
+        "startNumber",
+        "endNumber",
+        "quantity",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "AllocationEvent",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "createdByUserId",
+        "requestId",
+        "source",
+        "startCode",
+        "endCode",
+        "totalCodes"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "AuditLog",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "userId",
+        "orgId",
+        "licenseeId",
+        "action",
+        "entityType",
+        "entityId",
+        "details",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "SecurityEventOutbox",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "eventType",
+        "payload",
+        "requestId",
+        "organizationId",
+        "licenseeId",
+        "initiatingUserId",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "TraceEvent",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "eventType",
+        "licenseeId",
+        "batchId",
+        "qrCodeId",
+        "manufacturerId",
+        "userId",
+        "sourceAction",
+        "details",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "PolicyAlert",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "alertType",
+        "severity",
+        "message",
+        "score",
+        "batchId",
+        "qrCodeId",
+        "manufacturerId",
+        "acknowledgedAt",
+        "acknowledgedByUserId",
+        "details",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "InventoryStatusRollup",
+      "command": "INSERT",
+      "columns": [
+        "batchId",
+        "licenseeId",
+        "manufacturerId",
+        "totalCodes",
+        "dormant",
+        "active",
+        "activated",
+        "allocated",
+        "printed",
+        "redeemed",
+        "blocked",
+        "scanned",
+        "refreshedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "InventoryStatusRollup",
+      "command": "SELECT",
+      "columns": [
+        "batchId",
+        "licenseeId",
+        "manufacturerId",
+        "totalCodes",
+        "dormant",
+        "active",
+        "activated",
+        "allocated",
+        "printed",
+        "redeemed",
+        "blocked",
+        "scanned",
+        "refreshedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "InventoryStatusRollup",
+      "command": "UPDATE",
+      "columns": [
+        "licenseeId",
+        "manufacturerId",
+        "totalCodes",
+        "dormant",
+        "active",
+        "activated",
+        "allocated",
+        "printed",
+        "redeemed",
+        "blocked",
+        "scanned",
+        "refreshedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "QrScanLog",
+      "command": "SELECT",
+      "columns": [
+        "qrCodeId",
+        "licenseeId",
+        "batchId",
+        "status",
+        "scannedAt",
+        "isFirstScan",
+        "isTrustedOwnerContext",
+        "device",
+        "locationName",
+        "locationCountry",
+        "locationCity"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "ScanMetricsHourlyRollup",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "bucketKey",
+        "hourBucket",
+        "licenseeId",
+        "batchId",
+        "manufacturerId",
+        "totalScanEvents",
+        "firstScanEvents",
+        "repeatScanEvents",
+        "blockedEvents",
+        "trustedOwnerEvents",
+        "externalEvents",
+        "namedLocationEvents",
+        "knownDeviceEvents",
+        "uniqueQrCodes",
+        "firstScannedAt",
+        "lastScannedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "ScanMetricsHourlyRollup",
+      "command": "SELECT",
+      "columns": [
+        "bucketKey",
+        "totalScanEvents",
+        "firstScanEvents",
+        "repeatScanEvents",
+        "blockedEvents",
+        "trustedOwnerEvents",
+        "externalEvents",
+        "namedLocationEvents",
+        "knownDeviceEvents",
+        "uniqueQrCodes",
+        "firstScannedAt",
+        "lastScannedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "ScanMetricsHourlyRollup",
+      "command": "UPDATE",
+      "columns": [
+        "totalScanEvents",
+        "firstScanEvents",
+        "repeatScanEvents",
+        "blockedEvents",
+        "trustedOwnerEvents",
+        "externalEvents",
+        "namedLocationEvents",
+        "knownDeviceEvents",
+        "uniqueQrCodes",
+        "firstScannedAt",
+        "lastScannedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "SystemCheckpoint",
+      "command": "SELECT",
+      "columns": [
+        "key",
+        "value"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "SystemCheckpoint",
+      "command": "INSERT",
+      "columns": [
+        "key",
+        "value",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "SystemCheckpoint",
+      "command": "UPDATE",
+      "columns": [
+        "value",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-read-codes",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
       ]
     },
     {
@@ -1792,6 +3827,555 @@
         "b03-enqueue-security-outbox",
         "b03-fail-audit-outbox",
         "b03-fail-security-outbox"
+      ]
+    },
+    {
+      "table": "User",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "email",
+        "name",
+        "role",
+        "orgId",
+        "licenseeId",
+        "status",
+        "isActive",
+        "disabledAt",
+        "deletedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "name",
+        "prefix",
+        "brandName",
+        "isActive",
+        "suspendedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "Organization",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "command": "SELECT",
+      "columns": [
+        "manufacturerId",
+        "licenseeId",
+        "isPrimary",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "Batch",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "name",
+        "licenseeId",
+        "manufacturerId",
+        "parentBatchId",
+        "rootBatchId",
+        "startCode",
+        "endCode",
+        "totalCodes",
+        "lifecycleState",
+        "sampleScanPolicy",
+        "metadata",
+        "releasedAt",
+        "releasedByUserId",
+        "printedAt",
+        "suspendedAt",
+        "suspendedReason",
+        "printPackDownloadedAt",
+        "printPackDownloadedByUserId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "QRCode",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "code",
+        "displayCode",
+        "licenseeId",
+        "batchId",
+        "status",
+        "printJobId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "InventoryStatusRollup",
+      "command": "SELECT",
+      "columns": [
+        "batchId",
+        "licenseeId",
+        "manufacturerId",
+        "totalCodes",
+        "dormant",
+        "active",
+        "activated",
+        "allocated",
+        "printed",
+        "redeemed",
+        "blocked",
+        "scanned"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "PrintItem",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "printSessionId",
+        "qrCodeId",
+        "state",
+        "agentAckedAt",
+        "dispatchedAt",
+        "deviceJobRef",
+        "printConfirmedAt",
+        "confirmationEvidence",
+        "deadLetterReason",
+        "failureReason"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "PrintSession",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "printJobId",
+        "batchId",
+        "status"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "PrintJob",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "batchId",
+        "status"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "AuditLog",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "orgId",
+        "licenseeId",
+        "action",
+        "entityType",
+        "entityId",
+        "details"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "AuditLog",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "userId",
+        "orgId",
+        "licenseeId",
+        "action",
+        "entityType",
+        "entityId",
+        "details"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "User",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "email",
+        "name",
+        "role",
+        "orgId",
+        "licenseeId",
+        "status",
+        "isActive",
+        "disabledAt",
+        "deletedAt",
+        "createdAt",
+        "location",
+        "website"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "name",
+        "prefix",
+        "description",
+        "brandName",
+        "location",
+        "website",
+        "supportEmail",
+        "supportPhone",
+        "metadata",
+        "isActive",
+        "suspendedAt",
+        "suspendedReason",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "command": "SELECT",
+      "columns": [
+        "manufacturerId",
+        "licenseeId",
+        "isPrimary",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "Invite",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "email",
+        "role",
+        "expiresAt",
+        "usedAt",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "Batch",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "QRCode",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
+      ]
+    },
+    {
+      "table": "QRRange",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "startCode",
+        "endCode",
+        "totalCodes",
+        "usedCodes",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "batch-inventory-rollups",
+        "batch-operational-rows",
+        "batch-operational-scope",
+        "batch-operational-total",
+        "batch-reservable-qr-summaries",
+        "batch-status-fallback",
+        "batch-unassigned-ranges",
+        "dashboard-snapshot-data",
+        "dashboard-snapshot-scope",
+        "tenant-directory-licensees",
+        "tenant-directory-users"
       ]
     }
   ]

@@ -1,5 +1,5 @@
 import { Prisma, UserRole, UserStatus } from "@prisma/client";
-import { verifyPassword, hashPassword, shouldRehashPassword } from "./passwordService";
+import { hashPassword, shouldRehashPassword, verifyPassword } from "./passwordService";
 import {
   signAccessToken,
   newRefreshToken,
@@ -21,15 +21,14 @@ import { createAdminMfaChallenge, getAdminMfaStatus } from "./mfaService";
 import { buildAdminMfaChallengeExpiry } from "./authDurationConfig";
 import { hashToken, randomOpaqueToken } from "../../utils/security";
 import type { AuthAssuranceLevel, AuthSessionStage, StepUpMethod } from "../../types";
-import { withCanonicalDbContext } from "../../lib/canonicalDbContext";
 import { lookupPasswordBootstrapUser, recordPasswordLoginFailure } from "./authBootstrapRepository";
 import {
   createRefreshMfaChallengeRecord,
   loadRefreshSessionState,
   type RefreshSessionState,
 } from "../../rls-waves/session-b/b01/sessionCredentialRepository";
-import { getB01AuthenticatedPrisma } from "../../rls-waves/session-b/b01/runtimeClients";
-import { createAuthenticatedSessionCapability, revokeAuthenticatedSessionByRefreshToken } from "./authenticatedSessionCapabilityService";
+import { getB01PreAuthPrisma } from "../../rls-waves/session-b/b01/runtimeClients";
+import { createAuthenticatedSessionCapability } from "./authenticatedSessionCapabilityService";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = String(process.env[key] || "").trim();
@@ -344,12 +343,13 @@ export const issueSessionForUser = async (input: {
   authenticatedAt?: Date | null;
   mfaVerifiedAt?: Date | null;
   now?: Date;
+  preparedState?: ActiveSessionState;
 } & SessionScopeInput, db: AuthDbClient) => {
   const now = input.now || new Date();
   const authAssurance = input.authAssurance || "PASSWORD";
   const authenticatedAt = input.authenticatedAt || now;
   const mfaVerifiedAt = input.mfaVerifiedAt || null;
-  const state = await loadActiveSessionState({ ...input, authAssurance }, db);
+  const state = input.preparedState || await loadActiveSessionState({ ...input, authAssurance }, db);
   const refreshToken = newRefreshToken();
   const created = await createRefreshToken({
     userId: state.user.id,
@@ -598,30 +598,18 @@ export const loginWithPassword = async (input: {
 
     throw new Error("Invalid email or password");
   }
-
-  const canonicalContext = (purpose: string) => ({
-    userId: user.id,
-    role: user.role,
-    licenseeId: isManufacturerRole(user.role) ? null : user.licenseeId,
-    manufacturerId: isManufacturerRole(user.role) ? user.id : null,
-    organizationId: isManufacturerRole(user.role) ? null : user.orgId,
-    authAssurance: "password-verified" as const,
-    requestId: input.requestId,
-    purpose,
-  });
-  const authenticatedPrisma = getB01AuthenticatedPrisma();
-
   const upgradedPasswordHash = shouldRehashPassword(user.passwordHash) ? await hashPassword(password) : null;
-  const risk = await withCanonicalDbContext(authenticatedPrisma, canonicalContext("auth-password-login-state"), async (tx) => {
-    await tx.user.update({
-      where: { id: user.id },
-      data: {
-        ...(upgradedPasswordHash ? { passwordHash: upgradedPasswordHash } : {}),
-        failedLoginAttempts: 0,
-        lockedUntil: null,
-        lastLoginAt: now,
-      },
-    });
+
+  const preAuthPrisma = getB01PreAuthPrisma();
+  const bindPasswordSubject = async (tx: Prisma.TransactionClient) => {
+    const bound = await lookupPasswordBootstrapUser(email, tx);
+    if (!bound || bound.id !== user.id || bound.passwordHash !== user.passwordHash) {
+      throw new Error("AUTH_LOGIN_SUBJECT_CHANGED");
+    }
+  };
+
+  const risk = await preAuthPrisma.$transaction(async (tx) => {
+    await bindPasswordSubject(tx);
     return assessAuthSessionRisk({
       userId: user.id,
       role: user.role,
@@ -631,11 +619,11 @@ export const loginWithPassword = async (input: {
     }, tx);
   });
 
-  await withCanonicalDbContext(authenticatedPrisma, canonicalContext("auth-password-login-risk-signal"), (tx) =>
-    persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent }, risk, tx)
-  ).catch(() => undefined);
-
   if (risk.shouldBlock && isPlatformSuperAdminRole(user.role)) {
+    await preAuthPrisma.$transaction(async (tx) => {
+      await bindPasswordSubject(tx);
+      await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId }, risk, tx);
+    });
     await createAuditLog({
       userId: user.id,
       licenseeId: user.licenseeId || undefined,
@@ -654,10 +642,11 @@ export const loginWithPassword = async (input: {
     throw new Error("High-risk login blocked. Try from a trusted network or contact administrator.");
   }
 
-  return withCanonicalDbContext(authenticatedPrisma, canonicalContext("auth-password-login-session"), async (tx) => {
-    const mfaStatus: { enabled: boolean; lastUsedAt: Date | string | null } = isAdminMfaRequiredRole(user.role)
-      ? await getAdminMfaStatus(user.id, tx)
-      : { enabled: false, lastUsedAt: null };
+  return preAuthPrisma.$transaction(async (tx) => {
+    await bindPasswordSubject(tx);
+    const preparedState = refreshBoundaryState(risk.actorState as unknown as RefreshSessionState);
+    if (preparedState.user.id !== user.id || preparedState.user.role !== user.role) throw new Error("AUTH_LOGIN_SUBJECT_CHANGED");
+    const mfaStatus = preparedState.mfaStatus || { enabled: false, lastUsedAt: null, methods: [], preferredMethod: null };
 
     if (isAdminMfaRequiredRole(user.role)) {
       const lastUsedAt = mfaStatus?.lastUsedAt ? new Date(mfaStatus.lastUsedAt) : null;
@@ -673,6 +662,7 @@ export const loginWithPassword = async (input: {
 
       if (mfaFreshForLogin) {
         const verifiedAt = (lastUsedAt as Date).getTime() > now.getTime() ? now : (lastUsedAt as Date);
+        await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId, passwordHash: upgradedPasswordHash }, risk, tx);
         const session = await issueSessionForUser({
           userId: user.id,
           ipHash: input.ipHash,
@@ -683,37 +673,14 @@ export const loginWithPassword = async (input: {
           now,
           requestId: input.requestId,
           purpose: "manufacturer-bootstrap",
+          preparedState,
         }, tx);
-
-        await queueAuditLogOutbox({
-          userId: user.id,
-          licenseeId: user.licenseeId || undefined,
-          orgId: user.orgId || undefined,
-          action: "AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA",
-          entityType: "User",
-          entityId: user.id,
-          details: {
-            role: user.role,
-            riskScore: risk.score,
-            riskLevel: risk.riskLevel,
-            mfaEnabled: Boolean(mfaStatus.enabled),
-            mfaVerifiedAt: verifiedAt.toISOString(),
-            loginMfaCycleDays: loginCycleDays,
-          },
-          ipHash: input.ipHash || undefined,
-          userAgent: input.userAgent || undefined,
-        } as any, undefined, tx, {
-          requestId: input.requestId,
-          organizationId: session.user.orgId,
-          licenseeId: session.user.licenseeId,
-          manufacturerId: isManufacturerRole(user.role) ? user.id : null,
-          initiatingUserId: user.id,
-          initiatingActorRoleSnapshot: user.role,
-        });
-
         return session;
       }
 
+      if (!mfaStatus.enabled) {
+        await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId, passwordHash: upgradedPasswordHash }, risk, tx);
+      }
       const bootstrapSession = await buildBootstrapSessionForUser({
         user,
         ipHash: input.ipHash,
@@ -724,35 +691,29 @@ export const loginWithPassword = async (input: {
         riskLevel: risk.riskLevel,
         reasons: risk.reasons,
         requestId: input.requestId,
-      }, tx);
-
-      await queueAuditLogOutbox({
-        userId: user.id,
-        licenseeId: user.licenseeId || undefined,
-        orgId: user.orgId || undefined,
-        action: mfaStatus.enabled ? "AUTH_LOGIN_MFA_CHALLENGE_REQUIRED" : "AUTH_LOGIN_MFA_SETUP_REQUIRED",
-        entityType: "User",
-        entityId: user.id,
-        details: {
-          role: user.role,
-          riskScore: risk.score,
-          riskLevel: risk.riskLevel,
-          mfaEnabled: Boolean(mfaStatus.enabled),
+        preparedState,
+        challengeIssuer: async (params) => {
+          const ticket = randomOpaqueToken(36);
+          const { expiresAt } = buildAdminMfaChallengeExpiry(now);
+          await persistAuthSessionRisk({
+            ipHash: input.ipHash,
+            userAgent: input.userAgent,
+            requestId: input.requestId,
+            passwordHash: upgradedPasswordHash,
+            challenge: {
+              ticketHash: hashToken(ticket),
+              sessionBindingHash: hashToken(`admin-mfa-session:${String(params.sessionId || "")}`),
+              expiresAt,
+              maxAttempts: Math.max(1, Math.min(10, parseIntEnv("AUTH_MFA_CHALLENGE_MAX_ATTEMPTS", 5))),
+            },
+          }, risk, tx);
+          return { ticket, expiresAt };
         },
-        ipHash: input.ipHash || undefined,
-        userAgent: input.userAgent || undefined,
-      } as any, undefined, tx, {
-        requestId: input.requestId,
-        organizationId: bootstrapSession.user.orgId,
-        licenseeId: bootstrapSession.user.licenseeId,
-        manufacturerId: isManufacturerRole(user.role) ? user.id : null,
-        initiatingUserId: user.id,
-        initiatingActorRoleSnapshot: user.role,
-      });
-
+      }, tx);
       return bootstrapSession;
     }
 
+    await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId, passwordHash: upgradedPasswordHash }, risk, tx);
     const session = await issueSessionForUser({
       userId: user.id,
       ipHash: input.ipHash,
@@ -763,32 +724,8 @@ export const loginWithPassword = async (input: {
       now,
       requestId: input.requestId,
       purpose: "manufacturer-bootstrap",
+      preparedState,
     }, tx);
-
-    await queueAuditLogOutbox({
-      userId: user.id,
-      licenseeId: user.licenseeId || undefined,
-      orgId: user.orgId || undefined,
-      action: "AUTH_LOGIN_SUCCESS",
-      entityType: "User",
-      entityId: user.id,
-      details: {
-        role: user.role,
-        riskScore: risk.score,
-        riskLevel: risk.riskLevel,
-        mfaEnabled: false,
-      },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any, undefined, tx, {
-      requestId: input.requestId,
-      organizationId: session.user.orgId,
-      licenseeId: session.user.licenseeId,
-      manufacturerId: isManufacturerRole(user.role) ? user.id : null,
-      initiatingUserId: user.id,
-      initiatingActorRoleSnapshot: user.role,
-    });
-
     return session;
   });
 };
@@ -920,22 +857,9 @@ export const logoutSession = async (input: {
   actorRole: string;
   databaseSessionCapability?: string | null;
 }, db: AuthDbClient) => {
-  if (input.databaseSessionCapability) {
-    await revokeAuthenticatedSessionByRefreshToken(db, {
-      capability: input.databaseSessionCapability,
-      refreshTokenId: input.sessionId,
-      reason: "LOGOUT",
-      requestId: input.requestId,
-    });
-  }
-  // The reviewed capability boundary verifies the still-active refresh row.
-  // Revoke it first, then revoke the bearer in the existing lifecycle path;
-  // both mutations remain within the caller's auth transaction boundary.
-  await revokeRefreshTokenById({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    reason: "LOGOUT",
-  }, db);
+  if (!input.databaseSessionCapability) throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
+  // Queue the audit event while the verified capability remains live. The
+  // following exact revocation boundary invalidates it in the same transaction.
   await queueAuditLogOutbox({
     userId: input.userId,
     action: "AUTH_LOGOUT",
@@ -952,6 +876,11 @@ export const logoutSession = async (input: {
     initiatingUserId: input.userId,
     initiatingActorRoleSnapshot: input.actorRole,
   });
+  await revokeRefreshTokenById({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    reason: "LOGOUT",
+  }, db);
 };
 
 export const disableUserSessions = async (

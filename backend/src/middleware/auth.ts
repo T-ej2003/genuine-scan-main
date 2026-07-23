@@ -22,6 +22,7 @@ import { clearAuthCookies } from "../controllers/authControllerShared";
 import {
   isCanonicalAuthDenial,
   withCanonicalAuthClaims,
+  withDatabaseAuthenticatedSession,
 } from "../rls-waves/session-b/b01/canonicalAuthContext";
 import {
   loadAuthenticatedActor,
@@ -36,6 +37,8 @@ export interface AuthRequest extends Request {
   databaseSessionCapability?: string | null;
 }
 
+export const DATABASE_SESSION_CAPABILITY_HEADER = "x-database-session-capability";
+
 const getBearerToken = (req: Request) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
@@ -47,8 +50,9 @@ const getCookieAccessToken = (req: Request) => {
   return token ? openCookieToken(token, "auth.access") : null;
 };
 
-const getDatabaseSessionCapability = (req: Request) => {
-  const token = readCookie(req, AUTHENTICATED_SESSION_CAPABILITY_COOKIE) || "";
+export const getDatabaseSessionCapability = (req: Request, bearer: string | null) => {
+  const headerToken = bearer ? String(req.get(DATABASE_SESSION_CAPABILITY_HEADER) || "").trim() : "";
+  const token = headerToken || readCookie(req, AUTHENTICATED_SESSION_CAPABILITY_COOKIE) || "";
   return token ? openCookieToken(token, "auth.database-session") : null;
 };
 
@@ -57,13 +61,15 @@ const requestIdFor = (req: Request) =>
 
 export async function hydrateTenantIfNeeded(
   payload: AuthenticatedSessionClaims,
+  databaseSessionCapability: string | null,
   requestId: string = randomUUID()
 ): Promise<AuthenticatedSessionClaims> {
   if (!payload?.userId || !payload?.role) return payload;
+  if (!databaseSessionCapability) throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
 
-  const { user: u, manufacturerScope, canonicalAssurance } = await withCanonicalAuthClaims(
+  const { user: u, manufacturerScope, canonicalAssurance } = await withDatabaseAuthenticatedSession(
     payload,
-    { requestId, purpose: "auth-session-hydration" },
+    { capability: databaseSessionCapability, requestId, purpose: "auth-session-hydration" },
     async (tx, context) => {
       const user = await loadAuthenticatedActor(tx);
       if (user.id !== context.userId || user.role !== context.role) throw new Error("Authenticated actor changed");
@@ -144,10 +150,10 @@ export async function hydrateTenantIfNeeded(
   };
 }
 
-const parseAnySessionToken = async (token: string, requestId: string): Promise<AuthenticatedSessionClaims> => {
+const parseAnySessionToken = async (token: string, capability: string | null, requestId: string): Promise<AuthenticatedSessionClaims> => {
   try {
     const decoded = verifyAccessToken(token);
-    return hydrateTenantIfNeeded(decoded, requestId);
+    return hydrateTenantIfNeeded(decoded, capability, requestId);
   } catch {
     const decoded = verifyMfaBootstrapToken(token);
     return hydrateTenantIfNeeded({
@@ -163,7 +169,7 @@ const parseAnySessionToken = async (token: string, requestId: string): Promise<A
       authenticatedAt: null,
       mfaVerifiedAt: null,
       sessionId: decoded.sessionId,
-    }, requestId);
+    }, capability, requestId);
   }
 };
 
@@ -180,9 +186,9 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
 
   try {
     const decoded = verifyAccessToken(token);
-    req.user = await hydrateTenantIfNeeded(decoded, requestIdFor(req));
+    req.databaseSessionCapability = getDatabaseSessionCapability(req, bearer);
+    req.user = await hydrateTenantIfNeeded(decoded, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
-    req.databaseSessionCapability = getDatabaseSessionCapability(req);
     return next();
   } catch {
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
@@ -196,9 +202,9 @@ export const authenticateAnySession = async (req: AuthRequest, res: Response, ne
   if (!token) return res.status(401).json({ success: false, error: "No token provided" });
 
   try {
-    req.user = await parseAnySessionToken(token, requestIdFor(req));
+    req.databaseSessionCapability = getDatabaseSessionCapability(req, bearer);
+    req.user = await parseAnySessionToken(token, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
-    req.databaseSessionCapability = getDatabaseSessionCapability(req);
     return next();
   } catch {
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
@@ -213,9 +219,9 @@ export const optionalAuth = async (req: AuthRequest, _res: Response, next: NextF
 
   try {
     const decoded = verifyAccessToken(token);
-    req.user = await hydrateTenantIfNeeded(decoded, requestIdFor(req));
+    req.databaseSessionCapability = getDatabaseSessionCapability(req, bearer);
+    req.user = await hydrateTenantIfNeeded(decoded, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
-    req.databaseSessionCapability = getDatabaseSessionCapability(req);
   } catch {
     // ignore
   }
@@ -238,7 +244,8 @@ export const authenticateSSE = async (req: AuthRequest, res: Response, next: Nex
 
   try {
     const decoded = verifyAccessToken(token);
-    req.user = await hydrateTenantIfNeeded(decoded, requestIdFor(req));
+    req.databaseSessionCapability = getDatabaseSessionCapability(req, headerToken || queryToken || null);
+    req.user = await hydrateTenantIfNeeded(decoded, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = queryToken ? "bearer" : headerToken ? "bearer" : "cookie";
     return next();
   } catch {
@@ -281,9 +288,13 @@ export const requireRecentAdminMfa = async (req: AuthRequest, res: Response, nex
 
   const maxAgeMinutes = getAdminStepUpWindowMinutes();
   try {
-    await withCanonicalAuthClaims(
+    await withDatabaseAuthenticatedSession(
       req.user,
-      { requestId: requestIdFor(req), purpose: "auth-recent-admin-mfa" },
+      {
+        capability: String(req.databaseSessionCapability || ""),
+        requestId: requestIdFor(req),
+        purpose: "auth-recent-admin-mfa",
+      },
       (tx, context) => {
         if (context.authAssurance !== "mfa-verified" && context.authAssurance !== "step-up-verified") {
           throw new RecentMfaDenial();

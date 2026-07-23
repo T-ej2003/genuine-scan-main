@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { createHash } = require("node:crypto");
 const { PrismaClient } = require("@prisma/client");
 
 const enabled = process.env.MSCQR_BATCH_OPERATIONAL_POSTGRES18_TEST === "true";
@@ -82,10 +83,18 @@ const platformClaims = (overrides = {}) => ({
   mfaVerifiedAt: new Date(),
   ...overrides,
 });
+const capabilities = {
+  tenant: "E".repeat(43),
+  manufacturer: "F".repeat(43),
+  platform: "G".repeat(43),
+};
+const capabilityFor = (user) => user.role === "PLATFORM_SUPER_ADMIN"
+  ? capabilities.platform
+  : user.role?.includes("MANUFACTURER") ? capabilities.manufacturer : capabilities.tenant;
 
-const invoke = async (controller, { user, requestId, query = {}, params = {}, originalUrl }) => {
+const invoke = async (controller, { user, requestId, query = {}, params = {}, originalUrl, databaseSessionCapability }) => {
   const response = { status: 200, body: null };
-  const req = { user, requestId, query, params, originalUrl };
+  const req = { user, requestId, query, params, originalUrl, databaseSessionCapability: databaseSessionCapability || capabilityFor(user) };
   const res = {
     status(code) { response.status = code; return this; },
     json(payload) { response.body = payload; return this; },
@@ -180,6 +189,18 @@ const main = async () => {
         { batchId: ids.foreign, licenseeId: ids.licenseeB, manufacturerId: ids.manufacturerA, totalCodes: 1, active: 1 },
       ] });
     });
+    const sessionExpiry = new Date(Date.now() + 60 * 60_000);
+    await bootstrap.refreshToken.createMany({ data: [
+      [ids.tenantA, ids.orgA, "PASSWORD", capabilities.tenant],
+      [ids.manufacturerA, ids.orgA, "ADMIN_MFA", capabilities.manufacturer],
+      [ids.platformA, null, "ADMIN_MFA", capabilities.platform],
+    ].map(([userId, orgId, assurance, capability], index) => ({
+      id: `10000000-0000-4000-9000-00000000003${index + 1}`,
+      userId, orgId, tokenHash: createHash("sha256").update(`batch-refresh-${userId}`).digest("hex"),
+      expiresAt: sessionExpiry, sessionCapabilityHash: createHash("sha256").update(capability).digest("hex"),
+      sessionCapabilityHashVersion: "sha256-v1", sessionCapabilityAssurance: assurance,
+      sessionCapabilityExpiresAt: sessionExpiry,
+    })) });
 
     const tenantPage = expectSuccess(await invoke(getBatches, {
       user: tenantClaims(), requestId: success("batch-pg-tenant-page"), query: { limit: "2", offset: "0" },
@@ -290,25 +311,25 @@ const main = async () => {
     });
 
     await assert.rejects(prisma.$queryRawUnsafe(
-      "SELECT * FROM app_rls.batch_operational_scope('10000000-0000-4000-8000-000000009001',NULL,'GET /api/qr/batches',NULL)"
-    ), /batch operational access denied/i, "blank database context fails closed");
+      `SELECT * FROM app_rls.batch_operational_scope('${"Z".repeat(43)}','batch-operational-read','batch-pg-missing-capability','10000000-0000-4000-8000-000000009001',NULL,'GET /api/qr/batches',NULL)`
+    ), /AUTH_SESSION_CAPABILITY_DENIED/i, "missing database capability fails closed");
     await assert.rejects(prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`SELECT set_config('app.user_id','malformed',true),set_config('app.role','LICENSEE_ADMIN',true),set_config('app.organization_id','${ids.orgA}',true),set_config('app.licensee_id','${ids.licenseeA}',true),set_config('app.manufacturer_id','',true),set_config('app.auth_assurance','password-verified',true),set_config('app.request_id','batch-pg-malformed-context',true),set_config('app.purpose','batch-operational-read',true)`);
-      return tx.$queryRawUnsafe("SELECT * FROM app_rls.batch_operational_scope('10000000-0000-4000-8000-000000009002',NULL,'GET /api/qr/batches',NULL)");
-    }), /batch operational access denied/i, "malformed database context fails closed");
+      return tx.$queryRawUnsafe(`SELECT * FROM app_rls.batch_operational_scope('${"Z".repeat(43)}','batch-operational-read','batch-pg-malformed-context','10000000-0000-4000-8000-000000009002',NULL,'GET /api/qr/batches',NULL)`);
+    }), /AUTH_SESSION_CAPABILITY_DENIED/i, "malformed database context cannot replace capability authority");
     await assert.rejects(prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`SELECT app_rls.install_actor_context('${ids.tenantA}','LICENSEE_ADMIN','${ids.orgA}','${ids.licenseeA}','','password-verified','batch-pg-wrong-purpose','wrong-purpose')`);
-      return tx.$queryRawUnsafe("SELECT * FROM app_rls.batch_operational_scope('10000000-0000-4000-8000-000000009003',NULL,'GET /api/qr/batches',NULL)");
-    }), /batch operational access denied/i, "wrong purpose fails closed");
+    }), /permission denied/i, "generic installer remains inaccessible");
 
     const privileges = await bootstrap.$queryRawUnsafe(`SELECT
-      has_function_privilege('mscqr_rls_cert_app','app_rls.batch_operational_scope(text,text,text,text)','EXECUTE') AS scope_wrapper,
-      has_function_privilege('mscqr_rls_cert_app','app_rls.batch_operational_rows(text,text,text,text,text,integer,integer)','EXECUTE') AS rows_wrapper,
+      has_function_privilege('mscqr_rls_cert_app','app_rls.batch_operational_scope(text,text,text,text,text,text,text)','EXECUTE') AS scope_wrapper,
+      has_function_privilege('mscqr_rls_cert_app','app_rls.batch_operational_rows(text,text,text,text,text,text,text,text,integer,integer)','EXECUTE') AS rows_wrapper,
+      has_function_privilege('mscqr_rls_cert_app','app_rls.batch_operational_scope(text,text,text,text)','EXECUTE') AS legacy_wrapper,
       has_function_privilege('mscqr_rls_cert_app','app_rls.batch_scope_fingerprint(text,text,text)','EXECUTE') AS fingerprint_helper,
       has_function_privilege('mscqr_rls_cert_app','app_rls.batch_operational_batch_allowed(text,text)','EXECUTE') AS allowed_helper,
       has_function_privilege('mscqr_rls_cert_app','app_rls.authorize_batch_operational_read(text,text,text,text)','EXECUTE') AS authorize_helper`);
     assert.deepEqual(privileges[0], {
-      scope_wrapper: true, rows_wrapper: true, fingerprint_helper: false, allowed_helper: false, authorize_helper: false,
+      scope_wrapper: true, rows_wrapper: true, legacy_wrapper: false, fingerprint_helper: false, allowed_helper: false, authorize_helper: false,
     });
     await assert.rejects(prisma.$queryRawUnsafe("SELECT app_rls.batch_scope_fingerprint(NULL,'GET /api/qr/batches',NULL)"), /permission denied/i);
     await assert.rejects(prisma.$queryRawUnsafe('SELECT "passwordHash" FROM public."User"'), /permission denied/i);

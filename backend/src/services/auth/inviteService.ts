@@ -1,4 +1,4 @@
-import { Prisma, UserRole } from "@prisma/client";
+import { UserRole } from "@prisma/client";
 import { hashPassword } from "./passwordService";
 import { newCsrfToken } from "./tokenService";
 import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
@@ -8,7 +8,6 @@ import { mscqrBrandHeaderHtml, renderActionEmail } from "../emailTemplateService
 import { normalizeEmailAddress } from "../../utils/email";
 import { isManufacturerRole } from "../manufacturerScopeService";
 import { buildConnectorDownloadUrls } from "../connectorReleaseService";
-import type { CanonicalDbContext } from "../../lib/canonicalDbContext";
 import { prepareInvitation } from "../../rls-waves/session-b/b01/invitationRepository";
 import {
   consumeInvitationBoundary,
@@ -17,22 +16,12 @@ import {
 
 const addHours = (d: Date, hours: number) => new Date(d.getTime() + hours * 60 * 60 * 1000);
 
-type InviteDb = Prisma.TransactionClient;
-type InviteDatabaseBoundary = {
-  run: <T>(callback: (db: InviteDb, context: CanonicalDbContext) => Promise<T>) => Promise<T>;
-};
-
-const normalizeRole = (role: string): UserRole => {
+export const normalizeInviteRole = (role: string): UserRole => {
   const r = String(role || "").trim().toUpperCase();
-  if (r === "PLATFORM_SUPER_ADMIN") return UserRole.PLATFORM_SUPER_ADMIN;
-  if (r === "ORG_ADMIN") return UserRole.LICENSEE_ADMIN;
-  if (r === "MANUFACTURER_ADMIN") return UserRole.MANUFACTURER;
-  if (r === "MANUFACTURER_USER") return UserRole.MANUFACTURER;
-
-  // Legacy roles (accepted for backward compatibility).
   if (r === "SUPER_ADMIN") return UserRole.SUPER_ADMIN;
+  if (r === "PLATFORM_SUPER_ADMIN") return UserRole.PLATFORM_SUPER_ADMIN;
   if (r === "LICENSEE_ADMIN") return UserRole.LICENSEE_ADMIN;
-  if (r === "MANUFACTURER") return UserRole.MANUFACTURER;
+  if (r === "MANUFACTURER" || r === "MANUFACTURER_ADMIN") return UserRole.MANUFACTURER_ADMIN;
 
   throw new Error("Unsupported role");
 };
@@ -166,14 +155,16 @@ export const createInvite = async (input: {
   ipHash: string | null;
   userAgent: string | null;
   actorSessionId?: string | null;
-  databaseBoundary?: InviteDatabaseBoundary;
+  databaseCapability: string;
+  requestId: string;
+  actorRole: UserRole;
 }) => {
   const allowExistingInvitedUser = Boolean(input.allowExistingInvitedUser);
   const requireExistingUser = Boolean(input.requireExistingUser);
   const email = input.email == null ? null : normalizeEmailAddress(input.email);
   if (!email && !requireExistingUser) throw new Error("Invalid email address");
 
-  const role = normalizeRole(input.role);
+  const role = normalizeInviteRole(input.role);
 
   const licenseeId = input.licenseeId ? String(input.licenseeId).trim() : null;
   const manufacturerId = input.manufacturerId ? String(input.manufacturerId).trim() : null;
@@ -187,26 +178,28 @@ export const createInvite = async (input: {
   const createdByUserId = String(input.createdByUserId || "").trim();
   if (!createdByUserId) throw new Error("INVITE_ACTOR_REQUIRED");
 
-  if (!input.databaseBoundary) throw new Error("INVITE_DATABASE_BOUNDARY_REQUIRED");
   const actorSessionId = String(input.actorSessionId || "").trim();
   if (!actorSessionId) throw new Error("INVITE_ACTOR_SESSION_REQUIRED");
-  const result = await input.databaseBoundary.run((tx, context) => {
-    if (context.userId !== createdByUserId) throw new Error("INVITE_ACTOR_MISMATCH");
-    return prepareInvitation(tx, context, {
-      requestedEmail: email,
-      requestedName: userName,
-      requestedRole: role,
-      requestedLicenseeId: licenseeId,
-      requestedManufacturerId: manufacturerId,
-      allowExistingInvitedUser,
-      requireExistingUser,
-      tokenHash,
-      createdAt: now,
-      expiresAt,
-      actorSessionId,
-      ipHash: input.ipHash,
-      userAgent: input.userAgent,
-    });
+  const result = await prepareInvitation({
+    capability: input.databaseCapability,
+    actorUserId: createdByUserId,
+    requestId: input.requestId,
+    purpose: requireExistingUser ? "licensee-admin-invite-resend" : "auth-invite-create",
+    actorRole: input.actorRole,
+    actorLicenseeId: input.actorRole === UserRole.LICENSEE_ADMIN ? licenseeId : null,
+    requestedEmail: email,
+    requestedName: userName,
+    requestedRole: role,
+    requestedLicenseeId: licenseeId,
+    requestedManufacturerId: manufacturerId,
+    allowExistingInvitedUser,
+    requireExistingUser,
+    tokenHash,
+    createdAt: now,
+    expiresAt,
+    actorSessionId,
+    ipHash: input.ipHash,
+    userAgent: input.userAgent,
   });
 
   if (result.linkAction && !result.inviteId) {

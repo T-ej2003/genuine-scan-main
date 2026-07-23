@@ -98,45 +98,6 @@ export const createLicenseeQrApi = (core: ApiClientCore) => ({
     return core.request(`/qr/codes${query}`);
   },
 
-  async getLegacyPublicCodeReport() {
-    return core.request<{
-      totalLegacyCodes: number;
-      knownUnsafeLegacyCodes: number;
-      potentiallyRotatableLegacyCodes: number;
-      note: string;
-      groups: Array<{
-        brandId: string;
-        brandName: string | null;
-        brandPrefix: string | null;
-        batchId: string | null;
-        batchName: string | null;
-        batchStartCode: string | null;
-        batchEndCode: string | null;
-        batchLifecycleState: string | null;
-        batchReleasedAt: string | null;
-        batchPrintedAt: string | null;
-        batchPrintPackDownloadedAt: string | null;
-        status: string;
-        count: number;
-        knownUnsafeCount: number;
-        potentiallyRotatableCount: number;
-      }>;
-    }>("/qr/codes/legacy-report");
-  },
-
-  async getLegacyPublicCodeReportCsv() {
-    return core.request<string>("/qr/codes/legacy-report?format=csv");
-  },
-
-  async rotateLegacyPublicCodes(payload: { dryRun?: boolean; limit?: number; ids?: string[] }) {
-    return core.request<{
-      dryRun: boolean;
-      scanned: number;
-      rotated: Array<{ id: string; previousPublicCode: string; newPublicCode?: string; displayCode: string | null }>;
-      skipped: Array<{ id: string; publicCode: string; reasons: string[] }>;
-    }>("/qr/codes/legacy-rotate", { method: "POST", body: JSON.stringify(payload) });
-  },
-
   async getQRStats(licenseeId?: string) {
     const query = licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : "";
     return controlledDashboardGet(`qr:stats:${query}`, () => core.request(`/qr/stats${query}`));

@@ -47,6 +47,28 @@ export const createAuthenticatedSessionCapability = async (
   return { row, rawCapability };
 };
 
+export const requireAuthenticatedSessionCapability = async (
+  db: CapabilityDb,
+  input: { capability: string; purpose: string; requestId: string }
+) => {
+  const rows = await db.$queryRaw<Array<{
+    sessionId: string;
+    userId: string;
+    role: string;
+    organizationId: string | null;
+    licenseeId: string | null;
+    assurance: "PASSWORD" | "ADMIN_MFA";
+  }>>`
+    SELECT * FROM app_auth.require_authenticated_session(
+      ${capability(input.capability)}, ${input.purpose}, ${input.requestId}
+    )
+  `;
+  if (rows.length !== 1 || !rows[0].sessionId || !rows[0].userId) {
+    throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
+  }
+  return rows[0];
+};
+
 export const revokeAuthenticatedSessionByRefreshToken = async (
   db: CapabilityDb,
   input: { capability: string; refreshTokenId: string; reason: string; requestId: string }

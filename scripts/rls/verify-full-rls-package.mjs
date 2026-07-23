@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { calculateCleanRoomSourceContract } from "./lib/clean-room-source-contract.mjs";
 import { buildRegisteredCallPathEvidence } from "./lib/application-path-certifications.mjs";
 import { EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT, EXPECTED_WORKFLOW_COUNT } from "./lib/workflow-inventory-baseline.mjs";
+import { NAMED_SQL_FUNCTION_CONTRACTS } from "./lib/named-sql-function-contracts.mjs";
 
 const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const generatedRoot = path.join(root, "documents/security/rls-program/generated");
@@ -20,6 +21,12 @@ const ensure = (condition, message) => { if (!condition) throw new Error(message
 
 export const validateGeneratedPackage = ({ manifest, policies, privileges, commandSemantics }) => {
   const rules = new Map(commandSemantics.rules.map((rule) => [rule.id, rule]));
+  for (const contract of NAMED_SQL_FUNCTION_CONTRACTS) {
+    for (const [table, command] of contract.tableCommands || []) {
+      const id = `contract:${contract.id}:${table}:${command}`;
+      rules.set(id, { id, table, command, contractId: contract.id });
+    }
+  }
   const profiles = commandSemantics.sqlCertificationProfiles || [];
   const directProfiles = profiles.filter((profile) => profile.status === "direct-policy-candidate");
   const namedProfiles = profiles.filter((profile) => profile.status === "named-function-candidate");
@@ -107,12 +114,14 @@ export const validateGeneratedPackage = ({ manifest, policies, privileges, comma
 
   const expectedGrants = new Map();
   for (const policy of directPolicies) {
+    if (["QRCode", "QRRange"].includes(policy.table)) continue;
     const key = `${policy.table}|${policy.command}`;
     const entry = expectedGrants.get(key) || { columns: [], sourceCommandRuleIds: [] };
     entry.columns.push(...policy.columns);
     entry.sourceCommandRuleIds.push(...policy.sourceCommandRuleIds);
     expectedGrants.set(key, entry);
   }
+  ensure(privileges.rows.every(({ table }) => !["QRCode", "QRRange"].includes(table)), "Authenticated application retains direct QR table privileges");
   ensure(privileges.rows.length === expectedGrants.size, "Column grant rows do not match compatible semantic slices");
   for (const grant of privileges.rows) {
     const expected = expectedGrants.get(`${grant.table}|${grant.command}`);
@@ -195,7 +204,10 @@ export const verifyFullRlsPackage = () => {
   ensure(!/^\s*(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|GRANT|REVOKE)\b/im.test(verification), "Verification SQL is not read-only");
   ensure((readGenerated("30-policies.sql").toString().match(/FORCE ROW LEVEL SECURITY/g) || []).length === TABLE_INVENTORY_BASELINE.forceRlsTargets, `Generated SQL does not FORCE exactly ${TABLE_INVENTORY_BASELINE.forceRlsTargets} tables`);
   ensure((readGenerated("30-policies.sql").toString().match(/CREATE POLICY/g) || []).length === policies.rows.length, "Generated SQL policy count differs from inventory");
-  ensure((readGenerated("21-runtime-grants.sql").toString().match(/GRANT\s+(?:SELECT|INSERT|UPDATE)\s*\(/g) || []).length === privileges.rows.length + (privileges.functionOwnerRows || []).length, "Generated SQL column grants differ from inventory");
+  const runtimeGrantSql = readGenerated("21-runtime-grants.sql").toString();
+  const exactTableGrantCount = (runtimeGrantSql.match(/GRANT\s+(?:SELECT|INSERT|UPDATE)\s*\(/g) || []).length
+    + (runtimeGrantSql.match(/GRANT\s+DELETE\s+ON\s+TABLE\s+public\./g) || []).length;
+  ensure(exactTableGrantCount === privileges.rows.length + (privileges.functionOwnerRows || []).length, "Generated SQL exact table grants differ from inventory");
 
   ensure(roleLifecycle.schemaVersion === 5 && roleLifecycle.deploymentModel === "clean-room-blue-green", "Role lifecycle report is not clean-room blue/green");
   ensure(roleLifecycle.preflight?.mutationAllowed === false && roleLifecycle.legacyRoleRestoration === false && roleLifecycle.legacyAclRestoration === false && roleLifecycle.legacyDefaultAclRestoration === false && roleLifecycle.legacyOwnershipRestoration === false, "Role lifecycle report retains historical restoration");

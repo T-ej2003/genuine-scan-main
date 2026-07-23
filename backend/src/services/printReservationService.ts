@@ -311,6 +311,7 @@ export const listReservableQrCodeSummaries = async (
       start_code,
       end_code
     FROM app_rls.batch_reservable_qr_summaries(
+      ${boundary.databaseSessionCapability}, ${boundary.purpose}, ${boundary.requestId},
       ${boundary.auditId},
       ${boundary.requestedLicenseeId},
       ${boundary.routeSurface},

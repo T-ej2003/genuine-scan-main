@@ -15,8 +15,8 @@ const now = Date.parse("2026-07-21T12:00:00.000Z");
 
 const events = [];
 const calls = { contexts: [], scopes: [], data: [], cacheKeys: [], transactionOptions: [] };
-let contextInstalled = false;
 let denyScope = false;
+let denyCapability = false;
 let fingerprint = "a".repeat(32);
 let dataRow = {
   total_qr_codes: 10n,
@@ -36,18 +36,15 @@ let dataRow = {
 
 const tx = {
   $executeRaw: async (strings, ...values) => {
-    assert.match(strings.join("?"), /set_config\('app\.purpose'/);
-    contextInstalled = true;
-    events.push("context");
-    calls.contexts.push(values);
-    return 1;
+    throw new Error(`legacy context installer called: ${strings.join("?")}:${values.length}`);
   },
   $queryRaw: async (strings, ...values) => {
-    assert(contextInstalled, "protected dashboard query ran before canonical context installation");
+    assert.equal(values[0], "A".repeat(43), "capability is the first database authority argument");
     const sql = strings.join("?");
     if (/dashboard_snapshot_scope/.test(sql)) {
       events.push("scope");
       calls.scopes.push(values);
+      if (denyCapability) throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
       if (denyScope) throw new Error("dashboard access denied");
       return [{ scope_fingerprint: fingerprint }];
     }
@@ -61,7 +58,6 @@ const tx = {
 const runner = {
   $transaction: async (callback, options) => {
     calls.transactionOptions.push(options);
-    contextInstalled = false;
     events.push("transaction-begin");
     const value = await callback(tx);
     events.push("transaction-end");
@@ -104,6 +100,7 @@ const {
   DashboardSnapshotAccessError,
   getDashboardSnapshot,
 } = require("../dist/services/dashboardSnapshotService");
+const { getDashboardStats } = require("../dist/controllers/dashboardController");
 
 const actor = (overrides = {}) => ({
   userId: ids.actor,
@@ -123,6 +120,7 @@ const request = (user = actor(), overrides = {}) => ({
   query: {},
   originalUrl: "/api/dashboard/stats",
   requestId: "dashboard-request-1",
+  databaseSessionCapability: "A".repeat(43),
   ...overrides,
 });
 const denied = (req) => assert.throws(
@@ -202,15 +200,15 @@ const denied = (req) => assert.throws(
       blocked: 1,
     },
   });
-  assert.strictEqual(calls.contexts.length, 2, "every request installs canonical context");
+  assert.strictEqual(calls.contexts.length, 0, "caller-selected canonical context is never installed");
   assert.strictEqual(calls.scopes.length, 2, "cache hits still revalidate database scope");
   assert.strictEqual(calls.data.length, 1, "unchanged approved scope reuses the existing 20-second cache");
   assert(calls.transactionOptions.every((options) => options.isolationLevel === "RepeatableRead"));
   assert(calls.cacheKeys.every((key) => /^[0-9a-f]{64}$/.test(key)));
   assert(calls.cacheKeys.every((key) => !key.includes(ids.actor) && !key.includes(ids.tenant)));
-  assert.strictEqual(calls.scopes[0][2], "GET /api/dashboard/stats");
-  assert.strictEqual(calls.data[0][3], "a".repeat(32));
-  assert.deepStrictEqual(events.slice(0, 5), ["transaction-begin", "context", "scope", "data", "transaction-end"]);
+  assert.strictEqual(calls.scopes[0][5], "GET /api/dashboard/stats");
+  assert.strictEqual(calls.data[0][6], "a".repeat(32));
+  assert.deepStrictEqual(events.slice(0, 4), ["transaction-begin", "scope", "data", "transaction-end"]);
 
   const dataCallsBeforeDelta = calls.data.length;
   assert.strictEqual(await canDeliverDashboardAuditDelta(request(undefined, { requestId: "dashboard-delta-1" }), ids.tenant), true);
@@ -230,6 +228,12 @@ const denied = (req) => assert.throws(
   await assert.rejects(getDashboardSnapshot(request(undefined, { requestId: "dashboard-request-3" })), DashboardSnapshotAccessError);
   assert.strictEqual(calls.data.length, 1, "revoked scope cannot consume a cached snapshot");
   denyScope = false;
+
+  denyCapability = true;
+  const response = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+  await getDashboardStats(request(undefined, { requestId: "dashboard-request-capability-denied" }), response);
+  assert.deepStrictEqual([response.statusCode, response.body], [404, { success: false, error: "Dashboard not found" }]);
+  denyCapability = false;
 
   fingerprint = "b".repeat(32);
   dataRow = {

@@ -14,14 +14,9 @@ import { logger } from "./utils/logger";
 import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
 import { startAuditLogOutboxWorker, stopAuditLogOutboxWorker } from "./services/auditLogOutboxService";
 import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./services/compliancePackService";
-import {
-  startLegacyQrRiskReportScheduler,
-  stopLegacyQrRiskReportScheduler,
-} from "./services/legacyQrRiskReportJobService";
 import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
 import { startPrintConfirmationReconciler } from "./services/printConfirmationReconciler";
-import { startAnalyticsRollupWorker } from "./services/analyticsRollupService";
 import { attachPrinterAgentSessionWebSocket } from "./services/printerAgentSessionSocket";
 import { releaseMetadata } from "./observability/release";
 import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
@@ -304,7 +299,6 @@ if (sentryEnabled) {
 let server: ReturnType<typeof app.listen> | null = null;
 let shuttingDown = false;
 let stopPrintConfirmationReconcilerWorker: (() => void) | null = null;
-let stopAnalyticsRollupWorker: (() => void) | null = null;
 let activeHttpRequests = 0;
 const openHttpSockets = new Set<Socket>();
 
@@ -416,7 +410,6 @@ const startServer = async () => {
       startAuditLogOutboxWorker();
       startSecurityEventOutboxWorker();
       startCompliancePackScheduler();
-      startLegacyQrRiskReportScheduler();
       void resumePendingNetworkDirectJobs().catch((error) => {
         logger.error("Failed to resume pending network-direct jobs", { error: error?.message || error });
       });
@@ -424,7 +417,6 @@ const startServer = async () => {
         logger.error("Failed to resume pending network IPP jobs", { error: error?.message || error });
       });
       stopPrintConfirmationReconcilerWorker = startPrintConfirmationReconciler();
-      stopAnalyticsRollupWorker = startAnalyticsRollupWorker();
     } else {
       logger.info("Background workers disabled for this HTTP process");
     }
@@ -457,11 +449,8 @@ const shutdown = async (signal: string) => {
     stopSecurityEventOutboxWorker();
     stopAuditLogOutboxWorker();
     stopCompliancePackScheduler();
-    stopLegacyQrRiskReportScheduler();
     stopPrintConfirmationReconcilerWorker?.();
     stopPrintConfirmationReconcilerWorker = null;
-    stopAnalyticsRollupWorker?.();
-    stopAnalyticsRollupWorker = null;
     await closeHttpServer();
     await closeRedisConnections();
     await disconnectRlsReadPrisma();

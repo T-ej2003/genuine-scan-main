@@ -2,7 +2,7 @@
   "schemaVersion": 3,
   "algorithm": "sha256",
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda",
+  "sourceContractSha256": "aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
@@ -14,7 +14,7 @@
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "7826d94607f1f9a3415786a51b9e747888a946352e3ccb41ccc839418e51466a"
+      "sha256": "8b3a34a4de02045a9a02659de50c1ae9e7212d0e62719c76777872bcf96f991b"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -46,11 +46,11 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "1fd85f58d6fc9ea63dcd6f99002d6b7f5bec751b5f63bde527368622a0248be8"
+      "sha256": "1c91053ca3d9cc83d493b3979b8177073b6d9af04378ed02b88041b99f18f17f"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
-      "sha256": "14d78f5da2dd03a75963faa54f555855fdc9320d1c5ce0d7dd8d8ad980d28e27"
+      "sha256": "6c512239c42f82bbf3dc92a82dd9b2520807f7e06ca75b9e85f0b7e6fd43056b"
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
@@ -58,15 +58,15 @@
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "d8e5b3b00da7dd2beb345207eccb1ad7ccd36361921ff8c60f077fe12f7d5e4b"
+      "sha256": "7911f6ac1339c494dfe5e1ecef028c80e43b04cf06f35f208aba0240da025731"
     },
     {
       "path": "scripts/rls/lib/application-path-certifications.mjs",
-      "sha256": "d704bf7fc0e91b44fcf7a20577b5027758726907cafd8ddc6740788fec5565ae"
+      "sha256": "bc0d4e5a4c6013f1f3e02f7eab050336c79bc074df39b16b25d120a7c0be6b55"
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "681f7eed93e3de63c27a611dbfd53438ce1e3ac75f7c7d336eaaf85270a52d36"
+      "sha256": "e46957d58946ebcc33f8a8b7d076dd3705bcc433f9c244dfd4a44c415377761f"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -85,45 +85,69 @@
       "sha256": "77e59f8ec15003feeee419d532acbf0252d7b792fdf259d5c62db0bc7c8b6fbc"
     },
     {
+      "path": "backend/src/rls-waves/session-a/operationalReadBoundaries.sql",
+      "sha256": "5850898937c82e971f7c1882bb003a57bb38672bae02839544218b769eaa94f1"
+    },
+    {
+      "path": "backend/src/rls-waves/session-a/operationalReadBoundariesRollback.sql",
+      "sha256": "908f5d19079f8308ad5f062752a6561085fb8a0faf44e89b07d7a0f74e6b5722"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c01/administration.sql",
+      "sha256": "f977417467071f67064b21e31a5c3ed46dd04e3f2793d376e8336c6b0d5ad3e1"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c01/administrationRollback.sql",
+      "sha256": "6ec2102cfce05692a39b42e06bad27e196f60c0383e1017c2cf67dc21249271b"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c01/qrSystem.sql",
+      "sha256": "184226c35f95496407b093769ccb32a66918e21bcedd08e713981af6ac0c5365"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c01/qrSystemRollback.sql",
+      "sha256": "c8e614df73b97baad766204b07a7f94aac5ffec3ebbfbdf73d39ce80620c2bb8"
+    },
+    {
       "path": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
       "sha256": "6dedb97efcf719d70e06f92a2594c16711739faf742f861906998525b5e9c54c"
     },
     {
       "path": "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js",
-      "sha256": "e7cf5dda35b9cc032b063be6f842f5de299e2d010a7534a23681d6ca34b34efd"
+      "sha256": "37fb6030271fdbe36960afbad2041326d958b68fd73c1938798f8ef732c229b2"
     },
     {
       "path": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
-      "sha256": "8c574ee6cf64de488c59fe3a6d16017da13df9ab254733e92216fe709a005745"
+      "sha256": "9c1267085db771b3c04c61abef19d3c6cefabbfcf2f3e4baae25b4563b636890"
     }
   ],
   "files": {
     "00-preflight.sql": "adc995094cc2df2e51261aba015172611196dfd9b7b9ee101302a7db3e9d93b5",
-    "10-roles.sql": "5ccb46dc7edf81edba87d3922e3f80cc071a4aa9f411eea30db5f35cf42bd100",
-    "15-migration-preflight.sql": "71383bbb6cd416b2786267a4cd231d06076fc39a19a9301918e85fa282d205a2",
-    "11-ownership-grants.sql": "d177e907a12eec2262d377ebcac9ce2ed2c6ea5996becba727683331939e51da",
-    "20-context-helpers.sql": "b26ed183fef4f362a459eeddf91157cef096f257918146507c105ac28e3e761e",
-    "21-runtime-grants.sql": "2e5f7c49d71a607887752118d9f6bfe8de15b1b91d132d5178d7e92f62967d5a",
-    "30-policies.sql": "87adfdb73600fdfa3964ce10d23dcefbc7f28f448fc2a1e5e8324af8de8243c8",
-    "40-post-apply-verification.sql": "6edc3df45d842e8b2f1a0a04a43024d0c59bc246ff6557f0fa17bfaa1ff5075f",
+    "10-roles.sql": "62e1701a36e60c404b47171d82cf6c9a9e9651c6fdf20d28561be01686b01b6f",
+    "15-migration-preflight.sql": "3b84760c598caa519fbed2452750ccd25f6f2e7f7dddb67f7f1df69133b87083",
+    "11-ownership-grants.sql": "e43980e692c8565f10ba5fe1061676f501f2b9f643876551ff9742e3e72aee7d",
+    "20-context-helpers.sql": "bab69edb967ad81bfce4422184a8b417d89f93e13831a7b75df2d99c4514204c",
+    "21-runtime-grants.sql": "83224e14ebd2670ad8f72e6a737ce3cf05388ce871cf46c668b4fd441dc62ad7",
+    "30-policies.sql": "59931811d7ea72a47950e61034b0842937b4e89f4cf04e9e24b5f898f055a4ca",
+    "40-post-apply-verification.sql": "0b4033b3d5705249741562e692e54140b5dc329cf6c99226aba60783c9678a5b",
     "50-certification-fixtures.sql": "78df5820fe2178a15078a8f82c5603a21f38b526085d36720c6d39438fa57deb",
-    "90-clean-room-role-cleanup.sql": "8c59399562078907556605dc370de11b10a1b4cca9ee4051616e4dd0341e119f",
+    "90-clean-room-role-cleanup.sql": "33857d89dd706e5115650afab6423ba1041f9c03a914fb340077d1869073ecf7",
     "admin-bootstrap.sql": "5b4c0bcaa258038280d31bf4a85379d504809a04ec9205634ed4fc91494e46fb",
     "migration.sql": "ea5e0babccc4b268943d4e9ea7b28d0f6b7f1f9136edc7acb1b866082baf9e4a",
     "admin-ownership.sql": "a10897614902c090d720464868cdc616d36c4c367cc032de0bdf8007cfcae6be",
     "runtime-policy.sql": "1e67b2ff32e6ef897fd1e5be408da1c6cdb0a481a84a7698c823cd37a244a531",
     "verification.sql": "aa4791230fb7e1b8f9bd8d26358e462fbc7c59d8dd91993a6bcd848310b7f0f5",
     "clean-room-cleanup.sql": "6e34330ad5addc0cb5918614f98933dd74daa517f5297a460a59c6de16a7c721",
-    "full-rls-implementation-manifest.json": "a15db1c458787deb3bbb4b8efb1cc55626e6d81a9eb1b1a54d2853d26bb738fe",
-    "package-execution-report.json": "00e4323878969d4804235f3deb367c64539ee53da6cb024ba56edcba607f8bc3",
+    "full-rls-implementation-manifest.json": "fd7121e7868b77204392a245059fa599405c39adb8670db4acf7ff744f260f36",
+    "package-execution-report.json": "d48cc0bb60fd27e5dddcfa234663f875369e289b811eba44bd073c22b3e04fc8",
     "contract-only-implementation-inventory.json": "400836edcd83ca50a429be1b87f4af62748ab895aa15be01623fb5b9cfbe80db",
     "workflow-call-path-evidence.json": "cf06d0fa934be373b6dd887de16e789e78662abef37b5872e42ddb88846ac500",
-    "expected-catalog-snapshot.json": "c6e1a8979e69f2e66016c1f3b65f1420fedce23df4be145a3faff21f24a84e9d",
-    "column-privilege-report.json": "266273da95a6ebaacc2e3a8380673b8ca7c8b12f35ab8c6b216c0b5fa4d04b49",
-    "privilege-diff-report.json": "bf5409bba9930e0306bc5b97e414e5060dbc62b3c5e3df771d711ef6658e4404",
+    "expected-catalog-snapshot.json": "39647ec4ad13d26fca6c927f5f18a294dea93184491161f54e64414ca3261159",
+    "column-privilege-report.json": "17c7d80cf8e491fea12741d8f6a8e6479fe953dad5e3b5f23b998a00a296816c",
+    "privilege-diff-report.json": "e88d770390f42fc9f85bcf40be875d50089eac919748ef49554ff121b25d12fa",
     "ownership-diff-report.json": "f3acb2540f75224f731fa6e725a94dd10e315c6c7865b9b33fb19c54f5fbe7d2",
     "force-rls-report.json": "cdc802adf85b2e17cee2724a4ae0422ea1c8ac839a2dfa397fb98a6115f8fd19",
-    "policy-inventory-report.json": "a67ea5bc49cf6dcc2ac35797a54fc6338fa6859e1ed8d80805654de3adb5b14f",
-    "role-lifecycle-report.json": "8beecfb93b76c3195048fe3185d88e93157d24004fcbc6f2ed6ea9d818594705"
+    "policy-inventory-report.json": "ad2d5c5eb04fa265542eb1b0cfaa087b62e004d4660e11c25e1cd4e5ffee1d85",
+    "role-lifecycle-report.json": "84216d9aed42e298474f07f59fa502daf34200e134e7c82851711f452081fef1"
   }
 }

@@ -8,6 +8,7 @@ import {
 import type { AuthenticatedSessionClaims } from "../../../types";
 import { revalidateAuthenticatedActor } from "./actorRevalidationRepository";
 import { getB01AuthenticatedPrisma } from "./runtimeClients";
+import { requireAuthenticatedSessionCapability } from "../../../services/auth/authenticatedSessionCapabilityService";
 
 export class CanonicalAuthDenial extends Error {
   constructor() {
@@ -62,6 +63,44 @@ export const withCanonicalAuthClaims = <T>(
       purpose,
     };
     await installCanonicalDbContext(tx, context);
+    return callback(tx, context);
+  });
+};
+
+export const withDatabaseAuthenticatedSession = <T>(
+  claims: AuthenticatedSessionClaims,
+  input: { capability: string; requestId: string; purpose: string },
+  callback: (tx: Prisma.TransactionClient, context: CanonicalDbContext) => Promise<T>
+) => {
+  const expectedUserId = required(claims.userId, "an actor user ID");
+  const capability = required(input.capability, "a database session capability");
+  if (!/^[A-Za-z0-9_-]{43}$/.test(capability)) throw new CanonicalAuthDenial();
+  const requestId = required(input.requestId, "a request ID");
+  const purpose = required(input.purpose, "a purpose");
+  return getB01AuthenticatedPrisma().$transaction(async (tx) => {
+    const verified = await requireAuthenticatedSessionCapability(tx, { capability, purpose, requestId });
+    if (verified.userId !== expectedUserId || verified.sessionId !== required(claims.sessionId, "an authenticated session ID")) {
+      throw new CanonicalAuthDenial();
+    }
+    const actor = await revalidateAuthenticatedActor(tx, {
+      userId: expectedUserId,
+      sessionId: verified.sessionId,
+      requestedLicenseeId: claims.licenseeId || null,
+      requestedOrganizationId: claims.orgId || null,
+      checkedAt: new Date(),
+      requestId,
+    });
+    if (!actor || actor.userId !== expectedUserId) throw new CanonicalAuthDenial();
+    const context: CanonicalDbContext = {
+      userId: actor.userId,
+      role: actor.role,
+      organizationId: actor.organizationId,
+      licenseeId: actor.licenseeId,
+      manufacturerId: actor.manufacturerId,
+      authAssurance: assurance(actor.authAssurance),
+      requestId,
+      purpose,
+    };
     return callback(tx, context);
   });
 };

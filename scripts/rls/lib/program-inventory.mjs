@@ -2524,7 +2524,6 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
       "table-policy-alert": { SELECT: ["acknowledgedAt", "batchId", "id", "incidentId", "licenseeId", "manufacturerId", "policyRuleId", "qrCodeId"] },
       "table-policy-rule": { SELECT: ["id", "isActive", "licenseeId", "manufacturerId", "orgId"] },
       "table-qr-scan-log": { SELECT: ["batchId", "id", "latitude", "licenseeId", "longitude", "qrCodeId", "scannedAt"] },
-      "table-qrcode": { SELECT: ["batchId", "id", "licenseeId", "scanCount"] },
       "table-security-policy": { SELECT: ["geoDriftThresholdKm", "licenseeId", "multiScanThreshold", "velocitySpikeThresholdPerMin"] },
       "table-user": { SELECT: ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"] },
     },

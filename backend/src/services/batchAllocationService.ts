@@ -12,6 +12,9 @@ const LINEAGE_BACKFILL_COOLDOWN_MS = 5 * 60_000;
 const lineageBackfillState = new Map<string, number>();
 
 export type BatchOperationalRepositoryBoundary = {
+  databaseSessionCapability: string;
+  requestId: string;
+  purpose: "batch-operational-read";
   auditId: string;
   requestedLicenseeId: string | null;
   routeSurface: "GET /api/qr/batches" | "GET /api/qr/batches/:id/allocation-map";
@@ -307,6 +310,7 @@ const buildCountMaps = async (
     }>>`
       SELECT batch_id, dormant, active, activated, allocated, printed, redeemed, blocked, scanned
       FROM app_rls.batch_inventory_rollups(
+        ${boundary.databaseSessionCapability}, ${boundary.purpose}, ${boundary.requestId},
         ${boundary.auditId},
         ${boundary.requestedLicenseeId},
         ${boundary.routeSurface},
@@ -323,6 +327,7 @@ const buildCountMaps = async (
     }>>`
       SELECT batch_id, start_code, end_code
       FROM app_rls.batch_unassigned_ranges(
+        ${boundary.databaseSessionCapability}, ${boundary.purpose}, ${boundary.requestId},
         ${boundary.auditId},
         ${boundary.requestedLicenseeId},
         ${boundary.routeSurface},
@@ -370,6 +375,7 @@ const buildCountMaps = async (
       countGroups.push(...await db.$queryRaw<typeof countGroups>`
         SELECT batch_id, status, item_count AS count
         FROM app_rls.batch_status_fallback(
+          ${boundary.databaseSessionCapability}, ${boundary.purpose}, ${boundary.requestId},
           ${boundary.auditId},
           ${boundary.requestedLicenseeId},
           ${boundary.routeSurface},
@@ -487,6 +493,7 @@ export const listBatchOperationalSummaries = async (params: {
     const [scope] = await params.db.$queryRaw<Array<{ scope_fingerprint: string }>>`
       SELECT scope_fingerprint
       FROM app_rls.batch_operational_scope(
+        ${params.boundary.databaseSessionCapability}, ${params.boundary.purpose}, ${params.boundary.requestId},
         ${params.boundary.auditId},
         ${params.boundary.requestedLicenseeId},
         ${params.boundary.routeSurface},
@@ -497,6 +504,7 @@ export const listBatchOperationalSummaries = async (params: {
     const rows = await params.db.$queryRaw<Array<{ row_data: Prisma.JsonValue }>>`
       SELECT row_data
       FROM app_rls.batch_operational_rows(
+        ${params.boundary.databaseSessionCapability}, ${params.boundary.purpose}, ${params.boundary.requestId},
         ${params.boundary.auditId},
         ${params.boundary.requestedLicenseeId},
         ${params.boundary.routeSurface},
@@ -512,6 +520,7 @@ export const listBatchOperationalSummaries = async (params: {
     const [row] = await params.db.$queryRaw<Array<{ total: bigint | number | string }>>`
       SELECT total
       FROM app_rls.batch_operational_total(
+        ${params.boundary.databaseSessionCapability}, ${params.boundary.purpose}, ${params.boundary.requestId},
         ${params.boundary.auditId},
         ${params.boundary.requestedLicenseeId},
         ${params.boundary.routeSurface},
@@ -543,6 +552,7 @@ export const getBatchAllocationMap = async (
   const [scope] = await opts.db.$queryRaw<Array<{ scope_fingerprint: string }>>`
     SELECT scope_fingerprint
     FROM app_rls.batch_operational_scope(
+      ${opts.boundary.databaseSessionCapability}, ${opts.boundary.purpose}, ${opts.boundary.requestId},
       ${opts.boundary.auditId},
       ${opts.boundary.requestedLicenseeId},
       ${opts.boundary.routeSurface},
@@ -553,6 +563,7 @@ export const getBatchAllocationMap = async (
   const rows = await opts.db.$queryRaw<Array<{ row_data: Prisma.JsonValue }>>`
     SELECT row_data
     FROM app_rls.batch_operational_rows(
+      ${opts.boundary.databaseSessionCapability}, ${opts.boundary.purpose}, ${opts.boundary.requestId},
       ${opts.boundary.auditId},
       ${opts.boundary.requestedLicenseeId},
       ${opts.boundary.routeSurface},

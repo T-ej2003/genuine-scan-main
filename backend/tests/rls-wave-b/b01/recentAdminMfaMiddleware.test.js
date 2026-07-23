@@ -38,6 +38,7 @@ const run = async () => {
   mockModule("rls-waves/session-b/b01/canonicalAuthContext.js", {
     ...canonical,
     withCanonicalAuthClaims: (...args) => canonicalBehavior(...args),
+    withDatabaseAuthenticatedSession: (...args) => canonicalBehavior(...args),
   });
   mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
     ...security,
@@ -74,6 +75,7 @@ const run = async () => {
       sessionStage: "ACTIVE",
     },
     requestId: "request-1",
+    databaseSessionCapability: "A".repeat(43),
     get: () => null,
   });
   const response = () => ({

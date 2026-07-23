@@ -1,7 +1,7 @@
 import { createHash, createHmac, createPrivateKey, sign as cryptoSign } from "crypto";
 import JSZip from "jszip";
-import prisma from "../config/database";
 import { getQrSigningHmacSecret } from "../utils/secretConfig";
+import { readAuditExport } from "../rls-waves/session-c/c01/qrSystemRepository";
 
 const toBase64Url = (buf: Buffer) =>
   buf
@@ -47,55 +47,37 @@ const escapeCsv = (v: any) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-export const buildImmutableBatchAuditPackage = async (batchId: string) => {
-  const batch = await prisma.batch.findUnique({
-    where: { id: batchId },
-    include: {
-      licensee: { select: { id: true, name: true, prefix: true } },
-      manufacturer: { select: { id: true, name: true, email: true } },
-    },
+export const buildImmutableBatchAuditPackage = async (
+  batchId: string,
+  boundary: { capability:string; requestId:string }
+) => {
+  const projection = await readAuditExport<{batch:any;qrCodes:any[];traceEvents:any[];policyAlerts:any[]}>({
+    capability:boundary.capability,requestId:boundary.requestId,batchId,
   });
-
-  if (!batch) {
-    throw new Error("Batch not found");
-  }
-
-  const [qrCodes, traceEvents, policyAlerts] = await Promise.all([
-    prisma.qRCode.findMany({
-      where: { batchId },
-      orderBy: [{ code: "asc" }],
-      select: {
-        id: true,
-        code: true,
-        status: true,
-        scanCount: true,
-        printedAt: true,
-        redeemedAt: true,
-        blockedAt: true,
-        tokenHash: true,
-        tokenIssuedAt: true,
-        tokenExpiresAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    }),
-    prisma.traceEvent.findMany({
-      where: { batchId },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      include: {
-        user: { select: { id: true, name: true, email: true } },
-        manufacturer: { select: { id: true, name: true, email: true } },
-        qrCode: { select: { id: true, code: true } },
-      },
-    }),
-    prisma.policyAlert.findMany({
-      where: { batchId },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      include: {
-        acknowledgedByUser: { select: { id: true, name: true, email: true } },
-      },
-    }),
-  ]);
+  const batch = {
+    ...projection.batch,
+    printedAt:projection.batch.printedAt?new Date(projection.batch.printedAt):null,
+    createdAt:new Date(projection.batch.createdAt),
+    updatedAt:new Date(projection.batch.updatedAt),
+  };
+  const qrCodes = projection.qrCodes.map((qr) => ({
+    ...qr,
+    printedAt:qr.printedAt?new Date(qr.printedAt):null,
+    redeemedAt:qr.redeemedAt?new Date(qr.redeemedAt):null,
+    blockedAt:qr.blockedAt?new Date(qr.blockedAt):null,
+    tokenIssuedAt:qr.tokenIssuedAt?new Date(qr.tokenIssuedAt):null,
+    tokenExpiresAt:qr.tokenExpiresAt?new Date(qr.tokenExpiresAt):null,
+    createdAt:new Date(qr.createdAt),updatedAt:new Date(qr.updatedAt),
+  }));
+  const traceEvents = projection.traceEvents.map((event) => ({
+    ...event,
+    createdAt:new Date(event.createdAt),
+  }));
+  const policyAlerts = projection.policyAlerts.map((alert) => ({
+    ...alert,
+    createdAt:new Date(alert.createdAt),
+    acknowledgedAt:alert.acknowledgedAt?new Date(alert.acknowledgedAt):null,
+  }));
 
   const generatedAt = new Date().toISOString();
 
@@ -283,6 +265,7 @@ export const buildImmutableBatchAuditPackage = async (batchId: string) => {
     buffer,
     metadata: {
       batchId: batch.id,
+      licenseeId: batch.licenseeId,
       generatedAt,
       qrCount: qrCodes.length,
       eventCount: chainRecords.length,

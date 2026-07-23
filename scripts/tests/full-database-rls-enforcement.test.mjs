@@ -19,6 +19,20 @@ const packageInputs = () => ({
 });
 const clone = (value) => structuredClone(value);
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+const requireAuthOwnerOrganizationSelect = (policies) => {
+  const policy = policies.rows.find(
+    (entry) => entry.policyName === "full_rls_internal_authowner_organization_select"
+  );
+  assert.ok(policy, "auth-owner Organization SELECT policy is required");
+  assert.equal(policy.table, "Organization");
+  assert.equal(policy.command, "SELECT");
+  assert.equal(policy.roleKey, "authOwner");
+  assert.equal(policy.internalHelperOnly, true);
+  assert.match(policy.scopePredicate, /current_user='mscqr_rls_cert_auth_owner'/);
+  assert.match(policy.scopePredicate, /app_rls\.current_purpose\(\)='dashboard-snapshot-read'/);
+  assert.match(policy.scopePredicate, /l\."orgId"="Organization"\."id"/);
+  return policy;
+};
 
 test("full RLS generator covers all tables with fail-closed dispositions", () => {
   const generated = readJson("generated/full-rls-implementation-manifest.json");
@@ -39,18 +53,39 @@ test("generated direct policies preserve exact actor, assurance, purpose and col
   assert.ok(inputs.policies.rows.filter((policy) => !policy.internalHelperOnly && policy.actors.includes("platform-admin")).every((policy) => policy.assurance === "mfa-verified"));
   const platformOrganization = inputs.policies.rows.find((policy) => policy.table === "Organization" && !policy.internalHelperOnly && policy.actors.includes("platform-admin"));
   const platformPolicyRule = inputs.policies.rows.find((policy) => policy.table === "PolicyRule" && policy.actors.includes("platform-admin"));
-  const internalOrganization = inputs.policies.rows.find((policy) => policy.policyName === "full_rls_internal_organization_select");
   assert.match(platformOrganization.scopePredicate, /scope_licensee\."orgId"="Organization"\."id"/);
   assert.match(platformPolicyRule.scopePredicate, /scope_licensee\."orgId"="PolicyRule"\."orgId"/);
-  assert.match(internalOrganization.scopePredicate, /scope_licensee\."orgId"="Organization"\."id"/);
+  requireAuthOwnerOrganizationSelect(inputs.policies);
+  assert.equal(
+    inputs.policies.rows.some((policy) => policy.policyName === "full_rls_internal_organization_select"),
+    false,
+    "deprecated unqualified owner policy must not be required"
+  );
   const internalPolicies = inputs.policies.rows.filter((policy) => policy.internalHelperOnly);
   assert.equal(new Set(internalPolicies.map((policy) => policy.policyName)).size, internalPolicies.length,
     "owner policy names must remain unique");
+  assert.ok(internalPolicies.filter((policy) => policy.policyName.startsWith("full_rls_internal_")).every((policy) =>
+    policy.policyName.startsWith(`full_rls_internal_${String(policy.roleKey || "owner").toLowerCase()}_`)
+  ), "internal policy names must remain qualified by their exact owner key");
   assert.equal(new Set(internalPolicies.map((policy) => `${policy.table}:${policy.command}:${policy.scopePredicate}`)).size, internalPolicies.length,
     "owner policies must retain distinct operation-specific scopes");
   const auditInserts = inputs.policies.rows.filter((policy) => policy.table === "AuditLog" && policy.command === "INSERT" && !policy.internalHelperOnly);
   assert.ok(auditInserts.every((policy) => policy.scopePredicate.includes('"userId" = app_rls.current_user_id()') || policy.scopePredicate.includes('"userId"=app_rls.current_user_id()')));
   assert.ok(auditInserts.filter((policy) => policy.actors.includes("platform-admin")).every((policy) => policy.scopePredicate.includes('scope_licensee."orgId"="AuditLog"."orgId"')));
+});
+
+test("owner-qualified Organization verification rejects missing or wrongly owned policies", () => {
+  const missing = clone(packageInputs()).policies;
+  missing.rows = missing.rows.filter(
+    (entry) => entry.policyName !== "full_rls_internal_authowner_organization_select"
+  );
+  assert.throws(() => requireAuthOwnerOrganizationSelect(missing), /policy is required/);
+
+  const wrongOwner = clone(packageInputs()).policies;
+  wrongOwner.rows.find(
+    (entry) => entry.policyName === "full_rls_internal_authowner_organization_select"
+  ).roleKey = "owner";
+  assert.throws(() => requireAuthOwnerOrganizationSelect(wrongOwner), /authOwner/);
 });
 
 test("risk analytics User privilege is the exact display and parent-predicate union", () => {

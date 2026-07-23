@@ -15,8 +15,13 @@ assurance, expiry, revocation state and last-use time. It never stores the raw
 capability, tenant membership or role claims. Those are derived from current
 authoritative rows during verification.
 
-The capability is delivered only in the encrypted, HTTP-only `aq_db_session`
-cookie. Existing access-token and refresh-token JSON/cookie contracts remain
+The capability is delivered to browser sessions in the encrypted, HTTP-only
+`aq_db_session` cookie. Non-browser bearer clients may copy that same
+AES-GCM-protected cookie value from the authentication response and present it
+as `X-Database-Session-Capability`; the raw capability is never transported in
+that header. On bearer requests the protected header deterministically takes
+precedence over an ambient cookie, while cookie-only requests ignore it.
+Existing access-token and refresh-token JSON/cookie contracts remain
 unchanged. The raw value is opened only by the trusted Node authentication
 middleware and is passed to exact reviewed PostgreSQL boundaries; it is not
 logged, returned in API JSON or put in a general `app.*` setting.

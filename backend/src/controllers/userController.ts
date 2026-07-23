@@ -5,9 +5,9 @@ import { z } from "zod";
 import { Prisma, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { createAuditLogInTransaction } from "../services/auditService";
 import { hashPassword } from "../services/auth/passwordService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
+import { hashIp, normalizeUserAgent } from "../utils/security";
 import {
   MANUFACTURER_ROLES,
   isManufacturerRole,
@@ -15,17 +15,14 @@ import {
   normalizeLinkedLicensees,
 } from "../services/manufacturerScopeService";
 import { buildScopedUserWhere, resolveRequestedLicenseeScope } from "../services/accessControlService";
-import { withCanonicalDbContext } from "../lib/canonicalDbContext";
 import {
   AdministrationAccessError,
-  administrationPurposes,
-  buildAdministrationBoundary,
-  createUserInTransaction,
-  deleteUserInTransaction,
-  installAdministrationResultScope,
-  restoreManufacturerInTransaction,
-  updateUserInTransaction,
+  createUser as createUserBoundary,
+  deleteUser as deleteUserBoundary,
+  restoreManufacturer as restoreManufacturerBoundary,
+  updateUser as updateUserBoundary,
 } from "../rls-waves/session-c/c01/administrationRepository";
+import { isTenantDirectoryDenied, readUserDirectory } from "../rls-waves/session-a/tenantDirectoryRepository";
 
 const normalizedEmailSchema = z
   .string()
@@ -41,10 +38,7 @@ const createUserSchema = z.object({
   name: z.string().min(2),
   role: z.enum([
     "LICENSEE_ADMIN",
-    "ORG_ADMIN",
-    "MANUFACTURER",
     "MANUFACTURER_ADMIN",
-    "MANUFACTURER_USER",
   ]),
   licenseeId: z.string().uuid().optional(),
   location: z.string().trim().max(200).optional(),
@@ -78,19 +72,6 @@ const parsePagination = (query: Record<string, unknown>, defaults?: { limit?: nu
 };
 
 /* ===================== HELPERS ===================== */
-
-const canonicalizeRole = (role: UserRole): UserRole => {
-  if (role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN) return UserRole.SUPER_ADMIN;
-  if (role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN) return UserRole.LICENSEE_ADMIN;
-  if (
-    role === UserRole.MANUFACTURER ||
-    role === UserRole.MANUFACTURER_ADMIN ||
-    role === UserRole.MANUFACTURER_USER
-  ) {
-    return UserRole.MANUFACTURER;
-  }
-  return role;
-};
 
 const ensureAuth = (req: AuthRequest) => {
   const role = req.user?.role;
@@ -199,13 +180,13 @@ export const createUser = async (req: AuthRequest, res: Response) => {
     const email = parsed.data.email;
     const name = parsed.data.name.trim();
     const password = parsed.data.password.trim();
-    const role = canonicalizeRole(parsed.data.role as UserRole);
+    const role = parsed.data.role as UserRole;
 
     const requestedLicenseeId = parsed.data.licenseeId || null;
     const effectiveLicenseeId = isPlatform(auth.role)
       ? requestedLicenseeId
       : String(req.user?.licenseeId || "").trim() || null;
-    if (!isPlatform(auth.role) && !isManufacturerRole(role)) {
+    if (!isPlatform(auth.role) && role !== UserRole.MANUFACTURER_ADMIN) {
       return res.status(403).json({ success: false, error: "Only super users can create licensee users" });
     }
 
@@ -213,45 +194,17 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
     const passwordHash = await hashPassword(password);
-    const boundary = buildAdministrationBoundary(req.user!, {
-      purpose: administrationPurposes.createUser,
-      requestId: administrationRequestId(req),
-      targetLicenseeId: requestedLicenseeId || effectiveLicenseeId,
-    });
-    const created = await withCanonicalDbContext(
-      prisma,
-      boundary.context,
-      async (tx, installedContext) => {
-        const result = await createUserInTransaction<any>(tx, {
-          email,
-          passwordHash,
-          name,
-          role,
-          licenseeId: effectiveLicenseeId,
-          location: parsed.data.location?.trim() || null,
-          website: parsed.data.website?.trim() || null,
-        });
-        const scopedContext = await installAdministrationResultScope(tx, installedContext, {
-          licenseeId: result.licenseeId,
-          organizationId: result.organizationId,
-        });
-        await createAuditLogInTransaction(tx, scopedContext, {
-          action: "CREATE_USER",
-          entityType: "User",
-          entityId: result.user.id,
-          details: {
-            workflowId: "workflow-http-backend-src-controllers-user-controller-ts-create-user",
-            requestId: scopedContext.requestId,
-            purposeCode: scopedContext.purpose,
-            role,
-          },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        return result.user;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    const createdResult = await createUserBoundary<any>(
+      String(req.databaseSessionCapability || ""),
+      administrationRequestId(req),
+      {
+        email, passwordHash, name, role, licenseeId: effectiveLicenseeId,
+        location: parsed.data.location?.trim() || null,
+        website: parsed.data.website?.trim() || null,
+        audit: { ipHash: hashIp(req.ip), userAgent: normalizeUserAgent(req.get("user-agent")) },
+      }
     );
+    const created = createdResult.user;
 
     return res.status(201).json({ success: true, data: serializeScopedUser(created, effectiveLicenseeId) });
   } catch (e: any) {
@@ -278,59 +231,33 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
 
     const queryLicenseeId = (req.query.licenseeId as string | undefined) || undefined;
     const includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
-    const rawRoleFilter = String(req.query.role || "").trim() as UserRole;
-    const roleFilter = Object.values(UserRole).includes(rawRoleFilter) ? rawRoleFilter : undefined;
+    const rawRoleFilter = String(req.query.role || "").trim();
+    const roleFilter = rawRoleFilter === "MANUFACTURER"
+      ? UserRole.MANUFACTURER_ADMIN
+      : Object.values(UserRole).includes(rawRoleFilter as UserRole)
+        ? rawRoleFilter as UserRole
+        : undefined;
     const { limit, offset } = parsePagination(req.query as Record<string, unknown>);
 
-    const baseWhere: Prisma.UserWhereInput = {};
-    if (roleFilter && isManufacturerRole(roleFilter)) {
-      baseWhere.role = { in: MANUFACTURER_ROLES };
-    } else if (roleFilter) {
-      baseWhere.role = roleFilter;
-    }
-    const where = await buildScopedUserWhere(req.user!, {
-      base: baseWhere,
+    const { users, total } = await readUserDirectory({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: administrationRequestId(req),
       requestedLicenseeId: queryLicenseeId,
       includeInactive,
+      roleFilter,
+      limit,
+      offset,
     });
-    const resolvedScope = await resolveRequestedLicenseeScope(req.user!, queryLicenseeId);
-    const effectiveLicenseeId = resolvedScope.scopeLicenseeId || queryLicenseeId || undefined;
-
-    const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          licenseeId: true,
-          isActive: true,
-          deletedAt: true,
-          createdAt: true,
-          location: true,
-          website: true,
-          licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
-          manufacturerLicenseeLinks: {
-            include: {
-              licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
-            },
-            orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.user.count({ where }),
-    ]);
 
     return res.json({
       success: true,
-      data: users.map((row) => serializeScopedUser(row, effectiveLicenseeId || null)),
+      data: users,
       meta: { total, limit, offset },
     });
   } catch (e) {
+    if (isTenantDirectoryDenied(e)) {
+      return res.status(404).json({ success: false, error: "Users not found" });
+    }
     if (isScopeError(e)) {
       return res.status(404).json({ success: false, error: "Users not found" });
     }
@@ -430,48 +357,18 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       delete data.password;
     }
 
-    // keep deletedAt consistent with isActive
-    if (typeof data.isActive === "boolean") {
-      data.deletedAt = data.isActive ? null : new Date();
-    }
-
     // normalize email
     if (data.email) data.email = String(data.email).trim().toLowerCase();
 
     const targetLicenseeId = String(
       (isPlatform(auth.role) ? data.licenseeId : req.user?.licenseeId) || ""
     ).trim() || null;
-    const boundary = buildAdministrationBoundary(req.user!, {
-      purpose: administrationPurposes.updateUser,
-      requestId: administrationRequestId(req),
-      targetLicenseeId,
+    const result = await updateUserBoundary<any>(String(req.databaseSessionCapability || ""), administrationRequestId(req), {
+      id: targetId, patch: data,
+      requestedLicenseeId: targetLicenseeId,
+      audit: { changed: Object.keys(parsed.data), ipHash: hashIp(req.ip), userAgent: normalizeUserAgent(req.get("user-agent")) },
     });
-    const updated = await withCanonicalDbContext(
-      prisma,
-      boundary.context,
-      async (tx, installedContext) => {
-        const result = await updateUserInTransaction<any>(tx, { id: targetId, patch: data });
-        const scopedContext = await installAdministrationResultScope(tx, installedContext, {
-          licenseeId: result.licenseeId,
-          organizationId: result.organizationId,
-        });
-        await createAuditLogInTransaction(tx, scopedContext, {
-          action: "UPDATE_USER",
-          entityType: "User",
-          entityId: targetId,
-          details: {
-            workflowId: "workflow-http-backend-src-controllers-user-controller-ts-update-user",
-            requestId: scopedContext.requestId,
-            purposeCode: scopedContext.purpose,
-            changed: Object.keys(parsed.data),
-          },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        return serializeScopedUser(result.user, result.scopedLicenseeId || result.licenseeId);
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+    const updated = serializeScopedUser(result.user, result.scopedLicenseeId || result.licenseeId);
 
     return res.json({ success: true, data: updated });
   } catch (e: any) {
@@ -510,41 +407,11 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Only super admin can hard delete" });
     }
     const targetLicenseeId = String(req.user?.licenseeId || "").trim() || null;
-    const boundary = buildAdministrationBoundary(req.user!, {
-      purpose: administrationPurposes.deleteUser,
-      requestId: administrationRequestId(req),
-      targetLicenseeId,
+    const result = await deleteUserBoundary<any>(String(req.databaseSessionCapability || ""), administrationRequestId(req), {
+      id: targetId, hard, licenseeId: targetLicenseeId,
+      audit: { ipHash: hashIp(req.ip), userAgent: normalizeUserAgent(req.get("user-agent")) },
     });
-    const deleted = await withCanonicalDbContext(
-      prisma,
-      boundary.context,
-      async (tx, installedContext) => {
-        const result = await deleteUserInTransaction<any>(tx, {
-          id: targetId,
-          hard,
-          licenseeId: targetLicenseeId,
-        });
-        const scopedContext = await installAdministrationResultScope(tx, installedContext, {
-          licenseeId: result.licenseeId,
-          organizationId: result.organizationId,
-        });
-        await createAuditLogInTransaction(tx, scopedContext, {
-          action: result.auditAction,
-          entityType: "User",
-          entityId: targetId,
-          details: {
-            workflowId: "workflow-http-backend-src-controllers-user-controller-ts-delete-user",
-            requestId: scopedContext.requestId,
-            purposeCode: scopedContext.purpose,
-            ...(result.auditDetails || {}),
-          },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        return result.response;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+    const deleted = result.response;
 
     return res.json({ success: true, data: deleted });
   } catch (e) {
@@ -576,40 +443,11 @@ export const restoreManufacturer = async (req: AuthRequest, res: Response) => {
     }
     const targetId = paramsParsed.data.id;
     const targetLicenseeId = String(req.user?.licenseeId || "").trim() || null;
-    const boundary = buildAdministrationBoundary(req.user!, {
-      purpose: administrationPurposes.restoreManufacturer,
-      requestId: administrationRequestId(req),
-      targetLicenseeId,
+    const result = await restoreManufacturerBoundary<any>(String(req.databaseSessionCapability || ""), administrationRequestId(req), {
+      id: targetId, licenseeId: targetLicenseeId,
+      audit: { ipHash: hashIp(req.ip), userAgent: normalizeUserAgent(req.get("user-agent")) },
     });
-    const restored = await withCanonicalDbContext(
-      prisma,
-      boundary.context,
-      async (tx, installedContext) => {
-        const result = await restoreManufacturerInTransaction<any>(tx, {
-          id: targetId,
-          licenseeId: targetLicenseeId,
-        });
-        const scopedContext = await installAdministrationResultScope(tx, installedContext, {
-          licenseeId: result.licenseeId,
-          organizationId: result.organizationId,
-        });
-        await createAuditLogInTransaction(tx, scopedContext, {
-          action: result.auditAction,
-          entityType: "User",
-          entityId: targetId,
-          details: {
-            workflowId: "workflow-http-backend-src-controllers-user-controller-ts-restore-manufacturer",
-            requestId: scopedContext.requestId,
-            purposeCode: scopedContext.purpose,
-            ...(result.auditDetails || {}),
-          },
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-        });
-        return result.response;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+    const restored = result.response;
 
     return res.json({ success: true, data: restored });
   } catch (e) {

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, UserRole } from "@prisma/client";
 
 import prisma from "../config/database";
-import { CanonicalDbContext, withCanonicalDbContext } from "../lib/canonicalDbContext";
+import { CanonicalDbContext, CanonicalTransactionClient } from "../lib/canonicalDbContext";
 import {
   BatchOperationalRepositoryBoundary,
   listBatchOperationalSummaries,
@@ -72,6 +72,7 @@ export const buildBatchOperationalReadBoundary = (
     requestId: unknown;
     routeSurface: BatchOperationalRouteSurface;
     batchId?: unknown;
+    databaseSessionCapability: unknown;
   },
   now = Date.now()
 ): {
@@ -83,11 +84,12 @@ export const buildBatchOperationalReadBoundary = (
   const user = params.user;
   const userId = requiredUuid(user?.userId);
   const requestId = String(params.requestId || "").trim();
+  const databaseSessionCapability = String(params.databaseSessionCapability || "").trim();
   const requestedLicenseeId = optionalUuid(params.requestedLicenseeId);
   const batchId = params.routeSurface === "GET /api/qr/batches/:id/allocation-map"
     ? requiredUuid(params.batchId)
     : null;
-  if (user.sessionStage !== "ACTIVE" || !REQUEST_ID.test(requestId)) {
+  if (user.sessionStage !== "ACTIVE" || !REQUEST_ID.test(requestId) || !/^[A-Za-z0-9_-]{43}$/.test(databaseSessionCapability)) {
     throw new BatchOperationalReadAccessError();
   }
 
@@ -130,6 +132,9 @@ export const buildBatchOperationalReadBoundary = (
     batchId,
     where,
     repository: {
+      databaseSessionCapability,
+      requestId,
+      purpose: BATCH_OPERATIONAL_READ_PURPOSE,
       auditId,
       requestedLicenseeId,
       routeSurface: params.routeSurface,
@@ -154,6 +159,7 @@ type LoadBatchListPayloadParams = {
   requestId: unknown;
   limit: number;
   offset: number;
+  databaseSessionCapability: unknown;
 };
 
 export const listScopedBatchReadPayload = async (params: LoadBatchListPayloadParams) => {
@@ -164,14 +170,12 @@ export const listScopedBatchReadPayload = async (params: LoadBatchListPayloadPar
       ...params,
       routeSurface: "GET /api/qr/batches",
     });
-    const payload = await withCanonicalDbContext(
-      prisma,
-      boundary.context,
+    const payload = await prisma.$transaction(
       (tx) => listBatchOperationalSummaries({
         boundary: boundary.repository,
         limit: params.limit,
         offset: params.offset,
-        db: tx,
+        db: tx as CanonicalTransactionClient,
       }),
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
     );

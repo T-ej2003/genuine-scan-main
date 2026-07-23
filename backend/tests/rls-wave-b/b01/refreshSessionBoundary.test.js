@@ -71,7 +71,7 @@ for (const functionName of [
 assert.doesNotMatch(sessions, /revokeRefreshTokenByRaw|getRefreshTokenFromRequest|\bprisma\./);
 assert.match(sessions, /withCanonicalAuthClaims/);
 assert.match(sessions, /claims\.sessionId/);
-assert.match(controller, /withCanonicalAuthClaims[\s\S]*logoutSession/);
+assert.match(controller, /withDatabaseAuthenticatedSession[\s\S]*logoutSession/);
 assert.match(controller, /authenticatedSessionProjection/);
 assert.match(sessions, /authenticatedSessionProjection/);
 assert.match(sessionProjection, /findRefreshTokenById/);
@@ -79,7 +79,7 @@ assert.doesNotMatch(sessionProjection, /findRefreshTokenByRaw|\bprisma\.|config\
 assert.match(refresh, /REFRESH_TOKEN_DATABASE_BOUNDARY_REQUIRED/);
 assert.doesNotMatch(admin, /revokeRefreshTokenByRaw/);
 assert.match(auth, /loadRefreshSessionState/);
-assert.match(auth, /getB01AuthenticatedPrisma\(\)/);
+assert.match(auth, /getB01PreAuthPrisma\(\)/);
 assert.doesNotMatch(auth, /from "\.\.\/\.\.\/config\/database"/);
 assert.doesNotMatch(
   auth.slice(auth.indexOf("export const refreshSession"), auth.indexOf("export const logoutSession")),

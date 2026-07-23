@@ -6,7 +6,7 @@ import {
   requireRecentAdminMfa,
   requireRecentAdminMfaForSetup,
 } from "../../middleware/auth";
-import { requireAnyAdmin } from "../../middleware/rbac";
+import { requireAdministrationMutator } from "../../middleware/rbac";
 import { requireCsrf } from "../../middleware/csrf";
 import {
   composeRequestResolvers,
@@ -298,7 +298,7 @@ export const createAuthRoutes = () => {
   router.post("/auth/mfa/webauthn/challenge/finish", mfaPreAuthRouteLimiter, authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, completeAdminWebAuthnChallengeController);
   router.delete("/auth/mfa/webauthn/credentials/:id", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, deleteAdminWebAuthnCredentialController);
 
-  router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAnyAdmin, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);
+  router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAdministrationMutator, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);
 
   return router;
 };

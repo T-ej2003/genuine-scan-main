@@ -1,0 +1,13 @@
+DROP FUNCTION IF EXISTS app_rls.prepare_invitation(text,text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text);
+DROP FUNCTION IF EXISTS app_rls.session_c_create_licensee(text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.session_c_update_licensee(text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.session_c_delete_licensee(text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.session_c_create_user(text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.session_c_update_user(text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.session_c_delete_user(text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.session_c_restore_manufacturer(text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.session_c_admin_command(text,text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.session_c_write_audit(text,text,text,text,text,text,jsonb,text,text);
+DROP FUNCTION IF EXISTS app_rls.session_c_user_projection(text);
+DROP FUNCTION IF EXISTS app_rls.session_c_set_target(text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.session_c_bind_admin(text,text,text,boolean);

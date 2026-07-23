@@ -26,6 +26,12 @@ export const cleanRoomSourcePaths = [...new Set([
   "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
   "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
   "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
+  "backend/src/rls-waves/session-a/operationalReadBoundaries.sql",
+  "backend/src/rls-waves/session-a/operationalReadBoundariesRollback.sql",
+  "backend/src/rls-waves/session-c/c01/administration.sql",
+  "backend/src/rls-waves/session-c/c01/administrationRollback.sql",
+  "backend/src/rls-waves/session-c/c01/qrSystem.sql",
+  "backend/src/rls-waves/session-c/c01/qrSystemRollback.sql",
   ...applicationPathCertificationFamilies.map((family) => family.testFile),
 ])];
 

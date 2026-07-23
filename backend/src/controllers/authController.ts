@@ -7,7 +7,7 @@ import { isManufacturerRole, resolveManufacturerSessionScope } from "../services
 import {
   CanonicalAuthDenial,
   isCanonicalAuthDenial,
-  withCanonicalAuthClaims,
+  withDatabaseAuthenticatedSession,
 } from "../rls-waves/session-b/b01/canonicalAuthContext";
 import { loadAuthenticatedActor } from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
 import {
@@ -94,9 +94,10 @@ export const me = async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
 
-    const { actor, manufacturerScope, currentSession, auth } = await withCanonicalAuthClaims(
+    const capability = String((req as Request & { databaseSessionCapability?: unknown }).databaseSessionCapability || "");
+    const { actor, manufacturerScope, currentSession, auth } = await withDatabaseAuthenticatedSession(
       claims,
-      { requestId: getRequestId(req), purpose: "auth-me" },
+      { capability, requestId: getRequestId(req), purpose: "auth-me" },
       async (tx, context) => {
         const scopedUser = await loadAuthenticatedActor(tx);
         if (scopedUser.id !== context.userId || scopedUser.role !== context.role) {
@@ -223,7 +224,8 @@ export const logout = async (req: Request, res: Response) => {
     }
     const sessionId = claims.sessionId;
     const requestId = getRequestId(req);
-    await withCanonicalAuthClaims(claims, { requestId, purpose: "auth-logout" }, (tx, context) =>
+    const capability = String((req as Request & { databaseSessionCapability?: unknown }).databaseSessionCapability || "");
+    await withDatabaseAuthenticatedSession(claims, { capability, requestId, purpose: "auth-logout" }, (tx, context) =>
       logoutSession({
         userId: context.userId,
         sessionId,
@@ -234,7 +236,7 @@ export const logout = async (req: Request, res: Response) => {
         licenseeId: context.licenseeId ?? null,
         manufacturerId: context.manufacturerId ?? null,
         actorRole: context.role,
-        databaseSessionCapability: String((req as Request & { databaseSessionCapability?: unknown }).databaseSessionCapability || "") || null,
+        databaseSessionCapability: capability,
       }, tx)
     );
 
@@ -308,15 +310,11 @@ export const invite = async (req: Request, res: Response) => {
       allowExistingInvitedUser: parsed.data.allowExistingInvitedUser || false,
       createdByUserId: actorUserId,
       actorSessionId: claims.sessionId,
+      databaseCapability: String((req as Request & { databaseSessionCapability?: unknown }).databaseSessionCapability || ""),
+      requestId,
+      actorRole: claims.role,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
-      databaseBoundary: {
-        run: (callback) => withCanonicalAuthClaims(
-          claims,
-          { requestId, purpose: "auth-invite-create" },
-          callback
-        ),
-      },
     });
     const emailSent = (out as any).emailSent === true || (out as any).emailDelivered === true;
     const inviteCreated = Boolean((out as any).inviteId || (out as any).inviteLink);

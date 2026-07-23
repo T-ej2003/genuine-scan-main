@@ -23,6 +23,7 @@ let verifyError = null;
 let failureError = null;
 let transactionCalls = 0;
 let contextWrites = 0;
+let riskWrites = 0;
 const updates = [];
 const auditLogs = [];
 const baseUser = () => ({
@@ -103,8 +104,22 @@ mockModule("services/auditLogOutboxService.js", {
   },
 });
 mockModule("services/auth/sessionRiskService.js", {
-  assessAuthSessionRisk: async () => ({ score: 0, riskLevel: "LOW", reasons: [], shouldBlock: false }),
-  persistAuthSessionRisk: async () => null,
+  assessAuthSessionRisk: async () => ({
+    score: 0, riskLevel: "LOW", reasons: [], shouldBlock: false,
+    actorState: {
+      userId: user.id, email: user.email, name: user.name, role: user.role,
+      legacyLicenseeId: user.licenseeId, legacyOrganizationId: user.orgId,
+      emailVerifiedAt: user.emailVerifiedAt, sessionLicenseeId: null, sessionOrganizationId: null,
+      scopeVersion: null, selectedLicenseeId: null, selectedLicenseeName: null,
+      selectedLicenseePrefix: null, selectedLicenseeBrandName: null,
+      selectedLicenseeOrganizationId: null, linkedLicensees: [], mfaRequired: true,
+      mfaEnabled: false, mfaEnrolled: false, mfaLastUsedAt: null, mfaMethods: [], mfaPreferredMethod: null,
+    },
+  }),
+  persistAuthSessionRisk: async (input) => {
+    riskWrites += 1;
+    user = { ...user, failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date(), passwordHash: input.passwordHash || user.passwordHash };
+  },
 });
 mockModule("services/manufacturerScopeService.js", {
   resolveManufacturerSessionScope: async () => ({ selectedLicensee: null, linkedLicensees: [], linkedLicenseeIds: [] }),
@@ -186,6 +201,7 @@ const run = async () => {
   user = { ...baseUser(), failedLoginAttempts: 1 };
   rehash = true;
   updates.length = 0;
+  riskWrites = 0;
   transactionCalls = 0;
   contextWrites = 0;
   const result = await login(user.email, validPassword);
@@ -194,9 +210,10 @@ const run = async () => {
   assert.equal(user.lockedUntil, null);
   assert.ok(user.lastLoginAt instanceof Date);
   assert.equal(user.passwordHash, "upgraded-hash");
-  assert.equal(updates.length, 1, "successful auth state must update once inside verified context");
-  assert.equal(transactionCalls, 3, "verified login uses transaction-local context for state, risk, and MFA bootstrap");
-  assert.equal(contextWrites, 3, "each verified transaction installs the canonical context once");
+  assert.equal(updates.length, 0, "successful auth state must not use direct Prisma mutation");
+  assert.equal(riskWrites, 1, "the exact login-risk boundary performs the successful-login mutation once");
+  assert.equal(transactionCalls, 2, "verified login uses one risk-read transaction and one atomic completion transaction");
+  assert.equal(contextWrites, 0, "login must not install caller-derived canonical context");
 
   console.log("auth RLS bootstrap unit tests passed");
 };

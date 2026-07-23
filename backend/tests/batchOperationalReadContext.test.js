@@ -69,7 +69,7 @@ const tx = {
     state.queryCalls.push({ sql, values });
     if (sql.includes("batch_operational_scope")) return [{ scope_fingerprint: fingerprint }];
     if (sql.includes("batch_operational_rows")) {
-      return (values[2] === "GET /api/qr/batches" ? [batchRow] : allocationRows)
+      return (values[5] === "GET /api/qr/batches" ? [batchRow] : allocationRows)
         .map((row_data) => ({ row_data }));
     }
     if (sql.includes("batch_operational_total")) return [{ total: 1n }];
@@ -149,6 +149,7 @@ const boundary = (user, overrides = {}) => buildBatchOperationalReadBoundary({
   user,
   requestedLicenseeId: null,
   requestId: "request.batch.1",
+  databaseSessionCapability: "B".repeat(43),
   routeSurface: "GET /api/qr/batches",
   ...overrides,
 }, now);
@@ -209,6 +210,7 @@ const boundary = (user, overrides = {}) => buildBatchOperationalReadBoundary({
     requestId: "request.list.1",
     limit: 25,
     offset: 0,
+    databaseSessionCapability: "B".repeat(43),
   });
   assert.equal(state.transactions.length, listStart + 1, "list uses exactly one transaction");
   assert.deepEqual(state.transactions.at(-1), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
@@ -222,6 +224,7 @@ const boundary = (user, overrides = {}) => buildBatchOperationalReadBoundary({
     batchId: ids.batch,
     requestedLicenseeId: null,
     requestId: "request.map.1",
+    databaseSessionCapability: "B".repeat(43),
   });
   assert.equal(state.transactions.length, allocationStart + 1, "allocation map uses exactly one transaction");
   assert.deepEqual(state.transactions.at(-1), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
@@ -232,29 +235,19 @@ const boundary = (user, overrides = {}) => buildBatchOperationalReadBoundary({
   assert.equal(Object.hasOwn(allocation.allocationMap.selectedBatch, "rootBatch"), false,
     "allocation-map response does not gain list-only root relation fields");
 
-  assert.equal(state.contextCalls.length, 2, "canonical context is installed once per route transaction");
-  assert.deepEqual(state.contextCalls[0].values, [
-    ids.tenantUser,
-    UserRole.LICENSEE_ADMIN,
-    ids.organizationA,
-    ids.licenseeA,
-    "",
-    "password-verified",
-    "request.list.1",
-    "batch-operational-read",
-  ]);
+  assert.equal(state.contextCalls.length, 0, "legacy caller-selected context is never installed");
 
-  const listQueries = state.queryCalls.filter((call) => call.values[2] === "GET /api/qr/batches");
+  const listQueries = state.queryCalls.filter((call) => call.values[5] === "GET /api/qr/batches");
   assert(listQueries.length >= 7, "list executes the complete named-function repository path");
-  const listAuditId = listQueries[0].values[0];
-  assert(listQueries.every((call) => call.values[0] === listAuditId), "all list functions share one audit id");
-  assert(listQueries.every((call) => call.values[3] == null),
+  const listAuditId = listQueries[0].values[3];
+  assert(listQueries.every((call) => call.values[3] === listAuditId), "all list functions share one audit id");
+  assert(listQueries.every((call) => call.values[6] == null),
     "list summary functions are bound to null focus");
 
-  const mapQueries = state.queryCalls.filter((call) => call.values[2] === "GET /api/qr/batches/:id/allocation-map");
+  const mapQueries = state.queryCalls.filter((call) => call.values[5] === "GET /api/qr/batches/:id/allocation-map");
   assert.equal(mapQueries.length, 10, "501 lineage rows use two bounded summary chunks");
-  assert(mapQueries.every((call) => call.values[0] === mapQueries[0].values[0]), "map functions share one audit id");
-  assert(mapQueries.every((call) => call.values[3] === ids.batch),
+  assert(mapQueries.every((call) => call.values[3] === mapQueries[0].values[3]), "map functions share one audit id");
+  assert(mapQueries.every((call) => call.values[6] === ids.batch),
     "map scope and rows are bound to the authorized focus batch");
 
   const serviceRoot = path.join(__dirname, "../src/services");
@@ -263,7 +256,8 @@ const boundary = (user, overrides = {}) => buildBatchOperationalReadBoundary({
   const repositorySource = fs.readFileSync(path.join(serviceRoot, "batchAllocationService.ts"), "utf8");
   const printReservationSource = fs.readFileSync(path.join(serviceRoot, "printReservationService.ts"), "utf8");
   for (const source of [readSource, mapSource]) {
-    assert.match(source, /withCanonicalDbContext\(\s*prisma,/);
+    assert.doesNotMatch(source, /withCanonicalDbContext|install_actor_context/);
+    assert.match(source, /databaseSessionCapability/);
     assert.match(source, /TransactionIsolationLevel\.RepeatableRead/);
     assert.doesNotMatch(source, /withStagingRlsBatchReadTransaction|isStagingRls|RLS_READ_DATABASE_URL/);
   }

@@ -167,17 +167,29 @@ const b01Contracts = validateNamedSqlFunctionContracts().filter((contract) =>
 const authenticatedSessionContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   ["b01-issue-authenticated-session", "b01-require-authenticated-session", "b01-revoke-authenticated-session", "b01-revoke-all-authenticated-sessions"].includes(contract.id)
 );
+const authenticationClosureContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "session-b-b01-authentication-closure"
+);
 const preAuthContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-b-b01-preauth"
 );
 const c03Contracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-c-c03"
 );
+const administrationContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "session-c-c01-administration"
+);
+const qrSystemContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "release-fix-4-qr-system"
+);
 const scheduledContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-b-b03-scheduled"
 );
 const outboxContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-b-b03-outbox"
+);
+const operationalReadContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "session-a-operational-read"
 );
 const b01FunctionSource = b01Contracts.length
   ? fs.readFileSync(path.join(repoRoot, b01Contracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
@@ -189,6 +201,14 @@ const authenticatedSessionFunctionSource = authenticatedSessionContracts.length
 const authenticatedSessionFunctionSignatures = authenticatedSessionContracts.map((contract) => `app_auth.${contract.name}(${contract.signature})`);
 const authenticatedSessionPreauthSignatures = authenticatedSessionContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("preauth")).map((contract) => `app_auth.${contract.name}(${contract.signature})`);
 const authenticatedSessionAppSignatures = authenticatedSessionContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_auth.${contract.name}(${contract.signature})`);
+const authenticationClosureFunctionSource = authenticationClosureContracts.length
+  ? fs.readFileSync(path.join(repoRoot, authenticationClosureContracts[0].definitionLocation), "utf8")
+  : "";
+const authenticationClosureFunctionSignatures = authenticationClosureContracts.map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const authenticationClosurePreauthSignatures = authenticationClosureContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("preauth")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const authenticationClosureAppSignatures = authenticationClosureContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const authenticationClosureOwnerPrivileges = [...new Map(authenticationClosureContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const authenticationClosureOwnerPolicies = [...new Map(authenticationClosureContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const preAuthFunctionSource = preAuthContracts.length
   ? fs.readFileSync(path.join(repoRoot, preAuthContracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
   : "";
@@ -201,6 +221,24 @@ const c03FunctionSource = c03Contracts.length
 const c03AppSignatures = c03Contracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const c03OwnerPrivileges = [...new Map(c03Contracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const c03OwnerPolicies = [...new Map(c03Contracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const administrationFunctionSource = administrationContracts.length
+  ? fs.readFileSync(path.join(repoRoot, administrationContracts[0].definitionLocation), "utf8")
+  : "";
+const administrationAppSignatures = administrationContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const administrationOwnerPrivileges = [...new Map(administrationContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const administrationOwnerPolicies = [...new Map(administrationContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const qrSystemFunctionSource = qrSystemContracts.length
+  ? fs.readFileSync(path.join(repoRoot, qrSystemContracts[0].definitionLocation), "utf8")
+      .replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker))
+  : "";
+const qrSystemAppSignatures = qrSystemContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const qrSystemWorkerSignatures = qrSystemContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const qrSystemOwnerPrivileges = [...new Map(qrSystemContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const qrSystemOwnerPolicies = [...new Map(qrSystemContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const contractEvidenceFor = (contracts, table, command) => contracts
+  .filter((contract) => contract.tableCommands.some(([candidateTable, candidateCommand]) => candidateTable === table && candidateCommand === command))
+  .map((contract) => `contract:${contract.id}:${table}:${command}`)
+  .sort();
 const scheduledFunctionSource = scheduledContracts.length
   ? fs.readFileSync(path.join(repoRoot, scheduledContracts[0].definitionLocation), "utf8")
       .replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
@@ -221,6 +259,39 @@ const outboxAppSignatures = outboxContracts.filter((contract) => contract.securi
 const outboxWorkerSignatures = outboxContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const outboxOwnerPrivileges = [...new Map(outboxContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const outboxOwnerPolicies = [...new Map(outboxContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const operationalReadFunctionSource = operationalReadContracts.length
+  ? fs.readFileSync(path.join(repoRoot, operationalReadContracts[0].definitionLocation), "utf8")
+  : "";
+const operationalReadSignatures = operationalReadContracts.map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const operationalReadInternalSignatures = [
+  "app_rls.setting(text)",
+  "app_rls.uuid_setting(text)",
+  "app_rls.current_user_id()",
+  "app_rls.current_organization_id()",
+  "app_rls.current_licensee_id()",
+  "app_rls.current_manufacturer_id()",
+  "app_rls.current_role()",
+  "app_rls.current_assurance()",
+  "app_rls.current_request_id()",
+  "app_rls.current_purpose()",
+  "app_rls.attributed_request()",
+  "app_rls.dashboard_scope_fingerprint(text)",
+  "app_rls.authorize_dashboard_snapshot(text,text,text)",
+  "app_rls.dashboard_snapshot_scope(text,text,text)",
+  "app_rls.dashboard_snapshot_data(text,text,text,text)",
+  "app_rls.batch_scope_fingerprint(text,text,text)",
+  "app_rls.batch_operational_batch_allowed(text,text)",
+  "app_rls.authorize_batch_operational_read(text,text,text,text)",
+  "app_rls.batch_operational_scope(text,text,text,text)",
+  "app_rls.batch_operational_rows(text,text,text,text,text,integer,integer)",
+  "app_rls.batch_operational_total(text,text,text,text,text)",
+  "app_rls.batch_inventory_rollups(text,text,text,text,text,text[])",
+  "app_rls.batch_unassigned_ranges(text,text,text,text,text,text[])",
+  "app_rls.batch_status_fallback(text,text,text,text,text,text[])",
+  "app_rls.batch_reservable_qr_summaries(text,text,text,text,text,text[])",
+];
+const operationalReadOwnerPrivileges = [...new Map(operationalReadContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const operationalReadOwnerPolicies = [...new Map(operationalReadContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 // This is deliberately an exact runtime execution allowlist.  The functions
 // are the only app_rls public boundaries emitted by this clean-room package;
 // context setters and authorization helpers stay internal to their owner.
@@ -238,15 +309,6 @@ const appRuntimeFunctionSignatures = [
   "app_rls.attributed_request()",
   "app_rls.manufacturer_scope_valid(text)",
   "app_rls.actor_scope_valid()",
-  "app_rls.dashboard_snapshot_scope(text,text,text)",
-  "app_rls.dashboard_snapshot_data(text,text,text,text)",
-  "app_rls.batch_operational_scope(text,text,text,text)",
-  "app_rls.batch_operational_rows(text,text,text,text,text,integer,integer)",
-  "app_rls.batch_operational_total(text,text,text,text,text)",
-  "app_rls.batch_inventory_rollups(text,text,text,text,text,text[])",
-  "app_rls.batch_unassigned_ranges(text,text,text,text,text,text[])",
-  "app_rls.batch_status_fallback(text,text,text,text,text,text[])",
-  "app_rls.batch_reservable_qr_summaries(text,text,text,text,text,text[])",
   "app_rls.platform_audit_log_details(text[])",
 ];
 const b01FunctionOwnerGrants = [
@@ -266,15 +328,27 @@ const b01FunctionOwnerGrants = [
 ];
 const b01OwnerGrantSql = b01FunctionOwnerGrants.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const preAuthOwnerGrantSql = preAuthOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
+const authenticationClosureOwnerGrantSql = authenticationClosureOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const c03OwnerGrantSql = c03OwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
+const administrationOwnerGrantSql = administrationOwnerPrivileges.map(([table, command, columns]) => command === "DELETE"
+  ? `GRANT DELETE ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
+  : `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
+const qrSystemOwnerGrantSql = qrSystemOwnerPrivileges.map(([table, command, columns]) => command === "DELETE"
+  ? `GRANT DELETE ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
+  : `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const scheduledOwnerGrantSql = scheduledOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const outboxOwnerGrantSql = outboxOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
+const operationalReadOwnerGrantSql = operationalReadOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const functionOwnerRows = [
   ...b01FunctionOwnerGrants.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: b01Contracts.map((contract) => contract.id) })),
   ...preAuthOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: preAuthContracts.map((contract) => contract.id) })),
+  ...authenticationClosureOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: authenticationClosureContracts.map((contract) => contract.id) })),
   ...c03OwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: c03Contracts.map((contract) => contract.id) })),
+  ...administrationOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: administrationContracts.map((contract) => contract.id) })),
+  ...qrSystemOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: qrSystemContracts.map((contract) => contract.id) })),
   ...scheduledOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: scheduledContracts.map((contract) => contract.id) })),
   ...outboxOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: outboxContracts.map((contract) => contract.id) })),
+  ...operationalReadOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: operationalReadContracts.map((contract) => contract.id) })),
 ];
 const b01PolicyOwner = `current_user=${lit(roleNames.authOwner)}`;
 const b01User = `current_setting('app.b01_user_id',true)`;
@@ -372,7 +446,8 @@ const grants = [...commandGroups.values()].map((group) => ({
   command: group[0].command,
   columns: [...new Set(group.flatMap((slice) => slice.columns))].sort(),
   sourceCommandRuleIds: [...new Set(group.flatMap((slice) => slice.sourceCommandRuleIds))].sort(),
-})).sort((left, right) => `${left.table}:${left.command}`.localeCompare(`${right.table}:${right.command}`));
+})).filter(({ table }) => !["QRCode", "QRRange"].includes(table))
+  .sort((left, right) => `${left.table}:${left.command}`.localeCompare(`${right.table}:${right.command}`));
 const appTypeGrantNames = [...new Set(grants.flatMap((grant) => {
   const fields = new Map(tableById.get(grant.tableId).schemaEvidence.fields.map((field) => [field.name, field]));
   return grant.columns.map((column) => fields.get(column)?.type).filter((type) => prismaEnumNames.includes(type));
@@ -654,13 +729,22 @@ ${columnGrantSql}
 ${appTypeGrantSql}
 ${b01OwnerGrantSql}
 ${preAuthOwnerGrantSql}
+${authenticationClosureOwnerGrantSql}
 ${c03OwnerGrantSql}
+${administrationOwnerGrantSql}
+${qrSystemOwnerGrantSql}
 ${scheduledOwnerGrantSql}
 ${outboxOwnerGrantSql}
+${operationalReadOwnerGrantSql}
 GRANT USAGE ON SCHEMA public TO ${q(roleNames.authOwner)};
 ${resetRole}
 ${setRole(roleNames.authOwner)}
 GRANT USAGE ON SCHEMA app_auth TO ${q(roleNames.preauth)};
+${resetRole}
+${setRole(roleNames.owner)}
+GRANT USAGE ON SCHEMA app_rls TO ${q(roleNames.preauth)};
+${resetRole}
+${setRole(roleNames.authOwner)}
 ${b01FunctionSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
 ${resetRole}
 UPDATE mscqr_rls_install.state SET phase='runtime-grants-installed' WHERE singleton;
@@ -668,7 +752,7 @@ UPDATE mscqr_rls_install.state SET phase='runtime-grants-installed' WHERE single
 
 const dashboardSnapshotFunctionsSql = `
 CREATE FUNCTION app_rls.dashboard_scope_fingerprint(requested_licensee_id text) RETURNS text
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE
   selector text := NULLIF(btrim(requested_licensee_id),'');
   actor_licensee_id text;
@@ -682,13 +766,13 @@ BEGIN
      OR app_rls.current_user_id() IS NULL
      OR app_rls.current_role() IS NULL
      OR app_rls.current_request_id() !~ '^[A-Za-z0-9._:-]{1,128}$'
-  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  THEN RAISE EXCEPTION 'dashboard access denied: missing verified request context'; END IF;
   IF selector IS NOT NULL AND selector !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  THEN RAISE EXCEPTION 'dashboard access denied: invalid licensee selector'; END IF;
   IF ((${platformRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() NOT IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))
      OR (${tenantAdminRoles} AND app_rls.current_assurance() NOT IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))
      OR NOT (${platformRoles} OR ${tenantAdminRoles} OR ${manufacturerRoles})
-  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  THEN RAISE EXCEPTION 'dashboard access denied: actor role or assurance'; END IF;
 
   SELECT u.${q("licenseeId")},u.${q("orgId")} INTO actor_licensee_id,actor_organization_id
   FROM public.${q("User")} u
@@ -696,20 +780,28 @@ BEGIN
     AND u.${q("role")}::text=app_rls.current_role()
     AND u.${q("isActive")}=TRUE AND u.${q("status")}='ACTIVE'
     AND u.${q("deletedAt")} IS NULL AND u.${q("disabledAt")} IS NULL;
-  IF NOT FOUND THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'dashboard access denied: actor row'; END IF;
 
   IF ${tenantAdminRoles} THEN
     IF app_rls.current_licensee_id() IS NULL OR app_rls.current_organization_id() IS NULL
        OR app_rls.current_manufacturer_id() IS NOT NULL
-       OR actor_licensee_id IS DISTINCT FROM app_rls.current_licensee_id()
+    THEN RAISE EXCEPTION 'dashboard access denied: tenant derived context'; END IF;
+    IF actor_licensee_id IS DISTINCT FROM app_rls.current_licensee_id()
        OR actor_organization_id IS DISTINCT FROM app_rls.current_organization_id()
-       OR (selector IS NOT NULL AND selector IS DISTINCT FROM app_rls.current_licensee_id())
-       OR NOT EXISTS (
-         SELECT 1 FROM public.${q("Licensee")} l JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+    THEN RAISE EXCEPTION 'dashboard access denied: tenant actor relationship'; END IF;
+    IF selector IS NOT NULL AND selector IS DISTINCT FROM app_rls.current_licensee_id()
+    THEN RAISE EXCEPTION 'dashboard access denied: tenant selector'; END IF;
+    IF NOT EXISTS (
+         SELECT 1 FROM public.${q("Licensee")} l
          WHERE l.${q("id")}=app_rls.current_licensee_id() AND l.${q("orgId")}=app_rls.current_organization_id()
-           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL
        )
-    THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+    THEN RAISE EXCEPTION 'dashboard access denied: tenant live licensee'; END IF;
+    IF NOT EXISTS (
+         SELECT 1 FROM public.${q("Organization")} o
+         WHERE o.${q("id")}=app_rls.current_organization_id() AND o.${q("isActive")}=TRUE
+       )
+    THEN RAISE EXCEPTION 'dashboard access denied: tenant live organization'; END IF;
     RETURN md5(concat_ws('|','tenant',app_rls.current_user_id(),app_rls.current_role(),app_rls.current_licensee_id(),app_rls.current_organization_id()));
   END IF;
 
@@ -717,7 +809,7 @@ BEGIN
     IF app_rls.current_manufacturer_id() IS DISTINCT FROM app_rls.current_user_id()
        OR app_rls.current_organization_id() IS NOT NULL
        OR app_rls.current_licensee_id() IS DISTINCT FROM selector
-    THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+    THEN RAISE EXCEPTION 'dashboard access denied: manufacturer scope'; END IF;
     SELECT count(*),count(*) FILTER (WHERE ml.${q("isPrimary")}),string_agg(ml.${q("licenseeId")}||':'||ml.${q("isPrimary")}::text||':'||extract(epoch FROM ml.${q("updatedAt")})::text,',' ORDER BY ml.${q("licenseeId")})
       INTO membership_count,primary_count,membership_fingerprint
     FROM public.${q("ManufacturerLicenseeLink")} ml
@@ -757,27 +849,27 @@ BEGIN
        SELECT 1 FROM public.${q("Licensee")} l JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
        WHERE l.${q("id")}=selector AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
      ))
-  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  THEN RAISE EXCEPTION 'dashboard access denied: platform scope'; END IF;
   RETURN md5(concat_ws('|','platform',app_rls.current_user_id(),app_rls.current_role(),coalesce(selector,'global')));
 END
 $function$;
 
 CREATE FUNCTION app_rls.authorize_dashboard_snapshot(audit_id text,requested_licensee_id text,route_surface text) RETURNS text
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE
   fingerprint text;
   audit_organization_id text := app_rls.current_organization_id();
 BEGIN
   IF audit_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
      OR route_surface NOT IN ('GET /api/dashboard/stats','GET /api/events/dashboard')
-  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  THEN RAISE EXCEPTION 'dashboard access denied: request attribution'; END IF;
   fingerprint := app_rls.dashboard_scope_fingerprint(requested_licensee_id);
   IF app_rls.current_licensee_id() IS NOT NULL AND audit_organization_id IS NULL THEN
     SELECT l.${q("orgId")} INTO audit_organization_id
     FROM public.${q("Licensee")} l JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
     WHERE l.${q("id")}=app_rls.current_licensee_id()
       AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+    IF NOT FOUND THEN RAISE EXCEPTION 'dashboard access denied: audit organization'; END IF;
   END IF;
   INSERT INTO public.${q("AuditLog")}
     (${q("id")},${q("userId")},${q("orgId")},${q("licenseeId")},${q("action")},${q("entityType")},${q("entityId")},${q("details")})
@@ -812,13 +904,13 @@ BEGIN
         'workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot',
         'workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate'
       )
-  ) THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  ) THEN RAISE EXCEPTION 'dashboard access denied: audit persistence'; END IF;
   RETURN fingerprint;
 END
 $function$;
 
 CREATE FUNCTION app_rls.dashboard_snapshot_scope(audit_id text,requested_licensee_id text,route_surface text)
-RETURNS TABLE(scope_fingerprint text) LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+RETURNS TABLE(scope_fingerprint text) LANGUAGE sql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
   SELECT app_rls.authorize_dashboard_snapshot(audit_id,requested_licensee_id,route_surface)
 $function$;
 
@@ -827,7 +919,7 @@ RETURNS TABLE(
   total_qr_codes bigint,active_licensees bigint,manufacturers bigint,total_batches bigint,
   dormant bigint,active bigint,activated bigint,allocated bigint,printed bigint,redeemed bigint,blocked bigint,scanned bigint,
   rollup_authoritative boolean
-) LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE
   fingerprint text;
   rollup_total bigint;
@@ -841,7 +933,7 @@ DECLARE
   rollup_scanned bigint;
 BEGIN
   fingerprint := app_rls.authorize_dashboard_snapshot(audit_id,requested_licensee_id,route_surface);
-  IF expected_scope_fingerprint IS DISTINCT FROM fingerprint THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  IF expected_scope_fingerprint IS DISTINCT FROM fingerprint THEN RAISE EXCEPTION 'dashboard access denied: scope fingerprint'; END IF;
 
   IF ${manufacturerRoles} THEN
     SELECT count(*) INTO active_licensees
@@ -942,7 +1034,8 @@ END
 $function$;`;
 
 const batchOperationalAssurance = `((${tenantAdminRoles} AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR ((${manufacturerRoles} OR ${platformRoles}) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass')))`;
-const batchOperationalBase = `(app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND ${batchOperationalAssurance})`;
+const operationalSessionBinding = `(current_user=${lit(roleNames.authOwner)} AND current_setting('app.auth_session_verified',true)='1' AND EXISTS (SELECT 1 FROM public.${q("RefreshToken")} operational_session WHERE operational_session.${q("id")}=current_setting('app.auth_session_id',true) AND operational_session.${q("userId")}=app_rls.current_user_id() AND operational_session.${q("sessionCapabilityHash")}=current_setting('app.auth_session_hash',true) AND operational_session.${q("sessionCapabilityHashVersion")}='sha256-v1' AND operational_session.${q("sessionCapabilityRevokedAt")} IS NULL AND operational_session.${q("sessionCapabilityExpiresAt")}>clock_timestamp() AND operational_session.${q("revokedAt")} IS NULL AND operational_session.${q("expiresAt")}>clock_timestamp()))`;
+const batchOperationalBase = `(${operationalSessionBinding} AND app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND ${batchOperationalAssurance})`;
 const batchOperationalLinkedLicensee = (licenseeExpression) => `EXISTS (
   SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} scope_ml
   JOIN public.${q("Licensee")} scope_l ON scope_l.${q("id")}=scope_ml.${q("licenseeId")}
@@ -957,7 +1050,7 @@ const batchOperationalWorkflowIdsSql = BATCH_OPERATIONAL_READ_WORKFLOW_IDS.map(l
 
 const batchOperationalAuthorizationFunctionsSql = `
 CREATE FUNCTION app_rls.batch_scope_fingerprint(requested_licensee_id text,route_surface text,focus_batch_id text) RETURNS text
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE
   selector text := NULLIF(btrim(requested_licensee_id),'');
   focus_id text := NULLIF(btrim(focus_batch_id),'');
@@ -1052,7 +1145,7 @@ END
 $function$;
 
 CREATE FUNCTION app_rls.batch_operational_batch_allowed(candidate_batch_id text,focus_batch_id text) RETURNS boolean
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE focus_id text := NULLIF(btrim(focus_batch_id),''); focus_licensee_id text; source_batch_id text;
 BEGIN
   IF candidate_batch_id IS NULL OR candidate_batch_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN RETURN FALSE; END IF;
@@ -1074,7 +1167,7 @@ END
 $function$;
 
 CREATE FUNCTION app_rls.authorize_batch_operational_read(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text) RETURNS text
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE fingerprint text; audit_organization_id text := app_rls.current_organization_id(); focus_id text := NULLIF(btrim(focus_batch_id),'');
 BEGIN
   IF audit_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
@@ -1105,13 +1198,13 @@ END
 $function$;
 
 CREATE FUNCTION app_rls.batch_operational_scope(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text)
-RETURNS TABLE(scope_fingerprint text) LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+RETURNS TABLE(scope_fingerprint text) LANGUAGE sql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
   SELECT app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id)
 $function$;`;
 
 const batchOperationalRowFunctionsSql = `
 CREATE FUNCTION app_rls.batch_operational_rows(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,page_limit integer,page_offset integer)
-RETURNS TABLE(row_data jsonb) LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+RETURNS TABLE(row_data jsonb) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE fingerprint text; focus_licensee_id text; source_batch_id text;
 BEGIN
   fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
@@ -1152,7 +1245,7 @@ END
 $function$;
 
 CREATE FUNCTION app_rls.batch_operational_total(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text)
-RETURNS TABLE(total bigint) LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+RETURNS TABLE(total bigint) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE fingerprint text; focus_licensee_id text; source_batch_id text;
 BEGIN
   fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
@@ -1177,7 +1270,7 @@ const batchOperationalArrayGuardSql = `expected_scope_fingerprint IS DISTINCT FR
 const batchOperationalSummaryFunctionsSql = `
 CREATE FUNCTION app_rls.batch_inventory_rollups(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,batch_ids text[])
 RETURNS TABLE(batch_id text,dormant integer,active integer,activated integer,allocated integer,printed integer,redeemed integer,blocked integer,scanned integer)
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE fingerprint text;
 BEGIN
   fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
@@ -1189,7 +1282,7 @@ $function$;
 
 CREATE FUNCTION app_rls.batch_unassigned_ranges(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,batch_ids text[])
 RETURNS TABLE(batch_id text,item_count bigint,start_code text,end_code text)
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE fingerprint text;
 BEGIN
   fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
@@ -1202,7 +1295,7 @@ $function$;
 
 CREATE FUNCTION app_rls.batch_status_fallback(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,batch_ids text[])
 RETURNS TABLE(batch_id text,status text,item_count bigint)
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE fingerprint text;
 BEGIN
   fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
@@ -1214,7 +1307,7 @@ $function$;
 
 CREATE FUNCTION app_rls.batch_reservable_qr_summaries(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,batch_ids text[])
 RETURNS TABLE(batch_id text,item_count bigint,start_code text,end_code text)
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE fingerprint text;
 BEGIN
   fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
@@ -1299,7 +1392,13 @@ ${batchOperationalSummaryFunctionsSql}
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_rls FROM PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_rls FROM ${q(roleNames.app)};
 ${appRuntimeFunctionSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
+${operationalReadInternalSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.authOwner)};`).join("\n")}
 ${resetRole}
+${operationalReadFunctionSource ? `${setRole(roleNames.authOwner)}
+${operationalReadFunctionSource}
+${operationalReadSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+${resetRole}` : ""}
 ${b01FunctionSource ? `${setRole(roleNames.authOwner)}
 ${b01FunctionSource}
 ${b01FunctionSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
@@ -1314,12 +1413,44 @@ GRANT USAGE ON SCHEMA app_auth TO ${q(roleNames.app)};
 ${authenticatedSessionPreauthSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
 ${authenticatedSessionAppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
 ${resetRole}` : ""}
+${authenticationClosureFunctionSource ? `${setRole(roleNames.owner)}
+GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
+${resetRole}
+${setRole(roleNames.authOwner)}
+${authenticationClosureFunctionSource}
+${authenticationClosurePreauthSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
+${authenticationClosureAppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+${resetRole}
+${setRole(roleNames.owner)}
+REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
+${resetRole}` : ""}
 ${c03FunctionSource ? `${setRole(roleNames.owner)}
 GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
 ${resetRole}
 ${setRole(roleNames.authOwner)}
 ${c03FunctionSource}
 ${c03AppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+${resetRole}
+${setRole(roleNames.owner)}
+REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
+${resetRole}` : ""}
+${administrationFunctionSource ? `${setRole(roleNames.owner)}
+GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
+${resetRole}
+${setRole(roleNames.authOwner)}
+${administrationFunctionSource}
+${administrationAppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+${resetRole}
+${setRole(roleNames.owner)}
+REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
+${resetRole}` : ""}
+${qrSystemFunctionSource ? `${setRole(roleNames.owner)}
+GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
+${resetRole}
+${setRole(roleNames.authOwner)}
+${qrSystemFunctionSource}
+${qrSystemAppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+${qrSystemWorkerSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.worker)};`).join("\n")}
 ${resetRole}
 ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
@@ -1419,7 +1550,7 @@ const batchRuleIdsFor = (table, command) => {
   if (!ids.length) throw new Error(`Batch operational policy ${table}:${command} has no exact source rule`);
   return ids;
 };
-const dashboardPolicyBase = `(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (
+const dashboardPolicyBase = `(${operationalSessionBinding} AND app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (
   ((${platformRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))
   OR (${tenantAdminRoles} AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))
 ))`;
@@ -1508,7 +1639,7 @@ const internalPolicySlices = [
       predicate: `${dashboardPolicyBase} AND ${q("userId")}=app_rls.current_user_id() AND ${q("action")}='DASHBOARD_SNAPSHOT_READ' AND ${q("entityType")}='DashboardSnapshot' AND ${q("details")}->>'requestId'=app_rls.current_request_id() AND ${q("details")}->>'purposeCode'='dashboard-snapshot-read' AND ${q("details")}->>'route' IN ('GET /api/dashboard/stats','GET /api/events/dashboard')`,
     })),
   ].map((policy) => {
-    const predicate = `(CASE WHEN ${dashboardPolicyBase} THEN (${policy.predicate}) ELSE FALSE END)`;
+    const predicate = policy.predicate;
     return {
       ...policy,
       predicate,
@@ -1522,6 +1653,7 @@ const internalPolicySlices = [
       scopePredicate: predicate,
       certificationStatus: "pending",
       internalHelperOnly: true,
+      roleKey: "authOwner",
     };
   }))
   .concat([
@@ -1597,7 +1729,7 @@ const internalPolicySlices = [
         AND ${q("details")}->>'route' IN ('GET /api/qr/batches','GET /api/qr/batches/:id/allocation-map')`,
     })),
   ].map((policy) => {
-    const predicate = `(CASE WHEN ${batchOperationalBase} THEN (${policy.predicate}) ELSE FALSE END)`;
+    const predicate = policy.predicate;
     return {
       ...policy,
       predicate,
@@ -1612,12 +1744,13 @@ const internalPolicySlices = [
       scopePredicate: predicate,
       certificationStatus: "pending",
       internalHelperOnly: true,
+      roleKey: "authOwner",
     };
   }));
 
 const internalPolicyGroups = new Map();
 for (const policy of internalPolicySlices) {
-  const key = `${policy.table}:${policy.command}`;
+  const key = `${policy.roleKey || "owner"}:${policy.table}:${policy.command}`;
   internalPolicyGroups.set(key, [...(internalPolicyGroups.get(key) || []), policy]);
 }
 const internalPolicies = [...internalPolicyGroups.values()].map((group) => {
@@ -1628,7 +1761,7 @@ const internalPolicies = [...internalPolicyGroups.values()].map((group) => {
     : `(${group.map((policy) => `(${policy.predicate})`).join(" OR ")})`;
   return {
     table: group[0].table,
-    name: shortName("full_rls_internal", group[0].table, group[0].command),
+    name: shortName(`full_rls_internal_${group[0].roleKey || "owner"}`, group[0].table, group[0].command),
     command: group[0].command,
     predicate,
     projectedColumns: [...new Set(group.flatMap((policy) => policy.projectedColumns || []))].sort(),
@@ -1642,6 +1775,7 @@ const internalPolicies = [...internalPolicyGroups.values()].map((group) => {
     scopePredicate: predicate,
     certificationStatus: "pending",
     internalHelperOnly: true,
+    roleKey: group[0].roleKey || "owner",
   };
 });
 
@@ -1653,7 +1787,7 @@ for (const slice of slices) {
 }
 for (const policy of internalPolicies) {
   const clause = policy.command === "INSERT" ? `WITH CHECK (${policy.predicate})` : `USING (${policy.predicate})`;
-  policyStatements.push(`CREATE POLICY ${q(policy.name)} ON public.${q(policy.table)} AS PERMISSIVE FOR ${policy.command} TO ${q(roleNames.owner)} ${clause};`);
+  policyStatements.push(`CREATE POLICY ${q(policy.name)} ON public.${q(policy.table)} AS PERMISSIVE FOR ${policy.command} TO ${q(roleNames[policy.roleKey] || roleNames.owner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policy.name)} ON public.${q(policy.table)} IS ${lit(JSON.stringify({ sourceCommandRuleIds: policy.sourceCommandRuleIds, actors: policy.actors, assurance: policy.assurance, purpose: policy.purpose, scope: policy.scopeType, ...(policy.workflowIds ? { workflowIds: policy.workflowIds } : {}) }))};`);
 }
 for (const [table, command, predicate] of b01TablePolicies) {
@@ -1669,6 +1803,13 @@ for (const [table, command, rawPredicate] of preAuthOwnerPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "b01-preauth-bearer", ownerIdentity: "identity-auth-function-owner", scope: "operation-specific selector rebound to locked token or account" }))};`);
 }
+for (const [table, command, rawPredicate] of authenticationClosureOwnerPolicies) {
+  const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner));
+  const policyName = shortName("b01_auth_closure", table, command);
+  const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "b01-authentication-closure", ownerIdentity: "identity-auth-function-owner", scope: "capability-derived actor or live password-login subject" }))};`);
+}
 if (authenticatedSessionContracts.length) {
   const policyName = shortName("authenticated_session", "RefreshToken", "SELECT_UPDATE");
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q("RefreshToken")} AS PERMISSIVE FOR ALL TO ${q(roleNames.authOwner)} USING ${authenticatedSessionPolicy} WITH CHECK ${authenticatedSessionPolicy};`);
@@ -1677,12 +1818,32 @@ if (authenticatedSessionContracts.length) {
   policyStatements.push(`CREATE POLICY ${q(userPolicyName)} ON public.${q("User")} AS PERMISSIVE FOR SELECT TO ${q(roleNames.authOwner)} USING ${authenticatedSessionUserPolicy};`);
   policyStatements.push(`COMMENT ON POLICY ${q(userPolicyName)} ON public.${q("User")} IS ${lit(JSON.stringify({ boundary: "authenticated-session-capability", ownerIdentity: "identity-auth-function-owner", scope: "locked capability-bound refresh row derives the sole user selector" }))};`);
 }
+for (const [table, command, rawPredicate] of operationalReadOwnerPolicies) {
+  const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app));
+  const policyName = shortName("tenant_directory", table, command);
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} USING (${predicate});`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "tenant-directory-authenticated-capability", ownerIdentity: "identity-auth-function-owner", scope: "verified session plus live platform, tenant, or manufacturer-link scope" }))};`);
+}
 for (const [table, command, rawPredicate] of c03OwnerPolicies) {
   const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner));
   const policyName = shortName("c03_capability", table, command);
   const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "c03-authenticated-capability", ownerIdentity: "identity-auth-function-owner", scope: "verified session plus operation-specific selector" }))};`);
+}
+for (const [table, command, rawPredicate] of administrationOwnerPolicies) {
+  const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app));
+  const policyName = shortName("c01_administration", table, command);
+  const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "c01-administration-capability", ownerIdentity: "identity-auth-function-owner", scope: "verified session plus operation-specific target" }))};`);
+}
+for (const [table, command, rawPredicate] of qrSystemOwnerPolicies) {
+  const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app)).replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker));
+  const policyName = shortName("qr_system", table, command);
+  const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "qr-system-authenticated-capability", ownerIdentity: "identity-auth-function-owner", scope: "verified session plus operation and row-local QR scope" }))};`);
 }
 for (const [table, command, rawPredicate] of scheduledOwnerPolicies) {
   const predicate = rawPredicate
@@ -1740,14 +1901,22 @@ const columnAclColumns = [
   { name: "grantee_name", type: "text" }, { name: "grantor_name", type: "text" },
   { name: "privilege_type", type: "text" }, { name: "is_grantable", type: "boolean" },
 ];
-const expectedTableAclSelect = expectedRowsSelect(grants.filter((grant) => grant.command === "DELETE").map((grant) => ["public", grant.table, roleNames.app, roleNames.owner, "DELETE", false]), aclColumns);
+const expectedTableAclSelect = expectedRowsSelect([
+  ...grants.filter((grant) => grant.command === "DELETE").map((grant) => ["public", grant.table, roleNames.app, roleNames.owner, "DELETE", false]),
+  ...administrationOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
+  ...qrSystemOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
+], aclColumns);
 const expectedColumnAclSelect = expectedRowsSelect([
   ...grants.flatMap((grant) => grant.command === "DELETE" ? [] : grant.columns.map((column) => ["public", grant.table, column, roleNames.app, roleNames.owner, grant.command, false])),
   ...b01FunctionOwnerGrants.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...preAuthOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+  ...authenticationClosureOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...c03OwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+  ...administrationOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+  ...qrSystemOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...scheduledOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...outboxOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+  ...operationalReadOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
 ], columnAclColumns);
 const expectedTypeAclSelect = expectedRowsSelect(appTypeGrantNames.map((type) => ["public", type, roleNames.app, roleNames.owner, "USAGE", false]), aclColumns);
 const expectedDatabaseAclSelect = expectedRowsSelect([
@@ -1795,11 +1964,20 @@ const expectedRoutineIdentities = [
   ["app_rls", "c03_validate_compliance_result", "p_result jsonb"],
   ["app_rls", "c03_queue_audit", "p_action text, p_entity_type text, p_entity_id text, p_details jsonb"],
   ["app_rls", "c03_build_compliance_report", "p_licensee_id text, p_from timestamp with time zone, p_to timestamp with time zone"],
+  ["app_rls", "session_c_bind_admin", "p_capability text, p_purpose text, p_request_id text, p_allow_tenant boolean"],
+  ["app_rls", "session_c_set_target", "p_licensee_id text, p_organization_id text, p_user_id text, p_email text, p_prefix text"],
+  ["app_rls", "session_c_user_projection", "p_target_id text"],
+  ["app_rls", "session_c_write_audit", "p_actor_id text, p_organization_id text, p_licensee_id text, p_action text, p_entity_type text, p_entity_id text, p_details jsonb, p_ip_hash text, p_user_agent text"],
+  ["app_rls", "session_c_admin_command", "p_capability text, p_purpose text, p_request_id text, p_command text, payload jsonb"],
+  ["app_rls", "qr_bind_actor", "p_capability text, p_purpose text, p_request_id text, p_target_licensee_id text"],
+  ["app_rls", "qr_write_audit", "p_actor_id text, p_org_id text, p_licensee_id text, p_action text, p_entity_type text, p_entity_id text, p_details jsonb"],
   ["app_rls", "scheduled_job_prepare", "p_capability text, p_schedule_id text, p_operation text, p_request_id text"],
   ["app_rls", "scheduled_job_queue_audit", "p_action text, p_job_id text, p_licensee_id text, p_details jsonb"],
   ["app_rls", "b03_bind_outbox_operation", "p_operation text, p_row_id text, p_payload_digest text"],
+  ["app_rls", "operational_read_bind_actor", "p_capability text, p_purpose text, p_request_id text, p_requested_licensee_id text"],
   ["app_auth", "b01_preauth_audit", "p_action text, p_entity_type text, p_entity_id text, p_at timestamp without time zone, p_details jsonb"],
-  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...c03Contracts, ...scheduledContracts, ...outboxContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
+  ["app_rls", "b01_authenticated_actor", "p_expected_user_id text, p_expected_session_id text, p_request_id text"],
+  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...authenticationClosureContracts, ...c03Contracts, ...administrationContracts, ...qrSystemContracts, ...scheduledContracts, ...outboxContracts, ...operationalReadContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
 ];
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
@@ -1855,12 +2033,43 @@ const policyInventory = [
     scopeType: "security-definer-owner-and-locked-bearer-derived-context",
     scopePredicate: rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)),
     columns: [],
-    sourceCommandRuleIds: commandSemantics.rules.filter((rule) =>
-      rule.tableId === tables.find((entry) => entry.physicalTable === table)?.id &&
-      rule.command === command && rule.authorizationBoundary !== "prohibited"
-    ).map((rule) => rule.id).sort(),
+    sourceCommandRuleIds: contractEvidenceFor(preAuthContracts, table, command),
     workflowId: null,
     route: "B01 exact pre-auth SQL boundary",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
+  ...authenticationClosureOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("b01_auth_closure", table, command),
+    command,
+    actors: ["pre-auth", "authenticated-user"],
+    assurance: "source-rule-specific",
+    purpose: ["authentication-release-boundary"],
+    scopeType: "security-definer-owner-and-capability-or-live-login-subject",
+    scopePredicate: rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)),
+    columns: [],
+    sourceCommandRuleIds: contractEvidenceFor(authenticationClosureContracts, table, command),
+    workflowId: null,
+    route: "POST /auth/login, POST /auth/logout, GET /auth/me",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
+  ...operationalReadOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("tenant_directory", table, command),
+    command,
+    actors: ["licensee-admin", "manufacturer", "platform-admin"],
+    assurance: "source-rule-specific",
+    purpose: ["tenant-directory-licensees", "tenant-directory-users"],
+    scopeType: "security-definer-owner-capability-and-live-directory-scope",
+    scopePredicate: rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app)).replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker)),
+    columns: [],
+    sourceCommandRuleIds: contractEvidenceFor(operationalReadContracts, table, command),
+    workflowId: null,
+    route: "GET /licensees, GET /licensees/:id, GET /users",
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),
@@ -1892,6 +2101,40 @@ const policyInventory = [
     )?.id].filter(Boolean),
     workflowId: null,
     route: "C03 exact SQL boundary",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
+  ...administrationOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("c01_administration", table, command),
+    command,
+    actors: ["licensee-admin", "platform-admin"],
+    assurance: "source-rule-specific",
+    purpose: ["c01-administration-mutation"],
+    scopeType: "security-definer-owner-capability-and-operation-target",
+    scopePredicate: rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app)).replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker)),
+    columns: [],
+    sourceCommandRuleIds: contractEvidenceFor(administrationContracts, table, command),
+    workflowId: null,
+    route: "C01 administration exact SQL boundary",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
+  ...qrSystemOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("qr_system", table, command),
+    command,
+    actors: ["platform-admin","licensee-admin","manufacturer"],
+    assurance: "source-rule-specific",
+    purpose: ["release-fix-4-qr-system"],
+    scopeType: "security-definer-owner-capability-and-row-local-qr-scope",
+    scopePredicate: rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app)),
+    columns: [],
+    sourceCommandRuleIds: contractEvidenceFor(qrSystemContracts, table, command),
+    workflowId: null,
+    route: "Release Fix 4 exact QR boundary",
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),
@@ -1941,6 +2184,7 @@ const expectedSchemaAclRows = [
   ...[roleNames.app, roleNames.read, roleNames.worker, roleNames.scheduled, roleNames.operator, roleNames.migration].map((grantee) => ["public", grantee, roleNames.owner, "USAGE", false]),
   ["public", roleNames.authOwner, roleNames.owner, "USAGE", false],
   ...[roleNames.app, roleNames.read, roleNames.worker, roleNames.scheduled, roleNames.operator].map((grantee) => ["app_rls", grantee, roleNames.owner, "USAGE", false]),
+  ["app_rls", roleNames.preauth, roleNames.owner, "USAGE", false],
   ["app_rls", roleNames.authOwner, roleNames.owner, "USAGE", false],
   ["app_auth", roleNames.preauth, roleNames.authOwner, "USAGE", false],
   ["app_auth", roleNames.app, roleNames.authOwner, "USAGE", false],

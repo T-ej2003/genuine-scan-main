@@ -30,7 +30,7 @@ RETURNS TABLE(
   "failedLoginAttempts" integer,"lockedUntil" timestamp without time zone,"lastLoginAt" timestamp without time zone,
   "emailVerifiedAt" timestamp without time zone
 ) LANGUAGE plpgsql VOLATILE PARALLEL UNSAFE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE candidate_count integer;
+DECLARE candidate_count integer; candidate_user_id text;
 BEGIN
   IF p_requested_email IS NULL OR length(p_requested_email) NOT BETWEEN 3 AND 320
      OR p_requested_email IS DISTINCT FROM lower(btrim(p_requested_email))
@@ -44,6 +44,8 @@ BEGIN
           set_config('app.b01_preauth_licensee_id','',true),set_config('app.b01_preauth_pending_email','',true);
   SELECT count(*)::integer INTO candidate_count FROM public."User" u WHERE lower(u.email)=p_requested_email;
   IF candidate_count<>1 THEN RETURN; END IF;
+  SELECT u.id INTO STRICT candidate_user_id FROM public."User" u WHERE lower(u.email)=p_requested_email;
+  PERFORM set_config('app.b01_preauth_user_id',candidate_user_id,true);
   RETURN QUERY SELECT u.id,u.email,u."passwordHash",u.name,u.role::text,u."licenseeId",u."orgId",u.status::text,
     u."isActive",u."disabledAt",u."deletedAt",u."failedLoginAttempts",u."lockedUntil",u."lastLoginAt",u."emailVerifiedAt"
     FROM public."User" u WHERE lower(u.email)=p_requested_email;

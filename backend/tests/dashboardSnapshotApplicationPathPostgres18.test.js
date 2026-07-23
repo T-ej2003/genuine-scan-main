@@ -1,4 +1,5 @@
 const assert = require("node:assert");
+const { createHash } = require("node:crypto");
 const { EventEmitter } = require("node:events");
 const { PrismaClient } = require("@prisma/client");
 
@@ -71,11 +72,19 @@ const platformClaims = (overrides = {}) => ({
   mfaVerifiedAt: new Date(),
   ...overrides,
 });
+const capabilities = {
+  [ids.adminA]: "A".repeat(43),
+  [ids.manufacturerA]: "B".repeat(43),
+  [ids.platformA]: "C".repeat(43),
+  [ids.orgAdminA]: "D".repeat(43),
+};
+const capabilityFor = (user) => capabilities[user.userId] || capabilities[user.role?.includes("MANUFACTURER") ? ids.manufacturerA : ids.adminA];
 const request = (user, requestId, query = {}, originalUrl = "/api/dashboard/stats") => ({
   user,
   requestId,
   query,
   originalUrl,
+  databaseSessionCapability: capabilityFor(user),
 });
 const invoke = async (controller, req) => {
   const response = { status: 200, body: null };
@@ -87,7 +96,7 @@ const invoke = async (controller, req) => {
   return response;
 };
 const expectStats = (response, expected, label) => {
-  assert.equal(response.status, 200, `${label} status`);
+  assert.equal(response.status, 200, `${label} status: ${JSON.stringify(response.body)}`);
   assert.equal(response.body?.success, true, `${label} success`);
   assert.deepEqual(response.body.data, expected, `${label} response`);
 };
@@ -146,6 +155,20 @@ const main = async () => {
         scanned: 1,
       } }),
     ]);
+    const sessionExpiry = new Date(Date.now() + 60 * 60_000);
+    await bootstrap.refreshToken.createMany({ data: [
+      [ids.adminA, ids.orgA, "PASSWORD"],
+      [ids.manufacturerA, ids.orgA, "ADMIN_MFA"],
+      [ids.platformA, null, "ADMIN_MFA"],
+      [ids.orgAdminA, ids.orgA, "PASSWORD"],
+    ].map(([userId, orgId, assurance], index) => ({
+      id: `00000000-0000-4000-9000-00000000003${index + 1}`,
+      userId, orgId, tokenHash: createHash("sha256").update(`dashboard-refresh-${userId}`).digest("hex"),
+      expiresAt: sessionExpiry, sessionCapabilityHash: createHash("sha256").update(capabilities[userId]).digest("hex"),
+      sessionCapabilityHashVersion: "sha256-v1", sessionCapabilityAssurance: assurance,
+      sessionCapabilityExpiresAt: sessionExpiry,
+    })) });
+    await bootstrap.$executeRawUnsafe(`ANALYZE public."RefreshToken", public."User", public."Organization", public."Licensee", public."ManufacturerLicenseeLink", public."Batch", public."InventoryStatusRollup", public."QRCode", public."AuditLog"`);
 
     expectStats(await invoke(getDashboardStats, request(tenantClaims({
       userId: ids.orgAdminA,
@@ -232,7 +255,11 @@ const main = async () => {
     assert.equal((await invoke(getDashboardStats, request(tenantClaims(), "dashboard-pg-foreign", { licenseeId: ids.licenseeB }))).status, 404);
     assert.equal((await invoke(getDashboardStats, request(platformClaims({ authAssurance: "PASSWORD", mfaVerifiedAt: null }), "dashboard-pg-weak-platform"))).status, 404);
     assert.equal((await invoke(getDashboardStats, request(manufacturerClaims({ authAssurance: "PASSWORD", mfaVerifiedAt: null }), "dashboard-pg-weak-manufacturer"))).status, 404);
-    assert.equal((await invoke(getDashboardStats, request(manufacturerClaims({ userId: ids.adminA, email: "admin-a@example.invalid" }), "dashboard-pg-forged-role"))).status, 404);
+    assert.equal((await invoke(getDashboardStats, request(
+      manufacturerClaims({ userId: ids.adminA, email: "admin-a@example.invalid" }),
+      "dashboard-pg-forged-role",
+      { licenseeId: ids.licenseeB }
+    ))).status, 404);
     assert.equal((await invoke(getDashboardStats, request(tenantClaims(), "", {}))).status, 404);
 
     await bootstrap.user.update({ where: { id: ids.adminA }, data: { isActive: false } });
@@ -241,15 +268,16 @@ const main = async () => {
 
     await assert.rejects(prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`SELECT set_config('app.user_id','${ids.adminA}',true),set_config('app.role','LICENSEE_ADMIN',true),set_config('app.organization_id','${ids.orgA}',true),set_config('app.licensee_id','${ids.licenseeA}',true),set_config('app.manufacturer_id','',true),set_config('app.auth_assurance','password-verified',true),set_config('app.request_id','dashboard-pg-wrong-purpose',true),set_config('app.purpose','wrong-purpose',true)`);
-      return tx.$queryRawUnsafe("SELECT * FROM app_rls.dashboard_snapshot_scope('00000000-0000-4000-8000-000000009001',NULL,'GET /api/dashboard/stats')");
-    }), /dashboard access denied/i);
+      return tx.$queryRawUnsafe(`SELECT * FROM app_rls.dashboard_snapshot_scope('${"Z".repeat(43)}','dashboard-snapshot-read','dashboard-pg-wrong-purpose','00000000-0000-4000-8000-000000009001',NULL,'GET /api/dashboard/stats')`);
+    }), /AUTH_SESSION_CAPABILITY_DENIED|operational read access denied/i);
 
     const privileges = await bootstrap.$queryRawUnsafe(`SELECT
-      has_function_privilege('mscqr_rls_cert_app','app_rls.dashboard_snapshot_scope(text,text,text)','EXECUTE') AS scope_wrapper,
-      has_function_privilege('mscqr_rls_cert_app','app_rls.dashboard_snapshot_data(text,text,text,text)','EXECUTE') AS data_wrapper,
+      has_function_privilege('mscqr_rls_cert_app','app_rls.dashboard_snapshot_scope(text,text,text,text,text,text)','EXECUTE') AS scope_wrapper,
+      has_function_privilege('mscqr_rls_cert_app','app_rls.dashboard_snapshot_data(text,text,text,text,text,text,text)','EXECUTE') AS data_wrapper,
+      has_function_privilege('mscqr_rls_cert_app','app_rls.dashboard_snapshot_scope(text,text,text)','EXECUTE') AS legacy_wrapper,
       has_function_privilege('mscqr_rls_cert_app','app_rls.dashboard_scope_fingerprint(text)','EXECUTE') AS fingerprint_helper,
       has_function_privilege('mscqr_rls_cert_app','app_rls.authorize_dashboard_snapshot(text,text,text)','EXECUTE') AS authorize_helper`);
-    assert.deepEqual(privileges[0], { scope_wrapper: true, data_wrapper: true, fingerprint_helper: false, authorize_helper: false });
+    assert.deepEqual(privileges[0], { scope_wrapper: true, data_wrapper: true, legacy_wrapper: false, fingerprint_helper: false, authorize_helper: false });
     await assert.rejects(prisma.$queryRawUnsafe("SELECT app_rls.dashboard_scope_fingerprint(NULL)"), /permission denied/i);
     await assert.rejects(prisma.$queryRawUnsafe('SELECT "email" FROM public."User"'), /permission denied/i);
 

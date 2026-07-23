@@ -332,18 +332,4 @@ export const findScopedBatch = async (
     }),
   });
 
-export const findScopedQrCode = async (
-  user: NonNullable<AuthRequest["user"]>,
-  id: string,
-  args: Prisma.QRCodeFindFirstArgs = {}
-) =>
-  prisma.qRCode.findFirst({
-    ...args,
-    where: await buildScopedWhere(user, {
-      base: { id },
-      relationManufacturerField: "batch",
-      ...(args.where ? { base: { ...(args.where as unknown as MutableWhere), id } } : {}),
-    }),
-  });
-
 export const scopedNotFound = (message = "Resource not found") => new AccessDeniedError(message, 404);
