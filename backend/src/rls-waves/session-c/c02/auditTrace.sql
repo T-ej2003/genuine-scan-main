@@ -1,4 +1,30 @@
-CREATE SCHEMA IF NOT EXISTS app_rls;
+CREATE OR REPLACE FUNCTION app_rls.c02_audit_trace_session_valid()
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF session_user <> {{APP_ROLE}}
+     OR current_setting('app.auth_session_verified', true) <> '1'
+  THEN RETURN false; END IF;
+
+  RETURN EXISTS (
+    SELECT 1 FROM public."RefreshToken" session_row
+     WHERE session_row.id = current_setting('app.auth_session_id', true)
+       AND session_row."userId" = current_setting('app.user_id', true)
+       AND session_row."sessionCapabilityHash" = current_setting('app.auth_session_hash', true)
+       AND session_row."sessionCapabilityHashVersion" = 'sha256-v1'
+       AND session_row."sessionCapabilityRevokedAt" IS NULL
+       AND session_row."sessionCapabilityExpiresAt" > clock_timestamp()
+       AND session_row."revokedAt" IS NULL
+       AND session_row."expiresAt" > clock_timestamp()
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION app_rls.c02_audit_trace_session_valid() FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION app_rls.c02_audit_trace_actor_valid(target_licensee_id text)
 RETURNS boolean
@@ -59,7 +85,7 @@ BEGIN
        AND actor_manufacturer_id IS NULL;
   END IF;
 
-  IF actor_role IN ('LICENSEE_ADMIN', 'ORG_ADMIN') THEN
+  IF actor_role = 'LICENSEE_ADMIN' THEN
     RETURN assurance IN ('password-verified', 'mfa-verified', 'step-up-verified')
        AND actor."licenseeId" = target_licensee_id
        AND actor."orgId" = target_org_id
@@ -68,7 +94,7 @@ BEGIN
        AND (purpose_code <> 'audit-log-read' OR assurance IN ('mfa-verified', 'step-up-verified'));
   END IF;
 
-  IF actor_role IN ('MANUFACTURER', 'MANUFACTURER_ADMIN', 'MANUFACTURER_USER') THEN
+  IF actor_role = 'MANUFACTURER_ADMIN' THEN
     RETURN assurance IN ('password-verified', 'mfa-verified', 'step-up-verified')
        AND actor_manufacturer_id = actor_id
        AND EXISTS (

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { APP_PATHS } from "@/app/route-metadata";
 import { OperationProgressDialog } from "@/components/feedback/OperationProgressDialog";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";

@@ -12,8 +12,8 @@ import { verifyAdminMfaCode } from "../services/auth/mfaService";
 import { withAdminMfaClaimsTransaction } from "../services/auth/authClaimsRlsContext";
 import { queueAuditLogOutbox } from "../services/auditLogOutboxService";
 import { getSessionSecurityOverview } from "../services/auth/sessionSecurityOverview";
-import { installCanonicalDbContext, type CanonicalDbContext } from "../lib/canonicalDbContext";
-import { isCanonicalAuthDenial, withCanonicalAuthClaims } from "../rls-waves/session-b/b01/canonicalAuthContext";
+import type { CanonicalDbContext } from "../lib/canonicalDbContext";
+import { isCanonicalAuthDenial, withDatabaseAuthenticatedSession } from "../rls-waves/session-b/b01/canonicalAuthContext";
 import {
   loadAuthenticatedPasswordActor,
   proveAuthenticatedPasswordStepUp,
@@ -41,6 +41,20 @@ const auditAuthority = (requestId: string, context: CanonicalDbContext) => ({
   initiatingActorRoleSnapshot: context.role,
 });
 
+const withAuthenticatedRequest = <T>(
+  req: Request & { databaseSessionCapability?: string | null },
+  purpose: string,
+  callback: Parameters<typeof withDatabaseAuthenticatedSession<T>>[2]
+) => withDatabaseAuthenticatedSession(
+  getAuthClaims(req)!,
+  {
+    capability: String(req.databaseSessionCapability || ""),
+    requestId: getRequestId(req),
+    purpose,
+  },
+  callback
+);
+
 const denyInactiveSession = (error: unknown, res: Response) => {
   if (!isCanonicalAuthDenial(error)) return false;
   clearAuthCookies(res);
@@ -55,9 +69,9 @@ export const listSessions = async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: "An active authenticated session is required." });
     }
 
-    const overview = await withCanonicalAuthClaims(
-      claims,
-      { requestId: getRequestId(req), purpose: "auth-session-list" },
+    const overview = await withAuthenticatedRequest(
+      req,
+      "auth-session-list",
       async (tx, context) => {
         const currentSession = await getCurrentRefreshSession(req, tx);
         return getSessionSecurityOverview({
@@ -89,9 +103,9 @@ export const revokeSessionController = async (req: Request, res: Response) => {
     }
 
     const requestId = getRequestId(req);
-    const result = await withCanonicalAuthClaims(
-      claims,
-      { requestId, purpose: "auth-session-revoke" },
+    const result = await withAuthenticatedRequest(
+      req,
+      "auth-session-revoke",
       async (tx, context) => {
         const revoked = await revokeRefreshTokenById({
           sessionId,
@@ -143,9 +157,9 @@ export const revokeAllSessionsController = async (req: Request, res: Response) =
     }
 
     const requestId = getRequestId(req);
-    const revokedCount = await withCanonicalAuthClaims(
-      claims,
-      { requestId, purpose: "auth-session-revoke-all" },
+    const revokedCount = await withAuthenticatedRequest(
+      req,
+      "auth-session-revoke-all",
       async (tx, context) => {
         const result = await revokeAllUserRefreshTokens({
           userId: context.userId,
@@ -205,9 +219,9 @@ export const passwordStepUpController = async (req: Request, res: Response) => {
   const now = new Date();
   const requestId = getRequestId(req);
   try {
-    const outcome = await withCanonicalAuthClaims(
-      claims,
-      { requestId, purpose: "auth-password-step-up-proof" },
+    const outcome = await withAuthenticatedRequest(
+      req,
+      "auth-password-step-up-proof",
       async (tx, context) => {
         const actor = await loadAuthenticatedPasswordActor(tx);
         if (actor.id !== context.userId || !actor.passwordHash) {
@@ -221,13 +235,8 @@ export const passwordStepUpController = async (req: Request, res: Response) => {
           expectedPasswordHash: actor.passwordHash,
           verifiedAt: now,
         }, tx);
-        const steppedUp = await installCanonicalDbContext(tx, {
-          ...context,
-          authAssurance: "step-up-verified",
-          purpose: "auth-password-step-up",
-        });
         const session = await issueSessionForUser({
-          userId: steppedUp.userId,
+          userId: context.userId,
           ipHash,
           userAgent,
           authAssurance: "PASSWORD",
@@ -236,24 +245,24 @@ export const passwordStepUpController = async (req: Request, res: Response) => {
           now,
           requestId,
           purpose: "manufacturer-bootstrap",
-          requestedLicenseeId: steppedUp.licenseeId,
+          requestedLicenseeId: context.licenseeId,
           requestedScopeVersion: claims.scopeVersion,
         }, tx);
         await revokeRefreshTokenById({
           sessionId: currentSessionId,
-          userId: steppedUp.userId,
+          userId: context.userId,
           reason: "STEP_UP_REPLACED",
           now,
         }, tx);
         await queueAuditLogOutbox({
-          userId: steppedUp.userId,
+          userId: context.userId,
           action: "AUTH_STEP_UP_PASSWORD_SUCCESS",
           entityType: "User",
-          entityId: steppedUp.userId,
+          entityId: context.userId,
           details: { method: "PASSWORD_REAUTH" },
           ipHash: ipHash || undefined,
           userAgent: userAgent || undefined,
-        } as any, undefined, tx, auditAuthority(requestId, steppedUp));
+        } as any, undefined, tx, auditAuthority(requestId, context));
         return { kind: "success" as const, session };
       }
     );
@@ -293,15 +302,13 @@ export const adminMfaStepUpController = async (req: Request, res: Response) => {
     const userAgent = normalizeUserAgent(req.get("user-agent"));
     const now = new Date();
     const requestId = getRequestId(req);
-    const session = await withAdminMfaClaimsTransaction(claims, async (tx, context) => {
+    const session = await withAdminMfaClaimsTransaction(
+      claims,
+      String((req as Request & { databaseSessionCapability?: string | null }).databaseSessionCapability || ""),
+      async (tx, context) => {
       await verifyAdminMfaCode({ userId: claims.userId, code: parsed.data.code }, tx);
-      const steppedUp = await installCanonicalDbContext(tx, {
-        ...context,
-        authAssurance: "step-up-verified",
-        purpose: "admin-mfa-step-up",
-      });
       const nextSession = await issueSessionForUser({
-        userId: steppedUp.userId,
+        userId: context.userId,
         ipHash,
         userAgent,
         authAssurance: "ADMIN_MFA",
@@ -315,21 +322,23 @@ export const adminMfaStepUpController = async (req: Request, res: Response) => {
       }, tx);
       await revokeRefreshTokenById({
         sessionId: currentSessionId,
-        userId: steppedUp.userId,
+        userId: context.userId,
         reason: "STEP_UP_REPLACED",
         now,
       }, tx);
       await queueAuditLogOutbox({
-        userId: steppedUp.userId,
+        userId: context.userId,
         action: "AUTH_MFA_STEP_UP_SUCCESS",
         entityType: "User",
-        entityId: steppedUp.userId,
+        entityId: context.userId,
         details: { method: "ADMIN_MFA" },
         ipHash,
         userAgent,
-      }, undefined, tx, auditAuthority(requestId, steppedUp));
+      }, undefined, tx, auditAuthority(requestId, context));
       return nextSession;
-    }, { requestId, purpose: "admin-mfa-step-up-proof" });
+      },
+      { requestId, purpose: "admin-mfa-step-up-proof" }
+    );
 
     setAuthCookies(res, session);
     return res.json({ success: true, data: authResponseData(session) });

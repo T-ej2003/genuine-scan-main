@@ -1,10 +1,36 @@
 import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
+import type { AuthenticatedSessionClaims } from "../../../types";
+import { withDatabaseAuthenticatedSession } from "../b01/canonicalAuthContext";
 
 export type B03FunctionClient = Pick<Prisma.TransactionClient, "$queryRaw">;
 export type B03AuthenticatedFunctionBoundary = {
   requestId: string;
   run: <T>(callback: (db: B03FunctionClient) => Promise<T>) => Promise<T>;
+};
+
+export const createB03AuthenticatedFunctionBoundary = (input: {
+  claims: AuthenticatedSessionClaims;
+  capability: string;
+  requestId: string;
+  purpose: string;
+}): B03AuthenticatedFunctionBoundary => {
+  const requestId = String(input.requestId || "").trim();
+  if (!requestId || !/^[\x21-\x7e]{1,128}$/.test(requestId)) {
+    throw new Error("B03 authenticated repository requires a printable requestId");
+  }
+  return {
+    requestId,
+    run: (callback) => withDatabaseAuthenticatedSession(
+      input.claims,
+      {
+        capability: input.capability,
+        requestId,
+        purpose: input.purpose,
+      },
+      (tx) => callback(tx)
+    ),
+  };
 };
 
 export const b03AuthenticatedFunctionsEnabled = () =>
@@ -217,6 +243,19 @@ const booleanProjection = (value: unknown, label: string) => {
 const exactlyOne = <T>(rows: T[], functionName: string) => {
   if (rows.length !== 1) throw new Error(`${functionName} must return exactly one row`);
   return rows[0];
+};
+const dateCursor = (value: unknown) => {
+  const encoded = optional(value, "cursor", 512);
+  if (!encoded) return { createdAt: null, id: null };
+  try {
+    const parsed = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    const createdAt = new Date(String(parsed?.createdAt || ""));
+    const cursorId = id(parsed?.id, "cursor id");
+    if (!Number.isFinite(createdAt.getTime())) throw new Error();
+    return { createdAt, id: cursorId };
+  } catch {
+    throw new Error("B03 repository requires a valid notification cursor");
+  }
 };
 
 const validateClaim = <T extends B03DurableClaim>(claim: T, allowedTypes: readonly string[]) => {
@@ -507,6 +546,7 @@ export const listNotificationsForUser = async (
   input: { userId: string; limit: number; offset: number; unreadOnly: boolean; cursor?: string | null; requestId: string }
 ) => {
   const limit = integer(input.limit, "limit", 1, 100);
+  const cursor = dateCursor(input.cursor);
   const row = exactlyOne(await db.$queryRaw<Array<{
   notifications: Prisma.JsonArray; total: number | null; unread: number;
 }>>(Prisma.sql`
@@ -514,7 +554,7 @@ export const listNotificationsForUser = async (
   FROM app_rls.b03_list_notifications_for_user(
     ${id(input.userId, "userId")}, ${limit},
     ${integer(input.offset, "offset", 0, 1_000_000)}, ${Boolean(input.unreadOnly)},
-    ${optional(input.cursor, "cursor", 512)}, ${authenticatedRequestId(input.requestId)}
+    ${cursor.createdAt}, ${cursor.id}, ${authenticatedRequestId(input.requestId)}
   ) AS result
   `), "app_rls.b03_list_notifications_for_user");
   if (!Array.isArray(row.notifications) || row.notifications.length > limit) {
@@ -606,6 +646,7 @@ export const completeIncidentEmailDelivery = async (
   input: Pick<B03IncidentEmailDeliveryInput, "providerMessageId" | "emailErrorCode" | "status" | "smtpConfigSource"> & {
     deliveryId: string;
     idempotencyKey: string;
+    usedFrom?: string | null;
     completedAt: Date;
   }
 ) => exactlyOne(await db.$queryRaw<Array<{
@@ -618,6 +659,7 @@ export const completeIncidentEmailDelivery = async (
       ${optional(input.emailErrorCode, "emailErrorCode", 128)},
       ${exactEnum(input.status, "status", ["QUEUED", "SENT", "FAILED"])},
       ${optional(input.smtpConfigSource, "smtpConfigSource", 128)},
+      ${optional(input.usedFrom, "usedFrom", 320)},
       ${timestamp(input.completedAt, "completedAt")}
     ) AS result
   `), "app_rls.b03_complete_incident_email_delivery");

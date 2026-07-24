@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "react-router";
 
 const SITE_NAME = "MSCQR";
 const SITE_ORIGIN = "https://www.mscqr.com";

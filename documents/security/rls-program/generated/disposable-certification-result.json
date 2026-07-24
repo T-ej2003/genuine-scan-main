@@ -3,16 +3,73 @@
   "environment": "local-disposable-only",
   "deploymentModel": "clean-room-blue-green",
   "postgresqlMajor": 18,
-  "sourceContractSha256": "99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9",
+  "sourceContractSha256": "cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0",
   "tablesExpected": 79,
   "forceRlsTargetsExpected": 77,
   "tablesCertified": 77,
-  "generatedPoliciesCertified": 285,
-  "columnPrivilegeCellsCertified": 74,
+  "generatedPoliciesCertified": 339,
+  "columnPrivilegeCellsCertified": 60,
   "workflowCertificationStatus": "pending-application-path-certification",
-  "workflowsApplicationPathCertified": 0,
-  "applicationPathCertifiedWorkflowIds": [],
-  "applicationPathResults": [],
+  "workflowsApplicationPathCertified": 10,
+  "applicationPathCertifiedWorkflowIds": [
+    "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+    "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
+    "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
+    "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
+    "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
+    "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
+    "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups",
+    "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total",
+    "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges",
+    "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries"
+  ],
+  "applicationPathResults": [
+    {
+      "familyId": "risk-analytics",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics"
+      ],
+      "registeredRoots": [
+        "GET /api/analytics/risk-scores"
+      ],
+      "status": "application-path-certified",
+      "postgresqlMajor": 18,
+      "testFile": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js"
+    },
+    {
+      "familyId": "dashboard-snapshot",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "registeredRoots": [
+        "GET /api/dashboard/stats",
+        "GET /api/events/dashboard"
+      ],
+      "status": "application-path-certified",
+      "postgresqlMajor": 18,
+      "testFile": "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js"
+    },
+    {
+      "familyId": "batch-operational-read",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges",
+        "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries"
+      ],
+      "registeredRoots": [
+        "GET /api/qr/batches",
+        "GET /api/qr/batches/:id/allocation-map"
+      ],
+      "status": "application-path-certified",
+      "postgresqlMajor": 18,
+      "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
+    }
+  ],
   "b01PreAuthCertification": {
     "status": "application-path-certified",
     "postgresqlMajor": 18,
@@ -301,7 +358,7 @@
   "columnPrivilegeCertification": true,
   "exactCatalogTamperCertification": true,
   "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "764fca53305294e827f138e9a2f1d805cdc8f4c71ea6d7fc4beea26598571dea",
+  "packageChecksumsSha256": "861226d1cf4a5cfcdaa62f52255abb550c45f5dbf36c33806ab86c4a3dcffd70",
   "status": "clean-room-full-table-enforcement-certified-workflows-pending",
   "b01Certification": {
     "predecessorReplayRejected": true,
@@ -313,10 +370,6 @@
   },
   "c03Certification": null,
   "printingLifecycleCertification": null,
-  "publicVerificationCertification": {
-    "status": "application-path-certified",
-    "postgresqlMajor": 18,
-    "testFile": "backend/tests/rls-wave-b/b02/publicVerificationPostgres18.test.js"
-  },
+  "publicVerificationCertification": null,
   "disposableCertificationFixtureRows": 76
 }

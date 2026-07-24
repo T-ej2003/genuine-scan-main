@@ -1,5 +1,3 @@
-CREATE SCHEMA IF NOT EXISTS app_rls;
-
 CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_actor_scope(
   target_licensee_id text,
   allowed_roles_json jsonb,
@@ -59,7 +57,7 @@ BEGIN
     IF actor."orgId" IS NOT NULL OR actor."licenseeId" IS NOT NULL OR installed_org_id IS NOT NULL OR installed_manufacturer_id IS NOT NULL THEN
       RETURN;
     END IF;
-  ELSIF actor.role IN ('MANUFACTURER', 'MANUFACTURER_ADMIN', 'MANUFACTURER_USER') THEN
+  ELSIF actor.role = 'MANUFACTURER_ADMIN' THEN
     IF installed_licensee_id IS DISTINCT FROM target_licensee_id
        OR installed_manufacturer_id IS DISTINCT FROM actor.id
        OR NOT EXISTS (
@@ -68,7 +66,8 @@ BEGIN
        ) THEN
       RETURN;
     END IF;
-  ELSIF actor."licenseeId" IS DISTINCT FROM target_licensee_id
+  ELSIF actor.role <> 'LICENSEE_ADMIN'
+        OR actor."licenseeId" IS DISTINCT FROM target_licensee_id
         OR actor."orgId" IS DISTINCT FROM target_org_id
         OR installed_licensee_id IS DISTINCT FROM target_licensee_id
         OR installed_org_id IS DISTINCT FROM target_org_id

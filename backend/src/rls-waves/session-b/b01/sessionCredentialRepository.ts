@@ -424,16 +424,6 @@ export const createRefreshTokenRecord = async (
   `, "app_rls.create_refresh_token", [["id", "string"], ["expiresAt", "date"]]);
 };
 
-export const findRefreshTokenByHashes = async (
-  db: SessionCredentialClient,
-  input: { tokenHashCandidates: string[] }
-) => {
-  const candidates = tokenHashes(input.tokenHashCandidates);
-  return oneOrNone(await db.$queryRaw<RefreshSessionRecord[]>`
-    SELECT * FROM app_rls.find_refresh_token_by_hashes(${candidates}::text[])
-  `, "app_rls.find_refresh_token_by_hashes", sessionProjection);
-};
-
 export const findRefreshTokenByIdentifier = async (
   db: SessionCredentialClient,
   input: { sessionId: string; userId: string }
@@ -471,17 +461,6 @@ const checkedRevokedCount = (
   return result;
 };
 
-export const revokeRefreshTokenByHashes = async (
-  db: SessionCredentialClient,
-  input: { tokenHashCandidates: string[]; reason: string; revokedAt: Date }
-) => checkedRevokedCount(await db.$queryRaw<Array<{ revokedCount: number }>>`
-  SELECT * FROM app_rls.revoke_refresh_token_by_hashes(
-    ${tokenHashes(input.tokenHashCandidates)}::text[],
-    ${reason(input.reason)},
-    ${timestamp(input.revokedAt, "a revocation timestamp")}::timestamp without time zone
-  )
-`, "app_rls.revoke_refresh_token_by_hashes");
-
 export const revokeAllRefreshTokenRecords = async (
   db: SessionCredentialClient,
   input: { userId: string; reason: string; revokedAt: Date }
@@ -492,17 +471,6 @@ export const revokeAllRefreshTokenRecords = async (
     ${timestamp(input.revokedAt, "a revocation timestamp")}::timestamp without time zone
   )
 `, "app_rls.revoke_all_refresh_tokens");
-
-export const revokePasswordOnlyRefreshTokenRecords = async (
-  db: SessionCredentialClient,
-  input: { userId: string; reason: string; revokedAt: Date }
-) => checkedRevokedCount(await db.$queryRaw<Array<{ revokedCount: number }>>`
-  SELECT * FROM app_rls.revoke_password_only_refresh_tokens(
-    ${text(input.userId, "a target user ID")},
-    ${reason(input.reason)},
-    ${timestamp(input.revokedAt, "a revocation timestamp")}::timestamp without time zone
-  )
-`, "app_rls.revoke_password_only_refresh_tokens");
 
 export const revokeRefreshTokenByIdentifier = async (
   db: SessionCredentialClient,

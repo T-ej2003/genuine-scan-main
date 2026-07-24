@@ -1087,7 +1087,6 @@ const scanResourceResolver = (req: any) => {
 const connectorDownloadResourceResolver = (req: any) =>
   [String(req.params?.version || "").trim(), String(req.params?.platform || "").trim()].filter(Boolean).join(":") || null;
 const supportTicketTrackResourceResolver = (req: any) => String(req.params?.reference || "").trim().toUpperCase() || null;
-
 const [verifyOtpRequestIpLimiter, verifyOtpRequestActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "verify.otp-request",
   windowMs: 15 * 60 * 1000,
@@ -1375,6 +1374,12 @@ publicMutationRouter.post(
   sanitizeRequestInput,
   submitPublicSupportIssue
 );
+publicReadRouter.get(
+  "/support/tickets/track/:reference",
+  supportTicketTrackIpLimiter,
+  supportTicketTrackActorLimiter,
+  trackSupportTicketPublic
+);
 cookieReadRouter.get("/verify/:code", verifyLookupRouteLimiter, verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, verifyQRCode);
 cookieMutationRouter.post("/verify/session/start", verifyLookupRouteLimiter, verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, startCustomerVerificationSession);
 cookieReadRouter.get("/verify/session/:id", verifyLookupRouteLimiter, verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, getCustomerVerificationSessionState);
@@ -1551,7 +1556,6 @@ publicMutationRouter.post(
   verifyReportActorLimiter,
   reportIncident
 );
-publicReadRouter.get("/support/tickets/track/:reference", supportTicketTrackIpLimiter, supportTicketTrackActorLimiter, trackSupportTicketPublic);
 cookieReadRouter.get("/scan", scanReadIpLimiter, scanReadActorLimiter, optionalCustomerVerifyAuth, scanToken);
 cookieMutationRouter.post(
   "/telemetry/route-transition",

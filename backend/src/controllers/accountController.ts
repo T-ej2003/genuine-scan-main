@@ -4,7 +4,7 @@ import { AuthRequest } from "../middleware/auth";
 import { hashPassword, verifyPassword } from "../services/auth/passwordService";
 import { requestEmailChangeVerification } from "../services/auth/emailVerificationService";
 import { normalizeEmailAddress } from "../utils/email";
-import { withCanonicalAuthClaims } from "../rls-waves/session-b/b01/canonicalAuthContext";
+import { withDatabaseAuthenticatedSession } from "../rls-waves/session-b/b01/canonicalAuthContext";
 import { installCanonicalDbContext } from "../lib/canonicalDbContext";
 import { getAdminStepUpWindowMinutes, getPasswordReauthWindowMinutes } from "../services/auth/authService";
 import {
@@ -32,6 +32,20 @@ const requestId = (req: AuthRequest) =>
     return value;
   })();
 
+const withAccountSession = <T>(
+  req: AuthRequest,
+  purpose: string,
+  callback: Parameters<typeof withDatabaseAuthenticatedSession<T>>[2]
+) => withDatabaseAuthenticatedSession(
+  req.user!,
+  {
+    capability: String(req.databaseSessionCapability || ""),
+    requestId: requestId(req),
+    purpose,
+  },
+  callback
+);
+
 export const updateMyProfile = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
@@ -54,10 +68,7 @@ export const updateMyProfile = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: "Invalid email address" });
     }
 
-    const result = await withCanonicalAuthClaims(req.user!, {
-      requestId: requestId(req),
-      purpose: "account-profile-update",
-    }, async (tx, context) => {
+    const result = await withAccountSession(req, "account-profile-update", async (tx, context) => {
       const now = new Date();
       await requireRecentSensitiveSession({
         sessionId: req.user!.sessionId!,
@@ -126,10 +137,7 @@ export const changeMyPassword = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const user = await withCanonicalAuthClaims(req.user!, {
-      requestId: requestId(req),
-      purpose: "account-password-credential-read",
-    }, loadAuthenticatedPasswordActor);
+    const user = await withAccountSession(req, "account-password-credential-read", loadAuthenticatedPasswordActor);
 
     if (!user.passwordHash) {
       return res.status(400).json({ success: false, error: "Account has no password set. Use password reset." });
@@ -142,10 +150,7 @@ export const changeMyPassword = async (req: AuthRequest, res: Response) => {
 
     const passwordHash = await hashPassword(parsed.data.newPassword);
 
-    await withCanonicalAuthClaims(req.user!, {
-      requestId: requestId(req),
-      purpose: "account-password-change",
-    }, async (tx, context) => {
+    await withAccountSession(req, "account-password-change", async (tx, context) => {
       const changedAt = new Date();
       await proveAuthenticatedPasswordStepUp({
         sessionId: req.user!.sessionId!,

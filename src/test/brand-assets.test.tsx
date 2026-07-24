@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 
 import { BrandLockup } from "@/components/brand/BrandLockup";
 import { MscqrLogo } from "@/components/brand/MscqrLogo";

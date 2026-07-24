@@ -10,3 +10,4 @@ DROP FUNCTION IF EXISTS app_rls.batch_operational_scope(text,text,text,text,text
 DROP FUNCTION IF EXISTS app_rls.dashboard_snapshot_data(text,text,text,text,text,text,text);
 DROP FUNCTION IF EXISTS app_rls.dashboard_snapshot_scope(text,text,text,text,text,text);
 DROP FUNCTION IF EXISTS app_rls.operational_read_bind_actor(text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.operational_read_session_valid();

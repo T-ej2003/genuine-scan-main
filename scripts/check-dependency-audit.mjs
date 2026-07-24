@@ -1,143 +1,129 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const repoRoot = process.cwd();
-const allowlistPath = path.join(repoRoot, ".security", "dependency-audit-allowlist.json");
-const now = new Date();
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const defaultAllowlistPath = path.join(repoRoot, ".security", "dependency-audit-allowlist.json");
+const severities = new Set(["high", "critical"]);
 
 const pathWithSystemBins = () => {
-  const segments = String(process.env.PATH || "")
-    .split(":")
-    .filter(Boolean);
+  const segments = String(process.env.PATH || "").split(":").filter(Boolean);
   for (const bin of ["/bin", "/usr/bin", "/opt/homebrew/bin", "/usr/local/bin"]) {
     if (!segments.includes(bin)) segments.unshift(bin);
   }
   return segments.join(":");
 };
 
-const runAudit = ({ cwd, omitDev }) => {
-  const args = ["audit", "--json"];
-  if (omitDev) args.splice(1, 0, "--omit=dev");
+const parseReport = (source, label) => {
+  try {
+    return JSON.parse(String(source || "").trim());
+  } catch (error) {
+    throw new Error(`Could not parse npm audit JSON for ${label}: ${error instanceof Error ? error.message : error}`);
+  }
+};
 
-  const result = spawnSync("npm", args, {
+const runAudit = (scope, cwd) => {
+  const fixturePath = process.env[`DEPENDENCY_AUDIT_REPORT_${scope.toUpperCase()}`];
+  if (fixturePath) return parseReport(readFileSync(fixturePath, "utf8"), scope);
+
+  const result = spawnSync("npm", ["audit", "--omit=dev", "--json"], {
     cwd,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      PATH: pathWithSystemBins(),
-    },
+    env: { ...process.env, PATH: pathWithSystemBins() },
+  });
+  const source = String(result.stdout || result.stderr || "").trim();
+  if (!source) throw new Error(`npm audit returned no JSON output for ${scope}`);
+  return parseReport(source, scope);
+};
+
+const advisoryId = (via) => {
+  const ghsa = String(via?.url || "").match(/GHSA-[a-z0-9-]+/i)?.[0];
+  return ghsa?.toUpperCase() || (via?.source ? `npm:${via.source}` : null);
+};
+
+const advisoryIdsFor = (report, packageName, seen = new Set()) => {
+  if (seen.has(packageName)) return [];
+  seen.add(packageName);
+  const vulnerability = report?.vulnerabilities?.[packageName];
+  if (!vulnerability) return [];
+  return [...new Set((vulnerability.via || []).flatMap((via) =>
+    typeof via === "string"
+      ? advisoryIdsFor(report, via, seen)
+      : advisoryId(via) ? [advisoryId(via)] : []
+  ))];
+};
+
+const productionFindings = (scope, report) =>
+  Object.entries(report?.vulnerabilities || {}).flatMap(([packageName, vulnerability]) => {
+    if (!severities.has(String(vulnerability?.severity || "").toLowerCase())) return [];
+    const advisories = advisoryIdsFor(report, packageName);
+    return (advisories.length ? advisories : ["npm:unknown"]).map((advisory) => ({
+      scope,
+      package: packageName,
+      advisory,
+      severity: String(vulnerability.severity).toLowerCase(),
+    }));
   });
 
-  const source = String(result.stdout || result.stderr || "").trim();
-  if (!source) {
-    throw new Error(`npm audit returned no JSON output for ${cwd}`);
+const loadAllowlist = (allowlistPath) => {
+  if (!existsSync(allowlistPath)) return { schemaVersion: 1, entries: [] };
+  const parsed = parseReport(readFileSync(allowlistPath, "utf8"), allowlistPath);
+  if (parsed?.schemaVersion !== 1 || !Array.isArray(parsed.entries)) {
+    throw new Error(`Invalid dependency audit exception file at ${allowlistPath}`);
   }
-
-  try {
-    return JSON.parse(source);
-  } catch (error) {
-    throw new Error(`Could not parse npm audit JSON for ${cwd}: ${(error && error.message) || error}`);
-  }
+  return parsed;
 };
 
-const loadAllowlist = () => {
-  if (!existsSync(allowlistPath)) return { entries: [] };
-  try {
-    const parsed = JSON.parse(readFileSync(allowlistPath, "utf8"));
-    if (!Array.isArray(parsed?.entries)) return { entries: [] };
-    return parsed;
-  } catch (error) {
-    throw new Error(`Invalid allowlist JSON at ${allowlistPath}: ${(error && error.message) || error}`);
-  }
+const validateException = (entry, today) => {
+  const required = ["scope", "package", "advisory", "rationale", "owner", "expiresOn"];
+  const missing = required.find((key) => !String(entry?.[key] || "").trim());
+  if (missing) return `missing ${missing}`;
+  if (!["root", "backend"].includes(entry.scope)) return "scope must be root or backend";
+  if (/[*?]/.test(entry.package) || /[*?]/.test(entry.advisory)) return "wildcards are forbidden";
+  if (!/^(?:GHSA-[A-Z0-9-]+|npm:\d+)$/i.test(entry.advisory)) return "advisory must be an exact GHSA or npm ID";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.expiresOn)) return "expiresOn must be YYYY-MM-DD";
+  if (entry.expiresOn < today) return `expired on ${entry.expiresOn}`;
+  return null;
 };
 
-const highOrCriticalPackages = (report) =>
-  Object.entries(report?.vulnerabilities || {})
-    .filter(([, value]) => {
-      const severity = String(value?.severity || "").toLowerCase();
-      return severity === "high" || severity === "critical";
-    })
-    .map(([name]) => name);
-
-const validateAllowlistEntry = (entry) => {
-  const scope = String(entry?.scope || "").trim();
-  const pkg = String(entry?.package || "").trim();
-  const owner = String(entry?.owner || "").trim();
-  const expiresOnRaw = String(entry?.expiresOn || "").trim();
-
-  if (!scope || !pkg || !owner || !expiresOnRaw) {
-    return { valid: false, reason: "missing scope/package/owner/expiresOn fields" };
-  }
-
-  if (scope !== "root" && scope !== "backend") {
-    return { valid: false, reason: "scope must be root or backend" };
-  }
-
-  const expiresOn = new Date(expiresOnRaw);
-  if (Number.isNaN(expiresOn.getTime())) {
-    return { valid: false, reason: "expiresOn must be a valid ISO date" };
-  }
-  if (expiresOn <= now) {
-    return { valid: false, reason: `allowlist entry expired on ${expiresOnRaw}` };
-  }
-
-  return { valid: true };
-};
-
-const allowlist = loadAllowlist();
+const today = new Date().toISOString().slice(0, 10);
+const allowlistPath = path.resolve(process.env.DEPENDENCY_AUDIT_ALLOWLIST || defaultAllowlistPath);
+const allowlist = loadAllowlist(allowlistPath);
 const scopes = [
   { scope: "root", cwd: repoRoot },
   { scope: "backend", cwd: path.join(repoRoot, "backend") },
 ];
-
+const findings = scopes.flatMap(({ scope, cwd }) => productionFindings(scope, runAudit(scope, cwd)));
 const failures = [];
-const notes = [];
 
-for (const { scope, cwd } of scopes) {
-  const runtimeReport = runAudit({ cwd, omitDev: true });
-  const fullReport = runAudit({ cwd, omitDev: false });
+for (const entry of allowlist.entries) {
+  const invalid = validateException(entry, today);
+  if (invalid) failures.push(`invalid exception ${entry?.scope || "?"}/${entry?.package || "?"}: ${invalid}`);
+  const matches = findings.some((finding) =>
+    finding.scope === entry.scope &&
+    finding.package === entry.package &&
+    finding.advisory.toUpperCase() === String(entry.advisory).toUpperCase()
+  );
+  if (!invalid && !matches) failures.push(`stale exception ${entry.scope}/${entry.package}/${entry.advisory}`);
+}
 
-  const runtimeRisky = new Set(highOrCriticalPackages(runtimeReport));
-  const fullRisky = new Set(highOrCriticalPackages(fullReport));
-  const devOnlyRisky = [...fullRisky].filter((pkg) => !runtimeRisky.has(pkg));
-
-  if (runtimeRisky.size > 0) {
-    failures.push(
-      `${scope}: runtime high/critical packages detected (${[...runtimeRisky].sort().join(", ")})`
-    );
-  }
-
-  for (const pkg of devOnlyRisky) {
-    const matched = allowlist.entries.filter((entry) => String(entry?.scope) === scope && String(entry?.package) === pkg);
-    if (!matched.length) {
-      failures.push(`${scope}: dev-only high/critical package ${pkg} is missing allowlist owner/expiry entry`);
-      continue;
-    }
-    for (const entry of matched) {
-      const validation = validateAllowlistEntry(entry);
-      if (!validation.valid) {
-        failures.push(`${scope}: allowlist entry for ${pkg} is invalid (${validation.reason})`);
-      }
-    }
-  }
-
-  for (const entry of allowlist.entries.filter((item) => String(item?.scope) === scope)) {
-    const pkg = String(entry?.package || "").trim();
-    if (!pkg) continue;
-    if (!devOnlyRisky.includes(pkg)) {
-      notes.push(`${scope}: allowlist entry for ${pkg} is no longer required and can be removed`);
-    }
+for (const finding of findings) {
+  const excepted = allowlist.entries.some((entry) =>
+    entry.scope === finding.scope &&
+    entry.package === finding.package &&
+    String(entry.advisory).toUpperCase() === finding.advisory.toUpperCase() &&
+    !validateException(entry, today)
+  );
+  if (!excepted) {
+    failures.push(`${finding.scope}: ${finding.severity} ${finding.package} (${finding.advisory})`);
   }
 }
 
-if (failures.length > 0) {
-  console.error("Dependency audit gate failed:");
+if (failures.length) {
+  console.error("Production dependency audit gate failed:");
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
 
-console.log("Dependency audit gate passed.");
-if (notes.length > 0) {
-  for (const note of notes) console.log(`note: ${note}`);
-}
+console.log(`Production dependency audit gate passed for frontend and backend (${findings.length} reviewed high/critical finding(s)).`);

@@ -1,5 +1,5 @@
 const assert = require("assert");
-const { randomBytes } = require("crypto");
+const { createHash, randomBytes } = require("crypto");
 const path = require("path");
 const { UserRole, UserStatus, QRStatus } = require("@prisma/client");
 
@@ -395,7 +395,25 @@ const fakePrisma = {
     return Promise.all(input);
   },
   $disconnect: async () => undefined,
-  $queryRaw: async () => [],
+  $queryRaw: async (query, ...parameters) => {
+    const values = Array.isArray(query?.values) ? query.values : parameters;
+    const referenceCode = values[0];
+    if (typeof referenceCode !== "string" || !referenceCode.startsWith("P1SUP")) return [];
+    const ticket = state.supportTickets.find((row) => row.referenceCode === referenceCode);
+    const expectedProof = ticket?.customerEmail
+      ? `sha256-v1:${createHash("sha256").update(ticket.customerEmail.toLowerCase()).digest("hex")}`
+      : null;
+    if (!ticket || values[1] !== expectedProof) return [];
+    const incident = state.incidents.find((row) => row.id === ticket.incidentId);
+    return [{
+      referenceCode: ticket.referenceCode,
+      customerFacingStatus: ticket.status,
+      priority: ticket.priority,
+      updatedAt: ticket.updatedAt,
+      handoffStage: incident?.handoff?.currentStage || null,
+      slaDueAt: incident?.handoff?.slaDueAt || ticket.slaDueAt || null,
+    }];
+  },
   $executeRaw: async () => 0,
 };
 

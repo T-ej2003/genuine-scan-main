@@ -2,6 +2,7 @@ import { NotificationAudience, UserRole } from "@prisma/client";
 import { Response } from "express";
 
 import { AuthRequest } from "../middleware/auth";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import { listNotificationsForUser, onNotificationEvent, type NotificationRealtimeEvent } from "../services/notificationService";
 import { canRoleViewNotificationType } from "../services/notificationVisibility";
@@ -65,6 +66,7 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
 
     const limit = toInt(req.query.limit, 8, 1, 40);
     const accessibleLicenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
+    const databaseBoundary = b03BoundaryForRequest(req, "notification-events");
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -80,6 +82,7 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
         orgId: req.user!.orgId,
         limit,
         offset: 0,
+        databaseBoundary,
       });
 
       writeSseRealtimeEnvelope(res, {

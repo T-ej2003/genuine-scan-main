@@ -201,6 +201,7 @@ const main = async () => {
       sessionCapabilityHashVersion: "sha256-v1", sessionCapabilityAssurance: assurance,
       sessionCapabilityExpiresAt: sessionExpiry,
     })) });
+    await bootstrap.$executeRawUnsafe("ANALYZE");
 
     const tenantPage = expectSuccess(await invoke(getBatches, {
       user: tenantClaims(), requestId: success("batch-pg-tenant-page"), query: { limit: "2", offset: "0" },

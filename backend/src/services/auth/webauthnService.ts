@@ -10,11 +10,18 @@ import {
   completeWebAuthnFactorRegistration,
 } from "./webauthnMfaProvider";
 import { lockMfaState } from "./mfaAdapter";
+import {
+  completeAdminWebAuthnAuthenticationBoundary,
+  completeAdminWebAuthnRegistrationBoundary,
+  deleteAdminWebAuthnCredentialBoundary,
+  loadAdminWebAuthnChallengeBoundary,
+  loadAdminWebAuthnCredentials,
+} from "../../rls-waves/session-b/b01/adminMfaRepository";
 
 type WebAuthnChallengePurpose = "ENROLLMENT" | "LOGIN" | "STEP_UP";
 type WebAuthnDbClient = Pick<
   Prisma.TransactionClient,
-  "$executeRaw" | "authWebAuthnChallenge" | "userMfaFactor" | "adminWebAuthnCredential"
+  "$executeRaw" | "$queryRaw"
 >;
 
 type StoredChallenge = {
@@ -150,67 +157,10 @@ const assertUserPresence = (flags: number) => {
   }
 };
 
-const loadChallengeByTicket = async (
-  ticket: string,
-  purpose?: WebAuthnChallengePurpose,
-  db: WebAuthnDbClient = prisma
-) => {
-  const ticketHashCandidates = buildTokenHashCandidates(ticket);
-  const now = new Date();
-  const row = await db.authWebAuthnChallenge.findFirst({
-    where: {
-      ticketHash: { in: ticketHashCandidates },
-      purpose: purpose || undefined,
-      consumedAt: null,
-      expiresAt: { gt: now },
-    },
-  });
-
-  if (!row) throw new Error("WEBAUTHN_CHALLENGE_NOT_FOUND");
-  return row as StoredChallenge;
-};
-
-const consumeChallenge = async (id: string, db: WebAuthnDbClient = prisma) => {
-  const consumed = await db.authWebAuthnChallenge.updateMany({
-    where: { id, consumedAt: null, expiresAt: { gt: new Date() } },
-    data: {
-      consumedAt: new Date(),
-    },
-  });
-  if (consumed.count !== 1) throw new Error("WEBAUTHN_CHALLENGE_NOT_FOUND");
-};
-
-export const listAdminWebAuthnCredentials = async (userId: string) => {
-  const [factors, rows] = await Promise.all([
-    prisma.userMfaFactor.findMany({
-      where: { userId, type: "WEBAUTHN", disabledAt: null },
-      orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
-      select: {
-        id: true,
-        label: true,
-        credentialId: true,
-        transports: true,
-        lastUsedAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    }),
-    prisma.adminWebAuthnCredential.findMany({
-      where: { userId },
-      orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
-      select: {
-        id: true,
-        label: true,
-        credentialId: true,
-        transports: true,
-        lastUsedAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    }),
-  ]);
-
-  return [...factors, ...rows].map((row) => ({
+export const listAdminWebAuthnCredentials = async (userId: string, db?: Prisma.TransactionClient) => {
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  const state = await loadAdminWebAuthnCredentials(db);
+  return [...state.factors, ...state.legacy].map((row) => ({
     id: row.id,
     label: row.label || "Passkey",
     credentialId: row.credentialId,
@@ -227,8 +177,8 @@ export const beginAdminWebAuthnRegistration = async (params: {
   displayName: string;
   ipHash?: string | null;
   userAgent?: string | null;
-}) => {
-  return beginWebAuthnFactorRegistration(params);
+}, db?: Prisma.TransactionClient) => {
+  return beginWebAuthnFactorRegistration(params, db);
 };
 
 export const completeAdminWebAuthnRegistration = async (params: {
@@ -248,12 +198,12 @@ export const completeAdminWebAuthnRegistration = async (params: {
       transports?: string[];
     };
   };
-}) => {
+}, db?: Prisma.TransactionClient) => {
   try {
     return await completeWebAuthnFactorRegistration({
       ...params,
       credential: params.credential as any,
-    });
+    }, db);
   } catch (error) {
     if (!(error instanceof Error) || !["WEBAUTHN_CHALLENGE_NOT_FOUND", "WEBAUTHN_CHALLENGE_USER_MISMATCH"].includes(error.message)) {
       throw error;
@@ -265,7 +215,15 @@ export const completeAdminWebAuthnRegistration = async (params: {
     throw new Error("WEBAUTHN_LEGACY_REGISTRATION_PAYLOAD_UNSUPPORTED");
   }
 
-  const challenge = await loadChallengeByTicket(params.ticket, "ENROLLMENT");
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  const loaded = await loadAdminWebAuthnChallengeBoundary(db, {
+    ticketHashes: buildTokenHashCandidates(params.ticket),
+    purpose: "ENROLLMENT",
+    credentialId: null,
+    checkedAt: new Date(),
+  });
+  if (!loaded?.challenge) throw new Error("WEBAUTHN_CHALLENGE_NOT_FOUND");
+  const challenge = loaded.challenge as StoredChallenge;
   if (challenge.userId !== params.userId) {
     throw new Error("WEBAUTHN_CHALLENGE_USER_MISMATCH");
   }
@@ -290,39 +248,19 @@ export const completeAdminWebAuthnRegistration = async (params: {
   const credentialId = String(params.credential.rawId || params.credential.id || "").trim();
   if (!credentialId) throw new Error("INVALID_WEBAUTHN_CREDENTIAL_ID");
 
-  await prisma.adminWebAuthnCredential.upsert({
-    where: { credentialId },
-    update: {
-      userId: params.userId,
-      label: String(params.label || "").trim() || "Security key",
-      publicKeySpki: legacyResponse.publicKey,
-      publicKeyAlgorithm: Number(legacyResponse.publicKeyAlgorithm || -7),
-      counter: authenticatorData.signCount,
-      transports: Array.isArray(params.credential.response.transports)
-        ? params.credential.response.transports.map((value) => String(value || "").trim()).filter(Boolean)
-        : [],
-      lastUsedAt: new Date(),
-    },
-    create: {
-      userId: params.userId,
-      label: String(params.label || "").trim() || "Security key",
-      credentialId,
-      publicKeySpki: legacyResponse.publicKey,
-      publicKeyAlgorithm: Number(legacyResponse.publicKeyAlgorithm || -7),
-      counter: authenticatorData.signCount,
-      transports: Array.isArray(params.credential.response.transports)
-        ? params.credential.response.transports.map((value) => String(value || "").trim()).filter(Boolean)
-        : [],
-      lastUsedAt: new Date(),
-    },
-  });
-
-  await consumeChallenge(challenge.id);
-
-  return {
-    ok: true as const,
+  return completeAdminWebAuthnRegistrationBoundary(db, {
+    challengeId: challenge.id,
     credentialId,
-  };
+    label: String(params.label || "").trim() || "Security key",
+    publicKey: legacyResponse.publicKey,
+    counter: authenticatorData.signCount,
+    transports: Array.isArray(params.credential.response.transports)
+      ? params.credential.response.transports.map((value) => String(value || "").trim()).filter(Boolean)
+      : [],
+    deviceType: null,
+    backedUp: null,
+    completedAt: new Date(),
+  });
 };
 
 export const beginAdminWebAuthnChallenge = async (params: {
@@ -330,63 +268,8 @@ export const beginAdminWebAuthnChallenge = async (params: {
   purpose: Exclude<WebAuthnChallengePurpose, "ENROLLMENT">;
   ipHash?: string | null;
   userAgent?: string | null;
-}) => {
-  try {
-    return await beginWebAuthnFactorAuthentication(params);
-  } catch (error) {
-    if (!(error instanceof Error) || error.message !== "WEBAUTHN_NOT_ENROLLED") {
-      throw error;
-    }
-  }
-
-  const credentials = await prisma.adminWebAuthnCredential.findMany({
-    where: { userId: params.userId },
-    select: {
-      credentialId: true,
-      transports: true,
-    },
-  });
-
-  if (!credentials.length) {
-    throw new Error("WEBAUTHN_NOT_ENROLLED");
-  }
-
-  const ticket = randomOpaqueToken(36);
-  const challenge = toBase64Url(randomBytes(32));
-  const rpId = deriveRpId();
-  const origin = deriveAllowedOrigins()[0] || null;
-  const expiresAt = new Date(Date.now() + challengeTtlMinutes() * 60_000);
-
-  await prisma.authWebAuthnChallenge.create({
-    data: {
-      userId: params.userId,
-      purpose: params.purpose,
-      ticketHash: hashToken(ticket),
-      challengeHash: hashToken(challenge),
-      credentialIds: credentials.map((row) => row.credentialId),
-      createdIpHash: params.ipHash || null,
-      createdUserAgentHash: params.userAgent ? hashToken(normalizeUserAgent(params.userAgent) || params.userAgent) : null,
-      origin,
-      rpId,
-      expiresAt,
-    },
-  });
-
-  return {
-    ticket,
-    options: {
-      challenge,
-      timeout: challengeTtlMinutes() * 60_000,
-      rpId,
-      userVerification: "preferred" as const,
-      allowCredentials: credentials.map((row) => ({
-        id: row.credentialId,
-        type: "public-key" as const,
-        transports: row.transports,
-      })),
-    },
-    expiresAt,
-  };
+}, db?: Prisma.TransactionClient) => {
+  return beginWebAuthnFactorAuthentication(params, db);
 };
 
 const verifyAssertionSignature = (params: {
@@ -419,9 +302,7 @@ export const completeAdminWebAuthnChallenge = async (params: {
     };
   };
 }, db?: Prisma.TransactionClient): Promise<{ ok: true; purpose: WebAuthnChallengePurpose }> => {
-  if (!db) return prisma.$transaction((tx) => completeAdminWebAuthnChallenge(params, tx));
-
-  await lockMfaState(db, params.userId);
+  if (!db) throw new Error("B01 MFA capability transaction is required");
   try {
     return await completeWebAuthnFactorAuthentication({
       ...params,
@@ -436,24 +317,26 @@ export const completeAdminWebAuthnChallenge = async (params: {
     }
   }
 
-  const challenge = await loadChallengeByTicket(params.ticket, undefined, db);
+  const credentialId = String(params.credential.rawId || params.credential.id || "").trim();
+  let loaded = await loadAdminWebAuthnChallengeBoundary(db, {
+    ticketHashes: buildTokenHashCandidates(params.ticket),
+    purpose: "LOGIN",
+    credentialId,
+    checkedAt: new Date(),
+  });
+  if (!loaded) loaded = await loadAdminWebAuthnChallengeBoundary(db, {
+    ticketHashes: buildTokenHashCandidates(params.ticket),
+    purpose: "STEP_UP",
+    credentialId,
+    checkedAt: new Date(),
+  });
+  if (!loaded?.challenge) throw new Error("WEBAUTHN_CHALLENGE_NOT_FOUND");
+  const challenge = loaded.challenge as StoredChallenge;
   if (challenge.userId !== params.userId) {
     throw new Error("WEBAUTHN_CHALLENGE_USER_MISMATCH");
   }
 
-  const credentialId = String(params.credential.rawId || params.credential.id || "").trim();
-  const storedCredential = await db.adminWebAuthnCredential.findFirst({
-    where: {
-      userId: params.userId,
-      credentialId,
-    },
-    select: {
-      id: true,
-      credentialId: true,
-      publicKeySpki: true,
-      counter: true,
-    },
-  });
+  const storedCredential = loaded.legacy;
   if (!storedCredential) throw new Error("WEBAUTHN_CREDENTIAL_NOT_FOUND");
 
   const clientData = parseClientData(params.credential.response.clientDataJSON);
@@ -488,40 +371,27 @@ export const completeAdminWebAuthnChallenge = async (params: {
     throw new Error("WEBAUTHN_COUNTER_REPLAY");
   }
 
-  await db.adminWebAuthnCredential.update({
-    where: { id: storedCredential.id },
-    data: {
-      counter: nextCounter > storedCredential.counter ? nextCounter : storedCredential.counter,
-      lastUsedAt: new Date(),
-    },
+  const completed = await completeAdminWebAuthnAuthenticationBoundary(db, {
+    challengeId: challenge.id,
+    credentialKind: "LEGACY",
+    credentialRowId: storedCredential.id,
+    expectedCounter: storedCredential.counter,
+    nextCounter: nextCounter > storedCredential.counter ? nextCounter : storedCredential.counter,
+    deviceType: null,
+    backedUp: null,
+    completedAt: new Date(),
   });
-
-  await consumeChallenge(challenge.id, db);
 
   return {
     ok: true as const,
-    purpose: challenge.purpose as WebAuthnChallengePurpose,
+    purpose: completed.purpose as WebAuthnChallengePurpose,
   };
 };
 
 export const deleteAdminWebAuthnCredential = async (params: {
   userId: string;
   credentialId: string;
-}) => {
-  const [factorDeleted, legacyDeleted] = await prisma.$transaction([
-    prisma.userMfaFactor.updateMany({
-      where: { id: params.credentialId, userId: params.userId, type: "WEBAUTHN", disabledAt: null },
-      data: { disabledAt: new Date() },
-    }),
-    prisma.adminWebAuthnCredential.deleteMany({
-      where: {
-        id: params.credentialId,
-        userId: params.userId,
-      },
-    }),
-  ]);
-
-  return {
-    deleted: factorDeleted.count > 0 || legacyDeleted.count > 0,
-  };
+}, db?: Prisma.TransactionClient) => {
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  return deleteAdminWebAuthnCredentialBoundary(db, params.credentialId, new Date());
 };

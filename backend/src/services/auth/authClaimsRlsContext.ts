@@ -2,16 +2,17 @@ import { Prisma } from "@prisma/client";
 import { AuthenticatedSessionClaims } from "../../types";
 import { issueSessionForUser } from "./authService";
 import { confirmAdminMfaSetup } from "./mfaService";
-import { withCanonicalAuthClaims } from "../../rls-waves/session-b/b01/canonicalAuthContext";
+import { withDatabaseAuthenticatedSession } from "../../rls-waves/session-b/b01/canonicalAuthContext";
 import type { CanonicalDbContext } from "../../lib/canonicalDbContext";
 
 export const withAdminMfaClaimsTransaction = <T>(
   claims: AuthenticatedSessionClaims,
+  capability: string,
   callback: (tx: Prisma.TransactionClient, context: CanonicalDbContext) => Promise<T>,
   context?: { requestId: string; purpose: string }
 ) => {
   if (!context) throw new Error("B01 MFA transaction requires request attribution");
-  return withCanonicalAuthClaims(claims, context, callback);
+  return withDatabaseAuthenticatedSession(claims, { ...context, capability }, callback);
 };
 
 export const issueAdminMfaSessionFromClaims = (
@@ -21,10 +22,11 @@ export const issueAdminMfaSessionFromClaims = (
     userAgent: string | null;
     now: Date;
     requestId: string;
+    databaseCapability: string;
     requestedLicenseeId?: string | null;
     requestedScopeVersion?: string | null;
   }
-) => withAdminMfaClaimsTransaction(claims, (tx) => issueSessionForUser({
+) => withAdminMfaClaimsTransaction(claims, input.databaseCapability, (tx) => issueSessionForUser({
     userId: claims.userId,
     ...input,
     authAssurance: "ADMIN_MFA",
@@ -45,10 +47,11 @@ export const confirmAdminMfaEnrollmentAndIssueSessionFromClaims = (
     userAgent: string | null;
     now: Date;
     requestId: string;
+    databaseCapability: string;
     requestedLicenseeId?: string | null;
     requestedScopeVersion?: string | null;
   }
-) => withAdminMfaClaimsTransaction(claims, async (tx) => {
+) => withAdminMfaClaimsTransaction(claims, input.databaseCapability, async (tx) => {
   await confirmAdminMfaSetup({
     userId: claims.userId,
     code: input.code,
@@ -73,8 +76,8 @@ export const confirmAdminMfaEnrollmentAndIssueSessionFromClaims = (
 
 export const confirmAdminMfaReplacementFromClaims = (
   claims: AuthenticatedSessionClaims,
-  input: { code: string; ipHash: string | null; userAgent: string | null; requestId: string }
-) => withAdminMfaClaimsTransaction(claims, async (tx) => {
+  input: { code: string; ipHash: string | null; userAgent: string | null; requestId: string; databaseCapability: string }
+) => withAdminMfaClaimsTransaction(claims, input.databaseCapability, async (tx) => {
   return confirmAdminMfaSetup({
     userId: claims.userId,
     code: input.code,

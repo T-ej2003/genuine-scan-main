@@ -2,13 +2,12 @@
 
 This review records the seven production SQL boundaries generated from the authoritative named-function contracts, including exact ownership, grants, FORCE-RLS policies, rollback, and PostgreSQL 18 probes.
 
-Selected workflows: 10; exact functions: 7; moved behind actor context: 3; operator-only: 0; retired: 0.
+Selected workflows: 9; exact functions: 7; moved behind actor context: 2; operator-only: 0; retired: 0.
 
 ## Workflow reconciliation
 
 | Workflow | Group | Boundary | Function/assurance |
 |---|---|---|---|
-| workflow-internal-backend-src-services-auth-auth-service-ts-login-with-password | not actually pre-auth and must move behind canonical actor context | ordinary-authenticated-context | password-verified |
 | workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification | email-verification consumption | exact-security-definer-function | preauth-fn-consume-email-verification |
 | workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite | invitation/setup-link consumption | exact-security-definer-function | preauth-fn-consume-invitation |
 | workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview | invitation/setup-link lookup | exact-security-definer-function | preauth-fn-lookup-invitation |

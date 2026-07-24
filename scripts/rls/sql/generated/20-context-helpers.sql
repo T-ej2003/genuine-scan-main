@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9'
+    AND source_contract_sha256='cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0'
     AND administrator_role='certification-administrator'
     AND phase='ownership-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'context helpers lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -79,14 +79,6 @@ CREATE FUNCTION app_rls.actor_scope_valid() RETURNS boolean LANGUAGE sql STABLE 
       AND EXISTS (SELECT 1 FROM public."Licensee" l JOIN public."Organization" o ON o."id"=l."orgId" WHERE l."id"=app_rls.current_licensee_id() AND (app_rls.current_organization_id() IS NULL OR l."orgId"=app_rls.current_organization_id()) AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE)
     ELSE FALSE
   END
-$$;
-CREATE FUNCTION app_rls.platform_audit_log_details(log_ids text[]) RETURNS TABLE(id text,ip_address text,user_agent text,user_id text,user_name text) LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $$
-  SELECT a."id",a."ipAddress",a."userAgent",a."userId",u."name"
-  FROM public."AuditLog" a LEFT JOIN public."User" u ON u."id"=a."userId"
-  WHERE app_rls.attributed_request() AND app_rls.actor_scope_valid()
-    AND app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass')
-    AND app_rls.current_purpose()='platform-audit-log-read' AND cardinality(log_ids) BETWEEN 1 AND 500
-    AND a."licenseeId"=app_rls.current_licensee_id() AND a."id"=ANY(log_ids)
 $$;
 
 CREATE FUNCTION app_rls.dashboard_scope_fingerprint(requested_licensee_id text) RETURNS text
@@ -382,7 +374,7 @@ DECLARE
   primary_count bigint;
   membership_fingerprint text;
 BEGIN
-  IF NOT ((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND EXISTS (SELECT 1 FROM public."RefreshToken" operational_session WHERE operational_session."id"=current_setting('app.auth_session_id',true) AND operational_session."userId"=app_rls.current_user_id() AND operational_session."sessionCapabilityHash"=current_setting('app.auth_session_hash',true) AND operational_session."sessionCapabilityHashVersion"='sha256-v1' AND operational_session."sessionCapabilityRevokedAt" IS NULL AND operational_session."sessionCapabilityExpiresAt">clock_timestamp() AND operational_session."revokedAt" IS NULL AND operational_session."expiresAt">clock_timestamp())) AND app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND ((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR ((app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))))
+  IF NOT ((current_user='mscqr_rls_cert_auth_owner' AND app_rls.operational_read_session_valid()) AND app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND ((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR ((app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))))
      OR app_rls.current_user_id() IS NULL OR app_rls.current_role() IS NULL
      OR route_surface IS NULL
      OR (requested_licensee_id IS NOT NULL AND btrim(requested_licensee_id)='')
@@ -701,7 +693,6 @@ GRANT EXECUTE ON FUNCTION app_rls.current_purpose() TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.attributed_request() TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.manufacturer_scope_valid(text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.actor_scope_valid() TO "mscqr_rls_cert_app";
-GRANT EXECUTE ON FUNCTION app_rls.platform_audit_log_details(text[]) TO "mscqr_rls_cert_app";
 GRANT USAGE,CREATE ON SCHEMA app_rls TO "mscqr_rls_cert_auth_owner";
 GRANT EXECUTE ON FUNCTION app_rls.setting(text) TO "mscqr_rls_cert_auth_owner";
 GRANT EXECUTE ON FUNCTION app_rls.uuid_setting(text) TO "mscqr_rls_cert_auth_owner";
@@ -739,6 +730,29 @@ SET ROLE "mscqr_rls_cert_auth_owner";
 -- These wrappers are owned by identity-auth-function-owner and re-derive all
 -- actor context from the durable authenticated-session capability.
 
+CREATE OR REPLACE FUNCTION app_rls.operational_read_session_valid()
+RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+BEGIN
+  IF session_user <> 'mscqr_rls_cert_app'
+     OR current_setting('app.auth_session_verified',true) <> '1'
+  THEN RETURN false; END IF;
+  RETURN EXISTS (
+    SELECT 1 FROM public."RefreshToken" s
+     WHERE s.id=current_setting('app.auth_session_id',true)
+       AND s."userId"=current_setting('app.user_id',true)
+       AND s."sessionCapabilityHash"=current_setting('app.auth_session_hash',true)
+       AND s."sessionCapabilityHashVersion"='sha256-v1'
+       AND s."sessionCapabilityRevokedAt" IS NULL
+       AND s."sessionCapabilityExpiresAt">clock_timestamp()
+       AND s."revokedAt" IS NULL
+       AND s."expiresAt">clock_timestamp()
+  );
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.operational_read_session_valid() FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION app_rls.operational_read_bind_actor(
   p_capability text,
   p_purpose text,
@@ -746,7 +760,11 @@ CREATE OR REPLACE FUNCTION app_rls.operational_read_bind_actor(
   p_requested_licensee_id text
 ) RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY INVOKER AS $fn$
-DECLARE actor record; selected_licensee text := NULLIF(btrim(p_requested_licensee_id),'');
+DECLARE
+  actor record;
+  selected_licensee text := NULLIF(btrim(p_requested_licensee_id),'');
+  scope_licensee_ids text := '';
+  scope_organization_ids text := '';
 BEGIN
   IF p_purpose NOT IN ('dashboard-snapshot-read','batch-operational-read') THEN
     RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501';
@@ -766,15 +784,35 @@ BEGIN
           set_config('app.manufacturer_id','',true),
           set_config('app.auth_assurance',CASE actor.assurance WHEN 'ADMIN_MFA' THEN 'mfa-verified' WHEN 'PASSWORD' THEN 'password-verified' ELSE '' END,true),
           set_config('app.request_id',p_request_id,true),
-          set_config('app.purpose',p_purpose,true);
+          set_config('app.purpose',p_purpose,true),
+          set_config('app.operational_scope_loading','1',true),
+          set_config('app.operational_scope_licensee_ids','',true),
+          set_config('app.operational_scope_organization_ids','',true);
   IF current_setting('app.auth_assurance',true)='' THEN
     RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501';
   END IF;
   IF actor.role IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN
+    SELECT string_agg(l.id::text,',' ORDER BY l.id),string_agg(DISTINCT o.id::text,',' ORDER BY o.id::text)
+      INTO scope_licensee_ids,scope_organization_ids
+      FROM public."ManufacturerLicenseeLink" ml
+      JOIN public."Licensee" l ON l.id=ml."licenseeId"
+      JOIN public."Organization" o ON o.id=l."orgId"
+     WHERE ml."manufacturerId"=actor."userId"
+       AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive"
+       AND (selected_licensee IS NULL OR l.id=selected_licensee);
+    IF scope_licensee_ids IS NULL THEN
+      RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501';
+    END IF;
     PERFORM set_config('app.manufacturer_id',actor."userId",true),
             set_config('app.organization_id','',true),
             set_config('app.licensee_id',coalesce(selected_licensee,''),true);
   ELSIF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
+    IF selected_licensee IS NOT NULL THEN
+      SELECT l.id::text,o.id::text INTO scope_licensee_ids,scope_organization_ids
+        FROM public."Licensee" l JOIN public."Organization" o ON o.id=l."orgId"
+       WHERE l.id=selected_licensee AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive";
+      IF NOT FOUND THEN RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501'; END IF;
+    END IF;
     PERFORM set_config('app.manufacturer_id','',true),
             set_config('app.organization_id','',true),
             set_config('app.licensee_id',coalesce(selected_licensee,''),true);
@@ -782,10 +820,18 @@ BEGIN
     IF selected_licensee IS NOT NULL AND selected_licensee IS DISTINCT FROM actor."licenseeId" THEN
       RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501';
     END IF;
+    SELECT l.id::text,o.id::text INTO scope_licensee_ids,scope_organization_ids
+      FROM public."Licensee" l JOIN public."Organization" o ON o.id=l."orgId"
+     WHERE l.id=actor."licenseeId" AND l."orgId"=actor."organizationId"
+       AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive";
+    IF NOT FOUND THEN RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501'; END IF;
     PERFORM set_config('app.manufacturer_id','',true);
   ELSE
     RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501';
   END IF;
+  PERFORM set_config('app.operational_scope_licensee_ids',coalesce(scope_licensee_ids,''),true),
+          set_config('app.operational_scope_organization_ids',coalesce(scope_organization_ids,''),true),
+          set_config('app.operational_scope_loading','',true);
 END
 $fn$;
 
@@ -1887,7 +1933,7 @@ BEGIN
      AND s."sessionCapabilityHashVersion"='sha256-v1'
      AND s."sessionCapabilityRevokedAt" IS NULL AND s."sessionCapabilityExpiresAt">clock_timestamp()
      AND s."revokedAt" IS NULL AND s."expiresAt">clock_timestamp()
-   FOR UPDATE OF s;
+   FOR SHARE OF s;
   IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
 
   -- The user selector is derived from the locked, capability-bound refresh
@@ -1901,7 +1947,6 @@ BEGIN
      AND u."disabledAt" IS NULL AND u."deletedAt" IS NULL;
   IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
 
-  UPDATE public."RefreshToken" SET "sessionCapabilityLastUsedAt"=clock_timestamp() WHERE id=session_row.id;
   PERFORM set_config('app.auth_session_id',session_row.id,true),
           set_config('app.user_id',actor_row.id,true), set_config('app.role',actor_row.role,true),
           set_config('app.organization_id',coalesce(actor_row."orgId",''),true),
@@ -2079,6 +2124,116 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION app_rls.load_authenticated_manufacturer_scope(
+  p_requested_licensee_id text,p_requested_org_id text,p_requested_scope_version text,
+  p_purpose text,p_write_audit boolean
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; selected record; link_count integer; primary_count integer; links jsonb; audit_id text;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+    current_setting('app.user_id',true),
+    current_setting('app.auth_session_id',true),
+    current_setting('app.request_id',true)
+  );
+  IF actor.role <> 'MANUFACTURER_ADMIN'
+     OR p_purpose NOT IN ('manufacturer-bootstrap','manufacturer-scope-switch')
+     OR (p_requested_licensee_id IS NOT NULL AND p_requested_licensee_id !~* '^[0-9a-f-]{36}$')
+     OR (p_requested_org_id IS NOT NULL AND p_requested_org_id !~* '^[0-9a-f-]{36}$')
+     OR (p_requested_licensee_id IS NOT NULL AND p_requested_scope_version IS NULL)
+  THEN RAISE EXCEPTION 'MANUFACTURER_SCOPE_DENIED' USING ERRCODE='42501'; END IF;
+
+  PERFORM set_config('app.auth_closure_operation','manufacturer-scope-read',true),
+          set_config('app.auth_closure_user_id',actor."userId",true);
+  SELECT count(*) INTO link_count
+  FROM public."ManufacturerLicenseeLink" ml
+  JOIN public."Licensee" l ON l.id=ml."licenseeId"
+  JOIN public."Organization" o ON o.id=l."orgId"
+  WHERE ml."manufacturerId"=actor."userId" AND l."isActive"
+    AND l."suspendedAt" IS NULL AND o."isActive";
+  IF link_count=0 THEN RAISE EXCEPTION 'MANUFACTURER_MEMBERSHIP_REQUIRED' USING ERRCODE='42501'; END IF;
+  IF link_count>100 THEN RAISE EXCEPTION 'MANUFACTURER_MEMBERSHIP_SET_TOO_LARGE' USING ERRCODE='54000'; END IF;
+  SELECT count(*) INTO primary_count
+  FROM public."ManufacturerLicenseeLink" ml
+  JOIN public."Licensee" l ON l.id=ml."licenseeId"
+  JOIN public."Organization" o ON o.id=l."orgId"
+  WHERE ml."manufacturerId"=actor."userId" AND ml."isPrimary"
+    AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive";
+  IF primary_count>1 THEN RAISE EXCEPTION 'MANUFACTURER_MEMBERSHIP_AMBIGUOUS' USING ERRCODE='42501'; END IF;
+
+  SELECT ml."licenseeId",ml."isPrimary",ml."updatedAt",l.id,l.name,l.prefix,l."brandName",l."orgId"
+  INTO selected
+  FROM public."ManufacturerLicenseeLink" ml
+  JOIN public."Licensee" l ON l.id=ml."licenseeId"
+  JOIN public."Organization" o ON o.id=l."orgId"
+  WHERE ml."manufacturerId"=actor."userId" AND l."isActive"
+    AND l."suspendedAt" IS NULL AND o."isActive"
+    AND (p_requested_licensee_id IS NULL OR ml."licenseeId"=p_requested_licensee_id)
+    AND (p_requested_org_id IS NULL OR l."orgId"=p_requested_org_id)
+  ORDER BY
+    CASE WHEN p_requested_licensee_id IS NOT NULL OR p_requested_org_id IS NOT NULL THEN 0 ELSE 1 END,
+    ml."isPrimary" DESC,ml."createdAt",ml."licenseeId"
+  LIMIT 1;
+  IF NOT FOUND AND (p_requested_licensee_id IS NOT NULL OR p_requested_org_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'MANUFACTURER_SCOPE_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF p_requested_scope_version IS NOT NULL
+     AND to_char(selected."updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') IS DISTINCT FROM p_requested_scope_version
+  THEN RAISE EXCEPTION 'MANUFACTURER_SCOPE_STALE' USING ERRCODE='42501'; END IF;
+  IF p_requested_licensee_id IS NULL AND p_requested_org_id IS NULL
+     AND link_count>1
+     AND NOT EXISTS (
+       SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+       WHERE ml."manufacturerId"=actor."userId" AND ml."isPrimary"
+     )
+  THEN selected:=NULL; END IF;
+
+  SELECT coalesce(jsonb_agg(jsonb_build_object(
+    'id',l.id,'name',l.name,'prefix',l.prefix,'brandName',l."brandName",
+    'orgId',l."orgId",'isPrimary',ml."isPrimary",
+    'scopeVersion',to_char(ml."updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+  ) ORDER BY ml."isPrimary" DESC,ml."createdAt",ml."licenseeId"),'[]'::jsonb)
+  INTO links
+  FROM public."ManufacturerLicenseeLink" ml
+  JOIN public."Licensee" l ON l.id=ml."licenseeId"
+  JOIN public."Organization" o ON o.id=l."orgId"
+  WHERE ml."manufacturerId"=actor."userId" AND l."isActive"
+    AND l."suspendedAt" IS NULL AND o."isActive";
+
+  IF p_write_audit THEN
+    audit_id:=gen_random_uuid()::text;
+    PERFORM set_config('app.auth_closure_audit_id',audit_id,true);
+    INSERT INTO public."AuditLogOutbox"(
+      id,payload,"requestId","organizationId","licenseeId","initiatingUserId",
+      "initiatingActorRoleSnapshot","expiresAt","updatedAt"
+    ) VALUES (
+      audit_id,jsonb_build_object(
+        'userId',actor."userId",'orgId',selected."orgId",'licenseeId',selected.id,
+        'action',CASE WHEN p_purpose='manufacturer-scope-switch' THEN 'MANUFACTURER_SCOPE_SWITCH' ELSE 'MANUFACTURER_BOOTSTRAP_READ' END,
+        'entityType','ManufacturerLicenseeLink',
+        'entityId',CASE WHEN selected.id IS NULL THEN actor."userId" ELSE actor."userId"||':'||selected.id END,
+        'details',jsonb_build_object('requestId',current_setting('app.request_id',true),
+          'selectedLicenseeId',selected.id,'selectedOrganizationId',selected."orgId",
+          'scopeVersion',CASE WHEN selected.id IS NULL THEN NULL ELSE to_char(selected."updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END,
+          'assurance',actor."authAssurance",'purpose',p_purpose,
+          'outcome',CASE WHEN selected.id IS NULL THEN 'SCOPE_SELECTION_REQUIRED' ELSE 'SELECTED' END)
+      ),current_setting('app.request_id',true),selected."orgId",selected.id,actor."userId",actor.role,
+      clock_timestamp()+interval '1 day',clock_timestamp()
+    );
+  END IF;
+
+  RETURN jsonb_build_object(
+    'manufacturerId',actor."userId",
+    'selectedLicensee',CASE WHEN selected.id IS NULL THEN NULL ELSE jsonb_build_object(
+      'id',selected.id,'name',selected.name,'prefix',selected.prefix,'brandName',selected."brandName",
+      'orgId',selected."orgId",'isPrimary',selected."isPrimary",
+      'scopeVersion',to_char(selected."updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    ) END,
+    'linkedLicensees',links
+  );
+END
+$fn$;
+
 CREATE OR REPLACE FUNCTION app_rls.find_refresh_token_by_id(p_session_id text,p_user_id text)
 RETURNS TABLE("id" text,"userId" text,"orgId" text,"expiresAt" timestamp without time zone,"createdAt" timestamp without time zone,
   "createdIpHash" text,"createdUserAgent" text,"authenticatedAt" timestamp without time zone,"mfaVerifiedAt" timestamp without time zone,
@@ -2253,24 +2408,1016 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION app_rls.load_authenticated_password_actor()
+RETURNS TABLE(
+  "id" text,"passwordHash" text,"role" text,"status" text,"isActive" boolean,
+  "disabledAt" timestamp without time zone,"deletedAt" timestamp without time zone
+)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+    current_setting('app.user_id',true),
+    current_setting('app.auth_session_id',true),
+    current_setting('app.request_id',true)
+  );
+  PERFORM set_config('app.auth_closure_operation','password-actor-read',true);
+  RETURN QUERY
+  SELECT u.id::text,u."passwordHash"::text,u.role::text,u.status::text,u."isActive",u."disabledAt",u."deletedAt"
+    FROM public."User" u
+   WHERE u.id=actor."userId"
+     AND u."isActive" AND u.status='ACTIVE'::public."UserStatus"
+     AND u."disabledAt" IS NULL AND u."deletedAt" IS NULL;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.list_active_refresh_tokens(
+  p_user_id text,p_checked_at timestamp without time zone
+) RETURNS TABLE(
+  "id" text,"userId" text,"orgId" text,"expiresAt" timestamp without time zone,
+  "createdAt" timestamp without time zone,"createdIpHash" text,"createdUserAgent" text,
+  "authenticatedAt" timestamp without time zone,"mfaVerifiedAt" timestamp without time zone,
+  "lastUsedAt" timestamp without time zone,"revokedAt" timestamp without time zone,"revokedReason" text
+)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record;
+BEGIN
+  IF p_checked_at IS NULL OR abs(extract(epoch FROM (p_checked_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'AUTH_SESSION_LIST_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+    current_setting('app.user_id',true),
+    current_setting('app.auth_session_id',true),
+    current_setting('app.request_id',true)
+  );
+  IF actor."userId" IS DISTINCT FROM p_user_id THEN
+    RAISE EXCEPTION 'AUTH_SESSION_LIST_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.auth_closure_operation','session-list',true);
+  RETURN QUERY
+  SELECT rt.id::text,rt."userId"::text,rt."orgId"::text,rt."expiresAt",rt."createdAt",
+    rt."createdIpHash"::text,rt."createdUserAgent"::text,rt."authenticatedAt",rt."mfaVerifiedAt",
+    rt."lastUsedAt",rt."revokedAt",rt."revokedReason"::text
+    FROM public."RefreshToken" rt
+   WHERE rt."userId"=actor."userId" AND rt."revokedAt" IS NULL AND rt."expiresAt">p_checked_at
+   ORDER BY coalesce(rt."lastUsedAt",rt."createdAt") DESC,rt.id
+   LIMIT 200;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.revoke_all_refresh_tokens(
+  p_user_id text,p_reason text,p_revoked_at timestamp without time zone
+) RETURNS TABLE("revokedCount" integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; changed integer;
+BEGIN
+  IF p_reason NOT IN ('ALL_SESSIONS_REVOKED_BY_USER','PASSWORD_CHANGED','MFA_DISABLED')
+     OR p_revoked_at IS NULL OR abs(extract(epoch FROM (p_revoked_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'AUTH_SESSION_REVOCATION_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+    current_setting('app.user_id',true),
+    current_setting('app.auth_session_id',true),
+    current_setting('app.request_id',true)
+  );
+  IF actor."userId" IS DISTINCT FROM p_user_id THEN
+    RAISE EXCEPTION 'AUTH_SESSION_REVOCATION_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.auth_closure_operation','session-revoke-all',true);
+  UPDATE public."RefreshToken" rt
+     SET "revokedAt"=p_revoked_at,"revokedReason"=p_reason,"lastUsedAt"=p_revoked_at,
+         "sessionCapabilityRevokedAt"=p_revoked_at,"sessionCapabilityRevokedReason"=p_reason
+   WHERE rt."userId"=actor."userId" AND rt."revokedAt" IS NULL;
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  RETURN QUERY SELECT changed;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.prove_authenticated_password_step_up(
+  p_session_id text,p_expected_password_hash text,p_verified_at timestamp without time zone
+) RETURNS TABLE("authorized" boolean)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record;
+BEGIN
+  IF p_expected_password_hash IS NULL OR p_verified_at IS NULL
+     OR abs(extract(epoch FROM (p_verified_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'AUTH_PASSWORD_STEP_UP_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+    current_setting('app.user_id',true),p_session_id,current_setting('app.request_id',true)
+  );
+  PERFORM set_config('app.auth_closure_operation','password-step-up',true);
+  IF NOT EXISTS (
+    SELECT 1 FROM public."User" u
+     WHERE u.id=actor."userId" AND u."passwordHash"=p_expected_password_hash
+       AND u."isActive" AND u.status='ACTIVE'::public."UserStatus"
+       AND u."disabledAt" IS NULL AND u."deletedAt" IS NULL
+  ) THEN RETURN QUERY SELECT false; RETURN; END IF;
+  UPDATE public."RefreshToken" rt SET "authenticatedAt"=p_verified_at,"lastUsedAt"=p_verified_at
+   WHERE rt.id=p_session_id AND rt."userId"=actor."userId" AND rt."revokedAt" IS NULL;
+  RETURN QUERY SELECT FOUND;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.require_recent_sensitive_session(
+  p_session_id text,p_checked_at timestamp without time zone,
+  p_max_password_age_minutes integer,p_max_mfa_age_minutes integer
+) RETURNS TABLE("authorized" boolean)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; session_row record;
+BEGIN
+  IF p_checked_at IS NULL OR abs(extract(epoch FROM (p_checked_at-clock_timestamp())))>300
+     OR p_max_password_age_minutes NOT BETWEEN 1 AND 1440
+     OR p_max_mfa_age_minutes NOT BETWEEN 1 AND 1440 THEN
+    RAISE EXCEPTION 'AUTH_SENSITIVE_SESSION_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+    current_setting('app.user_id',true),p_session_id,current_setting('app.request_id',true)
+  );
+  PERFORM set_config('app.auth_closure_operation','sensitive-session-read',true);
+  SELECT rt."authenticatedAt",rt."mfaVerifiedAt" INTO session_row
+    FROM public."RefreshToken" rt
+   WHERE rt.id=p_session_id AND rt."userId"=actor."userId"
+     AND rt."revokedAt" IS NULL AND rt."expiresAt">p_checked_at;
+  RETURN QUERY SELECT FOUND
+    AND session_row."authenticatedAt">=p_checked_at-(p_max_password_age_minutes*interval '1 minute')
+    AND (
+      actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN')
+      OR session_row."mfaVerifiedAt">=p_checked_at-(p_max_mfa_age_minutes*interval '1 minute')
+    );
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.request_authenticated_email_change(
+  p_next_email text,p_token_hash text,p_secret_version text,
+  p_expires_at timestamp without time zone,p_requested_at timestamp without time zone,
+  p_ip_hash text,p_user_agent_hash text
+) RETURNS TABLE(
+  "changed" boolean,"verificationRequired" boolean,"userId" text,"currentEmail" text,
+  "pendingEmail" text,"orgId" text,"licenseeId" text,"expiresAt" timestamp without time zone
+)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; user_row record; token_id text := gen_random_uuid()::text; normalized_email text := lower(btrim(p_next_email));
+BEGIN
+  IF normalized_email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
+     OR length(normalized_email)>320
+     OR p_token_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$'
+     OR p_secret_version IS NULL OR length(p_secret_version) NOT BETWEEN 1 AND 64
+     OR p_requested_at IS NULL OR abs(extract(epoch FROM (p_requested_at-clock_timestamp())))>300
+     OR p_expires_at<=p_requested_at OR p_expires_at>p_requested_at+interval '48 hours' THEN
+    RAISE EXCEPTION 'AUTH_EMAIL_CHANGE_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+    current_setting('app.user_id',true),
+    current_setting('app.auth_session_id',true),
+    current_setting('app.request_id',true)
+  );
+  PERFORM set_config('app.auth_closure_operation','email-change',true),
+          set_config('app.auth_closure_pending_email',normalized_email,true),
+          set_config('app.auth_closure_token_hash',p_token_hash,true);
+  SELECT u.id,u.email,u."orgId",u."licenseeId" INTO user_row
+    FROM public."User" u WHERE u.id=actor."userId" FOR UPDATE;
+  IF lower(user_row.email)=normalized_email THEN
+    RETURN QUERY SELECT false,false,user_row.id::text,user_row.email::text,NULL::text,
+      user_row."orgId"::text,user_row."licenseeId"::text,NULL::timestamp;
+    RETURN;
+  END IF;
+  IF EXISTS (SELECT 1 FROM public."User" u WHERE lower(u.email)=normalized_email AND u.id<>actor."userId") THEN
+    RAISE EXCEPTION 'AUTH_EMAIL_CHANGE_CONFLICT' USING ERRCODE='23505';
+  END IF;
+  UPDATE public."EmailVerificationToken" t SET "usedAt"=p_requested_at
+   WHERE t."userId"=actor."userId" AND t.purpose='EMAIL_CHANGE' AND t."usedAt" IS NULL;
+  INSERT INTO public."EmailVerificationToken"(
+    id,"userId",email,"pendingEmail",purpose,"tokenHash","secretVersion","expiresAt","createdAt","createdIpHash","userAgentHash"
+  ) VALUES (
+    token_id,actor."userId",user_row.email,normalized_email,'EMAIL_CHANGE',p_token_hash,p_secret_version,
+    p_expires_at,p_requested_at,p_ip_hash,p_user_agent_hash
+  );
+  UPDATE public."User" u SET "pendingEmail"=normalized_email,"pendingEmailRequestedAt"=p_requested_at,"updatedAt"=p_requested_at
+   WHERE u.id=actor."userId";
+  PERFORM set_config('app.auth_closure_pending_email',normalized_email,true);
+  RETURN QUERY SELECT false,true,user_row.id::text,user_row.email::text,normalized_email,
+    user_row."orgId"::text,user_row."licenseeId"::text,p_expires_at;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.update_authenticated_profile(
+  p_name text,p_email_change_requested boolean,p_audit_pending_email text,
+  p_changed_at timestamp without time zone
+) RETURNS TABLE(
+  "id" text,"email" text,"name" text,"role" text,"licenseeId" text,"orgId" text,
+  "emailVerifiedAt" timestamp without time zone,"pendingEmail" text,"pendingEmailRequestedAt" timestamp without time zone,
+  "isActive" boolean,"status" text,"deletedAt" timestamp without time zone,"disabledAt" timestamp without time zone,
+  "createdAt" timestamp without time zone,"licenseeRecordId" text,"licenseeName" text,
+  "licenseePrefix" text,"licenseeBrandName" text,"licenseeOrgId" text
+)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; audit_id text := gen_random_uuid()::text;
+BEGIN
+  IF p_changed_at IS NULL OR abs(extract(epoch FROM (p_changed_at-clock_timestamp())))>300
+     OR (p_name IS NOT NULL AND length(btrim(p_name)) NOT BETWEEN 2 AND 80)
+     OR (p_email_change_requested AND NOT EXISTS (
+       SELECT 1 FROM public."User" pending_actor
+        WHERE pending_actor.id=current_setting('app.user_id',true)
+          AND lower(pending_actor."pendingEmail")=lower(btrim(coalesce(p_audit_pending_email,'')))
+     )) THEN
+    RAISE EXCEPTION 'AUTH_PROFILE_UPDATE_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+    current_setting('app.user_id',true),
+    current_setting('app.auth_session_id',true),
+    current_setting('app.request_id',true)
+  );
+  PERFORM set_config('app.auth_closure_operation','profile-update',true);
+  UPDATE public."User" u SET name=coalesce(btrim(p_name),u.name),"updatedAt"=p_changed_at
+   WHERE u.id=actor."userId";
+  IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_PROFILE_UPDATE_DENIED' USING ERRCODE='42501'; END IF;
+  INSERT INTO public."AuditLogOutbox"(id,payload,"requestId","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt")
+  VALUES (
+    audit_id,
+    jsonb_build_object('userId',actor."userId",'action','AUTH_PROFILE_UPDATED','entityType','User','entityId',actor."userId",
+      'details',jsonb_build_object('nameChanged',p_name IS NOT NULL,'emailChangeRequested',p_email_change_requested)),
+    current_setting('app.request_id',true),nullif(actor."organizationId",''),nullif(actor."licenseeId",''),
+    actor."userId",actor.role,p_changed_at+interval '1 day',p_changed_at
+  );
+  RETURN QUERY SELECT a.* FROM app_rls.load_authenticated_actor() a;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.change_authenticated_password(
+  p_expected_password_hash text,p_password_hash text,p_changed_at timestamp without time zone
+) RETURNS TABLE("changed" boolean)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; changed integer;
+BEGIN
+  IF p_expected_password_hash IS NULL OR p_password_hash !~ '^\$argon2(id|i|d)\$'
+     OR p_changed_at IS NULL OR abs(extract(epoch FROM (p_changed_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'AUTH_PASSWORD_CHANGE_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+    current_setting('app.user_id',true),
+    current_setting('app.auth_session_id',true),
+    current_setting('app.request_id',true)
+  );
+  PERFORM set_config('app.auth_closure_operation','password-change',true);
+  UPDATE public."User" u SET "passwordHash"=p_password_hash,"updatedAt"=p_changed_at
+   WHERE u.id=actor."userId" AND u."passwordHash"=p_expected_password_hash;
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  IF changed<>1 THEN RETURN QUERY SELECT false; RETURN; END IF;
+  UPDATE public."RefreshToken" rt
+     SET "revokedAt"=p_changed_at,"revokedReason"='PASSWORD_CHANGED',
+         "sessionCapabilityRevokedAt"=p_changed_at,"sessionCapabilityRevokedReason"='PASSWORD_CHANGED'
+   WHERE rt."userId"=actor."userId" AND rt."revokedAt" IS NULL;
+  INSERT INTO public."AuditLogOutbox"(id,payload,"requestId","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt")
+  VALUES (
+    gen_random_uuid()::text,
+    jsonb_build_object('userId',actor."userId",'action','AUTH_PASSWORD_CHANGED','entityType','User','entityId',actor."userId"),
+    current_setting('app.request_id',true),nullif(actor."organizationId",''),nullif(actor."licenseeId",''),
+    actor."userId",actor.role,p_changed_at+interval '1 day',p_changed_at
+  );
+  RETURN QUERY SELECT true;
+END
+$fn$;
+
+-- RF7 compatibility closure: admin MFA persistence remains application-crypto
+-- driven, while every protected row is selected or mutated by an actor-bound
+-- capability. Raw MFA secrets and bearer material are never written to audit.
+CREATE OR REPLACE FUNCTION app_rls.b01_admin_mfa_actor()
+RETURNS TABLE("userId" text,"role" text,"organizationId" text,"licenseeId" text)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+    current_setting('app.user_id',true),
+    current_setting('app.auth_session_id',true),
+    current_setting('app.request_id',true)
+  );
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN') THEN
+    RAISE EXCEPTION 'AUTH_MFA_ROLE_DENIED' USING ERRCODE='42501';
+  END IF;
+  RETURN QUERY SELECT actor."userId"::text,actor.role::text,actor."organizationId"::text,actor."licenseeId"::text;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.load_admin_mfa_state()
+RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; result jsonb;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM set_config('app.auth_closure_operation','mfa-state-read',true);
+  SELECT jsonb_build_object(
+    'legacyTotp',(SELECT to_jsonb(x) FROM (
+      SELECT c.id,c."isEnabled",c."verifiedAt",c."lastUsedAt",c."backupCodesHash",c."createdAt",c."updatedAt"
+      FROM public."AdminMfaCredential" c WHERE c."userId"=actor."userId"
+    ) x),
+    'legacyWebAuthn',coalesce((SELECT jsonb_agg(to_jsonb(x) ORDER BY x."lastUsedAt" DESC NULLS LAST,x."createdAt" DESC) FROM (
+      SELECT c.id,c.label,c."credentialId",c.transports,c."lastUsedAt",c."createdAt",c."updatedAt"
+      FROM public."AdminWebAuthnCredential" c WHERE c."userId"=actor."userId"
+    ) x),'[]'::jsonb),
+    'factors',coalesce((SELECT jsonb_agg(to_jsonb(x) ORDER BY x."lastUsedAt" DESC NULLS LAST,x."createdAt" DESC) FROM (
+      SELECT f.id,f.type,f.label,f."credentialId",f.transports,f."legacySource",f."lastUsedAt",f."createdAt",f."updatedAt"
+      FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId" AND f."disabledAt" IS NULL
+    ) x),'[]'::jsonb),
+    'backupCodesRemaining',(SELECT count(*) FROM public."UserBackupCode" b WHERE b."userId"=actor."userId" AND b."usedAt" IS NULL)
+  ) INTO result;
+  RETURN result;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.begin_admin_totp_enrollment(
+  p_mode text,p_secret_ciphertext text,p_secret_iv text,p_secret_tag text,p_backup_hashes text[],
+  p_pending_cutoff timestamp without time zone,p_created_at timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; enrolled boolean; pending_count integer; credential_id text; factor_id text;
+BEGIN
+  IF p_mode NOT IN ('FIRST_ENROLLMENT','REPLACEMENT') OR p_secret_ciphertext IS NULL OR p_secret_iv IS NULL
+     OR p_secret_tag IS NULL OR cardinality(p_backup_hashes) NOT BETWEEN 1 AND 20
+     OR p_pending_cutoff IS NULL OR p_created_at IS NULL
+     OR abs(extract(epoch FROM (p_created_at-clock_timestamp())))>300
+     OR p_pending_cutoff>p_created_at OR p_pending_cutoff<p_created_at-interval '30 minutes' THEN
+    RAISE EXCEPTION 'MFA_ENROLLMENT_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-enrollment-begin',true);
+
+  SELECT coalesce(bool_or(v),false) INTO enrolled FROM (
+    SELECT c."isEnabled" OR c."verifiedAt" IS NOT NULL AS v FROM public."AdminMfaCredential" c WHERE c."userId"=actor."userId"
+    UNION ALL SELECT true FROM public."AdminWebAuthnCredential" w WHERE w."userId"=actor."userId"
+    UNION ALL SELECT true FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId" AND f."disabledAt" IS NULL
+      AND f."legacySource" IS DISTINCT FROM 'MFA_ENROLLMENT_PENDING'
+      AND (f.type='WEBAUTHN' OR (f.type='TOTP' AND (f."lastUsedAt" IS NOT NULL OR f."legacySource"='AdminMfaCredential')))
+  ) q;
+  IF p_mode='FIRST_ENROLLMENT' AND enrolled THEN RAISE EXCEPTION 'MFA_ALREADY_ENROLLED' USING ERRCODE='23505'; END IF;
+  IF p_mode='REPLACEMENT' AND NOT enrolled THEN RAISE EXCEPTION 'MFA_REPLACEMENT_REQUIRES_ENROLLED_FACTOR' USING ERRCODE='23514'; END IF;
+
+  SELECT count(*) INTO pending_count FROM public."UserMfaFactor" f
+   WHERE f."userId"=actor."userId" AND f.type='TOTP' AND f."disabledAt" IS NULL
+     AND f."legacySource"='MFA_ENROLLMENT_PENDING' AND f."createdAt">p_pending_cutoff;
+  IF pending_count>0 THEN RAISE EXCEPTION 'MFA_SETUP_ALREADY_STARTED' USING ERRCODE='23505'; END IF;
+  DELETE FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId" AND f.type='TOTP'
+    AND f."legacySource"='MFA_ENROLLMENT_PENDING';
+
+  IF p_mode='REPLACEMENT' THEN
+    INSERT INTO public."UserMfaFactor"(id,"userId",type,label,"secretCiphertext","secretIv","secretTag","legacySource","legacyCredentialId","lastUsedAt","createdAt","updatedAt")
+    SELECT 'legacy-totp-'||actor."userId",actor."userId",'TOTP','Authenticator app',c."secretCiphertext",c."secretIv",c."secretTag",
+           'AdminMfaCredential',actor."userId",coalesce(c."lastUsedAt",c."verifiedAt"),p_created_at,p_created_at
+      FROM public."AdminMfaCredential" c
+     WHERE c."userId"=actor."userId" AND c."isEnabled"
+       AND NOT EXISTS (SELECT 1 FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId" AND f.type='TOTP'
+         AND f."disabledAt" IS NULL AND f."legacySource" IS DISTINCT FROM 'MFA_ENROLLMENT_PENDING')
+    ON CONFLICT (id) DO UPDATE SET "disabledAt"=NULL,"lastUsedAt"=excluded."lastUsedAt","updatedAt"=p_created_at;
+    INSERT INTO public."UserBackupCode"(id,"userId","codeHash","createdAt")
+    SELECT gen_random_uuid()::text,actor."userId",h,p_created_at
+      FROM public."AdminMfaCredential" c,unnest(c."backupCodesHash") h
+     WHERE c."userId"=actor."userId" AND c."isEnabled"
+    ON CONFLICT ("codeHash") DO NOTHING;
+  END IF;
+
+  SELECT c.id INTO credential_id FROM public."AdminMfaCredential" c WHERE c."userId"=actor."userId" FOR UPDATE;
+  IF credential_id IS NULL THEN
+    credential_id:=gen_random_uuid()::text;
+    INSERT INTO public."AdminMfaCredential"(id,"userId","secretCiphertext","secretIv","secretTag","backupCodesHash","isEnabled","verifiedAt","lastUsedAt","createdAt","updatedAt")
+    VALUES (credential_id,actor."userId",p_secret_ciphertext,p_secret_iv,p_secret_tag,p_backup_hashes,false,NULL,NULL,p_created_at,p_created_at);
+  ELSE
+    UPDATE public."AdminMfaCredential" SET "secretCiphertext"=p_secret_ciphertext,"secretIv"=p_secret_iv,"secretTag"=p_secret_tag,
+      "backupCodesHash"=p_backup_hashes,"isEnabled"=false,"verifiedAt"=NULL,"lastUsedAt"=NULL,"updatedAt"=p_created_at
+      WHERE id=credential_id;
+  END IF;
+  factor_id:=gen_random_uuid()::text;
+  INSERT INTO public."UserMfaFactor"(id,"userId",type,label,"secretCiphertext","secretIv","secretTag","legacySource","legacyCredentialId","createdAt","updatedAt")
+  VALUES (factor_id,actor."userId",'TOTP','Authenticator app',p_secret_ciphertext,p_secret_iv,p_secret_tag,
+          'MFA_ENROLLMENT_PENDING',actor."userId",p_created_at,p_created_at);
+  RETURN jsonb_build_object('factorId',factor_id);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.load_admin_totp_enrollment(
+  p_mode text,p_pending_cutoff timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; result jsonb; enrolled boolean;
+BEGIN
+  IF p_mode NOT IN ('FIRST_ENROLLMENT','REPLACEMENT') OR p_pending_cutoff IS NULL THEN
+    RAISE EXCEPTION 'MFA_ENROLLMENT_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-enrollment-load',true);
+  SELECT coalesce(bool_or(v),false) INTO enrolled FROM (
+    SELECT c."isEnabled" OR c."verifiedAt" IS NOT NULL AS v FROM public."AdminMfaCredential" c WHERE c."userId"=actor."userId"
+    UNION ALL SELECT true FROM public."AdminWebAuthnCredential" w WHERE w."userId"=actor."userId"
+    UNION ALL SELECT true FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId" AND f."disabledAt" IS NULL
+      AND f."legacySource" IS DISTINCT FROM 'MFA_ENROLLMENT_PENDING'
+      AND (f.type='WEBAUTHN' OR (f.type='TOTP' AND (f."lastUsedAt" IS NOT NULL OR f."legacySource"='AdminMfaCredential')))
+  ) q;
+  IF p_mode='FIRST_ENROLLMENT' AND enrolled THEN RAISE EXCEPTION 'MFA_ALREADY_ENROLLED' USING ERRCODE='23505'; END IF;
+  IF p_mode='REPLACEMENT' AND NOT enrolled THEN RAISE EXCEPTION 'MFA_REPLACEMENT_REQUIRES_ENROLLED_FACTOR' USING ERRCODE='23514'; END IF;
+  SELECT jsonb_build_object(
+    'credential',(SELECT to_jsonb(x) FROM (
+      SELECT c.id,c."secretCiphertext",c."secretIv",c."secretTag",c."backupCodesHash",c."isEnabled",c."verifiedAt"
+      FROM public."AdminMfaCredential" c WHERE c."userId"=actor."userId"
+    ) x),
+    'pending',coalesce((SELECT jsonb_agg(to_jsonb(x)) FROM (
+      SELECT f.id,f."secretCiphertext",f."secretIv",f."secretTag",f."createdAt"
+      FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId" AND f.type='TOTP'
+        AND f."disabledAt" IS NULL AND f."legacySource"='MFA_ENROLLMENT_PENDING' AND f."createdAt">p_pending_cutoff
+    ) x),'[]'::jsonb)
+  ) INTO result;
+  RETURN result;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.complete_admin_totp_enrollment(
+  p_mode text,p_factor_id text,p_secret_ciphertext text,p_secret_iv text,p_secret_tag text,
+  p_completed_at timestamp without time zone,p_ip_hash text,p_user_agent text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; hashes text[]; changed integer;
+BEGIN
+  IF p_mode NOT IN ('FIRST_ENROLLMENT','REPLACEMENT') OR p_factor_id IS NULL OR p_secret_ciphertext IS NULL
+     OR p_secret_iv IS NULL OR p_secret_tag IS NULL OR p_completed_at IS NULL
+     OR abs(extract(epoch FROM (p_completed_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'MFA_ENROLLMENT_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-enrollment-complete',true);
+  SELECT c."backupCodesHash" INTO hashes FROM public."AdminMfaCredential" c
+   WHERE c."userId"=actor."userId" AND NOT c."isEnabled" AND c."verifiedAt" IS NULL
+     AND c."secretCiphertext"=p_secret_ciphertext AND c."secretIv"=p_secret_iv AND c."secretTag"=p_secret_tag FOR UPDATE;
+  IF NOT FOUND OR NOT EXISTS (
+    SELECT 1 FROM public."UserMfaFactor" f WHERE f.id=p_factor_id AND f."userId"=actor."userId"
+      AND f.type='TOTP' AND f."disabledAt" IS NULL AND f."legacySource"='MFA_ENROLLMENT_PENDING'
+      AND f."secretCiphertext"=p_secret_ciphertext AND f."secretIv"=p_secret_iv AND f."secretTag"=p_secret_tag
+  ) THEN RAISE EXCEPTION 'MFA_SETUP_NOT_STARTED' USING ERRCODE='23514'; END IF;
+  UPDATE public."UserMfaFactor" SET "disabledAt"=p_completed_at,"updatedAt"=p_completed_at
+    WHERE "userId"=actor."userId" AND type='TOTP' AND "disabledAt" IS NULL AND id<>p_factor_id;
+  UPDATE public."UserMfaFactor" SET "legacySource"=NULL,"legacyCredentialId"=NULL,"lastUsedAt"=p_completed_at,
+    "disabledAt"=NULL,"updatedAt"=p_completed_at WHERE id=p_factor_id AND "userId"=actor."userId";
+  UPDATE public."AdminMfaCredential" SET "isEnabled"=true,"verifiedAt"=p_completed_at,"lastUsedAt"=p_completed_at,"updatedAt"=p_completed_at
+    WHERE "userId"=actor."userId" AND NOT "isEnabled" AND "verifiedAt" IS NULL;
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  IF changed<>1 THEN RAISE EXCEPTION 'MFA_SETUP_NOT_STARTED' USING ERRCODE='23514'; END IF;
+  DELETE FROM public."UserBackupCode" WHERE "userId"=actor."userId" AND "usedAt" IS NULL;
+  INSERT INTO public."UserBackupCode"(id,"userId","codeHash","createdAt")
+    SELECT gen_random_uuid()::text,actor."userId",h,p_completed_at FROM unnest(hashes) h;
+  INSERT INTO public."AuditLogOutbox"(id,payload,"requestId","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt")
+  VALUES (gen_random_uuid()::text,jsonb_build_object('userId',actor."userId",'action',
+    CASE WHEN p_mode='REPLACEMENT' THEN 'AUTH_MFA_REPLACED' ELSE 'AUTH_MFA_ENROLLED' END,
+    'entityType','User','entityId',actor."userId",'details',jsonb_build_object('source',
+    CASE WHEN p_mode='REPLACEMENT' THEN 'ACTIVE_SESSION' ELSE 'LOGIN_BOOTSTRAP' END),
+    'ipHash',p_ip_hash,'userAgent',p_user_agent),current_setting('app.request_id',true),
+    nullif(actor."organizationId",''),nullif(actor."licenseeId",''),actor."userId",actor.role,p_completed_at+interval '1 day',p_completed_at);
+  RETURN jsonb_build_object('enabled',true);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.load_admin_mfa_verifiers()
+RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; result jsonb;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-verifier-read',true);
+  SELECT jsonb_build_object(
+    'factors',coalesce((SELECT jsonb_agg(to_jsonb(x) ORDER BY x."createdAt" DESC) FROM (
+      SELECT f.id,f."secretCiphertext",f."secretIv",f."secretTag",f."legacySource",f."lastUsedAt",f."createdAt"
+      FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId" AND f.type='TOTP'
+        AND f."disabledAt" IS NULL AND f."secretCiphertext" IS NOT NULL
+    ) x),'[]'::jsonb),
+    'backupCodes',coalesce((SELECT jsonb_agg(jsonb_build_object('id',b.id,'codeHash',b."codeHash")) FROM public."UserBackupCode" b
+      WHERE b."userId"=actor."userId" AND b."usedAt" IS NULL),'[]'::jsonb),
+    'legacy',(SELECT to_jsonb(x) FROM (
+      SELECT c."isEnabled",c."secretCiphertext",c."secretIv",c."secretTag",c."backupCodesHash"
+      FROM public."AdminMfaCredential" c WHERE c."userId"=actor."userId"
+    ) x)
+  ) INTO result;
+  RETURN result;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.consume_admin_mfa_verifier(
+  p_method text,p_record_id text,p_expected_legacy_hashes text[],p_next_legacy_hashes text[],
+  p_used_at timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; changed integer;
+BEGIN
+  IF p_method NOT IN ('TOTP_FACTOR','TOTP_LEGACY','BACKUP_CODE','BACKUP_LEGACY') OR p_used_at IS NULL
+     OR abs(extract(epoch FROM (p_used_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'MFA_VERIFIER_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-verifier-consume',true);
+  changed:=0;
+  IF p_method='TOTP_FACTOR' THEN
+    UPDATE public."UserMfaFactor" SET "lastUsedAt"=p_used_at,"updatedAt"=p_used_at
+     WHERE id=p_record_id AND "userId"=actor."userId" AND type='TOTP' AND "disabledAt" IS NULL;
+    GET DIAGNOSTICS changed=ROW_COUNT;
+  ELSIF p_method='TOTP_LEGACY' THEN
+    UPDATE public."AdminMfaCredential" SET "lastUsedAt"=p_used_at,"updatedAt"=p_used_at
+     WHERE "userId"=actor."userId" AND "isEnabled";
+    GET DIAGNOSTICS changed=ROW_COUNT;
+    IF changed=1 THEN
+      INSERT INTO public."UserMfaFactor"(id,"userId",type,label,"secretCiphertext","secretIv","secretTag",
+        "legacySource","legacyCredentialId","lastUsedAt","createdAt","updatedAt")
+      SELECT 'legacy-totp-'||actor."userId",actor."userId",'TOTP','Authenticator app',
+        c."secretCiphertext",c."secretIv",c."secretTag",'AdminMfaCredential',actor."userId",
+        p_used_at,p_used_at,p_used_at
+      FROM public."AdminMfaCredential" c WHERE c."userId"=actor."userId" AND c."isEnabled"
+      ON CONFLICT (id) DO UPDATE SET "disabledAt"=NULL,"lastUsedAt"=p_used_at,"updatedAt"=p_used_at;
+    END IF;
+  ELSIF p_method='BACKUP_CODE' THEN
+    UPDATE public."UserBackupCode" SET "usedAt"=p_used_at
+     WHERE id=p_record_id AND "userId"=actor."userId" AND "usedAt" IS NULL;
+    GET DIAGNOSTICS changed=ROW_COUNT;
+  ELSE
+    UPDATE public."AdminMfaCredential" SET "backupCodesHash"=p_next_legacy_hashes,"lastUsedAt"=p_used_at,"updatedAt"=p_used_at
+     WHERE "userId"=actor."userId" AND "isEnabled" AND "backupCodesHash"=p_expected_legacy_hashes;
+    GET DIAGNOSTICS changed=ROW_COUNT;
+  END IF;
+  RETURN jsonb_build_object('consumed',changed=1);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.replace_admin_backup_codes(
+  p_hashes text[],p_replaced_at timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record;
+BEGIN
+  IF cardinality(p_hashes) NOT BETWEEN 1 AND 20 OR p_replaced_at IS NULL
+     OR abs(extract(epoch FROM (p_replaced_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'MFA_BACKUP_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-backup-replace',true);
+  DELETE FROM public."UserBackupCode" WHERE "userId"=actor."userId" AND "usedAt" IS NULL;
+  INSERT INTO public."UserBackupCode"(id,"userId","codeHash","createdAt")
+    SELECT gen_random_uuid()::text,actor."userId",h,p_replaced_at FROM unnest(p_hashes) h;
+  UPDATE public."AdminMfaCredential" SET "backupCodesHash"=p_hashes,"lastUsedAt"=p_replaced_at,"updatedAt"=p_replaced_at
+    WHERE "userId"=actor."userId";
+  RETURN jsonb_build_object('replaced',true);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.disable_admin_mfa(
+  p_disabled_at timestamp without time zone,p_ip_hash text,p_user_agent text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record;
+BEGIN
+  IF p_disabled_at IS NULL OR abs(extract(epoch FROM (p_disabled_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'MFA_DISABLE_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-disable',true);
+  UPDATE public."AdminMfaCredential" SET "backupCodesHash"='{}',"isEnabled"=false,"verifiedAt"=NULL,"lastUsedAt"=NULL,"updatedAt"=p_disabled_at
+    WHERE "userId"=actor."userId";
+  UPDATE public."UserMfaFactor" SET "disabledAt"=p_disabled_at,"updatedAt"=p_disabled_at
+    WHERE "userId"=actor."userId" AND "disabledAt" IS NULL;
+  DELETE FROM public."AdminWebAuthnCredential" WHERE "userId"=actor."userId";
+  DELETE FROM public."UserBackupCode" WHERE "userId"=actor."userId" AND "usedAt" IS NULL;
+  UPDATE public."RefreshToken" SET "revokedAt"=p_disabled_at,"revokedReason"='MFA_DISABLED',"lastUsedAt"=p_disabled_at,
+    "sessionCapabilityRevokedAt"=p_disabled_at,"sessionCapabilityRevokedReason"='MFA_DISABLED'
+    WHERE "userId"=actor."userId" AND "revokedAt" IS NULL;
+  INSERT INTO public."AuditLogOutbox"(id,payload,"requestId","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt")
+  VALUES (gen_random_uuid()::text,jsonb_build_object('userId',actor."userId",'action','AUTH_MFA_DISABLED','entityType','User',
+    'entityId',actor."userId",'details',jsonb_build_object('actorUserId',actor."userId"),'ipHash',p_ip_hash,'userAgent',p_user_agent),
+    current_setting('app.request_id',true),nullif(actor."organizationId",''),nullif(actor."licenseeId",''),
+    actor."userId",actor.role,p_disabled_at+interval '1 day',p_disabled_at);
+  RETURN jsonb_build_object('enabled',false);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.create_admin_mfa_challenge(
+  p_kind text,p_ticket_hash text,p_session_binding_hash text,p_purpose text,p_risk_score integer,p_risk_level text,
+  p_reasons text[],p_ip_hash text,p_user_agent_hash text,p_max_attempts integer,
+  p_created_at timestamp without time zone,p_expires_at timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; challenge_id text:=gen_random_uuid()::text;
+BEGIN
+  IF p_kind NOT IN ('LOGIN','SESSION') OR p_ticket_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$'
+     OR p_purpose NOT IN ('admin_login','high_risk_action')
+     OR (p_kind='LOGIN') IS DISTINCT FROM (p_purpose='admin_login')
+     OR (p_kind='SESSION') IS DISTINCT FROM (p_session_binding_hash IS NOT NULL)
+     OR (p_session_binding_hash IS NOT NULL AND p_session_binding_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$')
+     OR p_risk_score NOT BETWEEN 0 AND 100 OR p_risk_level NOT IN ('LOW','MEDIUM','HIGH','CRITICAL')
+     OR cardinality(p_reasons)>12 OR p_max_attempts NOT BETWEEN 1 AND 10 OR p_created_at IS NULL
+     OR p_expires_at<=p_created_at OR p_expires_at>p_created_at+interval '15 minutes'
+     OR abs(extract(epoch FROM (p_created_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'MFA_CHALLENGE_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM set_config('app.auth_closure_operation','mfa-challenge-create',true),
+          set_config('app.auth_closure_challenge_id',challenge_id,true),
+          set_config('app.auth_closure_challenge_hash',p_ticket_hash,true);
+  IF p_kind='LOGIN' THEN
+    INSERT INTO public."MfaLoginChallenge"(id,"userId","ticketHash",purpose,"riskScore","riskLevel",reasons,
+      "createdIpHash","createdUserAgentHash",attempts,"maxAttempts","createdAt","updatedAt","expiresAt")
+    VALUES (challenge_id,actor."userId",p_ticket_hash,p_purpose,p_risk_score,p_risk_level::public."AuthRiskLevel",
+      p_reasons,p_ip_hash,p_user_agent_hash,0,p_max_attempts,p_created_at,p_created_at,p_expires_at);
+  ELSE
+    UPDATE public."AuthMfaChallenge" SET "supersededAt"=p_created_at,"updatedAt"=p_created_at
+     WHERE "userId"=actor."userId" AND purpose=p_purpose AND "sessionBindingHash"=p_session_binding_hash
+       AND "consumedAt" IS NULL AND "supersededAt" IS NULL AND "expiresAt">p_created_at;
+    INSERT INTO public."AuthMfaChallenge"(id,"userId","ticketHash","sessionBindingHash",purpose,"riskScore","riskLevel",reasons,
+      "createdIpHash","createdUserAgentHash",attempts,"maxAttempts","createdAt","updatedAt","expiresAt")
+    VALUES (challenge_id,actor."userId",p_ticket_hash,p_session_binding_hash,p_purpose,p_risk_score,p_risk_level::public."AuthRiskLevel",
+      p_reasons,p_ip_hash,p_user_agent_hash,0,p_max_attempts,p_created_at,p_created_at,p_expires_at);
+  END IF;
+  INSERT INTO public."AuditLogOutbox"(id,payload,"requestId","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt")
+  VALUES (gen_random_uuid()::text,jsonb_build_object('userId',actor."userId",'action','AUTH_MFA_CHALLENGE_ISSUED',
+    'entityType','MfaChallenge','entityId',challenge_id,'details',jsonb_build_object('purpose',p_purpose,
+    'riskScore',p_risk_score,'riskLevel',p_risk_level,'sessionBound',p_kind='SESSION',
+    'ttlMs',round(extract(epoch FROM (p_expires_at-p_created_at))*1000),
+    'ttlMinutes',round(extract(epoch FROM (p_expires_at-p_created_at))/60))),
+    current_setting('app.request_id',true),nullif(actor."organizationId",''),nullif(actor."licenseeId",''),
+    actor."userId",actor.role,p_created_at+interval '1 day',p_created_at);
+  RETURN jsonb_build_object('challengeId',challenge_id);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.load_admin_mfa_challenge(
+  p_ticket_hashes text[],p_session_binding_hashes text[],p_checked_at timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; result jsonb;
+BEGIN
+  IF cardinality(p_ticket_hashes) NOT BETWEEN 1 AND 3 OR p_checked_at IS NULL
+     OR abs(extract(epoch FROM (p_checked_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'MFA_CHALLENGE_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-challenge-read',true);
+  SELECT to_jsonb(x) INTO result FROM (
+    SELECT 'LOGIN'::text AS kind,c.id,c."userId",c.purpose,c."riskScore",c."riskLevel"::text AS "riskLevel",
+      c.reasons,c.attempts,c."maxAttempts",c."createdIpHash",c."createdUserAgentHash",
+      c."expiresAt",c."consumedAt",NULL::timestamp without time zone AS "supersededAt"
+    FROM public."MfaLoginChallenge" c WHERE c."userId"=actor."userId" AND c."ticketHash"=ANY(p_ticket_hashes)
+    UNION ALL
+    SELECT 'SESSION',c.id,c."userId",c.purpose,c."riskScore",c."riskLevel"::text,c.reasons,c.attempts,c."maxAttempts",
+      c."createdIpHash",c."createdUserAgentHash",c."expiresAt",c."consumedAt",c."supersededAt"
+    FROM public."AuthMfaChallenge" c WHERE c."userId"=actor."userId" AND c."ticketHash"=ANY(p_ticket_hashes)
+      AND c."sessionBindingHash"=ANY(p_session_binding_hashes)
+  ) x LIMIT 1;
+  RETURN result;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.record_admin_mfa_challenge_failure(
+  p_kind text,p_challenge_id text,p_action text,p_expected_attempts integer,p_failed_at timestamp without time zone,
+  p_ip_hash text,p_user_agent text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; changed integer; next_attempts integer:=p_expected_attempts;
+BEGIN
+  IF p_kind NOT IN ('LOGIN','SESSION') OR p_action NOT IN ('AUTH_MFA_CHALLENGE_EXPIRED','AUTH_MFA_FAILURE','AUTH_MFA_TOO_MANY_ATTEMPTS')
+     OR p_expected_attempts NOT BETWEEN 0 AND 10 OR p_failed_at IS NULL
+     OR abs(extract(epoch FROM (p_failed_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'MFA_CHALLENGE_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM set_config('app.auth_closure_operation','mfa-challenge-fail',true);
+  IF p_kind='LOGIN' THEN
+    UPDATE public."MfaLoginChallenge" SET attempts=p_expected_attempts,"updatedAt"=p_failed_at
+     WHERE id=p_challenge_id AND "userId"=actor."userId" AND "consumedAt" IS NULL AND attempts<=p_expected_attempts;
+  ELSE
+    UPDATE public."AuthMfaChallenge" SET attempts=p_expected_attempts,"updatedAt"=p_failed_at
+     WHERE id=p_challenge_id AND "userId"=actor."userId" AND "consumedAt" IS NULL AND "supersededAt" IS NULL AND attempts<=p_expected_attempts;
+  END IF;
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  IF changed<>1 THEN RAISE EXCEPTION 'MFA_CHALLENGE_NOT_FOUND' USING ERRCODE='P0002'; END IF;
+  INSERT INTO public."AuditLogOutbox"(id,payload,"requestId","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt")
+  VALUES (gen_random_uuid()::text,jsonb_build_object('userId',actor."userId",'action',p_action,'entityType','MfaChallenge',
+    'entityId',p_challenge_id,'details',jsonb_build_object('attempts',next_attempts),'ipHash',p_ip_hash,'userAgent',p_user_agent),
+    current_setting('app.request_id',true),nullif(actor."organizationId",''),nullif(actor."licenseeId",''),
+    actor."userId",actor.role,p_failed_at+interval '1 day',p_failed_at);
+  RETURN jsonb_build_object('recorded',true,'attempts',next_attempts);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.complete_admin_mfa_challenge(
+  p_kind text,p_challenge_id text,p_method text,p_completed_at timestamp without time zone,p_ip_hash text,p_user_agent text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; challenge record;
+BEGIN
+  IF p_kind NOT IN ('LOGIN','SESSION') OR p_method NOT IN ('TOTP','BACKUP_CODE') OR p_completed_at IS NULL
+     OR abs(extract(epoch FROM (p_completed_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'MFA_CHALLENGE_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM set_config('app.auth_closure_operation','mfa-challenge-complete',true);
+  IF p_kind='LOGIN' THEN
+    UPDATE public."MfaLoginChallenge" SET "consumedAt"=p_completed_at,"updatedAt"=p_completed_at
+     WHERE id=p_challenge_id AND "userId"=actor."userId" AND "consumedAt" IS NULL AND "expiresAt">p_completed_at
+    RETURNING "riskScore","riskLevel",reasons INTO challenge;
+  ELSE
+    UPDATE public."AuthMfaChallenge" SET "consumedAt"=p_completed_at,"updatedAt"=p_completed_at
+     WHERE id=p_challenge_id AND "userId"=actor."userId" AND "consumedAt" IS NULL AND "supersededAt" IS NULL AND "expiresAt">p_completed_at
+    RETURNING "riskScore","riskLevel",reasons INTO challenge;
+  END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'MFA_CHALLENGE_NOT_FOUND' USING ERRCODE='P0002'; END IF;
+  INSERT INTO public."AuditLogOutbox"(id,payload,"requestId","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt")
+  VALUES (gen_random_uuid()::text,jsonb_build_object('userId',actor."userId",'action',
+    CASE WHEN p_method='BACKUP_CODE' THEN 'AUTH_MFA_BACKUP_CODE_USED' ELSE 'AUTH_MFA_SUCCESS' END,
+    'entityType','MfaChallenge','entityId',p_challenge_id,'details',jsonb_build_object('method',p_method),
+    'ipHash',p_ip_hash,'userAgent',p_user_agent),current_setting('app.request_id',true),
+    nullif(actor."organizationId",''),nullif(actor."licenseeId",''),actor."userId",actor.role,p_completed_at+interval '1 day',p_completed_at);
+  INSERT INTO public."AuditLogOutbox"(id,payload,"requestId","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt")
+  VALUES (gen_random_uuid()::text,jsonb_build_object('userId',actor."userId",'action','AUTH_MFA_LOGIN_COMPLETE',
+    'entityType','User','entityId',actor."userId",'details',jsonb_build_object('riskScore',challenge."riskScore",
+    'riskLevel',challenge."riskLevel",'reasons',challenge.reasons),'ipHash',p_ip_hash,'userAgent',p_user_agent),
+    current_setting('app.request_id',true),nullif(actor."organizationId",''),nullif(actor."licenseeId",''),
+    actor."userId",actor.role,p_completed_at+interval '1 day',p_completed_at);
+  RETURN jsonb_build_object('completed',true);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.load_admin_webauthn_credentials()
+RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; result jsonb;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM set_config('app.auth_closure_operation','mfa-webauthn-read',true);
+  SELECT jsonb_build_object(
+    'factors',coalesce((SELECT jsonb_agg(to_jsonb(x) ORDER BY x."lastUsedAt" DESC NULLS LAST,x."createdAt" DESC) FROM (
+      SELECT f.id,f.label,f."credentialId",f."publicKey",f.counter,f.transports,f."lastUsedAt",f."createdAt",f."updatedAt"
+      FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId" AND f.type='WEBAUTHN'
+        AND f."disabledAt" IS NULL AND f."credentialId" IS NOT NULL AND f."publicKey" IS NOT NULL
+    ) x),'[]'::jsonb),
+    'legacy',coalesce((SELECT jsonb_agg(to_jsonb(x) ORDER BY x."lastUsedAt" DESC NULLS LAST,x."createdAt" DESC) FROM (
+      SELECT c.id,c.label,c."credentialId",c."publicKeySpki",c."publicKeyAlgorithm",c.counter,c.transports,
+        c."lastUsedAt",c."createdAt",c."updatedAt"
+      FROM public."AdminWebAuthnCredential" c WHERE c."userId"=actor."userId"
+    ) x),'[]'::jsonb)
+  ) INTO result;
+  RETURN result;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.create_admin_webauthn_challenge(
+  p_purpose text,p_ticket_hash text,p_challenge_hash text,p_ip_hash text,p_user_agent_hash text,
+  p_origin text,p_rp_id text,p_created_at timestamp without time zone,p_expires_at timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; challenge_id text:=gen_random_uuid()::text; credential_ids text[];
+BEGIN
+  IF p_purpose NOT IN ('ENROLLMENT','LOGIN','STEP_UP') OR p_ticket_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$'
+     OR p_challenge_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$' OR length(coalesce(p_origin,''))>512
+     OR length(coalesce(p_rp_id,'')) NOT BETWEEN 1 AND 253 OR p_created_at IS NULL
+     OR p_expires_at<=p_created_at OR p_expires_at>p_created_at+interval '15 minutes'
+     OR abs(extract(epoch FROM (p_created_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'WEBAUTHN_CHALLENGE_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM set_config('app.auth_closure_operation','mfa-webauthn-challenge-create',true),
+          set_config('app.auth_closure_challenge_id',challenge_id,true),
+          set_config('app.auth_closure_challenge_hash',p_ticket_hash,true);
+  SELECT coalesce(array_agg(id ORDER BY id),'{}'::text[]) INTO credential_ids FROM (
+    SELECT f."credentialId" AS id FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId"
+      AND f.type='WEBAUTHN' AND f."disabledAt" IS NULL AND f."credentialId" IS NOT NULL AND f."publicKey" IS NOT NULL
+    UNION SELECT c."credentialId" FROM public."AdminWebAuthnCredential" c WHERE c."userId"=actor."userId"
+  ) q;
+  IF p_purpose IN ('LOGIN','STEP_UP') AND cardinality(credential_ids)=0 THEN
+    RAISE EXCEPTION 'WEBAUTHN_NOT_ENROLLED' USING ERRCODE='P0002';
+  END IF;
+  INSERT INTO public."AuthWebAuthnChallenge"(id,"userId",purpose,"ticketHash","challengeHash","credentialIds",
+    "createdIpHash","createdUserAgentHash",origin,"rpId","createdAt","expiresAt")
+  VALUES (challenge_id,actor."userId",p_purpose,p_ticket_hash,p_challenge_hash,credential_ids,
+    p_ip_hash,p_user_agent_hash,p_origin,p_rp_id,p_created_at,p_expires_at);
+  RETURN jsonb_build_object('challengeId',challenge_id,'credentialIds',to_jsonb(credential_ids));
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.load_admin_webauthn_challenge(
+  p_ticket_hashes text[],p_purpose text,p_credential_id text,p_checked_at timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; result jsonb;
+BEGIN
+  IF cardinality(p_ticket_hashes) NOT BETWEEN 1 AND 3 OR p_purpose NOT IN ('ENROLLMENT','LOGIN','STEP_UP')
+     OR p_checked_at IS NULL OR abs(extract(epoch FROM (p_checked_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'WEBAUTHN_CHALLENGE_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-webauthn-challenge-read',true);
+  SELECT jsonb_build_object(
+    'challenge',to_jsonb(c),
+    'factor',(SELECT to_jsonb(x) FROM (
+      SELECT f.id,f."credentialId",f."publicKey",f.counter,f.transports
+      FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId" AND f.type='WEBAUTHN'
+        AND f."disabledAt" IS NULL AND f."credentialId"=p_credential_id
+    ) x),
+    'legacy',(SELECT to_jsonb(x) FROM (
+      SELECT w.id,w."credentialId",w."publicKeySpki",w."publicKeyAlgorithm",w.counter,w.transports
+      FROM public."AdminWebAuthnCredential" w WHERE w."userId"=actor."userId" AND w."credentialId"=p_credential_id
+    ) x)
+  ) INTO result
+  FROM public."AuthWebAuthnChallenge" c WHERE c."userId"=actor."userId" AND c."ticketHash"=ANY(p_ticket_hashes)
+    AND c.purpose=p_purpose AND c."consumedAt" IS NULL AND c."expiresAt">p_checked_at;
+  RETURN result;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.complete_admin_webauthn_registration(
+  p_challenge_id text,p_credential_id text,p_label text,p_public_key text,p_counter integer,p_transports text[],
+  p_device_type text,p_backed_up boolean,p_completed_at timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; factor_id text;
+BEGIN
+  IF p_credential_id IS NULL OR length(p_credential_id)>1024 OR p_public_key IS NULL OR length(p_public_key)>16384
+     OR length(coalesce(p_label,''))>128 OR p_counter<0 OR cardinality(p_transports)>16 OR p_completed_at IS NULL
+     OR abs(extract(epoch FROM (p_completed_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'WEBAUTHN_REGISTRATION_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-webauthn-registration-complete',true);
+  IF NOT EXISTS (SELECT 1 FROM public."AuthWebAuthnChallenge" c WHERE c.id=p_challenge_id AND c."userId"=actor."userId"
+    AND c.purpose='ENROLLMENT' AND c."consumedAt" IS NULL AND c."expiresAt">p_completed_at) THEN
+    RAISE EXCEPTION 'WEBAUTHN_CHALLENGE_NOT_FOUND' USING ERRCODE='P0002';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public."UserMfaFactor" f WHERE f."credentialId"=p_credential_id AND f."userId"<>actor."userId")
+     OR EXISTS (SELECT 1 FROM public."AdminWebAuthnCredential" w WHERE w."credentialId"=p_credential_id AND w."userId"<>actor."userId") THEN
+    RAISE EXCEPTION 'WEBAUTHN_CREDENTIAL_CONFLICT' USING ERRCODE='23505';
+  END IF;
+  SELECT f.id INTO factor_id FROM public."UserMfaFactor" f WHERE f."credentialId"=p_credential_id FOR UPDATE;
+  IF factor_id IS NULL THEN
+    factor_id:=gen_random_uuid()::text;
+    INSERT INTO public."UserMfaFactor"(id,"userId",type,label,"credentialId","publicKey",counter,transports,
+      "credentialDeviceType","credentialBackedUp","lastUsedAt","createdAt","updatedAt")
+    VALUES (factor_id,actor."userId",'WEBAUTHN',coalesce(nullif(trim(p_label),''),'Passkey'),p_credential_id,p_public_key,
+      p_counter,p_transports,p_device_type,p_backed_up,p_completed_at,p_completed_at,p_completed_at);
+  ELSE
+    UPDATE public."UserMfaFactor" SET "userId"=actor."userId",type='WEBAUTHN',label=coalesce(nullif(trim(p_label),''),'Passkey'),
+      "publicKey"=p_public_key,counter=p_counter,transports=p_transports,"credentialDeviceType"=p_device_type,
+      "credentialBackedUp"=p_backed_up,"lastUsedAt"=p_completed_at,"disabledAt"=NULL,"updatedAt"=p_completed_at
+      WHERE id=factor_id AND "userId"=actor."userId";
+  END IF;
+  UPDATE public."AuthWebAuthnChallenge" SET "consumedAt"=p_completed_at
+   WHERE id=p_challenge_id AND "userId"=actor."userId" AND "consumedAt" IS NULL AND "expiresAt">p_completed_at;
+  IF NOT FOUND THEN RAISE EXCEPTION 'WEBAUTHN_CHALLENGE_NOT_FOUND' USING ERRCODE='P0002'; END IF;
+  INSERT INTO public."AuditLogOutbox"(id,payload,"requestId","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt")
+  VALUES (gen_random_uuid()::text,jsonb_build_object('userId',actor."userId",'action','AUTH_WEBAUTHN_ENROLLED',
+    'entityType','User','entityId',actor."userId",'details',jsonb_build_object('label',coalesce(nullif(trim(p_label),''),'Passkey'))),
+    current_setting('app.request_id',true),nullif(actor."organizationId",''),nullif(actor."licenseeId",''),
+    actor."userId",actor.role,p_completed_at+interval '1 day',p_completed_at);
+  RETURN jsonb_build_object('ok',true,'credentialId',p_credential_id);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.complete_admin_webauthn_authentication(
+  p_challenge_id text,p_credential_kind text,p_credential_row_id text,p_expected_counter integer,p_next_counter integer,
+  p_device_type text,p_backed_up boolean,p_completed_at timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; changed integer; purpose text;
+BEGIN
+  IF p_credential_kind NOT IN ('FACTOR','LEGACY') OR p_expected_counter<0 OR p_next_counter<0
+     OR (p_next_counter>0 AND p_expected_counter>0 AND p_next_counter<=p_expected_counter)
+     OR p_completed_at IS NULL OR abs(extract(epoch FROM (p_completed_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'WEBAUTHN_AUTHENTICATION_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-webauthn-authentication-complete',true);
+  SELECT c.purpose INTO purpose FROM public."AuthWebAuthnChallenge" c WHERE c.id=p_challenge_id AND c."userId"=actor."userId"
+    AND c.purpose IN ('LOGIN','STEP_UP') AND c."consumedAt" IS NULL AND c."expiresAt">p_completed_at FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'WEBAUTHN_CHALLENGE_NOT_FOUND' USING ERRCODE='P0002'; END IF;
+  IF p_credential_kind='FACTOR' THEN
+    UPDATE public."UserMfaFactor" SET counter=greatest(counter,p_next_counter),"credentialDeviceType"=p_device_type,
+      "credentialBackedUp"=p_backed_up,"lastUsedAt"=p_completed_at,"updatedAt"=p_completed_at
+      WHERE id=p_credential_row_id AND "userId"=actor."userId" AND type='WEBAUTHN' AND "disabledAt" IS NULL
+        AND counter=p_expected_counter;
+  ELSE
+    UPDATE public."AdminWebAuthnCredential" SET counter=greatest(counter,p_next_counter),"lastUsedAt"=p_completed_at,"updatedAt"=p_completed_at
+      WHERE id=p_credential_row_id AND "userId"=actor."userId" AND counter=p_expected_counter;
+  END IF;
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  IF changed<>1 THEN RAISE EXCEPTION 'WEBAUTHN_COUNTER_REPLAY' USING ERRCODE='40001'; END IF;
+  UPDATE public."AuthWebAuthnChallenge" SET "consumedAt"=p_completed_at
+    WHERE id=p_challenge_id AND "userId"=actor."userId" AND "consumedAt" IS NULL AND "expiresAt">p_completed_at;
+  IF NOT FOUND THEN RAISE EXCEPTION 'WEBAUTHN_CHALLENGE_NOT_FOUND' USING ERRCODE='P0002'; END IF;
+  RETURN jsonb_build_object('ok',true,'purpose',purpose);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.delete_admin_webauthn_credential(
+  p_credential_row_id text,p_deleted_at timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; changed integer:=0; delta integer;
+BEGIN
+  IF p_credential_row_id IS NULL OR p_deleted_at IS NULL
+     OR abs(extract(epoch FROM (p_deleted_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'WEBAUTHN_DELETE_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.b01_admin_mfa_actor();
+  PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
+  PERFORM set_config('app.auth_closure_operation','mfa-webauthn-delete',true);
+  UPDATE public."UserMfaFactor" SET "disabledAt"=p_deleted_at,"updatedAt"=p_deleted_at
+    WHERE id=p_credential_row_id AND "userId"=actor."userId" AND type='WEBAUTHN' AND "disabledAt" IS NULL;
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  DELETE FROM public."AdminWebAuthnCredential" WHERE id=p_credential_row_id AND "userId"=actor."userId";
+  GET DIAGNOSTICS delta=ROW_COUNT;
+  IF changed+delta>0 THEN
+    INSERT INTO public."AuditLogOutbox"(id,payload,"requestId","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt")
+    VALUES (gen_random_uuid()::text,jsonb_build_object('userId',actor."userId",'action','AUTH_WEBAUTHN_CREDENTIAL_REMOVED',
+      'entityType','User','entityId',actor."userId",'details',jsonb_build_object('credentialId',p_credential_row_id)),
+      current_setting('app.request_id',true),nullif(actor."organizationId",''),nullif(actor."licenseeId",''),
+      actor."userId",actor.role,p_deleted_at+interval '1 day',p_deleted_at);
+  END IF;
+  RETURN jsonb_build_object('deleted',changed+delta>0);
+END
+$fn$;
+
 REVOKE ALL ON FUNCTION app_rls.b01_authenticated_actor(text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.load_authenticated_actor() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.load_authenticated_manufacturer_scope(text,text,text,text,boolean) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.find_refresh_token_by_id(text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.revoke_refresh_token_by_id(text,text,text,timestamp without time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.require_recent_mfa_session(text,timestamp without time zone,integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.load_recent_auth_session_risk_inputs(integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.record_auth_session_risk_signal(integer,text,text[],text,text,timestamp without time zone,text,text,text,timestamp without time zone,integer,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.create_refresh_token(text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.load_authenticated_password_actor() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.list_active_refresh_tokens(text,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.revoke_all_refresh_tokens(text,text,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.prove_authenticated_password_step_up(text,text,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.require_recent_sensitive_session(text,timestamp without time zone,integer,integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.request_authenticated_email_change(text,text,text,timestamp without time zone,timestamp without time zone,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.update_authenticated_profile(text,boolean,text,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.change_authenticated_password(text,text,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b01_admin_mfa_actor() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.load_admin_mfa_state() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.begin_admin_totp_enrollment(text,text,text,text,text[],timestamp without time zone,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.load_admin_totp_enrollment(text,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.complete_admin_totp_enrollment(text,text,text,text,text,timestamp without time zone,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.load_admin_mfa_verifiers() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.consume_admin_mfa_verifier(text,text,text[],text[],timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.replace_admin_backup_codes(text[],timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.disable_admin_mfa(timestamp without time zone,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.create_admin_mfa_challenge(text,text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.load_admin_mfa_challenge(text[],text[],timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.record_admin_mfa_challenge_failure(text,text,text,integer,timestamp without time zone,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.complete_admin_mfa_challenge(text,text,text,timestamp without time zone,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.load_admin_webauthn_credentials() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.create_admin_webauthn_challenge(text,text,text,text,text,text,text,timestamp without time zone,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.load_admin_webauthn_challenge(text[],text,text,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.complete_admin_webauthn_registration(text,text,text,text,integer,text[],text,boolean,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.complete_admin_webauthn_authentication(text,text,text,integer,integer,text,boolean,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.delete_admin_webauthn_credential(text,timestamp without time zone) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION app_rls.create_refresh_token(text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_rls.load_recent_auth_session_risk_inputs(integer) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_rls.record_auth_session_risk_signal(integer,text,text[],text,text,timestamp without time zone,text,text,text,timestamp without time zone,integer,text) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_rls.begin_admin_totp_enrollment(text,text,text,text,text[],timestamp without time zone,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.change_authenticated_password(text,text,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.complete_admin_mfa_challenge(text,text,text,timestamp without time zone,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.complete_admin_totp_enrollment(text,text,text,text,text,timestamp without time zone,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.complete_admin_webauthn_authentication(text,text,text,integer,integer,text,boolean,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.complete_admin_webauthn_registration(text,text,text,text,integer,text[],text,boolean,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.consume_admin_mfa_verifier(text,text,text[],text[],timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.create_admin_mfa_challenge(text,text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.create_admin_webauthn_challenge(text,text,text,text,text,text,text,timestamp without time zone,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.delete_admin_webauthn_credential(text,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.disable_admin_mfa(timestamp without time zone,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.find_refresh_token_by_id(text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.list_active_refresh_tokens(text,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.load_admin_mfa_challenge(text[],text[],timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.load_admin_mfa_state() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.load_admin_mfa_verifiers() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.load_admin_totp_enrollment(text,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.load_admin_webauthn_challenge(text[],text,text,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.load_admin_webauthn_credentials() TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.load_authenticated_actor() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.load_authenticated_manufacturer_scope(text,text,text,text,boolean) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.load_authenticated_password_actor() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.prove_authenticated_password_step_up(text,text,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.record_admin_mfa_challenge_failure(text,text,text,integer,timestamp without time zone,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.replace_admin_backup_codes(text[],timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.request_authenticated_email_change(text,text,text,timestamp without time zone,timestamp without time zone,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.require_recent_mfa_session(text,timestamp without time zone,integer) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.require_recent_sensitive_session(text,timestamp without time zone,integer,integer) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.revoke_all_refresh_tokens(text,text,timestamp without time zone) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.revoke_refresh_token_by_id(text,text,text,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.update_authenticated_profile(text,boolean,text,timestamp without time zone) TO "mscqr_rls_cert_app";
 RESET ROLE;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;
@@ -2288,6 +3435,1011 @@ DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_auth_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_auth_owner'; END IF;
 END $$;
 SET ROLE "mscqr_rls_cert_auth_owner";
+CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_actor_scope(
+  target_licensee_id text,
+  allowed_roles_json jsonb,
+  minimum_assurance text,
+  purpose_code text
+)
+RETURNS TABLE(user_id text, role text, organization_id text, licensee_id text)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  actor record;
+  target_org_id text;
+  installed_licensee_id text := NULLIF(current_setting('app.licensee_id', true), '');
+  installed_org_id text := NULLIF(current_setting('app.organization_id', true), '');
+  installed_manufacturer_id text := NULLIF(current_setting('app.manufacturer_id', true), '');
+  installed_assurance text := current_setting('app.auth_assurance', true);
+BEGIN
+  IF current_setting('app.user_id', true) !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR current_setting('app.request_id', true) !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR target_licensee_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR current_setting('app.purpose', true) IS DISTINCT FROM purpose_code
+     OR jsonb_typeof(allowed_roles_json) IS DISTINCT FROM 'array'
+     OR NOT (allowed_roles_json ? current_setting('app.role', true))
+     OR minimum_assurance NOT IN ('password-verified', 'mfa-verified', 'step-up-verified')
+     OR (CASE minimum_assurance
+          WHEN 'password-verified' THEN installed_assurance NOT IN ('password-verified','mfa-verified','step-up-verified')
+          WHEN 'mfa-verified' THEN installed_assurance NOT IN ('mfa-verified','step-up-verified')
+          ELSE installed_assurance <> 'step-up-verified'
+        END) THEN
+    RETURN;
+  END IF;
+
+  SELECT u.id, u.role::text AS role, u."orgId", u."licenseeId"
+    INTO actor
+    FROM public."User" u
+   WHERE u.id = current_setting('app.user_id', true)
+     AND u.role::text = current_setting('app.role', true)
+     AND u."isActive"
+     AND u.status = 'ACTIVE'::public."UserStatus"
+     AND u."deletedAt" IS NULL
+     AND u."disabledAt" IS NULL;
+  IF NOT FOUND THEN RETURN; END IF;
+
+  SELECT l."orgId" INTO target_org_id
+    FROM public."Licensee" l
+    JOIN public."Organization" o ON o.id = l."orgId"
+   WHERE l.id = target_licensee_id
+     AND l."isActive"
+     AND l."suspendedAt" IS NULL
+     AND o."isActive";
+  IF NOT FOUND THEN RETURN; END IF;
+
+  IF actor.role IN ('SUPER_ADMIN', 'PLATFORM_SUPER_ADMIN') THEN
+    IF actor."orgId" IS NOT NULL OR actor."licenseeId" IS NOT NULL OR installed_org_id IS NOT NULL OR installed_manufacturer_id IS NOT NULL THEN
+      RETURN;
+    END IF;
+  ELSIF actor.role = 'MANUFACTURER_ADMIN' THEN
+    IF installed_licensee_id IS DISTINCT FROM target_licensee_id
+       OR installed_manufacturer_id IS DISTINCT FROM actor.id
+       OR NOT EXISTS (
+         SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+          WHERE ml."manufacturerId" = actor.id AND ml."licenseeId" = target_licensee_id
+       ) THEN
+      RETURN;
+    END IF;
+  ELSIF actor.role <> 'LICENSEE_ADMIN'
+        OR actor."licenseeId" IS DISTINCT FROM target_licensee_id
+        OR actor."orgId" IS DISTINCT FROM target_org_id
+        OR installed_licensee_id IS DISTINCT FROM target_licensee_id
+        OR installed_org_id IS DISTINCT FROM target_org_id
+        OR installed_manufacturer_id IS NOT NULL THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY SELECT actor.id::text, actor.role::text, target_org_id, target_licensee_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_platform_actor_scope(
+  allowed_roles_json jsonb,
+  minimum_assurance text,
+  purpose_code text
+)
+RETURNS TABLE(user_id text, role text)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+  SELECT actor.id::text, actor.role::text
+    FROM public."User" actor
+   WHERE actor.id = current_setting('app.user_id', true)
+     AND actor.role::text = current_setting('app.role', true)
+     AND actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+     AND actor."orgId" IS NULL AND actor."licenseeId" IS NULL
+     AND actor."isActive" AND actor.status = 'ACTIVE'::public."UserStatus"
+     AND actor."deletedAt" IS NULL AND actor."disabledAt" IS NULL
+     AND NULLIF(current_setting('app.organization_id', true), '') IS NULL
+     AND NULLIF(current_setting('app.licensee_id', true), '') IS NULL
+     AND NULLIF(current_setting('app.manufacturer_id', true), '') IS NULL
+     AND current_setting('app.request_id', true) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     AND current_setting('app.purpose', true) = purpose_code
+     AND jsonb_typeof(allowed_roles_json) = 'array'
+     AND allowed_roles_json ? actor.role::text
+     AND CASE minimum_assurance
+           WHEN 'password-verified' THEN current_setting('app.auth_assurance', true) IN ('password-verified','mfa-verified','step-up-verified')
+           WHEN 'mfa-verified' THEN current_setting('app.auth_assurance', true) IN ('mfa-verified','step-up-verified')
+           WHEN 'step-up-verified' THEN current_setting('app.auth_assurance', true) = 'step-up-verified'
+           ELSE false
+         END
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_incident_actor_scope(
+  incident_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text
+)
+RETURNS TABLE(user_id text, role text, organization_id text, licensee_id text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+  SELECT actor.* FROM public."Incident" resource
+  CROSS JOIN LATERAL app_rls.c03_revalidate_actor_scope(resource."licenseeId", allowed_roles_json, minimum_assurance, purpose_code) actor
+  WHERE resource.id = incident_id AND resource."licenseeId" IS NOT NULL
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_policy_rule_actor_scope(
+  policy_rule_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text
+)
+RETURNS TABLE(user_id text, role text, organization_id text, licensee_id text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+  SELECT actor.* FROM public."PolicyRule" resource
+  CROSS JOIN LATERAL app_rls.c03_revalidate_actor_scope(resource."licenseeId", allowed_roles_json, minimum_assurance, purpose_code) actor
+  WHERE resource.id = policy_rule_id AND resource."licenseeId" IS NOT NULL
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_compliance_pack_job_actor_scope(
+  compliance_pack_job_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text
+)
+RETURNS TABLE(user_id text, role text, organization_id text, licensee_id text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+  SELECT actor.* FROM public."CompliancePackJob" resource
+  CROSS JOIN LATERAL app_rls.c03_revalidate_actor_scope(resource."licenseeId", allowed_roles_json, minimum_assurance, purpose_code) actor
+  WHERE resource.id = compliance_pack_job_id AND resource."licenseeId" IS NOT NULL
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_incident_evidence_actor_scope(
+  incident_evidence_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text
+)
+RETURNS TABLE(user_id text, role text, organization_id text, licensee_id text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+  SELECT actor.* FROM public."IncidentEvidence" evidence
+  JOIN public."Incident" resource ON resource.id = evidence."incidentId"
+  CROSS JOIN LATERAL app_rls.c03_revalidate_actor_scope(resource."licenseeId", allowed_roles_json, minimum_assurance, purpose_code) actor
+  WHERE evidence.id = incident_evidence_id AND resource."licenseeId" IS NOT NULL
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_incident_evidence_storage_actor_scope(
+  storage_key text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text
+)
+RETURNS TABLE(user_id text, role text, organization_id text, licensee_id text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+  SELECT actor.* FROM public."IncidentEvidence" evidence
+  JOIN public."Incident" resource ON resource.id = evidence."incidentId"
+  CROSS JOIN LATERAL app_rls.c03_revalidate_actor_scope(resource."licenseeId", allowed_roles_json, minimum_assurance, purpose_code) actor
+  WHERE evidence."storageKey" = storage_key AND resource."licenseeId" IS NOT NULL
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_sensitive_approval_actor_scope(
+  approval_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text
+)
+RETURNS TABLE(user_id text, role text, organization_id text, licensee_id text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+  SELECT actor.* FROM public."SensitiveActionApproval" resource
+  CROSS JOIN LATERAL app_rls.c03_revalidate_actor_scope(resource."licenseeId", allowed_roles_json, minimum_assurance, purpose_code) actor
+  WHERE resource.id = approval_id AND resource."licenseeId" IS NOT NULL
+$$;
+
+REVOKE ALL ON FUNCTION app_rls.c03_revalidate_actor_scope(text,jsonb,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_revalidate_platform_actor_scope(jsonb,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_revalidate_incident_actor_scope(text,jsonb,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_revalidate_policy_rule_actor_scope(text,jsonb,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_revalidate_compliance_pack_job_actor_scope(text,jsonb,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_revalidate_incident_evidence_actor_scope(text,jsonb,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_revalidate_incident_evidence_storage_actor_scope(text,jsonb,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_revalidate_sensitive_approval_actor_scope(text,jsonb,text,text) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app_rls.c02_audit_trace_session_valid()
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF session_user <> 'mscqr_rls_cert_app'
+     OR current_setting('app.auth_session_verified', true) <> '1'
+  THEN RETURN false; END IF;
+
+  RETURN EXISTS (
+    SELECT 1 FROM public."RefreshToken" session_row
+     WHERE session_row.id = current_setting('app.auth_session_id', true)
+       AND session_row."userId" = current_setting('app.user_id', true)
+       AND session_row."sessionCapabilityHash" = current_setting('app.auth_session_hash', true)
+       AND session_row."sessionCapabilityHashVersion" = 'sha256-v1'
+       AND session_row."sessionCapabilityRevokedAt" IS NULL
+       AND session_row."sessionCapabilityExpiresAt" > clock_timestamp()
+       AND session_row."revokedAt" IS NULL
+       AND session_row."expiresAt" > clock_timestamp()
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION app_rls.c02_audit_trace_session_valid() FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app_rls.c02_audit_trace_actor_valid(target_licensee_id text)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  actor record;
+  target_org_id text;
+  actor_id text := current_setting('app.user_id', true);
+  actor_role text := current_setting('app.role', true);
+  actor_org_id text := NULLIF(current_setting('app.organization_id', true), '');
+  actor_licensee_id text := NULLIF(current_setting('app.licensee_id', true), '');
+  actor_manufacturer_id text := NULLIF(current_setting('app.manufacturer_id', true), '');
+  assurance text := current_setting('app.auth_assurance', true);
+  purpose_code text := current_setting('app.purpose', true);
+BEGIN
+  IF actor_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR current_setting('app.request_id', true) !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR target_licensee_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR actor_licensee_id IS DISTINCT FROM target_licensee_id
+     OR purpose_code NOT IN (
+       'platform-audit-log-read', 'audit-log-read',
+       'platform-audit-csv-export', 'tenant-audit-csv-export', 'manufacturer-audit-csv-export',
+       'platform-fraud-report-read',
+       'platform-trace-timeline-read', 'tenant-trace-timeline-read', 'manufacturer-trace-timeline-read'
+     ) THEN
+    RETURN false;
+  END IF;
+
+  SELECT u.id, u.role::text AS role, u."orgId", u."licenseeId"
+    INTO actor
+    FROM public."User" u
+   WHERE u.id = actor_id
+     AND u.role::text = actor_role
+     AND u."isActive"
+     AND u.status = 'ACTIVE'::public."UserStatus"
+     AND u."deletedAt" IS NULL
+     AND u."disabledAt" IS NULL;
+  IF NOT FOUND THEN RETURN false; END IF;
+
+  SELECT l."orgId" INTO target_org_id
+    FROM public."Licensee" l
+    JOIN public."Organization" o ON o.id = l."orgId"
+   WHERE l.id = target_licensee_id
+     AND l."isActive"
+     AND l."suspendedAt" IS NULL
+     AND o."isActive";
+  IF NOT FOUND THEN RETURN false; END IF;
+
+  IF actor_role IN ('SUPER_ADMIN', 'PLATFORM_SUPER_ADMIN') THEN
+    RETURN assurance = 'mfa-verified'
+       AND actor."orgId" IS NULL
+       AND actor."licenseeId" IS NULL
+       AND actor_org_id IS NULL
+       AND actor_manufacturer_id IS NULL;
+  END IF;
+
+  IF actor_role = 'LICENSEE_ADMIN' THEN
+    RETURN assurance IN ('password-verified', 'mfa-verified', 'step-up-verified')
+       AND actor."licenseeId" = target_licensee_id
+       AND actor."orgId" = target_org_id
+       AND actor_org_id = target_org_id
+       AND actor_manufacturer_id IS NULL
+       AND (purpose_code <> 'audit-log-read' OR assurance IN ('mfa-verified', 'step-up-verified'));
+  END IF;
+
+  IF actor_role = 'MANUFACTURER_ADMIN' THEN
+    RETURN assurance IN ('password-verified', 'mfa-verified', 'step-up-verified')
+       AND actor_manufacturer_id = actor_id
+       AND EXISTS (
+         SELECT 1
+           FROM public."ManufacturerLicenseeLink" ml
+          WHERE ml."manufacturerId" = actor_id
+            AND ml."licenseeId" = target_licensee_id
+       );
+  END IF;
+
+  RETURN false;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.platform_audit_log_details(audit_ids text[])
+RETURNS TABLE(id text, ip_address text, user_agent text, user_id text, user_name text)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  target_licensee_id text := NULLIF(current_setting('app.licensee_id', true), '');
+BEGIN
+  IF current_setting('app.role', true) NOT IN ('SUPER_ADMIN', 'PLATFORM_SUPER_ADMIN')
+     OR current_setting('app.purpose', true) <> 'platform-audit-log-read'
+     OR NOT app_rls.c02_audit_trace_actor_valid(target_licensee_id)
+     OR COALESCE(cardinality(audit_ids), 0) > 500
+     OR EXISTS (
+       SELECT 1 FROM unnest(COALESCE(audit_ids, ARRAY[]::text[])) requested(id)
+       LEFT JOIN public."AuditLog" a ON a.id = requested.id AND a."licenseeId" = target_licensee_id
+       WHERE a.id IS NULL
+     ) THEN
+    RAISE EXCEPTION 'SESSION_C_AUDIT_DETAIL_SCOPE_DENIED';
+  END IF;
+
+  RETURN QUERY
+  SELECT a.id, a."ipAddress", a."userAgent", a."userId", u.name
+    FROM public."AuditLog" a
+    LEFT JOIN public."User" u ON u.id = a."userId"
+   WHERE a.id = ANY(COALESCE(audit_ids, ARRAY[]::text[]))
+     AND a."licenseeId" = target_licensee_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c02_fraud_report_network_details(report_ids text[])
+RETURNS TABLE(id text, ip_address text)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  target_licensee_id text := NULLIF(current_setting('app.licensee_id', true), '');
+BEGIN
+  IF current_setting('app.role', true) NOT IN ('SUPER_ADMIN', 'PLATFORM_SUPER_ADMIN')
+     OR current_setting('app.purpose', true) <> 'platform-fraud-report-read'
+     OR NOT app_rls.c02_audit_trace_actor_valid(target_licensee_id)
+     OR COALESCE(cardinality(report_ids), 0) > 500
+     OR EXISTS (
+       SELECT 1 FROM unnest(COALESCE(report_ids, ARRAY[]::text[])) requested(id)
+       LEFT JOIN public."AuditLog" a
+         ON a.id = requested.id
+        AND a."licenseeId" = target_licensee_id
+        AND a.action = 'CUSTOMER_FRAUD_REPORT'
+       WHERE a.id IS NULL
+     ) THEN
+    RAISE EXCEPTION 'SESSION_C_FRAUD_DETAIL_SCOPE_DENIED';
+  END IF;
+
+  RETURN QUERY
+  SELECT a.id, a."ipAddress"
+    FROM public."AuditLog" a
+   WHERE a.id = ANY(COALESCE(report_ids, ARRAY[]::text[]))
+     AND a."licenseeId" = target_licensee_id
+     AND a.action = 'CUSTOMER_FRAUD_REPORT';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c02_respond_fraud_report(
+  report_id text,
+  response_status text,
+  requested_message text,
+  notify_customer boolean
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  actor record;
+  report record;
+  target_org_id text;
+  response_id text := gen_random_uuid()::text;
+  normalized_code text;
+  recipient_email text;
+  response_message text;
+  delivery jsonb;
+  response_details jsonb;
+BEGIN
+  IF current_setting('app.purpose', true) <> 'platform-fraud-report-response'
+     OR current_setting('app.auth_assurance', true) <> 'mfa-verified'
+     OR current_setting('app.request_id', true) !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR report_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR response_status NOT IN ('REVIEWED', 'RESOLVED', 'DISMISSED') THEN
+    RAISE EXCEPTION 'SESSION_C_INVALID_CONTEXT';
+  END IF;
+
+  SELECT u.id, u.role::text AS role
+    INTO actor
+    FROM public."User" u
+   WHERE u.id = current_setting('app.user_id', true)
+     AND u.role::text = current_setting('app.role', true)
+     AND u.role IN ('SUPER_ADMIN', 'PLATFORM_SUPER_ADMIN')
+     AND u."orgId" IS NULL
+     AND u."licenseeId" IS NULL
+     AND u."isActive"
+     AND u.status = 'ACTIVE'::public."UserStatus"
+     AND u."deletedAt" IS NULL
+     AND u."disabledAt" IS NULL
+   FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'SESSION_C_DISABLED_OR_STALE_ACTOR'; END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended(report_id, 0));
+  SELECT a.id, a."licenseeId", a."entityId", a.details
+    INTO report
+    FROM public."AuditLog" a
+   WHERE a.id = report_id
+     AND a.action = 'CUSTOMER_FRAUD_REPORT'
+     AND a."licenseeId" IS NOT NULL
+   FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'SESSION_C_FRAUD_REPORT_NOT_FOUND'; END IF;
+
+  SELECT l."orgId" INTO target_org_id
+    FROM public."Licensee" l
+    JOIN public."Organization" o ON o.id = l."orgId"
+   WHERE l.id = report."licenseeId"
+     AND l."isActive"
+     AND l."suspendedAt" IS NULL
+     AND o."isActive";
+  IF NOT FOUND THEN RAISE EXCEPTION 'SESSION_C_FRAUD_REPORT_NOT_FOUND'; END IF;
+
+  normalized_code := COALESCE(NULLIF(report.details->>'code', ''), NULLIF(report."entityId", ''), 'UNKNOWN');
+  recipient_email := NULLIF(btrim(report.details->>'contactEmail'), '');
+  response_message := NULLIF(btrim(requested_message), '');
+  IF response_message IS NULL THEN
+    response_message := CASE response_status
+      WHEN 'RESOLVED' THEN 'Thanks for reporting code ' || normalized_code || '. Our security team reviewed it and completed corrective action.'
+      WHEN 'DISMISSED' THEN 'Thanks for reporting code ' || normalized_code || '. We reviewed the case and found no actionable fraud signal from current evidence.'
+      ELSE 'Thanks for reporting code ' || normalized_code || '. Our security team has started investigating your report.'
+    END;
+  END IF;
+  response_message := left(response_message, 1000);
+  delivery := jsonb_build_object(
+    'attempted', notify_customer,
+    'delivered', notify_customer AND recipient_email IS NOT NULL,
+    'transport', CASE WHEN notify_customer THEN 'simulated' ELSE 'none' END,
+    'recipientEmail', CASE WHEN notify_customer THEN recipient_email ELSE NULL END,
+    'reason', CASE WHEN notify_customer AND recipient_email IS NULL THEN 'Customer did not provide a contact email in the report.' ELSE NULL END,
+    'deliveredAt', CASE WHEN notify_customer AND recipient_email IS NOT NULL THEN transaction_timestamp() ELSE NULL END
+  );
+  response_details := jsonb_build_object(
+    'reportId', report.id,
+    'status', response_status,
+    'message', response_message,
+    'notifyCustomer', notify_customer,
+    'recipientEmail', recipient_email,
+    'delivery', delivery,
+    'sourceCode', normalized_code,
+    'respondedAt', transaction_timestamp(),
+    'requestId', current_setting('app.request_id', true),
+    'purposeCode', current_setting('app.purpose', true)
+  );
+
+  INSERT INTO public."AuditLog"
+    (id, "userId", "orgId", "licenseeId", action, "entityType", "entityId", details)
+  VALUES
+    (response_id, actor.id, target_org_id, report."licenseeId", 'CUSTOMER_FRAUD_REPORT_RESPONSE', 'FraudReport', report.id, response_details);
+  INSERT INTO public."SecurityEventOutbox" (id, "eventType", payload, "updatedAt")
+  VALUES (
+    gen_random_uuid()::text,
+    'AUDIT_LOG',
+    jsonb_build_object(
+      'id', response_id,
+      'action', 'CUSTOMER_FRAUD_REPORT_RESPONSE',
+      'entityType', 'FraudReport',
+      'entityId', report.id,
+      'userId', actor.id,
+      'orgId', target_org_id,
+      'licenseeId', report."licenseeId",
+      'details', response_details,
+      'createdAt', transaction_timestamp()
+    ),
+    transaction_timestamp()
+  );
+
+  RETURN jsonb_build_object(
+    'responseId', response_id,
+    'reportId', report.id,
+    'status', response_status,
+    'message', response_message,
+    'notifyCustomer', notify_customer,
+    'delivery', delivery
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION app_rls.c02_audit_trace_actor_valid(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.platform_audit_log_details(text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c02_fraud_report_network_details(text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c02_respond_fraud_report(text,text,text,boolean) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_assert_restricted_identity(expected_identity text)
+RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog
+AS $$
+BEGIN
+  IF expected_identity NOT IN ('preauth','worker')
+     OR session_user::text IS DISTINCT FROM (CASE expected_identity
+       WHEN 'preauth' THEN 'mscqr_rls_cert_preauth'
+       ELSE 'mscqr_rls_cert_worker'
+     END) THEN
+    RAISE EXCEPTION 'C03_RESTRICTED_IDENTITY_DENIED' USING ERRCODE='42501';
+  END IF;
+  RETURN true;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_public_incident_qr(qr_proof text)
+RETURNS TABLE(qr_id text, licensee_id text)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE candidate record;
+BEGIN
+  IF session_user::text<>'mscqr_rls_cert_preauth' OR current_setting('app.purpose',true)<>'public-incident-intake'
+     OR qr_proof IS NULL OR length(qr_proof) NOT BETWEEN 2 AND 128 OR qr_proof<>btrim(qr_proof) THEN
+    RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.c03_public_operation','incident-qr-read',true);
+  PERFORM set_config('app.c03_public_code',qr_proof,true);
+  SELECT q.id,q."licenseeId" INTO candidate FROM public."QRCode" q WHERE q.code=qr_proof;
+  IF NOT FOUND THEN RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_NOT_FOUND' USING ERRCODE='02000'; END IF;
+  PERFORM set_config('app.c03_public_licensee_id',candidate."licenseeId",true);
+  RETURN QUERY
+  SELECT candidate.id,candidate."licenseeId" FROM public."Licensee" l
+   JOIN public."Organization" o ON o.id=l."orgId"
+  WHERE l.id=candidate."licenseeId" AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive";
+  IF NOT FOUND THEN RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_NOT_FOUND' USING ERRCODE='02000'; END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_compute_incident_spam_signal(qr_proof text, contact_hashes jsonb)
+RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE qr record; recent_count integer;
+BEGIN
+  IF jsonb_typeof(contact_hashes)<>'object'
+     OR EXISTS (SELECT 1 FROM jsonb_object_keys(contact_hashes) k WHERE k NOT IN ('emailHash','phoneHash'))
+     OR length(COALESCE(contact_hashes->>'emailHash',''))>64
+     OR length(COALESCE(contact_hashes->>'phoneHash',''))>64 THEN
+    RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO qr FROM app_rls.c03_public_incident_qr(qr_proof);
+  PERFORM set_config('app.c03_public_operation','incident-history-read',true);
+  PERFORM set_config('app.c03_public_qr_id',qr.qr_id,true);
+  SELECT count(*) INTO recent_count FROM public."Incident" i
+   WHERE i."qrCodeId"=qr.qr_id AND i."createdAt">transaction_timestamp()-interval '24 hours';
+  RETURN recent_count>=5;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_compute_incident_severity(qr_proof text, input jsonb)
+RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE qr record; kind text := input->>'incidentType';
+BEGIN
+  IF jsonb_typeof(input)<>'object' OR kind NOT IN ('COUNTERFEIT_SUSPECTED','DUPLICATE_SCAN','TAMPERED_LABEL','WRONG_PRODUCT','OTHER') THEN
+    RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO qr FROM app_rls.c03_public_incident_qr(qr_proof);
+  RETURN CASE kind
+    WHEN 'COUNTERFEIT_SUSPECTED' THEN 'HIGH'
+    WHEN 'TAMPERED_LABEL' THEN 'HIGH'
+    WHEN 'DUPLICATE_SCAN' THEN 'MEDIUM'
+    ELSE 'LOW'
+  END;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_create_public_incident_report(
+  qr_proof text, report jsonb, uploads jsonb, idempotency_key text
+)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE qr record; prior public."ActionIdempotencyKey"%ROWTYPE; incident public."Incident"%ROWTYPE;
+DECLARE request_hash text; response jsonb; upload jsonb; evidence_id text;
+BEGIN
+  IF jsonb_typeof(report)<>'object' OR jsonb_typeof(uploads)<>'array'
+     OR jsonb_array_length(uploads)>8 OR length(idempotency_key) NOT BETWEEN 8 AND 200
+     OR report->>'incidentType' NOT IN ('COUNTERFEIT_SUSPECTED','DUPLICATE_SCAN','TAMPERED_LABEL','WRONG_PRODUCT','OTHER')
+     OR report->>'severity' NOT IN ('LOW','MEDIUM','HIGH','CRITICAL')
+     OR length(COALESCE(report->>'description','')) NOT BETWEEN 5 AND 2000 THEN
+    RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO qr FROM app_rls.c03_public_incident_qr(qr_proof);
+  request_hash:=encode(sha256(convert_to(report::text||uploads::text,'UTF8')),'hex');
+  PERFORM set_config('app.c03_public_operation','incident-create',true);
+  PERFORM set_config('app.c03_public_qr_id',qr.qr_id,true);
+  PERFORM set_config('app.c03_public_licensee_id',qr.licensee_id,true);
+  INSERT INTO public."ActionIdempotencyKey"(id,"keyHash",action,scope,"requestHash","expiresAt")
+  VALUES(gen_random_uuid()::text,encode(sha256(convert_to('public-incident|'||idempotency_key,'UTF8')),'hex'),
+    'c03-public-incident',qr.licensee_id,request_hash,transaction_timestamp()+interval '24 hours')
+  ON CONFLICT("keyHash") DO NOTHING;
+  IF NOT FOUND THEN
+    SELECT * INTO prior FROM public."ActionIdempotencyKey"
+     WHERE "keyHash"=encode(sha256(convert_to('public-incident|'||idempotency_key,'UTF8')),'hex') FOR UPDATE;
+    IF prior."requestHash" IS DISTINCT FROM request_hash THEN RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_REPLAY_CONFLICT' USING ERRCODE='40001'; END IF;
+    IF prior."responsePayload" IS NULL THEN RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_REPLAY_IN_PROGRESS' USING ERRCODE='40001'; END IF;
+    RETURN prior."responsePayload";
+  END IF;
+  INSERT INTO public."Incident"(
+    id,"qrCodeId","qrCodeValue","licenseeId","reportedBy","customerName","customerEmail","customerPhone",
+    "customerCountry","preferredContactMethod","consentToContact","incidentType",severity,description,photos,
+    "purchasePlace","purchaseDate","productBatchNo","locationLat","locationLng","locationName","locationCountry",
+    "locationRegion","locationCity","ipHash","userAgentHash","deviceFingerprintHash",status,priority,"slaDueAt",tags
+  ) VALUES (
+    gen_random_uuid()::text,qr.qr_id,qr_proof,qr.licensee_id,'CUSTOMER',
+    NULLIF(report->>'customerName',''),NULLIF(report->>'customerEmail',''),NULLIF(report->>'customerPhone',''),
+    NULLIF(report->>'customerCountry',''),COALESCE(NULLIF(report->>'preferredContactMethod',''),'NONE')::public."IncidentContactMethod",
+    COALESCE((report->>'consentToContact')::boolean,false),(report->>'incidentType')::public."IncidentType",
+    (report->>'severity')::public."IncidentSeverity",report->>'description',
+    ARRAY(SELECT jsonb_array_elements_text(COALESCE(report->'photos','[]'::jsonb))),
+    NULLIF(report->>'purchasePlace',''),NULLIF(report->>'purchaseDate','')::timestamptz,NULLIF(report->>'productBatchNo',''),
+    NULLIF(report->>'locationLat','')::double precision,NULLIF(report->>'locationLng','')::double precision,
+    NULLIF(report->>'locationName',''),NULLIF(report->>'locationCountry',''),NULLIF(report->>'locationRegion',''),
+    NULLIF(report->>'locationCity',''),NULLIF(report->>'ipHash',''),NULLIF(report->>'userAgentHash',''),
+    NULLIF(report->>'deviceFingerprintHash',''),'NEW','P3',
+    transaction_timestamp()+CASE report->>'severity' WHEN 'CRITICAL' THEN interval '4 hours' WHEN 'HIGH' THEN interval '24 hours' WHEN 'MEDIUM' THEN interval '72 hours' ELSE interval '168 hours' END,
+    ARRAY(SELECT jsonb_array_elements_text(COALESCE(report->'tags','[]'::jsonb)))
+  ) RETURNING * INTO incident;
+  PERFORM set_config('app.c03_public_incident_id',incident.id,true);
+  INSERT INTO public."IncidentEvent"(id,"incidentId","actorType","eventType","eventPayload")
+  VALUES(gen_random_uuid()::text,incident.id,'CUSTOMER','CREATED',jsonb_build_object('source','public_report'));
+  FOR upload IN SELECT * FROM jsonb_array_elements(uploads) LOOP
+    IF length(COALESCE(upload->>'fileUrl',''))>1000 OR length(COALESCE(upload->>'storageKey',''))>1000
+       OR length(COALESCE(upload->>'fileType',''))>160 THEN RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_INVALID' USING ERRCODE='22023'; END IF;
+    evidence_id:=gen_random_uuid()::text;
+    INSERT INTO public."IncidentEvidence"(id,"incidentId","fileUrl","storageKey","fileType","uploadedBy")
+    VALUES(evidence_id,incident.id,NULLIF(upload->>'fileUrl',''),NULLIF(upload->>'storageKey',''),NULLIF(upload->>'fileType',''),'CUSTOMER');
+  END LOOP;
+  response:=jsonb_build_object('id',incident.id,'status',incident.status,'severity',incident.severity,
+    'createdAt',incident."createdAt",'qrCodeValue',incident."qrCodeValue");
+  UPDATE public."ActionIdempotencyKey" SET "statusCode"=201,"responsePayload"=response,"completedAt"=transaction_timestamp()
+   WHERE action='c03-public-incident' AND scope=qr.licensee_id AND "requestHash"=request_hash AND "responsePayload" IS NULL;
+  RETURN response;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_require_incident_actor(p_incident_id text, p_purpose text, p_assurance text DEFAULT 'password-verified')
+RETURNS TABLE(user_id text, licensee_id text)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  PERFORM set_config('app.c03_incident_id',p_incident_id,true);
+  RETURN QUERY
+  SELECT actor.user_id,actor.licensee_id
+    FROM public."Incident" i
+    CROSS JOIN LATERAL app_rls.c03_revalidate_actor_scope(
+      i."licenseeId",'["SUPER_ADMIN","PLATFORM_SUPER_ADMIN","LICENSEE_ADMIN","MANUFACTURER_ADMIN"]'::jsonb,p_assurance,p_purpose
+    ) actor
+   WHERE i.id=p_incident_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'C03_INCIDENT_DENIED' USING ERRCODE='42501'; END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_get_incident_detail(incident_id text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; result jsonb;
+BEGIN
+  SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,current_setting('app.purpose',true));
+  SELECT to_jsonb(i)||jsonb_build_object(
+    'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM public."IncidentEvent" e WHERE e."incidentId"=i.id),'[]'::jsonb),
+    'communications',COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c."createdAt" DESC,c.id DESC) FROM public."IncidentCommunication" c WHERE c."incidentId"=i.id),'[]'::jsonb),
+    'evidence',COALESCE((SELECT jsonb_agg(to_jsonb(v) ORDER BY v."createdAt" DESC,v.id DESC) FROM public."IncidentEvidence" v WHERE v."incidentId"=i.id),'[]'::jsonb)
+  ) INTO result FROM public."Incident" i WHERE i.id=incident_id AND i."licenseeId"=actor.licensee_id;
+  RETURN result;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_list_incidents(filters jsonb, row_limit integer, row_offset integer)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; result jsonb;
+BEGIN
+  IF jsonb_typeof(filters)<>'object' OR row_limit NOT BETWEEN 1 AND 200 OR row_offset NOT BETWEEN 0 AND 20000
+     OR EXISTS(SELECT 1 FROM jsonb_object_keys(filters) k WHERE k NOT IN ('status','severity','qr','search','dateFrom','dateTo','assignedTo')) THEN
+    RAISE EXCEPTION 'C03_INCIDENT_LIST_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.c03_revalidate_actor_scope(
+    current_setting('app.licensee_id',true),'["SUPER_ADMIN","PLATFORM_SUPER_ADMIN","LICENSEE_ADMIN","ORG_ADMIN"]'::jsonb,
+    'password-verified','incident-list');
+  IF NOT FOUND THEN RAISE EXCEPTION 'C03_INCIDENT_DENIED' USING ERRCODE='42501'; END IF;
+  SELECT jsonb_build_object(
+    'rows',COALESCE(jsonb_agg(to_jsonb(page) ORDER BY page."createdAt" DESC,page.id DESC),'[]'::jsonb),
+    'total',(SELECT count(*) FROM public."Incident" i WHERE i."licenseeId"=actor.licensee_id
+      AND (NOT filters?'status' OR i.status::text=filters->>'status')
+      AND (NOT filters?'severity' OR i.severity::text=filters->>'severity')
+      AND (NOT filters?'assignedTo' OR i."assignedToUserId"=filters->>'assignedTo')
+      AND (NOT filters?'qr' OR i."qrCodeValue" ILIKE '%'||(filters->>'qr')||'%')
+      AND (NOT filters?'search' OR i.description ILIKE '%'||(filters->>'search')||'%' OR i."qrCodeValue" ILIKE '%'||(filters->>'search')||'%')
+      AND (NOT filters?'dateFrom' OR i."createdAt">=(filters->>'dateFrom')::timestamptz)
+      AND (NOT filters?'dateTo' OR i."createdAt"<=(filters->>'dateTo')::timestamptz))
+  ) INTO result FROM (
+    SELECT i.* FROM public."Incident" i WHERE i."licenseeId"=actor.licensee_id
+      AND (NOT filters?'status' OR i.status::text=filters->>'status')
+      AND (NOT filters?'severity' OR i.severity::text=filters->>'severity')
+      AND (NOT filters?'assignedTo' OR i."assignedToUserId"=filters->>'assignedTo')
+      AND (NOT filters?'qr' OR i."qrCodeValue" ILIKE '%'||(filters->>'qr')||'%')
+      AND (NOT filters?'search' OR i.description ILIKE '%'||(filters->>'search')||'%' OR i."qrCodeValue" ILIKE '%'||(filters->>'search')||'%')
+      AND (NOT filters?'dateFrom' OR i."createdAt">=(filters->>'dateFrom')::timestamptz)
+      AND (NOT filters?'dateTo' OR i."createdAt"<=(filters->>'dateTo')::timestamptz)
+    ORDER BY i."createdAt" DESC,i.id DESC LIMIT row_limit OFFSET row_offset
+  ) page;
+  RETURN result;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_patch_incident(incident_id text, patch jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; prior public."Incident"%ROWTYPE; changed text[]:=ARRAY[]::text[]; updated public."Incident"%ROWTYPE;
+BEGIN
+  IF jsonb_typeof(patch)<>'object' OR patch='{}'::jsonb OR EXISTS(SELECT 1 FROM jsonb_object_keys(patch) k
+    WHERE k NOT IN ('status','assignedToUserId','internalNotes','tags','severity','priority','resolutionSummary','resolutionOutcome')) THEN
+    RAISE EXCEPTION 'C03_INCIDENT_PATCH_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,'incident-update','mfa-verified');
+  SELECT * INTO prior FROM public."Incident" WHERE id=incident_id AND "licenseeId"=actor.licensee_id FOR UPDATE;
+  UPDATE public."Incident" i SET
+    status=CASE WHEN patch?'status' THEN (patch->>'status')::public."IncidentStatus" ELSE i.status END,
+    "assignedToUserId"=CASE WHEN patch?'assignedToUserId' THEN NULLIF(patch->>'assignedToUserId','') ELSE i."assignedToUserId" END,
+    "internalNotes"=CASE WHEN patch?'internalNotes' THEN NULLIF(patch->>'internalNotes','') ELSE i."internalNotes" END,
+    tags=CASE WHEN patch?'tags' THEN ARRAY(SELECT jsonb_array_elements_text(patch->'tags')) ELSE i.tags END,
+    severity=CASE WHEN patch?'severity' THEN (patch->>'severity')::public."IncidentSeverity" ELSE i.severity END,
+    "severityOverridden"=CASE WHEN patch?'severity' THEN true ELSE i."severityOverridden" END,
+    priority=CASE WHEN patch?'priority' THEN (patch->>'priority')::public."IncidentPriority" ELSE i.priority END,
+    "resolutionSummary"=CASE WHEN patch?'resolutionSummary' THEN NULLIF(patch->>'resolutionSummary','') ELSE i."resolutionSummary" END,
+    "resolutionOutcome"=CASE WHEN patch?'resolutionOutcome' THEN NULLIF(patch->>'resolutionOutcome','')::public."IncidentResolutionOutcome" ELSE i."resolutionOutcome" END,
+    "updatedAt"=transaction_timestamp()
+   WHERE i.id=incident_id RETURNING * INTO updated;
+  SELECT array_agg(k) INTO changed FROM jsonb_object_keys(patch) k;
+  INSERT INTO public."IncidentEvent"(id,"incidentId","actorType","actorUserId","eventType","eventPayload")
+  VALUES(gen_random_uuid()::text,incident_id,'ADMIN',actor.user_id,'UPDATED_FIELDS',jsonb_build_object('changedFields',changed));
+  RETURN jsonb_build_object('incident',to_jsonb(updated),'changedFields',to_jsonb(changed));
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_record_incident_event(incident_id text, event_type text, event_payload jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; created public."IncidentEvent"%ROWTYPE; purpose text:=current_setting('app.purpose',true);
+BEGIN
+  SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,purpose,
+    CASE WHEN purpose IN ('incident-note-add','incident-update','incident-pdf-export') THEN 'mfa-verified' ELSE 'password-verified' END);
+  IF event_type NOT IN ('CREATED','NOTE_ADDED','STATUS_CHANGED','ASSIGNED','UPDATED_FIELDS','EXPORTED','EMAIL_SENT') OR octet_length(COALESCE(event_payload,'{}'::jsonb)::text)>16384 THEN
+    RAISE EXCEPTION 'C03_INCIDENT_EVENT_INVALID' USING ERRCODE='22023';
+  END IF;
+  INSERT INTO public."IncidentEvent"(id,"incidentId","actorType","actorUserId","eventType","eventPayload")
+  VALUES(gen_random_uuid()::text,incident_id,'ADMIN',actor.user_id,event_type::public."IncidentEventType",event_payload)
+  RETURNING * INTO created;
+  RETURN to_jsonb(created);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_add_incident_evidence(incident_id text, evidence jsonb, idempotency_key text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; created public."IncidentEvidence"%ROWTYPE; key_hash text;
+BEGIN
+  IF jsonb_typeof(evidence)<>'object' OR length(idempotency_key) NOT BETWEEN 8 AND 200
+     OR length(COALESCE(evidence->>'fileUrl',''))>1000 OR length(COALESCE(evidence->>'storageKey',''))>1000
+     OR length(COALESCE(evidence->>'fileType',''))>160 THEN
+    RAISE EXCEPTION 'C03_INCIDENT_EVIDENCE_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,'incident-evidence-add','mfa-verified');
+  key_hash:=encode(sha256(convert_to('incident-evidence|'||incident_id||'|'||idempotency_key,'UTF8')),'hex');
+  INSERT INTO public."ActionIdempotencyKey"(id,"keyHash",action,scope,"requestHash","expiresAt")
+  VALUES(gen_random_uuid()::text,key_hash,'c03-incident-evidence',incident_id,
+    encode(sha256(convert_to(evidence::text,'UTF8')),'hex'),transaction_timestamp()+interval '24 hours')
+  ON CONFLICT("keyHash") DO NOTHING;
+  IF NOT FOUND THEN
+    RETURN (SELECT "responsePayload" FROM public."ActionIdempotencyKey" WHERE "keyHash"=key_hash AND "responsePayload" IS NOT NULL);
+  END IF;
+  INSERT INTO public."IncidentEvidence"(id,"incidentId","fileUrl","storageKey","fileType","uploadedByUserId","uploadedBy")
+  VALUES(gen_random_uuid()::text,incident_id,NULLIF(evidence->>'fileUrl',''),NULLIF(evidence->>'storageKey',''),
+    NULLIF(evidence->>'fileType',''),actor.user_id,'ADMIN') RETURNING * INTO created;
+  UPDATE public."ActionIdempotencyKey" SET "statusCode"=201,"responsePayload"=jsonb_build_object('evidence',to_jsonb(created)),
+    "completedAt"=transaction_timestamp() WHERE "keyHash"=key_hash;
+  RETURN jsonb_build_object('evidence',to_jsonb(created),'tamperChecks',NULL);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_build_incident_evidence_audit_snapshot(incident_id text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record;
+BEGIN
+  SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,current_setting('app.purpose',true),'mfa-verified');
+  RETURN jsonb_build_object(
+    'incident',(SELECT to_jsonb(i) FROM public."Incident" i WHERE i.id=incident_id),
+    'evidence',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM public."IncidentEvidence" e WHERE e."incidentId"=incident_id),'[]'::jsonb),
+    'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM public."IncidentEvent" e WHERE e."incidentId"=incident_id),'[]'::jsonb)
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_list_ir_alerts(
+  p_incident_authorization_id text, p_incident_id text, p_licensee_id text, p_filters jsonb, p_row_limit integer, p_row_offset integer
+)
+RETURNS TABLE(id text,licensee_id text,alert_type text,severity text,message text,score integer,policy_rule_id text,
+  incident_id text,batch_id text,qr_code_id text,manufacturer_id text,acknowledged_at timestamptz,created_at timestamptz,total_count bigint)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record;
+BEGIN
+  IF p_incident_authorization_id !~* '^[0-9a-f-]{36}$' OR jsonb_typeof(p_filters)<>'object'
+     OR p_row_limit NOT BETWEEN 1 AND 100 OR p_row_offset NOT BETWEEN 0 AND 20000 THEN
+    RAISE EXCEPTION 'C03_IR_ALERT_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.c03_require_incident_actor(p_incident_id,'incident-response-alert-triage','step-up-verified');
+  IF actor.licensee_id<>p_licensee_id THEN RAISE EXCEPTION 'C03_IR_ALERT_DENIED' USING ERRCODE='42501'; END IF;
+  RETURN QUERY SELECT a.id,a."licenseeId",a."alertType"::text,a.severity::text,a.message,a.score,a."policyRuleId",
+    a."incidentId",a."batchId",a."qrCodeId",a."manufacturerId",a."acknowledgedAt",a."createdAt",count(*) OVER()
+    FROM public."PolicyAlert" a WHERE a."licenseeId"=actor.licensee_id AND a."incidentId"=p_incident_id
+      AND (NOT p_filters?'alertType' OR a."alertType"::text=p_filters->>'alertType')
+      AND (NOT p_filters?'severity' OR a.severity::text=p_filters->>'severity')
+      AND (NOT p_filters?'acknowledged' OR (a."acknowledgedAt" IS NOT NULL)=(p_filters->>'acknowledged')::boolean)
+      AND (NOT p_filters?'policyRuleId' OR a."policyRuleId"=p_filters->>'policyRuleId')
+      AND (NOT p_filters?'qrCodeId' OR a."qrCodeId"=p_filters->>'qrCodeId')
+      AND (NOT p_filters?'batchId' OR a."batchId"=p_filters->>'batchId')
+      AND (NOT p_filters?'manufacturerId' OR a."manufacturerId"=p_filters->>'manufacturerId')
+    ORDER BY a."createdAt" DESC,a.id DESC LIMIT p_row_limit OFFSET p_row_offset;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_link_ir_alert_incident(
+  incident_authorization_id text, alert_id text, incident_id text, reason text, idempotency_key text
+)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; alert public."PolicyAlert"%ROWTYPE; key_hash text;
+BEGIN
+  IF incident_authorization_id !~* '^[0-9a-f-]{36}$' OR length(reason) NOT BETWEEN 3 AND 600
+     OR length(idempotency_key) NOT BETWEEN 8 AND 200 THEN RAISE EXCEPTION 'C03_IR_ALERT_INVALID' USING ERRCODE='22023'; END IF;
+  SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,'alert-escalation','step-up-verified');
+  key_hash:=encode(sha256(convert_to('alert-link|'||alert_id||'|'||idempotency_key,'UTF8')),'hex');
+  INSERT INTO public."ActionIdempotencyKey"(id,"keyHash",action,scope,"requestHash","expiresAt")
+  VALUES(gen_random_uuid()::text,key_hash,'c03-alert-link',actor.licensee_id,
+    encode(sha256(convert_to(incident_id||'|'||reason,'UTF8')),'hex'),transaction_timestamp()+interval '24 hours')
+  ON CONFLICT("keyHash") DO NOTHING;
+  IF NOT FOUND THEN RETURN (SELECT "responsePayload" FROM public."ActionIdempotencyKey" WHERE "keyHash"=key_hash); END IF;
+  UPDATE public."PolicyAlert" SET "incidentId"=incident_id WHERE id=alert_id AND "licenseeId"=actor.licensee_id
+   RETURNING * INTO alert;
+  IF NOT FOUND THEN RAISE EXCEPTION 'C03_IR_ALERT_DENIED' USING ERRCODE='42501'; END IF;
+  UPDATE public."ActionIdempotencyKey" SET "statusCode"=200,"responsePayload"=to_jsonb(alert),"completedAt"=transaction_timestamp()
+   WHERE "keyHash"=key_hash;
+  RETURN to_jsonb(alert);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION app_rls.c03_assert_restricted_identity(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_public_incident_qr(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_compute_incident_spam_signal(text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_compute_incident_severity(text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_create_public_incident_report(text,jsonb,jsonb,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_require_incident_actor(text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_get_incident_detail(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_list_incidents(jsonb,integer,integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_patch_incident(text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_record_incident_event(text,text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_add_incident_evidence(text,jsonb,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_build_incident_evidence_audit_snapshot(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_list_ir_alerts(text,text,text,jsonb,integer,integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_link_ir_alert_incident(text,text,text,text,text) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_require_approval_actor(p_purpose text)
+RETURNS TABLE(user_id text, licensee_id text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF current_setting('app.purpose', true) IS DISTINCT FROM p_purpose
+     OR current_setting('app.role', true) NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN') THEN
+    RAISE EXCEPTION 'C03_APPROVAL_DENIED' USING ERRCODE='42501';
+  END IF;
+  RETURN QUERY
+  SELECT actor.user_id, actor.licensee_id
+    FROM app_rls.c03_revalidate_actor_scope(
+      current_setting('app.licensee_id', true),
+      '["SUPER_ADMIN","PLATFORM_SUPER_ADMIN","LICENSEE_ADMIN","MANUFACTURER_ADMIN"]'::jsonb,
+      CASE WHEN p_purpose IN ('sensitive-action-approval-approve','sensitive-action-approval-reject') THEN 'mfa-verified' ELSE 'password-verified' END,
+      p_purpose
+    ) actor;
+  IF NOT FOUND THEN RAISE EXCEPTION 'C03_APPROVAL_DENIED' USING ERRCODE='42501'; END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_create_sensitive_action_approval(input jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; created public."SensitiveActionApproval"%ROWTYPE;
+DECLARE action_key text := input->>'actionKey';
+BEGIN
+  SELECT * INTO actor FROM app_rls.c03_require_approval_actor('sensitive-action-approval-request');
+  IF jsonb_typeof(input)<>'object'
+     OR action_key NOT IN ('FEATURE_FLAG_UPSERT','RETENTION_POLICY_PATCH','RETENTION_APPLY','QR_BLOCK','BATCH_BLOCK','BATCH_RELEASE','PRINTER_GATEWAY_SECRET_ROTATION')
+     OR jsonb_typeof(input->'payload')<>'object'
+     OR octet_length((input->'payload')::text)>65536
+     OR (input ? 'summary' AND input->'summary' IS NOT NULL AND jsonb_typeof(input->'summary')<>'object')
+     OR length(COALESCE(input->>'entityType',''))>120
+     OR length(COALESCE(input->>'entityId',''))>160 THEN
+    RAISE EXCEPTION 'C03_APPROVAL_INVALID' USING ERRCODE='22023';
+  END IF;
+  INSERT INTO public."SensitiveActionApproval" (
+    id,"actionKey",status,"requestedByUserId","licenseeId","entityType","entityId",
+    payload,summary,"requestIpHash","requestUserAgentHash","expiresAt","updatedAt"
+  ) VALUES (
+    gen_random_uuid()::text,action_key,'PENDING',actor.user_id,actor.licensee_id,
+    NULLIF(input->>'entityType',''),NULLIF(input->>'entityId',''),input->'payload',
+    input->'summary',NULLIF(input->>'requestIpHash',''),NULLIF(input->>'requestUserAgentHash',''),
+    transaction_timestamp()+interval '30 minutes',transaction_timestamp()
+  ) RETURNING * INTO created;
+  PERFORM app_rls.c03_governance_audit('SENSITIVE_ACTION_APPROVAL_REQUESTED','SensitiveActionApproval',created.id,
+    jsonb_build_object('actionKey',action_key,'requestedByUserId',actor.user_id));
+  RETURN to_jsonb(created);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_list_sensitive_action_approvals(status_filter text, row_limit integer, row_offset integer)
+RETURNS TABLE(result jsonb)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record;
+BEGIN
+  SELECT * INTO actor FROM app_rls.c03_require_approval_actor('sensitive-action-approval-list');
+  IF row_limit NOT BETWEEN 1 AND 200 OR row_offset NOT BETWEEN 0 AND 20000
+     OR (status_filter IS NOT NULL AND status_filter NOT IN ('PENDING','APPROVED','REJECTED','EXECUTED','FAILED','EXPIRED')) THEN
+    RAISE EXCEPTION 'C03_APPROVAL_LIST_INVALID' USING ERRCODE='22023';
+  END IF;
+  RETURN QUERY
+  SELECT to_jsonb(a)
+    FROM public."SensitiveActionApproval" a
+   WHERE a."licenseeId"=actor.licensee_id
+     AND (status_filter IS NULL OR a.status=status_filter)
+   ORDER BY a."createdAt" DESC,a.id DESC
+   LIMIT row_limit OFFSET row_offset;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_review_sensitive_action_approval(
+  p_approval_id text, p_decision text, p_review_note text
+)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; approval public."SensitiveActionApproval"%ROWTYPE;
+BEGIN
+  IF p_decision NOT IN ('APPROVED','REJECTED') OR length(COALESCE(p_review_note,''))>500 THEN
+    RAISE EXCEPTION 'C03_APPROVAL_REVIEW_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.c03_require_approval_actor(
+    CASE p_decision WHEN 'APPROVED' THEN 'sensitive-action-approval-approve' ELSE 'sensitive-action-approval-reject' END
+  );
+  SELECT * INTO approval FROM public."SensitiveActionApproval"
+   WHERE id=p_approval_id AND "licenseeId"=actor.licensee_id FOR UPDATE;
+  IF NOT FOUND OR approval.status<>'PENDING' OR approval."expiresAt"<=transaction_timestamp()
+     OR approval."requestedByUserId"=actor.user_id THEN
+    RAISE EXCEPTION 'C03_APPROVAL_DENIED' USING ERRCODE='42501';
+  END IF;
+  UPDATE public."SensitiveActionApproval"
+     SET status=p_decision,"reviewedByUserId"=actor.user_id,"reviewNote"=NULLIF(p_review_note,''),
+         "reviewedAt"=transaction_timestamp(),"updatedAt"=transaction_timestamp()
+   WHERE id=p_approval_id RETURNING * INTO approval;
+  PERFORM app_rls.c03_governance_audit('SENSITIVE_ACTION_APPROVAL_'||p_decision,'SensitiveActionApproval',approval.id,
+    jsonb_build_object('actionKey',approval."actionKey",'requestedByUserId',approval."requestedByUserId",'reviewedByUserId',actor.user_id));
+  RETURN to_jsonb(approval);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_approve_sensitive_action_approval(approval_id text, review_note text)
+RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$ SELECT app_rls.c03_review_sensitive_action_approval(approval_id,'APPROVED',review_note) $$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_reject_sensitive_action_approval(approval_id text, review_note text)
+RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$ SELECT app_rls.c03_review_sensitive_action_approval(approval_id,'REJECTED',review_note) $$;
+
+REVOKE ALL ON FUNCTION app_rls.c03_require_approval_actor(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_create_sensitive_action_approval(jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_list_sensitive_action_approvals(text,integer,integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_review_sensitive_action_approval(text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_approve_sensitive_action_approval(text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_reject_sensitive_action_approval(text,text) FROM PUBLIC;
+
 -- Capability-verified C03 compliance and incident-evidence boundaries.
 -- "mscqr_rls_cert_auth_owner" is replaced by the reviewed clean-room generator. Runtime
 -- callers receive EXECUTE only on the seven public signatures at the end.
@@ -2684,13 +4836,1010 @@ ALTER FUNCTION app_rls.c03_get_compliance_pack_job(text,text,text,text) OWNER TO
 ALTER FUNCTION app_rls.c03_complete_compliance_pack_rebuild(text,text,text,text,jsonb) OWNER TO "mscqr_rls_cert_auth_owner";
 ALTER FUNCTION app_rls.c03_get_incident_evidence_file_by_storage_key(text,text,text,text) OWNER TO "mscqr_rls_cert_auth_owner";
 
+CREATE OR REPLACE FUNCTION app_rls.c03_require_policy_actor(
+  target_licensee_id text,
+  purpose_code text
+)
+RETURNS TABLE(user_id text, organization_id text, licensee_id text)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT actor.id::text, organization.id::text, licensee.id::text
+    FROM public."User" actor
+    JOIN public."Licensee" licensee ON licensee.id = target_licensee_id
+    JOIN public."Organization" organization ON organization.id = licensee."orgId"
+   WHERE actor.id = current_setting('app.user_id', true)
+     AND actor.role::text = current_setting('app.role', true)
+     AND actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+     AND actor."orgId" IS NULL AND actor."licenseeId" IS NULL
+     AND actor."isActive" AND actor.status = 'ACTIVE'::public."UserStatus"
+     AND actor."deletedAt" IS NULL AND actor."disabledAt" IS NULL
+     AND licensee."isActive" AND licensee."suspendedAt" IS NULL AND organization."isActive"
+     AND current_setting('app.organization_id', true) = organization.id
+     AND current_setting('app.licensee_id', true) = licensee.id
+     AND current_setting('app.auth_assurance', true) IN ('mfa-verified','step-up-verified')
+     AND current_setting('app.purpose', true) = purpose_code
+     AND current_setting('app.request_id', true) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'C03_POLICY_DENIED' USING ERRCODE = '42501';
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_require_platform_policy_actor(purpose_code text)
+RETURNS text
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  actor_id text;
+BEGIN
+  SELECT actor.id INTO actor_id
+    FROM public."User" actor
+   WHERE actor.id = current_setting('app.user_id', true)
+     AND actor.role::text = current_setting('app.role', true)
+     AND actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+     AND actor."orgId" IS NULL AND actor."licenseeId" IS NULL
+     AND actor."isActive" AND actor.status = 'ACTIVE'::public."UserStatus"
+     AND actor."deletedAt" IS NULL AND actor."disabledAt" IS NULL
+     AND NULLIF(current_setting('app.organization_id', true), '') IS NULL
+     AND NULLIF(current_setting('app.licensee_id', true), '') IS NULL
+     AND NULLIF(current_setting('app.manufacturer_id', true), '') IS NULL
+     AND current_setting('app.auth_assurance', true) IN ('mfa-verified','step-up-verified')
+     AND current_setting('app.purpose', true) = purpose_code
+     AND current_setting('app.request_id', true) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
+  IF actor_id IS NULL THEN
+    RAISE EXCEPTION 'C03_POLICY_DENIED' USING ERRCODE = '42501';
+  END IF;
+  RETURN actor_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_policy_context_valid()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+  SELECT current_setting('app.purpose', true) LIKE 'incident-response-policy-%'
+     AND (
+       EXISTS (
+       SELECT 1
+         FROM public."User" actor
+         JOIN public."Licensee" licensee ON licensee.id = current_setting('app.licensee_id', true)
+         JOIN public."Organization" organization ON organization.id = licensee."orgId"
+        WHERE actor.id = current_setting('app.user_id', true)
+          AND actor.role::text = current_setting('app.role', true)
+          AND actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+          AND actor."orgId" IS NULL AND actor."licenseeId" IS NULL
+          AND actor."isActive" AND actor.status = 'ACTIVE'::public."UserStatus"
+          AND actor."deletedAt" IS NULL AND actor."disabledAt" IS NULL
+          AND licensee."isActive" AND licensee."suspendedAt" IS NULL AND organization."isActive"
+          AND current_setting('app.organization_id', true) = organization.id
+          AND current_setting('app.auth_assurance', true) IN ('mfa-verified','step-up-verified')
+       )
+       OR EXISTS (
+         SELECT 1 FROM public."User" actor
+          WHERE actor.id = current_setting('app.user_id', true)
+            AND actor.role::text = current_setting('app.role', true)
+            AND actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+            AND actor."orgId" IS NULL AND actor."licenseeId" IS NULL
+            AND actor."isActive" AND actor.status = 'ACTIVE'::public."UserStatus"
+            AND actor."deletedAt" IS NULL AND actor."disabledAt" IS NULL
+            AND NULLIF(current_setting('app.organization_id', true), '') IS NULL
+            AND NULLIF(current_setting('app.licensee_id', true), '') IS NULL
+            AND NULLIF(current_setting('app.manufacturer_id', true), '') IS NULL
+            AND current_setting('app.auth_assurance', true) IN ('mfa-verified','step-up-verified')
+       )
+     )
+     AND current_setting('app.request_id', true) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_session_valid()
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF session_user <> 'mscqr_rls_cert_app'
+     OR current_setting('app.auth_session_verified', true) <> '1'
+     OR current_setting('app.c03_session_id', true) IS DISTINCT FROM current_setting('app.auth_session_id', true)
+     OR current_setting('app.c03_user_id', true) IS DISTINCT FROM current_setting('app.user_id', true)
+  THEN RETURN false; END IF;
+
+  RETURN EXISTS (
+    SELECT 1 FROM public."RefreshToken" session_row
+     WHERE session_row.id = current_setting('app.c03_session_id', true)
+       AND session_row."userId" = current_setting('app.c03_user_id', true)
+       AND session_row."sessionCapabilityHash" = current_setting('app.auth_session_hash', true)
+       AND session_row."sessionCapabilityHashVersion" = 'sha256-v1'
+       AND session_row."sessionCapabilityRevokedAt" IS NULL
+       AND session_row."sessionCapabilityExpiresAt" > clock_timestamp()
+       AND session_row."revokedAt" IS NULL
+       AND session_row."expiresAt" > clock_timestamp()
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_policy_replay(
+  command_name text,
+  command_payload jsonb
+)
+RETURNS TABLE(replayed boolean, result jsonb)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  key_value text := 'c03-policy:' || current_setting('app.licensee_id', true) || ':' || current_setting('app.user_id', true) || ':' || command_name || ':' || current_setting('app.request_id', true);
+  request_hash text := encode(sha256(convert_to(command_payload::text, 'UTF8')), 'hex');
+  inserted integer;
+  existing record;
+BEGIN
+  INSERT INTO public."ActionIdempotencyKey"
+    (id, "keyHash", action, scope, "requestHash", "expiresAt")
+  VALUES
+    (gen_random_uuid()::text, key_value, 'c03-policy-' || command_name,
+     current_setting('app.licensee_id', true), request_hash, transaction_timestamp() + interval '24 hours')
+  ON CONFLICT ("keyHash") DO NOTHING;
+  GET DIAGNOSTICS inserted = ROW_COUNT;
+
+  IF inserted = 1 THEN
+    RETURN QUERY SELECT false, NULL::jsonb;
+    RETURN;
+  END IF;
+
+  SELECT idem."requestHash", idem."responsePayload"
+    INTO existing
+    FROM public."ActionIdempotencyKey" idem
+   WHERE idem."keyHash" = key_value
+   FOR UPDATE;
+  IF existing."requestHash" IS DISTINCT FROM request_hash THEN
+    RAISE EXCEPTION 'C03_POLICY_REPLAY_CONFLICT' USING ERRCODE = '40001';
+  END IF;
+  IF existing."responsePayload" IS NULL THEN
+    RAISE EXCEPTION 'C03_POLICY_REPLAY_IN_PROGRESS' USING ERRCODE = '40001';
+  END IF;
+  RETURN QUERY SELECT true, existing."responsePayload";
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_complete_policy_command(
+  command_name text,
+  command_result jsonb
+)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+  UPDATE public."ActionIdempotencyKey"
+     SET "statusCode" = 200,
+         "responsePayload" = command_result,
+         "completedAt" = transaction_timestamp()
+   WHERE "keyHash" = 'c03-policy:' || current_setting('app.licensee_id', true) || ':' || current_setting('app.user_id', true) || ':' || command_name || ':' || current_setting('app.request_id', true)
+     AND "responsePayload" IS NULL
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_list_policy_rules(
+  rule_type_filter text,
+  active_filter boolean,
+  row_limit integer,
+  row_offset integer
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  licensee_id text := current_setting('app.licensee_id', true);
+  result jsonb;
+BEGIN
+  PERFORM 1 FROM app_rls.c03_require_policy_actor(licensee_id, 'incident-response-policy-list');
+  IF row_limit < 1 OR row_limit > 200 OR row_offset < 0
+     OR (rule_type_filter IS NOT NULL AND rule_type_filter NOT IN (
+       'DISTINCT_DEVICES','MULTI_COUNTRY','BURST_SCANS','TOO_MANY_REPORTS'
+     )) THEN
+    RAISE EXCEPTION 'C03_POLICY_LIST_INVALID' USING ERRCODE = '22023';
+  END IF;
+
+  SELECT jsonb_build_object(
+    'rules', COALESCE(jsonb_agg(to_jsonb(selected) ORDER BY selected."updatedAt" DESC, selected.id DESC), '[]'::jsonb),
+    'total', (SELECT count(*) FROM public."PolicyRule" p
+               WHERE p."licenseeId" = licensee_id
+                 AND (rule_type_filter IS NULL OR p."ruleType"::text = rule_type_filter)
+                 AND (active_filter IS NULL OR p."isActive" = active_filter))
+  )
+    INTO result
+    FROM (
+      SELECT p.id, p."orgId", p."licenseeId", p."manufacturerId", p."createdByUserId",
+             p.name, p.description, p."ruleType", p."isActive", p.threshold, p."windowMinutes",
+             p.severity, p."autoCreateIncident", p."incidentSeverity", p."incidentPriority",
+             p."actionConfig", p."createdAt", p."updatedAt",
+             CASE WHEN organization.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', organization.id, 'name', organization.name) END AS organization,
+             CASE WHEN licensee.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', licensee.id, 'name', licensee.name, 'prefix', licensee.prefix) END AS licensee,
+             CASE WHEN creator.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', creator.id, 'email', creator.email, 'name', creator.name) END AS "createdByUser"
+        FROM public."PolicyRule" p
+        LEFT JOIN public."Organization" organization ON organization.id = p."orgId"
+        LEFT JOIN public."Licensee" licensee ON licensee.id = p."licenseeId"
+        LEFT JOIN public."User" creator ON creator.id = p."createdByUserId"
+       WHERE p."licenseeId" = licensee_id
+         AND (rule_type_filter IS NULL OR p."ruleType"::text = rule_type_filter)
+         AND (active_filter IS NULL OR p."isActive" = active_filter)
+       ORDER BY p."updatedAt" DESC, p.id DESC
+       LIMIT row_limit OFFSET row_offset
+    ) selected;
+  RETURN result;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_list_platform_policy_rules(
+  rule_type_filter text,
+  active_filter boolean,
+  row_limit integer,
+  row_offset integer
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  result jsonb;
+BEGIN
+  PERFORM app_rls.c03_require_platform_policy_actor('incident-response-policy-list');
+  IF row_limit < 1 OR row_limit > 200 OR row_offset < 0
+     OR (rule_type_filter IS NOT NULL AND rule_type_filter NOT IN (
+       'DISTINCT_DEVICES','MULTI_COUNTRY','BURST_SCANS','TOO_MANY_REPORTS'
+     )) THEN
+    RAISE EXCEPTION 'C03_POLICY_LIST_INVALID' USING ERRCODE = '22023';
+  END IF;
+
+  SELECT jsonb_build_object(
+    'rules', COALESCE(jsonb_agg(to_jsonb(selected) ORDER BY selected."updatedAt" DESC, selected.id DESC), '[]'::jsonb),
+    'total', (SELECT count(*) FROM public."PolicyRule" p
+               WHERE (rule_type_filter IS NULL OR p."ruleType"::text = rule_type_filter)
+                 AND (active_filter IS NULL OR p."isActive" = active_filter))
+  )
+    INTO result
+    FROM (
+      SELECT p.id, p."orgId", p."licenseeId", p."manufacturerId", p."createdByUserId",
+             p.name, p.description, p."ruleType", p."isActive", p.threshold, p."windowMinutes",
+             p.severity, p."autoCreateIncident", p."incidentSeverity", p."incidentPriority",
+             p."actionConfig", p."createdAt", p."updatedAt",
+             CASE WHEN organization.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', organization.id, 'name', organization.name) END AS organization,
+             CASE WHEN licensee.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', licensee.id, 'name', licensee.name, 'prefix', licensee.prefix) END AS licensee,
+             CASE WHEN creator.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', creator.id, 'email', creator.email, 'name', creator.name) END AS "createdByUser"
+        FROM public."PolicyRule" p
+        LEFT JOIN public."Organization" organization ON organization.id = p."orgId"
+        LEFT JOIN public."Licensee" licensee ON licensee.id = p."licenseeId"
+        LEFT JOIN public."User" creator ON creator.id = p."createdByUserId"
+       WHERE (rule_type_filter IS NULL OR p."ruleType"::text = rule_type_filter)
+         AND (active_filter IS NULL OR p."isActive" = active_filter)
+       ORDER BY p."updatedAt" DESC, p.id DESC
+       LIMIT row_limit OFFSET row_offset
+    ) selected;
+  RETURN result;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_create_policy_rule(input jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  actor record;
+  replay record;
+  created public."PolicyRule"%ROWTYPE;
+  result jsonb;
+BEGIN
+  IF jsonb_typeof(input) IS DISTINCT FROM 'object'
+     OR EXISTS (
+       SELECT 1 FROM jsonb_object_keys(input) AS keys(value)
+        WHERE value NOT IN ('name','description','ruleType','isActive','threshold','windowMinutes',
+                            'severity','autoCreateIncident','incidentSeverity','incidentPriority','actionConfig')
+     )
+     OR length(btrim(COALESCE(input->>'name',''))) NOT BETWEEN 3 AND 120
+     OR (input->>'threshold')::integer NOT BETWEEN 1 AND 100000
+     OR (input->>'windowMinutes')::integer NOT BETWEEN 1 AND 43200
+     OR input->>'ruleType' NOT IN ('DISTINCT_DEVICES','MULTI_COUNTRY','BURST_SCANS','TOO_MANY_REPORTS')
+     OR COALESCE(input->>'severity','MEDIUM') NOT IN ('LOW','MEDIUM','HIGH','CRITICAL')
+     OR (input ? 'incidentSeverity' AND input->>'incidentSeverity' IS NOT NULL
+         AND input->>'incidentSeverity' NOT IN ('LOW','MEDIUM','HIGH','CRITICAL'))
+     OR (input ? 'incidentPriority' AND input->>'incidentPriority' IS NOT NULL
+         AND input->>'incidentPriority' NOT IN ('P1','P2','P3','P4')) THEN
+    RAISE EXCEPTION 'C03_POLICY_CREATE_INVALID' USING ERRCODE = '22023';
+  END IF;
+
+  SELECT * INTO actor
+    FROM app_rls.c03_require_policy_actor(
+      current_setting('app.licensee_id', true),
+      'incident-response-policy-create'
+    );
+  SELECT * INTO replay FROM app_rls.c03_policy_replay('create', input);
+  IF replay.replayed THEN
+    RETURN replay.result || '{"__c03Replay":true}'::jsonb;
+  END IF;
+
+  INSERT INTO public."PolicyRule"
+    (id, "orgId", "licenseeId", "createdByUserId", name, description, "ruleType", "isActive",
+     threshold, "windowMinutes", severity, "autoCreateIncident", "incidentSeverity",
+     "incidentPriority", "actionConfig", "updatedAt")
+  VALUES
+    (gen_random_uuid()::text, actor.organization_id, actor.licensee_id, actor.user_id,
+     btrim(input->>'name'), NULLIF(input->>'description',''), (input->>'ruleType')::public."PolicyRuleType",
+     COALESCE((input->>'isActive')::boolean, true), (input->>'threshold')::integer,
+     (input->>'windowMinutes')::integer, COALESCE(input->>'severity','MEDIUM')::public."AlertSeverity",
+     COALESCE((input->>'autoCreateIncident')::boolean, false),
+     NULLIF(input->>'incidentSeverity','')::public."IncidentSeverity",
+     NULLIF(input->>'incidentPriority','')::public."IncidentPriority",
+     CASE WHEN input ? 'actionConfig' THEN input->'actionConfig' ELSE NULL END,
+     transaction_timestamp())
+  RETURNING * INTO created;
+  result := to_jsonb(created);
+  PERFORM app_rls.c03_complete_policy_command('create', result);
+  RETURN result || '{"__c03Replay":false}'::jsonb;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_update_policy_rule(policy_rule_id text, patch jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  current_row public."PolicyRule"%ROWTYPE;
+  replay record;
+  updated public."PolicyRule"%ROWTYPE;
+  result jsonb;
+BEGIN
+  IF policy_rule_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR jsonb_typeof(patch) IS DISTINCT FROM 'object' OR patch = '{}'::jsonb
+     OR EXISTS (
+       SELECT 1 FROM jsonb_object_keys(patch) AS keys(value)
+        WHERE value NOT IN ('name','description','ruleType','isActive','threshold','windowMinutes',
+                            'severity','autoCreateIncident','incidentSeverity','incidentPriority','actionConfig')
+     ) THEN
+    RAISE EXCEPTION 'C03_POLICY_UPDATE_INVALID' USING ERRCODE = '22023';
+  END IF;
+
+  PERFORM 1 FROM app_rls.c03_require_policy_actor(
+    current_setting('app.licensee_id', true),
+    'incident-response-policy-update'
+  );
+  SELECT * INTO current_row
+    FROM public."PolicyRule"
+   WHERE id = policy_rule_id
+     AND "licenseeId" = current_setting('app.licensee_id', true)
+   FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'C03_POLICY_DENIED' USING ERRCODE = '42501'; END IF;
+  SELECT * INTO replay FROM app_rls.c03_policy_replay('update:' || policy_rule_id, patch);
+  IF replay.replayed THEN
+    RETURN replay.result || '{"__c03Replay":true}'::jsonb;
+  END IF;
+
+  UPDATE public."PolicyRule" p
+     SET name = CASE WHEN patch ? 'name' THEN btrim(patch->>'name') ELSE p.name END,
+         description = CASE WHEN patch ? 'description' THEN patch->>'description' ELSE p.description END,
+         "ruleType" = CASE WHEN patch ? 'ruleType' THEN (patch->>'ruleType')::public."PolicyRuleType" ELSE p."ruleType" END,
+         "isActive" = CASE WHEN patch ? 'isActive' THEN (patch->>'isActive')::boolean ELSE p."isActive" END,
+         threshold = CASE WHEN patch ? 'threshold' THEN (patch->>'threshold')::integer ELSE p.threshold END,
+         "windowMinutes" = CASE WHEN patch ? 'windowMinutes' THEN (patch->>'windowMinutes')::integer ELSE p."windowMinutes" END,
+         severity = CASE WHEN patch ? 'severity' THEN (patch->>'severity')::public."AlertSeverity" ELSE p.severity END,
+         "autoCreateIncident" = CASE WHEN patch ? 'autoCreateIncident' THEN (patch->>'autoCreateIncident')::boolean ELSE p."autoCreateIncident" END,
+         "incidentSeverity" = CASE WHEN patch ? 'incidentSeverity' THEN NULLIF(patch->>'incidentSeverity','')::public."IncidentSeverity" ELSE p."incidentSeverity" END,
+         "incidentPriority" = CASE WHEN patch ? 'incidentPriority' THEN NULLIF(patch->>'incidentPriority','')::public."IncidentPriority" ELSE p."incidentPriority" END,
+         "actionConfig" = CASE WHEN patch ? 'actionConfig' THEN patch->'actionConfig' ELSE p."actionConfig" END,
+         "updatedAt" = transaction_timestamp()
+   WHERE p.id = policy_rule_id
+  RETURNING * INTO updated;
+  IF length(updated.name) NOT BETWEEN 3 AND 120 OR updated.threshold NOT BETWEEN 1 AND 100000
+     OR updated."windowMinutes" NOT BETWEEN 1 AND 43200 THEN
+    RAISE EXCEPTION 'C03_POLICY_UPDATE_INVALID' USING ERRCODE = '22023';
+  END IF;
+  result := to_jsonb(updated);
+  PERFORM app_rls.c03_complete_policy_command('update:' || policy_rule_id, result);
+  RETURN result || '{"__c03Replay":false}'::jsonb;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION app_rls.c03_require_policy_actor(text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_require_platform_policy_actor(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_policy_context_valid() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_session_valid() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_policy_replay(text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_complete_policy_command(text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_list_policy_rules(text,boolean,integer,integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_list_platform_policy_rules(text,boolean,integer,integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_create_policy_rule(jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_update_policy_rule(text,jsonb) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_require_governance_actor(allowed_purposes text[])
+RETURNS TABLE(user_id text, organization_id text, licensee_id text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE purpose_code text := current_setting('app.purpose', true);
+BEGIN
+  IF purpose_code IS NULL OR NOT purpose_code = ANY(allowed_purposes) THEN
+    RAISE EXCEPTION 'C03_GOVERNANCE_PURPOSE_DENIED' USING ERRCODE = '42501';
+  END IF;
+  RETURN QUERY
+  SELECT actor.user_id, actor.organization_id, actor.licensee_id
+    FROM app_rls.c03_revalidate_actor_scope(
+      current_setting('app.licensee_id', true),
+      '["SUPER_ADMIN","PLATFORM_SUPER_ADMIN"]'::jsonb,
+      'mfa-verified', purpose_code
+    ) actor;
+  IF NOT FOUND THEN RAISE EXCEPTION 'C03_GOVERNANCE_ACTOR_DENIED' USING ERRCODE = '42501'; END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_governance_row_visible(target_licensee_id text, allowed_purposes text[])
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+  SELECT current_setting('app.purpose', true) = ANY(allowed_purposes)
+     AND EXISTS (
+       SELECT 1 FROM app_rls.c03_revalidate_actor_scope(
+         target_licensee_id,
+         '["SUPER_ADMIN","PLATFORM_SUPER_ADMIN"]'::jsonb,
+         'mfa-verified', current_setting('app.purpose', true)
+       )
+     )
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_governance_replay(command_name text, payload jsonb)
+RETURNS TABLE(replayed boolean, result jsonb)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  key_value text := encode(sha256(convert_to(
+    'c03-governance|' || current_setting('app.licensee_id', true) || '|' ||
+    current_setting('app.user_id', true) || '|' || command_name || '|' ||
+    current_setting('app.request_id', true), 'UTF8')), 'hex');
+  request_hash text := encode(sha256(convert_to(COALESCE(payload, '{}'::jsonb)::text, 'UTF8')), 'hex');
+  inserted integer;
+  prior public."ActionIdempotencyKey"%ROWTYPE;
+BEGIN
+  INSERT INTO public."ActionIdempotencyKey" (id,"keyHash",action,scope,"requestHash","expiresAt")
+  VALUES (gen_random_uuid()::text,key_value,'c03-governance-' || command_name,
+          current_setting('app.licensee_id',true),request_hash,transaction_timestamp()+interval '24 hours')
+  ON CONFLICT ("keyHash") DO NOTHING;
+  GET DIAGNOSTICS inserted = ROW_COUNT;
+  IF inserted = 1 THEN RETURN QUERY SELECT false,NULL::jsonb; RETURN; END IF;
+  SELECT * INTO prior FROM public."ActionIdempotencyKey" WHERE "keyHash"=key_value FOR UPDATE;
+  IF prior."requestHash" IS DISTINCT FROM request_hash THEN
+    RAISE EXCEPTION 'C03_GOVERNANCE_REPLAY_CONFLICT' USING ERRCODE='40001';
+  END IF;
+  IF prior."completedAt" IS NULL OR prior."responsePayload" IS NULL THEN
+    RAISE EXCEPTION 'C03_GOVERNANCE_REPLAY_IN_PROGRESS' USING ERRCODE='40001';
+  END IF;
+  RETURN QUERY SELECT true,prior."responsePayload";
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_complete_governance_command(command_name text, response jsonb)
+RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+  UPDATE public."ActionIdempotencyKey"
+     SET "statusCode"=200,"responsePayload"=response,"completedAt"=transaction_timestamp()
+   WHERE "keyHash"=encode(sha256(convert_to(
+     'c03-governance|' || current_setting('app.licensee_id', true) || '|' ||
+     current_setting('app.user_id', true) || '|' || command_name || '|' ||
+     current_setting('app.request_id', true), 'UTF8')), 'hex')
+     AND "completedAt" IS NULL
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_governance_audit(action_name text, entity_type text, entity_id text, details jsonb)
+RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE audit_id text := gen_random_uuid()::text;
+BEGIN
+  INSERT INTO public."AuditLog" (id,"userId","orgId","licenseeId",action,"entityType","entityId",details)
+  VALUES (audit_id,current_setting('app.user_id',true),NULLIF(current_setting('app.organization_id',true),''),
+          NULLIF(current_setting('app.licensee_id',true),''),action_name,entity_type,entity_id,
+          COALESCE(details,'{}'::jsonb) || jsonb_build_object(
+            'requestId',current_setting('app.request_id',true),'purpose',current_setting('app.purpose',true),
+            'immutableAttribution',true));
+  INSERT INTO public."SecurityEventOutbox" (id,"eventType",payload,"updatedAt")
+  VALUES (gen_random_uuid()::text,'C03_GOVERNANCE_AUDIT',jsonb_build_object(
+    'auditEventId',audit_id,'action',action_name,'entityType',entity_type,'entityId',entity_id,
+    'licenseeId',NULLIF(current_setting('app.licensee_id',true),'')),transaction_timestamp());
+  RETURN audit_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_require_governance_approval(action_key text, expected_payload jsonb)
+RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE approval public."SensitiveActionApproval"%ROWTYPE;
+DECLARE approval_id text := current_setting('app.c03_approval_id', true);
+BEGIN
+  IF approval_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
+    RAISE EXCEPTION 'C03_GOVERNANCE_APPROVAL_REQUIRED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO approval FROM public."SensitiveActionApproval" WHERE id=approval_id FOR UPDATE;
+  IF NOT FOUND OR approval."actionKey" IS DISTINCT FROM action_key
+     OR approval.status IS DISTINCT FROM 'APPROVED' OR approval."expiresAt"<=transaction_timestamp()
+     OR approval."licenseeId" IS DISTINCT FROM current_setting('app.licensee_id',true)
+     OR approval."reviewedByUserId" IS DISTINCT FROM current_setting('app.user_id',true)
+     OR approval."requestedByUserId"=approval."reviewedByUserId"
+     OR approval."executedAt" IS NOT NULL
+     OR jsonb_strip_nulls(approval.payload) IS DISTINCT FROM jsonb_strip_nulls(expected_payload) THEN
+    RAISE EXCEPTION 'C03_GOVERNANCE_APPROVAL_INVALID' USING ERRCODE='42501';
+  END IF;
+  RETURN approval_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_mark_governance_approval_executed(approval_id text)
+RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+  UPDATE public."SensitiveActionApproval"
+     SET status='EXECUTED',"executedByUserId"=current_setting('app.user_id',true),
+         "executedAt"=transaction_timestamp(),"updatedAt"=transaction_timestamp()
+   WHERE id=approval_id AND status='APPROVED' AND "executedAt" IS NULL
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_upsert_tenant_feature_flag(key text, enabled boolean, config jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; replay record; row public."TenantFeatureFlag"%ROWTYPE; response jsonb; approval_id text;
+DECLARE payload jsonb;
+BEGIN
+  SELECT * INTO actor FROM app_rls.c03_require_governance_actor(ARRAY['sensitive-action-approval-approve']);
+  IF key !~ '^[a-z0-9][a-z0-9_.-]{1,119}$' OR (config IS NOT NULL AND jsonb_typeof(config)<>'object')
+     OR octet_length(COALESCE(config,'{}'::jsonb)::text)>65536 THEN
+    RAISE EXCEPTION 'C03_FEATURE_FLAG_INVALID' USING ERRCODE='22023';
+  END IF;
+  payload := jsonb_build_object('licenseeId',actor.licensee_id,'key',key,'enabled',enabled,'config',config);
+  SELECT * INTO replay FROM app_rls.c03_governance_replay('feature-flag:'||key,payload);
+  IF replay.replayed THEN RETURN replay.result || '{"__c03Replay":true}'::jsonb; END IF;
+  approval_id := app_rls.c03_require_governance_approval('FEATURE_FLAG_UPSERT',payload);
+  INSERT INTO public."TenantFeatureFlag" (id,"licenseeId",key,enabled,config,"updatedByUserId","updatedAt")
+  VALUES (gen_random_uuid()::text,actor.licensee_id,key,enabled,config,actor.user_id,transaction_timestamp())
+  ON CONFLICT ("licenseeId",key) DO UPDATE SET enabled=EXCLUDED.enabled,config=EXCLUDED.config,
+    "updatedByUserId"=EXCLUDED."updatedByUserId","updatedAt"=transaction_timestamp()
+  RETURNING * INTO row;
+  response := to_jsonb(row);
+  PERFORM app_rls.c03_governance_audit('TENANT_FEATURE_FLAG_UPSERTED','TenantFeatureFlag',row.id,
+    jsonb_build_object('key',key,'enabled',enabled,'approvalId',approval_id));
+  PERFORM app_rls.c03_mark_governance_approval_executed(approval_id);
+  PERFORM app_rls.c03_complete_governance_command('feature-flag:'||key,response);
+  RETURN response || '{"__c03Replay":false}'::jsonb;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_get_or_create_retention_policy()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; row public."EvidenceRetentionPolicy"%ROWTYPE; inserted boolean := false;
+BEGIN
+  SELECT * INTO actor FROM app_rls.c03_require_governance_actor(ARRAY[
+    'governance-retention-policy-read','governance-retention-preview','governance-compliance-report',
+    'compliance-pack-start','compliance-pack-download','compliance-pack-rebuild-read',
+    'sensitive-action-approval-approve'
+  ]);
+  SELECT * INTO row FROM public."EvidenceRetentionPolicy" WHERE "licenseeId"=actor.licensee_id FOR UPDATE;
+  IF NOT FOUND THEN
+    INSERT INTO public."EvidenceRetentionPolicy"
+      (id,"licenseeId","retentionDays","purgeEnabled","exportBeforePurge","legalHoldTags","updatedAt")
+    VALUES (gen_random_uuid()::text,actor.licensee_id,180,false,true,ARRAY['legal_hold','compliance_hold'],transaction_timestamp())
+    RETURNING * INTO row;
+    inserted := true;
+  END IF;
+  IF inserted THEN
+    PERFORM app_rls.c03_governance_audit('EVIDENCE_RETENTION_POLICY_CREATED','EvidenceRetentionPolicy',row.id,'{}'::jsonb);
+  END IF;
+  RETURN to_jsonb(row);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_run_retention_lifecycle(mode text, approval_id text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; replay record; policy public."EvidenceRetentionPolicy"%ROWTYPE;
+DECLARE job public."EvidenceRetentionJob"%ROWTYPE; cutoff_at timestamptz; evaluated integer; eligible integer; response jsonb;
+BEGIN
+  IF mode NOT IN ('PREVIEW','APPLY') THEN RAISE EXCEPTION 'C03_RETENTION_MODE_INVALID' USING ERRCODE='22023'; END IF;
+  IF mode='APPLY' THEN
+    RAISE EXCEPTION 'C03_RETENTION_APPLY_REQUIRES_MAKER_CHECKER_EXECUTOR' USING ERRCODE='42501';
+  END IF;
+  IF approval_id IS NOT NULL THEN RAISE EXCEPTION 'C03_RETENTION_PREVIEW_APPROVAL_FORBIDDEN' USING ERRCODE='22023'; END IF;
+  SELECT * INTO actor FROM app_rls.c03_require_governance_actor(ARRAY['governance-retention-preview']);
+  SELECT * INTO replay FROM app_rls.c03_governance_replay('retention-preview','{"mode":"PREVIEW"}'::jsonb);
+  IF replay.replayed THEN RETURN replay.result || '{"__c03Replay":true}'::jsonb; END IF;
+  PERFORM app_rls.c03_get_or_create_retention_policy();
+  SELECT * INTO policy FROM public."EvidenceRetentionPolicy" WHERE "licenseeId"=actor.licensee_id FOR UPDATE;
+  cutoff_at := transaction_timestamp()-make_interval(days=>policy."retentionDays");
+  SELECT count(*),count(*) FILTER (WHERE NOT (COALESCE(incident.tags,ARRAY[]::text[]) && policy."legalHoldTags"))
+    INTO evaluated,eligible
+    FROM public."IncidentEvidence" evidence JOIN public."Incident" incident ON incident.id=evidence."incidentId"
+   WHERE incident."licenseeId"=actor.licensee_id AND evidence."createdAt"<cutoff_at;
+  INSERT INTO public."EvidenceRetentionJob"
+    (id,"licenseeId",status,mode,"cutoffAt","recordsEvaluated","recordsPurged","recordsExported",summary,
+     "startedByUserId","startedAt","finishedAt")
+  VALUES (gen_random_uuid()::text,actor.licensee_id,'PREVIEW','PREVIEW',cutoff_at,evaluated,0,0,
+    jsonb_build_object('eligibleCount',eligible,'skippedDueToLegalHold',evaluated-eligible,
+      'purgeEnabled',policy."purgeEnabled"),actor.user_id,transaction_timestamp(),transaction_timestamp())
+  RETURNING * INTO job;
+  response := jsonb_build_object('job',to_jsonb(job),'policy',to_jsonb(policy),'cutoffAt',cutoff_at,
+    'evaluated',evaluated,'eligible',eligible,'purged',0,'exported',0);
+  PERFORM app_rls.c03_governance_audit('EVIDENCE_RETENTION_JOB_PREVIEWED','EvidenceRetentionJob',job.id,
+    jsonb_build_object('evaluated',evaluated,'eligible',eligible));
+  PERFORM app_rls.c03_complete_governance_command('retention-preview',response);
+  RETURN response || '{"__c03Replay":false}'::jsonb;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_generate_compliance_report(from_at timestamptz, to_at timestamptz)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; replay record; policy public."EvidenceRetentionPolicy"%ROWTYPE; response jsonb;
+DECLARE total_incidents integer; resolved_incidents integer; breached_incidents integer; fraud_reports integer;
+DECLARE audit_events integer; failed_logins integer; handoff jsonb; payload jsonb;
+BEGIN
+  IF (from_at IS NOT NULL AND to_at IS NOT NULL AND from_at>to_at)
+     OR (from_at IS NOT NULL AND to_at IS NOT NULL AND to_at-from_at>interval '366 days') THEN
+    RAISE EXCEPTION 'C03_COMPLIANCE_RANGE_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO actor FROM app_rls.c03_require_governance_actor(ARRAY[
+    'governance-compliance-report','compliance-pack-start','compliance-pack-download','compliance-pack-rebuild-read']);
+  payload := jsonb_build_object('from',from_at,'to',to_at);
+  SELECT * INTO replay FROM app_rls.c03_governance_replay('compliance-report',payload);
+  IF replay.replayed THEN RETURN replay.result || '{"__c03Replay":true}'::jsonb; END IF;
+  PERFORM app_rls.c03_get_or_create_retention_policy();
+  SELECT * INTO policy FROM public."EvidenceRetentionPolicy" WHERE "licenseeId"=actor.licensee_id;
+  SELECT count(*),count(*) FILTER (WHERE status::text IN ('RESOLVED','CLOSED')),
+         count(*) FILTER (WHERE "slaDueAt"<transaction_timestamp() AND status::text NOT IN ('RESOLVED','CLOSED')),
+         count(*) FILTER (WHERE "reportedBy"='CUSTOMER')
+    INTO total_incidents,resolved_incidents,breached_incidents,fraud_reports
+    FROM public."Incident" WHERE "licenseeId"=actor.licensee_id
+      AND (from_at IS NULL OR "createdAt">=from_at) AND (to_at IS NULL OR "createdAt"<=to_at);
+  SELECT count(*),count(*) FILTER (WHERE action LIKE '%LOGIN_FAILED%') INTO audit_events,failed_logins
+    FROM public."AuditLog" WHERE "licenseeId"=actor.licensee_id
+      AND (from_at IS NULL OR "createdAt">=from_at) AND (to_at IS NULL OR "createdAt"<=to_at);
+  SELECT COALESCE(jsonb_object_agg(stage,row_count),'{}'::jsonb) INTO handoff FROM (
+    SELECT h."currentStage"::text stage,count(*) row_count FROM public."IncidentHandoff" h
+    JOIN public."Incident" i ON i.id=h."incidentId" WHERE i."licenseeId"=actor.licensee_id GROUP BY h."currentStage"
+  ) grouped;
+  response := jsonb_build_object(
+    'generatedAt',transaction_timestamp(),'appName','MSCQR',
+    'scope',jsonb_build_object('licenseeId',actor.licensee_id,'from',from_at,'to',to_at),
+    'compliance',jsonb_build_object(
+      'ukGdpr',jsonb_build_object('statement','Personal data is processed in accordance with UK GDPR and the Data Protection Act 2018.','contact','support@mscqr.local'),
+      'securityAccess',jsonb_build_object('roleBasedAccess',jsonb_build_array('Super Admin','Licensee','Manufacturer'),'httpsEncrypted',true,'passwordHandling','Secure password hashing and OTP controls are enforced.','auditLogging',true),
+      'incidentResponse',jsonb_build_object('workflow',jsonb_build_array('report intake','review','containment','documentation','resolution')),
+      'qrUsagePolicy',jsonb_build_object('uniqueTraceable',true,'singleUseWhereApplicable',true,'nonDuplicationRule',true),
+      'auditRetentionDays',policy."retentionDays",
+      'hosting',jsonb_build_object('provider','Cloud provider not set','disclaimer','Service is provided on a best-effort basis with reasonable security controls.')),
+    'metrics',jsonb_build_object(
+      'incidents',jsonb_build_object('total',total_incidents,'resolved',resolved_incidents,'slaBreachedOpen',breached_incidents,'handoff',handoff),
+      'fraudReports',fraud_reports,'auditEvents',audit_events,'failedLogins',failed_logins,
+      'retention',jsonb_build_object('retentionDays',policy."retentionDays",'purgeEnabled',policy."purgeEnabled",
+        'exportBeforePurge',policy."exportBeforePurge",'legalHoldTags',policy."legalHoldTags")),
+    'controls',jsonb_build_array(
+      jsonb_build_object('controlId','SOC2-CC7.2','framework','SOC2','title','Security event detection and response','status',CASE WHEN breached_incidents>5 THEN 'ATTENTION' ELSE 'EFFECTIVE' END,'evidenceRefs',jsonb_build_array('metrics.incidents.slaBreachedOpen','metrics.incidents.total','metrics.incidents.resolved')),
+      jsonb_build_object('controlId','SOC2-CC6.1','framework','SOC2','title','Logical access and authentication controls','status',CASE WHEN failed_logins>=20 THEN 'ATTENTION' WHEN failed_logins>=5 THEN 'MONITOR' ELSE 'EFFECTIVE' END,'evidenceRefs',jsonb_build_array('metrics.failedLogins','compliance.securityAccess')),
+      jsonb_build_object('controlId','ISO27001-A.5.23','framework','ISO27001','title','Information security for cloud services and logging','status',CASE WHEN audit_events>0 THEN 'EFFECTIVE' ELSE 'ATTENTION' END,'evidenceRefs',jsonb_build_array('metrics.auditEvents','scope.licenseeId','generatedAt')),
+      jsonb_build_object('controlId','ISO27001-A.8.10','framework','ISO27001','title','Information retention and deletion','status',CASE WHEN policy."retentionDays">=180 THEN 'EFFECTIVE' ELSE 'MONITOR' END,'evidenceRefs',jsonb_build_array('compliance.auditRetentionDays','metrics.retention'))),
+    'controlSummary',jsonb_build_object('EFFECTIVE',0,'MONITOR',0,'ATTENTION',0));
+  PERFORM app_rls.c03_governance_audit('COMPLIANCE_REPORT_SNAPSHOT','ComplianceReport',actor.licensee_id,
+    jsonb_build_object('from',from_at,'to',to_at,'incidents',total_incidents));
+  PERFORM app_rls.c03_complete_governance_command('compliance-report',response);
+  RETURN response || '{"__c03Replay":false}'::jsonb;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_update_retention_policy(patch jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE actor record; replay record; row public."EvidenceRetentionPolicy"%ROWTYPE; response jsonb; approval_id text; payload jsonb;
+BEGIN
+  SELECT * INTO actor FROM app_rls.c03_require_governance_actor(ARRAY['sensitive-action-approval-approve']);
+  IF jsonb_typeof(patch)<>'object' OR patch='{}'::jsonb OR EXISTS (
+    SELECT 1 FROM jsonb_object_keys(patch) k WHERE k NOT IN ('retentionDays','purgeEnabled','exportBeforePurge','legalHoldTags'))
+     OR (patch ? 'retentionDays' AND (patch->>'retentionDays')::integer NOT BETWEEN 1 AND 3650)
+     OR (patch ? 'legalHoldTags' AND (jsonb_typeof(patch->'legalHoldTags')<>'array' OR jsonb_array_length(patch->'legalHoldTags')>64)) THEN
+    RAISE EXCEPTION 'C03_RETENTION_POLICY_INVALID' USING ERRCODE='22023';
+  END IF;
+  payload := jsonb_build_object('licenseeId',actor.licensee_id) || patch;
+  SELECT * INTO replay FROM app_rls.c03_governance_replay('retention-policy-update',payload);
+  IF replay.replayed THEN RETURN replay.result || '{"__c03Replay":true}'::jsonb; END IF;
+  approval_id := app_rls.c03_require_governance_approval('RETENTION_POLICY_PATCH',payload);
+  PERFORM app_rls.c03_get_or_create_retention_policy();
+  UPDATE public."EvidenceRetentionPolicy" p SET
+    "retentionDays"=CASE WHEN patch?'retentionDays' THEN (patch->>'retentionDays')::integer ELSE p."retentionDays" END,
+    "purgeEnabled"=CASE WHEN patch?'purgeEnabled' THEN (patch->>'purgeEnabled')::boolean ELSE p."purgeEnabled" END,
+    "exportBeforePurge"=CASE WHEN patch?'exportBeforePurge' THEN (patch->>'exportBeforePurge')::boolean ELSE p."exportBeforePurge" END,
+    "legalHoldTags"=CASE WHEN patch?'legalHoldTags' THEN ARRAY(SELECT jsonb_array_elements_text(patch->'legalHoldTags')) ELSE p."legalHoldTags" END,
+    "updatedByUserId"=actor.user_id,"updatedAt"=transaction_timestamp()
+  WHERE p."licenseeId"=actor.licensee_id RETURNING * INTO row;
+  response := to_jsonb(row);
+  PERFORM app_rls.c03_governance_audit('EVIDENCE_RETENTION_POLICY_UPDATED','EvidenceRetentionPolicy',row.id,
+    jsonb_build_object('approvalId',approval_id,'changedFields',(SELECT jsonb_agg(k) FROM jsonb_object_keys(patch) k)));
+  PERFORM app_rls.c03_mark_governance_approval_executed(approval_id);
+  PERFORM app_rls.c03_complete_governance_command('retention-policy-update',response);
+  RETURN response || '{"__c03Replay":false}'::jsonb;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION app_rls.c03_require_governance_actor(text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_governance_row_visible(text,text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_governance_replay(text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_complete_governance_command(text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_governance_audit(text,text,text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_require_governance_approval(text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_mark_governance_approval_executed(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_upsert_tenant_feature_flag(text,boolean,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_get_or_create_retention_policy() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_run_retention_lifecycle(text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_generate_compliance_report(timestamptz,timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_update_retention_policy(jsonb) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app_rls.risk_analytics_session_valid()
+RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+BEGIN
+  IF session_user <> 'mscqr_rls_cert_app'
+     OR current_setting('app.auth_session_verified',true) <> '1'
+     OR current_setting('app.risk_analytics_operation',true) <> 'snapshot'
+  THEN RETURN false; END IF;
+
+  RETURN EXISTS (
+    SELECT 1
+      FROM public."RefreshToken" s
+     WHERE s.id=current_setting('app.auth_session_id',true)
+       AND s."userId"=current_setting('app.user_id',true)
+       AND s."sessionCapabilityHash"=current_setting('app.auth_session_hash',true)
+       AND s."sessionCapabilityHashVersion"='sha256-v1'
+       AND s."sessionCapabilityRevokedAt" IS NULL
+       AND s."sessionCapabilityExpiresAt">clock_timestamp()
+       AND s."revokedAt" IS NULL
+       AND s."expiresAt">clock_timestamp()
+  );
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.risk_analytics_session_valid() FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app_rls.risk_analytics_snapshot(
+  p_capability text,
+  p_purpose text,
+  p_request_id text,
+  p_licensee_id text,
+  p_expected_user_id text,
+  p_lookback_hours integer,
+  p_limit integer,
+  p_checked_at timestamp without time zone
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE
+  actor record;
+  tenant record;
+  result jsonb;
+  policy_payload jsonb;
+  batches_payload jsonb;
+  scans_payload jsonb;
+  alerts_payload jsonb;
+  qrs_payload jsonb;
+  manufacturers_payload jsonb;
+  manufacturer_links_payload jsonb;
+  incidents_payload jsonb;
+  policy_rules_payload jsonb;
+  audit_id text := gen_random_uuid()::text;
+  scan_count integer;
+  batch_count integer;
+  alert_count integer;
+BEGIN
+  IF p_purpose <> 'tenant-risk-analytics'
+     OR p_request_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR p_licensee_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR p_expected_user_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR p_lookback_hours NOT BETWEEN 1 AND 720
+     OR p_limit NOT BETWEEN 1 AND 200
+     OR p_checked_at IS NULL
+  THEN RAISE EXCEPTION 'RISK_ANALYTICS_DENIED' USING ERRCODE='42501'; END IF;
+
+  SELECT * INTO STRICT actor
+    FROM app_auth.require_authenticated_session(p_capability,p_purpose,p_request_id);
+  IF actor."userId" IS DISTINCT FROM p_expected_user_id
+     OR actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN')
+     OR (actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND
+         (actor."organizationId" IS NOT NULL OR actor."licenseeId" IS NOT NULL OR actor.assurance <> 'ADMIN_MFA'))
+     OR (actor.role='LICENSEE_ADMIN' AND actor."licenseeId" IS DISTINCT FROM p_licensee_id)
+  THEN RAISE EXCEPTION 'RISK_ANALYTICS_DENIED' USING ERRCODE='42501'; END IF;
+
+  PERFORM set_config('app.risk_analytics_operation','snapshot',true),
+          set_config('app.risk_analytics_user_id',actor."userId",true),
+          set_config('app.risk_analytics_licensee_id',p_licensee_id,true),
+          set_config('app.risk_analytics_organization_id','',true),
+          set_config('app.risk_analytics_audit_id',audit_id,true);
+
+  SELECT l.id,l."orgId" INTO tenant
+    FROM public."Licensee" l
+   WHERE l.id=p_licensee_id AND l."isActive" AND l."suspendedAt" IS NULL;
+  IF NOT FOUND THEN RAISE EXCEPTION 'RISK_ANALYTICS_DENIED' USING ERRCODE='42501'; END IF;
+  PERFORM set_config('app.risk_analytics_organization_id',tenant."orgId",true);
+  IF NOT EXISTS (SELECT 1 FROM public."Organization" o WHERE o.id=tenant."orgId" AND o."isActive")
+     OR (actor.role='LICENSEE_ADMIN' AND actor."organizationId" IS DISTINCT FROM tenant."orgId")
+  THEN RAISE EXCEPTION 'RISK_ANALYTICS_DENIED' USING ERRCODE='42501'; END IF;
+
+  SELECT count(*) INTO batch_count FROM public."Batch" b WHERE b."licenseeId"=p_licensee_id;
+  SELECT count(*) INTO scan_count FROM public."QrScanLog" s
+   WHERE s."licenseeId"=p_licensee_id AND s."batchId" IS NOT NULL
+     AND s."scannedAt" BETWEEN p_checked_at-(p_lookback_hours||' hours')::interval AND p_checked_at;
+  SELECT count(*) INTO alert_count FROM public."PolicyAlert" a
+   WHERE a."licenseeId"=p_licensee_id AND a."batchId" IS NOT NULL AND a."acknowledgedAt" IS NULL;
+  IF batch_count>5000 OR scan_count>50000 OR alert_count>50000 THEN
+    RAISE EXCEPTION 'RISK_ANALYTICS_DIMENSION_LIMIT' USING ERRCODE='22023';
+  END IF;
+
+  SELECT COALESCE(jsonb_build_object(
+      'multiScanThreshold',p."multiScanThreshold",
+      'geoDriftThresholdKm',p."geoDriftThresholdKm",
+      'velocitySpikeThresholdPerMin',p."velocitySpikeThresholdPerMin"
+    ),'{"multiScanThreshold":2,"geoDriftThresholdKm":300,"velocitySpikeThresholdPerMin":80}'::jsonb)
+    INTO policy_payload
+    FROM public."SecurityPolicy" p WHERE p."licenseeId"=p_licensee_id LIMIT 1;
+  policy_payload := COALESCE(policy_payload,'{"multiScanThreshold":2,"geoDriftThresholdKm":300,"velocitySpikeThresholdPerMin":80}'::jsonb);
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'id',b.id,'name',b.name,'licenseeId',b."licenseeId",'manufacturerId',b."manufacturerId"
+    ) ORDER BY b.id),'[]'::jsonb)
+    INTO batches_payload FROM public."Batch" b WHERE b."licenseeId"=p_licensee_id;
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'id',s.id,'licenseeId',s."licenseeId",'qrCodeId',s."qrCodeId",'batchId',s."batchId",
+      'latitude',s.latitude,'longitude',s.longitude,'scannedAt',s."scannedAt",
+      'qrCode',CASE WHEN q.id IS NULL THEN NULL ELSE jsonb_build_object('id',q.id,'licenseeId',q."licenseeId",'batchId',q."batchId") END,
+      'batch',CASE WHEN b.id IS NULL THEN NULL ELSE jsonb_build_object('id',b.id,'licenseeId',b."licenseeId") END
+    ) ORDER BY s."batchId",s."qrCodeId",s."scannedAt",s.id),'[]'::jsonb)
+    INTO scans_payload
+    FROM public."QrScanLog" s
+    LEFT JOIN public."QRCode" q ON q.id=s."qrCodeId"
+    LEFT JOIN public."Batch" b ON b.id=s."batchId"
+   WHERE s."licenseeId"=p_licensee_id AND s."batchId" IS NOT NULL
+     AND s."scannedAt" BETWEEN p_checked_at-(p_lookback_hours||' hours')::interval AND p_checked_at;
+
+  SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY a."batchId",a.id),'[]'::jsonb)
+    INTO alerts_payload FROM public."PolicyAlert" a
+   WHERE a."licenseeId"=p_licensee_id AND a."batchId" IS NOT NULL AND a."acknowledgedAt" IS NULL;
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'id',q.id,'licenseeId',q."licenseeId",'batchId',q."batchId",'scanCount',q."scanCount"
+    ) ORDER BY q.id),'[]'::jsonb)
+    INTO qrs_payload FROM public."QRCode" q WHERE q."licenseeId"=p_licensee_id;
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('id',u.id,'name',u.name) ORDER BY u.id),'[]'::jsonb)
+    INTO manufacturers_payload
+    FROM public."User" u
+   WHERE u.role IN (
+       'MANUFACTURER_ADMIN'::public."UserRole",
+       'MANUFACTURER'::public."UserRole",
+       'MANUFACTURER_USER'::public."UserRole"
+     )
+     AND u."isActive" AND u.status='ACTIVE'::public."UserStatus"
+     AND u."deletedAt" IS NULL AND u."disabledAt" IS NULL
+     AND EXISTS (SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+       WHERE ml."manufacturerId"=u.id AND ml."licenseeId"=p_licensee_id);
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'manufacturerId',ml."manufacturerId",'licenseeId',ml."licenseeId"
+    ) ORDER BY ml."manufacturerId"),'[]'::jsonb)
+    INTO manufacturer_links_payload
+    FROM public."ManufacturerLicenseeLink" ml WHERE ml."licenseeId"=p_licensee_id;
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('id',i.id,'licenseeId',i."licenseeId") ORDER BY i.id),'[]'::jsonb)
+    INTO incidents_payload FROM public."Incident" i WHERE i."licenseeId"=p_licensee_id;
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'id',r.id,'licenseeId',r."licenseeId",'orgId',r."orgId",
+      'manufacturerId',r."manufacturerId",'isActive',r."isActive"
+    ) ORDER BY r.id),'[]'::jsonb)
+    INTO policy_rules_payload
+    FROM public."PolicyRule" r
+   WHERE r."licenseeId"=p_licensee_id OR r."orgId"=tenant."orgId"
+      OR EXISTS (SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+        WHERE ml."licenseeId"=p_licensee_id AND ml."manufacturerId"=r."manufacturerId");
+
+  result := jsonb_build_object(
+    'organizationId',tenant."orgId",
+    'policy',policy_payload,
+    'batches',batches_payload,
+    'scanLogs',scans_payload,
+    'alerts',alerts_payload,
+    'qrs',qrs_payload,
+    'manufacturers',manufacturers_payload,
+    'manufacturerLinks',manufacturer_links_payload,
+    'incidents',incidents_payload,
+    'policyRules',policy_rules_payload
+  );
+
+  INSERT INTO public."AuditLog"
+    (id,"userId","orgId","licenseeId",action,"entityType","entityId",details)
+  VALUES (audit_id,actor."userId",tenant."orgId",p_licensee_id,'RISK_ANALYTICS_READ','Licensee',p_licensee_id,
+    jsonb_build_object('requestId',p_request_id,'purposeCode',p_purpose,'lookbackHours',p_lookback_hours,
+      'limit',p_limit,'analyzedBatchCount',batch_count,'scanRows',scan_count,'openAlertRows',alert_count,
+      'workflowId','workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics',
+      'route','GET /api/analytics/risk-scores'));
+
+  RETURN result;
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.risk_analytics_snapshot(text,text,text,text,text,integer,integer,timestamp without time zone) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_rls.c02_fraud_report_network_details(text[]) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c02_respond_fraud_report(text,text,text,boolean) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_add_incident_evidence(text,jsonb,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_approve_sensitive_action_approval(text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_build_incident_evidence_audit_snapshot(text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_complete_compliance_pack_job(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_complete_compliance_pack_rebuild(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_create_policy_rule(jsonb) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_create_sensitive_action_approval(jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_fail_compliance_pack_job(text,text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_generate_compliance_report(timestamp with time zone,timestamp with time zone) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_get_compliance_pack_job(text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_get_incident_detail(text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_get_incident_evidence_file_by_storage_key(text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_get_or_create_retention_policy() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_link_ir_alert_incident(text,text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_list_incidents(jsonb,integer,integer) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_list_ir_alerts(text,text,text,jsonb,integer,integer) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_list_platform_policy_rules(text,boolean,integer,integer) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_list_policy_rules(text,boolean,integer,integer) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_list_sensitive_action_approvals(text,integer,integer) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_patch_incident(text,jsonb) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_record_incident_event(text,text,jsonb) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_reject_sensitive_action_approval(text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_revalidate_compliance_pack_job_actor_scope(text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_run_retention_lifecycle(text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_start_compliance_pack_job(text,text,text,text,text,timestamp with time zone,timestamp with time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_update_policy_rule(text,jsonb) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_update_retention_policy(jsonb) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_upsert_tenant_feature_flag(text,boolean,jsonb) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.platform_audit_log_details(text[]) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.risk_analytics_snapshot(text,text,text,text,text,integer,integer,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_assert_restricted_identity(text) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_rls.c03_compute_incident_severity(text,jsonb) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_rls.c03_compute_incident_spam_signal(text,jsonb) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_rls.c03_create_public_incident_report(text,jsonb,jsonb,text) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_rls.c03_assert_restricted_identity(text) TO "mscqr_rls_cert_worker";
 RESET ROLE;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;
@@ -8099,6 +11248,48 @@ BEGIN
 END
 $$;
 
+CREATE OR REPLACE FUNCTION app_public.track_support_status(
+  p_reference_code text,p_proof_digest text,p_proof_version integer,
+  p_checked_at timestamp without time zone,p_request_id text
+) RETURNS TABLE(
+  "referenceCode" text,"customerFacingStatus" text,"priority" text,
+  "updatedAt" timestamp without time zone,"handoffStage" text,
+  "slaDueAt" timestamp without time zone
+)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
+AS $$
+DECLARE
+  ticket record;
+  handoff record;
+  expected_digest text;
+BEGIN
+  IF p_reference_code !~ '^[A-Z0-9][A-Z0-9_-]{3,63}$'
+     OR p_proof_digest !~ '^sha256-v1:[a-f0-9]{64}$'
+     OR p_proof_version<>1 OR p_checked_at IS NULL THEN
+    RAISE EXCEPTION 'PUBLIC_SUPPORT_TRACK_INVALID' USING ERRCODE='22023';
+  END IF;
+  expected_digest:=substr(p_proof_digest,11);
+  PERFORM app_public.public_verify_bind(
+    'public-verification-support-track',p_request_id,NULL,p_reference_code,NULL,NULL,p_proof_digest
+  );
+  SELECT t.id,t."incidentId",t."referenceCode",t.status::text AS status,t.priority::text AS priority,
+         t."updatedAt",t."slaDueAt"
+    INTO ticket
+    FROM public."SupportTicket" t
+   WHERE t."referenceCode"=p_reference_code
+     AND t."customerEmail" IS NOT NULL
+     AND encode(sha256(convert_to(lower(t."customerEmail"),'UTF8')),'hex')=expected_digest;
+  IF ticket.id IS NULL THEN RETURN; END IF;
+  PERFORM set_config('app.public_verification_target_id',ticket."incidentId",true);
+  SELECT h."currentStage"::text AS stage,h."slaDueAt"
+    INTO handoff
+    FROM public."IncidentHandoff" h
+   WHERE h."incidentId"=ticket."incidentId";
+  RETURN QUERY SELECT ticket."referenceCode",ticket.status,ticket.priority,ticket."updatedAt",
+    handoff.stage,coalesce(handoff."slaDueAt",ticket."slaDueAt");
+END
+$$;
+
 REVOKE ALL ON FUNCTION app_public.public_verify_bind(text,text,text,text,text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_public.issue_customer_auth_session(text,text,text,text,text,timestamp without time zone,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_public.require_customer_auth_session(text,timestamp without time zone,text,text) FROM PUBLIC;
@@ -8126,6 +11317,7 @@ REVOKE ALL ON FUNCTION app_public.submit_request_access(text,text,text,text,text
 REVOKE ALL ON FUNCTION app_public.submit_public_support(text,text,text,text,text,text,text,text,text,timestamp without time zone,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_public.complete_request_access_delivery(text,text,text,text,text,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_public.complete_public_support_delivery(text,text,text,text,text,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_public.track_support_status(text,text,integer,timestamp without time zone,text) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION app_public.accept_customer_ownership_transfer(text,text,text,text,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_public.begin_customer_passkey(text,text,text,text,text,text,text,text,text,text,timestamp without time zone,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
@@ -8147,6 +11339,7 @@ GRANT EXECUTE ON FUNCTION app_public.submit_product_feedback(text,integer,text,t
 GRANT EXECUTE ON FUNCTION app_public.submit_public_incident(text,text,text,text,text,boolean,jsonb,timestamp without time zone,text,text,text,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_public.submit_public_support(text,text,text,text,text,text,text,text,text,timestamp without time zone,text,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_public.submit_request_access(text,text,text,text,text,text,text,text,text,timestamp without time zone,text,text) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_public.track_support_status(text,text,integer,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_public.verify_raw_qr(text,timestamp without time zone,text,text,text,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_public.verify_signed_qr(text,text,text,text,text,text,integer,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text,text,text,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_public.write_verification_session(text,text,text,text,jsonb,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
@@ -8637,6 +11830,681 @@ GRANT EXECUTE ON FUNCTION app_rls.complete_security_event_outbox(text,text,times
 GRANT EXECUTE ON FUNCTION app_rls.consume_audit_log_outbox(text,text,timestamp without time zone) TO "mscqr_rls_cert_worker";
 GRANT EXECUTE ON FUNCTION app_rls.fail_audit_log_outbox(text,text,timestamp without time zone,integer,text) TO "mscqr_rls_cert_worker";
 GRANT EXECUTE ON FUNCTION app_rls.fail_security_event_outbox(text,text,timestamp without time zone,integer,text) TO "mscqr_rls_cert_worker";
+RESET ROLE;
+DO $$ BEGIN
+  IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;
+END $$;
+SET ROLE "mscqr_rls_cert_owner";
+REVOKE CREATE ON SCHEMA app_rls FROM "mscqr_rls_cert_auth_owner";
+RESET ROLE;
+DO $$ BEGIN
+  IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;
+END $$;
+SET ROLE "mscqr_rls_cert_owner";
+GRANT USAGE,CREATE ON SCHEMA app_rls TO "mscqr_rls_cert_auth_owner";
+RESET ROLE;
+DO $$ BEGIN
+  IF NOT pg_has_role(session_user,'mscqr_rls_cert_auth_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_auth_owner'; END IF;
+END $$;
+SET ROLE "mscqr_rls_cert_auth_owner";
+-- Capability-bound notification and incident-email persistence.
+-- "mscqr_rls_cert_auth_owner" owns these functions; runtime roles receive exact EXECUTE only.
+
+CREATE OR REPLACE FUNCTION app_rls.b03_authenticated_context_valid()
+RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+BEGIN
+  IF session_user <> 'mscqr_rls_cert_app'
+     OR current_setting('app.auth_session_verified',true) <> '1'
+     OR current_setting('app.b03_actor_id',true) IS DISTINCT FROM current_setting('app.user_id',true)
+  THEN RETURN false; END IF;
+
+  RETURN EXISTS (
+    SELECT 1 FROM public."RefreshToken" session_row
+     WHERE session_row.id=current_setting('app.auth_session_id',true)
+       AND session_row."userId"=current_setting('app.b03_actor_id',true)
+       AND session_row."sessionCapabilityHash"=current_setting('app.auth_session_hash',true)
+       AND session_row."sessionCapabilityHashVersion"='sha256-v1'
+       AND session_row."sessionCapabilityRevokedAt" IS NULL
+       AND session_row."sessionCapabilityExpiresAt">clock_timestamp()
+       AND session_row."revokedAt" IS NULL
+       AND session_row."expiresAt">clock_timestamp()
+  );
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.b03_authenticated_context_valid() FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_require_authenticated_actor(p_request_id text)
+RETURNS TABLE(user_id text, role text, organization_id text, licensee_id text)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+BEGIN
+  IF p_request_id IS NULL OR length(p_request_id) NOT BETWEEN 1 AND 128
+     OR p_request_id !~ '^[!-~]+$'
+     OR p_request_id IS DISTINCT FROM current_setting('app.request_id', true) THEN
+    RAISE EXCEPTION 'B03_AUTHENTICATED_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+
+  SELECT * INTO actor
+  FROM app_rls.b01_authenticated_actor(
+    current_setting('app.user_id', true),
+    current_setting('app.auth_session_id', true),
+    p_request_id
+  );
+
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN') THEN
+    RAISE EXCEPTION 'B03_AUTHENTICATED_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+
+  PERFORM set_config('app.b03_actor_id', actor."userId", true),
+          set_config('app.b03_actor_role', actor.role, true),
+          set_config('app.b03_actor_org_id', coalesce(actor."organizationId", ''), true),
+          set_config('app.b03_actor_licensee_id', coalesce(actor."licenseeId", ''), true);
+
+  RETURN QUERY SELECT actor."userId"::text, actor.role::text,
+    actor."organizationId"::text, actor."licenseeId"::text;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_assert_requested_scope(
+  p_licensee_id text,
+  p_organization_id text
+) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor_role text := current_setting('app.b03_actor_role', true);
+DECLARE actor_id text := current_setting('app.b03_actor_id', true);
+DECLARE actor_licensee text := nullif(current_setting('app.b03_actor_licensee_id', true), '');
+DECLARE actor_org text := nullif(current_setting('app.b03_actor_org_id', true), '');
+BEGIN
+  IF actor_role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
+    IF p_licensee_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM public."Licensee" l
+      JOIN public."Organization" o ON o.id=l."orgId"
+      WHERE l.id=p_licensee_id
+        AND (p_organization_id IS NULL OR o.id=p_organization_id)
+        AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive"
+    ) THEN
+      RAISE EXCEPTION 'B03_TENANT_SCOPE_DENIED' USING ERRCODE='42501';
+    END IF;
+  ELSIF actor_role='LICENSEE_ADMIN' THEN
+    IF p_licensee_id IS DISTINCT FROM actor_licensee
+       OR (p_organization_id IS NOT NULL AND p_organization_id IS DISTINCT FROM actor_org) THEN
+      RAISE EXCEPTION 'B03_TENANT_SCOPE_DENIED' USING ERRCODE='42501';
+    END IF;
+  ELSIF actor_role='MANUFACTURER_ADMIN' THEN
+    IF p_licensee_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+      JOIN public."Licensee" l ON l.id=ml."licenseeId"
+      JOIN public."Organization" o ON o.id=l."orgId"
+      WHERE ml."manufacturerId"=actor_id AND ml."licenseeId"=p_licensee_id
+        AND (p_organization_id IS NULL OR p_organization_id=actor_org)
+        AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive"
+    ) THEN
+      RAISE EXCEPTION 'B03_TENANT_SCOPE_DENIED' USING ERRCODE='42501';
+    END IF;
+  ELSE
+    RAISE EXCEPTION 'B03_AUTHENTICATED_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+
+  PERFORM set_config('app.b03_licensee_id', coalesce(p_licensee_id, ''), true),
+          set_config('app.b03_organization_id', coalesce(p_organization_id, ''), true);
+  RETURN true;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_primary_superadmin_email()
+RETURNS TABLE(email text)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+BEGIN
+  PERFORM app_rls.b03_require_authenticated_actor(current_setting('app.request_id', true));
+  PERFORM set_config('app.b03_operation','superadmin-read',true);
+  RETURN QUERY
+  SELECT u.email::text
+  FROM public."User" u
+  WHERE u.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+    AND u."isActive" AND u.status='ACTIVE' AND u."deletedAt" IS NULL
+  ORDER BY u."createdAt",u.id
+  LIMIT 1;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_superadmin_alert_emails()
+RETURNS TABLE(email text)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+BEGIN
+  PERFORM app_rls.b03_require_authenticated_actor(current_setting('app.request_id', true));
+  PERFORM set_config('app.b03_operation','superadmin-read',true);
+  RETURN QUERY
+  SELECT u.email::text
+  FROM public."User" u
+  WHERE u.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+    AND u."isActive" AND u.status='ACTIVE' AND u."deletedAt" IS NULL
+  ORDER BY u."createdAt",u.id
+  LIMIT 100;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_resolve_incident_email_actor(p_actor_user_id text)
+RETURNS TABLE(id text,email text,name text,role text,active boolean)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+BEGIN
+  SELECT * INTO actor
+  FROM app_rls.b03_require_authenticated_actor(current_setting('app.request_id', true));
+  IF p_actor_user_id IS DISTINCT FROM actor.user_id THEN
+    RAISE EXCEPTION 'B03_INCIDENT_EMAIL_ACTOR_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.b03_operation','actor-read',true);
+  RETURN QUERY
+  SELECT u.id::text,u.email::text,u.name::text,u.role::text,
+    (u."isActive" AND u.status='ACTIVE' AND u."deletedAt" IS NULL AND u."disabledAt" IS NULL)
+  FROM public."User" u WHERE u.id=actor.user_id;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_create_role_notifications(
+  p_audience text,p_title text,p_body text,p_type text,p_licensee_id text,p_organization_id text,
+  p_incident_id text,p_data jsonb,p_channels text[],p_request_id text
+) RETURNS TABLE(
+  "notificationId" text,"userId" text,"userEmail" text,"userRole" text,
+  "userLicenseeId" text,"userOrganizationId" text,"channel" text,
+  "writeResult" jsonb,"sideEffectRequired" boolean
+)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE channel_value text;
+DECLARE recipient record;
+DECLARE notification_id text;
+DECLARE audience_roles text[];
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF p_audience NOT IN ('SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER','ALL')
+     OR p_title IS NULL OR length(p_title) NOT BETWEEN 1 AND 255
+     OR p_body IS NULL OR length(p_body) NOT BETWEEN 1 AND 10000
+     OR p_type IS NULL OR length(p_type) NOT BETWEEN 1 AND 128
+     OR p_channels IS NULL OR cardinality(p_channels) NOT BETWEEN 1 AND 2
+     OR EXISTS (SELECT 1 FROM unnest(p_channels) c WHERE c NOT IN ('WEB','EMAIL'))
+     OR cardinality(p_channels)<>(SELECT count(DISTINCT c) FROM unnest(p_channels) c)
+     OR octet_length(coalesce(p_data,'null'::jsonb)::text)>65536 THEN
+    RAISE EXCEPTION 'B03_NOTIFICATION_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  PERFORM app_rls.b03_assert_requested_scope(p_licensee_id,p_organization_id);
+  IF actor.role='LICENSEE_ADMIN' AND p_audience NOT IN ('LICENSEE_ADMIN','ALL') THEN
+    RAISE EXCEPTION 'B03_NOTIFICATION_AUDIENCE_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF actor.role='MANUFACTURER_ADMIN' AND p_audience NOT IN ('MANUFACTURER','ALL') THEN
+    RAISE EXCEPTION 'B03_NOTIFICATION_AUDIENCE_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF p_incident_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM public."Incident" i
+    WHERE i.id=p_incident_id AND (p_licensee_id IS NULL OR i."licenseeId"=p_licensee_id)
+  ) THEN
+    RAISE EXCEPTION 'B03_INCIDENT_SCOPE_DENIED' USING ERRCODE='42501';
+  END IF;
+
+  audience_roles := CASE p_audience
+    WHEN 'SUPER_ADMIN' THEN ARRAY['SUPER_ADMIN','PLATFORM_SUPER_ADMIN']
+    WHEN 'LICENSEE_ADMIN' THEN ARRAY['LICENSEE_ADMIN']
+    WHEN 'MANUFACTURER' THEN ARRAY['MANUFACTURER_ADMIN']
+    ELSE ARRAY['SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN']
+  END;
+  PERFORM set_config('app.b03_operation','notification-write',true);
+
+  FOR recipient IN
+    SELECT u.id,u.email,u.role::text AS role,u."licenseeId",u."orgId"
+    FROM public."User" u
+    WHERE u.role::text=ANY(audience_roles)
+      AND u."isActive" AND u.status='ACTIVE' AND u."deletedAt" IS NULL AND u."disabledAt" IS NULL
+      AND (p_licensee_id IS NULL OR u."licenseeId"=p_licensee_id OR (
+        u.role='MANUFACTURER_ADMIN' AND EXISTS (
+          SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+          WHERE ml."manufacturerId"=u.id AND ml."licenseeId"=p_licensee_id
+        )
+      ))
+      AND (p_organization_id IS NULL OR u."orgId"=p_organization_id)
+    ORDER BY u.id
+  LOOP
+    FOREACH channel_value IN ARRAY p_channels LOOP
+      notification_id:=gen_random_uuid()::text;
+      INSERT INTO public."Notification"(
+        id,"userId","orgId","licenseeId","incidentId",audience,channel,type,title,body,data,"updatedAt"
+      ) VALUES (
+        notification_id,recipient.id,coalesce(p_organization_id,recipient."orgId"),
+        coalesce(p_licensee_id,recipient."licenseeId"),p_incident_id,
+        p_audience::public."NotificationAudience",channel_value::public."NotificationChannel",
+        p_type,p_title,p_body,p_data,clock_timestamp()
+      );
+      RETURN QUERY SELECT notification_id,recipient.id::text,recipient.email::text,recipient.role,
+        recipient."licenseeId"::text,recipient."orgId"::text,channel_value,
+        jsonb_build_object('count',1),true;
+    END LOOP;
+  END LOOP;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_create_user_notification(
+  p_user_id text,p_title text,p_body text,p_type text,p_licensee_id text,p_organization_id text,
+  p_incident_id text,p_data jsonb,p_channel text,p_request_id text
+) RETURNS TABLE(
+  "notificationId" text,"userId" text,"userEmail" text,"userRole" text,
+  "userLicenseeId" text,"userOrganizationId" text,"channel" text,
+  "writeResult" jsonb,"sideEffectRequired" boolean,"notification" jsonb
+)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE recipient record;
+DECLARE notification_id text := gen_random_uuid()::text;
+DECLARE projection jsonb;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF p_channel NOT IN ('WEB','EMAIL') OR p_title IS NULL OR length(p_title) NOT BETWEEN 1 AND 255
+     OR p_body IS NULL OR length(p_body) NOT BETWEEN 1 AND 10000
+     OR p_type IS NULL OR length(p_type) NOT BETWEEN 1 AND 128
+     OR octet_length(coalesce(p_data,'null'::jsonb)::text)>65536 THEN
+    RAISE EXCEPTION 'B03_NOTIFICATION_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  PERFORM app_rls.b03_assert_requested_scope(p_licensee_id,p_organization_id);
+  PERFORM set_config('app.b03_operation','notification-write',true),
+          set_config('app.b03_target_user_id',p_user_id,true);
+  SELECT u.id,u.email,u.role::text AS role,u."licenseeId",u."orgId" INTO recipient
+  FROM public."User" u
+  WHERE u.id=p_user_id AND u."isActive" AND u.status='ACTIVE'
+    AND u."deletedAt" IS NULL AND u."disabledAt" IS NULL;
+  IF NOT FOUND
+     OR (actor.role='LICENSEE_ADMIN' AND recipient."licenseeId" IS DISTINCT FROM actor.licensee_id)
+     OR (actor.role='MANUFACTURER_ADMIN' AND NOT EXISTS (
+       SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+       WHERE ml."manufacturerId"=actor.user_id AND ml."licenseeId"=recipient."licenseeId"
+     )) THEN
+    RAISE EXCEPTION 'B03_NOTIFICATION_TARGET_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF p_licensee_id IS NOT NULL AND recipient."licenseeId" IS DISTINCT FROM p_licensee_id THEN
+    RAISE EXCEPTION 'B03_NOTIFICATION_TARGET_DENIED' USING ERRCODE='42501';
+  END IF;
+
+  INSERT INTO public."Notification"(
+    id,"userId","orgId","licenseeId","incidentId",audience,channel,type,title,body,data,"updatedAt"
+  ) VALUES (
+    notification_id,recipient.id,coalesce(p_organization_id,recipient."orgId"),
+    coalesce(p_licensee_id,recipient."licenseeId"),p_incident_id,'ALL',
+    p_channel::public."NotificationChannel",p_type,p_title,p_body,p_data,clock_timestamp()
+  );
+  SELECT jsonb_build_object(
+    'id',notification_id,'userId',recipient.id,'orgId',coalesce(p_organization_id,recipient."orgId"),
+    'licenseeId',coalesce(p_licensee_id,recipient."licenseeId"),'incidentId',p_incident_id,
+    'audience','ALL','channel',p_channel,'type',p_type,'title',p_title,'body',p_body,
+    'data',p_data,'readAt',NULL,'emailedAt',NULL,'createdAt',clock_timestamp(),'updatedAt',clock_timestamp()
+  ) INTO projection;
+  RETURN QUERY SELECT notification_id,recipient.id::text,recipient.email::text,recipient.role,
+    recipient."licenseeId"::text,recipient."orgId"::text,p_channel,
+    jsonb_build_object('count',1),true,projection;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_mark_notification_emailed(
+  p_notification_id text,p_emailed_at timestamp without time zone,p_request_id text
+) RETURNS TABLE(updated boolean)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE changed integer;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF p_emailed_at IS NULL OR abs(extract(epoch FROM (p_emailed_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'B03_NOTIFICATION_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  PERFORM set_config('app.b03_operation','notification-email-update',true),
+          set_config('app.b03_notification_id',p_notification_id,true);
+  UPDATE public."Notification" n SET "emailedAt"=coalesce(n."emailedAt",p_emailed_at),"updatedAt"=clock_timestamp()
+  WHERE n.id=p_notification_id AND (
+    actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+    OR n."userId"=actor.user_id
+    OR (actor.role='LICENSEE_ADMIN' AND n."licenseeId"=actor.licensee_id)
+    OR (actor.role='MANUFACTURER_ADMIN' AND EXISTS (
+      SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+      WHERE ml."manufacturerId"=actor.user_id AND ml."licenseeId"=n."licenseeId"
+    ))
+  );
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  RETURN QUERY SELECT changed=1;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_list_notifications_for_user(
+  p_user_id text,p_limit integer,p_offset integer,p_unread_only boolean,
+  p_cursor_created_at timestamp without time zone,p_cursor_id text,p_request_id text
+) RETURNS TABLE(notifications jsonb,total integer,unread integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE audience_value text;
+DECLARE rows_json jsonb;
+DECLARE total_count integer;
+DECLARE unread_count integer;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF p_user_id IS DISTINCT FROM actor.user_id OR p_limit NOT BETWEEN 1 AND 100
+     OR p_offset NOT BETWEEN 0 AND 1000000 THEN
+    RAISE EXCEPTION 'B03_NOTIFICATION_READ_DENIED' USING ERRCODE='42501';
+  END IF;
+  audience_value:=CASE actor.role
+    WHEN 'SUPER_ADMIN' THEN 'SUPER_ADMIN'
+    WHEN 'PLATFORM_SUPER_ADMIN' THEN 'SUPER_ADMIN'
+    WHEN 'LICENSEE_ADMIN' THEN 'LICENSEE_ADMIN'
+    ELSE 'MANUFACTURER'
+  END;
+  PERFORM set_config('app.b03_operation','notification-read',true);
+
+  WITH visible AS (
+    SELECT n.*
+    FROM public."Notification" n
+    WHERE n.channel='WEB'
+      AND (n."userId"=actor.user_id OR (
+        n."userId" IS NULL AND n.audience::text IN ('ALL',audience_value)
+        AND (
+          actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+          OR n."licenseeId" IS NULL
+          OR (actor.role='LICENSEE_ADMIN' AND n."licenseeId"=actor.licensee_id)
+          OR (actor.role='MANUFACTURER_ADMIN' AND EXISTS (
+            SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+            WHERE ml."manufacturerId"=actor.user_id AND ml."licenseeId"=n."licenseeId"
+          ))
+        )
+      ))
+      AND NOT (actor.role='LICENSEE_ADMIN' AND lower(n.type)=ANY(ARRAY[
+        'manufacturer_batch_assigned','manufacturer_print_job_created','manufacturer_print_job_confirmed',
+        'system_print_job_created','system_print_job_completed','system_print_job_failed','system_printer_status_changed'
+      ]))
+  ), page AS (
+    SELECT * FROM visible
+    WHERE (NOT p_unread_only OR "readAt" IS NULL)
+      AND (p_cursor_created_at IS NULL OR ("createdAt",id)<(p_cursor_created_at,p_cursor_id))
+    ORDER BY "createdAt" DESC,id DESC
+    LIMIT p_limit OFFSET CASE WHEN p_cursor_created_at IS NULL THEN p_offset ELSE 0 END
+  )
+  SELECT coalesce(jsonb_agg(to_jsonb(page) ORDER BY "createdAt" DESC,id DESC),'[]'::jsonb)
+    INTO rows_json FROM page;
+  SELECT count(*)::integer INTO total_count FROM visible
+    WHERE (NOT p_unread_only OR "readAt" IS NULL);
+  SELECT count(*)::integer INTO unread_count FROM visible WHERE "readAt" IS NULL;
+  RETURN QUERY SELECT rows_json,
+    CASE WHEN p_cursor_created_at IS NULL THEN total_count ELSE NULL END,
+    unread_count;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_mark_notification_read(
+  p_notification_id text,p_user_id text,p_read_at timestamp without time zone,p_request_id text
+) RETURNS TABLE(notification jsonb)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE selected record;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF p_user_id IS DISTINCT FROM actor.user_id OR p_read_at IS NULL
+     OR abs(extract(epoch FROM (p_read_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'B03_NOTIFICATION_READ_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.b03_operation','notification-read-update',true),
+          set_config('app.b03_notification_id',p_notification_id,true);
+  SELECT n.* INTO selected FROM public."Notification" n
+  WHERE n.id=p_notification_id AND n.channel='WEB' AND n."userId"=actor.user_id
+  FOR UPDATE;
+  IF NOT FOUND THEN RETURN QUERY SELECT NULL::jsonb; RETURN; END IF;
+  UPDATE public."Notification" n
+  SET "readAt"=coalesce(n."readAt",p_read_at),"updatedAt"=clock_timestamp()
+  WHERE n.id=selected.id
+  RETURNING n.* INTO selected;
+  RETURN QUERY SELECT to_jsonb(selected);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_mark_all_notifications_read(
+  p_user_id text,p_read_at timestamp without time zone,p_request_id text
+) RETURNS TABLE(count integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE changed integer;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF p_user_id IS DISTINCT FROM actor.user_id OR p_read_at IS NULL
+     OR abs(extract(epoch FROM (p_read_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'B03_NOTIFICATION_READ_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.b03_operation','notification-read-update',true);
+  UPDATE public."Notification" n
+  SET "readAt"=p_read_at,"updatedAt"=clock_timestamp()
+  WHERE n."userId"=actor.user_id AND n.channel='WEB' AND n."readAt" IS NULL;
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  RETURN QUERY SELECT changed;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_resolve_incident_notification_scope(p_incident_id text)
+RETURNS TABLE("incidentId" text,"licenseeId" text,"manufacturerOrganizationId" text)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE incident_scope record;
+BEGIN
+  SELECT * INTO actor
+  FROM app_rls.b03_require_authenticated_actor(current_setting('app.request_id', true));
+  PERFORM set_config('app.b03_operation','incident-scope-read',true),
+          set_config('app.b03_incident_id',p_incident_id,true);
+  SELECT i.id,i."licenseeId",manufacturer."orgId" INTO incident_scope
+  FROM public."Incident" i
+  LEFT JOIN public."QRCode" qr ON qr.id=i."qrCodeId"
+  LEFT JOIN public."Batch" b ON b.id=qr."batchId"
+  LEFT JOIN public."User" manufacturer ON manufacturer.id=b."manufacturerId"
+  WHERE i.id=p_incident_id;
+  IF NOT FOUND
+     OR (actor.role='LICENSEE_ADMIN' AND incident_scope."licenseeId" IS DISTINCT FROM actor.licensee_id)
+     OR (actor.role='MANUFACTURER_ADMIN' AND NOT EXISTS (
+       SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+       WHERE ml."manufacturerId"=actor.user_id AND ml."licenseeId"=incident_scope."licenseeId"
+     )) THEN
+    RAISE EXCEPTION 'B03_INCIDENT_SCOPE_DENIED' USING ERRCODE='42501';
+  END IF;
+  RETURN QUERY SELECT incident_scope.id::text,incident_scope."licenseeId"::text,
+    incident_scope."orgId"::text;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_claim_incident_email_delivery(
+  p_incident_id text,p_licensee_id text,p_actor_user_id text,p_sender_mode text,
+  p_to_address text,p_subject text,p_body_preview text,p_attempted_from text,p_used_from text,
+  p_reply_to text,p_template text,p_request_id text,p_idempotency_key text,p_payload_digest text
+) RETURNS TABLE(
+  "deliveryId" text,"disposition" text,"delivered" boolean,"providerMessageId" text,
+  "emailErrorCode" text,"attemptedFrom" text,"usedFrom" text,"replyTo" text
+)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE incident_scope record;
+DECLARE existing record;
+DECLARE delivery_id text := gen_random_uuid()::text;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF p_sender_mode NOT IN ('actor','system') OR p_to_address IS NULL OR length(p_to_address) NOT BETWEEN 3 AND 320
+     OR p_to_address !~ '^[^[:space:]@]+@[^[:space:]@]+$'
+     OR p_subject IS NULL OR length(p_subject) NOT BETWEEN 1 AND 998
+     OR length(coalesce(p_body_preview,''))>500
+     OR p_idempotency_key !~ '^[0-9a-f]{64}$' OR p_payload_digest !~ '^[0-9a-f]{64}$'
+     OR (p_sender_mode='actor' AND p_actor_user_id IS DISTINCT FROM actor.user_id) THEN
+    RAISE EXCEPTION 'B03_INCIDENT_EMAIL_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  PERFORM set_config('app.b03_operation','incident-email-write',true),
+          set_config('app.b03_incident_id',p_incident_id,true);
+  SELECT i.id,i."licenseeId" INTO incident_scope
+  FROM public."Incident" i WHERE i.id=p_incident_id;
+  IF NOT FOUND OR (p_licensee_id IS NOT NULL AND p_licensee_id IS DISTINCT FROM incident_scope."licenseeId")
+     OR (actor.role='LICENSEE_ADMIN' AND actor.licensee_id IS DISTINCT FROM incident_scope."licenseeId")
+     OR (actor.role='MANUFACTURER_ADMIN' AND NOT EXISTS (
+       SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+       WHERE ml."manufacturerId"=actor.user_id AND ml."licenseeId"=incident_scope."licenseeId"
+     )) THEN
+    RAISE EXCEPTION 'B03_INCIDENT_SCOPE_DENIED' USING ERRCODE='42501';
+  END IF;
+
+  PERFORM set_config('app.b03_licensee_id',coalesce(incident_scope."licenseeId",''),true);
+  SELECT * INTO existing FROM public."ActionIdempotencyKey" k
+  WHERE k."keyHash"=p_idempotency_key FOR UPDATE;
+  IF FOUND THEN
+    IF existing."requestHash" IS DISTINCT FROM p_payload_digest THEN
+      RAISE EXCEPTION 'B03_IDEMPOTENCY_CONFLICT' USING ERRCODE='23505';
+    END IF;
+    RETURN QUERY SELECT existing."responsePayload"->>'deliveryId',
+      CASE
+        WHEN existing."completedAt" IS NULL THEN 'IN_FLIGHT'
+        WHEN existing."statusCode"=200 THEN 'REPLAY_SENT'
+        ELSE 'REPLAY_FAILED'
+      END,
+      existing."statusCode"=200,
+      existing."responsePayload"->>'providerMessageId',
+      existing."responsePayload"->>'emailErrorCode',
+      existing."responsePayload"->>'attemptedFrom',
+      existing."responsePayload"->>'usedFrom',
+      existing."responsePayload"->>'replyTo';
+    RETURN;
+  END IF;
+
+  INSERT INTO public."ActionIdempotencyKey"(
+    id,"keyHash",action,scope,"requestHash","responsePayload","expiresAt"
+  ) VALUES (
+    gen_random_uuid()::text,p_idempotency_key,'b03-incident-email',p_incident_id,
+    p_payload_digest,jsonb_build_object('deliveryId',delivery_id),clock_timestamp()+interval '1 day'
+  );
+  INSERT INTO public."IncidentCommunication"(
+    id,"incidentId",direction,channel,"toAddress",subject,"bodyPreview","attemptedFrom",
+    "usedFrom","replyTo",status
+  ) VALUES (
+    delivery_id,p_incident_id,'OUTBOUND','EMAIL',lower(p_to_address),p_subject,p_body_preview,
+    p_attempted_from,p_used_from,p_reply_to,'QUEUED'
+  );
+  RETURN QUERY SELECT delivery_id,'CLAIMED',false,NULL::text,NULL::text,
+    p_attempted_from,p_used_from,p_reply_to;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_complete_incident_email_delivery(
+  p_delivery_id text,p_idempotency_key text,p_provider_message_id text,p_email_error_code text,
+  p_status text,p_smtp_config_source text,p_used_from text,p_completed_at timestamp without time zone
+) RETURNS TABLE("communicationId" text,"eventId" text,"auditLogId" text)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE delivery record;
+DECLARE idem record;
+DECLARE event_id text := gen_random_uuid()::text;
+DECLARE audit_id text := gen_random_uuid()::text;
+DECLARE delivery_licensee_id text;
+BEGIN
+  SELECT * INTO actor
+  FROM app_rls.b03_require_authenticated_actor(current_setting('app.request_id', true));
+  IF p_status NOT IN ('QUEUED','SENT','FAILED')
+     OR p_idempotency_key !~ '^[0-9a-f]{64}$'
+     OR p_completed_at IS NULL OR abs(extract(epoch FROM (p_completed_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'B03_INCIDENT_EMAIL_INPUT_DENIED' USING ERRCODE='22023';
+  END IF;
+  PERFORM set_config('app.b03_operation','incident-email-complete',true);
+  PERFORM set_config('app.b03_delivery_id',p_delivery_id,true);
+  SELECT * INTO idem FROM public."ActionIdempotencyKey" k
+  WHERE k."keyHash"=p_idempotency_key AND k.action='b03-incident-email' FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'B03_INCIDENT_EMAIL_CLAIM_REQUIRED' USING ERRCODE='42501'; END IF;
+  IF idem."completedAt" IS NOT NULL THEN
+    RETURN QUERY SELECT idem."responsePayload"->>'deliveryId',
+      idem."responsePayload"->>'eventId',idem."responsePayload"->>'auditLogId';
+    RETURN;
+  END IF;
+  SELECT c.* INTO delivery FROM public."IncidentCommunication" c
+  WHERE c.id=p_delivery_id AND c.id=(idem."responsePayload"->>'deliveryId') FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'B03_INCIDENT_EMAIL_CLAIM_REQUIRED' USING ERRCODE='42501'; END IF;
+  PERFORM set_config('app.b03_incident_id',delivery."incidentId",true);
+  SELECT i."licenseeId" INTO STRICT delivery_licensee_id
+  FROM public."Incident" i WHERE i.id=delivery."incidentId";
+  PERFORM set_config('app.b03_licensee_id',coalesce(delivery_licensee_id,''),true);
+  UPDATE public."IncidentCommunication" c SET
+    "providerMessageId"=p_provider_message_id,"errorMessage"=p_email_error_code,
+    "usedFrom"=p_used_from,status=p_status::public."IncidentCommStatus"
+  WHERE c.id=p_delivery_id;
+  INSERT INTO public."IncidentEvent"(id,"incidentId","actorType","actorUserId","eventType","eventPayload")
+  VALUES (
+    event_id,delivery."incidentId",'ADMIN',actor.user_id,'EMAIL_SENT',
+    jsonb_build_object('delivered',p_status='SENT','providerMessageId',p_provider_message_id,
+      'emailErrorCode',p_email_error_code,'smtpConfigSource',p_smtp_config_source)
+  );
+  INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details)
+  SELECT audit_id,actor.user_id,actor.organization_id,i."licenseeId",'INCIDENT_EMAIL_SENT',
+    'Incident',i.id,jsonb_build_object('status',p_status,'delivered',p_status='SENT',
+      'providerMessageId',p_provider_message_id,'emailErrorCode',p_email_error_code,
+      'smtpConfigSource',p_smtp_config_source,'usedFrom',p_used_from)
+  FROM public."Incident" i WHERE i.id=delivery."incidentId";
+  UPDATE public."ActionIdempotencyKey" k SET
+    "statusCode"=CASE WHEN p_status='SENT' THEN 200 ELSE 502 END,
+    "responsePayload"=jsonb_build_object(
+      'deliveryId',p_delivery_id,'eventId',event_id,'auditLogId',audit_id,
+      'providerMessageId',p_provider_message_id,'emailErrorCode',p_email_error_code,
+      'attemptedFrom',delivery."attemptedFrom",'usedFrom',p_used_from,'replyTo',delivery."replyTo"
+    ),
+    "completedAt"=p_completed_at
+  WHERE k.id=idem.id;
+  RETURN QUERY SELECT p_delivery_id,event_id,audit_id;
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.b03_require_authenticated_actor(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_assert_requested_scope(text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_primary_superadmin_email() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_superadmin_alert_emails() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_resolve_incident_email_actor(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_create_role_notifications(text,text,text,text,text,text,text,jsonb,text[],text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_create_user_notification(text,text,text,text,text,text,text,jsonb,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_mark_notification_emailed(text,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_list_notifications_for_user(text,integer,integer,boolean,timestamp without time zone,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_mark_notification_read(text,text,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_mark_all_notifications_read(text,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_resolve_incident_notification_scope(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_claim_incident_email_delivery(text,text,text,text,text,text,text,text,text,text,text,text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_complete_incident_email_delivery(text,text,text,text,text,text,text,timestamp without time zone) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_rls.b03_claim_incident_email_delivery(text,text,text,text,text,text,text,text,text,text,text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_complete_incident_email_delivery(text,text,text,text,text,text,text,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_create_role_notifications(text,text,text,text,text,text,text,jsonb,text[],text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_create_user_notification(text,text,text,text,text,text,text,jsonb,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_list_notifications_for_user(text,integer,integer,boolean,timestamp without time zone,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_mark_all_notifications_read(text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_mark_notification_emailed(text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_mark_notification_read(text,text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_primary_superadmin_email() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_resolve_incident_email_actor(text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_resolve_incident_notification_scope(text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_superadmin_alert_emails() TO "mscqr_rls_cert_app";
 RESET ROLE;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;

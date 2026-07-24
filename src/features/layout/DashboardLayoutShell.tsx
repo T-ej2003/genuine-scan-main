@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router";
 import { motion, useReducedMotion } from "framer-motion";
 import { Activity, ChevronDown, CircleHelp, Command, LogOut, Menu, Settings } from "lucide-react";
 

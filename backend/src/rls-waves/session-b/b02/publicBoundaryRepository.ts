@@ -52,8 +52,10 @@ export type ReadVerificationSessionRow = {
 export type TrackSupportStatusRow = {
   referenceCode: string;
   customerFacingStatus: string;
+  priority: string;
   updatedAt: Date;
-  slaState: string;
+  handoffStage: string | null;
+  slaDueAt: Date | null;
 };
 export type AcceptedRow = { accepted: boolean; publicReference: string; message: string };
 type IntakeAcceptedRow = AcceptedRow & { deliveryRequired: boolean };
@@ -721,7 +723,8 @@ export const trackSupportStatus = async (
       ${referenceCode}, ${proofDigest}, ${proofVersion}, ${checkedAt}, ${validatedRequestId}
     )
   `, "app_public.track_support_status", [
-    ["referenceCode", "string"], ["customerFacingStatus", "string"], ["updatedAt", "date"], ["slaState", "string"],
+    ["referenceCode", "string"], ["customerFacingStatus", "string"], ["priority", "string"],
+    ["updatedAt", "date"], ["handoffStage", "string", true], ["slaDueAt", "date", true],
   ]);
 };
 

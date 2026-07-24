@@ -5,11 +5,8 @@ import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../ut
 import { logger } from "../../utils/logger";
 import { buildAdminMfaChallengeExpiry, buildAdminMfaChallengeTtlAuditDetails } from "./authDurationConfig";
 import {
-  consumeLegacyBackupCode,
-  consumeUserBackupCode,
   generateBackupCodes,
   hashBackupCode,
-  replaceUserBackupCodes,
 } from "./backupCodeMfaProvider";
 import {
   buildTotpUri,
@@ -20,6 +17,20 @@ import {
   type EncryptedTotpSecret,
 } from "./totpMfaProvider";
 import { getMfaBootstrapTtlMinutes } from "./tokenService";
+import {
+  beginAdminTotpEnrollment,
+  completeAdminTotpEnrollment,
+  consumeAdminMfaVerifier,
+  loadAdminMfaState,
+  loadAdminMfaVerifiers,
+  loadAdminTotpEnrollment,
+  replaceAdminBackupCodes,
+  createAdminMfaChallengeBoundary,
+  loadAdminMfaChallengeBoundary,
+  recordAdminMfaChallengeFailure,
+  completeAdminMfaChallengeBoundary,
+} from "../../rls-waves/session-b/b01/adminMfaRepository";
+import { buildBackupCodeHashCandidates, matchesBackupCodeHash } from "./backupCodeHashService";
 
 export type MfaEnrollmentMode = "FIRST_ENROLLMENT" | "REPLACEMENT";
 
@@ -55,7 +66,7 @@ export class MfaAdapterError extends Error {
 
 type LoginMfaDbClient = Pick<
   Prisma.TransactionClient,
-  "$executeRaw" | "adminMfaCredential" | "adminWebAuthnCredential" | "userMfaFactor" | "userBackupCode" | "mfaLoginChallenge" | "auditLogOutbox"
+  "$executeRaw" | "$queryRaw" | "mfaLoginChallenge" | "auditLogOutbox"
 >;
 
 const safeMfaErrorCategory = (error: unknown) => {
@@ -131,40 +142,13 @@ const isVerifiedTotpFactor = (factor: { type: string; legacySource: string | nul
   Boolean(factor.lastUsedAt || factor.legacySource === "AdminMfaCredential");
 
 export const getAdminMfaAdapterStatus = async (userId: string, db: LoginMfaDbClient = prisma) => {
-  const [legacyTotp, legacyWebAuthn, factors, backupCodesRemaining] = await Promise.all([
-    db.adminMfaCredential.findUnique({
-      where: { userId },
-      select: {
-        id: true,
-        isEnabled: true,
-        verifiedAt: true,
-        lastUsedAt: true,
-        backupCodesHash: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    }),
-    db.adminWebAuthnCredential.findMany({
-      where: { userId },
-      orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
-      select: { id: true, label: true, transports: true, lastUsedAt: true, createdAt: true, updatedAt: true },
-    }),
-    db.userMfaFactor.findMany({
-      where: { userId, disabledAt: null },
-      orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
-      select: {
-        id: true,
-        type: true,
-        label: true,
-        legacySource: true,
-        transports: true,
-        lastUsedAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    }),
-    db.userBackupCode.count({ where: { userId, usedAt: null } }),
-  ]);
+  if (!db?.$queryRaw) throw new Error("B01 MFA capability transaction is required");
+  const state = await loadAdminMfaState(db);
+  const legacyTotp = (state.legacyTotp || null) as any;
+  const legacyWebAuthn = Array.isArray(state.legacyWebAuthn) ? state.legacyWebAuthn as any[] : [];
+  const factors = Array.isArray(state.factors) ? state.factors as any[] : [];
+  const backupCodesRemaining = Number(state.backupCodesRemaining || 0);
+  const asDate = (value: unknown) => value ? new Date(String(value)) : null;
 
   const enrolledFactors = factors.filter((factor) => factor.legacySource !== MFA_ENROLLMENT_PENDING_SOURCE);
   const hasTotp = enrolledFactors.some(isVerifiedTotpFactor) || Boolean(legacyTotp?.isEnabled);
@@ -178,9 +162,9 @@ export const getAdminMfaAdapterStatus = async (userId: string, db: LoginMfaDbCli
       : []),
   ];
   const lastUsedAtCandidates = [
-    legacyTotp?.lastUsedAt || null,
-    ...legacyWebAuthn.map((entry) => entry.lastUsedAt || null),
-    ...enrolledFactors.map((entry) => entry.lastUsedAt || null),
+    asDate(legacyTotp?.lastUsedAt),
+    ...legacyWebAuthn.map((entry) => asDate(entry.lastUsedAt)),
+    ...enrolledFactors.map((entry) => asDate(entry.lastUsedAt)),
   ]
     .filter((value): value is Date => Boolean(value))
     .sort((a, b) => b.getTime() - a.getTime());
@@ -192,27 +176,27 @@ export const getAdminMfaAdapterStatus = async (userId: string, db: LoginMfaDbCli
     hasWebAuthn,
     methods,
     preferredMethod: hasWebAuthn ? "WEBAUTHN" : hasTotp ? "TOTP" : null,
-    verifiedAt: legacyTotp?.verifiedAt || null,
+    verifiedAt: asDate(legacyTotp?.verifiedAt),
     lastUsedAt: lastUsedAtCandidates[0] || null,
     backupCodesRemaining: backupCodesRemaining || (legacyTotp?.isEnabled ? legacyTotp.backupCodesHash?.length || 0 : 0),
-    createdAt: legacyTotp?.isEnabled ? legacyTotp.createdAt : enrolledFactors[0]?.createdAt || null,
-    updatedAt: legacyTotp?.isEnabled ? legacyTotp.updatedAt : enrolledFactors[0]?.updatedAt || null,
+    createdAt: asDate(legacyTotp?.isEnabled ? legacyTotp.createdAt : enrolledFactors[0]?.createdAt),
+    updatedAt: asDate(legacyTotp?.isEnabled ? legacyTotp.updatedAt : enrolledFactors[0]?.updatedAt),
     webauthnCredentials: [
       ...newWebAuthnFactors.map((entry) => ({
         id: entry.id,
         label: entry.label || "Passkey",
         transports: entry.transports,
-        lastUsedAt: entry.lastUsedAt || null,
-        createdAt: entry.createdAt,
-        updatedAt: entry.updatedAt,
+        lastUsedAt: asDate(entry.lastUsedAt),
+        createdAt: asDate(entry.createdAt),
+        updatedAt: asDate(entry.updatedAt),
       })),
       ...legacyWebAuthn.map((entry) => ({
         id: entry.id,
         label: entry.label || "Security key",
         transports: entry.transports,
-        lastUsedAt: entry.lastUsedAt || null,
-        createdAt: entry.createdAt,
-        updatedAt: entry.updatedAt,
+        lastUsedAt: asDate(entry.lastUsedAt),
+        createdAt: asDate(entry.createdAt),
+        updatedAt: asDate(entry.updatedAt),
       })),
     ],
   };
@@ -223,6 +207,11 @@ export const lockMfaState = (tx: LoginMfaDbClient, userId: string) =>
 
 const pendingEnrollmentCutoff = () =>
   new Date(Date.now() - getMfaBootstrapTtlMinutes() * 60_000);
+
+const sessionBindingCandidates = (sessionId?: string | null) => {
+  const normalized = String(sessionId || "").trim();
+  return normalized ? buildTokenHashCandidates(`admin-mfa-session:${normalized}`) : [];
+};
 
 const assertEnrollmentMode = (mode: MfaEnrollmentMode, enrolled: boolean) => {
   if (mode === "FIRST_ENROLLMENT" && enrolled) throw new MfaAdapterError("MFA_ALREADY_ENROLLED", { status: 409 });
@@ -236,132 +225,18 @@ export const beginTotpMfaEnrollment = async (params: {
   email: string;
   mode: MfaEnrollmentMode;
 }, db?: Prisma.TransactionClient): Promise<{ secret: string; otpauthUri: string; backupCodes: string[] }> => {
-  if (!db) return prisma.$transaction((tx) => beginTotpMfaEnrollment(params, tx));
+  if (!db) throw new Error("B01 MFA capability transaction is required");
   const secret = createTotpSecret();
   const encrypted = encryptTotpSecret(secret);
   const backupCodes = generateBackupCodes();
   const backupCodesHash = backupCodes.map((code) => hashBackupCode(code));
-  const mode = params.mode;
-
-  const tx = db;
-    await lockMfaState(tx, params.userId);
-    const [legacyTotp, legacyWebAuthnCount, factors] = await Promise.all([
-      tx.adminMfaCredential.findUnique({
-        where: { userId: params.userId },
-        select: {
-          id: true,
-          userId: true,
-          secretCiphertext: true,
-          secretIv: true,
-          secretTag: true,
-          backupCodesHash: true,
-          isEnabled: true,
-          verifiedAt: true,
-          lastUsedAt: true,
-        },
-      }),
-      tx.adminWebAuthnCredential.count({ where: { userId: params.userId } }),
-      tx.userMfaFactor.findMany({
-        where: { userId: params.userId, disabledAt: null, type: { in: ["TOTP", "WEBAUTHN"] } },
-        select: {
-          id: true,
-          type: true,
-          secretCiphertext: true,
-          secretIv: true,
-          secretTag: true,
-          legacySource: true,
-          legacyCredentialId: true,
-          credentialId: true,
-          publicKey: true,
-          createdAt: true,
-          lastUsedAt: true,
-        },
-      }),
-    ]);
-    const enrolled = Boolean(legacyTotp?.isEnabled || legacyTotp?.verifiedAt || legacyWebAuthnCount) ||
-      factors.some((factor) =>
-        factor.legacySource !== MFA_ENROLLMENT_PENDING_SOURCE &&
-        (factor.type === "WEBAUTHN" || isVerifiedTotpFactor(factor))
-      );
-    assertEnrollmentMode(mode, enrolled);
-
-    const pending = factors.filter(
-      (factor) => factor.type === "TOTP" && factor.legacySource === MFA_ENROLLMENT_PENDING_SOURCE
-    );
-    const cutoff = pendingEnrollmentCutoff();
-    if (pending.some((factor) => factor.createdAt.getTime() > cutoff.getTime())) {
-      throw new MfaAdapterError("MFA_SETUP_ALREADY_STARTED", { status: 409 });
-    }
-    if (pending.length) {
-      await tx.userMfaFactor.deleteMany({ where: { id: { in: pending.map((factor) => factor.id) } } });
-    }
-
-    const enrolledTotpFactors = factors.filter(
-      (factor) => factor.type === "TOTP" && factor.legacySource !== MFA_ENROLLMENT_PENDING_SOURCE
-    );
-    if (mode === "REPLACEMENT" && legacyTotp?.isEnabled && !enrolledTotpFactors.length) {
-      await tx.userMfaFactor.upsert({
-        where: { id: `legacy-totp-${params.userId}` },
-        update: {
-          type: "TOTP",
-          label: "Authenticator app",
-          secretCiphertext: legacyTotp.secretCiphertext,
-          secretIv: legacyTotp.secretIv,
-          secretTag: legacyTotp.secretTag,
-          legacySource: "AdminMfaCredential",
-          legacyCredentialId: params.userId,
-          disabledAt: null,
-          lastUsedAt: legacyTotp.lastUsedAt || legacyTotp.verifiedAt,
-        },
-        create: {
-          id: `legacy-totp-${params.userId}`,
-          userId: params.userId,
-          type: "TOTP",
-          label: "Authenticator app",
-          secretCiphertext: legacyTotp.secretCiphertext,
-          secretIv: legacyTotp.secretIv,
-          secretTag: legacyTotp.secretTag,
-          legacySource: "AdminMfaCredential",
-          legacyCredentialId: params.userId,
-          lastUsedAt: legacyTotp.lastUsedAt || legacyTotp.verifiedAt,
-        },
-      });
-    }
-    if (mode === "REPLACEMENT" && legacyTotp?.isEnabled && legacyTotp.backupCodesHash.length) {
-      await tx.userBackupCode.createMany({
-        data: legacyTotp.backupCodesHash.map((codeHash) => ({ userId: params.userId, codeHash })),
-        skipDuplicates: true,
-      });
-    }
-
-    await tx.adminMfaCredential.upsert({
-      where: { userId: params.userId },
-      update: {
-        ...encrypted,
-        backupCodesHash,
-        isEnabled: false,
-        verifiedAt: null,
-        lastUsedAt: null,
-      },
-      create: {
-        userId: params.userId,
-        ...encrypted,
-        backupCodesHash,
-        isEnabled: false,
-        verifiedAt: null,
-        lastUsedAt: null,
-      },
-    });
-    await tx.userMfaFactor.create({
-      data: {
-        userId: params.userId,
-        type: "TOTP",
-        label: "Authenticator app",
-        ...encrypted,
-        legacySource: MFA_ENROLLMENT_PENDING_SOURCE,
-        legacyCredentialId: params.userId,
-      },
-    });
+  await beginAdminTotpEnrollment(db, {
+    mode: params.mode,
+    ...encrypted,
+    backupHashes: backupCodesHash,
+    pendingCutoff: pendingEnrollmentCutoff(),
+    createdAt: new Date(),
+  });
   return {
     secret,
     otpauthUri: buildTotpUri({ email: params.email, secret }),
@@ -375,60 +250,14 @@ export const confirmTotpMfaEnrollment = async (params: {
   mode: MfaEnrollmentMode;
   audit?: { ipHash: string | null; userAgent: string | null };
 }, db?: Prisma.TransactionClient): Promise<{ enabled: true }> => {
-  if (!db) return prisma.$transaction((tx) => confirmTotpMfaEnrollment(params, tx));
-  const tx = db;
-    await lockMfaState(tx, params.userId);
-    const [legacyTotp, legacyWebAuthnCount, factors] = await Promise.all([
-      tx.adminMfaCredential.findUnique({
-        where: { userId: params.userId },
-        select: {
-          id: true,
-          userId: true,
-          secretCiphertext: true,
-          secretIv: true,
-          secretTag: true,
-          backupCodesHash: true,
-          isEnabled: true,
-          verifiedAt: true,
-          lastUsedAt: true,
-        },
-      }),
-      tx.adminWebAuthnCredential.count({ where: { userId: params.userId } }),
-      tx.userMfaFactor.findMany({
-        where: { userId: params.userId, disabledAt: null, type: { in: ["TOTP", "WEBAUTHN"] } },
-        select: {
-          id: true,
-          type: true,
-          secretCiphertext: true,
-          secretIv: true,
-          secretTag: true,
-          legacySource: true,
-          legacyCredentialId: true,
-          credentialId: true,
-          publicKey: true,
-          createdAt: true,
-          lastUsedAt: true,
-        },
-      }),
-    ]);
-    const enrolled = Boolean(legacyTotp?.isEnabled || legacyTotp?.verifiedAt || legacyWebAuthnCount) ||
-      factors.some((factor) =>
-        factor.legacySource !== MFA_ENROLLMENT_PENDING_SOURCE &&
-        (factor.type === "WEBAUTHN" || isVerifiedTotpFactor(factor))
-      );
-    const mode = params.mode;
-    assertEnrollmentMode(mode, enrolled);
-
-    const pending = factors.filter(
-      (factor) =>
-        factor.type === "TOTP" &&
-        factor.legacySource === MFA_ENROLLMENT_PENDING_SOURCE &&
-        factor.createdAt.getTime() > pendingEnrollmentCutoff().getTime()
-    );
-    if (pending.length !== 1 || !legacyTotp || legacyTotp.isEnabled || legacyTotp.verifiedAt) {
-      throw new MfaAdapterError("MFA_SETUP_NOT_STARTED", { status: 409 });
-    }
-    const factor = pending[0];
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  const state = await loadAdminTotpEnrollment(db, { mode: params.mode, pendingCutoff: pendingEnrollmentCutoff() }) as any;
+  const pending = Array.isArray(state.pending) ? state.pending : [];
+  const legacyTotp = state.credential;
+  if (pending.length !== 1 || !legacyTotp || legacyTotp.isEnabled || legacyTotp.verifiedAt) {
+    throw new MfaAdapterError("MFA_SETUP_NOT_STARTED", { status: 409 });
+  }
+  const factor = pending[0];
     const secretPayload = factor.secretCiphertext && factor.secretIv && factor.secretTag
       ? {
           secretCiphertext: factor.secretCiphertext,
@@ -445,152 +274,17 @@ export const confirmTotpMfaEnrollment = async (params: {
       throw new MfaAdapterError("MFA_SETUP_NOT_STARTED", { status: 409 });
     }
 
-    const valid = await verifyTotpToken({ secret: decryptTotpSecret(secretPayload), token: params.code });
-    if (!valid) throw new MfaAdapterError("INVALID_MFA_CODE", { status: 400 });
-
-    const now = new Date();
-    await tx.userMfaFactor.updateMany({
-      where: { userId: params.userId, type: "TOTP", disabledAt: null, id: { not: factor.id } },
-      data: { disabledAt: now },
-    });
-    await tx.userMfaFactor.update({
-      where: { id: factor.id },
-      data: {
-        legacySource: null,
-        legacyCredentialId: null,
-        lastUsedAt: now,
-        disabledAt: null,
-      },
-    });
-    const enabled = await tx.adminMfaCredential.updateMany({
-      where: { userId: params.userId, isEnabled: false, verifiedAt: null },
-      data: { isEnabled: true, verifiedAt: now, lastUsedAt: now },
-    });
-    if (enabled.count !== 1) throw new MfaAdapterError("MFA_SETUP_NOT_STARTED", { status: 409 });
-
-    await tx.userBackupCode.deleteMany({ where: { userId: params.userId, usedAt: null } });
-    await tx.userBackupCode.createMany({
-      data: legacyTotp.backupCodesHash.map((codeHash) => ({ userId: params.userId, codeHash })),
-    });
-    if (params.audit) {
-      const replacement = mode === "REPLACEMENT";
-      await tx.auditLogOutbox.create({
-        data: {
-          payload: {
-            userId: params.userId,
-            action: replacement ? "AUTH_MFA_REPLACED" : "AUTH_MFA_ENROLLED",
-            entityType: "User",
-            entityId: params.userId,
-            details: { source: replacement ? "ACTIVE_SESSION" : "LOGIN_BOOTSTRAP" },
-            ...params.audit,
-          },
-        },
-      });
-    }
-  return { enabled: true };
-};
-
-const verifyTotpAgainstNewFactor = async (
-  params: { userId: string; code: string },
-  db: LoginMfaDbClient
-): Promise<TotpVerificationPathResult> => {
-  const factors = (await db.userMfaFactor.findMany({
-    where: { userId: params.userId, type: "TOTP", disabledAt: null, secretCiphertext: { not: null } },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      type: true,
-      secretCiphertext: true,
-      secretIv: true,
-      secretTag: true,
-      legacySource: true,
-      lastUsedAt: true,
-    },
-  })).filter(isVerifiedTotpFactor);
-
-  let attempted = 0;
-  let operationalFailures = 0;
-  for (const factor of factors) {
-    if (!factor.secretCiphertext || !factor.secretIv || !factor.secretTag) continue;
-    let verified = false;
-    try {
-      attempted += 1;
-      verified = await verifyTotpToken({
-        secret: decryptTotpSecret(factor as EncryptedTotpSecret),
-        token: params.code,
-      });
-    } catch (error) {
-      operationalFailures += 1;
-      logTotpPathFailure({ userId: params.userId, factorPath: "new_factor", factorId: factor.id, error });
-      continue;
-    }
-    if (verified) {
-      await db.userMfaFactor.update({ where: { id: factor.id }, data: { lastUsedAt: new Date() } });
-      return { verified: true, attempted, operationalFailures };
-    }
-  }
-  return { verified: false, attempted, operationalFailures };
-};
-
-const verifyTotpAgainstLegacyCredential = async (
-  params: { userId: string; code: string },
-  db: LoginMfaDbClient
-): Promise<TotpVerificationPathResult> => {
-  const legacy = await db.adminMfaCredential.findUnique({
-    where: { userId: params.userId },
-    select: {
-      userId: true,
-      isEnabled: true,
-      secretCiphertext: true,
-      secretIv: true,
-      secretTag: true,
-    },
+  const valid = await verifyTotpToken({ secret: decryptTotpSecret(secretPayload), token: params.code });
+  if (!valid) throw new MfaAdapterError("INVALID_MFA_CODE", { status: 400 });
+  await completeAdminTotpEnrollment(db, {
+    mode: params.mode,
+    factorId: factor.id,
+    ...secretPayload,
+    completedAt: new Date(),
+    ipHash: params.audit?.ipHash || null,
+    userAgent: params.audit?.userAgent || null,
   });
-  if (!legacy?.isEnabled) return { verified: false, attempted: 0, operationalFailures: 0 };
-
-  let verified = false;
-  try {
-    verified = await verifyTotpToken({ secret: decryptTotpSecret(legacy), token: params.code });
-  } catch (error) {
-    logTotpPathFailure({ userId: params.userId, factorPath: "legacy_credential", factorId: params.userId, error });
-    return { verified: false, attempted: 1, operationalFailures: 1 };
-  }
-  if (!verified) return { verified: false, attempted: 1, operationalFailures: 0 };
-
-  const usedAt = new Date();
-  try {
-    await db.adminMfaCredential.update({ where: { userId: params.userId }, data: { lastUsedAt: usedAt } });
-    await db.userMfaFactor.upsert({
-      where: { id: `legacy-totp-${params.userId}` },
-      update: {
-        type: "TOTP",
-        label: "Authenticator app",
-        secretCiphertext: legacy.secretCiphertext,
-        secretIv: legacy.secretIv,
-        secretTag: legacy.secretTag,
-        legacySource: "AdminMfaCredential",
-        legacyCredentialId: params.userId,
-        disabledAt: null,
-        lastUsedAt: usedAt,
-      },
-      create: {
-        id: `legacy-totp-${params.userId}`,
-        userId: params.userId,
-        type: "TOTP",
-        label: "Authenticator app",
-        secretCiphertext: legacy.secretCiphertext,
-        secretIv: legacy.secretIv,
-        secretTag: legacy.secretTag,
-        legacySource: "AdminMfaCredential",
-        legacyCredentialId: params.userId,
-        lastUsedAt: usedAt,
-      },
-    });
-  } catch (error) {
-    logTotpPathFailure({ level: "error", userId: params.userId, factorPath: "legacy_credential", factorId: params.userId, error });
-    throw new MfaAdapterError("MFA_VERIFICATION_UNAVAILABLE", { status: 409 });
-  }
-  return { verified: true, attempted: 1, operationalFailures: 0 };
+  return { enabled: true };
 };
 
 const verifyMfaCodeWithClient = async (
@@ -599,49 +293,63 @@ const verifyMfaCodeWithClient = async (
 ) => {
   const normalizedCode = String(params.code || "").trim();
   if (!normalizedCode) throw new Error("INVALID_MFA_CODE");
-
+  const state = await loadAdminMfaVerifiers(db) as any;
   if (/^[A-Za-z0-9]{4,8}-[A-Za-z0-9]{4,8}$/.test(normalizedCode)) {
-    const newBackupCodeCount = await db.userBackupCode.count({ where: { userId: params.userId } });
-    const consumed = await consumeUserBackupCode({ userId: params.userId, code: normalizedCode }, db);
-    if (consumed) return { ok: true as const, method: "BACKUP_CODE" as const };
-    if (newBackupCodeCount > 0) throw new Error("INVALID_MFA_CODE");
-
-    let legacy = await db.adminMfaCredential.findUnique({
-      where: { userId: params.userId },
-      select: { isEnabled: true, backupCodesHash: true },
-    });
-    for (let attempt = 0; attempt < 2 && legacy?.isEnabled && legacy.backupCodesHash.length; attempt += 1) {
-      if (await consumeLegacyBackupCode({
-          userId: params.userId,
-          code: normalizedCode,
-          codesHash: legacy.backupCodesHash,
-        }, db)) {
-        return { ok: true as const, method: "BACKUP_CODE" as const };
-      }
-      if (await consumeUserBackupCode({ userId: params.userId, code: normalizedCode }, db)) {
-        return { ok: true as const, method: "BACKUP_CODE" as const };
-      }
-      legacy = await db.adminMfaCredential.findUnique({
-        where: { userId: params.userId },
-        select: { isEnabled: true, backupCodesHash: true },
+    const backupCodes = Array.isArray(state.backupCodes) ? state.backupCodes as Array<{ id: string; codeHash: string }> : [];
+    const candidates = buildBackupCodeHashCandidates(normalizedCode);
+    const row = backupCodes.find((entry) => candidates.includes(entry.codeHash));
+    if (row) {
+      const result = await consumeAdminMfaVerifier(db, { method: "BACKUP_CODE", recordId: row.id, usedAt: new Date() });
+      if (result.consumed) return { ok: true as const, method: "BACKUP_CODE" as const };
+    }
+    if (backupCodes.length) throw new Error("INVALID_MFA_CODE");
+    const hashes = Array.isArray(state.legacy?.backupCodesHash) ? state.legacy.backupCodesHash as string[] : [];
+    const index = hashes.findIndex((entry) => matchesBackupCodeHash(normalizedCode, entry));
+    if (state.legacy?.isEnabled && index >= 0) {
+      const next = [...hashes];
+      next.splice(index, 1);
+      const result = await consumeAdminMfaVerifier(db, {
+        method: "BACKUP_LEGACY", expectedLegacyHashes: hashes, nextLegacyHashes: next, usedAt: new Date(),
       });
+      if (result.consumed) return { ok: true as const, method: "BACKUP_CODE" as const };
     }
   }
 
-  const newFactorResult = await verifyTotpAgainstNewFactor({ userId: params.userId, code: normalizedCode }, db);
-  if (newFactorResult.verified) return { ok: true as const, method: "TOTP" as const };
-
-  const legacyResult = await verifyTotpAgainstLegacyCredential({ userId: params.userId, code: normalizedCode }, db);
-  if (legacyResult.verified) return { ok: true as const, method: "TOTP" as const };
-
-  const attempted = newFactorResult.attempted + legacyResult.attempted;
-  const operationalFailures = newFactorResult.operationalFailures + legacyResult.operationalFailures;
+  let attempted = 0;
+  let operationalFailures = 0;
+  const factors = Array.isArray(state.factors) ? state.factors as any[] : [];
+  for (const factor of factors.filter(isVerifiedTotpFactor)) {
+    if (!factor.secretCiphertext || !factor.secretIv || !factor.secretTag) continue;
+    try {
+      attempted += 1;
+      if (await verifyTotpToken({ secret: decryptTotpSecret(factor), token: normalizedCode })) {
+        const result = await consumeAdminMfaVerifier(db, { method: "TOTP_FACTOR", recordId: factor.id, usedAt: new Date() });
+        if (result.consumed) return { ok: true as const, method: "TOTP" as const };
+      }
+    } catch (error) {
+      operationalFailures += 1;
+      logTotpPathFailure({ userId: params.userId, factorPath: "new_factor", factorId: factor.id, error });
+    }
+  }
+  const legacy = state.legacy;
+  if (legacy?.isEnabled && legacy.secretCiphertext && legacy.secretIv && legacy.secretTag) {
+    try {
+      attempted += 1;
+      if (await verifyTotpToken({ secret: decryptTotpSecret(legacy), token: normalizedCode })) {
+        const result = await consumeAdminMfaVerifier(db, { method: "TOTP_LEGACY", usedAt: new Date() });
+        if (result.consumed) return { ok: true as const, method: "TOTP" as const };
+      }
+    } catch (error) {
+      operationalFailures += 1;
+      logTotpPathFailure({ userId: params.userId, factorPath: "legacy_credential", factorId: params.userId, error });
+    }
+  }
   if (attempted > 0 && attempted === operationalFailures) {
     logger.error("auth_mfa_totp_verification_unavailable", {
       userId: params.userId,
       factorPathsAttempted: [
-        ...(newFactorResult.attempted > 0 ? ["new_factor"] : []),
-        ...(legacyResult.attempted > 0 ? ["legacy_credential"] : []),
+        ...(factors.length ? ["new_factor"] : []),
+        ...(legacy?.isEnabled ? ["legacy_credential"] : []),
       ],
       errorCategory: "MFA_VERIFICATION_UNAVAILABLE",
     });
@@ -652,8 +360,8 @@ const verifyMfaCodeWithClient = async (
     logger.warn("auth_mfa_totp_verification_completed_with_factor_errors", {
       userId: params.userId,
       factorPathsAttempted: [
-        ...(newFactorResult.attempted > 0 ? ["new_factor"] : []),
-        ...(legacyResult.attempted > 0 ? ["legacy_credential"] : []),
+        ...(factors.length ? ["new_factor"] : []),
+        ...(legacy?.isEnabled ? ["legacy_credential"] : []),
       ],
       operationalFailures,
     });
@@ -666,31 +374,19 @@ export const verifyMfaCodeWithAdapter = async (
   params: { userId: string; code: string },
   db?: Prisma.TransactionClient
 ) => {
-  const verify = async (tx: Prisma.TransactionClient) => {
-    await lockMfaState(tx, params.userId);
-    return verifyMfaCodeWithClient(params, tx);
-  };
-  return db ? verify(db) : prisma.$transaction(verify);
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  return verifyMfaCodeWithClient(params, db as LoginMfaDbClient);
 };
 
 export const rotateMfaBackupCodesWithAdapter = async (
   params: { userId: string; code: string },
   db?: Prisma.TransactionClient
 ) => {
-  const rotate = async (tx: Prisma.TransactionClient) => {
-    await verifyMfaCodeWithAdapter({ userId: params.userId, code: params.code }, tx);
-    const backupCodes = generateBackupCodes();
-    await replaceUserBackupCodes({ userId: params.userId, codes: backupCodes }, tx);
-    await tx.adminMfaCredential.updateMany({
-      where: { userId: params.userId },
-      data: {
-        backupCodesHash: backupCodes.map((code) => hashBackupCode(code)),
-        lastUsedAt: new Date(),
-      },
-    });
-    return { backupCodes };
-  };
-  return db ? rotate(db) : prisma.$transaction(rotate);
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  await verifyMfaCodeWithAdapter({ userId: params.userId, code: params.code }, db);
+  const backupCodes = generateBackupCodes();
+  await replaceAdminBackupCodes(db, backupCodes.map(hashBackupCode), new Date());
+  return { backupCodes };
 };
 
 export const createStableMfaLoginChallenge = async (params: {
@@ -703,49 +399,43 @@ export const createStableMfaLoginChallenge = async (params: {
   userAgent?: string | null;
   maxAttempts?: number;
 }, db: LoginMfaDbClient = prisma) => {
+  if (!db?.$queryRaw) throw new Error("B01 MFA capability transaction is required");
   const ticket = randomOpaqueToken(36);
   const now = new Date();
   const { expiresAt, config: ttlConfig } = buildAdminMfaChallengeExpiry(now);
   const purpose = String(params.purpose || "admin_login").trim() || "admin_login";
   const maxAttempts = Math.max(1, Math.min(10, params.maxAttempts || getMaxChallengeAttempts()));
 
-  const challenge = await db.mfaLoginChallenge.create({
-    data: {
-      userId: params.userId,
-      ticketHash: hashToken(ticket),
-      purpose,
-      riskScore: Math.max(0, Math.min(100, Math.round(params.riskScore || 0))),
-      riskLevel: normalizeRiskLevel(params.riskLevel),
-      reasons: Array.isArray(params.reasons) ? params.reasons.slice(0, 12) : [],
-      createdIpHash: params.ipHash || null,
-      createdUserAgentHash: params.userAgent ? hashToken(params.userAgent) : null,
-      attempts: 0,
-      maxAttempts,
-      expiresAt,
-    },
+  const riskScore = Math.max(0, Math.min(100, Math.round(params.riskScore || 0)));
+  const riskLevel = normalizeRiskLevel(params.riskLevel);
+  const challenge = await createAdminMfaChallengeBoundary(db, {
+    kind: "LOGIN",
+    ticketHash: hashToken(ticket),
+    sessionBindingHash: null,
+    purpose,
+    riskScore,
+    riskLevel,
+    reasons: Array.isArray(params.reasons) ? params.reasons.slice(0, 12) : [],
+    ipHash: params.ipHash || null,
+    userAgentHash: params.userAgent ? hashToken(params.userAgent) : null,
+    maxAttempts,
+    createdAt: now,
+    expiresAt,
   });
   const ttlDetails = buildAdminMfaChallengeTtlAuditDetails(ttlConfig, now, expiresAt);
 
   logger.info("auth_mfa_challenge_issued", {
-    challengeId: challenge.id,
+    challengeId: challenge.challengeId,
     purpose,
     ...ttlDetails,
   });
-
-  await db.auditLogOutbox.create(mfaAuditOutboxRecord({
-    userId: params.userId,
-    action: "AUTH_MFA_CHALLENGE_ISSUED",
-    entityId: challenge.id,
-    details: { purpose, riskScore: challenge.riskScore, riskLevel: challenge.riskLevel, ...ttlDetails },
-    ipHash: params.ipHash,
-    userAgent: params.userAgent,
-  }));
 
   return { ticket, expiresAt };
 };
 
 export const completeStableMfaLoginChallenge = async (params: {
   userId: string;
+  sessionId?: string | null;
   ticket: string;
   method?: "totp" | "backup_code" | null;
   code: string;
@@ -758,37 +448,39 @@ export const completeStableMfaLoginChallenge = async (params: {
   reasons: string[];
   method: "TOTP" | "BACKUP_CODE";
 }> => {
-  if (!db) return runMfaCompletionTransaction((tx) => completeStableMfaLoginChallenge(params, tx));
-
-  await lockMfaState(db, params.userId);
+  if (!db) throw new Error("B01 MFA capability transaction is required");
   const now = new Date();
-  const challenge = await db.mfaLoginChallenge.findFirst({
-    where: { ticketHash: { in: buildTokenHashCandidates(String(params.ticket || "").trim()) } },
+  const challenge = await loadAdminMfaChallengeBoundary(db, {
+    ticketHashes: buildTokenHashCandidates(String(params.ticket || "").trim()),
+    sessionBindingHashes: sessionBindingCandidates(params.sessionId),
+    checkedAt: now,
   });
   if (!challenge) throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
   if (challenge.userId !== params.userId) throw new MfaAdapterError("MFA_CHALLENGE_FORBIDDEN", { status: 403 });
   if (challenge.consumedAt) throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
-  if (challenge.expiresAt.getTime() <= now.getTime()) {
-    await db.auditLogOutbox.create(mfaAuditOutboxRecord({
-      userId: challenge.userId,
+  if (new Date(challenge.expiresAt).getTime() <= now.getTime()) {
+    await recordAdminMfaChallengeFailure(db, {
+      kind: challenge.kind,
+      challengeId: challenge.id,
       action: "AUTH_MFA_CHALLENGE_EXPIRED",
-      entityId: challenge.id,
-      details: { purpose: challenge.purpose, expiresAt: challenge.expiresAt.toISOString() },
-      ipHash: params.ipHash,
-      userAgent: params.userAgent,
-    }));
+      attempts: challenge.attempts,
+      failedAt: now,
+      ipHash: params.ipHash || null,
+      userAgent: params.userAgent || null,
+    });
     throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410, commitFailure: true });
   }
   if (challenge.attempts >= challenge.maxAttempts) {
-    const retryAfterSeconds = challenge.retryAfterSeconds || 60;
-    await db.auditLogOutbox.create(mfaAuditOutboxRecord({
-      userId: challenge.userId,
+    const retryAfterSeconds = 60;
+    await recordAdminMfaChallengeFailure(db, {
+      kind: challenge.kind,
+      challengeId: challenge.id,
       action: "AUTH_MFA_TOO_MANY_ATTEMPTS",
-      entityId: challenge.id,
-      details: { purpose: challenge.purpose, attempts: challenge.attempts, maxAttempts: challenge.maxAttempts },
-      ipHash: params.ipHash,
-      userAgent: params.userAgent,
-    }));
+      attempts: challenge.attempts,
+      failedAt: now,
+      ipHash: params.ipHash || null,
+      userAgent: params.userAgent || null,
+    });
     throw new MfaAdapterError("MFA_TOO_MANY_ATTEMPTS", {
       status: 429,
       retryAfterSeconds,
@@ -832,22 +524,15 @@ export const completeStableMfaLoginChallenge = async (params: {
   if (failureReason) {
     const nextAttempts = challenge.attempts + 1;
     const retryAfterSeconds = nextAttempts >= challenge.maxAttempts ? 60 : null;
-    const updated = await db.mfaLoginChallenge.updateMany({
-      where: { id: challenge.id, consumedAt: null },
-      data: {
-        attempts: { increment: 1 },
-        retryAfterSeconds,
-      },
-    });
-    if (updated.count !== 1) throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
-    await db.auditLogOutbox.create(mfaAuditOutboxRecord({
-      userId: challenge.userId,
+    await recordAdminMfaChallengeFailure(db, {
+      kind: challenge.kind,
+      challengeId: challenge.id,
       action: nextAttempts >= challenge.maxAttempts ? "AUTH_MFA_TOO_MANY_ATTEMPTS" : "AUTH_MFA_FAILURE",
-      entityId: challenge.id,
-      details: { purpose: challenge.purpose, attempts: nextAttempts, maxAttempts: challenge.maxAttempts, ...(failureReason === "INVALID_CODE_SHAPE" ? { reason: failureReason } : {}) },
-      ipHash: params.ipHash,
-      userAgent: params.userAgent,
-    }));
+      attempts: nextAttempts,
+      failedAt: now,
+      ipHash: params.ipHash || null,
+      userAgent: params.userAgent || null,
+    });
     throw new MfaAdapterError(nextAttempts >= challenge.maxAttempts ? "MFA_TOO_MANY_ATTEMPTS" : "INVALID_MFA_CODE", {
       status: nextAttempts >= challenge.maxAttempts ? 429 : 400,
       retryAfterSeconds: retryAfterSeconds || undefined,
@@ -855,25 +540,19 @@ export const completeStableMfaLoginChallenge = async (params: {
     });
   }
 
-  const consumed = await db.mfaLoginChallenge.updateMany({
-    where: { id: challenge.id, consumedAt: null, expiresAt: { gt: now } },
-    data: { consumedAt: now },
+  await completeAdminMfaChallengeBoundary(db, {
+    kind: challenge.kind,
+    challengeId: challenge.id,
+    method: verification.method,
+    completedAt: now,
+    ipHash: params.ipHash || null,
+    userAgent: params.userAgent || null,
   });
-  if (consumed.count !== 1) throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
-
-  await db.auditLogOutbox.create(mfaAuditOutboxRecord({
-    userId: challenge.userId,
-    action: verification.method === "BACKUP_CODE" ? "AUTH_MFA_BACKUP_CODE_USED" : "AUTH_MFA_SUCCESS",
-    entityId: challenge.id,
-    details: { purpose: challenge.purpose, method: verification.method, riskScore: challenge.riskScore, riskLevel: challenge.riskLevel },
-    ipHash: params.ipHash,
-    userAgent: params.userAgent,
-  }));
 
   return {
     userId: challenge.userId,
     riskScore: challenge.riskScore,
-    riskLevel: challenge.riskLevel,
+    riskLevel: challenge.riskLevel as AuthRiskLevel,
     reasons: challenge.reasons,
     method: verification.method,
   };

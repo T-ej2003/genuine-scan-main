@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { ArrowRight, Bell, CircleHelp, Printer, ScanEye } from "lucide-react";
 
 import { APP_PATHS, getAppRouteLabel, getRoleDisplayLabel } from "@/app/route-metadata";

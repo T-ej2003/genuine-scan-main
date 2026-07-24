@@ -702,7 +702,10 @@ export const validateProtectedTransactionClients = (workflowManifest, scan = sca
     for (const evidence of workflow.supportingEvidence) {
       const access = accessById.get(evidence.accessId);
       assert(access, `${workflow.id} references missing protected access ${evidence.accessId}`);
-      assert.equal(access.clientKind, "canonical-transaction-client", `${workflow.id} uses ${access.clientKind} at ${access.sourceFile}:${access.line}; protected access must use CanonicalTransactionClient`);
+      assert(
+        access.clientKind === "canonical-transaction-client" || access.method.startsWith("$function:"),
+        `${workflow.id} uses ${access.clientKind} at ${access.sourceFile}:${access.line}; protected access must use CanonicalTransactionClient or one exact named function`
+      );
       protectedAccesses += 1;
     }
   }
@@ -1090,7 +1093,9 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   const preAuthFunction = actors.includes("pre-auth-runtime");
   const workerBoundary = actors.some((actor) => ["worker", "scheduled-job"].includes(actor));
   const operatorApproval = actors.some((actor) => ["operator-admin", "break-glass"].includes(actor));
-  const rawEvidence = workflow.id !== RISK_ANALYTICS_WORKFLOW_ID && workflow.supportingEvidence.some((evidence) => evidence.method?.startsWith("$"));
+  const functionEvidence = workflow.supportingEvidence.filter((evidence) => evidence.method?.startsWith("$function:"));
+  const rawEvidence = functionEvidence.length > 0 &&
+    workflow.supportingEvidence.every((evidence) => evidence.method?.startsWith("$function:"));
   let allowedColumns = command === "DELETE" ? [] : command === "SELECT"
     ? scalarColumns.filter((column) => !(table.primaryCategory === "security-sensitive" && table.sensitiveColumns.includes(column)))
     : scalarColumns.filter((column) => !protectedColumns.includes(column));
@@ -1302,13 +1307,17 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
   const sqlCertificationProfiles = [
     {
       id: "sql-profile-risk-analytics-licensee-admin", workflowId: RISK_ANALYTICS_WORKFLOW_ID, route: "GET /api/analytics/risk-scores",
+      routes: ["GET /api/analytics/risk-scores"],
+      functionSignature: "app_rls.risk_analytics_snapshot(text,text,text,text,text,integer,integer,timestamp without time zone)",
       actorClass: "licensee-admin", roleValues: ["LICENSEE_ADMIN", "ORG_ADMIN"], minimumAssurance: "password-verified", purposeCodes: ["tenant-risk-analytics"],
-      scopeType: "canonical-licensee-organization", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(RISK_ANALYTICS_WORKFLOW_ID),
+      scopeType: "canonical-licensee-organization", status: "named-function-candidate", commandRuleIds: ruleIdsFor(RISK_ANALYTICS_WORKFLOW_ID),
     },
     {
       id: "sql-profile-risk-analytics-platform-admin", workflowId: RISK_ANALYTICS_WORKFLOW_ID, route: "GET /api/analytics/risk-scores",
+      routes: ["GET /api/analytics/risk-scores"],
+      functionSignature: "app_rls.risk_analytics_snapshot(text,text,text,text,text,integer,integer,timestamp without time zone)",
       actorClass: "platform-admin", roleValues: ["SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"], minimumAssurance: "mfa-verified", purposeCodes: ["tenant-risk-analytics"],
-      scopeType: "database-validated-selected-licensee-organization", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(RISK_ANALYTICS_WORKFLOW_ID),
+      scopeType: "database-validated-selected-licensee-organization", status: "named-function-candidate", commandRuleIds: ruleIdsFor(RISK_ANALYTICS_WORKFLOW_ID),
     },
     {
       id: "sql-profile-audit-log-licensee-admin", workflowId: AUDIT_LOGS_WORKFLOW_ID, route: "GET /api/audit/logs",
@@ -2524,6 +2533,8 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
       "table-policy-alert": { SELECT: ["acknowledgedAt", "batchId", "id", "incidentId", "licenseeId", "manufacturerId", "policyRuleId", "qrCodeId"] },
       "table-policy-rule": { SELECT: ["id", "isActive", "licenseeId", "manufacturerId", "orgId"] },
       "table-qr-scan-log": { SELECT: ["batchId", "id", "latitude", "licenseeId", "longitude", "qrCodeId", "scannedAt"] },
+      "table-qrcode": { SELECT: ["batchId", "id", "licenseeId", "scanCount"] },
+      "table-refresh-token": { SELECT: ["expiresAt", "id", "revokedAt", "sessionCapabilityExpiresAt", "sessionCapabilityHash", "sessionCapabilityHashVersion", "sessionCapabilityRevokedAt", "userId"] },
       "table-security-policy": { SELECT: ["geoDriftThresholdKm", "licenseeId", "multiScanThreshold", "velocitySpikeThresholdPerMin"] },
       "table-user": { SELECT: ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"] },
     },

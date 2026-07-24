@@ -26,6 +26,7 @@ import { ensureIncidentWorkflowArtifacts } from "../services/supportWorkflowServ
 import { notifyIncidentLifecycle } from "../services/notificationService";
 import { runIncidentAutoContainment } from "../services/soarService";
 import { listLatestDecisionByQrCodeIds } from "../services/verificationDecisionReadService";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).catch(50),
@@ -287,6 +288,7 @@ export const createIrIncident = async (req: AuthRequest, res: Response) => {
       emitEvents: false,
     });
     await notifyIncidentLifecycle({
+      databaseBoundary: b03BoundaryForRequest(req, "incident-notification"),
       incidentId: created.id,
       licenseeId,
       type: "ir_incident_created",
@@ -495,6 +497,7 @@ export const patchIrIncident = async (req: AuthRequest, res: Response) => {
     });
 
     await notifyIncidentLifecycle({
+      databaseBoundary: b03BoundaryForRequest(req, "incident-notification"),
       incidentId: id,
       licenseeId: existing.licenseeId || null,
       type: "ir_incident_updated",

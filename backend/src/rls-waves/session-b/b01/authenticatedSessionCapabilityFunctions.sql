@@ -111,7 +111,7 @@ BEGIN
      AND s."sessionCapabilityHashVersion"='sha256-v1'
      AND s."sessionCapabilityRevokedAt" IS NULL AND s."sessionCapabilityExpiresAt">clock_timestamp()
      AND s."revokedAt" IS NULL AND s."expiresAt">clock_timestamp()
-   FOR UPDATE OF s;
+   FOR SHARE OF s;
   IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
 
   -- The user selector is derived from the locked, capability-bound refresh
@@ -125,7 +125,6 @@ BEGIN
      AND u."disabledAt" IS NULL AND u."deletedAt" IS NULL;
   IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
 
-  UPDATE public."RefreshToken" SET "sessionCapabilityLastUsedAt"=clock_timestamp() WHERE id=session_row.id;
   PERFORM set_config('app.auth_session_id',session_row.id,true),
           set_config('app.user_id',actor_row.id,true), set_config('app.role',actor_row.role,true),
           set_config('app.organization_id',coalesce(actor_row."orgId",''),true),

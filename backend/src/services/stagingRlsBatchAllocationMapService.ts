@@ -1,9 +1,9 @@
-import { Prisma } from "@prisma/client";
-
-import prisma from "../config/database";
-import { CanonicalTransactionClient } from "../lib/canonicalDbContext";
 import { getBatchAllocationMap } from "./batchAllocationService";
-import { buildBatchOperationalReadBoundary } from "./stagingRlsBatchReadService";
+import {
+  assertBatchOperationalCapabilityActor,
+  buildBatchOperationalReadBoundary,
+  runBatchOperationalReadTransaction,
+} from "./stagingRlsBatchReadService";
 import {
   categorizeStagingRlsBatchAllocationMapFailure,
   classifyStagingRlsBatchAllocationMapContext,
@@ -38,9 +38,11 @@ export const getScopedBatchAllocationMapPayload = async (
       ...params,
       routeSurface: "GET /api/qr/batches/:id/allocation-map",
     });
-    const allocationMap = await prisma.$transaction(
-      (tx) => getBatchAllocationMap(boundary.batchId!, { boundary: boundary.repository, db: tx as CanonicalTransactionClient }),
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+    const allocationMap = await runBatchOperationalReadTransaction(
+      async (db) => {
+        await assertBatchOperationalCapabilityActor(db, boundary.repository, params.user);
+        return getBatchAllocationMap(boundary.batchId!, { boundary: boundary.repository, db });
+      }
     );
     const payload: ScopedBatchAllocationMapPayload = allocationMap
       ? { status: "ok", allocationMap }

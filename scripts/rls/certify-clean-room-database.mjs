@@ -43,8 +43,8 @@ const ids = {
   traceA: "00000000-0000-4000-8000-000000001201", traceB: "00000000-0000-4000-8000-000000001202",
   refreshA: "00000000-0000-4000-8000-000000001301", refreshRollback: "00000000-0000-4000-8000-000000001302",
 };
-const riskAnalyticsUserColumns = ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"];
-const prohibitedRiskAnalyticsUserColumns = ["createdAt", "disabledReason", "email", "emailVerifiedAt", "failedLoginAttempts", "lastLoginAt", "location", "lockedUntil", "metadata", "passwordHash", "pendingEmail", "pendingEmailRequestedAt", "updatedAt", "website"];
+const directAppUserColumns = ["id", "name"];
+const prohibitedDirectAppUserColumns = ["createdAt", "deletedAt", "disabledAt", "disabledReason", "email", "emailVerifiedAt", "failedLoginAttempts", "isActive", "lastLoginAt", "licenseeId", "location", "lockedUntil", "metadata", "orgId", "passwordHash", "pendingEmail", "pendingEmailRequestedAt", "role", "status", "updatedAt", "website"];
 let runCounter = 0;
 const activeDatabases = new Set();
 const semanticCapabilities = new Map();
@@ -105,7 +105,7 @@ const contextSql = ({ user, org, licensee, actorClass = "licensee-admin", assura
   const role = manufacturer ? "MANUFACTURER" : actorClass === "platform-admin" ? "PLATFORM_SUPER_ADMIN" : "LICENSEE_ADMIN";
   const capability = semanticCapabilities.get(`${user}:${assurance === "password-verified" ? "PASSWORD" : "ADMIN_MFA"}`);
   if (!capability) throw new Error(`Certification capability is missing for ${user}`);
-  return `SELECT * FROM app_auth.require_authenticated_session(${lit(capability)},${lit(purpose)},'full-rls-cert-request');
+  return `SELECT * FROM app_auth.require_authenticated_session(${lit(capability)},${lit(purpose)},'00000000-0000-4000-8000-000000009999');
 SELECT set_config('app.role',${lit(role)},true),set_config('app.organization_id',${lit(org)},true),set_config('app.licensee_id',${lit(licensee)},true),set_config('app.manufacturer_id',${lit(manufacturer ? user : "")},true);`;
 };
 const appScalar = (appUrl, context, sql, label) => scalar(appUrl, `BEGIN; ${contextSql(context)} ${sql}; ROLLBACK;`, label);
@@ -129,7 +129,15 @@ const runBackendBuild = (env) => {
 const runApplicationPathCertifications = (connections, env) => applicationPathCertificationFamilies
   .filter((family) => !env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY || family.id === env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY)
   .map((family) => {
-  const familyEnv = { ...env, NODE_ENV: "test", [family.enable[0]]: family.enable[1], [family.confirm[0]]: family.confirm[1] };
+  const familyEnv = {
+    ...env,
+    NODE_ENV: "test",
+    MSCQR_RISK_ANALYTICS_TENANT_CAPABILITY: semanticCapabilities.get(`${ids.adminA}:PASSWORD`) || "",
+    MSCQR_RISK_ANALYTICS_PLATFORM_CAPABILITY: semanticCapabilities.get(`${ids.platformA}:ADMIN_MFA`) || "",
+    MSCQR_RISK_ANALYTICS_BOOTSTRAP_URL: connections.bootstrap,
+    [family.enable[0]]: family.enable[1],
+    [family.confirm[0]]: family.confirm[1],
+  };
   for (const [name, connection] of Object.entries(family.connections)) familyEnv[name] = connections[connection];
   const result = spawnSync(process.execPath, [path.join(root, family.testFile)], {
     cwd: root,
@@ -348,7 +356,7 @@ const tenantFixtureExpectations = {
   AuditLog: { column: "id", own: ids.auditA, foreign: ids.auditB, ownCount: 2, foreignCount: 1, purpose: "audit-log-read" },
   Batch: { column: "id", own: ids.batchA, foreign: ids.batchB, ownCount: 1, foreignCount: 1 },
   Incident: { column: "id", own: ids.incidentA, foreign: ids.incidentB, ownCount: 1, foreignCount: 1 },
-  Licensee: { column: "id", own: ids.licenseeA, foreign: ids.licenseeB, ownCount: 1, foreignCount: 1 },
+  Licensee: { column: "id", own: ids.licenseeA, foreign: ids.licenseeB, ownCount: 1, foreignCount: 1, purpose: "audit-log-read" },
   ManufacturerLicenseeLink: {
     column: "manufacturerId",
     ownWhere: `"manufacturerId"=${lit(ids.manufacturerA)} AND "licenseeId"=${lit(ids.licenseeA)}`,
@@ -356,14 +364,15 @@ const tenantFixtureExpectations = {
     ownCount: 1,
     foreignCount: 2,
   },
-  Organization: { column: "id", own: ids.orgA, foreign: ids.orgB, ownCount: 1, foreignCount: 1 },
+  Organization: { column: "id", own: ids.orgA, foreign: ids.orgB, ownCount: 1, foreignCount: 1, purpose: "audit-log-read" },
   PolicyAlert: { column: "id", own: ids.alertA, foreign: ids.alertB, ownCount: 1, foreignCount: 1 },
   PolicyRule: { column: "id", own: ids.ruleA, foreign: ids.ruleB, ownCount: 3, foreignCount: 1 },
   QRCode: { column: "id", own: ids.qrA, foreign: ids.qrB, ownCount: 1, foreignCount: 1 },
   QrScanLog: { column: "id", own: ids.scanA, foreign: ids.scanB, ownCount: 1, foreignCount: 1 },
+  RefreshToken: { column: "id", own: ids.refreshA, foreign: "00000000-0000-4000-8000-000000001403", ownCount: 8, foreignCount: 4, purpose: "audit-log-read" },
   SecurityPolicy: { column: "licenseeId", own: ids.licenseeA, foreign: ids.licenseeB, ownCount: 1, foreignCount: 1 },
   TraceEvent: { column: "id", own: ids.traceA, foreign: ids.traceB, ownCount: 1, foreignCount: 1, purpose: "trace-timeline-read" },
-  User: { column: "id", own: ids.adminA, foreign: ids.adminB, ownCount: 2, foreignCount: 3 },
+  User: { column: "id", own: ids.adminA, foreign: ids.adminB, ownCount: 11, foreignCount: 3, purpose: "audit-log-read" },
 };
 
 const certifyTablesAndColumns = (dbUrl, appUrl, manifest, policies, privileges) => {
@@ -383,8 +392,8 @@ const certifyTablesAndColumns = (dbUrl, appUrl, manifest, policies, privileges) 
     if (actual !== "t") throw new Error(`Approved ${grant.command} privilege missing for ${grant.table}.${column}`);
   }
   const userGrant = privileges.rows.find((grant) => grant.table === "User" && grant.command === "SELECT");
-  if (JSON.stringify(userGrant?.columns) !== JSON.stringify(riskAnalyticsUserColumns)) throw new Error("User SELECT grant is not the exact risk-analytics display/predicate union");
-  for (const column of prohibitedRiskAnalyticsUserColumns) requireDenial(runPsql(appUrl, ["-q", "-c", `SELECT ${quote(column)} FROM public."User" LIMIT 1`], `prohibited User.${column} SELECT`, true), `prohibited User.${column} SELECT`);
+  if (JSON.stringify(userGrant?.columns) !== JSON.stringify(directAppUserColumns)) throw new Error("User SELECT grant is not the exact audit-display projection");
+  for (const column of prohibitedDirectAppUserColumns) requireDenial(runPsql(appUrl, ["-q", "-c", `SELECT ${quote(column)} FROM public."User" LIMIT 1`], `prohibited User.${column} SELECT`, true), `prohibited User.${column} SELECT`);
   requireDenial(runPsql(appUrl, ["-q", "-c", `SELECT "ipAddress" FROM public."AuditLog" LIMIT 1`], "prohibited direct AuditLog network metadata SELECT", true), "prohibited direct AuditLog network metadata SELECT");
   requireDenial(runPsql(appUrl, ["-q", "-c", `INSERT INTO public."AuditLog" ("action","entityType","ipAddress") VALUES ('X','Certification','127.0.0.1')`], "prohibited AuditLog INSERT column", true), "prohibited AuditLog INSERT column");
   requireDenial(runPsql(appUrl, ["-q", "-c", `UPDATE public."Batch" SET "name"='changed'`], "prohibited Batch UPDATE", true), "prohibited Batch UPDATE");
@@ -433,29 +442,7 @@ const certifyTablesAndColumns = (dbUrl, appUrl, manifest, policies, privileges) 
     && entry.purpose.includes("tenant-risk-analytics")
     && grantByTable.has(entry.table)
   ).map((entry) => entry.table))].sort();
-  if (!platformTables.length) throw new Error("Frozen bounded platform risk analytics has no generated SELECT policies");
-  for (const table of platformTables) {
-    const grant = grantByTable.get(table);
-    const fixture = tenantFixtureExpectations[table];
-    if (!grant || !fixture) throw new Error(`${table} platform selector lacks an exact grant/fixture contract`);
-    const column = grant.columns.includes("id") ? "id" : fixture.column;
-    const expected = fixture.ownCount;
-    const platformContext = { user: ids.platformA, org: ids.orgA, licensee: ids.licenseeA, actorClass: "platform-admin", assurance: "mfa-verified", purpose: "tenant-risk-analytics" };
-    const selected = Number(appScalar(appUrl, platformContext, `SELECT count(${quote(column)}) FROM public.${quote(table)}`, `${table} bounded platform selector`));
-    if (selected !== expected) {
-      const visible = appScalar(appUrl, platformContext, `SELECT coalesce(string_agg(${quote(column)}::text,',' ORDER BY ${quote(column)}::text),'') FROM public.${quote(table)}`, `${table} platform diagnostic`);
-      const actorValid = appScalar(appUrl, platformContext, "SELECT app_rls.actor_scope_valid()", `${table} platform actor diagnostic`);
-      throw new Error(`${table} bounded platform selector returned ${selected}, expected ${expected}; actor_scope_valid=${actorValid}; visible=[${visible}]`);
-    }
-    for (const [label, context] of [
-      ["role-string-only", { user: ids.adminA, org: ids.orgA, licensee: ids.licenseeA, actorClass: "platform-admin", assurance: "mfa-verified", purpose: "tenant-risk-analytics" }],
-      ["password-only", { user: ids.platformA, org: ids.orgA, licensee: ids.licenseeA, actorClass: "platform-admin", assurance: "password-verified", purpose: "tenant-risk-analytics" }],
-      ["blank-selector", { user: ids.platformA, org: "", licensee: "", actorClass: "platform-admin", assurance: "mfa-verified", purpose: "tenant-risk-analytics" }],
-    ]) {
-      const visible = Number(appScalar(appUrl, context, `SELECT count(${quote(column)}) FROM public.${quote(table)}`, `${table} platform ${label} denial`));
-      if (visible !== 0) throw new Error(`${table} platform ${label} context exposed ${visible} rows`);
-    }
-  }
+  if (platformTables.length) throw new Error(`Risk analytics restored direct runtime SELECT policies: ${platformTables.join(",")}`);
   return forceCount;
 };
 
@@ -533,30 +520,18 @@ const issueSemanticCapabilities = ({ bootstrap, preauth }) => {
 };
 
 const certifySemantics = (bootstrapUrl, appUrl) => {
-  const tenantRisk = { user: ids.adminA, org: ids.orgA, licensee: ids.licenseeA };
-  const manufacturerParentCount = Number(appScalar(appUrl, tenantRisk, `SELECT count("id") FROM public."User" WHERE "id"=${lit(ids.manufacturerA)} AND "role" IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND "isActive"=TRUE AND "status"='ACTIVE' AND "deletedAt" IS NULL AND "disabledAt" IS NULL`, "risk analytics manufacturer parent validation"));
-  if (manufacturerParentCount !== 1) throw new Error("Legitimate risk analytics manufacturer parent validation failed");
-  const tenantRiskB = { user: ids.adminB, org: ids.orgB, licensee: ids.licenseeB };
-  const linkedManufacturer = appScalar(appUrl, tenantRiskB, `SELECT concat_ws('|',"id","name","role","isActive","status",coalesce("deletedAt"::text,'NULL'),coalesce("disabledAt"::text,'NULL')) FROM public."User" WHERE "id"=${lit(ids.manufacturerLegacyALinkB)}`, "risk analytics linked manufacturer with stale legacy scope");
-  if (linkedManufacturer !== `${ids.manufacturerLegacyALinkB}|Manufacturer Linked B|MANUFACTURER|t|ACTIVE|NULL|NULL`) throw new Error(`Active manufacturer link did not override stale legacy User scope: ${linkedManufacturer || "<no row>"}`);
-  if (Number(appScalar(appUrl, tenantRiskB, `SELECT count("id") FROM public."User" WHERE "id"=${lit(ids.manufacturerLegacyBUnlinked)}`, "risk analytics unlinked manufacturer denial")) !== 0) throw new Error("Legacy User scope granted an unlinked manufacturer");
-  if (Number(appScalar(appUrl, tenantRisk, `SELECT count("id") FROM public."User" WHERE "id"=${lit(ids.manufacturerLegacyALinkB)}`, "risk analytics foreign link denial")) !== 0) throw new Error("Legacy User scope overrode a foreign manufacturer link");
-  if (Number(appScalar(appUrl, tenantRisk, `SELECT count("id") FROM public."PolicyAlert"`, "tenant risk alert read")) !== 1) throw new Error("Tenant risk PolicyAlert policy drifted");
-  if (Number(appScalar(appUrl, { ...tenantRisk, actorClass: "platform-admin", assurance: "mfa-verified" }, `SELECT count("id") FROM public."PolicyAlert"`, "blocked platform alert read")) !== 0) throw new Error("Platform actor received a direct PolicyAlert policy");
-  if (Number(appScalar(appUrl, { ...tenantRisk, purpose: "audit-log-read", assurance: "mfa-verified" }, `SELECT count("id") FROM public."PolicyAlert"`, "wrong-purpose alert read")) !== 0) throw new Error("Purpose guard did not deny risk analytics");
-  if (Number(appScalar(appUrl, { ...tenantRisk, purpose: "audit-log-read", assurance: "mfa-verified" }, `SELECT count("id") FROM public."AuditLog"`, "tenant-wide audit read")) !== 2) throw new Error("Tenant audit read was narrowed to actor-self instead of the approved tenant scope");
-  if (Number(appScalar(appUrl, { ...tenantRisk, purpose: "audit-log-read", assurance: "password-verified" }, `SELECT count("id") FROM public."AuditLog"`, "weak-assurance audit denial")) !== 0) throw new Error("Actor-specific audit MFA guard was flattened");
+  const tenantAudit = { user: ids.adminA, org: ids.orgA, licensee: ids.licenseeA, assurance: "mfa-verified", purpose: "audit-log-read" };
+  requireDenial(denial(appUrl, tenantAudit, `SELECT count("id") FROM public."PolicyAlert"`, "direct risk analytics read"), "direct risk analytics read");
+  if (Number(appScalar(appUrl, tenantAudit, `SELECT count("id") FROM public."AuditLog"`, "tenant-wide audit read")) !== 2) throw new Error("Tenant audit read was narrowed to actor-self instead of the approved tenant scope");
+  if (Number(appScalar(appUrl, { ...tenantAudit, assurance: "password-verified" }, `SELECT count("id") FROM public."AuditLog"`, "weak-assurance audit denial")) !== 0) throw new Error("Actor-specific audit MFA guard was flattened");
   const manufacturerAudit = { user: ids.manufacturerA, org: ids.orgA, licensee: ids.licenseeA, actorClass: "manufacturer", assurance: "mfa-verified", purpose: "audit-log-read" };
   if (appScalar(appUrl, manufacturerAudit, `SELECT string_agg("id",',' ORDER BY "id") FROM public."AuditLog"`, "manufacturer self-attributed audit read") !== ids.auditAOther) throw new Error("Manufacturer audit read escaped immutable self attribution");
   const platformAudit = { user: ids.platformA, org: "", licensee: ids.licenseeA, actorClass: "platform-admin", assurance: "mfa-verified", purpose: "platform-audit-log-read" };
-  const platformDetails = appScalar(appUrl, platformAudit, `SELECT string_agg(id||'|'||coalesce(user_name,'')||'|'||coalesce(ip_address,''),',' ORDER BY id) FROM app_rls.platform_audit_log_details(ARRAY[${lit(ids.auditA)},${lit(ids.auditAOther)},${lit(ids.auditB)}])`, "bounded platform audit metadata function");
+  const platformDetails = appScalar(appUrl, platformAudit, `SELECT string_agg(id||'|'||coalesce(user_name,'')||'|'||coalesce(ip_address,''),',' ORDER BY id) FROM app_rls.platform_audit_log_details(ARRAY[${lit(ids.auditA)},${lit(ids.auditAOther)}])`, "bounded platform audit metadata function");
   const expectedPlatformDetails = `${ids.auditA}|Admin A|192.0.2.10,${ids.auditAOther}|Manufacturer A|192.0.2.11`;
   if (platformDetails !== expectedPlatformDetails) throw new Error(`Bounded platform audit metadata projection drifted: ${platformDetails || "<empty>"}`);
-  if (Number(appScalar(appUrl, { ...platformAudit, user: ids.adminA }, `SELECT count(*) FROM app_rls.platform_audit_log_details(ARRAY[${lit(ids.auditA)}])`, "platform audit role-string-only denial")) !== 0) throw new Error("Platform audit metadata trusted a platform role string without a database-valid actor");
-
-  const visibleRules = appScalar(appUrl, tenantRisk, `SELECT string_agg("id",',' ORDER BY "id") FROM public."PolicyRule"`, "PolicyRule nullable scopes").split(",");
-  for (const expected of [ids.ruleA, ids.ruleOrgA, ids.ruleManA]) if (!visibleRules.includes(expected)) throw new Error(`Approved PolicyRule scope ${expected} is invisible`);
-  for (const deniedId of [ids.ruleB, ids.ruleConflict]) if (visibleRules.includes(deniedId)) throw new Error(`Conflicting/foreign PolicyRule scope ${deniedId} is visible`);
+  if (!/SESSION_C_AUDIT_DETAIL_SCOPE_DENIED/.test(denial(appUrl, platformAudit, `SELECT * FROM app_rls.platform_audit_log_details(ARRAY[${lit(ids.auditA)},${lit(ids.auditB)}])`, "platform audit mixed-tenant selector denial"))) throw new Error("Platform audit metadata accepted a mixed-tenant selector");
+  if (!/SESSION_C_AUDIT_DETAIL_SCOPE_DENIED/.test(denial(appUrl, { ...platformAudit, user: ids.adminA }, `SELECT * FROM app_rls.platform_audit_log_details(ARRAY[${lit(ids.auditA)}])`, "platform audit role-string-only denial"))) throw new Error("Platform audit metadata trusted a platform role string without a database-valid actor");
 
   // Audit inserts are source-purpose-specific.  A generic direct runtime
   // insert is not a reviewed business command; it must fail closed.  Reviewed
@@ -588,21 +563,20 @@ const certifySemantics = (bootstrapUrl, appUrl) => {
     `UPDATE public."Organization" SET "isActive"=true WHERE "id"=${lit(ids.orgA)}`);
   temporarily(`UPDATE public."User" SET "isActive"=false WHERE "id"=${lit(ids.adminA)}`,
     () => {
-      const output = runPsql(appUrl, ["-q", "-c", `BEGIN; ${contextSql(tenantRisk)} SELECT count("id") FROM public."PolicyAlert"; ROLLBACK;`], "disabled tenant actor denial", true);
+      const output = runPsql(appUrl, ["-q", "-c", `BEGIN; ${contextSql(tenantAudit)} SELECT count("id") FROM public."AuditLog"; ROLLBACK;`], "disabled tenant actor denial", true);
       if (!/AUTH_SESSION_CAPABILITY_DENIED/.test(output)) throw new Error("Disabled tenant actor did not fail at capability verification");
     },
     `UPDATE public."User" SET "isActive"=true WHERE "id"=${lit(ids.adminA)}`);
   temporarily(`UPDATE public."User" SET "licenseeId"=${lit(ids.licenseeB)},"orgId"=${lit(ids.orgB)} WHERE "id"=${lit(ids.adminA)}`,
-    () => { if (Number(appScalar(appUrl, tenantRisk, `SELECT count("id") FROM public."PolicyAlert"`, "stale tenant membership denial")) !== 0) throw new Error("Stale tenant membership retained RLS authority"); },
+    () => { if (Number(appScalar(appUrl, tenantAudit, `SELECT count("id") FROM public."AuditLog"`, "stale tenant membership denial")) !== 0) throw new Error("Stale tenant membership retained RLS authority"); },
     `UPDATE public."User" SET "licenseeId"=${lit(ids.licenseeA)},"orgId"=${lit(ids.orgA)} WHERE "id"=${lit(ids.adminA)}`);
   temporarily(`UPDATE public."Licensee" SET "isActive"=false WHERE "id"=${lit(ids.licenseeA)}`,
     () => {
-      const platform = { user: ids.platformA, org: ids.orgA, licensee: ids.licenseeA, actorClass: "platform-admin", assurance: "mfa-verified", purpose: "tenant-risk-analytics" };
-      if (Number(appScalar(appUrl, platform, `SELECT count("id") FROM public."PolicyAlert"`, "inactive platform selector denial")) !== 0) throw new Error("Inactive platform selector retained RLS authority");
+      if (Number(appScalar(appUrl, platformAudit, `SELECT count("id") FROM public."AuditLog"`, "inactive platform selector denial")) !== 0) throw new Error("Inactive platform selector retained RLS authority");
     },
     `UPDATE public."Licensee" SET "isActive"=true WHERE "id"=${lit(ids.licenseeA)}`);
 
-  const secondVerification = scalar(appUrl, `BEGIN; ${contextSql(tenantRisk)} SELECT set_config('app.user_id','${ids.adminB}',true); ${contextSql(tenantRisk)} SELECT current_setting('app.user_id',true); ROLLBACK;`, "same-transaction capability re-verification");
+  const secondVerification = scalar(appUrl, `BEGIN; ${contextSql(tenantAudit)} SELECT set_config('app.user_id','${ids.adminB}',true); ${contextSql(tenantAudit)} SELECT current_setting('app.user_id',true); ROLLBACK;`, "same-transaction capability re-verification");
   if (secondVerification !== ids.adminA) throw new Error("Capability re-verification did not overwrite forged actor context");
   const malformed = runPsql(appUrl, ["-q", "-c", "BEGIN; SELECT app_rls.install_actor_context('not-a-uuid','LICENSEE_ADMIN','','','','password-verified','request','purpose'); ROLLBACK;"], "malformed context", true);
   if (!/permission denied/i.test(malformed)) throw new Error("Generic context installer remained runtime-executable");

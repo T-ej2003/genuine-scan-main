@@ -6,6 +6,7 @@ import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
 import { approveAllocationRequest } from "../rls-waves/session-c/c01/qrSystemRepository";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 
 const createRequestSchema = z
   .object({
@@ -91,6 +92,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
 
     await Promise.all([
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
         type: "qr_request_created",
         title: "New QR inventory request",
@@ -106,6 +108,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
         channels: [NotificationChannel.WEB],
       }),
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.LICENSEE_ADMIN,
         licenseeId,
         type: "qr_request_created",
@@ -215,6 +218,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
 
     await Promise.all([
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
         type: "qr_request_approved",
         title: "QR request approved",
@@ -230,6 +234,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
         channels: [NotificationChannel.WEB],
       }),
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.LICENSEE_ADMIN,
         licenseeId: requestRow.licenseeId,
         type: "qr_request_approved",
@@ -246,6 +251,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
         channels: [NotificationChannel.WEB],
       }),
       createUserNotification({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         userId: requestRow.requestedByUserId,
         licenseeId: requestRow.licenseeId,
         type: "qr_request_approved",
@@ -320,6 +326,7 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
 
     await Promise.all([
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
         type: "qr_request_rejected",
         title: "QR request rejected",
@@ -334,6 +341,7 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
         channels: [NotificationChannel.WEB],
       }),
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.LICENSEE_ADMIN,
         licenseeId: requestRow.licenseeId,
         type: "qr_request_rejected",
@@ -349,6 +357,7 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
         channels: [NotificationChannel.WEB],
       }),
       createUserNotification({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         userId: requestRow.requestedByUserId,
         licenseeId: requestRow.licenseeId,
         type: "qr_request_rejected",

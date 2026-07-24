@@ -151,6 +151,34 @@ const licenseeAdmin = {
   mockModule("observability/verificationTrustMetrics.js", {
     recordBreakGlassIssuanceMetric: () => undefined,
   });
+  mockModule("rls-waves/session-c/c01/administrationRepository.js", {
+    AdministrationAccessError: class AdministrationAccessError extends Error {},
+    updateUser: async () => {
+      throw new Error("SESSION_C_USER_NOT_FOUND");
+    },
+  });
+  class C03AccessError extends Error {
+    constructor(message, statusCode = 403) {
+      super(message);
+      this.statusCode = statusCode;
+    }
+  }
+  mockModule("rls-waves/session-c/c03/c03ActorBoundary.js", {
+    C03AccessError,
+    c03DatabaseSessionCapability: () => "test-capability",
+    c03RequestId: () => "security-route-surface",
+    withC03ResourceTransaction: async () => {
+      throw new C03AccessError("Incident not found", 404);
+    },
+  });
+  mockModule("rls-waves/session-c/c01/qrSystemRepository.js", {
+    withQrBoundaryTransaction: async (callback) => callback({}),
+    visitQrCodePages: async (readPage) => readPage(100, 0),
+    readCodes: async () => {
+      throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
+    },
+    isQrBoundaryDenied: (error) => /AUTH_SESSION_CAPABILITY_DENIED/.test(String(error?.message || "")),
+  });
 
   const { updateUser } = require("../dist/controllers/userController");
   const updateRes = createResponse();
@@ -160,6 +188,9 @@ const licenseeAdmin = {
       query: {},
       body: { licenseeId: licenseeB },
       user: licenseeAdmin,
+      databaseSessionCapability: "test-capability",
+      requestId: "security-route-surface",
+      get: () => undefined,
     },
     updateRes
   );
@@ -186,19 +217,35 @@ const licenseeAdmin = {
   assert.ok(!prismaCalls.some(([name]) => name === "incident.update"), "cross-scope incident updates must not mutate");
 
   const { listNotifications, readNotification, readAllNotifications } = require("../dist/controllers/notificationController");
+  const authenticatedNotificationRequest = {
+    user: licenseeAdmin,
+    databaseSessionCapability: "test-capability",
+    requestId: "security-route-surface",
+    get: () => undefined,
+  };
   const notificationListRes = createResponse();
-  await listNotifications({ query: { userId: targetId, licenseeId: licenseeB }, user: licenseeAdmin }, notificationListRes);
+  await listNotifications({
+    ...authenticatedNotificationRequest,
+    query: { userId: targetId, licenseeId: licenseeB },
+  }, notificationListRes);
   assert.strictEqual(notificationListRes.statusCode, 200);
   assert.strictEqual(notificationListRes.body.data.capturedParams.userId, actorId);
   assert.strictEqual(notificationListRes.body.data.capturedParams.licenseeId, licenseeA);
 
   const notificationReadRes = createResponse();
-  await readNotification({ params: { id: notificationId }, body: { userId: targetId }, user: licenseeAdmin }, notificationReadRes);
+  await readNotification({
+    ...authenticatedNotificationRequest,
+    params: { id: notificationId },
+    body: { userId: targetId },
+  }, notificationReadRes);
   assert.strictEqual(notificationReadRes.statusCode, 200);
   assert.strictEqual(notificationReadRes.body.data.userId, actorId);
 
   const notificationReadAllRes = createResponse();
-  await readAllNotifications({ body: { userId: targetId }, user: licenseeAdmin }, notificationReadAllRes);
+  await readAllNotifications({
+    ...authenticatedNotificationRequest,
+    body: { userId: targetId },
+  }, notificationReadAllRes);
   assert.strictEqual(notificationReadAllRes.statusCode, 200);
   assert.deepStrictEqual(
     prismaCalls.find(([name]) => name === "notifications.markAll")[1].userId,

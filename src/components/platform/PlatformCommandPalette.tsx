@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 import { ArrowRight, ExternalLink, ScanLine, ShieldCheck } from "lucide-react";
 
 import { APP_PATHS, getNavItemsForRole } from "@/app/route-metadata";

@@ -16,7 +16,7 @@ test("authenticated session capability is a database-verified, hash-only boundar
   assert.equal(contract.security.ownerRole, "authOwner");
   assert.deepEqual(contract.security.runtimeExecuteGrantees, ["app"]);
   assert.deepEqual(contract.tableCommands, [
-    ["RefreshToken", "SELECT"], ["RefreshToken", "UPDATE"], ["User", "SELECT"],
+    ["RefreshToken", "SELECT"], ["User", "SELECT"],
   ]);
   assert.match(source, /encode\(sha256\(convert_to\(p_capability,'UTF8'\)\),'hex'\)/);
   assert.match(source, /set_config\('app\.user_id','',true\)/);
@@ -24,6 +24,8 @@ test("authenticated session capability is a database-verified, hash-only boundar
   assert.match(source, /rt\."tokenHash"=p_refresh_token_hash/);
   assert.match(source, /s\."sessionCapabilityHash"=current_setting\('app\.auth_session_hash',true\)/);
   assert.match(source, /s\."revokedAt" IS NULL/);
+  assert.match(source, /FOR SHARE OF s/);
+  assert.doesNotMatch(source, /UPDATE public\."RefreshToken" SET "sessionCapabilityLastUsedAt"=clock_timestamp\(\) WHERE id=session_row\.id/);
   assert.match(source, /REVOKE ALL ON FUNCTION app_auth\.auth_session_prepare/);
   assert.match(source, /CREATE OR REPLACE FUNCTION app_auth\.revoke_authenticated_session_capability/);
   assert.match(source, /CREATE OR REPLACE FUNCTION app_auth\.revoke_all_authenticated_session_capabilities/);

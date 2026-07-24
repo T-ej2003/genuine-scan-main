@@ -100,11 +100,13 @@ const makeTransactionRunner = (options = {}) => {
   const batchReadSource = fs.readFileSync(path.join(serviceRoot, "stagingRlsBatchReadService.ts"), "utf8");
   const allocationSource = fs.readFileSync(path.join(serviceRoot, "stagingRlsBatchAllocationMapService.ts"), "utf8");
   for (const source of [batchReadSource, allocationSource]) {
-    assert.match(source, /config\/database/);
-    assert.match(source, /withCanonicalDbContext\(\s*prisma,/);
-    assert.match(source, /TransactionIsolationLevel\.RepeatableRead/);
+    assert.match(source, /assertBatchOperationalCapabilityActor/);
     assert.doesNotMatch(source, /withStagingRlsBatchReadTransaction|isStagingRls/);
   }
+  assert.match(batchReadSource, /config\/database/);
+  assert.match(batchReadSource, /prisma\.\$transaction/);
+  assert.match(batchReadSource, /TransactionIsolationLevel\.RepeatableRead/);
+  assert.match(allocationSource, /runBatchOperationalReadTransaction/);
 
   const manufacturerPrinterSource = fs.readFileSync(
     path.join(serviceRoot, "stagingRlsManufacturerPrintersReadService.ts"),

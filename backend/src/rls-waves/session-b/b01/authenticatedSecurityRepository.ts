@@ -46,6 +46,54 @@ export const loadAuthenticatedActor = async (db: AuthQueryClient) => {
   return one(rows, "app_rls.load_authenticated_actor");
 };
 
+export type AuthenticatedManufacturerLicensee = {
+  id: string;
+  name: string;
+  prefix: string;
+  brandName: string | null;
+  orgId: string;
+  isPrimary: boolean;
+  scopeVersion: string;
+};
+
+export const loadAuthenticatedManufacturerScope = async (
+  input: {
+    requestedLicenseeId?: string | null;
+    requestedOrgId?: string | null;
+    requestedScopeVersion?: string | null;
+    purpose: "manufacturer-bootstrap" | "manufacturer-scope-switch";
+    writeAudit: boolean;
+  },
+  db: AuthQueryClient
+) => {
+  const rows = await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>`
+    SELECT app_rls.load_authenticated_manufacturer_scope(
+      ${input.requestedLicenseeId || null},
+      ${input.requestedOrgId || null},
+      ${input.requestedScopeVersion || null},
+      ${input.purpose},
+      ${input.writeAudit}
+    ) AS result
+  `;
+  const result = one(rows, "app_rls.load_authenticated_manufacturer_scope").result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error("app_rls.load_authenticated_manufacturer_scope returned an unexpected projection");
+  }
+  const manufacturerId = typeof result.manufacturerId === "string" ? result.manufacturerId : "";
+  const linkedLicensees = Array.isArray(result.linkedLicensees) ? result.linkedLicensees : null;
+  const selectedLicensee = result.selectedLicensee;
+  if (!manufacturerId || !linkedLicensees || (
+    selectedLicensee !== null && (typeof selectedLicensee !== "object" || Array.isArray(selectedLicensee))
+  )) {
+    throw new Error("app_rls.load_authenticated_manufacturer_scope returned an unexpected projection");
+  }
+  return {
+    manufacturerId,
+    selectedLicensee: selectedLicensee as AuthenticatedManufacturerLicensee | null,
+    linkedLicensees: linkedLicensees as AuthenticatedManufacturerLicensee[],
+  };
+};
+
 export const loadAuthenticatedPasswordActor = async (db: AuthQueryClient) => {
   const rows = await db.$queryRaw<Array<{
     id: string;

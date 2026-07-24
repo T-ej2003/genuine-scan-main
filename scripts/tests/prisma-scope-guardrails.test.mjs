@@ -64,8 +64,12 @@ test("Prisma scope scanner rejects broad or undocumented allowlist entries", () 
   }
 });
 
-test("auth bootstrap exception permits only User.findMany", () => {
+test("auth bootstrap uses the exact pre-auth repository without a Prisma exception", () => {
   const allowlist = JSON.parse(fs.readFileSync(path.join(repoRoot, "scripts/security-scope-allowlist.json"), "utf8"));
   const entry = allowlist.allowedFindings.find(({ path: file }) => file === "backend/src/services/auth/authBootstrapRepository.ts");
-  assert.deepEqual(entry && { model: entry.model, methods: entry.methods }, { model: "user", methods: ["findMany"] });
+  assert.equal(entry, undefined);
+  assert.match(
+    fs.readFileSync(path.join(repoRoot, "backend/src/services/auth/authBootstrapRepository.ts"), "utf8"),
+    /from "\.\.\/\.\.\/rls-waves\/session-b\/b01\/preAuthRepository"/
+  );
 });

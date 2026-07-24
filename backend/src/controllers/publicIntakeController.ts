@@ -2,7 +2,6 @@ import { Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 
-import prisma from "../config/database";
 import { sanitizeUnknownInput } from "../middleware/requestSanitizer";
 import { createAuditLogSafely } from "../services/auditService";
 import {
@@ -14,11 +13,7 @@ import {
 } from "../services/supportIntakeMailService";
 import { normalizeEmailAddress } from "../utils/email";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
-import {
-  b02BoundariesEnabled,
-  isB02AuthorizationError,
-  withB02AuthenticatedRequest,
-} from "../rls-waves/session-b/b02/authenticatedBoundary";
+import { isB02AuthorizationError, withB02AuthenticatedRequest } from "../rls-waves/session-b/b02/authenticatedBoundary";
 import {
   listRequestAccessRows as listRequestAccessRowsThroughBoundary,
   updateRequestAccessRow as updateRequestAccessRowThroughBoundary,
@@ -84,12 +79,6 @@ const requestAccessListSchema = z
   })
   .strict();
 
-const makeReferenceCode = (prefix: string) => {
-  const date = new Date().toISOString().slice(2, 10).replace(/-/g, "");
-  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `${prefix}-${date}-${random}`;
-};
-
 const parseBody = <T>(schema: z.ZodType<T>, body: unknown) => {
   const sanitized = sanitizeUnknownInput(body || {}, "body");
   return schema.safeParse(sanitized);
@@ -104,10 +93,8 @@ export const submitPublicRequestAccess = async (req: Request, res: Response) => 
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
     }
 
-    const referenceCode = makeReferenceCode("RA");
     const data = parsed.data;
-
-    if (b02BoundariesEnabled() || process.env.NODE_ENV !== "test") {
+    {
       const submittedAt = new Date();
       const requestId = String((req as Request & { requestId?: string }).requestId || randomUUID()).trim();
       const idempotencyDigest = b02IdempotencyDigest({
@@ -184,79 +171,6 @@ export const submitPublicRequestAccess = async (req: Request, res: Response) => 
         },
       });
     }
-
-    const created = await prisma.requestAccess.create({
-      data: {
-        referenceCode,
-        fullName: data.fullName,
-        workEmail: data.workEmail,
-        companyName: data.companyName,
-        roleTitle: data.role,
-        country: data.country,
-        monthlyGarmentVolume: data.monthlyGarmentVolume,
-        message: data.message,
-        sourcePage: data.sourcePage?.trim() || null,
-        referrer: data.referrer?.trim() || null,
-      },
-    });
-
-    const [adminMail, ackMail] = await Promise.all([
-      sendRequestAccessAdminNotification({
-        referenceCode,
-        fullName: created.fullName,
-        workEmail: created.workEmail,
-        companyName: created.companyName,
-        roleTitle: created.roleTitle,
-        country: created.country,
-        monthlyGarmentVolume: created.monthlyGarmentVolume,
-        message: created.message,
-        sourcePage: created.sourcePage,
-      }),
-      sendRequestAccessAcknowledgement({
-        referenceCode,
-        fullName: created.fullName,
-        workEmail: created.workEmail,
-        companyName: created.companyName,
-      }),
-    ]);
-
-    await prisma.requestAccess.update({
-      where: { id: created.id },
-      data: {
-        adminEmailDeliveryStatus: toDeliveryStatus(adminMail),
-        adminEmailErrorCode: safeEmailError(adminMail.errorCode),
-        acknowledgementEmailDeliveryStatus: toDeliveryStatus(ackMail),
-        acknowledgementEmailErrorCode: safeEmailError(ackMail.errorCode),
-      },
-    });
-
-    await createAuditLogSafely({
-      action: "REQUEST_ACCESS_SUBMITTED",
-      entityType: "RequestAccess",
-      entityId: created.id,
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
-      details: {
-        referenceCode,
-        companyName: created.companyName,
-        adminEmailDeliveryStatus: toDeliveryStatus(adminMail),
-        acknowledgementEmailDeliveryStatus: toDeliveryStatus(ackMail),
-      },
-    });
-
-    return res.status(201).json({
-      success: true,
-      data: {
-        referenceCode,
-        status: created.status,
-        emailDeliveryStatus: toDeliveryStatus(adminMail),
-        acknowledgementEmailDeliveryStatus: toDeliveryStatus(ackMail),
-        message:
-          adminMail.delivered || adminMail.errorCode === "EMAIL_DRY_RUN"
-            ? "Request received. MSCQR will review your access request."
-            : "Request received. Email notification could not be confirmed, but the MSCQR team can review it in the platform console.",
-      },
-    });
   } catch (error) {
     if (isPrismaMissingTableError(error, ["requestaccess"])) {
       warnStorageUnavailableOnce("request-access-storage", "[request-access] request access storage unavailable.");
@@ -274,9 +188,8 @@ export const submitPublicSupportIssue = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid support request" });
     }
 
-    const referenceCode = makeReferenceCode("SUP");
     const data = parsed.data;
-    if (b02BoundariesEnabled() || process.env.NODE_ENV !== "test") {
+    {
       const submittedAt = new Date();
       const requestId = String((req as Request & { requestId?: string }).requestId || randomUUID()).trim();
       const idempotencyDigest = b02IdempotencyDigest({
@@ -358,84 +271,6 @@ export const submitPublicSupportIssue = async (req: Request, res: Response) => {
         },
       });
     }
-    const created = await prisma.supportIssueReport.create({
-      data: {
-        referenceCode,
-        publicName: data.name,
-        publicEmail: data.email,
-        issueType: data.issueType,
-        title: data.title,
-        description: data.message,
-        verificationCode: data.verificationCode?.trim() || null,
-        productReference: data.productReference?.trim() || null,
-        sourcePath: data.sourcePath?.trim() || "/help/support",
-        pageUrl: data.pageUrl?.trim() || null,
-        priority: data.issueType === "verification_result" || data.issueType === "product_concern" ? "P2" : "P3",
-        autoDetected: false,
-        diagnostics: {
-          publicIntake: true,
-          issueType: data.issueType,
-        },
-      } as any,
-    });
-
-    const [adminMail, ackMail] = await Promise.all([
-      sendPublicSupportAdminNotification({
-        referenceCode,
-        name: data.name,
-        email: data.email,
-        issueType: data.issueType,
-        title: data.title,
-        message: data.message,
-        verificationCode: data.verificationCode,
-        productReference: data.productReference,
-        sourcePath: data.sourcePath,
-      }),
-      sendPublicSupportAcknowledgement({
-        referenceCode,
-        name: data.name,
-        email: data.email,
-        title: data.title,
-      }),
-    ]);
-
-    await prisma.supportIssueReport.update({
-      where: { id: created.id },
-      data: {
-        emailDeliveryStatus: toDeliveryStatus(adminMail),
-        emailErrorCode: safeEmailError(adminMail.errorCode),
-        acknowledgementEmailDeliveryStatus: toDeliveryStatus(ackMail),
-        acknowledgementEmailErrorCode: safeEmailError(ackMail.errorCode),
-      },
-    });
-
-    await createAuditLogSafely({
-      action: "PUBLIC_SUPPORT_ISSUE_SUBMITTED",
-      entityType: "SupportIssueReport",
-      entityId: created.id,
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
-      details: {
-        referenceCode,
-        issueType: data.issueType,
-        emailDeliveryStatus: toDeliveryStatus(adminMail),
-        acknowledgementEmailDeliveryStatus: toDeliveryStatus(ackMail),
-      },
-    });
-
-    return res.status(201).json({
-      success: true,
-      data: {
-        referenceCode,
-        status: created.status,
-        emailDeliveryStatus: toDeliveryStatus(adminMail),
-        acknowledgementEmailDeliveryStatus: toDeliveryStatus(ackMail),
-        message:
-          adminMail.delivered || adminMail.errorCode === "EMAIL_DRY_RUN"
-            ? "Support request received. Keep this reference for follow-up."
-            : "Support request received. Email notification could not be confirmed, but MSCQR operators can review it in the platform console.",
-      },
-    });
   } catch (error) {
     if (isPrismaMissingTableError(error, ["supportissuereport"])) {
       warnStorageUnavailableOnce("public-support-storage", "[support] public support storage unavailable.");
@@ -454,36 +289,19 @@ export const listRequestAccessRecords = async (req: Request, res: Response) => {
     }
     const limit = parsed.data.limit ?? 50;
     const offset = parsed.data.offset ?? 0;
-    if (b02BoundariesEnabled()) {
-      const data = await withB02AuthenticatedRequest(
-        req as Request & { user?: any },
-        { purpose: "request-access-read", assurance: "mfa-verified" },
-        async (tx) => {
-          const [records, total] = await listRequestAccessRowsThroughBoundary(tx, {
-            status: parsed.data.status,
-            limit,
-            offset,
-          });
-          return { records, total, limit, offset };
-        }
-      );
-      return res.json({ success: true, data });
-    }
-    const where = parsed.data.status ? { status: parsed.data.status } : {};
-    const [records, total] = await Promise.all([
-      prisma.requestAccess.findMany({
-        where,
-        orderBy: [{ createdAt: "desc" }],
-        take: limit,
-        skip: offset,
-        include: {
-          assignedToUser: { select: { id: true, name: true, email: true } },
-          reviewedByUser: { select: { id: true, name: true, email: true } },
-        },
-      }),
-      prisma.requestAccess.count({ where }),
-    ]);
-    return res.json({ success: true, data: { records, total, limit, offset } });
+    const data = await withB02AuthenticatedRequest(
+      req as Request & { user?: any },
+      { purpose: "request-access-read", assurance: "mfa-verified" },
+      async (tx) => {
+        const [records, total] = await listRequestAccessRowsThroughBoundary(tx, {
+          status: parsed.data.status,
+          limit,
+          offset,
+        });
+        return { records, total, limit, offset };
+      }
+    );
+    return res.json({ success: true, data });
   } catch (error) {
     if (isB02AuthorizationError(error)) {
       return res.status(403).json({ success: false, error: "Request access authorization is stale or insufficient." });
@@ -510,56 +328,18 @@ export const patchRequestAccessRecord = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request access update" });
     }
 
-    if (b02BoundariesEnabled()) {
-      const updated = await withB02AuthenticatedRequest(
-        req as Request & { user?: any },
-        { purpose: "request-access-update", assurance: "mfa-verified" },
-        (tx, context) => updateRequestAccessRowThroughBoundary(tx, {
-          id,
-          actorUserId: context.userId,
-          status: parsed.data.status,
-          internalNote: parsed.data.internalNote,
-          assignedToUserId: parsed.data.assignedToUserId,
-        })
-      );
-      if (!updated) return res.status(404).json({ success: false, error: "Request access record not found" });
-      await createAuditLogSafely({
-        userId: authReq.user?.userId,
-        action: "REQUEST_ACCESS_UPDATED",
-        entityType: "RequestAccess",
-        entityId: id,
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent") || undefined,
-        details: {
-          status: updated.status,
-          assignedToUserId: updated.assignedToUserId,
-          internalNoteChanged: parsed.data.internalNote !== undefined,
-        },
-      });
-      return res.json({ success: true, data: updated });
-    }
-
-    const existing = await prisma.requestAccess.findUnique({ where: { id } });
-    if (!existing) return res.status(404).json({ success: false, error: "Request access record not found" });
-
-    const updateData: any = {};
-    if (parsed.data.status) updateData.status = parsed.data.status;
-    if (parsed.data.internalNote !== undefined) updateData.internalNote = parsed.data.internalNote || null;
-    if (parsed.data.assignedToUserId !== undefined) updateData.assignedToUserId = parsed.data.assignedToUserId || null;
-    if (parsed.data.status && parsed.data.status !== existing.status) {
-      updateData.reviewedAt = new Date();
-      updateData.reviewedByUserId = authReq.user?.userId || null;
-    }
-
-    const updated = await prisma.requestAccess.update({
-      where: { id },
-      data: updateData,
-      include: {
-        assignedToUser: { select: { id: true, name: true, email: true } },
-        reviewedByUser: { select: { id: true, name: true, email: true } },
-      },
-    });
-
+    const updated = await withB02AuthenticatedRequest(
+      req as Request & { user?: any },
+      { purpose: "request-access-update", assurance: "mfa-verified" },
+      (tx, context) => updateRequestAccessRowThroughBoundary(tx, {
+        id,
+        actorUserId: context.userId,
+        status: parsed.data.status,
+        internalNote: parsed.data.internalNote,
+        assignedToUserId: parsed.data.assignedToUserId,
+      })
+    );
+    if (!updated) return res.status(404).json({ success: false, error: "Request access record not found" });
     await createAuditLogSafely({
       userId: authReq.user?.userId,
       action: "REQUEST_ACCESS_UPDATED",

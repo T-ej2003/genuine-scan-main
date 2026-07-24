@@ -36,6 +36,7 @@ import {
   visitQrCodePages,
   withQrBoundaryTransaction,
 } from "../rls-waves/session-c/c01/qrSystemRepository";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -75,7 +76,8 @@ const allocateLicenseeTopupSchema = z
   });
 
 const isScopeError = (error: unknown) =>
-  error instanceof Error && /access denied|no licensee association/i.test(error.message);
+  error instanceof Error &&
+  /access denied|no licensee association|AUTH_SESSION_CAPABILITY_DENIED/i.test(error.message);
 
 const createBatchSchema = z
   .object({
@@ -417,6 +419,7 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
 
     try {
       await createUserNotification({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         userId: result.manufacturerId,
         licenseeId: result.licenseeId,
         type: "manufacturer_batch_assigned",

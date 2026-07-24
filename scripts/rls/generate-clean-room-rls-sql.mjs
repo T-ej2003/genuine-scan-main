@@ -30,6 +30,26 @@ const transactionalPhase = (sql) => {
   const body = sql.slice(prefix.length).trimEnd().split("\n").map((line) => line.trimEnd()).join("\n");
   return `${prefix}BEGIN;\n${body}\nCOMMIT;\n`;
 };
+const readContractSources = (contracts, replacements = []) =>
+  [...new Set(contracts.map((contract) => contract.definitionLocation))]
+    .map((location) => {
+      let source = fs.readFileSync(path.join(repoRoot, location), "utf8");
+      for (const [needle, replacement] of replacements) source = source.replaceAll(needle, replacement);
+      return source.trim();
+    })
+    .filter(Boolean)
+    .join("\n\n");
+const mergeOwnerPolicies = (entries) => [...entries.reduce((groups, [table, command, predicate]) => {
+  const key = `${table}:${command}`;
+  const group = groups.get(key) || { table, command, predicates: [] };
+  if (!group.predicates.includes(predicate)) group.predicates.push(predicate);
+  groups.set(key, group);
+  return groups;
+}, new Map()).values()].map(({ table, command, predicates }) => [
+  table,
+  command,
+  predicates.length === 1 ? predicates[0] : predicates.map((predicate) => `(${predicate})`).join(" OR "),
+]);
 
 const tablesManifest = readJson("tables.json");
 const workflowsManifest = readJson("workflows.json");
@@ -194,6 +214,9 @@ const scheduledContracts = validateNamedSqlFunctionContracts().filter((contract)
 const outboxContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-b-b03-outbox"
 );
+const b03AuthenticatedContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "session-b-b03-authenticated"
+);
 const operationalReadContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-a-operational-read"
 );
@@ -221,12 +244,17 @@ const preAuthFunctionSource = preAuthContracts.length
 const preAuthFunctionSignatures = preAuthContracts.map((contract) => `app_auth.${contract.name}(${contract.signature})`);
 const preAuthOwnerPrivileges = [...new Map(preAuthContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const preAuthOwnerPolicies = [...new Map(preAuthContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
-const c03FunctionSource = c03Contracts.length
-  ? fs.readFileSync(path.join(repoRoot, c03Contracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
-  : "";
+const c03FunctionSource = `${fs.readFileSync(path.join(repoRoot, "backend/src/rls-waves/session-c/c03/c03Boundary.sql"), "utf8")}\n${readContractSources(c03Contracts, [
+  ["{{AUTH_OWNER}}", q(roleNames.authOwner)],
+  ["{{APP_ROLE}}", lit(roleNames.app)],
+  ["{{PREAUTH_ROLE}}", roleNames.preauth],
+  ["{{WORKER_ROLE}}", roleNames.worker],
+])}`;
 const c03AppSignatures = c03Contracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const c03PreauthSignatures = c03Contracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("preauth")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const c03WorkerSignatures = c03Contracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const c03OwnerPrivileges = [...new Map(c03Contracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
-const c03OwnerPolicies = [...new Map(c03Contracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const c03OwnerPolicies = mergeOwnerPolicies(c03Contracts.flatMap((contract) => contract.security.ownerPolicies || []));
 const administrationFunctionSource = administrationContracts.length
   ? fs.readFileSync(path.join(repoRoot, administrationContracts[0].definitionLocation), "utf8")
   : "";
@@ -260,6 +288,14 @@ const contractEvidenceFor = (contracts, table, command) => contracts
   .filter((contract) => contract.tableCommands.some(([candidateTable, candidateCommand]) => candidateTable === table && candidateCommand === command))
   .map((contract) => `contract:${contract.id}:${table}:${command}`)
   .sort();
+const c03PolicyEvidenceFor = (table, command) => {
+  const contracts = contractEvidenceFor(c03Contracts, table, command);
+  if (contracts.length) return contracts;
+  return [commandSemantics.rules.find((rule) =>
+    rule.tableId === tables.find((entry) => entry.physicalTable === table)?.id &&
+    rule.command === command && rule.authorizationBoundary !== "prohibited"
+  )?.id].filter(Boolean);
+};
 const scheduledFunctionSource = scheduledContracts.length
   ? fs.readFileSync(path.join(repoRoot, scheduledContracts[0].definitionLocation), "utf8")
       .replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
@@ -280,8 +316,16 @@ const outboxAppSignatures = outboxContracts.filter((contract) => contract.securi
 const outboxWorkerSignatures = outboxContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const outboxOwnerPrivileges = [...new Map(outboxContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const outboxOwnerPolicies = [...new Map(outboxContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const b03AuthenticatedFunctionSource = readContractSources(b03AuthenticatedContracts, [
+  ["{{AUTH_OWNER}}", q(roleNames.authOwner)],
+  ["{{APP_ROLE}}", lit(roleNames.app)],
+]);
+const b03AuthenticatedAppSignatures = b03AuthenticatedContracts.map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const b03AuthenticatedOwnerPrivileges = [...new Map(b03AuthenticatedContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const b03AuthenticatedOwnerPolicies = mergeOwnerPolicies(b03AuthenticatedContracts.flatMap((contract) => contract.security.ownerPolicies || []));
 const operationalReadFunctionSource = operationalReadContracts.length
   ? fs.readFileSync(path.join(repoRoot, operationalReadContracts[0].definitionLocation), "utf8")
+      .replaceAll("{{APP_ROLE}}", lit(roleNames.app))
   : "";
 const operationalReadSignatures = operationalReadContracts.map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const operationalReadInternalSignatures = [
@@ -330,7 +374,6 @@ const appRuntimeFunctionSignatures = [
   "app_rls.attributed_request()",
   "app_rls.manufacturer_scope_valid(text)",
   "app_rls.actor_scope_valid()",
-  "app_rls.platform_audit_log_details(text[])",
 ];
 const b01FunctionOwnerGrants = [
   ["RefreshToken", "SELECT", ["id","orgId","userId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt","revokedAt","revokedReason","replacedByTokenHash","rotationRequestId","rotationClaimedAt","rotationCompletedAt","sessionCapabilityHash","sessionCapabilityHashVersion","sessionCapabilityAssurance","sessionCapabilityExpiresAt","sessionCapabilityLastUsedAt","sessionCapabilityRevokedAt","sessionCapabilityRevokedReason"]],
@@ -349,7 +392,9 @@ const b01FunctionOwnerGrants = [
 ];
 const b01OwnerGrantSql = b01FunctionOwnerGrants.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const preAuthOwnerGrantSql = preAuthOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
-const authenticationClosureOwnerGrantSql = authenticationClosureOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
+const authenticationClosureOwnerGrantSql = authenticationClosureOwnerPrivileges.map(([table, command, columns]) => command === "DELETE"
+  ? `GRANT DELETE ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
+  : `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const c03OwnerGrantSql = c03OwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const administrationOwnerGrantSql = administrationOwnerPrivileges.map(([table, command, columns]) => command === "DELETE"
   ? `GRANT DELETE ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
@@ -369,6 +414,7 @@ const publicVerificationOwnerGrantSql = publicVerificationOwnerPrivileges.map(([
 ).join("\n");
 const scheduledOwnerGrantSql = scheduledOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const outboxOwnerGrantSql = outboxOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
+const b03AuthenticatedOwnerGrantSql = b03AuthenticatedOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const operationalReadOwnerGrantSql = operationalReadOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const functionOwnerRows = [
   ...b01FunctionOwnerGrants.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: b01Contracts.map((contract) => contract.id) })),
@@ -381,6 +427,7 @@ const functionOwnerRows = [
   ...publicVerificationOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: publicVerificationContracts.map((contract) => contract.id) })),
   ...scheduledOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: scheduledContracts.map((contract) => contract.id) })),
   ...outboxOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: outboxContracts.map((contract) => contract.id) })),
+  ...b03AuthenticatedOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: b03AuthenticatedContracts.map((contract) => contract.id) })),
   ...operationalReadOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: operationalReadContracts.map((contract) => contract.id) })),
 ];
 const b01PolicyOwner = `current_user=${lit(roleNames.authOwner)}`;
@@ -771,6 +818,7 @@ ${printingLifecycleOwnerGrantSql}
 ${publicVerificationOwnerGrantSql}
 ${scheduledOwnerGrantSql}
 ${outboxOwnerGrantSql}
+${b03AuthenticatedOwnerGrantSql}
 ${operationalReadOwnerGrantSql}
 GRANT USAGE ON SCHEMA public TO ${q(roleNames.authOwner)};
 ${resetRole}
@@ -1071,7 +1119,7 @@ END
 $function$;`;
 
 const batchOperationalAssurance = `((${tenantAdminRoles} AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR ((${manufacturerRoles} OR ${platformRoles}) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass')))`;
-const operationalSessionBinding = `(current_user=${lit(roleNames.authOwner)} AND current_setting('app.auth_session_verified',true)='1' AND EXISTS (SELECT 1 FROM public.${q("RefreshToken")} operational_session WHERE operational_session.${q("id")}=current_setting('app.auth_session_id',true) AND operational_session.${q("userId")}=app_rls.current_user_id() AND operational_session.${q("sessionCapabilityHash")}=current_setting('app.auth_session_hash',true) AND operational_session.${q("sessionCapabilityHashVersion")}='sha256-v1' AND operational_session.${q("sessionCapabilityRevokedAt")} IS NULL AND operational_session.${q("sessionCapabilityExpiresAt")}>clock_timestamp() AND operational_session.${q("revokedAt")} IS NULL AND operational_session.${q("expiresAt")}>clock_timestamp()))`;
+const operationalSessionBinding = `(current_user=${lit(roleNames.authOwner)} AND app_rls.operational_read_session_valid())`;
 const batchOperationalBase = `(${operationalSessionBinding} AND app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND ${batchOperationalAssurance})`;
 const batchOperationalLinkedLicensee = (licenseeExpression) => `EXISTS (
   SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} scope_ml
@@ -1414,14 +1462,6 @@ CREATE FUNCTION app_rls.actor_scope_valid() RETURNS boolean LANGUAGE sql STABLE 
     ELSE FALSE
   END
 $$;
-CREATE FUNCTION app_rls.platform_audit_log_details(log_ids text[]) RETURNS TABLE(id text,ip_address text,user_agent text,user_id text,user_name text) LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $$
-  SELECT a.${q("id")},a.${q("ipAddress")},a.${q("userAgent")},a.${q("userId")},u.${q("name")}
-  FROM public.${q("AuditLog")} a LEFT JOIN public.${q("User")} u ON u.${q("id")}=a.${q("userId")}
-  WHERE app_rls.attributed_request() AND app_rls.actor_scope_valid()
-    AND ${platformRoles} AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass')
-    AND app_rls.current_purpose()='platform-audit-log-read' AND cardinality(log_ids) BETWEEN 1 AND 500
-    AND a.${q("licenseeId")}=app_rls.current_licensee_id() AND a.${q("id")}=ANY(log_ids)
-$$;
 ${dashboardSnapshotFunctionsSql}
 ${batchOperationalAuthorizationFunctionsSql}
 ${batchOperationalRowFunctionsSql}
@@ -1467,6 +1507,8 @@ ${resetRole}
 ${setRole(roleNames.authOwner)}
 ${c03FunctionSource}
 ${c03AppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+${c03PreauthSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
+${c03WorkerSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.worker)};`).join("\n")}
 ${resetRole}
 ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
@@ -1529,6 +1571,16 @@ ${resetRole}
 ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
 ${resetRole}` : ""}
+${b03AuthenticatedFunctionSource ? `${setRole(roleNames.owner)}
+GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
+${resetRole}
+${setRole(roleNames.authOwner)}
+${b03AuthenticatedFunctionSource}
+${b03AuthenticatedAppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+${resetRole}
+${setRole(roleNames.owner)}
+REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
+${resetRole}` : ""}
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
   security_definer,leakproof,strict,parallel_mode,configuration,source_body,acl_rows
@@ -1574,7 +1626,7 @@ const dashboardWorkflowIds = new Set([
   "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
 ]);
 const dashboardSourceRuleIds = commandSemantics.rules
-  .filter((rule) => rule.supportingWorkflowIds?.some((workflowId) => dashboardWorkflowIds.has(workflowId)))
+  .filter((rule) => rule.allowedColumns?.length && rule.supportingWorkflowIds?.some((workflowId) => dashboardWorkflowIds.has(workflowId)))
   .map((rule) => rule.id)
   .sort();
 if (dashboardSourceRuleIds.length !== 15) throw new Error(`Expected 15 exact dashboard source rules, found ${dashboardSourceRuleIds.length}`);
@@ -1606,6 +1658,9 @@ const dashboardPolicyBase = `(${operationalSessionBinding} AND app_rls.attribute
   ((${platformRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))
   OR (${tenantAdminRoles} AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))
 ))`;
+const operationalScopeLoading = `${operationalSessionBinding} AND current_setting('app.operational_scope_loading',true)='1'`;
+const operationalLicenseeScope = (column) =>
+  `${column}=ANY(string_to_array(current_setting('app.operational_scope_licensee_ids',true),','))`;
 const internalPolicySlices = [
   { table: "User", name: "full_rls_internal_actor_user", predicate: `(((${q("id")}=app_rls.current_user_id() AND ${q("role")}::text=app_rls.current_role()) OR (((${tenantAdminRoles} OR ${platformRoles}) AND app_rls.current_purpose()='tenant-risk-analytics') AND ${q("role")} IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) OR (${platformRoles} AND app_rls.current_purpose()='platform-audit-log-read' AND ${q("licenseeId")}=app_rls.current_licensee_id())) AND ${q("isActive")}=TRUE AND ${q("status")}='ACTIVE' AND ${q("deletedAt")} IS NULL AND ${q("disabledAt")} IS NULL)` },
   { table: "ManufacturerLicenseeLink", name: "full_rls_internal_manufacturer_link", predicate: `${q("licenseeId")}=app_rls.current_licensee_id() AND ((${manufacturerRoles} AND ${q("manufacturerId")}=app_rls.current_user_id()) OR ((${tenantAdminRoles} OR ${platformRoles}) AND app_rls.current_purpose()='tenant-risk-analytics'))` },
@@ -1614,6 +1669,21 @@ const internalPolicySlices = [
   { table: "AuditLog", name: "full_rls_internal_platform_audit_details", predicate: `${platformRoles} AND app_rls.current_purpose()='platform-audit-log-read' AND ${q("licenseeId")}=app_rls.current_licensee_id()` },
 ].map((policy) => ({ ...policy, sourceCommandRuleIds: internalSourceRuleIds, actors: ["licensee-admin", "manufacturer", "platform-admin"], assurance: "source-rule-specific", purpose: ["tenant-risk-analytics", "audit-log-read", "platform-audit-log-read", "trace-timeline-read"], scopeType: "internal-manufacturer-validation", scopePredicate: policy.predicate, command: "SELECT", columns: [], certificationStatus: "pending", internalHelperOnly: true }))
   .concat([
+    {
+      table: "ManufacturerLicenseeLink", name: "full_rls_internal_operational_scope_link", command: "SELECT",
+      columns: ["manufacturerId", "licenseeId"],
+      predicate: `${operationalScopeLoading} AND ${q("manufacturerId")}=app_rls.current_user_id()`,
+    },
+    {
+      table: "Licensee", name: "full_rls_internal_operational_scope_licensee", command: "SELECT",
+      columns: ["id", "orgId", "isActive", "suspendedAt"],
+      predicate: `${operationalScopeLoading} AND ${q("isActive")}=TRUE AND ${q("suspendedAt")} IS NULL`,
+    },
+    {
+      table: "Organization", name: "full_rls_internal_operational_scope_organization", command: "SELECT",
+      columns: ["id", "isActive"],
+      predicate: `${operationalScopeLoading} AND ${q("isActive")}=TRUE`,
+    },
     {
       table: "User", name: "full_rls_internal_dashboard_manufacturer_user", command: "SELECT",
       columns: ["id", "role", "isActive", "status", "deletedAt", "disabledAt", "licenseeId", "orgId"],
@@ -1662,7 +1732,7 @@ const internalPolicySlices = [
       table: "Batch", name: "full_rls_internal_dashboard_batch", command: "SELECT",
       columns: ["id", "licenseeId", "manufacturerId"],
       predicate: `${dashboardPolicyBase} AND (
-        (${manufacturerRoles} AND ${q("manufacturerId")}=app_rls.current_user_id() AND EXISTS (SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")} JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")} WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=${q("Batch")}.${q("licenseeId")} AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE) AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
+        (${manufacturerRoles} AND ${q("manufacturerId")}=app_rls.current_user_id() AND ${operationalLicenseeScope(q("licenseeId"))})
         OR (${tenantAdminRoles} AND ${q("licenseeId")}=app_rls.current_licensee_id())
         OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
       )`,
@@ -1671,7 +1741,7 @@ const internalPolicySlices = [
       table: "QRCode", name: "full_rls_internal_dashboard_qrcode", command: "SELECT",
       columns: ["batchId", "licenseeId", "status"],
       predicate: `${dashboardPolicyBase} AND (
-        (${manufacturerRoles} AND EXISTS (SELECT 1 FROM public.${q("Batch")} b WHERE b.${q("id")}=${q("QRCode")}.${q("batchId")} AND b.${q("manufacturerId")}=app_rls.current_user_id()) AND EXISTS (SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")} JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")} WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=${q("QRCode")}.${q("licenseeId")} AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE) AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
+        (${manufacturerRoles} AND ${operationalLicenseeScope(q("licenseeId"))})
         OR (${tenantAdminRoles} AND ${q("licenseeId")}=app_rls.current_licensee_id())
         OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
       )`,
@@ -1680,7 +1750,7 @@ const internalPolicySlices = [
       table: "InventoryStatusRollup", name: "full_rls_internal_dashboard_rollup", command: "SELECT",
       columns: ["licenseeId", "manufacturerId", "totalCodes", "dormant", "active", "activated", "allocated", "printed", "redeemed", "blocked", "scanned"],
       predicate: `${dashboardPolicyBase} AND (
-        (${manufacturerRoles} AND ${q("manufacturerId")}=app_rls.current_user_id() AND EXISTS (SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")} JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")} WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=${q("InventoryStatusRollup")}.${q("licenseeId")} AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE) AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
+        (${manufacturerRoles} AND ${q("manufacturerId")}=app_rls.current_user_id() AND ${operationalLicenseeScope(q("licenseeId"))})
         OR (${tenantAdminRoles} AND ${q("licenseeId")}=app_rls.current_licensee_id())
         OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
       )`,
@@ -1692,15 +1762,18 @@ const internalPolicySlices = [
     })),
   ].map((policy) => {
     const predicate = policy.predicate;
+    const operationalScopeLoader = policy.name.startsWith("full_rls_internal_operational_scope_");
     return {
       ...policy,
       predicate,
       projectedColumns: policy.columns,
       columns: [],
-      sourceCommandRuleIds: dashboardRuleIdsFor(policy.table, policy.command),
+      sourceCommandRuleIds: operationalScopeLoader
+        ? [...new Set([...dashboardRuleIdsFor(policy.table, policy.command), ...batchRuleIdsFor(policy.table, policy.command)])].sort()
+        : dashboardRuleIdsFor(policy.table, policy.command),
       actors: ["licensee-admin", "manufacturer", "platform-admin"],
       assurance: "source-rule-specific",
-      purpose: ["dashboard-snapshot-read"],
+      purpose: operationalScopeLoader ? ["batch-operational-read", "dashboard-snapshot-read"] : ["dashboard-snapshot-read"],
       scopeType: "database-revalidated-dashboard-aggregate",
       scopePredicate: predicate,
       certificationStatus: "pending",
@@ -1877,7 +1950,11 @@ for (const [table, command, rawPredicate] of operationalReadOwnerPolicies) {
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "tenant-directory-authenticated-capability", ownerIdentity: "identity-auth-function-owner", scope: "verified session plus live platform, tenant, or manufacturer-link scope" }))};`);
 }
 for (const [table, command, rawPredicate] of c03OwnerPolicies) {
-  const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner));
+  const predicate = rawPredicate
+    .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
+    .replaceAll("{{APP_ROLE}}", lit(roleNames.app))
+    .replaceAll("{{PREAUTH_ROLE}}", lit(roleNames.preauth))
+    .replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker));
   const policyName = shortName("c03_capability", table, command);
   const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
@@ -1936,6 +2013,15 @@ for (const [table, command, rawPredicate] of outboxOwnerPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "b03-durable-outbox", ownerIdentity: "identity-auth-function-owner", scope: "exact worker identity plus immutable row digest" }))};`);
 }
+for (const [table, command, rawPredicate] of b03AuthenticatedOwnerPolicies) {
+  const predicate = rawPredicate
+    .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
+    .replaceAll("{{APP_ROLE}}", lit(roleNames.app));
+  const policyName = shortName("b03_authenticated", table, command);
+  const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "b03-authenticated-notification-email", ownerIdentity: "identity-auth-function-owner", scope: "live capability plus operation-specific notification or incident selector" }))};`);
+}
 const policiesSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
 ${requirePackagePhaseSql("runtime-grants-installed", "policy package")}
@@ -1974,6 +2060,7 @@ const columnAclColumns = [
 ];
 const expectedTableAclSelect = expectedRowsSelect([
   ...grants.filter((grant) => grant.command === "DELETE").map((grant) => ["public", grant.table, roleNames.app, roleNames.owner, "DELETE", false]),
+  ...authenticationClosureOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
   ...administrationOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
   ...qrSystemOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
   ...printingLifecycleOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
@@ -1983,7 +2070,7 @@ const expectedColumnAclSelect = expectedRowsSelect([
   ...grants.flatMap((grant) => grant.command === "DELETE" ? [] : grant.columns.map((column) => ["public", grant.table, column, roleNames.app, roleNames.owner, grant.command, false])),
   ...b01FunctionOwnerGrants.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...preAuthOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
-  ...authenticationClosureOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+  ...authenticationClosureOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...c03OwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...administrationOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...qrSystemOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
@@ -1991,6 +2078,7 @@ const expectedColumnAclSelect = expectedRowsSelect([
   ...publicVerificationOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...scheduledOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...outboxOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+  ...b03AuthenticatedOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...operationalReadOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
 ], columnAclColumns);
 const expectedTypeAclSelect = expectedRowsSelect(appTypeGrantNames.map((type) => ["public", type, roleNames.app, roleNames.owner, "USAGE", false]), aclColumns);
@@ -2025,7 +2113,6 @@ const expectedRoutineIdentities = [
   ["app_rls", "dashboard_snapshot_scope", "audit_id text, requested_licensee_id text, route_surface text"],
   ["app_rls", "install_actor_context", "user_id text, actor_role text, organization_id text, licensee_id text, manufacturer_id text, assurance text, request_id text, purpose_code text"],
   ["app_rls", "manufacturer_scope_valid", "target_manufacturer_id text"],
-  ["app_rls", "platform_audit_log_details", "log_ids text[]"],
   ["app_rls", "setting", "setting_name text"],
   ["app_rls", "uuid_setting", "setting_name text"],
   ["app_auth", "b01_audit", "p_action text, p_token_id text, p_at timestamp without time zone"],
@@ -2039,6 +2126,35 @@ const expectedRoutineIdentities = [
   ["app_rls", "c03_validate_compliance_result", "p_result jsonb"],
   ["app_rls", "c03_queue_audit", "p_action text, p_entity_type text, p_entity_id text, p_details jsonb"],
   ["app_rls", "c03_build_compliance_report", "p_licensee_id text, p_from timestamp with time zone, p_to timestamp with time zone"],
+  ["app_rls", "c03_revalidate_actor_scope", "target_licensee_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text"],
+  ["app_rls", "c03_revalidate_platform_actor_scope", "allowed_roles_json jsonb, minimum_assurance text, purpose_code text"],
+  ["app_rls", "c03_revalidate_incident_actor_scope", "incident_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text"],
+  ["app_rls", "c03_revalidate_policy_rule_actor_scope", "policy_rule_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text"],
+  ["app_rls", "c03_revalidate_compliance_pack_job_actor_scope", "compliance_pack_job_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text"],
+  ["app_rls", "c03_revalidate_incident_evidence_actor_scope", "incident_evidence_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text"],
+  ["app_rls", "c03_revalidate_incident_evidence_storage_actor_scope", "storage_key text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text"],
+  ["app_rls", "c03_revalidate_sensitive_approval_actor_scope", "approval_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text"],
+  ["app_rls", "c03_require_policy_actor", "target_licensee_id text, purpose_code text"],
+  ["app_rls", "c03_require_platform_policy_actor", "purpose_code text"],
+  ["app_rls", "c03_policy_context_valid", ""],
+  ["app_rls", "c03_policy_replay", "command_name text, command_payload jsonb"],
+  ["app_rls", "c03_complete_policy_command", "command_name text, command_result jsonb"],
+  ["app_rls", "c03_require_governance_actor", "allowed_purposes text[]"],
+  ["app_rls", "c03_governance_row_visible", "target_licensee_id text, allowed_purposes text[]"],
+  ["app_rls", "c03_governance_replay", "command_name text, payload jsonb"],
+  ["app_rls", "c03_complete_governance_command", "command_name text, response jsonb"],
+  ["app_rls", "c03_governance_audit", "action_name text, entity_type text, entity_id text, details jsonb"],
+  ["app_rls", "c03_require_governance_approval", "action_key text, expected_payload jsonb"],
+  ["app_rls", "c03_mark_governance_approval_executed", "approval_id text"],
+  ["app_rls", "c03_require_approval_actor", "p_purpose text"],
+  ["app_rls", "c03_review_sensitive_action_approval", "p_approval_id text, p_decision text, p_review_note text"],
+  ["app_rls", "c03_public_incident_qr", "qr_proof text"],
+  ["app_rls", "c03_require_incident_actor", "p_incident_id text, p_purpose text, p_assurance text"],
+  ["app_rls", "c02_audit_trace_actor_valid", "target_licensee_id text"],
+  ["app_rls", "c02_audit_trace_session_valid", ""],
+  ["app_rls", "c03_session_valid", ""],
+  ["app_rls", "b03_authenticated_context_valid", ""],
+  ["app_rls", "risk_analytics_session_valid", ""],
   ["app_rls", "session_c_bind_admin", "p_capability text, p_purpose text, p_request_id text, p_allow_tenant boolean"],
   ["app_rls", "session_c_set_target", "p_licensee_id text, p_organization_id text, p_user_id text, p_email text, p_prefix text"],
   ["app_rls", "session_c_user_projection", "p_target_id text"],
@@ -2051,7 +2167,10 @@ const expectedRoutineIdentities = [
   ["app_rls", "scheduled_job_prepare", "p_capability text, p_schedule_id text, p_operation text, p_request_id text"],
   ["app_rls", "scheduled_job_queue_audit", "p_action text, p_job_id text, p_licensee_id text, p_details jsonb"],
   ["app_rls", "b03_bind_outbox_operation", "p_operation text, p_row_id text, p_payload_digest text"],
+  ["app_rls", "b03_require_authenticated_actor", "p_request_id text"],
+  ["app_rls", "b03_assert_requested_scope", "p_licensee_id text, p_organization_id text"],
   ["app_rls", "operational_read_bind_actor", "p_capability text, p_purpose text, p_request_id text, p_requested_licensee_id text"],
+  ["app_rls", "operational_read_session_valid", ""],
   ["app_auth", "b01_preauth_audit", "p_action text, p_entity_type text, p_entity_id text, p_at timestamp without time zone, p_details jsonb"],
   ["app_rls", "b01_authenticated_actor", "p_expected_user_id text, p_expected_session_id text, p_request_id text"],
   ["app_public", "public_verify_bind", "p_operation text, p_request_id text, p_qr_id text, p_code text, p_decision_id text, p_session_id text, p_idempotency_hash text"],
@@ -2059,7 +2178,7 @@ const expectedRoutineIdentities = [
   ["app_public", "require_customer_auth_session", "p_capability text, p_checked_at timestamp without time zone, p_request_id text, p_operation text"],
   ["app_public", "public_verify_write_evidence", "p_action text, p_entity_type text, p_entity_id text, p_licensee_id text, p_details jsonb, p_recorded_at timestamp without time zone, p_request_id text"],
   ["app_public", "record_qr_verification", "p_qr_id text, p_proof_class text, p_outcome_code text, p_scanned_at timestamp without time zone, p_request_id text, p_actor_ip_hash text, p_actor_device_hash text"],
-  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...authenticationClosureContracts, ...c03Contracts, ...administrationContracts, ...qrSystemContracts, ...printingLifecycleContracts, ...publicVerificationContracts, ...scheduledContracts, ...outboxContracts, ...operationalReadContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
+  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...authenticationClosureContracts, ...c03Contracts, ...administrationContracts, ...qrSystemContracts, ...printingLifecycleContracts, ...publicVerificationContracts, ...scheduledContracts, ...outboxContracts, ...b03AuthenticatedContracts, ...operationalReadContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
 ];
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
@@ -2166,7 +2285,7 @@ const policyInventory = [
     scopeType: "security-definer-owner-and-capability-bound-user-derived-transaction-context", scopePredicate: authenticatedSessionUserPolicy,
     columns: [], sourceCommandRuleIds: [b01SourceRuleIds.get("User:SELECT")], workflowId: null, route: "authenticated session capability", certificationStatus: "pending", internalHelperOnly: true,
   }] : []),
-  ...c03OwnerPolicies.map(([table, command, predicate]) => ({
+  ...c03OwnerPolicies.map(([table, command, rawPredicate]) => ({
     tableId: tables.find((entry) => entry.physicalTable === table)?.id,
     table,
     policyName: shortName("c03_capability", table, command),
@@ -2175,12 +2294,13 @@ const policyInventory = [
     assurance: "source-rule-specific",
     purpose: ["c03-reviewed-boundary"],
     scopeType: "security-definer-owner-capability-and-resource-derived-context",
-    scopePredicate: predicate,
+    scopePredicate: rawPredicate
+      .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
+      .replaceAll("{{APP_ROLE}}", lit(roleNames.app))
+      .replaceAll("{{PREAUTH_ROLE}}", lit(roleNames.preauth))
+      .replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker)),
     columns: [],
-    sourceCommandRuleIds: [commandSemantics.rules.find((rule) =>
-      rule.tableId === tables.find((entry) => entry.physicalTable === table)?.id &&
-      rule.command === command && rule.authorizationBoundary !== "prohibited"
-    )?.id].filter(Boolean),
+    sourceCommandRuleIds: c03PolicyEvidenceFor(table, command),
     workflowId: null,
     route: "C03 exact SQL boundary",
     certificationStatus: "pending",
@@ -2299,6 +2419,23 @@ const policyInventory = [
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),
+  ...b03AuthenticatedOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("b03_authenticated", table, command),
+    command,
+    actors: ["authenticated-application"],
+    assurance: "source-rule-specific",
+    purpose: ["notification-and-incident-email"],
+    scopeType: "security-definer-owner-capability-and-operation-selector",
+    scopePredicate: rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app)),
+    columns: [],
+    sourceCommandRuleIds: contractEvidenceFor(b03AuthenticatedContracts, table, command),
+    workflowId: null,
+    route: "B03 authenticated notification and incident email boundary",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
 ].sort((left, right) => `${left.table}:${left.policyName}`.localeCompare(`${right.table}:${right.policyName}`));
 const expectedPolicyValues = policyInventory.map((policy) => `(${lit(policy.table)},${lit(policy.policyName)},${lit(policy.command)})`).join(",");
 const expectedSchemaAclRows = [
@@ -2412,7 +2549,23 @@ ${requirePackagePhaseSql("policies-installed", "verification")}
     (SELECT schema_name,routine_name,identity_arguments FROM mscqr_rls_install.expected_routine EXCEPT ${expectedRoutineIdentitySelect})
     UNION ALL
     (${expectedRoutineIdentitySelect} EXCEPT SELECT schema_name,routine_name,identity_arguments FROM mscqr_rls_install.expected_routine)
-  ) THEN RAISE EXCEPTION 'routine identity inventory differs from the generated contract'; END IF;
+  ) THEN
+    RAISE EXCEPTION 'routine identity inventory differs from the generated contract'
+      USING DETAIL = concat(
+        'unexpected=',
+        COALESCE((SELECT jsonb_agg(row_to_json(r)) FROM (
+          SELECT schema_name,routine_name,identity_arguments
+            FROM mscqr_rls_install.expected_routine
+          EXCEPT ${expectedRoutineIdentitySelect}
+        ) r), '[]'::jsonb),
+        '; missing=',
+        COALESCE((SELECT jsonb_agg(row_to_json(r)) FROM (
+          ${expectedRoutineIdentitySelect}
+          EXCEPT SELECT schema_name,routine_name,identity_arguments
+            FROM mscqr_rls_install.expected_routine
+        ) r), '[]'::jsonb)
+      );
+  END IF;
   IF EXISTS (
     (SELECT * FROM (${currentSchemaAclSelect}) current_acl EXCEPT ${expectedSchemaAclSelect})
     UNION ALL
@@ -2427,7 +2580,19 @@ ${requirePackagePhaseSql("policies-installed", "verification")}
     (SELECT * FROM (${currentColumnAclSelect}) current_acl EXCEPT ${expectedColumnAclSelect})
     UNION ALL
     (${expectedColumnAclSelect} EXCEPT SELECT * FROM (${currentColumnAclSelect}) current_acl)
-  ) THEN RAISE EXCEPTION 'column privilege inventory differs from the generated contract'; END IF;
+  ) THEN
+    RAISE EXCEPTION 'column privilege inventory differs from the generated contract'
+      USING DETAIL = concat(
+        'unexpected=',
+        COALESCE((SELECT jsonb_agg(row_to_json(r)) FROM (
+          SELECT * FROM (${currentColumnAclSelect}) current_acl EXCEPT ${expectedColumnAclSelect}
+        ) r), '[]'::jsonb),
+        '; missing=',
+        COALESCE((SELECT jsonb_agg(row_to_json(r)) FROM (
+          ${expectedColumnAclSelect} EXCEPT SELECT * FROM (${currentColumnAclSelect}) current_acl
+        ) r), '[]'::jsonb)
+      );
+  END IF;
   IF EXISTS (
     (SELECT * FROM (${currentTypeAclSelect}) current_acl EXCEPT ${expectedTypeAclSelect})
     UNION ALL

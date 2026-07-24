@@ -1,0 +1,14 @@
+DROP FUNCTION IF EXISTS app_rls.c03_link_ir_alert_incident(text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.c03_list_ir_alerts(text,text,text,jsonb,integer,integer);
+DROP FUNCTION IF EXISTS app_rls.c03_build_incident_evidence_audit_snapshot(text);
+DROP FUNCTION IF EXISTS app_rls.c03_add_incident_evidence(text,jsonb,text);
+DROP FUNCTION IF EXISTS app_rls.c03_record_incident_event(text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_patch_incident(text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_list_incidents(jsonb,integer,integer);
+DROP FUNCTION IF EXISTS app_rls.c03_get_incident_detail(text);
+DROP FUNCTION IF EXISTS app_rls.c03_require_incident_actor(text,text,text);
+DROP FUNCTION IF EXISTS app_rls.c03_create_public_incident_report(text,jsonb,jsonb,text);
+DROP FUNCTION IF EXISTS app_rls.c03_compute_incident_severity(text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_compute_incident_spam_signal(text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_public_incident_qr(text);
+DROP FUNCTION IF EXISTS app_rls.c03_assert_restricted_identity(text);

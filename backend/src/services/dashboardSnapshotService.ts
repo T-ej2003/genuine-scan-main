@@ -219,10 +219,20 @@ export const computeDashboardSnapshot = async (
 export const getDashboardSnapshot = async (req: AuthRequest) => {
   const boundary = buildDashboardSnapshotBoundary(req);
   try {
-    const snapshot = await prisma.$transaction(
-      (tx) => computeDashboardSnapshot(tx as CanonicalTransactionClient, boundary),
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
-    );
+    let snapshot: DashboardSnapshot | null = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        snapshot = await prisma.$transaction(
+          (tx) => computeDashboardSnapshot(tx as CanonicalTransactionClient, boundary),
+          { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+        );
+        break;
+      } catch (error) {
+        const code = String((error as { meta?: { code?: unknown }; code?: unknown })?.meta?.code ||
+          (error as { code?: unknown })?.code || "");
+        if (code !== "40001" || attempt === 1) throw error;
+      }
+    }
     if (!snapshot) throw new Error("Dashboard snapshot function returned no result");
     return snapshot;
   } catch (error) {

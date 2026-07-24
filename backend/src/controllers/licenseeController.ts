@@ -18,7 +18,7 @@ import {
   deleteLicensee as deleteLicenseeBoundary,
   updateLicensee as updateLicenseeBoundary,
 } from "../rls-waves/session-c/c01/administrationRepository";
-import { isTenantDirectoryDenied, readLicenseeDirectory } from "../rls-waves/session-a/tenantDirectoryRepository";
+import { isTenantDirectoryDenied, readLicenseeDetail, readLicenseeDirectory } from "../rls-waves/session-a/tenantDirectoryRepository";
 
 const prefixSchema = z
   .string()
@@ -327,7 +327,6 @@ export const getLicensees = async (req: AuthRequest, res: Response) => {
     const data = await readLicenseeDirectory({
       capability: String(req.databaseSessionCapability || ""),
       requestId: administrationRequestId(req),
-      detail: false,
     });
     return res.json({ success: true, data });
   } catch (e) {
@@ -345,11 +344,10 @@ export const getLicensee = async (req: AuthRequest, res: Response) => {
     }
     const { id } = paramsParsed.data;
 
-    const licensee = await readLicenseeDirectory({
+    const licensee = await readLicenseeDetail({
       capability: String(req.databaseSessionCapability || ""),
       requestId: administrationRequestId(req),
       requestedLicenseeId: id,
-      detail: true,
     });
 
     if (!licensee) return res.status(404).json({ success: false, error: "Licensee not found" });

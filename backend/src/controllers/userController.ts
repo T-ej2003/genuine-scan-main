@@ -277,50 +277,23 @@ export const getManufacturers = async (req: AuthRequest, res: Response) => {
     const licenseeId = (req.query.licenseeId as string | undefined) || undefined;
     const { limit, offset } = parsePagination(req.query as Record<string, unknown>);
 
-    const where = await buildScopedUserWhere(req.user!, {
+    const { users: manufacturers, total } = await readUserDirectory({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: administrationRequestId(req),
       requestedLicenseeId: licenseeId,
-      manufacturerOnly: true,
       includeInactive,
+      roleFilter: UserRole.MANUFACTURER_ADMIN,
+      limit,
+      offset,
     });
-    const resolvedScope = await resolveRequestedLicenseeScope(req.user!, licenseeId);
-    const effectiveLicenseeId = resolvedScope.scopeLicenseeId || licenseeId || null;
-
-    const [manufacturers, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          licenseeId: true,
-          isActive: true,
-          deletedAt: true,
-          createdAt: true,
-          location: true,
-          website: true,
-          licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
-          manufacturerLicenseeLinks: {
-            include: {
-              licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
-            },
-            orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-          },
-        },
-        orderBy: { name: "asc" },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.user.count({ where }),
-    ]);
 
     return res.json({
       success: true,
-      data: manufacturers.map((row) => serializeScopedUser(row, effectiveLicenseeId)),
+      data: manufacturers,
       meta: { total, limit, offset },
     });
   } catch (e) {
-    if (isScopeError(e)) {
+    if (isTenantDirectoryDenied(e) || isScopeError(e)) {
       return res.status(404).json({ success: false, error: "Manufacturers not found" });
     }
     console.error("getManufacturers error:", e);

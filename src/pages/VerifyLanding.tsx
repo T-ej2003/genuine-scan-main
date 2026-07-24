@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 import { Camera, Keyboard, Loader2, QrCode, ScanLine, ShieldCheck, Shirt } from "lucide-react";
 
 import { Button } from "@/components/ui/button";

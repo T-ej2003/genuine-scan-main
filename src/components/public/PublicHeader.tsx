@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { LockKeyhole, Menu } from "lucide-react";
 
 import { BrandLockup } from "@/components/brand/BrandLockup";

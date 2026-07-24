@@ -19,6 +19,7 @@ import {
 } from "./shared";
 import { PRINT_JOB_MAX_RUN_LABELS, validatePrintJobRunQuantity } from "../../services/printJobRunLimitService";
 import { rejectPrintJobRunQuantity } from "./runLimitResponse";
+import { b03BoundaryForRequest } from "../../rls-waves/session-b/b03/requestBoundary";
 
 const getRequestId = getPrintJobCreateRequestId;
 const getRequestShape = getPrintJobCreateRequestShape;
@@ -180,6 +181,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
     try {
       failureStage = "notification_dispatch";
       await createUserNotification({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         userId: user.userId,
         licenseeId: batch.licenseeId,
         type: "manufacturer_print_job_created",
@@ -203,6 +205,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
         },
       });
       await notifySystemPrintEvent({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         licenseeId: batch.licenseeId,
         orgId: user.orgId || null,
         type: "system_print_job_created",

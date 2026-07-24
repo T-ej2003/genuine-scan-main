@@ -1,0 +1,14 @@
+DROP FUNCTION IF EXISTS app_rls.c03_update_retention_policy(jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_generate_compliance_report(timestamptz,timestamptz);
+DROP FUNCTION IF EXISTS app_rls.c03_run_retention_lifecycle(text,text);
+DROP FUNCTION IF EXISTS app_rls.c03_get_or_create_retention_policy();
+DROP FUNCTION IF EXISTS app_rls.c03_upsert_tenant_feature_flag(text,boolean,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_validate_compliance_result(jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_compliance_job_projection(text);
+DROP FUNCTION IF EXISTS app_rls.c03_mark_governance_approval_executed(text);
+DROP FUNCTION IF EXISTS app_rls.c03_require_governance_approval(text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_governance_audit(text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_complete_governance_command(text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_governance_replay(text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_governance_row_visible(text,text[]);
+DROP FUNCTION IF EXISTS app_rls.c03_require_governance_actor(text[]);

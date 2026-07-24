@@ -17,6 +17,7 @@ const events = [];
 const calls = { contexts: [], scopes: [], data: [], cacheKeys: [], transactionOptions: [] };
 let denyScope = false;
 let denyCapability = false;
+let serializationFailures = 0;
 let fingerprint = "a".repeat(32);
 let dataRow = {
   total_qr_codes: 10n,
@@ -59,6 +60,10 @@ const runner = {
   $transaction: async (callback, options) => {
     calls.transactionOptions.push(options);
     events.push("transaction-begin");
+    if (serializationFailures > 0) {
+      serializationFailures -= 1;
+      throw Object.assign(new Error("serialization failure"), { meta: { code: "40001" } });
+    }
     const value = await callback(tx);
     events.push("transaction-end");
     return value;
@@ -215,6 +220,12 @@ const denied = (req) => assert.throws(
   assert.strictEqual(await canDeliverDashboardAuditDelta(request(undefined, { requestId: "dashboard-delta-2" }), ids.foreign), false);
   assert.strictEqual(calls.data.length, dataCallsBeforeDelta, "SSE delta authorization does not reload aggregate data");
 
+  fingerprint = "d".repeat(32);
+  serializationFailures = 1;
+  const retried = await getDashboardSnapshot(request(undefined, { requestId: "dashboard-request-retry" }));
+  assert.equal(retried.totalQRCodes, 10);
+  assert.equal(serializationFailures, 0, "one serialization conflict is retried exactly once");
+
   const platformRequest = request(actor({
     role: UserRole.PLATFORM_SUPER_ADMIN,
     licenseeId: null,
@@ -224,9 +235,10 @@ const denied = (req) => assert.throws(
   }), { requestId: "dashboard-delta-platform" });
   assert.strictEqual(await canDeliverDashboardAuditDelta(platformRequest, null), true, "global platform SSE preserves null-scope events");
 
+  const dataCallsBeforeDeniedScope = calls.data.length;
   denyScope = true;
   await assert.rejects(getDashboardSnapshot(request(undefined, { requestId: "dashboard-request-3" })), DashboardSnapshotAccessError);
-  assert.strictEqual(calls.data.length, 1, "revoked scope cannot consume a cached snapshot");
+  assert.strictEqual(calls.data.length, dataCallsBeforeDeniedScope, "revoked scope cannot consume a cached snapshot");
   denyScope = false;
 
   denyCapability = true;

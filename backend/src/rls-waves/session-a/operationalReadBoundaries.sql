@@ -4,6 +4,29 @@
 -- These wrappers are owned by identity-auth-function-owner and re-derive all
 -- actor context from the durable authenticated-session capability.
 
+CREATE OR REPLACE FUNCTION app_rls.operational_read_session_valid()
+RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+BEGIN
+  IF session_user <> {{APP_ROLE}}
+     OR current_setting('app.auth_session_verified',true) <> '1'
+  THEN RETURN false; END IF;
+  RETURN EXISTS (
+    SELECT 1 FROM public."RefreshToken" s
+     WHERE s.id=current_setting('app.auth_session_id',true)
+       AND s."userId"=current_setting('app.user_id',true)
+       AND s."sessionCapabilityHash"=current_setting('app.auth_session_hash',true)
+       AND s."sessionCapabilityHashVersion"='sha256-v1'
+       AND s."sessionCapabilityRevokedAt" IS NULL
+       AND s."sessionCapabilityExpiresAt">clock_timestamp()
+       AND s."revokedAt" IS NULL
+       AND s."expiresAt">clock_timestamp()
+  );
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.operational_read_session_valid() FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION app_rls.operational_read_bind_actor(
   p_capability text,
   p_purpose text,
@@ -11,7 +34,11 @@ CREATE OR REPLACE FUNCTION app_rls.operational_read_bind_actor(
   p_requested_licensee_id text
 ) RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY INVOKER AS $fn$
-DECLARE actor record; selected_licensee text := NULLIF(btrim(p_requested_licensee_id),'');
+DECLARE
+  actor record;
+  selected_licensee text := NULLIF(btrim(p_requested_licensee_id),'');
+  scope_licensee_ids text := '';
+  scope_organization_ids text := '';
 BEGIN
   IF p_purpose NOT IN ('dashboard-snapshot-read','batch-operational-read') THEN
     RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501';
@@ -31,15 +58,35 @@ BEGIN
           set_config('app.manufacturer_id','',true),
           set_config('app.auth_assurance',CASE actor.assurance WHEN 'ADMIN_MFA' THEN 'mfa-verified' WHEN 'PASSWORD' THEN 'password-verified' ELSE '' END,true),
           set_config('app.request_id',p_request_id,true),
-          set_config('app.purpose',p_purpose,true);
+          set_config('app.purpose',p_purpose,true),
+          set_config('app.operational_scope_loading','1',true),
+          set_config('app.operational_scope_licensee_ids','',true),
+          set_config('app.operational_scope_organization_ids','',true);
   IF current_setting('app.auth_assurance',true)='' THEN
     RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501';
   END IF;
   IF actor.role IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN
+    SELECT string_agg(l.id::text,',' ORDER BY l.id),string_agg(DISTINCT o.id::text,',' ORDER BY o.id::text)
+      INTO scope_licensee_ids,scope_organization_ids
+      FROM public."ManufacturerLicenseeLink" ml
+      JOIN public."Licensee" l ON l.id=ml."licenseeId"
+      JOIN public."Organization" o ON o.id=l."orgId"
+     WHERE ml."manufacturerId"=actor."userId"
+       AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive"
+       AND (selected_licensee IS NULL OR l.id=selected_licensee);
+    IF scope_licensee_ids IS NULL THEN
+      RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501';
+    END IF;
     PERFORM set_config('app.manufacturer_id',actor."userId",true),
             set_config('app.organization_id','',true),
             set_config('app.licensee_id',coalesce(selected_licensee,''),true);
   ELSIF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
+    IF selected_licensee IS NOT NULL THEN
+      SELECT l.id::text,o.id::text INTO scope_licensee_ids,scope_organization_ids
+        FROM public."Licensee" l JOIN public."Organization" o ON o.id=l."orgId"
+       WHERE l.id=selected_licensee AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive";
+      IF NOT FOUND THEN RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501'; END IF;
+    END IF;
     PERFORM set_config('app.manufacturer_id','',true),
             set_config('app.organization_id','',true),
             set_config('app.licensee_id',coalesce(selected_licensee,''),true);
@@ -47,10 +94,18 @@ BEGIN
     IF selected_licensee IS NOT NULL AND selected_licensee IS DISTINCT FROM actor."licenseeId" THEN
       RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501';
     END IF;
+    SELECT l.id::text,o.id::text INTO scope_licensee_ids,scope_organization_ids
+      FROM public."Licensee" l JOIN public."Organization" o ON o.id=l."orgId"
+     WHERE l.id=actor."licenseeId" AND l."orgId"=actor."organizationId"
+       AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive";
+    IF NOT FOUND THEN RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501'; END IF;
     PERFORM set_config('app.manufacturer_id','',true);
   ELSE
     RAISE EXCEPTION 'operational read access denied' USING ERRCODE='42501';
   END IF;
+  PERFORM set_config('app.operational_scope_licensee_ids',coalesce(scope_licensee_ids,''),true),
+          set_config('app.operational_scope_organization_ids',coalesce(scope_organization_ids,''),true),
+          set_config('app.operational_scope_loading','',true);
 END
 $fn$;
 

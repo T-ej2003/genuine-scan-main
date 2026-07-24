@@ -427,24 +427,15 @@ const buildBootstrapSessionForUser = async (input: {
   requestId?: string | null;
   requestedLicenseeId?: string | null;
   requestedScopeVersion?: string | null;
-  preparedState?: ActiveSessionState;
+  preparedState: ActiveSessionState;
   challengeIssuer?: (params: Parameters<typeof createAdminMfaChallenge>[0]) => Promise<{
     ticket: string;
     expiresAt: Date;
   }>;
 }, db: AuthDbClient) => {
-  const linkedScope = input.preparedState?.linkedScope || (isManufacturerRole(input.user.role)
-    ? await mapLinkedLicenseesForSession(input.user, {
-        requestedLicenseeId: input.requestedLicenseeId,
-        requestedScopeVersion: input.requestedScopeVersion,
-        requestId: input.requestId,
-        purpose: "manufacturer-bootstrap",
-      }, "password-verified", db)
-    : { selectedLicensee: null, linkedLicensees: [], linkedLicenseeIds: [] as string[] });
-  const mfaStatus = input.preparedState?.mfaStatus || await getAdminMfaStatus(input.user.id, db);
-  const primaryLicensee = input.preparedState?.primaryLicensee || (isManufacturerRole(input.user.role)
-    ? linkedScope.selectedLicensee
-    : input.user.licensee || null);
+  const linkedScope = input.preparedState.linkedScope;
+  const mfaStatus = input.preparedState.mfaStatus;
+  const primaryLicensee = input.preparedState.primaryLicensee;
   const sessionLicenseeId = primaryLicensee?.id || (isManufacturerRole(input.user.role) ? null : input.user.licenseeId);
   const sessionOrgId = primaryLicensee?.orgId || (isManufacturerRole(input.user.role) ? null : input.user.orgId);
   const scopeVersion = isManufacturerRole(input.user.role)

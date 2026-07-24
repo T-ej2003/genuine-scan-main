@@ -1,12 +1,13 @@
 import { Prisma, UserRole } from "@prisma/client";
 
 import prisma from "../config/database";
+import { loadAuthenticatedManufacturerScope } from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
 
 type DbClient = typeof prisma | Prisma.TransactionClient;
 export type ManufacturerScopeReadClient = {
   manufacturerLicenseeLink: Pick<Prisma.TransactionClient["manufacturerLicenseeLink"], "findMany">;
-  auditLogOutbox?: Pick<Prisma.TransactionClient["auditLogOutbox"], "create">;
 };
+type ManufacturerScopeBoundaryClient = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 const MAX_ELIGIBLE_MANUFACTURER_LINKS = 100;
 
@@ -69,130 +70,33 @@ export const resolveManufacturerSessionScope = async (
       assurance: "password-verified" | "mfa-verified";
     };
   },
-  db: ManufacturerScopeReadClient
+  db: ManufacturerScopeBoundaryClient
 ) => {
-  const rows = await db.manufacturerLicenseeLink.findMany({
-    where: {
-      manufacturerId: input.manufacturerId,
-      licensee: {
-        is: {
-          isActive: true,
-          suspendedAt: null,
-          organization: { is: { isActive: true } },
-        },
-      },
-    },
-    select: {
-      licenseeId: true,
-      isPrimary: true,
-      createdAt: true,
-      updatedAt: true,
-      licensee: {
-        select: {
-          id: true,
-          name: true,
-          prefix: true,
-          brandName: true,
-          orgId: true,
-        },
-      },
-    },
-    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }, { licenseeId: "asc" }],
-    take: MAX_ELIGIBLE_MANUFACTURER_LINKS + 1,
-  });
-
-  if (rows.length > MAX_ELIGIBLE_MANUFACTURER_LINKS) {
+  const scope = await loadAuthenticatedManufacturerScope({
+    requestedLicenseeId: input.requestedLicenseeId,
+    requestedOrgId: input.requestedOrgId,
+    requestedScopeVersion: input.requestedScopeVersion,
+    purpose: input.audit?.purpose || "manufacturer-bootstrap",
+    writeAudit: Boolean(input.audit),
+  }, db);
+  if (scope.manufacturerId !== input.manufacturerId) {
+    throw new Error("MANUFACTURER_SCOPE_DENIED");
+  }
+  if (scope.linkedLicensees.length > MAX_ELIGIBLE_MANUFACTURER_LINKS) {
     throw new Error("MANUFACTURER_MEMBERSHIP_SET_TOO_LARGE");
   }
-  if (rows.length === 0) {
-    throw new Error("MANUFACTURER_MEMBERSHIP_REQUIRED");
-  }
-
   const legacyLicenseeId = String(input.legacyLicenseeId || "").trim();
   const legacyOrgId = String(input.legacyOrgId || "").trim();
-  if (legacyLicenseeId && !rows.some((row) => row.licenseeId === legacyLicenseeId)) {
+  if (
+    (legacyLicenseeId && !scope.linkedLicensees.some((row) => row.id === legacyLicenseeId))
+    || (legacyOrgId && !scope.linkedLicensees.some((row) => row.orgId === legacyOrgId))
+  ) {
     throw new Error("MANUFACTURER_MEMBERSHIP_INCONSISTENT");
   }
-  if (legacyOrgId && !rows.some((row) => row.licensee.orgId === legacyOrgId)) {
-    throw new Error("MANUFACTURER_MEMBERSHIP_INCONSISTENT");
-  }
-
-  const primaryRows = rows.filter((row) => row.isPrimary);
-  if (primaryRows.length > 1) {
-    throw new Error("MANUFACTURER_MEMBERSHIP_AMBIGUOUS");
-  }
-
-  const requestedLicenseeId = String(input.requestedLicenseeId || "").trim();
-  const requestedOrgId = String(input.requestedOrgId || "").trim();
-  const requestedScopeVersion = String(input.requestedScopeVersion || "").trim();
-  const selected = requestedLicenseeId
-    ? rows.find((row) => row.licenseeId === requestedLicenseeId) || null
-    : requestedOrgId
-      ? rows.find((row) => row.licensee.orgId === requestedOrgId) || null
-    : rows.length === 1
-      ? rows[0]
-      : primaryRows[0] || null;
-
-  if (requestedLicenseeId && !selected) {
-    throw new Error("MANUFACTURER_SCOPE_DENIED");
-  }
-  if (requestedOrgId && (!selected || selected.licensee.orgId !== requestedOrgId)) {
-    throw new Error("MANUFACTURER_SCOPE_DENIED");
-  }
-  if (requestedLicenseeId && !requestedScopeVersion) {
-    throw new Error("MANUFACTURER_SCOPE_VERSION_REQUIRED");
-  }
-  if (requestedScopeVersion && (!selected || selected.updatedAt.toISOString() !== requestedScopeVersion)) {
-    throw new Error("MANUFACTURER_SCOPE_STALE");
-  }
-
-  const linkedLicensees = rows.map((row) => ({
-    id: row.licensee.id,
-    name: row.licensee.name,
-    prefix: row.licensee.prefix,
-    brandName: row.licensee.brandName ?? null,
-    orgId: row.licensee.orgId,
-    isPrimary: row.isPrimary,
-    scopeVersion: row.updatedAt.toISOString(),
-  }));
-
-  const selectedLicensee = selected
-    ? linkedLicensees.find((row) => row.id === selected.licenseeId) || null
-    : null;
-  if (input.audit) {
-    const requestId = String(input.audit.requestId || "").trim();
-    if (!requestId) throw new Error("REQUEST_ATTRIBUTION_REQUIRED");
-    if (!db.auditLogOutbox?.create) throw new Error("MANUFACTURER_SCOPE_AUDIT_BOUNDARY_REQUIRED");
-    await db.auditLogOutbox.create({
-      data: {
-        payload: {
-          userId: input.manufacturerId,
-          orgId: selectedLicensee?.orgId || undefined,
-          licenseeId: selectedLicensee?.id || undefined,
-          action: input.audit.purpose === "manufacturer-scope-switch"
-            ? "MANUFACTURER_SCOPE_SWITCH"
-            : "MANUFACTURER_BOOTSTRAP_READ",
-          entityType: "ManufacturerLicenseeLink",
-          entityId: selectedLicensee ? `${input.manufacturerId}:${selectedLicensee.id}` : input.manufacturerId,
-          details: {
-            requestId,
-            manufacturerUserId: input.manufacturerId,
-            selectedLicenseeId: selectedLicensee?.id || null,
-            selectedOrganizationId: selectedLicensee?.orgId || null,
-            scopeVersion: selectedLicensee?.scopeVersion || null,
-            assurance: input.audit.assurance,
-            purpose: input.audit.purpose,
-            outcome: selectedLicensee ? "SELECTED" : "SCOPE_SELECTION_REQUIRED",
-          },
-        },
-      },
-    });
-  }
-
   return {
-    selectedLicensee,
-    linkedLicensees,
-    linkedLicenseeIds: linkedLicensees.map((row) => row.id),
+    selectedLicensee: scope.selectedLicensee,
+    linkedLicensees: scope.linkedLicensees,
+    linkedLicenseeIds: scope.linkedLicensees.map((row) => row.id),
   };
 };
 
@@ -264,7 +168,7 @@ export const resolveAccessibleLicenseeIdsForUser = async (
     licenseeId?: string | null;
     linkedLicenseeIds?: string[] | null;
   },
-  db: ManufacturerScopeReadClient = prisma
+  _db: ManufacturerScopeReadClient = prisma
 ) => {
   if (isPlatformRole(user.role)) return [] as string[];
   if (isLicenseeAdminRole(user.role)) {
@@ -274,11 +178,7 @@ export const resolveAccessibleLicenseeIdsForUser = async (
     return unique([user.licenseeId || null]);
   }
 
-  const resolved = await resolveManufacturerSessionScope(
-    { manufacturerId: user.userId },
-    db
-  );
-  return resolved.linkedLicenseeIds;
+  return unique(user.linkedLicenseeIds || []);
 };
 
 export const assertUserCanAccessLicensee = async (

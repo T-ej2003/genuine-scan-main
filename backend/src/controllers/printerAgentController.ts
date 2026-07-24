@@ -28,6 +28,7 @@ import {
   getPrinterAgentIssuedAtSkewSeconds,
   verifyPrinterAgentPayloadSignature,
 } from "../services/printerAgentSigningService";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER_ADMIN,
 ];
@@ -318,6 +319,7 @@ const quarantinedLegacyPrinterHeartbeat = async (req: AuthRequest, res: Response
           userAgent: req.get("user-agent") || undefined,
         }),
         createRoleNotifications({
+          databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
           audience: NotificationAudience.SUPER_ADMIN,
           type: "system_printer_status_changed",
           title,

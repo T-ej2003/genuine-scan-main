@@ -70,14 +70,15 @@ export const withCanonicalAuthClaims = <T>(
 export const withDatabaseAuthenticatedSession = <T>(
   claims: AuthenticatedSessionClaims,
   input: { capability: string; requestId: string; purpose: string },
-  callback: (tx: Prisma.TransactionClient, context: CanonicalDbContext) => Promise<T>
-) => {
+  callback: (tx: Prisma.TransactionClient, context: CanonicalDbContext) => Promise<T>,
+  runner: Pick<ReturnType<typeof getB01AuthenticatedPrisma>, "$transaction"> = getB01AuthenticatedPrisma()
+): Promise<T> => {
   const expectedUserId = required(claims.userId, "an actor user ID");
   const capability = required(input.capability, "a database session capability");
   if (!/^[A-Za-z0-9_-]{43}$/.test(capability)) throw new CanonicalAuthDenial();
   const requestId = required(input.requestId, "a request ID");
   const purpose = required(input.purpose, "a purpose");
-  return getB01AuthenticatedPrisma().$transaction(async (tx) => {
+  return runner.$transaction(async (tx) => {
     const verified = await requireAuthenticatedSessionCapability(tx, { capability, purpose, requestId });
     if (verified.userId !== expectedUserId || verified.sessionId !== required(claims.sessionId, "an authenticated session ID")) {
       throw new CanonicalAuthDenial();

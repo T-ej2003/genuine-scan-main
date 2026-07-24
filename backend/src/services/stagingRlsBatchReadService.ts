@@ -15,8 +15,14 @@ import {
 } from "../observability/stagingRlsBatchReadProof";
 import { AuthenticatedSessionClaims } from "../types";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
+import { requireAuthenticatedSessionCapability } from "./auth/authenticatedSessionCapabilityService";
 
 const BATCH_OPERATIONAL_READ_PURPOSE = "batch-operational-read";
+export const BATCH_OPERATIONAL_READ_TRANSACTION_OPTIONS = {
+  isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+  maxWait: 5_000,
+  timeout: 15_000,
+} as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 
@@ -37,6 +43,38 @@ export class BatchOperationalReadAccessError extends Error {
     super("Access denied to batch operational read");
   }
 }
+
+export const assertBatchOperationalCapabilityActor = async (
+  db: CanonicalTransactionClient,
+  boundary: BatchOperationalRepositoryBoundary,
+  user: AuthenticatedSessionClaims
+) => {
+  const actor = await requireAuthenticatedSessionCapability(db, {
+    capability: boundary.databaseSessionCapability,
+    purpose: boundary.purpose,
+    requestId: boundary.requestId,
+  });
+  if (actor.userId !== user.userId || actor.role !== user.role) {
+    throw new BatchOperationalReadAccessError();
+  }
+};
+
+export const runBatchOperationalReadTransaction = async <T>(
+  callback: (db: CanonicalTransactionClient) => Promise<T>
+) => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await prisma.$transaction(
+        (tx) => callback(tx as CanonicalTransactionClient),
+        BATCH_OPERATIONAL_READ_TRANSACTION_OPTIONS
+      );
+    } catch (error) {
+      const code = String((error as { meta?: { code?: unknown }; code?: unknown })?.meta?.code ||
+        (error as { code?: unknown })?.code || "");
+      if (code !== "40001" || attempt === 1) throw error;
+    }
+  }
+};
 
 const optionalUuid = (value: unknown) => {
   if (value == null || value === "") return null;
@@ -170,14 +208,16 @@ export const listScopedBatchReadPayload = async (params: LoadBatchListPayloadPar
       ...params,
       routeSurface: "GET /api/qr/batches",
     });
-    const payload = await prisma.$transaction(
-      (tx) => listBatchOperationalSummaries({
-        boundary: boundary.repository,
-        limit: params.limit,
-        offset: params.offset,
-        db: tx as CanonicalTransactionClient,
-      }),
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+    const payload = await runBatchOperationalReadTransaction(
+      async (db) => {
+        await assertBatchOperationalCapabilityActor(db, boundary.repository, params.user);
+        return listBatchOperationalSummaries({
+          boundary: boundary.repository,
+          limit: params.limit,
+          offset: params.offset,
+          db,
+        });
+      }
     );
     recordStagingRlsBatchReadProof({
       flagEnabled: true,

@@ -1,5 +1,5 @@
 import React from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router";
 import { ArrowRight, LifeBuoy, ScanLine, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";

@@ -15,19 +15,19 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9",
+  "sourceContractSha256": "cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
-      "sha256": "8c7d85c7db116d38eaa4bb8061db9e598792ccd6656f0292f915d875ccf31bd8"
+      "sha256": "b6da206b299670d121f5140cc37ece8a066ca06145b3354bbab2ac186267823a"
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "19cf6e902ecee59853dd9702d702db77a09d0ca8f7dd62c04b1872867070c287"
+      "sha256": "666b1e9fe403a4b36392f25fe347e075d08b8d2e3f27dae1af0878b8997951af"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "8b3a34a4de02045a9a02659de50c1ae9e7212d0e62719c76777872bcf96f991b"
+      "sha256": "5cf89a501ea7a9276db000afb57e94bf8e8012954bdf20f35e1d453c0cf54e46"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -43,11 +43,11 @@
     },
     {
       "path": "documents/security/rls-program/context-boundary-families.json",
-      "sha256": "d27405c229b884641f903b804ed5f74fdffd7808b4f24ba278db2cc3ec2fd280"
+      "sha256": "f7ded964856c3eab5830d9fc25c2e51640d00d3b54df6c8b44952ad2df7bce2e"
     },
     {
       "path": "documents/security/rls-program/workflow-three-session-partition.json",
-      "sha256": "f1f01d22e7b02cde698db67b9ea388d5c336d6eb2413a1580d1d240c107b4cb8"
+      "sha256": "2315f36dea5175f5866e90d3f831c2ff474ca4568335da7966baa87eea633693"
     },
     {
       "path": "backend/prisma/schema.prisma",
@@ -59,15 +59,15 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "94a9db37b0ccfda0ea13720b9211a07fd434bb94904f1c04c0fbadb87aa34512"
+      "sha256": "dd182059803c0b449d67a7a221901f0f2ff5a73151529fc120437d70a660ca49"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
-      "sha256": "6c512239c42f82bbf3dc92a82dd9b2520807f7e06ca75b9e85f0b7e6fd43056b"
+      "sha256": "cef9650382c4b83fe8bae77d9ba460becaf71a0c529ca9ed832c318490cad1ad"
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
-      "sha256": "24b924a77b36a7b693cec30ab72005dd0ee22c5a1abaa7cc22f72daba65836aa"
+      "sha256": "e0c61799ef230750bf2fbd4b7b680213bec75eb2096cf2d8a65d5bed083cf672"
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
@@ -75,7 +75,7 @@
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
-      "sha256": "d3930dab211ebb6229a2c0b870b18a6b7d3b0a987989fc516fd5779c026e164c"
+      "sha256": "1b1ca2b456740464ddba4a724ecfdc983939a5f66391fc6c89fad98dc7d32fc4"
     },
     {
       "path": "scripts/rls/lib/table-inventory-baseline.mjs",
@@ -87,7 +87,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "ca9abb80942328988fec830b5b36a28fe91c86d63bc50da0de88112f218d47f8"
+      "sha256": "10ec82bd8665345dc49638b6557329c9bc01edce4c87d21d6a81ea4301cb4d00"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -99,7 +99,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
-      "sha256": "2f5434c3ad57d4633c0ec422a959f84e371dc433a9dd1bf428ca024e486f529a"
+      "sha256": "405197cdfa4d55040152950e74b8a4c5f83875f1a8314e04bfcec6ce2fc9d455"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
@@ -107,19 +107,19 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b02/publicVerificationFunctions.sql",
-      "sha256": "86a35345993a97486c3f4cbc3ef0914c25023cdb6125b5a23adf35800bab2e90"
+      "sha256": "f483b2c6b6fc4c9ac96479a4604b3be0ebb29432377a3c3d6c976e685c0da68b"
     },
     {
       "path": "backend/src/rls-waves/session-b/b02/publicVerificationRollback.sql",
-      "sha256": "e8cf317aa5fe3c7e4a446e7425bfd726c237fade6296feea991fa80c4911ec2c"
+      "sha256": "f06f802fb7031e07eefec864bf775a4995c8e63f13ed608c4446b8b421ba815a"
     },
     {
       "path": "backend/src/rls-waves/session-a/operationalReadBoundaries.sql",
-      "sha256": "5850898937c82e971f7c1882bb003a57bb38672bae02839544218b769eaa94f1"
+      "sha256": "fd8069fd9b12736dbd18f32e27a10faf5cd6e86a424c545fafb24c7ad18f30bf"
     },
     {
       "path": "backend/src/rls-waves/session-a/operationalReadBoundariesRollback.sql",
-      "sha256": "908f5d19079f8308ad5f062752a6561085fb8a0faf44e89b07d7a0f74e6b5722"
+      "sha256": "9a2a2dda7c04274cd499eb554599f65d46126068fb80b605b80d46abda730ddb"
     },
     {
       "path": "backend/src/rls-waves/session-c/c01/administration.sql",
@@ -139,7 +139,7 @@
     },
     {
       "path": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
-      "sha256": "6dedb97efcf719d70e06f92a2594c16711739faf742f861906998525b5e9c54c"
+      "sha256": "104e03f160c37e3e9e126a5754b6c634d16f3d75587da2870e31e22bda8dee98"
     },
     {
       "path": "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js",
@@ -147,7 +147,7 @@
     },
     {
       "path": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
-      "sha256": "9c1267085db771b3c04c61abef19d3c6cefabbfcf2f3e4baae25b4563b636890"
+      "sha256": "b1ca20876e6579b75a1a428813adad95b7e0933794945d97cb809c2b1181d660"
     }
   ],
   "greenDatabasePattern": "^mscqr_full_rls_cert_[a-z0-9_]+$",
@@ -156,12 +156,12 @@
     "forceRlsTargets": 77,
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
-    "directPolicySlices": 31,
-    "generatedPolicies": 285,
-    "columnPrivilegeCells": 74,
+    "directPolicySlices": 13,
+    "generatedPolicies": 339,
+    "columnPrivilegeCells": 60,
     "prismaMigrations": 53,
     "prismaEnums": 58,
-    "registeredWorkflowCallPaths": 401,
+    "registeredWorkflowCallPaths": 338,
     "applicationPathCertifiedWorkflows": 10
   },
   "roles": {
@@ -175,7 +175,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
@@ -574,31 +574,11 @@
       "owner": "identity-table-owner",
       "policyFamily": "exact-command-rule-slices",
       "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_11be7964ec",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_aca9313fd4",
         "slice_sql_profile_audit_log_licensee_admin_command_a_f969c4430c",
         "slice_sql_profile_audit_log_manufacturer_command_aud_03817808f8",
         "slice_sql_profile_audit_log_platform_admin_command_a_40b2c83843"
       ],
       "columnGrants": [
-        {
-          "tableId": "table-audit-log",
-          "table": "AuditLog",
-          "command": "INSERT",
-          "columns": [
-            "action",
-            "details",
-            "entityId",
-            "entityType",
-            "id",
-            "licenseeId",
-            "orgId",
-            "userId"
-          ],
-          "sourceCommandRuleIds": [
-            "command-audit-log-insert-509547f03abe"
-          ]
-        },
         {
           "tableId": "table-audit-log",
           "table": "AuditLog",
@@ -676,28 +656,10 @@
       "category": "tenant-owned",
       "rls": "ENABLE AND FORCE",
       "owner": "identity-table-owner",
-      "policyFamily": "exact-command-rule-slices",
-      "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_b4e915ff0f",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_6d5d858e17"
-      ],
-      "columnGrants": [
-        {
-          "tableId": "table-batch",
-          "table": "Batch",
-          "command": "SELECT",
-          "columns": [
-            "id",
-            "licenseeId",
-            "manufacturerId",
-            "name"
-          ],
-          "sourceCommandRuleIds": [
-            "command-batch-select-509547f03abe"
-          ]
-        }
-      ],
-      "disposition": "exact-policy-certification-candidate",
+      "policyFamily": "deny-by-default-no-policy",
+      "policySlices": [],
+      "columnGrants": [],
+      "disposition": "fail-closed-no-runtime-grant",
       "postgresqlCertification": "pending"
     },
     {
@@ -862,26 +824,10 @@
       "category": "security-sensitive",
       "rls": "ENABLE AND FORCE",
       "owner": "identity-table-owner",
-      "policyFamily": "exact-command-rule-slices",
-      "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_093616b17c",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_bcbab9053c"
-      ],
-      "columnGrants": [
-        {
-          "tableId": "table-incident",
-          "table": "Incident",
-          "command": "SELECT",
-          "columns": [
-            "id",
-            "licenseeId"
-          ],
-          "sourceCommandRuleIds": [
-            "command-incident-select-509547f03abe"
-          ]
-        }
-      ],
-      "disposition": "exact-policy-certification-candidate",
+      "policyFamily": "deny-by-default-no-policy",
+      "policySlices": [],
+      "columnGrants": [],
+      "disposition": "fail-closed-no-runtime-grant",
       "postgresqlCertification": "pending"
     },
     {
@@ -976,8 +922,8 @@
       "owner": "identity-table-owner",
       "policyFamily": "exact-command-rule-slices",
       "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_eed775fa6e",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_7ad878c9ad"
+        "slice_sql_profile_audit_log_licensee_admin_command_l_f1e5f598a8",
+        "slice_sql_profile_audit_log_manufacturer_command_lic_076e4b1820"
       ],
       "columnGrants": [
         {
@@ -985,13 +931,25 @@
           "table": "Licensee",
           "command": "SELECT",
           "columns": [
+            "brandName",
+            "createdAt",
+            "description",
             "id",
             "isActive",
+            "location",
+            "metadata",
+            "name",
             "orgId",
-            "suspendedAt"
+            "prefix",
+            "supportEmail",
+            "supportPhone",
+            "suspendedAt",
+            "suspendedReason",
+            "updatedAt",
+            "website"
           ],
           "sourceCommandRuleIds": [
-            "command-licensee-select-509547f03abe"
+            "command-licensee-select-97535583a8fe"
           ]
         }
       ],
@@ -1004,26 +962,10 @@
       "category": "tenant-owned",
       "rls": "ENABLE AND FORCE",
       "owner": "identity-table-owner",
-      "policyFamily": "exact-command-rule-slices",
-      "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_3f52eb0af8",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_1f6eadc203"
-      ],
-      "columnGrants": [
-        {
-          "tableId": "table-manufacturer-licensee-link",
-          "table": "ManufacturerLicenseeLink",
-          "command": "SELECT",
-          "columns": [
-            "licenseeId",
-            "manufacturerId"
-          ],
-          "sourceCommandRuleIds": [
-            "command-manufacturer-licensee-link-select-509547f03abe"
-          ]
-        }
-      ],
-      "disposition": "exact-policy-certification-candidate",
+      "policyFamily": "deny-by-default-no-policy",
+      "policySlices": [],
+      "columnGrants": [],
+      "disposition": "fail-closed-no-runtime-grant",
       "postgresqlCertification": "pending"
     },
     {
@@ -1058,8 +1000,8 @@
       "owner": "identity-table-owner",
       "policyFamily": "exact-command-rule-slices",
       "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_50ade50c35",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_14bd53c281"
+        "slice_sql_profile_audit_log_licensee_admin_command_o_bd2468c1e2",
+        "slice_sql_profile_audit_log_manufacturer_command_org_95e059c91d"
       ],
       "columnGrants": [
         {
@@ -1067,11 +1009,14 @@
           "table": "Organization",
           "command": "SELECT",
           "columns": [
+            "createdAt",
             "id",
-            "isActive"
+            "isActive",
+            "name",
+            "updatedAt"
           ],
           "sourceCommandRuleIds": [
-            "command-organization-select-509547f03abe"
+            "command-organization-select-97535583a8fe"
           ]
         }
       ],
@@ -1120,32 +1065,10 @@
       "category": "tenant-owned",
       "rls": "ENABLE AND FORCE",
       "owner": "identity-table-owner",
-      "policyFamily": "exact-command-rule-slices",
-      "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_2ee80c2486",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_fba91e4a1f"
-      ],
-      "columnGrants": [
-        {
-          "tableId": "table-policy-alert",
-          "table": "PolicyAlert",
-          "command": "SELECT",
-          "columns": [
-            "acknowledgedAt",
-            "batchId",
-            "id",
-            "incidentId",
-            "licenseeId",
-            "manufacturerId",
-            "policyRuleId",
-            "qrCodeId"
-          ],
-          "sourceCommandRuleIds": [
-            "command-policy-alert-select-509547f03abe"
-          ]
-        }
-      ],
-      "disposition": "exact-policy-certification-candidate",
+      "policyFamily": "deny-by-default-no-policy",
+      "policySlices": [],
+      "columnGrants": [],
+      "disposition": "fail-closed-no-runtime-grant",
       "postgresqlCertification": "pending"
     },
     {
@@ -1154,29 +1077,10 @@
       "category": "security-sensitive",
       "rls": "ENABLE AND FORCE",
       "owner": "identity-table-owner",
-      "policyFamily": "exact-command-rule-slices",
-      "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_108f8d53fb",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_5f3080c5d9"
-      ],
-      "columnGrants": [
-        {
-          "tableId": "table-policy-rule",
-          "table": "PolicyRule",
-          "command": "SELECT",
-          "columns": [
-            "id",
-            "isActive",
-            "licenseeId",
-            "manufacturerId",
-            "orgId"
-          ],
-          "sourceCommandRuleIds": [
-            "command-policy-rule-select-509547f03abe"
-          ]
-        }
-      ],
-      "disposition": "exact-policy-certification-candidate",
+      "policyFamily": "deny-by-default-no-policy",
+      "policySlices": [],
+      "columnGrants": [],
+      "disposition": "fail-closed-no-runtime-grant",
       "postgresqlCertification": "pending"
     },
     {
@@ -1365,13 +1269,10 @@
       "category": "tenant-owned",
       "rls": "ENABLE AND FORCE",
       "owner": "identity-table-owner",
-      "policyFamily": "exact-command-rule-slices",
-      "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_09d9526992",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_64d1e45a47"
-      ],
+      "policyFamily": "deny-by-default-no-policy",
+      "policySlices": [],
       "columnGrants": [],
-      "disposition": "exact-policy-certification-candidate",
+      "disposition": "fail-closed-no-runtime-grant",
       "postgresqlCertification": "pending"
     },
     {
@@ -1392,31 +1293,10 @@
       "category": "append-only-audit",
       "rls": "ENABLE AND FORCE",
       "owner": "identity-table-owner",
-      "policyFamily": "exact-command-rule-slices",
-      "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_8b30366222",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_d34faaf133"
-      ],
-      "columnGrants": [
-        {
-          "tableId": "table-qr-scan-log",
-          "table": "QrScanLog",
-          "command": "SELECT",
-          "columns": [
-            "batchId",
-            "id",
-            "latitude",
-            "licenseeId",
-            "longitude",
-            "qrCodeId",
-            "scannedAt"
-          ],
-          "sourceCommandRuleIds": [
-            "command-qr-scan-log-select-509547f03abe"
-          ]
-        }
-      ],
-      "disposition": "exact-policy-certification-candidate",
+      "policyFamily": "deny-by-default-no-policy",
+      "policySlices": [],
+      "columnGrants": [],
+      "disposition": "fail-closed-no-runtime-grant",
       "postgresqlCertification": "pending"
     },
     {
@@ -1425,10 +1305,42 @@
       "category": "security-sensitive",
       "rls": "ENABLE AND FORCE",
       "owner": "identity-table-owner",
-      "policyFamily": "deny-by-default-no-policy",
-      "policySlices": [],
-      "columnGrants": [],
-      "disposition": "fail-closed-no-runtime-grant",
+      "policyFamily": "exact-command-rule-slices",
+      "policySlices": [
+        "slice_sql_profile_audit_log_licensee_admin_command_r_2152b85d1e",
+        "slice_sql_profile_audit_log_manufacturer_command_ref_08895ca8c6"
+      ],
+      "columnGrants": [
+        {
+          "tableId": "table-refresh-token",
+          "table": "RefreshToken",
+          "command": "SELECT",
+          "columns": [
+            "authenticatedAt",
+            "createdAt",
+            "expiresAt",
+            "id",
+            "lastUsedAt",
+            "mfaVerifiedAt",
+            "orgId",
+            "revokedAt",
+            "revokedReason",
+            "rotationClaimedAt",
+            "rotationCompletedAt",
+            "rotationRequestId",
+            "sessionCapabilityAssurance",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt",
+            "sessionCapabilityRevokedReason",
+            "userId"
+          ],
+          "sourceCommandRuleIds": [
+            "command-refresh-token-select-97535583a8fe"
+          ]
+        }
+      ],
+      "disposition": "exact-policy-certification-candidate",
       "postgresqlCertification": "pending"
     },
     {
@@ -1509,28 +1421,10 @@
       "category": "security-sensitive",
       "rls": "ENABLE AND FORCE",
       "owner": "identity-table-owner",
-      "policyFamily": "exact-command-rule-slices",
-      "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_570331bb3d",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_43f91fdf25"
-      ],
-      "columnGrants": [
-        {
-          "tableId": "table-security-policy",
-          "table": "SecurityPolicy",
-          "command": "SELECT",
-          "columns": [
-            "geoDriftThresholdKm",
-            "licenseeId",
-            "multiScanThreshold",
-            "velocitySpikeThresholdPerMin"
-          ],
-          "sourceCommandRuleIds": [
-            "command-security-policy-select-509547f03abe"
-          ]
-        }
-      ],
-      "disposition": "exact-policy-certification-candidate",
+      "policyFamily": "deny-by-default-no-policy",
+      "policySlices": [],
+      "columnGrants": [],
+      "disposition": "fail-closed-no-runtime-grant",
       "postgresqlCertification": "pending"
     },
     {
@@ -1649,8 +1543,6 @@
       "owner": "identity-table-owner",
       "policyFamily": "exact-command-rule-slices",
       "policySlices": [
-        "slice_sql_profile_risk_analytics_licensee_admin_comm_7e804befff",
-        "slice_sql_profile_risk_analytics_platform_admin_comm_6ac57da44c",
         "slice_sql_profile_audit_log_licensee_admin_command_u_6293132c5a",
         "slice_sql_profile_audit_log_manufacturer_command_use_47bccd37ae"
       ],
@@ -1660,18 +1552,10 @@
           "table": "User",
           "command": "SELECT",
           "columns": [
-            "deletedAt",
-            "disabledAt",
             "id",
-            "isActive",
-            "licenseeId",
-            "name",
-            "orgId",
-            "role",
-            "status"
+            "name"
           ],
           "sourceCommandRuleIds": [
-            "command-user-select-509547f03abe",
             "command-user-select-97535583a8fe"
           ]
         }

@@ -1,10 +1,13 @@
-import { Prisma, SecurityPolicy, UserRole, UserStatus } from "@prisma/client";
-import { randomUUID } from "node:crypto";
+import { SecurityPolicy, UserRole } from "@prisma/client";
 import prisma from "../config/database";
-import { CanonicalDbContext, CanonicalTransactionClient } from "../lib/canonicalDbContext";
+import { CanonicalDbContext } from "../lib/canonicalDbContext";
 import { AuthenticatedSessionClaims } from "../types";
+import {
+  isRiskAnalyticsBoundaryDenied,
+  readRiskAnalyticsSnapshot,
+} from "../rls-waves/session-c/c02/riskAnalyticsRepository";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
-import { MANUFACTURER_ROLES, isLicenseeAdminRole, isPlatformRole } from "./manufacturerScopeService";
+import { isLicenseeAdminRole, isPlatformRole } from "./manufacturerScopeService";
 import { getOrCreateSecurityPolicy } from "./policyEngineService";
 import { getBatchScanHistoryFallback } from "./scanLogReportingService";
 
@@ -296,8 +299,6 @@ export class RiskAnalyticsAccessError extends Error {
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const riskAnalyticsPurpose = "tenant-risk-analytics";
-const riskAnalyticsWorkflowId = "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics";
-const riskAnalyticsRoute = "GET /api/analytics/risk-scores";
 export const RISK_ANALYTICS_MAX_CANDIDATE_BATCHES = 5_000;
 export const RISK_ANALYTICS_MAX_DIMENSION_ROWS = 50_000;
 export const RISK_ANALYTICS_MAX_OPEN_ALERT_ROWS = 50_000;
@@ -363,58 +364,36 @@ export const buildRiskAnalyticsBoundary = (
   };
 };
 
-const loadRiskPolicy = async (tx: CanonicalTransactionClient, licenseeId: string) => {
-  const [policy] = await tx.$queryRaw<
-    Array<Pick<SecurityPolicy, "multiScanThreshold" | "geoDriftThresholdKm" | "velocitySpikeThresholdPerMin">>
-  >`
-    SELECT "multiScanThreshold", "geoDriftThresholdKm", "velocitySpikeThresholdPerMin"
-    FROM public."SecurityPolicy"
-    WHERE "licenseeId" = ${licenseeId}
-    LIMIT 1
-  `;
-  return policy || defaultPolicy;
-};
-
-const recordRiskAnalyticsRead = (
-  tx: CanonicalTransactionClient,
-  context: CanonicalDbContext,
-  query: RiskAnalyticsQuery,
-  result: { analyzedBatches: number; returnedBatches: number; analyzedManufacturers: number },
-  timestamp: Date
-) => {
-  const details = {
-    actorId: context.userId,
-    role: context.role,
-    assurance: context.authAssurance,
-    requestId: context.requestId,
-    purposeCode: context.purpose,
-    organizationId: context.organizationId,
-    licenseeId: context.licenseeId,
-    workflowId: riskAnalyticsWorkflowId,
-    route: riskAnalyticsRoute,
-    outcome: "SUCCESS",
-    lookbackHours: query.lookbackHours,
-    limit: query.limit,
-    analyzedBatchCount: result.analyzedBatches,
-    returnedBatchCount: result.returnedBatches,
-    analyzedManufacturerCount: result.analyzedManufacturers,
-    timestamp: timestamp.toISOString(),
-  };
-  return tx.$executeRaw`
-    INSERT INTO public."AuditLog"
-      ("id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details")
-    VALUES
-      (${randomUUID()}, ${context.userId}, ${context.organizationId}, ${context.licenseeId},
-       'RISK_ANALYTICS_READ', 'Licensee', ${context.licenseeId}, ${JSON.stringify(details)}::jsonb)
-  `;
+type RiskAnalyticsSnapshot = {
+  organizationId: string;
+  policy: Pick<SecurityPolicy, "multiScanThreshold" | "geoDriftThresholdKm" | "velocitySpikeThresholdPerMin">;
+  batches: Array<{ id: string; name: string; licenseeId: string; manufacturerId: string | null }>;
+  scanLogs: Array<{
+    id: string; licenseeId: string; qrCodeId: string; batchId: string | null;
+    latitude: number | null; longitude: number | null; scannedAt: string;
+    qrCode: { id: string; licenseeId: string; batchId: string | null } | null;
+    batch: { id: string; licenseeId: string } | null;
+  }>;
+  alerts: Array<{
+    id: string; licenseeId: string; batchId: string | null; qrCodeId: string | null;
+    manufacturerId: string | null; incidentId: string | null; policyRuleId: string | null;
+    acknowledgedAt: string | null;
+  }>;
+  qrs: Array<{ id: string; licenseeId: string; batchId: string | null; scanCount: number }>;
+  manufacturers: Array<{ id: string; name: string }>;
+  manufacturerLinks: Array<{ manufacturerId: string; licenseeId: string }>;
+  incidents: Array<{ id: string; licenseeId: string }>;
+  policyRules: Array<{ id: string; licenseeId: string | null; orgId: string | null; manufacturerId: string | null; isActive: boolean }>;
 };
 
 export const getRiskAnalytics = async (
-  tx: CanonicalTransactionClient,
   query: RiskAnalyticsQuery,
   context: CanonicalDbContext,
-  now = new Date()
+  capability: string,
+  now = new Date(),
+  readSnapshot = readRiskAnalyticsSnapshot<RiskAnalyticsSnapshot>
 ): Promise<RiskAnalytics> => {
+  if (!capability) throw new RiskAnalyticsAccessError("Authenticated database capability is required", 401);
   const tenantActor = isLicenseeAdminRole(context.role as UserRole);
   const platformActor = isPlatformRole(context.role as UserRole);
   if (!uuid.test(query.licenseeId) || context.purpose !== riskAnalyticsPurpose) {
@@ -430,74 +409,31 @@ export const getRiskAnalytics = async (
     throw new RiskAnalyticsAccessError("Risk analytics assurance is insufficient");
   }
 
-  const actor = await tx.user.findUnique({
-    where: { id: context.userId },
-    select: {
-      id: true,
-      role: true,
-      licenseeId: true,
-      orgId: true,
-      isActive: true,
-      status: true,
-      deletedAt: true,
-      disabledAt: true,
-    },
-  });
-  if (
-    !actor ||
-    actor.role !== context.role ||
-    !actor.isActive ||
-    actor.status !== UserStatus.ACTIVE ||
-    actor.deletedAt !== null ||
-    actor.disabledAt !== null ||
-    tenantActor && (actor.licenseeId !== query.licenseeId || actor.orgId !== context.organizationId) ||
-    platformActor && (actor.licenseeId !== null || actor.orgId !== null)
-  ) {
-    throw new RiskAnalyticsAccessError("Risk analytics actor or tenant authority is stale or inconsistent");
-  }
-
-  const tenant = await tx.licensee.findUnique({
-    where: { id: query.licenseeId },
-    select: { id: true, orgId: true, isActive: true, suspendedAt: true },
-  });
-  if (!tenant?.isActive || tenant.id !== query.licenseeId || tenant.suspendedAt || tenantActor && tenant.orgId !== context.organizationId) {
-    throw new RiskAnalyticsAccessError("Tenant scope is inactive or inconsistent");
-  }
-  const organization = await tx.organization.findUnique({
-    where: { id: tenant.orgId },
-    select: { id: true, isActive: true },
-  });
-  if (!organization?.isActive || organization.id !== tenant.orgId) {
-    throw new RiskAnalyticsAccessError("Tenant scope is inactive or inconsistent");
-  }
-
-  const scopedContext = platformActor ? { ...context, organizationId: tenant.orgId } : context;
-
   const limit = query.limit;
   const lookbackHours = query.lookbackHours;
-  const policy = await loadRiskPolicy(tx, scopedContext.licenseeId!);
-  const since = new Date(now.getTime() - lookbackHours * 3_600_000);
-
-  const scanLogs = await tx.qrScanLog.findMany({
-    where: {
-      licenseeId: scopedContext.licenseeId!,
-      batchId: { not: null },
-      scannedAt: { gte: since, lte: now },
-    },
-    orderBy: [{ batchId: "asc" }, { qrCodeId: "asc" }, { scannedAt: "asc" }, { id: "asc" }],
-    take: RISK_ANALYTICS_MAX_DIMENSION_ROWS + 1,
-    select: {
-      id: true,
-      licenseeId: true,
-      qrCodeId: true,
-      batchId: true,
-      latitude: true,
-      longitude: true,
-      scannedAt: true,
-      qrCode: { select: { id: true, licenseeId: true, batchId: true } },
-      batch: { select: { id: true, licenseeId: true } },
-    },
-  });
+  let snapshot: RiskAnalyticsSnapshot;
+  try {
+    snapshot = await readSnapshot({
+      capability,
+      requestId: context.requestId,
+      licenseeId: query.licenseeId,
+      expectedUserId: context.userId,
+      lookbackHours,
+      limit,
+      checkedAt: now,
+    });
+  } catch (error) {
+    if (isRiskAnalyticsBoundaryDenied(error)) {
+      throw new RiskAnalyticsAccessError("Risk analytics capability or actor scope was denied");
+    }
+    throw error;
+  }
+  if (tenantActor && snapshot.organizationId !== context.organizationId) {
+    throw new RiskAnalyticsAccessError("Tenant scope is inactive or inconsistent");
+  }
+  const scopedContext = { ...context, organizationId: snapshot.organizationId };
+  const policy = snapshot.policy;
+  const scanLogs = snapshot.scanLogs;
   const scopedScanLogs = scanLogs.filter((row): row is typeof row & { batchId: string } => row.batchId !== null);
   const qrParents = new Map<string, string>();
   for (const row of scopedScanLogs) {
@@ -521,25 +457,7 @@ export const getRiskAnalytics = async (
     throw new RiskAnalyticsAccessError("Risk analytics scan dimension exceeds its bounded limit", 422);
   }
 
-  const openAlertRows = await tx.policyAlert.findMany({
-    where: {
-      licenseeId: scopedContext.licenseeId!,
-      batchId: { not: null },
-      acknowledgedAt: null,
-    },
-    orderBy: [{ batchId: "asc" }, { id: "asc" }],
-    take: RISK_ANALYTICS_MAX_OPEN_ALERT_ROWS + 1,
-    select: {
-      id: true,
-      licenseeId: true,
-      batchId: true,
-      qrCodeId: true,
-      manufacturerId: true,
-      incidentId: true,
-      policyRuleId: true,
-      acknowledgedAt: true,
-    },
-  });
+  const openAlertRows = snapshot.alerts;
   const scopedOpenAlertRows = openAlertRows.filter((row): row is typeof row & { batchId: string } => row.batchId !== null);
   if (scopedOpenAlertRows.some((row) => row.licenseeId !== scopedContext.licenseeId)) {
     throw new RiskAnalyticsAccessError("Risk analytics alert parentage is missing, foreign, or inconsistent", 422);
@@ -555,17 +473,7 @@ export const getRiskAnalytics = async (
   if (referencedBatchIds.length > RISK_ANALYTICS_MAX_CANDIDATE_BATCHES) {
     throw new RiskAnalyticsAccessError("Risk analytics candidate batch set exceeds its bounded limit", 422);
   }
-  const batches = await tx.batch.findMany({
-    where: { licenseeId: scopedContext.licenseeId! },
-    orderBy: { id: "asc" },
-    take: RISK_ANALYTICS_MAX_CANDIDATE_BATCHES + 1,
-    select: {
-      id: true,
-      name: true,
-      licenseeId: true,
-      manufacturerId: true,
-    },
-  });
+  const batches = snapshot.batches;
   const loadedBatchIds = new Set(batches.map((batch) => batch.id));
   if (batches.length > RISK_ANALYTICS_MAX_CANDIDATE_BATCHES) {
     throw new RiskAnalyticsAccessError("Risk analytics candidate batch set exceeds its bounded limit", 422);
@@ -582,43 +490,11 @@ export const getRiskAnalytics = async (
   const alertManufacturerIds = [...new Set(scopedOpenAlertRows.map((row) => row.manufacturerId).filter((id): id is string => Boolean(id)))].sort();
   const alertIncidentIds = [...new Set(scopedOpenAlertRows.map((row) => row.incidentId).filter((id): id is string => Boolean(id)))].sort();
   const alertPolicyRuleIds = [...new Set(scopedOpenAlertRows.map((row) => row.policyRuleId).filter((id): id is string => Boolean(id)))].sort();
-  const alertQrs = alertQrIds.length ? await tx.qRCode.findMany({
-    where: { id: { in: alertQrIds } },
-    orderBy: { id: "asc" },
-    take: alertQrIds.length + 1,
-    select: { id: true, licenseeId: true, batchId: true },
-  }) : [];
-  const alertManufacturers = alertManufacturerIds.length ? await tx.user.findMany({
-    where: {
-      id: { in: alertManufacturerIds },
-      role: { in: MANUFACTURER_ROLES },
-      isActive: true,
-      status: UserStatus.ACTIVE,
-      deletedAt: null,
-      disabledAt: null,
-    },
-    orderBy: { id: "asc" },
-    take: alertManufacturerIds.length + 1,
-    select: { id: true },
-  }) : [];
-  const alertManufacturerLinks = alertManufacturerIds.length ? await tx.manufacturerLicenseeLink.findMany({
-    where: { manufacturerId: { in: alertManufacturerIds }, licenseeId: scopedContext.licenseeId! },
-    orderBy: [{ manufacturerId: "asc" }, { licenseeId: "asc" }],
-    take: alertManufacturerIds.length + 1,
-    select: { manufacturerId: true, licenseeId: true },
-  }) : [];
-  const alertIncidents = alertIncidentIds.length ? await tx.incident.findMany({
-    where: { id: { in: alertIncidentIds } },
-    orderBy: { id: "asc" },
-    take: alertIncidentIds.length + 1,
-    select: { id: true, licenseeId: true },
-  }) : [];
-  const alertPolicyRules = alertPolicyRuleIds.length ? await tx.policyRule.findMany({
-    where: { id: { in: alertPolicyRuleIds } },
-    orderBy: { id: "asc" },
-    take: alertPolicyRuleIds.length + 1,
-    select: { id: true, licenseeId: true, orgId: true, manufacturerId: true, isActive: true },
-  }) : [];
+  const alertQrs = snapshot.qrs.filter((row) => alertQrIds.includes(row.id));
+  const alertManufacturers = snapshot.manufacturers.filter((row) => alertManufacturerIds.includes(row.id));
+  const alertManufacturerLinks = snapshot.manufacturerLinks.filter((row) => alertManufacturerIds.includes(row.manufacturerId));
+  const alertIncidents = snapshot.incidents.filter((row) => alertIncidentIds.includes(row.id));
+  const alertPolicyRules = snapshot.policyRules.filter((row) => alertPolicyRuleIds.includes(row.id));
   const alertQrMap = new Map(alertQrs.map((row) => [row.id, row]));
   const alertManufacturerSet = new Set(alertManufacturers.map((row) => row.id));
   const alertManufacturerLinkSet = new Set(alertManufacturerLinks.map((row) => row.manufacturerId));
@@ -672,22 +548,11 @@ export const getRiskAnalytics = async (
       batchRisk: [],
       manufacturerRisk: [],
     };
-    await recordRiskAnalyticsRead(tx, scopedContext, query, {
-      analyzedBatches: 0,
-      returnedBatches: 0,
-      analyzedManufacturers: 0,
-    }, now);
     return result;
   }
 
   const batchIds = batches.map((b) => b.id);
-
-  const qrRows = await tx.qRCode.findMany({
-    where: { licenseeId: scopedContext.licenseeId!, batchId: { in: batchIds } },
-    orderBy: [{ batchId: "asc" }, { id: "asc" }],
-    take: RISK_ANALYTICS_MAX_DIMENSION_ROWS + 1,
-    select: { batchId: true, scanCount: true },
-  });
+  const qrRows = snapshot.qrs.filter((row) => row.batchId !== null && batchIds.includes(row.batchId));
   if (qrRows.length > RISK_ANALYTICS_MAX_DIMENSION_ROWS) {
     throw new RiskAnalyticsAccessError("Risk analytics QR dimension exceeds its bounded limit", 422);
   }
@@ -762,16 +627,7 @@ export const getRiskAnalytics = async (
   }
 
   const manufacturerIds = [...new Set(batches.map((batch) => batch.manufacturerId).filter((id): id is string => Boolean(id)))];
-  const manufacturers = manufacturerIds.length
-    ? await tx.user.findMany({
-        where: {
-          id: { in: manufacturerIds },
-          assignedBatches: { some: { id: { in: batchIds }, licenseeId: scopedContext.licenseeId! } },
-        },
-        orderBy: { id: "asc" },
-        select: { id: true, name: true },
-      })
-    : [];
+  const manufacturers = snapshot.manufacturers.filter((row) => manufacturerIds.includes(row.id));
   const manufacturerNames = new Map(manufacturers.map((manufacturer) => [manufacturer.id, manufacturer.name]));
 
   const batchRiskAll: BatchRiskRow[] = batches.map((batch) => {
@@ -872,10 +728,5 @@ export const getRiskAnalytics = async (
     batchRisk: sortedBatchRisk.slice(0, limit),
     manufacturerRisk: sortedManufacturerRisk.slice(0, limit),
   };
-  await recordRiskAnalyticsRead(tx, scopedContext, query, {
-    analyzedBatches: result.summary.analyzedBatches,
-    returnedBatches: result.batchRisk.length,
-    analyzedManufacturers: result.summary.analyzedManufacturers,
-  }, now);
   return result;
 };

@@ -1,7 +1,7 @@
 import React from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 
 import { CookieConsentBanner } from "@/components/trust/CookieConsentBanner";
 import { LegalFooter } from "@/components/trust/LegalFooter";

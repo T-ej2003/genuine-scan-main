@@ -1673,6 +1673,48 @@ BEGIN
 END
 $$;
 
+CREATE OR REPLACE FUNCTION app_public.track_support_status(
+  p_reference_code text,p_proof_digest text,p_proof_version integer,
+  p_checked_at timestamp without time zone,p_request_id text
+) RETURNS TABLE(
+  "referenceCode" text,"customerFacingStatus" text,"priority" text,
+  "updatedAt" timestamp without time zone,"handoffStage" text,
+  "slaDueAt" timestamp without time zone
+)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
+AS $$
+DECLARE
+  ticket record;
+  handoff record;
+  expected_digest text;
+BEGIN
+  IF p_reference_code !~ '^[A-Z0-9][A-Z0-9_-]{3,63}$'
+     OR p_proof_digest !~ '^sha256-v1:[a-f0-9]{64}$'
+     OR p_proof_version<>1 OR p_checked_at IS NULL THEN
+    RAISE EXCEPTION 'PUBLIC_SUPPORT_TRACK_INVALID' USING ERRCODE='22023';
+  END IF;
+  expected_digest:=substr(p_proof_digest,11);
+  PERFORM app_public.public_verify_bind(
+    'public-verification-support-track',p_request_id,NULL,p_reference_code,NULL,NULL,p_proof_digest
+  );
+  SELECT t.id,t."incidentId",t."referenceCode",t.status::text AS status,t.priority::text AS priority,
+         t."updatedAt",t."slaDueAt"
+    INTO ticket
+    FROM public."SupportTicket" t
+   WHERE t."referenceCode"=p_reference_code
+     AND t."customerEmail" IS NOT NULL
+     AND encode(sha256(convert_to(lower(t."customerEmail"),'UTF8')),'hex')=expected_digest;
+  IF ticket.id IS NULL THEN RETURN; END IF;
+  PERFORM set_config('app.public_verification_target_id',ticket."incidentId",true);
+  SELECT h."currentStage"::text AS stage,h."slaDueAt"
+    INTO handoff
+    FROM public."IncidentHandoff" h
+   WHERE h."incidentId"=ticket."incidentId";
+  RETURN QUERY SELECT ticket."referenceCode",ticket.status,ticket.priority,ticket."updatedAt",
+    handoff.stage,coalesce(handoff."slaDueAt",ticket."slaDueAt");
+END
+$$;
+
 REVOKE ALL ON FUNCTION app_public.public_verify_bind(text,text,text,text,text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_public.issue_customer_auth_session(text,text,text,text,text,timestamp without time zone,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_public.require_customer_auth_session(text,timestamp without time zone,text,text) FROM PUBLIC;
@@ -1700,3 +1742,4 @@ REVOKE ALL ON FUNCTION app_public.submit_request_access(text,text,text,text,text
 REVOKE ALL ON FUNCTION app_public.submit_public_support(text,text,text,text,text,text,text,text,text,timestamp without time zone,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_public.complete_request_access_delivery(text,text,text,text,text,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_public.complete_public_support_delivery(text,text,text,text,text,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_public.track_support_status(text,text,integer,timestamp without time zone,text) FROM PUBLIC;

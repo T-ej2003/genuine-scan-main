@@ -16,6 +16,7 @@ import { buildImmutableBatchAuditPackage } from "../services/immutableAuditExpor
 import { createRoleNotifications } from "../services/notificationService";
 import { withCanonicalDbContext } from "../lib/canonicalDbContext";
 import { decodeDateCursor } from "../utils/cursorPagination";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 
 const policyUpdateSchema = z
   .object({
@@ -227,11 +228,10 @@ export const getRiskAnalyticsController = async (req: AuthRequest, res: Response
       limit: parsed.data.limit ?? 20,
       lookbackHours: parsed.data.lookbackHours ?? 24,
     }, requestId);
-    const data = await withCanonicalDbContext(
-      prisma,
+    const data = await getRiskAnalytics(
+      boundary.query,
       boundary.context,
-      (tx, installedContext) => getRiskAnalytics(tx, boundary.query, installedContext),
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+      String(req.databaseSessionCapability || "")
     );
     return res.json({ success: true, data });
   } catch (e) {
@@ -423,6 +423,7 @@ export const acknowledgePolicyAlertController = async (req: AuthRequest, res: Re
 
     await Promise.all([
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
         type: "policy_alert_acknowledged",
         title: "Policy alert acknowledged",
@@ -438,6 +439,7 @@ export const acknowledgePolicyAlertController = async (req: AuthRequest, res: Re
         channels: [NotificationChannel.WEB],
       }),
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.LICENSEE_ADMIN,
         licenseeId: updated.licenseeId,
         type: "policy_alert_acknowledged",

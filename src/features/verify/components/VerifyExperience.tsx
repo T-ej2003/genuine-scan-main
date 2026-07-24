@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -705,7 +705,7 @@ export default function VerifyExperience() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const token = String(searchParams.get("t") || "").trim();
+  const [token] = useState(() => String(searchParams.get("t") || "").trim());
   const sessionIdFromUrl = String(searchParams.get("session") || "").trim();
   const codeParam = useMemo(() => {
     const raw = String(code || "");
@@ -853,6 +853,17 @@ export default function VerifyExperience() {
   useEffect(() => {
     clearLegacyStoredCustomerSession();
   }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    const sanitized = new URL(window.location.href);
+    sanitized.searchParams.delete("t");
+    window.history.replaceState(
+      {},
+      document.title,
+      `${sanitized.pathname}${sanitized.search}${sanitized.hash}`
+    );
+  }, [token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1038,9 +1049,13 @@ export default function VerifyExperience() {
       }
       setSession(nextSession);
 
+      const canonicalCode = normalizeVerifyCode(nextResult.code || nextSession.code || codeParam);
       const params = new URLSearchParams();
       params.set("session", nextSession.sessionId);
-      navigate(`${codeParam ? `/verify/${encodeURIComponent(codeParam)}` : "/verify"}?${params.toString()}`, { replace: true });
+      navigate(
+        `${canonicalCode ? `/verify/${encodeURIComponent(canonicalCode)}` : "/verify"}?${params.toString()}`,
+        { replace: true }
+      );
 
       if (nextSession.authState === "VERIFIED" || customerAuthenticated) {
         setFlowStep("purchase");

@@ -1,5 +1,3 @@
-CREATE SCHEMA IF NOT EXISTS app_rls;
-
 CREATE OR REPLACE FUNCTION app_rls.c03_require_governance_actor(allowed_purposes text[])
 RETURNS TABLE(user_id text, organization_id text, licensee_id text)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
@@ -130,14 +128,6 @@ AS $$
          "executedAt"=transaction_timestamp(),"updatedAt"=transaction_timestamp()
    WHERE id=approval_id AND status='APPROVED' AND "executedAt" IS NULL
 $$;
-
-DROP POLICY IF EXISTS c03_governance_feature_flag_read ON public."TenantFeatureFlag";
-CREATE POLICY c03_governance_feature_flag_read ON public."TenantFeatureFlag" FOR SELECT
-USING (app_rls.c03_governance_row_visible("licenseeId",ARRAY['governance-feature-flag-list']));
-
-DROP POLICY IF EXISTS c03_governance_compliance_job_read ON public."CompliancePackJob";
-CREATE POLICY c03_governance_compliance_job_read ON public."CompliancePackJob" FOR SELECT
-USING (app_rls.c03_governance_row_visible("licenseeId",ARRAY['compliance-pack-list']));
 
 CREATE OR REPLACE FUNCTION app_rls.c03_upsert_tenant_feature_flag(key text, enabled boolean, config jsonb)
 RETURNS jsonb
@@ -293,36 +283,6 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION app_rls.c03_compliance_job_projection(job_id text)
-RETURNS jsonb
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
-AS $$
-  SELECT jsonb_build_object('id',j.id,'licenseeId',j."licenseeId",'status',j.status::text,
-    'triggerType',j."triggerType",'periodFrom',j."periodFrom",'periodTo',j."periodTo",
-    'fileName',j."fileName",'storageKey',j."storageKey",'integrityHash',j."integrityHash",
-    'signatureAlgorithm',j."signatureAlgorithm",'summary',j.summary,'errorMessage',j."errorMessage",
-    'startedByUserId',j."startedByUserId",'startedAt',j."startedAt",'finishedAt',j."finishedAt",
-    'createdAt',j."createdAt",'updatedAt',j."updatedAt")
-  FROM public."CompliancePackJob" j WHERE j.id=job_id
-$$;
-
-CREATE OR REPLACE FUNCTION app_rls.c03_validate_compliance_result(result jsonb)
-RETURNS void
-LANGUAGE plpgsql IMMUTABLE SET search_path = pg_catalog
-AS $$
-BEGIN
-  IF jsonb_typeof(result)<>'object' OR EXISTS (SELECT 1 FROM jsonb_object_keys(result) k
-      WHERE k NOT IN ('fileName','storageKey','integrityHash','signatureAlgorithm','controls','generatedAt','storageMode'))
-     OR length(result->>'fileName') NOT BETWEEN 1 AND 240 OR result->>'fileName' LIKE '%/%'
-     OR length(result->>'storageKey') NOT BETWEEN 1 AND 1000 OR result->>'storageKey' LIKE '%..%'
-     OR result->>'integrityHash' !~ '^[0-9a-f]{64}$'
-     OR result->>'signatureAlgorithm' NOT IN ('ed25519','hmac-sha256')
-     OR result->>'storageMode' NOT IN ('object-storage','local-disk') THEN
-    RAISE EXCEPTION 'C03_COMPLIANCE_RESULT_INVALID' USING ERRCODE='22023';
-  END IF;
-END;
-$$;
-
 CREATE OR REPLACE FUNCTION app_rls.c03_update_retention_policy(patch jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
@@ -356,3 +316,16 @@ BEGIN
   RETURN response || '{"__c03Replay":false}'::jsonb;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION app_rls.c03_require_governance_actor(text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_governance_row_visible(text,text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_governance_replay(text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_complete_governance_command(text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_governance_audit(text,text,text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_require_governance_approval(text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_mark_governance_approval_executed(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_upsert_tenant_feature_flag(text,boolean,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_get_or_create_retention_policy() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_run_retention_lifecycle(text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_generate_compliance_report(timestamptz,timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_update_retention_policy(jsonb) FROM PUBLIC;

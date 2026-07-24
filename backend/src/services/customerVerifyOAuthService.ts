@@ -93,18 +93,30 @@ const deriveAllowedFrontendOrigins = () => {
   return Array.from(new Set(origins));
 };
 
-const validateReturnTo = (raw: string) => {
+export const validateCustomerVerifyReturnTo = (
+  raw: string,
+  allowedOrigins = deriveAllowedFrontendOrigins()
+) => {
   const parsed = tryParseUrl(raw);
-  if (!parsed) {
+  if (
+    !parsed ||
+    !["http:", "https:"].includes(parsed.protocol) ||
+    parsed.username ||
+    parsed.password
+  ) {
     throw new Error("Invalid return URL");
   }
 
-  const allowedOrigins = deriveAllowedFrontendOrigins();
-  if (allowedOrigins.length && !allowedOrigins.includes(parsed.origin)) {
+  if (!allowedOrigins.length || !allowedOrigins.includes(parsed.origin)) {
     throw new Error("Return URL origin is not allowed");
   }
 
-  if (!parsed.pathname.startsWith("/verify") && !parsed.pathname.startsWith("/scan")) {
+  if (
+    parsed.pathname !== "/verify" &&
+    !parsed.pathname.startsWith("/verify/") &&
+    parsed.pathname !== "/scan" &&
+    !parsed.pathname.startsWith("/scan/")
+  ) {
     throw new Error("Return URL must stay inside the verify flow");
   }
 
@@ -279,7 +291,7 @@ export const buildCustomerOAuthAuthorizationUrl = (params: {
     throw new Error("That customer identity provider is not configured");
   }
 
-  const returnTo = validateReturnTo(params.returnTo);
+  const returnTo = validateCustomerVerifyReturnTo(params.returnTo);
   const callbackUrl = `${resolveApiBaseUrl(params.req)}/api/verify/auth/oauth/${params.provider}/callback`;
 
   const codeVerifier = randomOpaqueToken(32);
@@ -301,7 +313,9 @@ export const finishCustomerOAuthCallback = async (params: {
 }) => {
   if (params.error) {
     const state = params.state ? verifyOauthState(params.state) : null;
-    const returnTo = state?.returnTo || deriveAllowedFrontendOrigins()[0] || String(process.env.APP_URL || "").trim() || "http://localhost:8080/verify";
+    const allowedOrigin = deriveAllowedFrontendOrigins()[0];
+    const returnTo = state?.returnTo || (allowedOrigin ? `${allowedOrigin}/verify` : null);
+    if (!returnTo) throw new Error("Customer verification frontend origin is not configured");
     return appendHashParam(returnTo, "customer_auth_error", String(params.error));
   }
 

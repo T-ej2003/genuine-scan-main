@@ -5,12 +5,9 @@ import {
   claimRefreshTokenRotation,
   completeRefreshTokenRotation,
   createRefreshTokenRecord,
-  findRefreshTokenByHashes,
   findRefreshTokenByIdentifier,
   listActiveRefreshTokenRecords,
   revokeAllRefreshTokenRecords,
-  revokePasswordOnlyRefreshTokenRecords,
-  revokeRefreshTokenByHashes,
   revokeRefreshTokenByIdentifier,
   revokeRefreshTokenRotationScope,
   type SessionCredentialClient,
@@ -79,20 +76,6 @@ export const createRefreshToken = async (input: {
   return { row, expiresAt, tokenHash };
 };
 
-export const revokeRefreshTokenByRaw = async (input: {
-  rawToken: string;
-  reason: string;
-  now?: Date;
-}, db: SessionCredentialClient) => {
-  const now = input.now || new Date();
-  const tokenHashCandidates = buildTokenHashCandidates(input.rawToken);
-  return revokeRefreshTokenByHashes(db, {
-    tokenHashCandidates,
-    reason: input.reason,
-    revokedAt: now,
-  });
-};
-
 export const revokeAllUserRefreshTokens = async (input: {
   userId: string;
   reason: string;
@@ -104,25 +87,6 @@ export const revokeAllUserRefreshTokens = async (input: {
     reason: input.reason,
     revokedAt: now,
   });
-};
-
-export const revokePasswordOnlyRefreshTokensForUser = async (input: {
-  userId: string;
-  reason: string;
-  now?: Date;
-}, db: SessionCredentialClient) => {
-  const now = input.now || new Date();
-  return revokePasswordOnlyRefreshTokenRecords(db, {
-    userId: input.userId,
-    reason: input.reason,
-    revokedAt: now,
-  });
-};
-
-export const findRefreshTokenByRaw = async (rawToken: string, db?: SessionCredentialClient) => {
-  if (!db) throw new Error("REFRESH_TOKEN_DATABASE_BOUNDARY_REQUIRED");
-  const tokenHashCandidates = buildTokenHashCandidates(rawToken);
-  return findRefreshTokenByHashes(db, { tokenHashCandidates });
 };
 
 export const findRefreshTokenById = async (

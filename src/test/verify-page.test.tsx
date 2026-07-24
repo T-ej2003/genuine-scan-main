@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import Verify from "@/pages/Verify";
@@ -203,8 +203,9 @@ describe("Verify page", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("location-probe")).toHaveTextContent(`/verify/${CODE}?session=${SESSION_ID}&t=signed-token`);
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(`/verify/${CODE}?session=${SESSION_ID}`);
     });
+    expect(screen.getByTestId("location-probe")).not.toHaveTextContent("signed-token");
   });
 
   it("shows a calm quick-check state when the session is not yet revealed", async () => {
@@ -497,6 +498,7 @@ describe("Verify page", () => {
       success: true,
       data: buildSession({
         decisionId: undefined,
+        sessionProofToken: "session-proof-1",
         authState: "VERIFIED",
         intakeCompleted: true,
         revealed: true,
@@ -530,13 +532,14 @@ describe("Verify page", () => {
     await waitFor(() => {
       expect(vi.mocked(apiClient.reportFraud)).toHaveBeenCalledWith(
         expect.objectContaining({
-          code: CODE,
           sessionId: SESSION_ID,
-        })
+        }),
+        "session-proof-1"
       );
     });
     const payload = vi.mocked(apiClient.reportFraud).mock.calls[0]?.[0] as Record<string, unknown>;
     expect(payload).not.toHaveProperty("decisionId");
+    expect(payload).not.toHaveProperty("code");
   });
 
   it("lets a signed-in customer complete a replay review check and refresh the session", async () => {

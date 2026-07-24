@@ -1,5 +1,3 @@
-CREATE SCHEMA IF NOT EXISTS app_rls;
-
 CREATE OR REPLACE FUNCTION app_rls.c03_require_policy_actor(
   target_licensee_id text,
   purpose_code text
@@ -104,6 +102,34 @@ AS $$
        )
      )
      AND current_setting('app.request_id', true) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_session_valid()
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF session_user <> {{APP_ROLE}}
+     OR current_setting('app.auth_session_verified', true) <> '1'
+     OR current_setting('app.c03_session_id', true) IS DISTINCT FROM current_setting('app.auth_session_id', true)
+     OR current_setting('app.c03_user_id', true) IS DISTINCT FROM current_setting('app.user_id', true)
+  THEN RETURN false; END IF;
+
+  RETURN EXISTS (
+    SELECT 1 FROM public."RefreshToken" session_row
+     WHERE session_row.id = current_setting('app.c03_session_id', true)
+       AND session_row."userId" = current_setting('app.c03_user_id', true)
+       AND session_row."sessionCapabilityHash" = current_setting('app.auth_session_hash', true)
+       AND session_row."sessionCapabilityHashVersion" = 'sha256-v1'
+       AND session_row."sessionCapabilityRevokedAt" IS NULL
+       AND session_row."sessionCapabilityExpiresAt" > clock_timestamp()
+       AND session_row."revokedAt" IS NULL
+       AND session_row."expiresAt" > clock_timestamp()
+  );
+END;
 $$;
 
 CREATE OR REPLACE FUNCTION app_rls.c03_policy_replay(
@@ -403,6 +429,7 @@ $$;
 REVOKE ALL ON FUNCTION app_rls.c03_require_policy_actor(text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_require_platform_policy_actor(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_policy_context_valid() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_session_valid() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_policy_replay(text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_complete_policy_command(text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_list_policy_rules(text,boolean,integer,integer) FROM PUBLIC;

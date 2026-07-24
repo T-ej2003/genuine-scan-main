@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Factory, Mail, MessageSquare, ShieldCheck, Shirt, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";

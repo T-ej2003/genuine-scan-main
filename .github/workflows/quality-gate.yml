@@ -42,6 +42,9 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
+      - name: RF7 application and dependency contracts
+        run: npm run test:rf7:static
+
       - name: Security and release guardrails
         env:
           REQUIRE_RELEASE_EVIDENCE_REFS: ${{ github.ref == 'refs/heads/main' }}

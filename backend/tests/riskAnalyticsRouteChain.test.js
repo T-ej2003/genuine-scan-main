@@ -2,6 +2,8 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const { UserRole, UserStatus } = require("@prisma/client");
 
+process.env.NODE_ENV = "test";
+
 const distRoot = path.resolve(__dirname, "../dist");
 const mockModule = (relativePath, exportsValue) => {
   const resolved = require.resolve(path.join(distRoot, relativePath));
@@ -12,7 +14,18 @@ const ids = {
   tenant: "11111111-1111-4111-8111-111111111111",
   organization: "33333333-3333-4333-8333-333333333333",
   foreign: "22222222-2222-4222-8222-222222222222",
+  platform: "55555555-5555-4555-8555-555555555555",
 };
+const response = () => ({
+  statusCode: 200,
+  body: null,
+  status(code) { this.statusCode = code; return this; },
+  json(body) { this.body = body; return this; },
+});
+
+let payload;
+let databaseUser;
+let snapshotCalls = 0;
 const basePayload = (overrides = {}) => ({
   userId: ids.actor,
   email: "admin@example.test",
@@ -39,209 +52,144 @@ const baseDatabaseUser = (overrides = {}) => ({
   disabledAt: null,
   ...overrides,
 });
-const manufacturerLink = (licenseeId = ids.tenant, orgId = ids.organization) => ({
-  licenseeId,
-  isPrimary: true,
-  createdAt: new Date("2026-01-01T00:00:00.000Z"),
-  updatedAt: new Date("2026-01-02T00:00:00.000Z"),
-  licensee: {
-    id: licenseeId,
-    name: "Linked tenant",
-    prefix: "LINKED",
-    brandName: null,
-    orgId,
-  },
-});
-const response = () => ({
-  statusCode: 200,
-  body: null,
-  status(code) { this.statusCode = code; return this; },
-  json(body) { this.body = body; return this; },
-});
 
-let payload = basePayload();
-let databaseUser = baseDatabaseUser();
-let databaseLinks = [];
-let transactionCount = 0;
-const events = [];
-const authTx = {
-  $executeRaw: async (strings) => {
-    events.push(/INSERT INTO public\."AuditLog"/.test(strings.join("?"))
-      ? "audit"
-      : transactionCount === 1 ? "actor-self-context" : "risk-context");
-    return 1;
-  },
-  $queryRaw: async () => { events.push("policy"); return []; },
-  user: { findUnique: async () => { events.push("actor-self-user"); return databaseUser; } },
-  manufacturerLicenseeLink: { findMany: async () => { events.push("actor-membership"); return databaseLinks; } },
-  licensee: {
-    findUnique: async () => {
-      events.push("licensee");
-      return { id: ids.tenant, orgId: ids.organization, isActive: true, suspendedAt: null };
-    },
-  },
-  organization: {
-    findUnique: async () => {
-      events.push("organization");
-      return { id: ids.organization, isActive: true };
-    },
-  },
-  qrScanLog: { findMany: async () => { events.push("scan"); return []; } },
-  policyAlert: { findMany: async () => { events.push("alert"); return []; } },
-  batch: { findMany: async () => { events.push("batch"); return []; } },
-};
-const database = {
-  $transaction: async (callback) => {
-    transactionCount += 1;
-    events.push("transaction");
-    return callback(authTx);
-  },
-};
-mockModule("config/database.js", { __esModule: true, default: database });
 mockModule("services/auth/tokenService.js", {
   ACCESS_TOKEN_COOKIE: "mscqr_access",
+  AUTHENTICATED_SESSION_CAPABILITY_COOKIE: "mscqr_db_session",
   verifyAccessToken: () => payload,
   verifyMfaBootstrapToken: () => { throw new Error("not bootstrap"); },
 });
-mockModule("services/auth/cookieTokenProtectionService.js", { openCookieToken: () => null });
+mockModule("services/auth/cookieTokenProtectionService.js", { openCookieToken: (value) => value });
 mockModule("services/auth/authService.js", {
   getAdminStepUpWindowMinutes: () => 30,
   getPasswordReauthWindowMinutes: () => 30,
   getSensitiveActionStepUpMethod: () => "PASSWORD_REAUTH",
   isAdminMfaRequiredRole: () => false,
 });
+mockModule("rls-waves/session-b/b01/canonicalAuthContext.js", {
+  isCanonicalAuthDenial: () => false,
+  withCanonicalAuthClaims: async (_claims, fn) => fn({}),
+  withDatabaseAuthenticatedSession: async (claims, input, fn) => {
+    if (input.capability !== "database-capability") throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
+    return fn({}, {
+      userId: claims.userId,
+      role: claims.role,
+      organizationId: claims.orgId,
+      licenseeId: claims.licenseeId,
+      manufacturerId: null,
+      authAssurance: claims.authAssurance === "ADMIN_MFA" ? "mfa-verified" : "password-verified",
+      requestId: input.requestId,
+      purpose: input.purpose,
+    }).then((value) => ({
+      ...value,
+      canonicalAssurance: claims.authAssurance === "ADMIN_MFA" ? "mfa-verified" : "password-verified",
+    }));
+  },
+});
+mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
+  loadAuthenticatedActor: async () => databaseUser,
+  isRecentMfaDenial: () => false,
+  RecentMfaDenial: class RecentMfaDenial extends Error {},
+  requireRecentMfaSession: async () => true,
+});
+mockModule("rls-waves/session-c/c02/riskAnalyticsRepository.js", {
+  RiskAnalyticsBoundaryDenied: class RiskAnalyticsBoundaryDenied extends Error {},
+  isRiskAnalyticsBoundaryDenied: () => false,
+  readRiskAnalyticsSnapshot: async (input) => {
+    snapshotCalls += 1;
+    assert.equal(input.capability, "database-capability");
+    assert.equal(input.expectedUserId, payload.userId);
+    return {
+      organizationId: ids.organization,
+      policy: { multiScanThreshold: 2, geoDriftThresholdKm: 300, velocitySpikeThresholdPerMin: 80 },
+      batches: [],
+      scanLogs: [],
+      alerts: [],
+      qrs: [],
+      manufacturers: [],
+      manufacturerLinks: [],
+      incidents: [],
+      policyRules: [],
+    };
+  },
+});
 
-const { authenticate } = require("../dist/middleware/auth");
+const { authenticate, DATABASE_SESSION_CAPABILITY_HEADER } = require("../dist/middleware/auth");
 const { getRiskAnalyticsController } = require("../dist/controllers/tracePolicyController");
 
-const authenticateOnce = async () => {
-  const req = { headers: { authorization: "Bearer test-token" } };
+const authenticateOnce = async ({ includeCapability = true } = {}) => {
+  const headers = { authorization: "Bearer test-token" };
+  if (includeCapability) headers[DATABASE_SESSION_CAPABILITY_HEADER] = "database-capability";
+  const req = { headers, get(name) { return this.headers[String(name).toLowerCase()]; } };
   const res = response();
   let nextCalled = false;
   await authenticate(req, res, () => { nextCalled = true; });
   return { req, res, nextCalled };
 };
-const reset = (nextPayload, nextUser, links = []) => {
-  payload = nextPayload;
-  databaseUser = nextUser;
-  databaseLinks = links;
-  transactionCount = 0;
-  events.length = 0;
-};
 
 (async () => {
-  reset(basePayload(), baseDatabaseUser());
+  payload = basePayload();
+  databaseUser = baseDatabaseUser();
   let result = await authenticateOnce();
-  assert.equal(result.nextCalled, true);
+  assert.equal(result.nextCalled, true, "bearer authentication with a database capability succeeds");
   assert.equal(result.req.user.licenseeId, ids.tenant);
-  assert.equal(result.req.user.orgId, ids.organization);
-  assert.equal(transactionCount, 1, "normal actor-self hydration remains one transaction");
+  assert.equal(result.req.databaseSessionCapability, "database-capability");
 
-  reset(basePayload(), baseDatabaseUser({ role: UserRole.ORG_ADMIN }));
+  result = await authenticateOnce({ includeCapability: false });
+  assert.equal(result.nextCalled, false, "bearer authentication without a database capability fails closed");
+  assert.equal(result.res.statusCode, 401);
+
+  databaseUser = baseDatabaseUser({ role: UserRole.ORG_ADMIN });
   result = await authenticateOnce();
   assert.equal(result.nextCalled, false, "a database role change requires re-authentication");
   assert.equal(result.res.statusCode, 401);
 
-  for (const [name, user, token] of [
-    ["removed licensee", baseDatabaseUser({ licenseeId: null }), basePayload()],
-    ["removed organization", baseDatabaseUser({ orgId: null }), basePayload()],
-    ["licensee mismatch", baseDatabaseUser({ licenseeId: ids.foreign }), basePayload()],
-    ["organization mismatch", baseDatabaseUser({ orgId: ids.foreign }), basePayload()],
-  ]) {
-    reset(token, user);
-    result = await authenticateOnce();
-    assert.equal(result.nextCalled, false, `${name} must fail closed`);
-    assert.equal(result.res.statusCode, 401);
-  }
-
-  reset(
-    basePayload({
-      role: UserRole.MANUFACTURER,
-      licenseeId: ids.tenant,
-      scopeVersion: new Date("2026-01-02T00:00:00.000Z").toISOString(),
-    }),
-    baseDatabaseUser({ role: UserRole.MANUFACTURER, licenseeId: null, orgId: null }),
-    [manufacturerLink()]
-  );
-  result = await authenticateOnce();
-  assert.equal(result.nextCalled, true, "database-linked manufacturer scope remains valid");
-  assert.deepEqual(result.req.user.linkedLicenseeIds, [ids.tenant]);
-  reset(
-    basePayload({ role: UserRole.MANUFACTURER, licenseeId: ids.foreign }),
-    baseDatabaseUser({ role: UserRole.MANUFACTURER, licenseeId: null, orgId: null }),
-    [manufacturerLink()]
-  );
-  result = await authenticateOnce();
-  assert.equal(result.nextCalled, false, "manufacturer token scope cannot escape database links");
-
-  reset(
-    basePayload({ role: UserRole.MANUFACTURER, licenseeId: null, orgId: null }),
-    baseDatabaseUser({ role: UserRole.MANUFACTURER, licenseeId: null, orgId: null }),
-    []
-  );
-  result = await authenticateOnce();
-  assert.equal(result.nextCalled, false, "a legacy or signed manufacturer identity without an active link fails closed");
-
-  reset(
-    basePayload({ role: UserRole.MANUFACTURER, licenseeId: null, orgId: null }),
-    baseDatabaseUser({ role: UserRole.MANUFACTURER, licenseeId: null, orgId: null }),
-    [
-      { ...manufacturerLink(ids.tenant, ids.organization), isPrimary: false },
-      { ...manufacturerLink(ids.foreign, ids.foreign), isPrimary: false },
-    ]
-  );
-  result = await authenticateOnce();
-  assert.equal(result.nextCalled, true, "an unambiguous membership set remains visible for an explicit later scope choice");
-  assert.equal(result.req.user.licenseeId, null, "several links without one primary install no active scope");
-  assert.equal(result.req.user.orgId, null, "organization remains blank until a verified scope is selected");
-  assert.deepEqual(result.req.user.linkedLicenseeIds, [ids.tenant, ids.foreign]);
-
-  reset(
-    basePayload({
-      role: UserRole.PLATFORM_SUPER_ADMIN,
-      licenseeId: ids.foreign,
-      orgId: ids.foreign,
-      authAssurance: "ADMIN_MFA",
-      mfaVerifiedAt: new Date().toISOString(),
-    }),
-    baseDatabaseUser({ role: UserRole.PLATFORM_SUPER_ADMIN, licenseeId: null, orgId: null })
-  );
+  payload = basePayload({
+    userId: ids.platform,
+    role: UserRole.PLATFORM_SUPER_ADMIN,
+    licenseeId: null,
+    orgId: null,
+    authAssurance: "ADMIN_MFA",
+    mfaVerifiedAt: new Date().toISOString(),
+  });
+  databaseUser = baseDatabaseUser({
+    id: ids.platform,
+    role: UserRole.PLATFORM_SUPER_ADMIN,
+    licenseeId: null,
+    orgId: null,
+  });
   const req = {
-    headers: { authorization: "Bearer platform-token" },
+    headers: {
+      authorization: "Bearer platform-token",
+      [DATABASE_SESSION_CAPABILITY_HEADER]: "database-capability",
+    },
+    get(name) { return this.headers[String(name).toLowerCase()]; },
     query: { licenseeId: ids.tenant },
-    requestId: "request-platform-risk",
+    requestId: "66666666-6666-4666-8666-666666666666",
   };
   const res = response();
   await authenticate(req, res, () => getRiskAnalyticsController(req, res));
-  assert.equal(req.user.licenseeId, null, "platform authentication cannot carry tenant scope");
-  assert.equal(req.user.orgId, null, "platform authentication cannot carry organization scope");
-  assert.equal(res.statusCode, 200, "fresh-MFA platform access accepts one bounded selector");
+  assert.equal(res.statusCode, 200);
   assert.equal(res.body.data.summary.analyzedBatches, 0);
-  assert.equal(transactionCount, 2, "platform actor hydration and bounded analytics share no unscoped global query");
-  assert(events.includes("actor-self-user"));
-  assert(events.includes("licensee"));
-  assert(events.includes("organization"));
-  assert(events.includes("audit"));
+  assert.equal(snapshotCalls, 1, "controller performs one capability-bound snapshot read");
 
-  reset(
-    basePayload({
-      role: UserRole.PLATFORM_SUPER_ADMIN,
-      licenseeId: ids.foreign,
-      orgId: ids.foreign,
-      authAssurance: "ADMIN_MFA",
-      mfaVerifiedAt: new Date().toISOString(),
-    }),
-    baseDatabaseUser({ role: UserRole.PLATFORM_SUPER_ADMIN, licenseeId: null, orgId: null })
-  );
-  const unscopedReq = { headers: { authorization: "Bearer platform-token" }, query: {}, requestId: "request-platform-unscoped" };
-  const unscopedRes = response();
-  await authenticate(unscopedReq, unscopedRes, () => getRiskAnalyticsController(unscopedReq, unscopedRes));
-  assert.equal(unscopedRes.statusCode, 403);
-  assert.equal(unscopedRes.body.error, "A valid tenant scope is required");
-  assert.equal(transactionCount, 1, "blank platform scope denies before the analytics transaction");
-  assert(!events.some((event) => ["licensee", "organization", "batch", "scan", "alert", "audit"].includes(event)));
+  payload = basePayload();
+  databaseUser = baseDatabaseUser();
+  const tenantReq = {
+    headers: {
+      authorization: "Bearer tenant-token",
+      [DATABASE_SESSION_CAPABILITY_HEADER]: "database-capability",
+    },
+    get(name) { return this.headers[String(name).toLowerCase()]; },
+    query: { licenseeId: ids.foreign },
+    requestId: "77777777-7777-4777-8777-777777777777",
+  };
+  const tenantRes = response();
+  await authenticate(tenantReq, tenantRes, () => getRiskAnalyticsController(tenantReq, tenantRes));
+  assert.equal(tenantRes.statusCode, 403);
+  assert.equal(snapshotCalls, 1, "foreign selector is denied before PostgreSQL invocation");
 
-  console.log("risk analytics route-chain and database-scope hydration tests passed");
+  console.log("risk analytics route-chain and capability hydration tests passed");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

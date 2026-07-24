@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient, UserRole } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { Request } from "express";
 
 import prisma from "../../../config/database";
@@ -14,21 +14,12 @@ import {
 } from "../../../services/customerVerifyAuthService";
 import { getAdminStepUpWindowMinutes } from "../../../services/auth/authService";
 import { AuthenticatedSessionClaims } from "../../../types";
-import {
-  isB02ManufacturerRole,
-  loadB02ActiveAuthSession,
-  loadB02AuthenticatedActorSelf,
-  loadB02ManufacturerScope,
-} from "./actorRevalidationRepository";
+import { isCanonicalAuthDenial, withDatabaseAuthenticatedSession } from "../b01/canonicalAuthContext";
+import { isRecentMfaDenial, requireRecentMfaSession } from "../b01/authenticatedSecurityRepository";
 
 type TransactionRunner = Pick<PrismaClient, "$transaction">;
 export type B02TransactionClient = Prisma.TransactionClient;
 type RequestWithId = Request & { requestId?: string };
-
-export const b02BoundariesEnabled = () =>
-  ["1", "true", "yes", "on"].includes(
-    String(process.env.MSCQR_RLS_B02_BOUNDARIES_ENABLED || "").trim().toLowerCase()
-  );
 
 export const isB02AuthorizationError = (error: unknown) =>
   error instanceof Error && error.message.startsWith("B02 ");
@@ -41,8 +32,6 @@ const required = (value: unknown, label: string) => {
 
 const requestIdFrom = (req: RequestWithId) =>
   required(req.requestId || req.get("x-request-id"), "a request ID");
-
-const platformRoles = new Set<UserRole>([UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN]);
 
 export type B02AuthenticatedPurpose =
   | "request-access-read"
@@ -76,29 +65,6 @@ const authenticatedPurposes = new Set<B02AuthenticatedPurpose>([
 ]);
 
 const authenticatedAssurances = new Set<B02RequiredAssurance>(["password-verified", "mfa-verified"]);
-
-const finitePastDate = (value: Date | null, checkedAt: Date) =>
-  value instanceof Date && Number.isFinite(value.getTime()) && value.getTime() <= checkedAt.getTime()
-    ? value
-    : null;
-
-const sessionAssurance = (
-  session: { authenticatedAt: Date | null; mfaVerifiedAt: Date | null },
-  requiredAssurance: B02RequiredAssurance,
-  checkedAt: Date
-): CanonicalAssurance => {
-  const authenticatedAt = finitePastDate(session.authenticatedAt, checkedAt);
-  if (!authenticatedAt) throw new Error("B02 authenticated session has no valid password assurance");
-  const mfaVerifiedAt = finitePastDate(session.mfaVerifiedAt, checkedAt);
-  if (requiredAssurance === "mfa-verified") {
-    const oldestAccepted = checkedAt.getTime() - getAdminStepUpWindowMinutes() * 60_000;
-    if (!mfaVerifiedAt || mfaVerifiedAt.getTime() < oldestAccepted) {
-      throw new Error("B02 authenticated session requires fresh MFA assurance");
-    }
-    return "mfa-verified";
-  }
-  return mfaVerifiedAt ? "mfa-verified" : "password-verified";
-};
 
 export type B02CustomerPurpose =
   | "customer-trust-read"
@@ -143,106 +109,46 @@ const customerAssurance = (
 };
 
 export const withB02AuthenticatedRequest = async <T>(
-  req: RequestWithId & { user?: AuthenticatedSessionClaims },
+  req: RequestWithId & { user?: AuthenticatedSessionClaims; databaseSessionCapability?: string | null },
   requirement: { purpose: B02AuthenticatedPurpose; assurance: B02RequiredAssurance },
   callback: (tx: Prisma.TransactionClient, context: CanonicalDbContext) => Promise<T>,
   runner: TransactionRunner = prisma
 ) => {
   const claims = req.user;
   if (!claims) throw new Error("B02 authenticated actor is required");
-  const userId = required(claims.userId, "a signed user ID");
   const sessionId = required(claims.sessionId, "a signed session ID");
+  const capability = required(req.databaseSessionCapability, "a database session capability");
   const requestId = requestIdFrom(req);
   if (!authenticatedPurposes.has(requirement.purpose) || !authenticatedAssurances.has(requirement.assurance)) {
     throw new Error("B02 authenticated operation requirement is unsupported");
   }
-  const operationPurpose = requirement.purpose;
-  const requiredAssurance = requirement.assurance;
-  const checkedAt = new Date();
-  return runner.$transaction(async (tx) => {
-    await installCanonicalDbContext(tx, {
-      userId,
-      role: "AUTHENTICATED_ACTOR_BOOTSTRAP",
-      organizationId: null,
-      licenseeId: null,
-      manufacturerId: null,
-      authAssurance: "none",
+  try {
+    return await withDatabaseAuthenticatedSession(claims, {
+      capability,
       requestId,
-      purpose: "actor-revalidation",
-    });
-
-    // The bootstrap role is deliberately restricted to this fixed actor-self projection.
-    const actor = await loadB02AuthenticatedActorSelf(tx, userId);
-    if (!actor) throw new Error("B02 authenticated actor is no longer active");
-
-    const databaseLicenseeId = actor.licenseeId || null;
-    const databaseOrganizationId = actor.orgId || null;
-    await installCanonicalDbContext(tx, {
-      userId: actor.id,
-      role: actor.role,
-      organizationId: isB02ManufacturerRole(actor.role) ? null : databaseOrganizationId,
-      licenseeId: isB02ManufacturerRole(actor.role) ? null : databaseLicenseeId,
-      manufacturerId: isB02ManufacturerRole(actor.role) ? actor.id : null,
-      authAssurance: "none",
-      requestId,
-      purpose: "session-revalidation",
-    });
-
-    const session = await loadB02ActiveAuthSession(tx, { sessionId, userId: actor.id, checkedAt });
-    if (!session) throw new Error("B02 authenticated session is stale or revoked");
-    if (session.orgId && databaseOrganizationId && session.orgId !== databaseOrganizationId) {
-      throw new Error("B02 authenticated session organization scope changed");
-    }
-    const authAssurance = sessionAssurance(session, requiredAssurance, checkedAt);
-
-    let licenseeId = databaseLicenseeId;
-    let organizationId = databaseOrganizationId;
-    let manufacturerId: string | null = null;
-    if (platformRoles.has(actor.role)) {
-      licenseeId = null;
-      organizationId = null;
-    } else if (isB02ManufacturerRole(actor.role)) {
-      manufacturerId = actor.id;
-      await installCanonicalDbContext(tx, {
-        userId: actor.id,
-        role: actor.role,
-        organizationId: null,
-        licenseeId: null,
-        manufacturerId,
-        authAssurance,
-        requestId,
-        purpose: "scope-revalidation",
-      });
-      const scope = await loadB02ManufacturerScope(tx, {
-        manufacturerId,
-        requestedLicenseeId: claims.licenseeId,
-        requestedOrganizationId: claims.orgId,
-        requestedScopeVersion: claims.scopeVersion,
-      });
-      licenseeId = scope.licenseeId;
-      organizationId = scope.organizationId;
-    } else {
-      const claimedLicenseeId = String(claims.licenseeId || "").trim();
-      const claimedOrganizationId = String(claims.orgId || "").trim();
-      if ((claimedLicenseeId && claimedLicenseeId !== databaseLicenseeId) ||
-          (claimedOrganizationId && claimedOrganizationId !== databaseOrganizationId)) {
-        throw new Error("B02 authenticated actor tenant scope changed");
+      purpose: requirement.purpose,
+    }, async (tx, verified) => {
+      if (requirement.assurance === "mfa-verified") {
+        await requireRecentMfaSession({
+          sessionId,
+          checkedAt: new Date(),
+          maxAgeMinutes: getAdminStepUpWindowMinutes(),
+        }, tx);
       }
+      const context: CanonicalDbContext = { ...verified, purpose: requirement.purpose };
+      await installCanonicalDbContext(tx, context);
+      return callback(tx, context);
+    }, runner);
+  } catch (error) {
+    if (
+      isCanonicalAuthDenial(error) ||
+      isRecentMfaDenial(error) ||
+      (error instanceof Error && /AUTH_SESSION_CAPABILITY|RECENT_MFA_DENIED/.test(error.message))
+    ) {
+      throw new Error("B02 authenticated capability is stale or insufficient");
     }
-
-    const context: CanonicalDbContext = {
-      userId: actor.id,
-      role: actor.role,
-      organizationId,
-      licenseeId,
-      manufacturerId,
-      authAssurance,
-      requestId,
-      purpose: operationPurpose,
-    };
-    await installCanonicalDbContext(tx, context);
-    return callback(tx, context);
-  });
+    throw error;
+  }
 };
 
 export const withB02CustomerRequest = async <T>(

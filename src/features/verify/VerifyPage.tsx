@@ -1,4 +1,4 @@
-import { useLocation } from "react-router-dom";
+import { useLocation } from "react-router";
 
 import VerifyExperience from "@/features/verify/components/VerifyExperience";
 import { LegalFooter } from "@/components/trust/LegalFooter";

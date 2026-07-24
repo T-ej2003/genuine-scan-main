@@ -77,8 +77,12 @@ export const createPrintingOperationsApi = (core: ApiClientCore) => ({
       decision,
       stablePrinterPayloadSignature(decisionNote),
     ]);
+    const endpoint =
+      decision === "approve"
+        ? `/manufacturer/print-reissue-requests/${encodeURIComponent(requestId)}/approve`
+        : `/manufacturer/print-reissue-requests/${encodeURIComponent(requestId)}/reject`;
     return controlledPrinterMutation(actionKey, () =>
-      core.request<any>(`/manufacturer/print-reissue-requests/${encodeURIComponent(requestId)}/${decision}`, {
+      core.request<any>(endpoint, {
         method: "POST",
         headers: { "x-idempotency-key": actionKey },
         body: JSON.stringify({ decisionNote }),

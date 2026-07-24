@@ -720,11 +720,6 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     });
   },
 
-  async trackSupportTicket(reference: string, email?: string) {
-    const query = email ? `?email=${encodeURIComponent(email)}` : "";
-    return core.request(`/support/tickets/track/${encodeURIComponent(reference)}${query}`);
-  },
-
   async createSupportIssueReport(formData: FormData) {
     return core.request(`/support/reports`, {
       method: "POST",

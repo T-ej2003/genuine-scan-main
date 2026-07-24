@@ -103,12 +103,19 @@ export const validateGeneratedPackage = ({ manifest, policies, privileges, comma
     ensure(equal(policy.columns, rule.allowedColumns || []), `${policy.policyName} columns drifted from its source rule`);
   }
 
-  const riskUserPolicies = directPolicies.filter((policy) => policy.table === "User" && policy.workflowId === "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics");
-  ensure(riskUserPolicies.length === 2 && riskUserPolicies.every((policy) =>
-    policy.scopePredicate.includes('"id"=app_rls.current_user_id()') && policy.scopePredicate.includes('app_rls.manufacturer_scope_valid("id")')
-  ), "Risk analytics User policies lost actor hydration or validated manufacturer scope");
-  const platformRiskPolicies = directPolicies.filter((policy) => policy.workflowId === "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics" && policy.actors.includes("platform-admin"));
-  ensure(platformRiskPolicies.length === 12 && platformRiskPolicies.every((policy) => policy.assurance === "mfa-verified"), "Frozen platform risk analytics boundary is not exact and MFA-bound");
+  const riskProfiles = namedProfiles.filter((profile) => profile.workflowId === "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics");
+  ensure(riskProfiles.length === 2 && equal(riskProfiles.map((profile) => profile.actorClass), ["licensee-admin", "platform-admin"]) &&
+    riskProfiles.every((profile) =>
+      profile.functionSignature === "app_rls.risk_analytics_snapshot(text,text,text,text,text,integer,integer,timestamp without time zone)" &&
+      equal(profile.purposeCodes, ["tenant-risk-analytics"])
+    ) &&
+    riskProfiles.find((profile) => profile.actorClass === "platform-admin")?.minimumAssurance === "mfa-verified",
+  "Risk analytics named-function boundary is incomplete or weakens platform assurance");
+  const riskUserPolicy = policies.rows.find((policy) => policy.table === "User" && policy.policyName === "full_rls_internal_owner_user_select");
+  ensure(riskUserPolicy?.scopePredicate.includes('"id"=app_rls.current_user_id()') &&
+    riskUserPolicy.scopePredicate.includes("app_rls.current_purpose()='tenant-risk-analytics'") &&
+    riskUserPolicy.scopePredicate.includes("\"role\" IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')"),
+  "Risk analytics owner policy lost actor hydration or bounded manufacturer projection");
   const auditUserPolicies = directPolicies.filter((policy) => policy.table === "User" && policy.workflowId === "workflow-http-backend-src-controllers-audit-controller-ts-get-logs");
   ensure(auditUserPolicies.length === 2 && auditUserPolicies.every((policy) => policy.scopePredicate.includes('"id" = app_rls.current_user_id()')), "Audit User policies lost actor-self scope");
 

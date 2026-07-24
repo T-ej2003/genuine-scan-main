@@ -12,6 +12,7 @@ const {
 
 const request = (user) => ({
   user,
+  databaseSessionCapability: "a".repeat(43),
   requestId: "req-b02-001",
   get: () => undefined,
 });
@@ -20,40 +21,33 @@ const runnerFor = (tx) => ({
   $transaction: async (callback) => callback(tx),
 });
 
-test("B02 authenticates with bootstrap self-read before any protected delegate", async () => {
+test("B02 verifies the database capability before any protected delegate", async () => {
   const events = [];
   const now = new Date();
+  const rows = [
+    [{
+      sessionId: "session-db",
+      userId: "user-db",
+      role: "LICENSEE_ADMIN",
+      organizationId: "org-db",
+      licenseeId: "lic-db",
+      assurance: "ADMIN_MFA",
+    }],
+    [{
+      userId: "user-db",
+      role: "LICENSEE_ADMIN",
+      organizationId: "org-db",
+      licenseeId: "lic-db",
+      manufacturerId: null,
+      authAssurance: "mfa-verified",
+    }],
+    [{ verifiedAt: new Date(now.getTime() - 30_000) }],
+  ];
   const tx = {
     $executeRaw: async () => { events.push("context"); return 1; },
-    user: {
-      findFirst: async (args) => {
-        events.push("user-self");
-        assert.deepEqual(args.where, {
-          id: "user-db",
-          isActive: true,
-          status: "ACTIVE",
-          disabledAt: null,
-          deletedAt: null,
-        });
-        assert.deepEqual(Object.keys(args.select).sort(), ["id", "licenseeId", "orgId", "role"]);
-        return { id: "user-db", role: "LICENSEE_ADMIN", licenseeId: "lic-db", orgId: "org-db" };
-      },
-    },
-    refreshToken: {
-      findFirst: async (args) => {
-        events.push("session-self");
-        assert.equal(args.where.id, "session-db");
-        assert.equal(args.where.userId, "user-db");
-        assert.equal(args.where.revokedAt, null);
-        return {
-          id: "session-db",
-          userId: "user-db",
-          orgId: "org-db",
-          authenticatedAt: new Date(now.getTime() - 60_000),
-          mfaVerifiedAt: new Date(now.getTime() - 30_000),
-          expiresAt: new Date(now.getTime() + 60_000),
-        };
-      },
+    $queryRaw: async () => {
+      events.push(["capability", "actor", "recent-mfa"][3 - rows.length]);
+      return rows.shift();
     },
   };
 
@@ -73,7 +67,7 @@ test("B02 authenticates with bootstrap self-read before any protected delegate",
     runnerFor(tx)
   );
 
-  assert.deepEqual(events, ["context", "user-self", "context", "session-self", "context", "callback"]);
+  assert.deepEqual(events, ["capability", "actor", "recent-mfa", "context", "callback"]);
   assert.equal(result.role, "LICENSEE_ADMIN", "database role must override the stale/forged claim role");
   assert.equal(result.licenseeId, "lic-db");
   assert.equal(result.authAssurance, "mfa-verified");
@@ -82,22 +76,28 @@ test("B02 authenticates with bootstrap self-read before any protected delegate",
 
 test("B02 denies stale MFA before the protected callback", async () => {
   let callbackRan = false;
-  const now = Date.now();
+  const rows = [
+    [{
+      sessionId: "session-db",
+      userId: "user-db",
+      role: "PLATFORM_SUPER_ADMIN",
+      organizationId: null,
+      licenseeId: null,
+      assurance: "ADMIN_MFA",
+    }],
+    [{
+      userId: "user-db",
+      role: "PLATFORM_SUPER_ADMIN",
+      organizationId: null,
+      licenseeId: null,
+      manufacturerId: null,
+      authAssurance: "mfa-verified",
+    }],
+    [],
+  ];
   const tx = {
     $executeRaw: async () => 1,
-    user: {
-      findFirst: async () => ({ id: "user-db", role: "PLATFORM_SUPER_ADMIN", licenseeId: null, orgId: null }),
-    },
-    refreshToken: {
-      findFirst: async () => ({
-        id: "session-db",
-        userId: "user-db",
-        orgId: null,
-        authenticatedAt: new Date(now - 60_000),
-        mfaVerifiedAt: new Date(now - 31 * 60_000),
-        expiresAt: new Date(now + 60_000),
-      }),
-    },
+    $queryRaw: async () => rows.shift(),
   };
 
   await assert.rejects(
@@ -107,7 +107,7 @@ test("B02 denies stale MFA before the protected callback", async () => {
       async () => { callbackRan = true; },
       runnerFor(tx)
     ),
-    /fresh MFA assurance/
+    /capability is stale or insufficient/
   );
   assert.equal(callbackRan, false);
 });

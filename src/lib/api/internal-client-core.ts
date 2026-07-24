@@ -3,7 +3,7 @@ import { recordSupportNetworkLog, reportSupportRuntimeIssue } from "@/lib/suppor
 
 export const BASE_URL = import.meta.env.VITE_API_URL || "/api";
 
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;

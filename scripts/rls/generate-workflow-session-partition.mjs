@@ -10,10 +10,12 @@ const workflows = JSON.parse(fs.readFileSync(path.join(programRoot, "workflows.j
 const coordinationBaseCommit = "33cbe7ff019efefad242f654f0aa96c44c5b963c";
 // Reviewed after the Session B repository handoff was merged into this
 // integration branch. A changed set must still fail before artefacts are made.
-// Explicit integration-owner handoff: the reviewed B01 SQL contract restored
-// authService.refreshSession to the production inventory. No other Session B
-// workflow ownership changes are accepted by this digest.
-const originalSessionBWorkflowSetSha256 = "078751379c2b3cb9addc46318901bb9af6ccdc56b56748d7d305c84a785ae18f";
+// RF7 integration-owner handoff: exact B01/B02/B03 repositories are mapped to
+// their registered application owners and unreachable pre-RF6 public paths
+// are removed from the production inventory.
+// RF7 restores the active public support-ticket tracker under Session B's
+// exact pre-auth capability; this hash is the reviewed 174-workflow handoff.
+const originalSessionBWorkflowSetSha256 = "900aca6e10ae73acdabaa5000c9ff5b62841f743c020910fdc444daeb147ba59";
 const workflowSetSha256 = (ids) => crypto.createHash("sha256").update(`${[...ids].sort().join("\n")}\n`).digest("hex");
 
 const waves = [
@@ -33,9 +35,10 @@ const waves = [
 const waveById = new Map(waves.map((wave) => [wave.id, wave]));
 const idMatches = (workflow, expression) => expression.test(workflow.id);
 const isPlatformAdminStartup = (workflow) => workflow.executionSurface === "startup" && idMatches(workflow, /services-auth-super-admin-bootstrap-service/);
-const isAuthAccountWorkflow = (workflow) => !isPlatformAdminStartup(workflow) && (Boolean(workflow.preAuthFunctionId) || idMatches(workflow, /backend-src-(?:controllers-(?:account-controller|auth-admin-security-controller|auth-controller|auth-session-controller|licensee-invite-controller)|middleware-auth|services-auth-)/));
+const ownsSource = (workflow, prefix) => workflow.canonicalSourceFiles.some((file) => file.startsWith(prefix));
+const isAuthAccountWorkflow = (workflow) => !isPlatformAdminStartup(workflow) && (ownsSource(workflow, "backend/src/rls-waves/session-b/b01/") || Boolean(workflow.preAuthFunctionId) || idMatches(workflow, /backend-src-(?:controllers-(?:account-controller|auth-admin-security-controller|auth-controller|auth-session-controller|licensee-invite-controller)|middleware-auth|services-auth-)/));
 const isPublicProofWorkflow = (workflow) => !isAuthAccountWorkflow(workflow) && (Boolean(workflow.publicReadContractBoundaryId || workflow.publicAccessClass) || (workflow.authenticationStage === "pre-authentication" && workflow.authorizationBoundaryType === "public-proof-boundary") || workflow.canonicalSourceFiles.some((file) => file.startsWith("backend/src/rls-waves/session-b/b02/")) || idMatches(workflow, /backend-src-(?:controllers-(?:public-intake-controller|support-controller|support-issue-controller|verify-)|services-(?:customer-trust-service|customer-verification-session-service|customer-webauthn-service|public-verification-post-scan-service|support-workflow-service|verification-decision-read-service|verification-decision-service))/));
-const isWorkerDeliveryWorkflow = (workflow) => !isAuthAccountWorkflow(workflow) && !isPublicProofWorkflow(workflow) && (["worker", "scheduled"].includes(workflow.executionSurface) || Boolean(workflow.workerBoundaryId || workflow.producesWorkerBoundaryId) || idMatches(workflow, /backend-src-services-(?:analytics-rollup-service|audit-log-outbox-service|incident-email-service|notification-service|siem-outbox-service)/));
+const isWorkerDeliveryWorkflow = (workflow) => !isAuthAccountWorkflow(workflow) && !isPublicProofWorkflow(workflow) && (ownsSource(workflow, "backend/src/rls-waves/session-b/b03/") || ["worker", "scheduled"].includes(workflow.executionSurface) || Boolean(workflow.workerBoundaryId || workflow.producesWorkerBoundaryId) || idMatches(workflow, /backend-src-services-(?:analytics-rollup-service|audit-log-outbox-service|incident-email-service|notification-service|siem-outbox-service)/));
 const isSessionBWorkflow = (workflow) => isAuthAccountWorkflow(workflow) || isPublicProofWorkflow(workflow) || isWorkerDeliveryWorkflow(workflow);
 const isSystemIntegrationRunner = (workflow) => workflow.id === "workflow-cli-scripts-run-system-integration-mjs-main";
 
@@ -44,6 +47,10 @@ const rules = [
   { id: "b02-public-proof-support-contract", waveId: "b-02-public-proof-support-intake", match: isPublicProofWorkflow },
   { id: "b03-worker-schedule-delivery-contract", waveId: "b-03-workers-scheduled-outbox-delivery", match: isWorkerDeliveryWorkflow },
   { id: "a09-system-integration-owner", waveId: "a-09-system-integration-owner", match: isSystemIntegrationRunner },
+  { id: "a01-session-a-reviewed-repository", waveId: "a-01-tenant-manufacturer-platform-reads", match: (workflow) => !isSessionBWorkflow(workflow) && ownsSource(workflow, "backend/src/rls-waves/session-a/") },
+  { id: "c01-session-c-administration-repository", waveId: "c-01-administration-general-mutations", match: (workflow) => !isSessionBWorkflow(workflow) && ownsSource(workflow, "backend/src/rls-waves/session-c/c01/") },
+  { id: "c02-session-c-audit-repository", waveId: "c-02-audit-fraud-trace-alerts", match: (workflow) => !isSessionBWorkflow(workflow) && ownsSource(workflow, "backend/src/rls-waves/session-c/c02/") },
+  { id: "c03-session-c-governance-repository", waveId: "c-03-governance-policies-incidents-compliance", match: (workflow) => !isSessionBWorkflow(workflow) && ownsSource(workflow, "backend/src/rls-waves/session-c/c03/") },
   { id: "c04-registered-operator-recovery-cli-or-startup", waveId: "c-04-operator-recovery-startup-migration-cli", match: (workflow) => !isSessionBWorkflow(workflow) && !isSystemIntegrationRunner(workflow) && ["cli", "startup"].includes(workflow.executionSurface) },
   { id: "a04-printing-release-root", waveId: "a-04-printing-reissue-recovery-release", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-(?:controllers-(?:print-job-|printer-agent-job-controller|printer-gateway-controller)|printing-|services-(?:batch-print-lifecycle-reconciliation-service|batch-release-service|local-agent|network-direct-print-service|network-ipp-print-service|print|printer|replacement-chain-service|sample-scan-policy-service))/) },
   { id: "a03-batch-qr-root", waveId: "a-03-batch-qr-lifecycle", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-(?:controllers-(?:qr-controller|qr-log-controller|qr-request-controller)|services-(?:batch-allocation-service|batch-state-machine-service|legacy-qr-rotation-service|qr-allocation-service|qr-provenance-backfill-service|qr-service|qr-tracking-analytics-service|scan-insight-service|scan-log-reporting-service))/) },
@@ -94,10 +101,10 @@ const sharedFiles = [...new Set([...referencedA, ...referencedB, ...referencedC]
   .filter((file) => [referencedA, referencedB, referencedC].filter((files) => files.has(file)).length > 1)
   .sort();
 const sessionAOwnedSharedFiles = [
-  "backend/src/services/replacementChainService.ts",
+  "backend/src/controllers/licenseeController.ts",
   "backend/src/routes/index.ts",
 ];
-const sessionBOwnedSharedFiles = [];
+const sessionBOwnedSharedFiles = ["backend/src/middleware/auth.ts"];
 const sessionCOwnedSharedFiles = [
   "backend/src/controllers/incidentController.ts",
   "backend/src/controllers/tracePolicyController.ts",

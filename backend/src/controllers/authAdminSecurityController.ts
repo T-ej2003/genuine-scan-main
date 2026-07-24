@@ -25,8 +25,8 @@ import {
 import { getAdminStepUpWindowMinutes, issueSessionForUser } from "../services/auth/authService";
 import { lockMfaState, MfaAdapterError } from "../services/auth/mfaAdapter";
 import { revokeRefreshTokenById } from "../services/auth/refreshTokenService";
-import { installCanonicalDbContext } from "../lib/canonicalDbContext";
 import {
+  loadAuthenticatedActor,
   loadAuthenticatedPasswordActor,
   requireRecentMfaSession,
 } from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
@@ -60,6 +60,9 @@ const logAuthSecurityFailure = (event: string, userId: string, category: string,
     errorName: error instanceof Error ? error.name : typeof error,
   });
 
+const databaseCapability = (req: Request) =>
+  String((req as Request & { databaseSessionCapability?: string | null }).databaseSessionCapability || "");
+
 export const getAdminMfaStatusController = async (req: Request, res: Response) => {
   const claims = getAuthClaims(req);
   if (!claims?.userId) return res.status(401).json({ success: false, error: "Not authenticated" });
@@ -76,7 +79,12 @@ export const getAdminMfaStatusController = async (req: Request, res: Response) =
   }
 
   try {
-    const status = await getAdminMfaStatus(claims.userId);
+    const status = await withAdminMfaClaimsTransaction(
+      claims,
+      databaseCapability(req),
+      (tx) => getAdminMfaStatus(claims.userId, tx as any),
+      { requestId: getRequestId(req), purpose: "admin-mfa-status" }
+    );
     return res.json({ success: true, data: { required: true, sessionStage: claims.sessionStage, ...status } });
   } catch {
     logger.warn("auth_mfa_status_unavailable", { userId: claims.userId });
@@ -92,11 +100,16 @@ export const beginAdminMfaSetupController = async (req: Request, res: Response) 
   }
 
   try {
-    const setup = await beginAdminMfaSetup({
-      userId: claims.userId,
-      email: claims.email,
-      mode: claims.sessionStage === "ACTIVE" ? "REPLACEMENT" : "FIRST_ENROLLMENT",
-    });
+    const setup = await withAdminMfaClaimsTransaction(
+      claims,
+      databaseCapability(req),
+      (tx) => beginAdminMfaSetup({
+        userId: claims.userId,
+        email: claims.email,
+        mode: claims.sessionStage === "ACTIVE" ? "REPLACEMENT" : "FIRST_ENROLLMENT",
+      }, tx),
+      { requestId: getRequestId(req), purpose: "admin-mfa-enrollment-begin" }
+    );
     return res.json({ success: true, data: setup });
   } catch (error) {
     const conflict = error instanceof Error && [
@@ -123,21 +136,21 @@ export const beginAdminWebAuthnSetupController = async (req: Request, res: Respo
   }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: claims.userId },
-      select: { id: true, email: true, name: true },
-    });
-    if (!user) {
-      return res.status(404).json({ success: false, error: "User not found." });
-    }
-
-    const setup = await beginAdminWebAuthnRegistration({
-      userId: claims.userId,
-      email: user.email,
-      displayName: user.name || user.email,
-      ipHash: hashIp(req.ip),
-      userAgent: normalizeUserAgent(req.get("user-agent")),
-    });
+    const setup = await withAdminMfaClaimsTransaction(
+      claims,
+      databaseCapability(req),
+      async (tx) => {
+        const user = await loadAuthenticatedActor(tx);
+        return beginAdminWebAuthnRegistration({
+          userId: user.id,
+          email: user.email,
+          displayName: user.name || user.email,
+          ipHash: hashIp(req.ip),
+          userAgent: normalizeUserAgent(req.get("user-agent")),
+        }, tx);
+      },
+      { requestId: getRequestId(req), purpose: "admin-webauthn-enrollment-begin" }
+    );
 
     return res.json({ success: true, data: setup });
   } catch (error) {
@@ -166,6 +179,7 @@ export const confirmAdminMfaSetupController = async (req: Request, res: Response
         userAgent,
         now,
         requestId: getRequestId(req),
+        databaseCapability: databaseCapability(req),
         requestedLicenseeId: parsed.data.licenseeId,
         requestedScopeVersion: parsed.data.scopeVersion,
       });
@@ -179,6 +193,7 @@ export const confirmAdminMfaSetupController = async (req: Request, res: Response
       ipHash,
       userAgent,
       requestId: getRequestId(req),
+      databaseCapability: databaseCapability(req),
     });
     return res.json({ success: true, data: { enabled: true } });
   } catch (error: any) {
@@ -219,24 +234,20 @@ export const completeAdminWebAuthnSetupController = async (req: Request, res: Re
   }
 
   try {
-    await completeAdminWebAuthnRegistration({
-      userId: claims.userId,
-      ticket: parsed.data.ticket,
-      label: parsed.data.label,
-      credential: parsed.data.credential,
-    });
-
-    await createAuditLog({
-      userId: claims.userId,
-      action: "AUTH_WEBAUTHN_ENROLLED",
-      entityType: "User",
-      entityId: claims.userId,
-      details: { label: parsed.data.label || "Security key" },
-      ipHash: hashIp(req.ip) || undefined,
-      userAgent: normalizeUserAgent(req.get("user-agent")) || undefined,
-    } as any);
-
-    const status = await getAdminMfaStatus(claims.userId);
+    const status = await withAdminMfaClaimsTransaction(
+      claims,
+      databaseCapability(req),
+      async (tx) => {
+        await completeAdminWebAuthnRegistration({
+          userId: claims.userId,
+          ticket: parsed.data.ticket,
+          label: parsed.data.label,
+          credential: parsed.data.credential,
+        }, tx);
+        return getAdminMfaStatus(claims.userId, tx as any);
+      },
+      { requestId: getRequestId(req), purpose: "admin-webauthn-enrollment-complete" }
+    );
     return res.json({ success: true, data: { enrolled: true, status } });
   } catch (error) {
     logAuthSecurityFailure("auth_webauthn_setup_complete_failed", claims.userId, "WEBAUTHN_SETUP_COMPLETE_FAILED", error);
@@ -251,16 +262,21 @@ export const beginAdminMfaChallengeController = async (req: Request, res: Respon
     return res.status(403).json({ success: false, error: "MFA is not required for this role." });
   }
 
-  const challenge = await createAdminMfaChallenge({
-    userId: claims.userId,
-    sessionId: claims.sessionStage === "MFA_BOOTSTRAP" ? claims.sessionId || null : null,
-    purpose: claims.sessionStage === "MFA_BOOTSTRAP" ? "admin_login" : "high_risk_action",
-    riskScore: 0,
-    riskLevel: "LOW",
-    reasons: ["Admin login requires MFA confirmation."],
-    ipHash: hashIp(req.ip),
-    userAgent: normalizeUserAgent(req.get("user-agent")),
-  });
+  const challenge = await withAdminMfaClaimsTransaction(
+    claims,
+    databaseCapability(req),
+    (tx) => createAdminMfaChallenge({
+      userId: claims.userId,
+      sessionId: claims.sessionStage === "MFA_BOOTSTRAP" ? claims.sessionId || null : null,
+      purpose: claims.sessionStage === "MFA_BOOTSTRAP" ? "admin_login" : "high_risk_action",
+      riskScore: 0,
+      riskLevel: "LOW",
+      reasons: ["Admin login requires MFA confirmation."],
+      ipHash: hashIp(req.ip),
+      userAgent: normalizeUserAgent(req.get("user-agent")),
+    }, tx as any),
+    { requestId: getRequestId(req), purpose: "admin-mfa-challenge-begin" }
+  );
 
   return res.json({ success: true, data: { ticket: challenge.ticket, expiresAt: challenge.expiresAt } });
 };
@@ -273,12 +289,17 @@ export const beginAdminWebAuthnChallengeController = async (req: Request, res: R
   }
 
   try {
-    const challenge = await beginAdminWebAuthnChallenge({
-      userId: claims.userId,
-      purpose: claims.sessionStage === "MFA_BOOTSTRAP" ? "LOGIN" : "STEP_UP",
-      ipHash: hashIp(req.ip),
-      userAgent: normalizeUserAgent(req.get("user-agent")),
-    });
+    const challenge = await withAdminMfaClaimsTransaction(
+      claims,
+      databaseCapability(req),
+      (tx) => beginAdminWebAuthnChallenge({
+        userId: claims.userId,
+        purpose: claims.sessionStage === "MFA_BOOTSTRAP" ? "LOGIN" : "STEP_UP",
+        ipHash: hashIp(req.ip),
+        userAgent: normalizeUserAgent(req.get("user-agent")),
+      }, tx),
+      { requestId: getRequestId(req), purpose: "admin-webauthn-challenge-begin" }
+    );
 
     return res.json({ success: true, data: challenge });
   } catch (error: any) {
@@ -306,7 +327,7 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
     const ipHash = hashIp(req.ip);
     const userAgent = normalizeUserAgent(req.get("user-agent"));
     const now = new Date();
-    const outcome = await withAdminMfaClaimsTransaction(claims, async (tx) => {
+    const outcome = await withAdminMfaClaimsTransaction(claims, databaseCapability(req), async (tx) => {
       try {
         const completed = await completeAdminMfaChallenge({
           userId: claims.userId,
@@ -332,23 +353,6 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
           requestedLicenseeId: parsed.data.licenseeId ?? claims.licenseeId,
           requestedScopeVersion: parsed.data.scopeVersion ?? claims.scopeVersion,
         }, tx);
-        await tx.auditLogOutbox.create({
-          data: {
-            payload: {
-              userId: claims.userId,
-              action: "AUTH_MFA_LOGIN_COMPLETE",
-              entityType: "User",
-              entityId: claims.userId,
-              details: {
-                riskScore: completed.riskScore,
-                riskLevel: completed.riskLevel,
-                reasons: completed.reasons,
-              },
-              ipHash,
-              userAgent,
-            },
-          },
-        });
         return { ok: true as const, session };
       } catch (error) {
         if (error instanceof MfaAdapterError && error.commitFailure) {
@@ -419,19 +423,14 @@ export const completeAdminWebAuthnChallengeController = async (req: Request, res
     const requestId = getRequestId(req);
     const hasCurrentRefresh = Boolean(getRefreshTokenFromRequest(req));
     const currentSessionId = claims.sessionId;
-    const session = await withAdminMfaClaimsTransaction(claims, async (tx, context) => {
+    const session = await withAdminMfaClaimsTransaction(claims, databaseCapability(req), async (tx, context) => {
       const completed = await completeAdminWebAuthnChallenge({
         userId: claims.userId,
         ticket: parsed.data.ticket,
         credential: parsed.data.credential,
       }, tx);
-      const steppedUp = await installCanonicalDbContext(tx, {
-        ...context,
-        authAssurance: "step-up-verified",
-        purpose: "admin-webauthn-challenge-complete",
-      });
       const nextSession = await issueSessionForUser({
-        userId: steppedUp.userId,
+        userId: context.userId,
         ipHash,
         userAgent,
         authAssurance: "ADMIN_MFA",
@@ -446,7 +445,7 @@ export const completeAdminWebAuthnChallengeController = async (req: Request, res
       if (hasCurrentRefresh) {
         await revokeRefreshTokenById({
           sessionId: currentSessionId,
-          userId: steppedUp.userId,
+          userId: context.userId,
           reason: "STEP_UP_REPLACED",
           now,
         }, tx);
@@ -461,11 +460,11 @@ export const completeAdminWebAuthnChallengeController = async (req: Request, res
         userAgent,
       }, undefined, tx, {
         requestId,
-        organizationId: steppedUp.organizationId,
-        licenseeId: steppedUp.licenseeId,
-        manufacturerId: steppedUp.manufacturerId,
-        initiatingUserId: steppedUp.userId,
-        initiatingActorRoleSnapshot: steppedUp.role,
+        organizationId: context.organizationId,
+        licenseeId: context.licenseeId,
+        manufacturerId: context.manufacturerId,
+        initiatingUserId: context.userId,
+        initiatingActorRoleSnapshot: context.role,
       });
       return nextSession;
     }, { requestId, purpose: "admin-webauthn-challenge-proof" });
@@ -497,6 +496,7 @@ export const rotateAdminMfaBackupCodesController = async (req: Request, res: Res
   try {
     const rotated = await withAdminMfaClaimsTransaction(
       claims,
+      databaseCapability(req),
       (tx) => rotateAdminMfaBackupCodes({ userId: claims.userId, code: parsed.data.code }, tx),
       { requestId: getRequestId(req), purpose: "admin-mfa-backup-code-rotation" }
     );
@@ -523,7 +523,7 @@ export const disableAdminMfaController = async (req: Request, res: Response) => 
   try {
     const ipHash = hashIp(req.ip);
     const userAgent = normalizeUserAgent(req.get("user-agent"));
-    await withAdminMfaClaimsTransaction(claims, async (tx) => {
+    await withAdminMfaClaimsTransaction(claims, databaseCapability(req), async (tx) => {
       await lockMfaState(tx, claims.userId);
       const user = await loadAuthenticatedPasswordActor(tx);
       if (
@@ -595,36 +595,33 @@ export const deleteAdminWebAuthnCredentialController = async (req: Request, res:
     });
   }
 
-  const currentStatus = await getAdminMfaStatus(claims.userId);
-  if (!currentStatus.totpEnabled && (currentStatus.webauthnCredentials?.length || 0) <= 1) {
-    return res.status(409).json({
-      success: false,
-      error: "Add another MFA method before removing the last WebAuthn credential.",
-    });
-  }
-
   try {
-    const deleted = await deleteAdminWebAuthnCredential({
-      userId: claims.userId,
-      credentialId: paramsParsed.data.id,
-    });
+    const result = await withAdminMfaClaimsTransaction(
+      claims,
+      databaseCapability(req),
+      async (tx) => {
+        const currentStatus = await getAdminMfaStatus(claims.userId, tx as any);
+        if (!currentStatus.totpEnabled && (currentStatus.webauthnCredentials?.length || 0) <= 1) {
+          throw new Error("WEBAUTHN_LAST_FACTOR");
+        }
+        const deleted = await deleteAdminWebAuthnCredential({
+          userId: claims.userId,
+          credentialId: paramsParsed.data.id,
+        }, tx);
+        const status = deleted.deleted ? await getAdminMfaStatus(claims.userId, tx as any) : null;
+        return { deleted, status };
+      },
+      { requestId: getRequestId(req), purpose: "admin-webauthn-credential-delete" }
+    );
+    const { deleted, status } = result;
     if (!deleted.deleted) {
       return res.status(404).json({ success: false, error: "WebAuthn credential not found." });
     }
-
-    await createAuditLog({
-      userId: claims.userId,
-      action: "AUTH_WEBAUTHN_CREDENTIAL_REMOVED",
-      entityType: "User",
-      entityId: claims.userId,
-      details: { credentialId: paramsParsed.data.id },
-      ipHash: hashIp(req.ip) || undefined,
-      userAgent: normalizeUserAgent(req.get("user-agent")) || undefined,
-    } as any);
-
-    const status = await getAdminMfaStatus(claims.userId);
     return res.json({ success: true, data: { deleted: true, status } });
   } catch (error) {
+    if (error instanceof Error && error.message === "WEBAUTHN_LAST_FACTOR") {
+      return res.status(409).json({ success: false, error: "Add another MFA method before removing the last WebAuthn credential." });
+    }
     logAuthSecurityFailure("auth_webauthn_credential_delete_failed", claims.userId, "WEBAUTHN_CREDENTIAL_DELETE_FAILED", error);
     return res.status(500).json({ success: false, error: "Could not remove that WebAuthn credential." });
   }

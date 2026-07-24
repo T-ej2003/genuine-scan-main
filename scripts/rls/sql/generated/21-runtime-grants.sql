@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9'
+    AND source_contract_sha256='cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0'
     AND administrator_role='certification-administrator'
     AND phase='context-helpers-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'runtime grants lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -40,22 +40,13 @@ GRANT USAGE ON SCHEMA public,app_rls TO "mscqr_rls_cert_app";
 GRANT USAGE ON SCHEMA public,app_rls TO "mscqr_rls_cert_read";
 GRANT USAGE ON SCHEMA public,app_rls TO "mscqr_rls_cert_worker","mscqr_rls_cert_scheduled";
 GRANT USAGE ON SCHEMA public,app_rls TO "mscqr_rls_cert_operator";
-GRANT INSERT ("action", "details", "entityId", "entityType", "id", "licenseeId", "orgId", "userId") ON TABLE public."AuditLog" TO "mscqr_rls_cert_app";
 GRANT SELECT ("action", "createdAt", "details", "entityId", "entityType", "id", "licenseeId", "orgId", "userId") ON TABLE public."AuditLog" TO "mscqr_rls_cert_app";
-GRANT SELECT ("id", "licenseeId", "manufacturerId", "name") ON TABLE public."Batch" TO "mscqr_rls_cert_app";
-GRANT SELECT ("id", "licenseeId") ON TABLE public."Incident" TO "mscqr_rls_cert_app";
-GRANT SELECT ("id", "isActive", "orgId", "suspendedAt") ON TABLE public."Licensee" TO "mscqr_rls_cert_app";
-GRANT SELECT ("licenseeId", "manufacturerId") ON TABLE public."ManufacturerLicenseeLink" TO "mscqr_rls_cert_app";
-GRANT SELECT ("id", "isActive") ON TABLE public."Organization" TO "mscqr_rls_cert_app";
-GRANT SELECT ("acknowledgedAt", "batchId", "id", "incidentId", "licenseeId", "manufacturerId", "policyRuleId", "qrCodeId") ON TABLE public."PolicyAlert" TO "mscqr_rls_cert_app";
-GRANT SELECT ("id", "isActive", "licenseeId", "manufacturerId", "orgId") ON TABLE public."PolicyRule" TO "mscqr_rls_cert_app";
-GRANT SELECT ("batchId", "id", "latitude", "licenseeId", "longitude", "qrCodeId", "scannedAt") ON TABLE public."QrScanLog" TO "mscqr_rls_cert_app";
-GRANT SELECT ("geoDriftThresholdKm", "licenseeId", "multiScanThreshold", "velocitySpikeThresholdPerMin") ON TABLE public."SecurityPolicy" TO "mscqr_rls_cert_app";
+GRANT SELECT ("brandName", "createdAt", "description", "id", "isActive", "location", "metadata", "name", "orgId", "prefix", "supportEmail", "supportPhone", "suspendedAt", "suspendedReason", "updatedAt", "website") ON TABLE public."Licensee" TO "mscqr_rls_cert_app";
+GRANT SELECT ("createdAt", "id", "isActive", "name", "updatedAt") ON TABLE public."Organization" TO "mscqr_rls_cert_app";
+GRANT SELECT ("authenticatedAt", "createdAt", "expiresAt", "id", "lastUsedAt", "mfaVerifiedAt", "orgId", "revokedAt", "revokedReason", "rotationClaimedAt", "rotationCompletedAt", "rotationRequestId", "sessionCapabilityAssurance", "sessionCapabilityExpiresAt", "sessionCapabilityLastUsedAt", "sessionCapabilityRevokedAt", "sessionCapabilityRevokedReason", "userId") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_app";
 GRANT SELECT ("batchId", "createdAt", "details", "eventType", "id", "licenseeId", "manufacturerId", "qrCodeId", "sourceAction", "userId") ON TABLE public."TraceEvent" TO "mscqr_rls_cert_app";
-GRANT SELECT ("deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status") ON TABLE public."User" TO "mscqr_rls_cert_app";
+GRANT SELECT ("id", "name") ON TABLE public."User" TO "mscqr_rls_cert_app";
 GRANT USAGE ON TYPE public."TraceEventType" TO "mscqr_rls_cert_app";
-GRANT USAGE ON TYPE public."UserRole" TO "mscqr_rls_cert_app";
-GRANT USAGE ON TYPE public."UserStatus" TO "mscqr_rls_cert_app";
 GRANT SELECT ("id", "orgId", "userId", "tokenHash", "expiresAt", "createdAt", "createdIpHash", "createdUserAgent", "authenticatedAt", "mfaVerifiedAt", "lastUsedAt", "revokedAt", "revokedReason", "replacedByTokenHash", "rotationRequestId", "rotationClaimedAt", "rotationCompletedAt", "sessionCapabilityHash", "sessionCapabilityHashVersion", "sessionCapabilityAssurance", "sessionCapabilityExpiresAt", "sessionCapabilityLastUsedAt", "sessionCapabilityRevokedAt", "sessionCapabilityRevokedReason") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "orgId", "userId", "tokenHash", "expiresAt", "createdAt", "createdIpHash", "createdUserAgent", "authenticatedAt", "mfaVerifiedAt", "lastUsedAt") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("revokedAt", "revokedReason", "lastUsedAt", "replacedByTokenHash", "rotationRequestId", "rotationClaimedAt", "rotationCompletedAt", "sessionCapabilityHash", "sessionCapabilityHashVersion", "sessionCapabilityAssurance", "sessionCapabilityExpiresAt", "sessionCapabilityLastUsedAt", "sessionCapabilityRevokedAt", "sessionCapabilityRevokedReason") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
@@ -83,25 +74,52 @@ GRANT UPDATE ("revokedAt", "revokedReason", "lastUsedAt", "sessionCapabilityRevo
 GRANT SELECT ("id", "orgId", "name", "isActive", "suspendedAt") ON TABLE public."Licensee" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "isActive") ON TABLE public."Organization" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "payload", "updatedAt") ON TABLE public."AuditLogOutbox" TO "mscqr_rls_cert_auth_owner";
-GRANT SELECT ("id", "email", "pendingEmail", "name", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt", "emailVerifiedAt", "pendingEmailRequestedAt", "createdAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
-GRANT UPDATE ("passwordHash", "failedLoginAttempts", "lockedUntil", "lastLoginAt", "updatedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "email", "pendingEmail", "passwordHash", "name", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt", "emailVerifiedAt", "pendingEmailRequestedAt", "createdAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("passwordHash", "pendingEmail", "pendingEmailRequestedAt", "name", "failedLoginAttempts", "lockedUntil", "lastLoginAt", "updatedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "userId", "orgId", "tokenHash", "expiresAt", "createdAt", "createdIpHash", "createdUserAgent", "authenticatedAt", "mfaVerifiedAt", "lastUsedAt", "revokedAt", "revokedReason", "sessionCapabilityHash", "sessionCapabilityHashVersion", "sessionCapabilityExpiresAt", "sessionCapabilityRevokedAt") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "orgId", "userId", "tokenHash", "expiresAt", "createdAt", "createdIpHash", "createdUserAgent", "authenticatedAt", "mfaVerifiedAt", "lastUsedAt") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
-GRANT UPDATE ("revokedAt", "revokedReason", "lastUsedAt", "sessionCapabilityRevokedAt", "sessionCapabilityRevokedReason") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("authenticatedAt", "revokedAt", "revokedReason", "lastUsedAt", "sessionCapabilityRevokedAt", "sessionCapabilityRevokedReason") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "purpose", "usedAt") ON TABLE public."EmailVerificationToken" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "email", "pendingEmail", "purpose", "tokenHash", "secretVersion", "expiresAt", "createdAt", "createdIpHash", "userAgentHash") ON TABLE public."EmailVerificationToken" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("usedAt") ON TABLE public."EmailVerificationToken" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "orgId", "name", "prefix", "brandName", "isActive", "suspendedAt") ON TABLE public."Licensee" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "isActive") ON TABLE public."Organization" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("manufacturerId", "licenseeId") ON TABLE public."ManufacturerLicenseeLink" TO "mscqr_rls_cert_auth_owner";
-GRANT SELECT ("userId", "isEnabled", "lastUsedAt") ON TABLE public."AdminMfaCredential" TO "mscqr_rls_cert_auth_owner";
-GRANT SELECT ("userId", "lastUsedAt") ON TABLE public."AdminWebAuthnCredential" TO "mscqr_rls_cert_auth_owner";
-GRANT SELECT ("userId", "type", "lastUsedAt", "disabledAt") ON TABLE public."UserMfaFactor" TO "mscqr_rls_cert_auth_owner";
-GRANT SELECT ("userId", "usedAt") ON TABLE public."UserBackupCode" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "secretCiphertext", "secretIv", "secretTag", "backupCodesHash", "isEnabled", "verifiedAt", "lastUsedAt", "createdAt", "updatedAt") ON TABLE public."AdminMfaCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "secretCiphertext", "secretIv", "secretTag", "backupCodesHash", "isEnabled", "verifiedAt", "lastUsedAt", "createdAt", "updatedAt") ON TABLE public."AdminMfaCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("secretCiphertext", "secretIv", "secretTag", "backupCodesHash", "isEnabled", "verifiedAt", "lastUsedAt", "updatedAt") ON TABLE public."AdminMfaCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "label", "credentialId", "publicKeySpki", "publicKeyAlgorithm", "counter", "transports", "lastUsedAt", "createdAt", "updatedAt") ON TABLE public."AdminWebAuthnCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "label", "credentialId", "publicKeySpki", "publicKeyAlgorithm", "counter", "transports", "lastUsedAt", "createdAt", "updatedAt") ON TABLE public."AdminWebAuthnCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("label", "publicKeySpki", "publicKeyAlgorithm", "counter", "transports", "lastUsedAt", "updatedAt") ON TABLE public."AdminWebAuthnCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT DELETE ON TABLE public."AdminWebAuthnCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "type", "label", "credentialId", "publicKey", "counter", "transports", "credentialDeviceType", "credentialBackedUp", "secretCiphertext", "secretIv", "secretTag", "legacySource", "legacyCredentialId", "createdAt", "updatedAt", "lastUsedAt", "disabledAt") ON TABLE public."UserMfaFactor" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "type", "label", "credentialId", "publicKey", "counter", "transports", "credentialDeviceType", "credentialBackedUp", "secretCiphertext", "secretIv", "secretTag", "legacySource", "legacyCredentialId", "createdAt", "updatedAt", "lastUsedAt", "disabledAt") ON TABLE public."UserMfaFactor" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("userId", "type", "label", "credentialId", "publicKey", "counter", "transports", "credentialDeviceType", "credentialBackedUp", "secretCiphertext", "secretIv", "secretTag", "legacySource", "legacyCredentialId", "updatedAt", "lastUsedAt", "disabledAt") ON TABLE public."UserMfaFactor" TO "mscqr_rls_cert_auth_owner";
+GRANT DELETE ON TABLE public."UserMfaFactor" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "codeHash", "usedAt", "createdAt") ON TABLE public."UserBackupCode" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "codeHash", "createdAt") ON TABLE public."UserBackupCode" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("usedAt") ON TABLE public."UserBackupCode" TO "mscqr_rls_cert_auth_owner";
+GRANT DELETE ON TABLE public."UserBackupCode" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "userId", "riskScore", "riskLevel", "reasons", "ipHash", "userAgentHash", "createdAt") ON TABLE public."AuthSessionRiskSignal" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "userId", "ticketHash", "purpose", "riskScore", "riskLevel", "reasons", "createdIpHash", "createdUserAgentHash", "attempts", "maxAttempts", "createdAt", "updatedAt", "expiresAt") ON TABLE public."MfaLoginChallenge" TO "mscqr_rls_cert_auth_owner";
-GRANT INSERT ("id", "payload", "requestId", "organizationId", "initiatingUserId", "initiatingActorRoleSnapshot", "expiresAt", "updatedAt") ON TABLE public."AuditLogOutbox" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "ticketHash", "purpose", "riskScore", "riskLevel", "reasons", "createdIpHash", "createdUserAgentHash", "attempts", "maxAttempts", "expiresAt", "consumedAt") ON TABLE public."MfaLoginChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("attempts", "updatedAt", "consumedAt") ON TABLE public."MfaLoginChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "ticketHash", "sessionBindingHash", "purpose", "riskScore", "riskLevel", "reasons", "createdIpHash", "createdUserAgentHash", "attempts", "maxAttempts", "expiresAt", "consumedAt", "supersededAt") ON TABLE public."AuthMfaChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "ticketHash", "sessionBindingHash", "purpose", "riskScore", "riskLevel", "reasons", "createdIpHash", "createdUserAgentHash", "attempts", "maxAttempts", "createdAt", "updatedAt", "expiresAt") ON TABLE public."AuthMfaChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("attempts", "updatedAt", "consumedAt", "supersededAt") ON TABLE public."AuthMfaChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "purpose", "ticketHash", "challengeHash", "credentialIds", "createdIpHash", "createdUserAgentHash", "origin", "rpId", "createdAt", "expiresAt", "consumedAt") ON TABLE public."AuthWebAuthnChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "purpose", "ticketHash", "challengeHash", "credentialIds", "createdIpHash", "createdUserAgentHash", "origin", "rpId", "createdAt", "expiresAt") ON TABLE public."AuthWebAuthnChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("consumedAt") ON TABLE public."AuthWebAuthnChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "payload", "requestId", "organizationId", "licenseeId", "initiatingUserId", "initiatingActorRoleSnapshot", "expiresAt", "updatedAt") ON TABLE public."AuditLogOutbox" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "userId", "expiresAt", "revokedAt", "sessionCapabilityHash", "sessionCapabilityHashVersion", "sessionCapabilityExpiresAt", "sessionCapabilityRevokedAt") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
-GRANT SELECT ("id", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "name", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "orgId", "isActive", "suspendedAt") ON TABLE public."Licensee" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "isActive") ON TABLE public."Organization" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("manufacturerId", "licenseeId") ON TABLE public."ManufacturerLicenseeLink" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details", "ipAddress", "userAgent", "createdAt") ON TABLE public."AuditLog" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details") ON TABLE public."AuditLog" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "eventType", "payload", "updatedAt") ON TABLE public."SecurityEventOutbox" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "licenseeId", "status", "triggerType", "scheduledScheduleId", "periodFrom", "periodTo", "fileName", "storageKey", "integrityHash", "signatureAlgorithm", "summary", "errorMessage", "startedByUserId", "startedAt", "finishedAt", "createdAt", "updatedAt") ON TABLE public."CompliancePackJob" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "licenseeId", "status", "triggerType", "periodFrom", "periodTo", "startedByUserId", "startedAt", "updatedAt") ON TABLE public."CompliancePackJob" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("status", "fileName", "storageKey", "integrityHash", "signatureAlgorithm", "summary", "errorMessage", "finishedAt", "updatedAt") ON TABLE public."CompliancePackJob" TO "mscqr_rls_cert_auth_owner";
@@ -114,6 +132,37 @@ GRANT SELECT ("incidentId", "currentStage") ON TABLE public."IncidentHandoff" TO
 GRANT SELECT ("licenseeId", "action", "createdAt") ON TABLE public."AuditLog" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("licenseeId", "retentionDays") ON TABLE public."EvidenceRetentionPolicy" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "payload", "updatedAt") ON TABLE public."AuditLogOutbox" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "code", "licenseeId") ON TABLE public."QRCode" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "qrCodeId", "qrCodeValue", "licenseeId", "reportedBy", "customerName", "customerEmail", "customerPhone", "customerCountry", "preferredContactMethod", "consentToContact", "incidentType", "severity", "severityOverridden", "description", "photos", "purchasePlace", "purchaseDate", "productBatchNo", "locationLat", "locationLng", "locationName", "locationCountry", "locationRegion", "locationCity", "ipHash", "userAgentHash", "deviceFingerprintHash", "status", "priority", "assignedToUserId", "slaDueAt", "tags", "internalNotes", "resolutionSummary", "resolutionOutcome", "createdAt", "updatedAt") ON TABLE public."Incident" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "qrCodeId", "qrCodeValue", "licenseeId", "reportedBy", "customerName", "customerEmail", "customerPhone", "customerCountry", "preferredContactMethod", "consentToContact", "incidentType", "severity", "description", "photos", "purchasePlace", "purchaseDate", "productBatchNo", "locationLat", "locationLng", "locationName", "locationCountry", "locationRegion", "locationCity", "ipHash", "userAgentHash", "deviceFingerprintHash", "status", "priority", "slaDueAt", "tags") ON TABLE public."Incident" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("status", "assignedToUserId", "internalNotes", "tags", "severity", "severityOverridden", "priority", "resolutionSummary", "resolutionOutcome", "updatedAt") ON TABLE public."Incident" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "incidentId", "actorType", "actorUserId", "eventType", "eventPayload", "createdAt") ON TABLE public."IncidentEvent" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "incidentId", "actorType", "actorUserId", "eventType", "eventPayload") ON TABLE public."IncidentEvent" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "incidentId", "fileUrl", "storageKey", "fileType", "uploadedByUserId", "uploadedBy") ON TABLE public."IncidentEvidence" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "incidentId", "direction", "channel", "toAddress", "subject", "bodyPreview", "attemptedFrom", "usedFrom", "replyTo", "providerMessageId", "errorMessage", "status", "createdAt") ON TABLE public."IncidentCommunication" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "licenseeId", "alertType", "severity", "message", "score", "policyRuleId", "incidentId", "batchId", "qrCodeId", "manufacturerId", "acknowledgedAt", "createdAt") ON TABLE public."PolicyAlert" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("incidentId") ON TABLE public."PolicyAlert" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "licenseeId", "key", "enabled", "config", "updatedByUserId", "createdAt", "updatedAt") ON TABLE public."TenantFeatureFlag" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "licenseeId", "key", "enabled", "config", "updatedByUserId", "updatedAt") ON TABLE public."TenantFeatureFlag" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("enabled", "config", "updatedByUserId", "updatedAt") ON TABLE public."TenantFeatureFlag" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "licenseeId", "retentionDays", "purgeEnabled", "exportBeforePurge", "legalHoldTags", "updatedByUserId", "createdAt", "updatedAt") ON TABLE public."EvidenceRetentionPolicy" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "licenseeId", "retentionDays", "purgeEnabled", "exportBeforePurge", "legalHoldTags", "updatedAt") ON TABLE public."EvidenceRetentionPolicy" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("retentionDays", "purgeEnabled", "exportBeforePurge", "legalHoldTags", "updatedByUserId", "updatedAt") ON TABLE public."EvidenceRetentionPolicy" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "licenseeId", "status", "mode", "cutoffAt", "recordsEvaluated", "recordsPurged", "recordsExported", "summary", "startedByUserId", "startedAt", "finishedAt") ON TABLE public."EvidenceRetentionJob" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "actionKey", "status", "requestedByUserId", "reviewedByUserId", "executedByUserId", "licenseeId", "payload", "expiresAt", "executedAt") ON TABLE public."SensitiveActionApproval" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("status", "executedByUserId", "executedAt", "updatedAt") ON TABLE public."SensitiveActionApproval" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "actionKey", "status", "requestedByUserId", "licenseeId", "entityType", "entityId", "payload", "summary", "requestIpHash", "requestUserAgentHash", "expiresAt", "updatedAt") ON TABLE public."SensitiveActionApproval" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("status", "reviewedByUserId", "reviewNote", "reviewedAt", "updatedAt") ON TABLE public."SensitiveActionApproval" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "orgId", "licenseeId", "manufacturerId", "createdByUserId", "name", "description", "ruleType", "isActive", "threshold", "windowMinutes", "severity", "autoCreateIncident", "incidentSeverity", "incidentPriority", "actionConfig", "createdAt", "updatedAt") ON TABLE public."PolicyRule" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "orgId", "licenseeId", "manufacturerId", "createdByUserId", "name", "description", "ruleType", "isActive", "threshold", "windowMinutes", "severity", "autoCreateIncident", "incidentSeverity", "incidentPriority", "actionConfig", "createdAt", "updatedAt") ON TABLE public."PolicyRule" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("name", "description", "ruleType", "isActive", "threshold", "windowMinutes", "severity", "autoCreateIncident", "incidentSeverity", "incidentPriority", "actionConfig", "updatedAt") ON TABLE public."PolicyRule" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("licenseeId", "multiScanThreshold", "geoDriftThresholdKm", "velocitySpikeThresholdPerMin") ON TABLE public."SecurityPolicy" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "name", "licenseeId", "manufacturerId") ON TABLE public."Batch" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "licenseeId", "batchId", "scanCount") ON TABLE public."QRCode" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "licenseeId", "qrCodeId", "batchId", "latitude", "longitude", "scannedAt") ON TABLE public."QrScanLog" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "licenseeId", "batchId", "qrCodeId", "manufacturerId", "incidentId", "policyRuleId", "acknowledgedAt") ON TABLE public."PolicyAlert" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "licenseeId") ON TABLE public."Incident" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "licenseeId", "orgId", "manufacturerId", "isActive") ON TABLE public."PolicyRule" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "email", "name", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt", "passwordHash", "location", "website", "createdAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "email", "passwordHash", "name", "role", "orgId", "licenseeId", "location", "website", "status", "isActive", "emailVerifiedAt", "updatedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("email", "passwordHash", "name", "orgId", "licenseeId", "location", "website", "status", "isActive", "disabledAt", "deletedAt", "updatedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
@@ -259,6 +308,8 @@ GRANT INSERT ("id", "qrCodeId", "qrCodeValue", "scanEventId", "licenseeId", "rep
 GRANT INSERT ("id", "incidentId", "actorType", "actorUserId", "eventType", "eventPayload", "createdAt") ON TABLE public."IncidentEvent" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "incidentId", "fileUrl", "storageKey", "fileType", "uploadedByUserId", "uploadedBy", "createdAt") ON TABLE public."IncidentEvidence" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "incidentId", "referenceCode", "licenseeId", "customerEmail", "subject", "status", "priority", "assignedToUserId", "slaDueAt", "firstResponseAt", "resolvedAt", "createdAt", "updatedAt") ON TABLE public."SupportTicket" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "incidentId", "referenceCode", "customerEmail", "status", "priority", "updatedAt", "slaDueAt") ON TABLE public."SupportTicket" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("incidentId", "currentStage", "slaDueAt") ON TABLE public."IncidentHandoff" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "referenceCode", "fullName", "workEmail", "companyName", "roleTitle", "country", "monthlyGarmentVolume", "message", "sourcePage", "referrer", "status", "internalNote", "assignedToUserId", "reviewedByUserId", "reviewedAt", "adminEmailDeliveryStatus", "adminEmailErrorCode", "acknowledgementEmailDeliveryStatus", "acknowledgementEmailErrorCode", "createdAt", "updatedAt") ON TABLE public."RequestAccess" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id") ON TABLE public."RequestAccess" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("adminEmailDeliveryStatus", "adminEmailErrorCode", "acknowledgementEmailDeliveryStatus", "acknowledgementEmailErrorCode", "updatedAt") ON TABLE public."RequestAccess" TO "mscqr_rls_cert_auth_owner";
@@ -288,6 +339,25 @@ GRANT SELECT ("id", "eventType", "payload", "jobType", "requestId", "payloadDige
 GRANT INSERT ("id", "eventType", "payload", "jobType", "requestId", "payloadDigest", "idempotencyKey", "organizationId", "licenseeId", "manufacturerId", "initiatingUserId", "expiresAt", "updatedAt") ON TABLE public."SecurityEventOutbox" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("status", "attempts", "nextAttemptAt", "lastError", "sentAt", "claimedAt", "claimLeaseExpiresAt", "sinkEventId", "updatedAt") ON TABLE public."SecurityEventOutbox" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details", "ipAddress", "ipHash", "userAgent") ON TABLE public."AuditLog" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "expiresAt", "revokedAt", "sessionCapabilityHash", "sessionCapabilityHashVersion", "sessionCapabilityExpiresAt", "sessionCapabilityRevokedAt") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "email", "name", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt", "createdAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "orgId", "isActive", "suspendedAt") ON TABLE public."Licensee" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "isActive") ON TABLE public."Organization" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("manufacturerId", "licenseeId") ON TABLE public."ManufacturerLicenseeLink" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "orgId", "licenseeId", "incidentId", "audience", "channel", "type", "title", "body", "data", "readAt", "emailedAt", "createdAt", "updatedAt") ON TABLE public."Notification" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "orgId", "licenseeId", "incidentId", "audience", "channel", "type", "title", "body", "data", "updatedAt") ON TABLE public."Notification" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("readAt", "emailedAt", "updatedAt") ON TABLE public."Notification" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "qrCodeId", "scanEventId", "licenseeId") ON TABLE public."Incident" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "batchId") ON TABLE public."QRCode" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "manufacturerId") ON TABLE public."Batch" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "incidentId", "toAddress", "subject", "bodyPreview", "attemptedFrom", "usedFrom", "replyTo", "providerMessageId", "errorMessage", "status") ON TABLE public."IncidentCommunication" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "incidentId", "direction", "channel", "toAddress", "subject", "bodyPreview", "attemptedFrom", "usedFrom", "replyTo", "status") ON TABLE public."IncidentCommunication" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("providerMessageId", "errorMessage", "usedFrom", "status") ON TABLE public."IncidentCommunication" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "incidentId", "actorType", "actorUserId", "eventType", "eventPayload") ON TABLE public."IncidentEvent" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details") ON TABLE public."AuditLog" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "keyHash", "action", "scope", "requestHash", "statusCode", "responsePayload", "completedAt", "expiresAt") ON TABLE public."ActionIdempotencyKey" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "keyHash", "action", "scope", "requestHash", "responsePayload", "expiresAt") ON TABLE public."ActionIdempotencyKey" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("statusCode", "responsePayload", "completedAt") ON TABLE public."ActionIdempotencyKey" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "email", "name", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "orgId", "name", "prefix", "brandName", "isActive", "suspendedAt") ON TABLE public."Licensee" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "isActive") ON TABLE public."Organization" TO "mscqr_rls_cert_auth_owner";

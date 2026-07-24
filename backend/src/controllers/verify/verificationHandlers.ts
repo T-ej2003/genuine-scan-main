@@ -35,7 +35,7 @@ const messageFor = (key: string) => ({
   "verification.not_found": "This code could not be verified.",
 }[key] || "Verification completed.");
 
-const responseFor = (
+export const buildPublicVerificationResponse = (
   row: VerifyRawQrRow,
   customerAuthenticated: boolean
 ) => {
@@ -170,7 +170,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     if (!row) return publicFailure(res, 404, "Requested information is unavailable.");
     return res.json({
       success: true,
-      data: responseFor(row, Boolean(req.customer)),
+      data: buildPublicVerificationResponse(row, Boolean(req.customer)),
     });
   } catch (error) {
     const message = String(error instanceof Error ? error.message : error);

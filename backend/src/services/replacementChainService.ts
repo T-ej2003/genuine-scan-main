@@ -1,59 +1,8 @@
-import { QRStatus, ReplacementChainStatus, VerificationReplacementStatus } from "@prisma/client";
+import { QRStatus, ReplacementChainStatus } from "@prisma/client";
 
 import prisma from "../config/database";
 
 const getStore = (client: any = prisma) => client?.replacementChain;
-
-export const resolveReplacementStatus = async (qrCodeId: string) => {
-  const store = getStore();
-  if (!store?.findFirst) {
-    return {
-      replacementStatus: VerificationReplacementStatus.NONE,
-      replacementChainId: null as string | null,
-      relatedQrCodeId: null as string | null,
-    };
-  }
-
-  try {
-    const replaced = await store.findFirst({
-      where: {
-        originalQrCodeId: qrCodeId,
-        status: ReplacementChainStatus.ACTIVE,
-      },
-      orderBy: [{ createdAt: "desc" }],
-    });
-    if (replaced?.id) {
-      return {
-        replacementStatus: VerificationReplacementStatus.REPLACED_LABEL,
-        replacementChainId: replaced.id as string,
-        relatedQrCodeId: String(replaced.replacementQrCodeId || "") || null,
-      };
-    }
-
-    const replacement = await store.findFirst({
-      where: {
-        replacementQrCodeId: qrCodeId,
-        status: ReplacementChainStatus.ACTIVE,
-      },
-      orderBy: [{ createdAt: "desc" }],
-    });
-    if (replacement?.id) {
-      return {
-        replacementStatus: VerificationReplacementStatus.ACTIVE_REPLACEMENT,
-        replacementChainId: replacement.id as string,
-        relatedQrCodeId: String(replacement.originalQrCodeId || "") || null,
-      };
-    }
-  } catch (error) {
-    console.warn("replacement chain resolution skipped:", error);
-  }
-
-  return {
-    replacementStatus: VerificationReplacementStatus.NONE,
-    replacementChainId: null as string | null,
-    relatedQrCodeId: null as string | null,
-  };
-};
 
 export const materializeReplacementChainsForReissue = async (params: {
   tx?: any;

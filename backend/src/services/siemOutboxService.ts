@@ -1,7 +1,4 @@
 import { createHash, createHmac, randomUUID } from "crypto";
-import { Prisma } from "@prisma/client";
-
-import prisma from "../config/database";
 import {
   B03FunctionClient,
   B03SiemEnqueueInput,
@@ -12,7 +9,6 @@ import {
   failSecurityEventOutbox,
 } from "../rls-waves/session-b/b03/repositoryFunctions";
 import {
-  b03WorkerBoundariesEnabled,
   withB03SiemWorkerContext,
 } from "../rls-waves/session-b/b03/systemContext";
 import { logger } from "../utils/logger";
@@ -51,39 +47,23 @@ export const queueSecurityEvent = async (
 ) => {
   if (!eventType) return;
 
-  if (b03WorkerBoundariesEnabled()) {
-    if (!boundary || !["AUDIT_LOG", "CSP_VIOLATION"].includes(eventType)) {
-      throw new Error("B03 SIEM enqueue requires an attributed transaction and allowlisted event type");
-    }
-    const typedEvent = eventType as "AUDIT_LOG" | "CSP_VIOLATION";
-    const payloadDigest = b03PayloadDigest(payload);
-    const idempotencyKey = createHash("sha256")
-      .update(`${typedEvent}:${boundary.authority.requestId}:${payloadDigest}`)
-      .digest("hex");
-    const row = await enqueueSecurityEventOutbox(boundary.db, {
-      ...boundary.authority,
-      eventType: typedEvent,
-      payload,
-      payloadDigest,
-      idempotencyKey,
-      expiresAt: new Date(Date.now() + 86_400_000),
-    });
-    return row.id;
+  if (!boundary || !["AUDIT_LOG", "CSP_VIOLATION"].includes(eventType)) {
+    throw new Error("B03 SIEM enqueue requires an attributed transaction and allowlisted event type");
   }
-
-  try {
-    await prisma.securityEventOutbox.create({
-      data: {
-        eventType,
-        payload: payload as Prisma.InputJsonValue,
-      },
-    });
-  } catch (error) {
-    logger.warn("Failed to enqueue SIEM event", {
-      eventType,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  const typedEvent = eventType as "AUDIT_LOG" | "CSP_VIOLATION";
+  const payloadDigest = b03PayloadDigest(payload);
+  const idempotencyKey = createHash("sha256")
+    .update(`${typedEvent}:${boundary.authority.requestId}:${payloadDigest}`)
+    .digest("hex");
+  const row = await enqueueSecurityEventOutbox(boundary.db, {
+    ...boundary.authority,
+    eventType: typedEvent,
+    payload,
+    payloadDigest,
+    idempotencyKey,
+    expiresAt: new Date(Date.now() + 86_400_000),
+  });
+  return row.id;
 };
 
 const sendToWebhook = async (row: { id: string; eventType: string; payload: any; createdAt: Date }) => {
@@ -177,46 +157,7 @@ const flushSecurityEventOutboxThroughB03Boundary = async () => {
 export const flushSecurityEventOutbox = async () => {
   const url = webhookUrl();
   if (!url && sinkMode() !== "stdout") return;
-  if (b03WorkerBoundariesEnabled()) return flushSecurityEventOutboxThroughB03Boundary();
-
-  const batchSize = parseIntEnv("SIEM_OUTBOX_BATCH_SIZE", 20, 1, 200);
-  const now = new Date();
-  const rows = await prisma.securityEventOutbox.findMany({
-    where: {
-      status: { in: ["QUEUED", "FAILED"] },
-      nextAttemptAt: { lte: now },
-    },
-    orderBy: { createdAt: "asc" },
-    take: batchSize,
-  });
-
-  for (const row of rows) {
-    try {
-      await sendToWebhook(row);
-      await prisma.securityEventOutbox.update({
-        where: { id: row.id },
-        data: {
-          status: "SENT",
-          sentAt: new Date(),
-          attempts: { increment: 1 },
-          lastError: null,
-          nextAttemptAt: new Date(),
-        },
-      });
-    } catch (error) {
-      const attempts = (row.attempts || 0) + 1;
-      const retryDelaySec = Math.min(300, Math.max(5, 2 ** attempts));
-      await prisma.securityEventOutbox.update({
-        where: { id: row.id },
-        data: {
-          status: "FAILED",
-          attempts,
-          lastError: error instanceof Error ? error.message : String(error),
-          nextAttemptAt: new Date(Date.now() + retryDelaySec * 1000),
-        },
-      });
-    }
-  }
+  return flushSecurityEventOutboxThroughB03Boundary();
 };
 
 let started = false;

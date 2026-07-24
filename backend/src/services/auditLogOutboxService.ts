@@ -1,7 +1,6 @@
-import { AuditLogOutboxStatus, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "crypto";
 
-import prisma from "../config/database";
 import {
   B03AuditEnqueueInput,
   b03PayloadDigest,
@@ -11,12 +10,10 @@ import {
   failAuditLogOutbox,
 } from "../rls-waves/session-b/b03/repositoryFunctions";
 import {
-  b03WorkerBoundariesEnabled,
   withB03AuditWorkerContext,
 } from "../rls-waves/session-b/b03/systemContext";
 import { withDistributedLease } from "./distributedLeaseService";
 
-const getStore = () => (prisma as any).auditLogOutbox;
 const parseBool = (value: unknown, fallback = false) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (["1", "true", "yes", "on"].includes(normalized)) return true;
@@ -43,42 +40,22 @@ export const queueAuditLogOutbox = async (
   db?: Pick<Prisma.TransactionClient, "auditLogOutbox"> & Partial<Pick<Prisma.TransactionClient, "$queryRaw">>,
   authority?: Omit<B03AuditEnqueueInput, "payload" | "payloadDigest" | "idempotencyKey" | "expiresAt" | "initialErrorCode">
 ) => {
-  if (b03WorkerBoundariesEnabled()) {
-    if (!db?.$queryRaw || !authority) {
-      throw new Error("B03 audit enqueue requires an attributed transaction and durable authority");
-    }
-    const payloadDigest = b03PayloadDigest(payload);
-    const idempotencyKey = createHash("sha256")
-      .update(`AUDIT_LOG_RECOVERY:${authority.requestId}:${payloadDigest}`)
-      .digest("hex");
-    const row = await enqueueAuditLogOutbox(db as any, {
-      ...authority,
-      payload,
-      payloadDigest,
-      idempotencyKey,
-      expiresAt: new Date(Date.now() + 86_400_000),
-      initialErrorCode: error ? "AUDIT_PERSISTENCE_FAILED" : null,
-    });
-    return row.id;
+  if (!db?.$queryRaw || !authority) {
+    throw new Error("B03 audit enqueue requires an attributed transaction and durable authority");
   }
-
-  const store = db?.auditLogOutbox || getStore();
-  if (!store?.create) return null;
-
-  try {
-    const row = await store.create({
-      data: {
-        payload,
-        status: AuditLogOutboxStatus.QUEUED,
-        lastError: error instanceof Error ? error.message : error ? String(error) : null,
-      },
-    });
-    return String(row.id || "");
-  } catch (queueError) {
-    if (db) throw queueError;
-    console.warn("audit outbox enqueue skipped:", queueError);
-    return null;
-  }
+  const payloadDigest = b03PayloadDigest(payload);
+  const idempotencyKey = createHash("sha256")
+    .update(`AUDIT_LOG_RECOVERY:${authority.requestId}:${payloadDigest}`)
+    .digest("hex");
+  const row = await enqueueAuditLogOutbox(db as any, {
+    ...authority,
+    payload,
+    payloadDigest,
+    idempotencyKey,
+    expiresAt: new Date(Date.now() + 86_400_000),
+    initialErrorCode: error ? "AUDIT_PERSISTENCE_FAILED" : null,
+  });
+  return row.id;
 };
 
 const flushAuditLogOutboxThroughB03Boundary = async () => {
@@ -126,54 +103,7 @@ const flushAuditLogOutboxThroughB03Boundary = async () => {
 
 export const flushAuditLogOutbox = async () => {
   if (isShutdownStarted()) return;
-  if (b03WorkerBoundariesEnabled()) return flushAuditLogOutboxThroughB03Boundary();
-  const store = getStore();
-  if (!store?.findMany || !store?.update) return;
-
-  const batchSize = parseIntEnv("AUDIT_OUTBOX_BATCH_SIZE", 25, 1, 250);
-  const now = new Date();
-  const rows = await store.findMany({
-    where: {
-      status: { in: [AuditLogOutboxStatus.QUEUED, AuditLogOutboxStatus.FAILED] },
-      nextAttemptAt: { lte: now },
-    },
-    orderBy: [{ createdAt: "asc" }],
-    take: batchSize,
-  });
-
-  if (!rows.length) return;
-  if (isShutdownStarted()) return;
-
-  const { createAuditLog } = await import("./auditService");
-
-  for (const row of rows) {
-    if (isShutdownStarted()) return;
-    try {
-      const log = await createAuditLog((row.payload || {}) as any);
-      await store.update({
-        where: { id: row.id },
-        data: {
-          status: AuditLogOutboxStatus.SENT,
-          flushedAuditLogId: String(log?.id || "") || null,
-          attempts: { increment: 1 },
-          lastError: null,
-          nextAttemptAt: new Date(),
-        },
-      });
-    } catch (error) {
-      const attempts = Number(row.attempts || 0) + 1;
-      const retryDelaySec = Math.min(300, Math.max(10, 2 ** attempts));
-      await store.update({
-        where: { id: row.id },
-        data: {
-          status: AuditLogOutboxStatus.FAILED,
-          attempts,
-          lastError: error instanceof Error ? error.message : String(error),
-          nextAttemptAt: new Date(Date.now() + retryDelaySec * 1000),
-        },
-      });
-    }
-  }
+  return flushAuditLogOutboxThroughB03Boundary();
 };
 
 let started = false;
@@ -182,8 +112,7 @@ let timer: NodeJS.Timeout | null = null;
 
 export const startAuditLogOutboxWorker = () => {
   if (auditOutboxWorkerDisabled()) return;
-  const store = getStore();
-  if (started || !store?.findMany || !store?.update) return;
+  if (started) return;
 
   started = true;
   stopping = false;

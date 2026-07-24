@@ -17,6 +17,7 @@ const mockModule = (relativePath, exportsValue) => {
 
 let prismaUser = null;
 const prismaMock = {
+  $queryRaw: async (_query, ...values) => [{ id: values[0], expiresAt: values[4] }],
   user: {
     findUnique: async () => prismaUser,
   },

@@ -124,6 +124,16 @@
       "dependencyLayer": 0
     },
     {
+      "id": "table-customer-auth-session",
+      "prismaModel": "CustomerAuthSession",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "actor-key",
+      "dependencyLayer": 0
+    },
+    {
       "id": "table-customer-trust-credential",
       "prismaModel": "CustomerTrustCredential",
       "primaryCategory": "security-sensitive",
@@ -1514,13 +1524,13 @@
   "unrestrictedRuntimeOwnedDependencies": 0,
   "reviewGroups": {
     "A": {
-      "tableCount": 22,
-      "resolvedCount": 22,
+      "tableCount": 23,
+      "resolvedCount": 23,
       "unresolvedCount": 0,
       "dependencyEdges": 15,
       "blockingDecisions": [],
       "ownershipConfidence": {
-        "high": 18,
+        "high": 19,
         "medium": 4,
         "low": 0
       }

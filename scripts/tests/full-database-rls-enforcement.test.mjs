@@ -51,10 +51,14 @@ test("generated direct policies preserve exact actor, assurance, purpose and col
   assert.equal(result.directPolicySlices, inputs.manifest.counts.directPolicySlices);
   assert.equal(result.columnPrivilegeCells, inputs.manifest.counts.columnPrivilegeCells);
   assert.ok(inputs.policies.rows.filter((policy) => !policy.internalHelperOnly && policy.actors.includes("platform-admin")).every((policy) => policy.assurance === "mfa-verified"));
-  const platformOrganization = inputs.policies.rows.find((policy) => policy.table === "Organization" && !policy.internalHelperOnly && policy.actors.includes("platform-admin"));
-  const platformPolicyRule = inputs.policies.rows.find((policy) => policy.table === "PolicyRule" && policy.actors.includes("platform-admin"));
-  assert.match(platformOrganization.scopePredicate, /scope_licensee\."orgId"="Organization"\."id"/);
-  assert.match(platformPolicyRule.scopePredicate, /scope_licensee\."orgId"="PolicyRule"\."orgId"/);
+  const riskProfiles = inputs.commandSemantics.sqlCertificationProfiles.filter(
+    (profile) => profile.workflowId === "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics"
+  );
+  assert.equal(riskProfiles.length, 2);
+  assert.ok(riskProfiles.every((profile) =>
+    profile.status === "named-function-candidate" &&
+    profile.functionSignature === "app_rls.risk_analytics_snapshot(text,text,text,text,text,integer,integer,timestamp without time zone)"
+  ));
   requireAuthOwnerOrganizationSelect(inputs.policies);
   assert.equal(
     inputs.policies.rows.some((policy) => policy.policyName === "full_rls_internal_organization_select"),
@@ -88,17 +92,19 @@ test("owner-qualified Organization verification rejects missing or wrongly owned
   assert.throws(() => requireAuthOwnerOrganizationSelect(wrongOwner), /authOwner/);
 });
 
-test("risk analytics User privilege is the exact display and parent-predicate union", () => {
+test("risk analytics uses an exact function while direct User privilege stays audit-display-only", () => {
   const { policies, privileges } = packageInputs();
   const userSelect = privileges.rows.find((grant) => grant.table === "User" && grant.command === "SELECT");
-  assert.deepEqual(userSelect.columns, ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"]);
-  assert.deepEqual(userSelect.sourceCommandRuleIds, ["command-user-select-509547f03abe", "command-user-select-97535583a8fe"]);
+  assert.deepEqual(userSelect.columns, ["id", "name"]);
+  assert.deepEqual(userSelect.sourceCommandRuleIds, ["command-user-select-97535583a8fe"]);
   for (const prohibited of ["email", "pendingEmail", "passwordHash", "metadata", "failedLoginAttempts", "lockedUntil", "emailVerifiedAt"]) {
     assert(!userSelect.columns.includes(prohibited), `generated grant exposes User.${prohibited}`);
   }
-  const riskPolicies = policies.rows.filter((policy) => policy.table === "User" && policy.workflowId === "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics");
-  assert.equal(riskPolicies.length, 2);
-  assert.ok(riskPolicies.every((policy) => policy.scopePredicate.includes('"id"=app_rls.current_user_id()') && policy.scopePredicate.includes('app_rls.manufacturer_scope_valid("id")')));
+  const riskPolicy = policies.rows.find((policy) =>
+    policy.table === "User" && policy.policyName === "full_rls_internal_owner_user_select"
+  );
+  assert.match(riskPolicy.scopePredicate, /"id"=app_rls\.current_user_id\(\)/);
+  assert.match(riskPolicy.scopePredicate, /current_purpose\(\)='tenant-risk-analytics'/);
   const auditPolicies = policies.rows.filter((policy) => policy.table === "User" && policy.workflowId === "workflow-http-backend-src-controllers-audit-controller-ts-get-logs");
   assert.equal(auditPolicies.length, 2);
   assert.ok(auditPolicies.every((policy) => policy.scopePredicate.includes('"id" = app_rls.current_user_id()')));
@@ -127,8 +133,10 @@ test("package validation rejects missing source rules and broadened column grant
   assert.throws(() => validateGeneratedPackage(broadGrant), /column (?:grant|privilege)/i);
 
   const legacyUserScope = clone(packageInputs());
-  legacyUserScope.policies.rows.find((policy) => policy.table === "User" && policy.workflowId === "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics").scopePredicate = '("licenseeId" = app_rls.current_licensee_id() AND "orgId" = app_rls.current_organization_id())';
-  assert.throws(() => validateGeneratedPackage(legacyUserScope), /validated manufacturer (?:links|scope)/i);
+  legacyUserScope.policies.rows.find((policy) =>
+    policy.table === "User" && policy.policyName === "full_rls_internal_owner_user_select"
+  ).scopePredicate = '("licenseeId" = app_rls.current_licensee_id() AND "orgId" = app_rls.current_organization_id())';
+  assert.throws(() => validateGeneratedPackage(legacyUserScope), /actor hydration|manufacturer projection/i);
 });
 
 test("package validation rejects an actor outside the exact certification profile", () => {

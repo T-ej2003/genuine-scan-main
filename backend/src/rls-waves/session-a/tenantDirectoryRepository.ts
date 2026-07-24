@@ -32,20 +32,38 @@ const query = async <T>(operation: () => Promise<T>) => {
 export const readLicenseeDirectory = async (input: {
   capability: string;
   requestId: string;
-  requestedLicenseeId?: string | null;
-  detail: boolean;
 }) => query(async () => {
   const rows = await getB01AuthenticatedPrisma().$queryRaw<Array<{ payload: Prisma.JsonValue | null }>>`
     SELECT * FROM app_rls.read_licensee_directory(
       ${required(input.capability, "a capability")},
       ${"tenant-directory-licensees"},
       ${required(input.requestId, "a request ID")},
-      ${input.requestedLicenseeId || null},
-      ${input.detail}
+      ${null},
+      ${false}
     )
   `;
-  if (rows.length !== 1 || (input.detail ? rows[0].payload !== null && typeof rows[0].payload !== "object" : !Array.isArray(rows[0].payload))) {
+  if (rows.length !== 1 || !Array.isArray(rows[0].payload)) {
     throw new Error("Tenant licensee directory returned an invalid projection");
+  }
+  return rows[0].payload;
+});
+
+export const readLicenseeDetail = async (input: {
+  capability: string;
+  requestId: string;
+  requestedLicenseeId: string;
+}) => query(async () => {
+  const rows = await getB01AuthenticatedPrisma().$queryRaw<Array<{ payload: Prisma.JsonValue | null }>>`
+    SELECT * FROM app_rls.read_licensee_directory(
+      ${required(input.capability, "a capability")},
+      ${"tenant-directory-licensees"},
+      ${required(input.requestId, "a request ID")},
+      ${required(input.requestedLicenseeId, "a licensee ID")},
+      ${true}
+    )
+  `;
+  if (rows.length !== 1 || rows[0].payload !== null && typeof rows[0].payload !== "object") {
+    throw new Error("Tenant licensee directory returned an invalid detail projection");
   }
   return rows[0].payload;
 });

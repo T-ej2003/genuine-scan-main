@@ -26,6 +26,8 @@ DROP POLICY IF EXISTS public_verification_incident_insert ON public."Incident";
 DROP POLICY IF EXISTS public_verification_incidentevent_insert ON public."IncidentEvent";
 DROP POLICY IF EXISTS public_verification_incidentevidence_insert ON public."IncidentEvidence";
 DROP POLICY IF EXISTS public_verification_supportticket_insert ON public."SupportTicket";
+DROP POLICY IF EXISTS public_verification_supportticket_select ON public."SupportTicket";
+DROP POLICY IF EXISTS public_verification_incidenthandoff_select ON public."IncidentHandoff";
 DROP POLICY IF EXISTS public_verification_requestaccess_insert ON public."RequestAccess";
 DROP POLICY IF EXISTS public_verification_requestaccess_select ON public."RequestAccess";
 DROP POLICY IF EXISTS public_verification_requestaccess_update ON public."RequestAccess";
@@ -64,6 +66,7 @@ DROP FUNCTION IF EXISTS app_public.read_customer_auth_session(text,timestamp wit
 DROP FUNCTION IF EXISTS app_public.require_customer_auth_session(text,timestamp without time zone,text,text);
 DROP FUNCTION IF EXISTS app_public.issue_customer_auth_session(text,text,text,text,text,timestamp without time zone,timestamp without time zone,text);
 DROP FUNCTION IF EXISTS app_public.complete_public_support_delivery(text,text,text,text,text,timestamp without time zone,text);
+DROP FUNCTION IF EXISTS app_public.track_support_status(text,text,integer,timestamp without time zone,text);
 DROP FUNCTION IF EXISTS app_public.complete_request_access_delivery(text,text,text,text,text,timestamp without time zone,text);
 DROP FUNCTION IF EXISTS app_public.submit_public_support(text,text,text,text,text,text,text,text,text,timestamp without time zone,text,text);
 DROP FUNCTION IF EXISTS app_public.submit_request_access(text,text,text,text,text,text,text,text,text,timestamp without time zone,text,text);

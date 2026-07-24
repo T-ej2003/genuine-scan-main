@@ -17,7 +17,7 @@ const ids = {
 const now = Date.UTC(2026, 6, 21, 12, 0, 0);
 const fingerprint = "0123456789abcdef0123456789abcdef";
 
-const state = { transactions: [], contextCalls: [], queryCalls: [] };
+const state = { transactions: [], contextCalls: [], queryCalls: [], failNextSerialization: false };
 const batchRow = {
   id: ids.batch,
   name: "Operational batch",
@@ -67,6 +67,20 @@ const tx = {
   async $queryRaw(strings, ...values) {
     const sql = strings.join("?");
     state.queryCalls.push({ sql, values });
+    if (state.failNextSerialization) {
+      state.failNextSerialization = false;
+      throw { meta: { code: "40001" } };
+    }
+    if (sql.includes("app_auth.require_authenticated_session")) {
+      return [{
+        sessionId: "session-tenant",
+        userId: ids.tenantUser,
+        role: UserRole.LICENSEE_ADMIN,
+        organizationId: ids.organizationA,
+        licenseeId: ids.licenseeA,
+        assurance: "PASSWORD",
+      }];
+    }
     if (sql.includes("batch_operational_scope")) return [{ scope_fingerprint: fingerprint }];
     if (sql.includes("batch_operational_rows")) {
       return (values[5] === "GET /api/qr/batches" ? [batchRow] : allocationRows)
@@ -213,10 +227,26 @@ const boundary = (user, overrides = {}) => buildBatchOperationalReadBoundary({
     databaseSessionCapability: "B".repeat(43),
   });
   assert.equal(state.transactions.length, listStart + 1, "list uses exactly one transaction");
-  assert.deepEqual(state.transactions.at(-1), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  assert.deepEqual(state.transactions.at(-1), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    maxWait: 5_000,
+    timeout: 15_000,
+  });
   assert.equal(list.total, 1);
   assert.equal(list.rows[0].id, ids.batch);
   assert.equal(list.rows[0].unassignedRemainingCodes, 1);
+
+  state.failNextSerialization = true;
+  const retryStart = state.transactions.length;
+  await listScopedBatchReadPayload({
+    user: tenant,
+    requestedLicenseeId: null,
+    requestId: "request.list.retry",
+    limit: 25,
+    offset: 0,
+    databaseSessionCapability: "B".repeat(43),
+  });
+  assert.equal(state.transactions.length, retryStart + 2, "one serialization failure retries the complete read transaction once");
 
   const allocationStart = state.transactions.length;
   const allocation = await getScopedBatchAllocationMapPayload({
@@ -227,7 +257,11 @@ const boundary = (user, overrides = {}) => buildBatchOperationalReadBoundary({
     databaseSessionCapability: "B".repeat(43),
   });
   assert.equal(state.transactions.length, allocationStart + 1, "allocation map uses exactly one transaction");
-  assert.deepEqual(state.transactions.at(-1), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  assert.deepEqual(state.transactions.at(-1), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    maxWait: 5_000,
+    timeout: 15_000,
+  });
   assert.equal(allocation.status, "ok");
   assert.equal(allocation.allocationMap.allocations.length, 500, "allocation lineage remains unbounded");
   assert.equal(Object.hasOwn(allocation.allocationMap.selectedBatch, "parentBatch"), false,
@@ -237,7 +271,9 @@ const boundary = (user, overrides = {}) => buildBatchOperationalReadBoundary({
 
   assert.equal(state.contextCalls.length, 0, "legacy caller-selected context is never installed");
 
-  const listQueries = state.queryCalls.filter((call) => call.values[5] === "GET /api/qr/batches");
+  const listQueries = state.queryCalls.filter((call) =>
+    call.values[2] === "request.list.1" && call.values[5] === "GET /api/qr/batches"
+  );
   assert(listQueries.length >= 7, "list executes the complete named-function repository path");
   const listAuditId = listQueries[0].values[3];
   assert(listQueries.every((call) => call.values[3] === listAuditId), "all list functions share one audit id");
@@ -258,9 +294,10 @@ const boundary = (user, overrides = {}) => buildBatchOperationalReadBoundary({
   for (const source of [readSource, mapSource]) {
     assert.doesNotMatch(source, /withCanonicalDbContext|install_actor_context/);
     assert.match(source, /databaseSessionCapability/);
-    assert.match(source, /TransactionIsolationLevel\.RepeatableRead/);
     assert.doesNotMatch(source, /withStagingRlsBatchReadTransaction|isStagingRls|RLS_READ_DATABASE_URL/);
   }
+  assert.match(readSource, /TransactionIsolationLevel\.RepeatableRead/);
+  assert.match(mapSource, /runBatchOperationalReadTransaction/);
   assert.doesNotMatch(readSource, /buildScopedWhere|listCachedBatchOperationalSummaries/);
   assert.doesNotMatch(mapSource, /findScopedBatch|resolveManufacturerSessionScope/);
   const protectedRepository = repositorySource.slice(

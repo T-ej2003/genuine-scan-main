@@ -15,6 +15,7 @@ import {
   linkPolicyAlertToIncidentInTransaction,
   listIncidentPolicyAlertsInTransaction,
 } from "../rls-waves/session-c/c03/c03PolicyRepository";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 
 const optionalQueryValue = (value: unknown) =>
   typeof value === "string" && !value.trim() ? undefined : value;
@@ -181,6 +182,7 @@ export const patchIrAlert = async (req: AuthRequest, res: Response) => {
 
     await Promise.all([
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
         type: "policy_alert_updated",
         title: "Policy alert updated",
@@ -195,6 +197,7 @@ export const patchIrAlert = async (req: AuthRequest, res: Response) => {
         channels: [NotificationChannel.WEB],
       }),
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.LICENSEE_ADMIN,
         licenseeId: updated.licenseeId,
         type: "policy_alert_updated",

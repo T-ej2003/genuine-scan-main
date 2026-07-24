@@ -71,6 +71,9 @@ mockModule("rls-waves/session-b/b01/canonicalAuthContext.js", {
   withCanonicalAuthClaims: (claims, _input, callback) => callback({}, {
     authAssurance: claims.databaseMfaFresh ? "mfa-verified" : "password-verified",
   }),
+  withDatabaseAuthenticatedSession: (claims, _input, callback) => callback({}, {
+    authAssurance: claims.databaseMfaFresh ? "mfa-verified" : "password-verified",
+  }),
 });
 mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
   isRecentMfaDenial: (error) => error instanceof RecentMfaDenial,
@@ -83,7 +86,7 @@ const { requireRecentAdminMfaForSetup, requireRecentSensitiveAuth } = require(".
 
 const runMiddleware = (user, middleware = requireRecentSensitiveAuth) =>
   new Promise((resolve) => {
-    const req = { user, requestId: "request-1", get: () => null };
+    const req = { user, requestId: "request-1", databaseSessionCapability: "test-capability", get: () => null };
     const res = {
       statusCode: 200,
       body: null,

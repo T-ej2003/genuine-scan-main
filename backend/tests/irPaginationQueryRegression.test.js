@@ -52,6 +52,7 @@ const canonicalContext = {
 const runC03 = async (_boundary, callback) => callback({}, canonicalContext);
 mockModule("rls-waves/session-c/c03/c03ActorBoundary.js", {
   C03AccessError,
+  c03DatabaseSessionCapability: () => "test-capability",
   c03RequestId: () => canonicalContext.requestId,
   withC03ActorTransaction: runC03,
   withC03ResourceTransaction: runC03,

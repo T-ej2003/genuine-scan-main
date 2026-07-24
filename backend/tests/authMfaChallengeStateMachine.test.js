@@ -82,6 +82,10 @@ const prismaMock = {
     advisoryLockCalls += 1;
     return 1;
   },
+  $queryRaw: async (_query, ...values) => [{
+    id: values[0],
+    expiresAt: values[4],
+  }],
   $transaction: async (input) => {
     if (Array.isArray(input)) return Promise.all(input);
     const run = async () => {
@@ -397,6 +401,248 @@ const prismaMock = {
 };
 
 mockModule("config/database.js", { __esModule: true, default: prismaMock });
+mockModule("rls-waves/session-b/b01/adminMfaRepository.js", {
+  loadAdminMfaState: async () => {
+    if (failMfaStateRead) throw new Error("MFA_STATE_DATABASE_UNAVAILABLE");
+    return {
+      legacyTotp: credential ? { ...credential } : null,
+      legacyWebAuthn: webAuthnCredentials.map((row) => ({ ...row })),
+      factors: factors.map((row) => ({ ...row })),
+      backupCodesRemaining: backupCodeRows.filter((row) => !row.usedAt).length,
+    };
+  },
+  beginAdminTotpEnrollment: async (_db, input) => {
+    advisoryLockCalls += 1;
+    if (failMfaStateRead) throw new Error("MFA_STATE_DATABASE_UNAVAILABLE");
+    const enrolled = Boolean(credential?.isEnabled) ||
+      webAuthnCredentials.length > 0 ||
+      factors.some((row) => row.legacySource !== "MFA_ENROLLMENT_PENDING");
+    if (input.mode === "FIRST_ENROLLMENT" && enrolled) throw new Error("MFA_ALREADY_ENROLLED");
+    if (input.mode === "REPLACEMENT" && !enrolled) throw new Error("MFA_REPLACEMENT_REQUIRES_ENROLLED_FACTOR");
+    if (factors.some((row) => row.legacySource === "MFA_ENROLLMENT_PENDING" && row.createdAt > input.pendingCutoff)) {
+      throw new Error("MFA_SETUP_ALREADY_STARTED");
+    }
+    if (failPendingFactorWrite) throw new Error("MFA_FACTOR_WRITE_FAILED");
+    factors = factors.filter((row) => row.legacySource !== "MFA_ENROLLMENT_PENDING");
+    if (input.mode === "REPLACEMENT" && credential?.isEnabled &&
+        !factors.some((row) => row.type === "TOTP" && !row.disabledAt)) {
+      factors.push({
+        id: "legacy-totp-admin-1",
+        userId: "admin-1",
+        type: "TOTP",
+        label: "Authenticator app",
+        secretCiphertext: credential.secretCiphertext,
+        secretIv: credential.secretIv,
+        secretTag: credential.secretTag,
+        legacySource: "AdminMfaCredential",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+        lastUsedAt: credential.lastUsedAt || credential.verifiedAt,
+        disabledAt: null,
+      });
+    }
+    if (input.mode === "REPLACEMENT" && credential?.isEnabled && backupCodeRows.length === 0) {
+      backupCodeRows = credential.backupCodesHash.map((codeHash, index) => ({
+        id: `legacy-backup-${index + 1}`,
+        userId: "admin-1",
+        codeHash,
+        usedAt: null,
+        createdAt: input.createdAt,
+      }));
+    }
+    const factor = {
+      id: `factor-${factors.length + 1}`,
+      userId: "admin-1",
+      type: "TOTP",
+      label: "Authenticator app",
+      secretCiphertext: input.secretCiphertext,
+      secretIv: input.secretIv,
+      secretTag: input.secretTag,
+      legacySource: "MFA_ENROLLMENT_PENDING",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+      lastUsedAt: null,
+      disabledAt: null,
+    };
+    factors.push(factor);
+    credential = {
+      ...(credential || { id: "cred-1", userId: "admin-1", createdAt: input.createdAt }),
+      secretCiphertext: input.secretCiphertext,
+      secretIv: input.secretIv,
+      secretTag: input.secretTag,
+      backupCodesHash: [...input.backupHashes],
+      isEnabled: false,
+      verifiedAt: null,
+      updatedAt: input.createdAt,
+    };
+    return { factorId: factor.id };
+  },
+  loadAdminTotpEnrollment: async (_db, input) => {
+    const enrolled = Boolean(credential?.isEnabled) ||
+      webAuthnCredentials.length > 0 ||
+      factors.some((row) => row.legacySource !== "MFA_ENROLLMENT_PENDING" && !row.disabledAt);
+    if (input.mode === "FIRST_ENROLLMENT" && enrolled) throw new Error("MFA_ALREADY_ENROLLED");
+    if (input.mode === "REPLACEMENT" && !enrolled) throw new Error("MFA_REPLACEMENT_REQUIRES_ENROLLED_FACTOR");
+    return {
+      credential: credential ? { ...credential } : null,
+      pending: factors.filter((row) => row.legacySource === "MFA_ENROLLMENT_PENDING" && row.createdAt > input.pendingCutoff).map((row) => ({ ...row })),
+    };
+  },
+  completeAdminTotpEnrollment: async (_db, input) => {
+    const factor = factors.find((row) => row.id === input.factorId && row.legacySource === "MFA_ENROLLMENT_PENDING");
+    if (!factor || !credential) throw new Error("MFA_SETUP_NOT_STARTED");
+    for (const row of factors) {
+      if (row.id !== factor.id && row.type === "TOTP" && !row.disabledAt) {
+        row.disabledAt = input.completedAt;
+        row.updatedAt = input.completedAt;
+      }
+    }
+    factor.legacySource = "AdminMfaCredential";
+    factor.lastUsedAt = input.completedAt;
+    factor.updatedAt = input.completedAt;
+    backupCodeRows = credential.backupCodesHash.map((codeHash, index) => ({
+      id: `backup-${index + 1}`,
+      userId: "admin-1",
+      codeHash,
+      usedAt: null,
+      createdAt: input.completedAt,
+    }));
+    credential = { ...credential, isEnabled: true, verifiedAt: input.completedAt, lastUsedAt: input.completedAt, updatedAt: input.completedAt };
+    auditEvents.push({ action: input.mode === "REPLACEMENT" ? "AUTH_MFA_REPLACED" : "AUTH_MFA_ENROLLED", userId: "admin-1" });
+    return { enabled: true };
+  },
+  loadAdminMfaVerifiers: async () => ({
+    legacy: credential ? { ...credential } : null,
+    factors: factors.map((row) => ({ ...row })),
+    backupCodes: backupCodeRows.filter((row) => !row.usedAt).map((row) => ({ ...row })),
+  }),
+  consumeAdminMfaVerifier: async (_db, input) => {
+    if (input.method === "BACKUP_CODE") {
+      const row = backupCodeRows.find((entry) => entry.id === input.recordId && !entry.usedAt);
+      if (!row) return { consumed: false };
+      row.usedAt = input.usedAt;
+      return { consumed: true };
+    }
+    if (input.method === "BACKUP_LEGACY") {
+      if (!credential || JSON.stringify(credential.backupCodesHash) !== JSON.stringify(input.expectedLegacyHashes)) return { consumed: false };
+      credential.backupCodesHash = [...input.nextLegacyHashes];
+      credential.lastUsedAt = input.usedAt;
+      return { consumed: true };
+    }
+    if (input.method === "TOTP_FACTOR") {
+      const row = factors.find((entry) => entry.id === input.recordId && !entry.disabledAt);
+      if (!row) return { consumed: false };
+      row.lastUsedAt = input.usedAt;
+      return { consumed: true };
+    }
+    if (!credential?.isEnabled) return { consumed: false };
+    credential.lastUsedAt = input.usedAt;
+    if (!factors.some((row) => row.id === "legacy-totp-admin-1")) {
+      factors.push({
+        id: "legacy-totp-admin-1",
+        userId: "admin-1",
+        type: "TOTP",
+        label: "Authenticator app",
+        secretCiphertext: credential.secretCiphertext,
+        secretIv: credential.secretIv,
+        secretTag: credential.secretTag,
+        legacySource: "AdminMfaCredential",
+        createdAt: input.usedAt,
+        updatedAt: input.usedAt,
+        lastUsedAt: input.usedAt,
+        disabledAt: null,
+      });
+    }
+    return { consumed: true };
+  },
+  replaceAdminBackupCodes: async (_db, hashes, replacedAt) => {
+    if (failCredentialBackupWrite) throw new Error("MFA_BACKUP_WRITE_FAILED");
+    backupCodeRows = hashes.map((codeHash, index) => ({
+      id: `backup-${index + 1}`,
+      userId: "admin-1",
+      codeHash,
+      usedAt: null,
+      createdAt: replacedAt,
+    }));
+    if (credential) credential.backupCodesHash = [...hashes];
+    return { replaced: true };
+  },
+  disableAdminMfaBoundary: async (_db, input) => {
+    if (failDisableAuditWrite) throw new Error("MFA_DISABLE_AUDIT_WRITE_FAILED");
+    if (credential) credential = { ...credential, isEnabled: false, verifiedAt: null, backupCodesHash: [], updatedAt: input.disabledAt };
+    factors = [];
+    backupCodeRows = [];
+    webAuthnCredentials = [];
+    auditEvents.push({ action: "AUTH_MFA_DISABLED", userId: "admin-1" });
+    return { enabled: false };
+  },
+  createAdminMfaChallengeBoundary: async (_db, input) => {
+    const target = input.kind === "LOGIN" ? challenges : legacyChallenges;
+    const row = {
+      id: `${input.kind.toLowerCase()}-challenge-${target.length + 1}`,
+      userId: "admin-1",
+      ticketHash: input.ticketHash,
+      sessionBindingHash: input.sessionBindingHash,
+      purpose: input.purpose,
+      riskScore: input.riskScore,
+      riskLevel: input.riskLevel,
+      reasons: input.reasons,
+      createdIpHash: input.ipHash,
+      createdUserAgentHash: input.userAgentHash,
+      attempts: 0,
+      maxAttempts: input.maxAttempts,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+      expiresAt: input.expiresAt,
+      consumedAt: null,
+      supersededAt: null,
+    };
+    target.push(row);
+    auditEvents.push({
+      action: "AUTH_MFA_CHALLENGE_ISSUED",
+      userId: "admin-1",
+      details: {
+        ttlMs: input.expiresAt.getTime() - input.createdAt.getTime(),
+        ttlMinutes: (input.expiresAt.getTime() - input.createdAt.getTime()) / 60_000,
+      },
+    });
+    return { challengeId: row.id };
+  },
+  loadAdminMfaChallengeBoundary: async (_db, input) => {
+    const login = challenges.find((row) => input.ticketHashes.includes(row.ticketHash));
+    const session = legacyChallenges.find((row) =>
+      input.ticketHashes.includes(row.ticketHash) &&
+      input.sessionBindingHashes.includes(row.sessionBindingHash)
+    );
+    const row = login || session;
+    return row ? { ...row, kind: login ? "LOGIN" : "SESSION" } : null;
+  },
+  recordAdminMfaChallengeFailure: async (_db, input) => {
+    const rows = input.kind === "LOGIN" ? challenges : legacyChallenges;
+    const row = rows.find((entry) => entry.id === input.challengeId);
+    if (!row) throw new Error("MFA_CHALLENGE_NOT_FOUND");
+    row.attempts = input.attempts;
+    row.updatedAt = input.failedAt;
+    auditEvents.push({ action: input.action, userId: "admin-1" });
+    return { recorded: true, attempts: input.attempts };
+  },
+  completeAdminMfaChallengeBoundary: async (_db, input) => {
+    if (failCompletionAuditWrite) throw new Error("AUTH_COMPLETION_AUDIT_WRITE_FAILED");
+    const rows = input.kind === "LOGIN" ? challenges : legacyChallenges;
+    const row = rows.find((entry) => entry.id === input.challengeId && !entry.consumedAt);
+    if (!row) throw new Error("MFA_CHALLENGE_NOT_FOUND");
+    row.consumedAt = input.completedAt;
+    auditEvents.push({ action: input.method === "BACKUP_CODE" ? "AUTH_MFA_BACKUP_CODE_USED" : "AUTH_MFA_SUCCESS", userId: "admin-1" });
+    auditEvents.push({ action: "AUTH_MFA_LOGIN_COMPLETE", userId: "admin-1" });
+    return { completed: true };
+  },
+  loadAdminWebAuthnCredentials: async () => ({ factors: [], legacy: webAuthnCredentials.map((row) => ({ ...row })) }),
+  createAdminWebAuthnChallengeBoundary: async () => ({ challengeId: "webauthn-challenge-1", credentialIds: [] }),
+  loadAdminWebAuthnChallengeBoundary: async () => null,
+  completeAdminWebAuthnRegistrationBoundary: async () => ({ ok: true, credentialId: "credential-1" }),
+  completeAdminWebAuthnAuthenticationBoundary: async () => ({ ok: true }),
+  deleteAdminWebAuthnCredentialBoundary: async () => ({ deleted: true }),
+});
 mockModule("rls-waves/session-b/b01/sessionCredentialRepository.js", {
   createRefreshTokenRecord: async (db, input) => {
     const row = await db.refreshToken.create({
@@ -440,6 +686,20 @@ mockModule("services/auditService.js", {
     return { persisted: true };
   },
 });
+mockModule("services/auditLogOutboxService.js", {
+  queueAuditLogOutbox: async (payload) => {
+    if (failCompletionAuditWrite && [
+      "AUTH_MFA_LOGIN_COMPLETE",
+      "AUTH_MFA_STEP_UP_SUCCESS",
+      "AUTH_WEBAUTHN_LOGIN_COMPLETE",
+      "AUTH_WEBAUTHN_STEP_UP_SUCCESS",
+    ].includes(payload?.action)) {
+      throw new Error("AUTH_COMPLETION_AUDIT_WRITE_FAILED");
+    }
+    auditEvents.push(payload);
+    return `audit-${auditEvents.length}`;
+  },
+});
 let injectedWebAuthnError = null;
 const maybeFailWebAuthn = async () => {
   if (injectedWebAuthnError) throw injectedWebAuthnError;
@@ -472,16 +732,18 @@ const activeSession = (claims) => ({
 mockModule("services/auth/authClaimsRlsContext.js", {
   issueAdminMfaSessionFromClaims: async (claims) => activeSession(claims),
   confirmAdminMfaEnrollmentAndIssueSessionFromClaims: async (claims, input) => {
-    await confirmAdminMfaSetup({ userId: claims.userId, code: input.code, mode: "FIRST_ENROLLMENT" });
+    await confirmAdminMfaSetup({ userId: claims.userId, code: input.code, mode: "FIRST_ENROLLMENT" }, prismaMock);
     auditEvents.push({ action: "AUTH_MFA_ENROLLED", userId: claims.userId });
     return activeSession(claims);
   },
   confirmAdminMfaReplacementFromClaims: async (claims, input) => {
-    const result = await confirmAdminMfaSetup({ userId: claims.userId, code: input.code, mode: "REPLACEMENT" });
+    const result = await confirmAdminMfaSetup({ userId: claims.userId, code: input.code, mode: "REPLACEMENT" }, prismaMock);
     auditEvents.push({ action: "AUTH_MFA_REPLACED", userId: claims.userId });
     return result;
   },
-  withAdminMfaClaimsTransaction: (claims, callback, attribution) => prismaMock.$transaction((tx) => callback(tx, {
+  withAdminMfaClaimsTransaction: (claims, capability, callback, attribution) => {
+    assert.equal(capability, "database-capability");
+    return prismaMock.$transaction((tx) => callback(tx, {
     userId: claims.userId,
     role: claims.role,
     organizationId: claims.orgId || null,
@@ -490,7 +752,8 @@ mockModule("services/auth/authClaimsRlsContext.js", {
     authAssurance: claims.sessionStage === "ACTIVE" ? "mfa-verified" : "mfa-bootstrap",
     requestId: attribution.requestId,
     purpose: attribution.purpose,
-  })),
+    }));
+  },
 });
 mockModule("utils/logger.js", {
   logger: {
@@ -502,15 +765,23 @@ mockModule("utils/logger.js", {
 });
 
 const {
-  beginAdminMfaSetup,
-  completeAdminMfaChallenge,
-  confirmAdminMfaSetup,
-  createAdminMfaChallenge,
-  disableAdminMfa,
-  getAdminMfaStatus,
-  rotateAdminMfaBackupCodes,
-  verifyAdminMfaCode,
+  beginAdminMfaSetup: beginAdminMfaSetupBoundary,
+  completeAdminMfaChallenge: completeAdminMfaChallengeBoundary,
+  confirmAdminMfaSetup: confirmAdminMfaSetupBoundary,
+  createAdminMfaChallenge: createAdminMfaChallengeBoundary,
+  disableAdminMfa: disableAdminMfaBoundary,
+  getAdminMfaStatus: getAdminMfaStatusBoundary,
+  rotateAdminMfaBackupCodes: rotateAdminMfaBackupCodesBoundary,
+  verifyAdminMfaCode: verifyAdminMfaCodeBoundary,
 } = require("../dist/services/auth/mfaService");
+const beginAdminMfaSetup = (input, db = prismaMock) => beginAdminMfaSetupBoundary(input, db);
+const completeAdminMfaChallenge = (input, db = prismaMock) => completeAdminMfaChallengeBoundary(input, db);
+const confirmAdminMfaSetup = (input, db = prismaMock) => confirmAdminMfaSetupBoundary(input, db);
+const createAdminMfaChallenge = (input, db = prismaMock) => createAdminMfaChallengeBoundary(input, db);
+const disableAdminMfa = (userId, db = prismaMock, audit) => disableAdminMfaBoundary(userId, db, audit);
+const getAdminMfaStatus = (userId, db = prismaMock) => getAdminMfaStatusBoundary(userId, db);
+const rotateAdminMfaBackupCodes = (input, db = prismaMock) => rotateAdminMfaBackupCodesBoundary(input, db);
+const verifyAdminMfaCode = (input, db = prismaMock) => verifyAdminMfaCodeBoundary(input, db);
 const { verifyTotpToken } = require("../dist/services/auth/totpMfaProvider");
 const {
   beginAdminMfaSetupController,
@@ -551,6 +822,7 @@ const controllerResponse = () => ({
 const controllerRequest = (sessionStage, body = {}, cookies = {}, sessionId = "bootstrap-session-1") => ({
   body,
   cookies,
+  databaseSessionCapability: "database-capability",
   ip: "127.0.0.1",
   user: {
     userId: "admin-1",
@@ -584,8 +856,8 @@ const reset = async () => {
   webAuthnCounter = 0;
   injectedWebAuthnError = null;
   transactionTail = Promise.resolve();
-  const setup = await beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" });
-  await confirmAdminMfaSetup({ userId: "admin-1", code: totp(setup.secret), mode: "FIRST_ENROLLMENT" });
+  const setup = await beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }, prismaMock);
+  await confirmAdminMfaSetup({ userId: "admin-1", code: totp(setup.secret), mode: "FIRST_ENROLLMENT" }, prismaMock);
   return setup;
 };
 
@@ -600,7 +872,7 @@ const makeChallenge = (overrides = {}) =>
     ipHash: "ip-hash",
     userAgent: "agent",
     ...overrides,
-  });
+  }, prismaMock);
 
 const rejectCode = async (promise) => {
   try {
@@ -652,14 +924,14 @@ const run = async () => {
   transactionTail = Promise.resolve();
   const controllerBeginResponse = controllerResponse();
   await beginAdminMfaSetupController(controllerRequest("MFA_BOOTSTRAP"), controllerBeginResponse);
-  assert.strictEqual(controllerBeginResponse.statusCode, 200);
+  assert.strictEqual(controllerBeginResponse.statusCode, 200, JSON.stringify({ body: controllerBeginResponse.body, loggerEvents }));
   assert.strictEqual(
-    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: controllerBeginResponse.body.data.backupCodes[0] })),
+    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: controllerBeginResponse.body.data.backupCodes[0] }, prismaMock)),
     "INVALID_MFA_CODE",
     "pending recovery codes must not authenticate before TOTP confirmation"
   );
   assert.strictEqual(
-    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: totp(controllerBeginResponse.body.data.secret) })),
+    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: totp(controllerBeginResponse.body.data.secret) }, prismaMock)),
     "INVALID_MFA_CODE",
     "pending TOTP factors must not authenticate before confirmation"
   );
@@ -668,7 +940,7 @@ const run = async () => {
     controllerRequest("MFA_BOOTSTRAP", { code: totp(controllerBeginResponse.body.data.secret) }),
     controllerConfirmResponse
   );
-  assert.strictEqual(controllerConfirmResponse.statusCode, 200);
+  assert.strictEqual(controllerConfirmResponse.statusCode, 200, JSON.stringify({ body: controllerConfirmResponse.body, loggerEvents }));
   assert.strictEqual(controllerConfirmResponse.body.data.auth.sessionStage, "ACTIVE");
   assert.deepStrictEqual(
     controllerConfirmResponse.cookies.map((entry) => entry.name).sort(),
@@ -749,7 +1021,7 @@ const run = async () => {
   }, {
     aq_refresh: sealCookieToken(currentRefresh, "auth.refresh"),
   }, "current-step-up-session"), successfulStepUpResponse);
-  assert.strictEqual(successfulStepUpResponse.statusCode, 200);
+  assert.strictEqual(successfulStepUpResponse.statusCode, 200, JSON.stringify({ body: successfulStepUpResponse.body, loggerEvents }));
   assert.strictEqual(backupCodeRows.filter((row) => row.usedAt).length, 2, "successful step-up must consume the backup code once");
   assert(refreshTokens.find((row) => row.id === "current-step-up-session").revokedAt, "successful step-up must replace the current refresh session");
   assert.strictEqual(refreshTokens.length, stepUpRefreshCount + 1, "successful step-up must create exactly one replacement session");
@@ -827,7 +1099,7 @@ const run = async () => {
   const historicalStatus = await getAdminMfaStatus("admin-1");
   assert.strictEqual(historicalStatus.enabled, false, "pre-fix unconfirmed TOTP rows must not be reported as enrolled");
   assert.strictEqual(
-    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: totp(historicalUnconfirmed.secret) })),
+    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: totp(historicalUnconfirmed.secret) }, prismaMock)),
     "INVALID_MFA_CODE",
     "pre-fix unconfirmed TOTP rows must not authenticate"
   );
@@ -842,7 +1114,7 @@ const run = async () => {
 
   const enrolledSnapshot = JSON.stringify({ credential, factors, backupCodeRows });
   assert.strictEqual(
-    String((await rejectError(beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }))).message),
+    String((await rejectError(beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }, prismaMock))).message),
     "MFA_ALREADY_ENROLLED",
     "a bootstrap session must not begin replacement of an enrolled factor"
   );
@@ -852,7 +1124,7 @@ const run = async () => {
     "enrolled bootstrap begin denial must not mutate MFA state"
   );
   assert.strictEqual(
-    String((await rejectError(confirmAdminMfaSetup({ userId: "admin-1", code: totp(firstEnrollment.secret), mode: "FIRST_ENROLLMENT" }))).message),
+    String((await rejectError(confirmAdminMfaSetup({ userId: "admin-1", code: totp(firstEnrollment.secret), mode: "FIRST_ENROLLMENT" }, prismaMock))).message),
     "MFA_ALREADY_ENROLLED",
     "a bootstrap session must not confirm replacement of an enrolled factor"
   );
@@ -869,18 +1141,18 @@ const run = async () => {
     userId: "admin-1",
     email: "admin@example.com",
     mode: "REPLACEMENT",
-  });
+  }, prismaMock);
   assert(
     factors.some((factor) => factor.type === "TOTP" && factor.lastUsedAt && !factor.disabledAt),
     "replacement begin must preserve a legacy-only verified factor"
   );
   assert.strictEqual(
-    (await verifyAdminMfaCode({ userId: "admin-1", code: totp(firstEnrollment.secret) })).method,
+    (await verifyAdminMfaCode({ userId: "admin-1", code: totp(firstEnrollment.secret) }, prismaMock)).method,
     "TOTP",
     "replacement begin must keep the old TOTP usable until confirmation"
   );
   assert.strictEqual(
-    (await verifyAdminMfaCode({ userId: "admin-1", code: firstEnrollment.backupCodes[0] })).method,
+    (await verifyAdminMfaCode({ userId: "admin-1", code: firstEnrollment.backupCodes[0] }, prismaMock)).method,
     "BACKUP_CODE",
     "replacement begin must preserve legacy-only backup-code recovery until confirmation"
   );
@@ -902,20 +1174,20 @@ const run = async () => {
   const oldTotp = totp(firstEnrollment.secret);
   const newTotp = totp(replacementSetup.secret);
   if (oldTotp !== newTotp) {
-    assert.strictEqual(await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: oldTotp })), "INVALID_MFA_CODE");
+    assert.strictEqual(await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: oldTotp }, prismaMock)), "INVALID_MFA_CODE");
   }
   assert.strictEqual(
-    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: firstEnrollment.backupCodes[1] })),
+    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: firstEnrollment.backupCodes[1] }, prismaMock)),
     "INVALID_MFA_CODE",
     "old unused recovery codes must be invalid after replacement confirmation"
   );
   assert.strictEqual(
-    (await verifyAdminMfaCode({ userId: "admin-1", code: replacementSetup.backupCodes[0] })).method,
+    (await verifyAdminMfaCode({ userId: "admin-1", code: replacementSetup.backupCodes[0] }, prismaMock)).method,
     "BACKUP_CODE",
     "new recovery codes must become usable exactly after confirmation"
   );
   assert.strictEqual(
-    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: replacementSetup.backupCodes[0] })),
+    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: replacementSetup.backupCodes[0] }, prismaMock)),
     "INVALID_MFA_CODE",
     "new recovery codes must be one-time"
   );
@@ -961,7 +1233,7 @@ const run = async () => {
   assert(factors.every((factor) => factor.disabledAt), "disable must retire normalized TOTP and WebAuthn factors");
   assert.strictEqual(backupCodeRows.filter((row) => !row.usedAt).length, 0, "disable must invalidate unused recovery codes");
   assert.strictEqual(
-    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: totp(disableSetup.secret) })),
+    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: totp(disableSetup.secret) }, prismaMock)),
     "INVALID_MFA_CODE",
     "disabled TOTP must not authenticate"
   );
@@ -970,7 +1242,9 @@ const run = async () => {
   const rotationSnapshot = JSON.stringify({ credential, factors, backupCodeRows });
   failCredentialBackupWrite = true;
   assert.strictEqual(
-    await rejectCode(rotateAdminMfaBackupCodes({ userId: "admin-1", code: totp(rotationSetup.secret) })),
+    await rejectCode(prismaMock.$transaction((tx) =>
+      rotateAdminMfaBackupCodes({ userId: "admin-1", code: totp(rotationSetup.secret) }, tx)
+    )),
     "MFA_BACKUP_WRITE_FAILED"
   );
   assert.strictEqual(
@@ -979,14 +1253,16 @@ const run = async () => {
     "backup rotation failure must roll back verification and both recovery stores"
   );
   failCredentialBackupWrite = false;
-  const rotated = await rotateAdminMfaBackupCodes({ userId: "admin-1", code: totp(rotationSetup.secret) });
+  const rotated = await prismaMock.$transaction((tx) =>
+    rotateAdminMfaBackupCodes({ userId: "admin-1", code: totp(rotationSetup.secret) }, tx)
+  );
   assert.strictEqual(
-    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: rotationSetup.backupCodes[0] })),
+    await rejectCode(verifyAdminMfaCode({ userId: "admin-1", code: rotationSetup.backupCodes[0] }, prismaMock)),
     "INVALID_MFA_CODE",
     "successful rotation must retire the previous recovery set"
   );
   assert.strictEqual(
-    (await verifyAdminMfaCode({ userId: "admin-1", code: rotated.backupCodes[0] })).method,
+    (await verifyAdminMfaCode({ userId: "admin-1", code: rotated.backupCodes[0] }, prismaMock)).method,
     "BACKUP_CODE",
     "successful rotation must publish one consistent recovery set"
   );
@@ -997,7 +1273,7 @@ const run = async () => {
   webAuthnCredentials = [{ id: "webauthn-1", userId: "admin-1" }];
   transactionTail = Promise.resolve();
   assert.strictEqual(
-    String((await rejectError(beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }))).message),
+    String((await rejectError(beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }, prismaMock))).message),
     "MFA_ALREADY_ENROLLED",
     "an existing WebAuthn factor must block bootstrap TOTP setup"
   );
@@ -1008,7 +1284,7 @@ const run = async () => {
   transactionTail = Promise.resolve();
   const unavailableSnapshot = JSON.stringify({ credential, factors, backupCodeRows });
   assert.strictEqual(
-    String((await rejectError(beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }))).message),
+    String((await rejectError(beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }, prismaMock))).message),
     "MFA_STATE_DATABASE_UNAVAILABLE",
     "MFA state read failures must fail closed"
   );
@@ -1023,7 +1299,7 @@ const run = async () => {
   transactionTail = Promise.resolve();
   const writeFailureSnapshot = JSON.stringify({ credential, factors, backupCodeRows });
   assert.strictEqual(
-    String((await rejectError(beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }))).message),
+    String((await rejectError(beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }, prismaMock))).message),
     "MFA_FACTOR_WRITE_FAILED"
   );
   assert.strictEqual(
@@ -1039,8 +1315,8 @@ const run = async () => {
   transactionTail = Promise.resolve();
   const lockCallsBeforeRace = advisoryLockCalls;
   const concurrent = await Promise.allSettled([
-    beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }),
-    beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }),
+    beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }, prismaMock),
+    beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com", mode: "FIRST_ENROLLMENT" }, prismaMock),
   ]);
   assert.strictEqual(concurrent.filter((result) => result.status === "fulfilled").length, 1);
   assert.strictEqual(concurrent.filter((result) => result.status === "rejected").length, 1);
@@ -1055,7 +1331,7 @@ const run = async () => {
     "concurrent first enrollment must leave one confirmable pending factor"
   );
   const raceWinner = concurrent.find((result) => result.status === "fulfilled").value;
-  await confirmAdminMfaSetup({ userId: "admin-1", code: totp(raceWinner.secret), mode: "FIRST_ENROLLMENT" });
+  await confirmAdminMfaSetup({ userId: "admin-1", code: totp(raceWinner.secret), mode: "FIRST_ENROLLMENT" }, prismaMock);
 
   const providerSetup = await reset();
   assert.strictEqual(
@@ -1092,7 +1368,7 @@ const run = async () => {
       userAgent: "agent",
     });
     assertSafeFutureExpiry(legacyChallenge.expiresAt, beforeMs, "legacy high-risk challenge");
-  });
+  }, prismaMock);
 
   const productionEvidenceSetup = await reset();
   await withAuthMfaChallengeTtl(undefined, async () => {
@@ -1120,7 +1396,7 @@ const run = async () => {
     });
     assert.strictEqual(correct.method, "TOTP");
     assert(challenges[challenges.length - 1].consumedAt, "same login-returned ticket should complete and be consumed");
-  });
+  }, prismaMock);
 
   const setup = await reset();
   const invalidChallenge = await makeChallenge();
@@ -1145,7 +1421,7 @@ const run = async () => {
     ticket: newFactorChallenge.ticket,
     method: "totp",
     code: totp(newFactorSetup.secret),
-  });
+  }, prismaMock);
   assert.strictEqual(newFactorValid.method, "TOTP");
   assert(challenges[0].consumedAt, "new UserMfaFactor TOTP should consume challenge");
   assert(factors.some((factor) => factor.type === "TOTP" && factor.lastUsedAt), "new TOTP factor should record last use");
@@ -1159,7 +1435,7 @@ const run = async () => {
     ticket: legacyOnlyChallenge.ticket,
     method: "totp",
     code: totp(legacyOnlySetup.secret),
-  });
+  }, prismaMock);
   assert.strictEqual(legacyOnlyValid.method, "TOTP");
   assert(challenges[0].consumedAt, "legacy AdminMfaCredential TOTP should consume challenge");
   assert(

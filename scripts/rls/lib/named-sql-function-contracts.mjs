@@ -54,10 +54,24 @@ const preAuthSource = "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFun
 const preAuthRollback = "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql";
 const c03Source = "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql";
 const c03Rollback = "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql";
+const c03PolicySource = "backend/src/rls-waves/session-c/c03/c03Policy.sql";
+const c03PolicyRollback = "backend/src/rls-waves/session-c/c03/c03PolicyRollback.sql";
+const c03GovernanceSource = "backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql";
+const c03GovernanceRollback = "backend/src/rls-waves/session-c/c03/c03GovernanceRollback.sql";
+const c03ApprovalSource = "backend/src/rls-waves/session-c/c03/c03ApprovalFunctions.sql";
+const c03ApprovalRollback = "backend/src/rls-waves/session-c/c03/c03ApprovalRollback.sql";
+const c03IncidentSource = "backend/src/rls-waves/session-c/c03/c03IncidentFunctions.sql";
+const c03IncidentRollback = "backend/src/rls-waves/session-c/c03/c03IncidentRollback.sql";
+const c02AuditTraceSource = "backend/src/rls-waves/session-c/c02/auditTrace.sql";
+const c02AuditTraceRollback = "backend/src/rls-waves/session-c/c02/auditTraceRollback.sql";
+const riskAnalyticsSource = "backend/src/rls-waves/session-c/c02/riskAnalytics.sql";
+const riskAnalyticsRollback = "backend/src/rls-waves/session-c/c02/riskAnalyticsRollback.sql";
 const scheduledSource = "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql";
 const scheduledRollback = "backend/src/rls-waves/session-b/b03/scheduledJobIdentityRollback.sql";
 const outboxSource = "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql";
 const outboxRollback = "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql";
+const b03AuthenticatedSource = "backend/src/rls-waves/session-b/b03/b03AuthenticatedFunctions.sql";
+const b03AuthenticatedRollback = "backend/src/rls-waves/session-b/b03/b03AuthenticatedRollback.sql";
 const operationalReadSource = "backend/src/rls-waves/session-a/operationalReadBoundaries.sql";
 const operationalReadRollback = "backend/src/rls-waves/session-a/operationalReadBoundariesRollback.sql";
 const administrationSource = "backend/src/rls-waves/session-c/c01/administration.sql";
@@ -143,6 +157,7 @@ const preAuthSecurity = Object.freeze({
 });
 
 const authClosureSessionBinding = `(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public."RefreshToken" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session."userId"=current_setting('app.auth_closure_user_id',true) AND auth_session."sessionCapabilityHash"=current_setting('app.auth_session_hash',true) AND auth_session."sessionCapabilityHashVersion"='sha256-v1' AND auth_session."sessionCapabilityRevokedAt" IS NULL AND auth_session."sessionCapabilityExpiresAt">clock_timestamp() AND auth_session."revokedAt" IS NULL AND auth_session."expiresAt">clock_timestamp()))`;
+const authClosureVerifiedBinding = `(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true))`;
 const authClosureSessionRowBinding = `(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND id=current_setting('app.auth_closure_session_id',true) AND "userId"=current_setting('app.auth_closure_user_id',true) AND "sessionCapabilityHash"=current_setting('app.auth_session_hash',true) AND "sessionCapabilityHashVersion"='sha256-v1')`;
 const authClosureLoginBinding = `(current_user={{AUTH_OWNER}} AND current_setting('app.auth_closure_user_id',true)<>'' AND current_setting('app.auth_closure_user_id',true)=current_setting('app.b01_preauth_user_id',true))`;
 const authenticationClosureSecurity = Object.freeze({
@@ -151,42 +166,161 @@ const authenticationClosureSecurity = Object.freeze({
   rollbackDefinition: authenticationClosureRollback,
   deploymentPhase: "session-b-b01-authentication-closure",
   ownerPrivileges: [
-    ["User", "SELECT", ["id","email","pendingEmail","name","role","orgId","licenseeId","status","isActive","disabledAt","deletedAt","emailVerifiedAt","pendingEmailRequestedAt","createdAt"]],
-    ["User", "UPDATE", ["passwordHash","failedLoginAttempts","lockedUntil","lastLoginAt","updatedAt"]],
+    ["User", "SELECT", ["id","email","pendingEmail","passwordHash","name","role","orgId","licenseeId","status","isActive","disabledAt","deletedAt","emailVerifiedAt","pendingEmailRequestedAt","createdAt"]],
+    ["User", "UPDATE", ["passwordHash","pendingEmail","pendingEmailRequestedAt","name","failedLoginAttempts","lockedUntil","lastLoginAt","updatedAt"]],
     ["RefreshToken", "SELECT", ["id","userId","orgId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt","revokedAt","revokedReason","sessionCapabilityHash","sessionCapabilityHashVersion","sessionCapabilityExpiresAt","sessionCapabilityRevokedAt"]],
     ["RefreshToken", "INSERT", ["id","orgId","userId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt"]],
-    ["RefreshToken", "UPDATE", ["revokedAt","revokedReason","lastUsedAt","sessionCapabilityRevokedAt","sessionCapabilityRevokedReason"]],
+    ["RefreshToken", "UPDATE", ["authenticatedAt","revokedAt","revokedReason","lastUsedAt","sessionCapabilityRevokedAt","sessionCapabilityRevokedReason"]],
+    ["EmailVerificationToken", "SELECT", ["id","userId","purpose","usedAt"]],
+    ["EmailVerificationToken", "INSERT", ["id","userId","email","pendingEmail","purpose","tokenHash","secretVersion","expiresAt","createdAt","createdIpHash","userAgentHash"]],
+    ["EmailVerificationToken", "UPDATE", ["usedAt"]],
     ["Licensee", "SELECT", ["id","orgId","name","prefix","brandName","isActive","suspendedAt"]],
     ["Organization", "SELECT", ["id","isActive"]],
     ["ManufacturerLicenseeLink", "SELECT", ["manufacturerId","licenseeId"]],
-    ["AdminMfaCredential", "SELECT", ["userId","isEnabled","lastUsedAt"]],
-    ["AdminWebAuthnCredential", "SELECT", ["userId","lastUsedAt"]],
-    ["UserMfaFactor", "SELECT", ["userId","type","lastUsedAt","disabledAt"]],
-    ["UserBackupCode", "SELECT", ["userId","usedAt"]],
+    ["AdminMfaCredential", "SELECT", ["id","userId","secretCiphertext","secretIv","secretTag","backupCodesHash","isEnabled","verifiedAt","lastUsedAt","createdAt","updatedAt"]],
+    ["AdminMfaCredential", "INSERT", ["id","userId","secretCiphertext","secretIv","secretTag","backupCodesHash","isEnabled","verifiedAt","lastUsedAt","createdAt","updatedAt"]],
+    ["AdminMfaCredential", "UPDATE", ["secretCiphertext","secretIv","secretTag","backupCodesHash","isEnabled","verifiedAt","lastUsedAt","updatedAt"]],
+    ["AdminWebAuthnCredential", "SELECT", ["id","userId","label","credentialId","publicKeySpki","publicKeyAlgorithm","counter","transports","lastUsedAt","createdAt","updatedAt"]],
+    ["AdminWebAuthnCredential", "INSERT", ["id","userId","label","credentialId","publicKeySpki","publicKeyAlgorithm","counter","transports","lastUsedAt","createdAt","updatedAt"]],
+    ["AdminWebAuthnCredential", "UPDATE", ["label","publicKeySpki","publicKeyAlgorithm","counter","transports","lastUsedAt","updatedAt"]],
+    ["AdminWebAuthnCredential", "DELETE", ["id","userId"]],
+    ["UserMfaFactor", "SELECT", ["id","userId","type","label","credentialId","publicKey","counter","transports","credentialDeviceType","credentialBackedUp","secretCiphertext","secretIv","secretTag","legacySource","legacyCredentialId","createdAt","updatedAt","lastUsedAt","disabledAt"]],
+    ["UserMfaFactor", "INSERT", ["id","userId","type","label","credentialId","publicKey","counter","transports","credentialDeviceType","credentialBackedUp","secretCiphertext","secretIv","secretTag","legacySource","legacyCredentialId","createdAt","updatedAt","lastUsedAt","disabledAt"]],
+    ["UserMfaFactor", "UPDATE", ["userId","type","label","credentialId","publicKey","counter","transports","credentialDeviceType","credentialBackedUp","secretCiphertext","secretIv","secretTag","legacySource","legacyCredentialId","updatedAt","lastUsedAt","disabledAt"]],
+    ["UserMfaFactor", "DELETE", ["id","userId","type","legacySource"]],
+    ["UserBackupCode", "SELECT", ["id","userId","codeHash","usedAt","createdAt"]],
+    ["UserBackupCode", "INSERT", ["id","userId","codeHash","createdAt"]],
+    ["UserBackupCode", "UPDATE", ["usedAt"]],
+    ["UserBackupCode", "DELETE", ["id","userId","usedAt"]],
     ["AuthSessionRiskSignal", "INSERT", ["id","userId","riskScore","riskLevel","reasons","ipHash","userAgentHash","createdAt"]],
     ["MfaLoginChallenge", "INSERT", ["id","userId","ticketHash","purpose","riskScore","riskLevel","reasons","createdIpHash","createdUserAgentHash","attempts","maxAttempts","createdAt","updatedAt","expiresAt"]],
-    ["AuditLogOutbox", "INSERT", ["id","payload","requestId","organizationId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt"]],
+    ["MfaLoginChallenge", "SELECT", ["id","userId","ticketHash","purpose","riskScore","riskLevel","reasons","createdIpHash","createdUserAgentHash","attempts","maxAttempts","expiresAt","consumedAt"]],
+    ["MfaLoginChallenge", "UPDATE", ["attempts","updatedAt","consumedAt"]],
+    ["AuthMfaChallenge", "SELECT", ["id","userId","ticketHash","sessionBindingHash","purpose","riskScore","riskLevel","reasons","createdIpHash","createdUserAgentHash","attempts","maxAttempts","expiresAt","consumedAt","supersededAt"]],
+    ["AuthMfaChallenge", "INSERT", ["id","userId","ticketHash","sessionBindingHash","purpose","riskScore","riskLevel","reasons","createdIpHash","createdUserAgentHash","attempts","maxAttempts","createdAt","updatedAt","expiresAt"]],
+    ["AuthMfaChallenge", "UPDATE", ["attempts","updatedAt","consumedAt","supersededAt"]],
+    ["AuthWebAuthnChallenge", "SELECT", ["id","userId","purpose","ticketHash","challengeHash","credentialIds","createdIpHash","createdUserAgentHash","origin","rpId","createdAt","expiresAt","consumedAt"]],
+    ["AuthWebAuthnChallenge", "INSERT", ["id","userId","purpose","ticketHash","challengeHash","credentialIds","createdIpHash","createdUserAgentHash","origin","rpId","createdAt","expiresAt"]],
+    ["AuthWebAuthnChallenge", "UPDATE", ["consumedAt"]],
+    ["AuditLogOutbox", "INSERT", ["id","payload","requestId","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt"]],
   ],
   ownerPolicies: [
     ["User", "SELECT", `(${authClosureSessionBinding} AND id=current_setting('app.auth_closure_user_id',true)) OR (${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true) IN ('login-risk-read','login-risk-write','login-session-create') AND id=current_setting('app.auth_closure_user_id',true))`],
-    ["User", "UPDATE", `${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-write' AND id=current_setting('app.auth_closure_user_id',true)`],
-    ["RefreshToken", "SELECT", `(${authClosureSessionRowBinding} AND "sessionCapabilityRevokedAt" IS NULL AND "sessionCapabilityExpiresAt">clock_timestamp() AND "revokedAt" IS NULL AND "expiresAt">clock_timestamp()) OR (${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-read' AND "userId"=current_setting('app.auth_closure_user_id',true))`],
+    ["User", "UPDATE", `(${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-write' AND id=current_setting('app.auth_closure_user_id',true)) OR (${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) IN ('email-change','profile-update','password-change') AND id=current_setting('app.auth_closure_user_id',true))`],
+    ["RefreshToken", "SELECT", `(${authClosureSessionRowBinding} AND "sessionCapabilityRevokedAt" IS NULL AND "sessionCapabilityExpiresAt">clock_timestamp() AND "revokedAt" IS NULL AND "expiresAt">clock_timestamp()) OR (${authClosureVerifiedBinding} AND current_setting('app.auth_closure_operation',true) IN ('session-list','sensitive-session-read') AND "userId"=current_setting('app.auth_closure_user_id',true)) OR (${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-read' AND "userId"=current_setting('app.auth_closure_user_id',true))`],
     ["RefreshToken", "INSERT", `${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-session-create' AND id=current_setting('app.auth_closure_token_id',true) AND "userId"=current_setting('app.auth_closure_user_id',true) AND "tokenHash"=current_setting('app.auth_closure_token_hash',true) AND coalesce("orgId",'')=current_setting('app.auth_closure_organization_id',true)`],
-    ["RefreshToken", "UPDATE", `${authClosureSessionRowBinding} AND current_setting('app.auth_session_operation',true)='revoke-one' AND id=current_setting('app.auth_session_target_id',true)`],
+    ["RefreshToken", "UPDATE", `(${authClosureSessionRowBinding} AND current_setting('app.auth_session_operation',true)='revoke-one' AND id=current_setting('app.auth_session_target_id',true)) OR (${authClosureVerifiedBinding} AND ((current_setting('app.auth_closure_operation',true)='password-step-up' AND id=current_setting('app.auth_closure_session_id',true)) OR (current_setting('app.auth_closure_operation',true) IN ('session-revoke-all','password-change','mfa-disable') AND "userId"=current_setting('app.auth_closure_user_id',true))))`],
+    ["EmailVerificationToken", "SELECT", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='email-change' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["EmailVerificationToken", "INSERT", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='email-change' AND "userId"=current_setting('app.auth_closure_user_id',true) AND purpose='EMAIL_CHANGE' AND "pendingEmail"=current_setting('app.auth_closure_pending_email',true) AND "tokenHash"=current_setting('app.auth_closure_token_hash',true)`],
+    ["EmailVerificationToken", "UPDATE", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='email-change' AND "userId"=current_setting('app.auth_closure_user_id',true) AND purpose='EMAIL_CHANGE'`],
     ["Licensee", "SELECT", `((${authClosureSessionBinding}) OR (${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true) IN ('login-risk-read','login-session-create'))) AND (id=current_setting('app.auth_closure_licensee_id',true) OR "orgId"=current_setting('app.auth_closure_organization_id',true) OR EXISTS (SELECT 1 FROM public."ManufacturerLicenseeLink" ml WHERE ml."manufacturerId"=current_setting('app.auth_closure_user_id',true) AND ml."licenseeId"=public."Licensee".id))`],
     ["Organization", "SELECT", `((${authClosureSessionBinding}) OR (${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true) IN ('login-risk-read','login-session-create'))) AND (id=current_setting('app.auth_closure_organization_id',true) OR EXISTS (SELECT 1 FROM public."Licensee" l WHERE l."orgId"=public."Organization".id AND (l.id=current_setting('app.auth_closure_licensee_id',true) OR EXISTS (SELECT 1 FROM public."ManufacturerLicenseeLink" ml WHERE ml."manufacturerId"=current_setting('app.auth_closure_user_id',true) AND ml."licenseeId"=l.id))))`],
     ["ManufacturerLicenseeLink", "SELECT", `((${authClosureSessionBinding}) OR (${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true) IN ('login-risk-read','login-session-create'))) AND "manufacturerId"=current_setting('app.auth_closure_user_id',true)`],
-    ["AdminMfaCredential", "SELECT", `${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-read' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
-    ["AdminWebAuthnCredential", "SELECT", `${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-read' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
-    ["UserMfaFactor", "SELECT", `${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-read' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
-    ["UserBackupCode", "SELECT", `${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-read' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["AdminMfaCredential", "SELECT", `(${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-read' AND "userId"=current_setting('app.auth_closure_user_id',true)) OR (${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) LIKE 'mfa-%' AND "userId"=current_setting('app.auth_closure_user_id',true))`],
+    ["AdminMfaCredential", "INSERT", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='mfa-enrollment-begin' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["AdminMfaCredential", "UPDATE", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) IN ('mfa-enrollment-begin','mfa-enrollment-complete','mfa-verifier-consume','mfa-backup-replace','mfa-disable') AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["AdminWebAuthnCredential", "SELECT", `(${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-read' AND "userId"=current_setting('app.auth_closure_user_id',true)) OR (${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) LIKE 'mfa-%' AND "userId"=current_setting('app.auth_closure_user_id',true))`],
+    ["AdminWebAuthnCredential", "INSERT", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='mfa-webauthn-registration-complete' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["AdminWebAuthnCredential", "UPDATE", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='mfa-webauthn-authentication-complete' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["AdminWebAuthnCredential", "DELETE", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) IN ('mfa-disable','mfa-webauthn-delete') AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["UserMfaFactor", "SELECT", `(${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-read' AND "userId"=current_setting('app.auth_closure_user_id',true)) OR (${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) LIKE 'mfa-%' AND "userId"=current_setting('app.auth_closure_user_id',true))`],
+    ["UserMfaFactor", "INSERT", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) IN ('mfa-enrollment-begin','mfa-verifier-consume','mfa-webauthn-registration-complete') AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["UserMfaFactor", "UPDATE", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) IN ('mfa-enrollment-begin','mfa-enrollment-complete','mfa-verifier-consume','mfa-disable','mfa-webauthn-registration-complete','mfa-webauthn-authentication-complete','mfa-webauthn-delete') AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["UserMfaFactor", "DELETE", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='mfa-enrollment-begin' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["UserBackupCode", "SELECT", `(${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-read' AND "userId"=current_setting('app.auth_closure_user_id',true)) OR (${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) LIKE 'mfa-%' AND "userId"=current_setting('app.auth_closure_user_id',true))`],
+    ["UserBackupCode", "INSERT", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) IN ('mfa-enrollment-begin','mfa-enrollment-complete','mfa-backup-replace') AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["UserBackupCode", "UPDATE", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='mfa-verifier-consume' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["UserBackupCode", "DELETE", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) IN ('mfa-enrollment-complete','mfa-backup-replace','mfa-disable') AND "userId"=current_setting('app.auth_closure_user_id',true)`],
     ["AuthSessionRiskSignal", "INSERT", `${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-risk-write' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
-    ["MfaLoginChallenge", "INSERT", `${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true)='login-mfa-challenge' AND id=current_setting('app.auth_closure_challenge_id',true) AND "userId"=current_setting('app.auth_closure_user_id',true) AND "ticketHash"=current_setting('app.auth_closure_challenge_hash',true)`],
-    ["AuditLogOutbox", "INSERT", `${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true) IN ('login-mfa-challenge','login-session-create') AND payload->>'userId'=current_setting('app.auth_closure_user_id',true) AND payload->>'action' IN ('AUTH_MFA_CHALLENGE_ISSUED','AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA')`],
+    ["MfaLoginChallenge", "INSERT", `((${authClosureLoginBinding}) AND current_setting('app.auth_closure_operation',true)='login-mfa-challenge' OR (${authClosureSessionBinding}) AND current_setting('app.auth_closure_operation',true)='mfa-challenge-create') AND id=current_setting('app.auth_closure_challenge_id',true) AND "userId"=current_setting('app.auth_closure_user_id',true) AND "ticketHash"=current_setting('app.auth_closure_challenge_hash',true)`],
+    ["MfaLoginChallenge", "SELECT", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='mfa-challenge-read' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["MfaLoginChallenge", "UPDATE", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) IN ('mfa-challenge-fail','mfa-challenge-complete') AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["AuthMfaChallenge", "SELECT", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='mfa-challenge-read' AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["AuthMfaChallenge", "INSERT", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='mfa-challenge-create' AND id=current_setting('app.auth_closure_challenge_id',true) AND "userId"=current_setting('app.auth_closure_user_id',true) AND "ticketHash"=current_setting('app.auth_closure_challenge_hash',true)`],
+    ["AuthMfaChallenge", "UPDATE", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) IN ('mfa-challenge-create','mfa-challenge-fail','mfa-challenge-complete') AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["AuthWebAuthnChallenge", "SELECT", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) IN ('mfa-webauthn-challenge-read','mfa-webauthn-registration-complete','mfa-webauthn-authentication-complete') AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["AuthWebAuthnChallenge", "INSERT", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true)='mfa-webauthn-challenge-create' AND id=current_setting('app.auth_closure_challenge_id',true) AND "userId"=current_setting('app.auth_closure_user_id',true) AND "ticketHash"=current_setting('app.auth_closure_challenge_hash',true)`],
+    ["AuthWebAuthnChallenge", "UPDATE", `${authClosureSessionBinding} AND current_setting('app.auth_closure_operation',true) IN ('mfa-webauthn-registration-complete','mfa-webauthn-authentication-complete') AND "userId"=current_setting('app.auth_closure_user_id',true)`],
+    ["AuditLogOutbox", "INSERT", `(${authClosureLoginBinding} AND current_setting('app.auth_closure_operation',true) IN ('login-mfa-challenge','login-session-create') AND payload->>'userId'=current_setting('app.auth_closure_user_id',true) AND payload->>'action' IN ('AUTH_MFA_CHALLENGE_ISSUED','AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA')) OR (${authClosureSessionBinding} AND ((current_setting('app.auth_closure_operation',true) IN ('profile-update','password-change','mfa-enrollment-complete','mfa-disable','mfa-challenge-create','mfa-challenge-fail','mfa-challenge-complete','mfa-webauthn-registration-complete','mfa-webauthn-delete') AND payload->>'action' IN ('AUTH_PROFILE_UPDATED','AUTH_PASSWORD_CHANGED','AUTH_MFA_ENROLLED','AUTH_MFA_REPLACED','AUTH_MFA_DISABLED','AUTH_MFA_CHALLENGE_ISSUED','AUTH_MFA_CHALLENGE_EXPIRED','AUTH_MFA_FAILURE','AUTH_MFA_TOO_MANY_ATTEMPTS','AUTH_MFA_BACKUP_CODE_USED','AUTH_MFA_SUCCESS','AUTH_WEBAUTHN_ENROLLED','AUTH_WEBAUTHN_CREDENTIAL_REMOVED')) OR (current_setting('app.auth_closure_operation',true)='manufacturer-scope-read' AND payload->>'action' IN ('MANUFACTURER_BOOTSTRAP_READ','MANUFACTURER_SCOPE_SWITCH'))) AND payload->>'userId'=current_setting('app.auth_closure_user_id',true))`],
   ],
 });
 
-const c03SessionBinding = `(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public."RefreshToken" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session."userId"=current_setting('app.c03_user_id',true) AND c03_session."sessionCapabilityHash"=current_setting('app.auth_session_hash',true) AND c03_session."sessionCapabilityHashVersion"='sha256-v1' AND c03_session."sessionCapabilityRevokedAt" IS NULL AND c03_session."sessionCapabilityExpiresAt">clock_timestamp() AND c03_session."revokedAt" IS NULL AND c03_session."expiresAt">clock_timestamp()))`;
+const c03SessionBinding = `app_rls.c03_session_valid()`;
+const c02SessionRowBinding = `(current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE}} AND current_setting('app.auth_session_verified',true)='1' AND id=current_setting('app.auth_session_id',true) AND "userId"=current_setting('app.user_id',true) AND "sessionCapabilityHash"=current_setting('app.auth_session_hash',true) AND "sessionCapabilityHashVersion"='sha256-v1' AND "sessionCapabilityRevokedAt" IS NULL AND "sessionCapabilityExpiresAt">clock_timestamp() AND "revokedAt" IS NULL AND "expiresAt">clock_timestamp())`;
+const c02SessionBinding = `app_rls.c02_audit_trace_session_valid()`;
+const c02AuditTraceSecurity = Object.freeze({
+  mode: "SECURITY DEFINER",
+  ownerIdentity: "identity-auth-function-owner",
+  ownerRole: "authOwner",
+  searchPath: "pg_catalog,public",
+  publicExecute: "revoked",
+  runtimeExecuteGrantees: ["app"],
+  functionSource: c02AuditTraceSource,
+  rollbackDefinition: c02AuditTraceRollback,
+  deploymentPhase: "session-c-c03",
+  ownerPrivileges: [
+    ["RefreshToken", "SELECT", ["id","userId","expiresAt","revokedAt","sessionCapabilityHash","sessionCapabilityHashVersion","sessionCapabilityExpiresAt","sessionCapabilityRevokedAt"]],
+    ["User", "SELECT", ["id","name","role","orgId","licenseeId","status","isActive","disabledAt","deletedAt"]],
+    ["Licensee", "SELECT", ["id","orgId","isActive","suspendedAt"]],
+    ["Organization", "SELECT", ["id","isActive"]],
+    ["ManufacturerLicenseeLink", "SELECT", ["manufacturerId","licenseeId"]],
+    ["AuditLog", "SELECT", ["id","userId","orgId","licenseeId","action","entityType","entityId","details","ipAddress","userAgent","createdAt"]],
+    ["AuditLog", "INSERT", ["id","userId","orgId","licenseeId","action","entityType","entityId","details"]],
+    ["SecurityEventOutbox", "INSERT", ["id","eventType","payload","updatedAt"]],
+  ],
+  ownerPolicies: [
+    ["RefreshToken", "SELECT", c02SessionRowBinding],
+    ["User", "SELECT", `${c02SessionBinding} AND (id=current_setting('app.user_id',true) OR (current_setting('app.purpose',true)='platform-audit-log-read' AND "licenseeId"=current_setting('app.licensee_id',true)))`],
+    ["Licensee", "SELECT", `${c02SessionBinding} AND id=current_setting('app.licensee_id',true) AND "isActive" AND "suspendedAt" IS NULL`],
+    ["Organization", "SELECT", `${c02SessionBinding} AND "isActive" AND id IN (current_setting('app.organization_id',true),(SELECT l."orgId" FROM public."Licensee" l WHERE l.id=current_setting('app.licensee_id',true)))`],
+    ["ManufacturerLicenseeLink", "SELECT", `${c02SessionBinding} AND "manufacturerId"=current_setting('app.user_id',true) AND "licenseeId"=current_setting('app.licensee_id',true)`],
+    ["AuditLog", "SELECT", `${c02SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
+    ["AuditLog", "INSERT", `${c02SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true) AND "userId"=current_setting('app.user_id',true) AND action='CUSTOMER_FRAUD_REPORT_RESPONSE'`],
+    ["SecurityEventOutbox", "INSERT", `${c02SessionBinding} AND "eventType"='AUDIT_LOG' AND payload->>'userId'=current_setting('app.user_id',true) AND payload->>'licenseeId'=current_setting('app.licensee_id',true)`],
+  ],
+});
+const riskAnalyticsBinding = `app_rls.risk_analytics_session_valid()`;
+const riskAnalyticsSecurity = Object.freeze({
+  mode: "SECURITY DEFINER",
+  ownerIdentity: "identity-auth-function-owner",
+  ownerRole: "authOwner",
+  searchPath: "pg_catalog,public",
+  publicExecute: "revoked",
+  runtimeExecuteGrantees: ["app"],
+  functionSource: riskAnalyticsSource,
+  rollbackDefinition: riskAnalyticsRollback,
+  deploymentPhase: "session-c-c03",
+  ownerPrivileges: [
+    ["RefreshToken","SELECT",["id","userId","expiresAt","revokedAt","sessionCapabilityHash","sessionCapabilityHashVersion","sessionCapabilityExpiresAt","sessionCapabilityRevokedAt"]],
+    ["User","SELECT",["id","name","role","orgId","licenseeId","status","isActive","disabledAt","deletedAt"]],
+    ["Licensee","SELECT",["id","orgId","isActive","suspendedAt"]],
+    ["Organization","SELECT",["id","isActive"]],
+    ["ManufacturerLicenseeLink","SELECT",["manufacturerId","licenseeId"]],
+    ["SecurityPolicy","SELECT",["licenseeId","multiScanThreshold","geoDriftThresholdKm","velocitySpikeThresholdPerMin"]],
+    ["Batch","SELECT",["id","name","licenseeId","manufacturerId"]],
+    ["QRCode","SELECT",["id","licenseeId","batchId","scanCount"]],
+    ["QrScanLog","SELECT",["id","licenseeId","qrCodeId","batchId","latitude","longitude","scannedAt"]],
+    ["PolicyAlert","SELECT",["id","licenseeId","batchId","qrCodeId","manufacturerId","incidentId","policyRuleId","acknowledgedAt"]],
+    ["Incident","SELECT",["id","licenseeId"]],
+    ["PolicyRule","SELECT",["id","licenseeId","orgId","manufacturerId","isActive"]],
+    ["AuditLog","INSERT",["id","userId","orgId","licenseeId","action","entityType","entityId","details"]],
+  ],
+  ownerPolicies: [
+    ["RefreshToken","SELECT",c02SessionRowBinding],
+    ["User","SELECT",`${riskAnalyticsBinding} AND (id=current_setting('app.risk_analytics_user_id',true) OR "licenseeId"=current_setting('app.risk_analytics_licensee_id',true) OR EXISTS (SELECT 1 FROM public."ManufacturerLicenseeLink" ml WHERE ml."manufacturerId"=id AND ml."licenseeId"=current_setting('app.risk_analytics_licensee_id',true)))`],
+    ["Licensee","SELECT",`${riskAnalyticsBinding} AND id=current_setting('app.risk_analytics_licensee_id',true) AND "isActive" AND "suspendedAt" IS NULL`],
+    ["Organization","SELECT",`${riskAnalyticsBinding} AND id=current_setting('app.risk_analytics_organization_id',true) AND "isActive"`],
+    ["ManufacturerLicenseeLink","SELECT",`${riskAnalyticsBinding} AND "licenseeId"=current_setting('app.risk_analytics_licensee_id',true)`],
+    ["SecurityPolicy","SELECT",`${riskAnalyticsBinding} AND "licenseeId"=current_setting('app.risk_analytics_licensee_id',true)`],
+    ["Batch","SELECT",`${riskAnalyticsBinding} AND "licenseeId"=current_setting('app.risk_analytics_licensee_id',true)`],
+    ["QRCode","SELECT",`${riskAnalyticsBinding} AND "licenseeId"=current_setting('app.risk_analytics_licensee_id',true)`],
+    ["QrScanLog","SELECT",`${riskAnalyticsBinding} AND "licenseeId"=current_setting('app.risk_analytics_licensee_id',true)`],
+    ["PolicyAlert","SELECT",`${riskAnalyticsBinding} AND "licenseeId"=current_setting('app.risk_analytics_licensee_id',true)`],
+    ["Incident","SELECT",`${riskAnalyticsBinding} AND "licenseeId"=current_setting('app.risk_analytics_licensee_id',true)`],
+    ["PolicyRule","SELECT",`${riskAnalyticsBinding} AND ("licenseeId"=current_setting('app.risk_analytics_licensee_id',true) OR "orgId"=current_setting('app.risk_analytics_organization_id',true) OR EXISTS (SELECT 1 FROM public."ManufacturerLicenseeLink" ml WHERE ml."licenseeId"=current_setting('app.risk_analytics_licensee_id',true) AND ml."manufacturerId"="manufacturerId"))`],
+    ["AuditLog","INSERT",`${riskAnalyticsBinding} AND id=current_setting('app.risk_analytics_audit_id',true) AND "userId"=current_setting('app.risk_analytics_user_id',true) AND "licenseeId"=current_setting('app.risk_analytics_licensee_id',true) AND action='RISK_ANALYTICS_READ'`],
+  ],
+});
 const c03LicenseeScope = `(id=current_setting('app.c03_licensee_id',true) AND "isActive" AND "suspendedAt" IS NULL AND (current_setting('app.c03_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (id=current_setting('app.c03_actor_licensee_id',true) AND "orgId"=current_setting('app.c03_actor_organization_id',true))))`;
 const c03Security = Object.freeze({
   mode: "SECURITY DEFINER",
@@ -231,6 +365,113 @@ const c03Security = Object.freeze({
     ["AuditLog", "SELECT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.c03_licensee_id',true)`],
     ["EvidenceRetentionPolicy", "SELECT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.c03_licensee_id',true)`],
     ["AuditLogOutbox", "INSERT", `${c03SessionBinding} AND payload->>'userId'=current_setting('app.c03_user_id',true) AND payload->>'licenseeId'=current_setting('app.c03_licensee_id',true)`],
+  ],
+});
+
+const c03PolicySecurity = Object.freeze({
+  ...c03Security,
+  functionSource: c03PolicySource,
+  rollbackDefinition: c03PolicyRollback,
+  ownerPrivileges: [
+    ...c03Security.ownerPrivileges,
+    ["PolicyRule", "SELECT", ["id","orgId","licenseeId","manufacturerId","createdByUserId","name","description","ruleType","isActive","threshold","windowMinutes","severity","autoCreateIncident","incidentSeverity","incidentPriority","actionConfig","createdAt","updatedAt"]],
+    ["PolicyRule", "INSERT", ["id","orgId","licenseeId","manufacturerId","createdByUserId","name","description","ruleType","isActive","threshold","windowMinutes","severity","autoCreateIncident","incidentSeverity","incidentPriority","actionConfig","createdAt","updatedAt"]],
+    ["PolicyRule", "UPDATE", ["name","description","ruleType","isActive","threshold","windowMinutes","severity","autoCreateIncident","incidentSeverity","incidentPriority","actionConfig","updatedAt"]],
+  ],
+  ownerPolicies: [
+    ...c03Security.ownerPolicies,
+    ["PolicyRule", "SELECT", `${c03SessionBinding} AND ("licenseeId"=current_setting('app.licensee_id',true) OR (current_setting('app.licensee_id',true)='' AND current_setting('app.role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')))`],
+    ["PolicyRule", "INSERT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true) AND "createdByUserId"=current_setting('app.user_id',true)`],
+    ["PolicyRule", "UPDATE", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
+  ],
+});
+
+const c03GovernanceSecurity = Object.freeze({
+  ...c03Security,
+  functionSource: c03GovernanceSource,
+  rollbackDefinition: c03GovernanceRollback,
+  ownerPrivileges: [
+    ...c03Security.ownerPrivileges,
+    ["TenantFeatureFlag", "SELECT", ["id","licenseeId","key","enabled","config","updatedByUserId","createdAt","updatedAt"]],
+    ["TenantFeatureFlag", "INSERT", ["id","licenseeId","key","enabled","config","updatedByUserId","updatedAt"]],
+    ["TenantFeatureFlag", "UPDATE", ["enabled","config","updatedByUserId","updatedAt"]],
+    ["EvidenceRetentionPolicy", "SELECT", ["id","licenseeId","retentionDays","purgeEnabled","exportBeforePurge","legalHoldTags","updatedByUserId","createdAt","updatedAt"]],
+    ["EvidenceRetentionPolicy", "INSERT", ["id","licenseeId","retentionDays","purgeEnabled","exportBeforePurge","legalHoldTags","updatedAt"]],
+    ["EvidenceRetentionPolicy", "UPDATE", ["retentionDays","purgeEnabled","exportBeforePurge","legalHoldTags","updatedByUserId","updatedAt"]],
+    ["EvidenceRetentionJob", "INSERT", ["id","licenseeId","status","mode","cutoffAt","recordsEvaluated","recordsPurged","recordsExported","summary","startedByUserId","startedAt","finishedAt"]],
+    ["SensitiveActionApproval", "SELECT", ["id","actionKey","status","requestedByUserId","reviewedByUserId","executedByUserId","licenseeId","payload","expiresAt","executedAt"]],
+    ["SensitiveActionApproval", "UPDATE", ["status","executedByUserId","executedAt","updatedAt"]],
+    ["AuditLog", "INSERT", ["id","userId","orgId","licenseeId","action","entityType","entityId","details"]],
+    ["SecurityEventOutbox", "INSERT", ["id","eventType","payload","updatedAt"]],
+  ],
+  ownerPolicies: [
+    ...c03Security.ownerPolicies,
+    ["TenantFeatureFlag", "SELECT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
+    ["TenantFeatureFlag", "INSERT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true) AND "updatedByUserId"=current_setting('app.user_id',true)`],
+    ["TenantFeatureFlag", "UPDATE", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
+    ["EvidenceRetentionPolicy", "SELECT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
+    ["EvidenceRetentionPolicy", "INSERT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
+    ["EvidenceRetentionPolicy", "UPDATE", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
+    ["EvidenceRetentionJob", "INSERT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true) AND "startedByUserId"=current_setting('app.user_id',true)`],
+    ["SensitiveActionApproval", "SELECT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
+    ["SensitiveActionApproval", "UPDATE", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true) AND current_setting('app.user_id',true)<>"requestedByUserId"`],
+    ["AuditLog", "INSERT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true) AND "userId"=current_setting('app.user_id',true)`],
+    ["SecurityEventOutbox", "INSERT", `${c03SessionBinding} AND payload->>'licenseeId'=current_setting('app.licensee_id',true)`],
+  ],
+});
+
+const c03ApprovalSecurity = Object.freeze({
+  ...c03GovernanceSecurity,
+  functionSource: c03ApprovalSource,
+  rollbackDefinition: c03ApprovalRollback,
+  ownerPrivileges: [
+    ...c03GovernanceSecurity.ownerPrivileges,
+    ["SensitiveActionApproval", "INSERT", ["id","actionKey","status","requestedByUserId","licenseeId","entityType","entityId","payload","summary","requestIpHash","requestUserAgentHash","expiresAt","updatedAt"]],
+    ["SensitiveActionApproval", "UPDATE", ["status","reviewedByUserId","reviewNote","reviewedAt","updatedAt"]],
+  ],
+  ownerPolicies: [
+    ...c03GovernanceSecurity.ownerPolicies,
+    ["SensitiveActionApproval", "INSERT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true) AND "requestedByUserId"=current_setting('app.user_id',true) AND status='PENDING'`],
+  ],
+});
+
+const c03PublicIncidentBinding = `(current_user={{AUTH_OWNER}} AND session_user={{PREAUTH_ROLE}} AND current_setting('app.purpose',true)='public-incident-intake')`;
+const c03IncidentSecurity = Object.freeze({
+  ...c03Security,
+  functionSource: c03IncidentSource,
+  rollbackDefinition: c03IncidentRollback,
+  ownerPrivileges: [
+    ...c03Security.ownerPrivileges,
+    ["QRCode","SELECT",["id","code","licenseeId"]],
+    ["Incident","SELECT",["id","qrCodeId","qrCodeValue","licenseeId","reportedBy","customerName","customerEmail","customerPhone","customerCountry","preferredContactMethod","consentToContact","incidentType","severity","severityOverridden","description","photos","purchasePlace","purchaseDate","productBatchNo","locationLat","locationLng","locationName","locationCountry","locationRegion","locationCity","ipHash","userAgentHash","deviceFingerprintHash","status","priority","assignedToUserId","slaDueAt","tags","internalNotes","resolutionSummary","resolutionOutcome","createdAt","updatedAt"]],
+    ["Incident","INSERT",["id","qrCodeId","qrCodeValue","licenseeId","reportedBy","customerName","customerEmail","customerPhone","customerCountry","preferredContactMethod","consentToContact","incidentType","severity","description","photos","purchasePlace","purchaseDate","productBatchNo","locationLat","locationLng","locationName","locationCountry","locationRegion","locationCity","ipHash","userAgentHash","deviceFingerprintHash","status","priority","slaDueAt","tags"]],
+    ["Incident","UPDATE",["status","assignedToUserId","internalNotes","tags","severity","severityOverridden","priority","resolutionSummary","resolutionOutcome","updatedAt"]],
+    ["IncidentEvent","SELECT",["id","incidentId","actorType","actorUserId","eventType","eventPayload","createdAt"]],
+    ["IncidentEvent","INSERT",["id","incidentId","actorType","actorUserId","eventType","eventPayload"]],
+    ["IncidentEvidence","SELECT",["id","incidentId","fileUrl","storageKey","fileType","uploadedByUserId","uploadedBy","createdAt"]],
+    ["IncidentEvidence","INSERT",["id","incidentId","fileUrl","storageKey","fileType","uploadedByUserId","uploadedBy"]],
+    ["IncidentCommunication","SELECT",["id","incidentId","direction","channel","toAddress","subject","bodyPreview","attemptedFrom","usedFrom","replyTo","providerMessageId","errorMessage","status","createdAt"]],
+    ["PolicyAlert","SELECT",["id","licenseeId","alertType","severity","message","score","policyRuleId","incidentId","batchId","qrCodeId","manufacturerId","acknowledgedAt","createdAt"]],
+    ["PolicyAlert","UPDATE",["incidentId"]],
+  ],
+  ownerPolicies: [
+    ...c03Security.ownerPolicies,
+    ["QRCode","SELECT",`${c03PublicIncidentBinding} AND current_setting('app.c03_public_operation',true)='incident-qr-read' AND code=current_setting('app.c03_public_code',true)`],
+    ["Licensee","SELECT",`${c03PublicIncidentBinding} AND id=current_setting('app.c03_public_licensee_id',true) AND "isActive" AND "suspendedAt" IS NULL`],
+    ["Organization","SELECT",`${c03PublicIncidentBinding} AND "isActive" AND EXISTS (SELECT 1 FROM public."Licensee" public_incident_licensee WHERE public_incident_licensee.id=current_setting('app.c03_public_licensee_id',true) AND public_incident_licensee."orgId"=id)`],
+    ["Incident","SELECT",`(${c03PublicIncidentBinding} AND current_setting('app.c03_public_operation',true)='incident-history-read' AND "qrCodeId"=current_setting('app.c03_public_qr_id',true)) OR (${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true) AND (id=current_setting('app.c03_incident_id',true) OR current_setting('app.purpose',true)='incident-list'))`],
+    ["Incident","INSERT",`${c03PublicIncidentBinding} AND current_setting('app.c03_public_operation',true)='incident-create' AND "qrCodeId"=current_setting('app.c03_public_qr_id',true) AND "licenseeId"=current_setting('app.c03_public_licensee_id',true) AND "reportedBy"='CUSTOMER'`],
+    ["Incident","UPDATE",`${c03SessionBinding} AND id=current_setting('app.c03_incident_id',true) AND "licenseeId"=current_setting('app.licensee_id',true)`],
+    ["IncidentEvent","SELECT",`${c03SessionBinding} AND "incidentId"=current_setting('app.c03_incident_id',true)`],
+    ["IncidentEvent","INSERT",`(${c03PublicIncidentBinding} AND current_setting('app.c03_public_operation',true)='incident-create' AND "incidentId"=current_setting('app.c03_public_incident_id',true) AND "actorType"='CUSTOMER') OR (${c03SessionBinding} AND "incidentId"=current_setting('app.c03_incident_id',true) AND "actorUserId"=current_setting('app.user_id',true))`],
+    ["IncidentEvidence","SELECT",`${c03SessionBinding} AND "incidentId"=current_setting('app.c03_incident_id',true)`],
+    ["IncidentEvidence","INSERT",`(${c03PublicIncidentBinding} AND current_setting('app.c03_public_operation',true)='incident-create' AND "incidentId"=current_setting('app.c03_public_incident_id',true) AND "uploadedBy"='CUSTOMER') OR (${c03SessionBinding} AND "incidentId"=current_setting('app.c03_incident_id',true) AND "uploadedByUserId"=current_setting('app.user_id',true))`],
+    ["IncidentCommunication","SELECT",`${c03SessionBinding} AND "incidentId"=current_setting('app.c03_incident_id',true)`],
+    ["PolicyAlert","SELECT",`${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true) AND "incidentId"=current_setting('app.c03_incident_id',true)`],
+    ["PolicyAlert","UPDATE",`${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
+    ["ActionIdempotencyKey","SELECT",`(${c03PublicIncidentBinding} AND action='c03-public-incident') OR (${c03SessionBinding} AND action IN ('c03-incident-evidence','c03-alert-link'))`],
+    ["ActionIdempotencyKey","INSERT",`(${c03PublicIncidentBinding} AND action='c03-public-incident' AND scope=current_setting('app.c03_public_licensee_id',true)) OR (${c03SessionBinding} AND action IN ('c03-incident-evidence','c03-alert-link'))`],
+    ["ActionIdempotencyKey","UPDATE",`(${c03PublicIncidentBinding} AND action='c03-public-incident' AND scope=current_setting('app.c03_public_licensee_id',true)) OR (${c03SessionBinding} AND action IN ('c03-incident-evidence','c03-alert-link'))`],
   ],
 });
 
@@ -319,6 +560,55 @@ const outboxSecurity = Object.freeze({
     ["SecurityEventOutbox","INSERT",`current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND ${outboxOperation}='security-enqueue' AND id=${outboxId} AND "payloadDigest"=${outboxDigest}) OR (session_user={{WORKER_ROLE}} AND ${outboxOperation}='audit-consume' AND id=current_setting('app.b03_security_outbox_id',true) AND "payloadDigest"=current_setting('app.b03_security_outbox_digest',true) AND "eventType"='AUDIT_LOG'))`],
     ["SecurityEventOutbox","UPDATE",`current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND ${outboxOperation} IN ('security-claim','security-complete','security-fail') AND (${outboxId}='' OR id=${outboxId}) AND (${outboxDigest}=repeat('0',64) OR "payloadDigest"=${outboxDigest})`],
     ["AuditLog","INSERT",`current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND ${outboxOperation}='audit-consume' AND id IS NOT NULL AND "userId" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND "orgId" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND "licenseeId" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')`],
+  ],
+});
+const b03AuthenticatedBinding = `app_rls.b03_authenticated_context_valid()`;
+const b03AuthenticatedSecurity = Object.freeze({
+  mode:"SECURITY DEFINER",ownerIdentity:"identity-auth-function-owner",ownerRole:"authOwner",
+  searchPath:"pg_catalog,public",publicExecute:"revoked",runtimeExecuteGrantees:["app"],
+  functionSource:b03AuthenticatedSource,rollbackDefinition:b03AuthenticatedRollback,
+  deploymentPhase:"session-b-b03-authenticated",
+  ownerPrivileges:[
+    ["RefreshToken","SELECT",["id","userId","expiresAt","revokedAt","sessionCapabilityHash","sessionCapabilityHashVersion","sessionCapabilityExpiresAt","sessionCapabilityRevokedAt"]],
+    ["User","SELECT",["id","email","name","role","orgId","licenseeId","status","isActive","disabledAt","deletedAt","createdAt"]],
+    ["Licensee","SELECT",["id","orgId","isActive","suspendedAt"]],
+    ["Organization","SELECT",["id","isActive"]],
+    ["ManufacturerLicenseeLink","SELECT",["manufacturerId","licenseeId"]],
+    ["Notification","SELECT",["id","userId","orgId","licenseeId","incidentId","audience","channel","type","title","body","data","readAt","emailedAt","createdAt","updatedAt"]],
+    ["Notification","INSERT",["id","userId","orgId","licenseeId","incidentId","audience","channel","type","title","body","data","updatedAt"]],
+    ["Notification","UPDATE",["readAt","emailedAt","updatedAt"]],
+    ["Incident","SELECT",["id","qrCodeId","scanEventId","licenseeId"]],
+    ["QRCode","SELECT",["id","batchId"]],
+    ["Batch","SELECT",["id","manufacturerId"]],
+    ["IncidentCommunication","SELECT",["id","incidentId","toAddress","subject","bodyPreview","attemptedFrom","usedFrom","replyTo","providerMessageId","errorMessage","status"]],
+    ["IncidentCommunication","INSERT",["id","incidentId","direction","channel","toAddress","subject","bodyPreview","attemptedFrom","usedFrom","replyTo","status"]],
+    ["IncidentCommunication","UPDATE",["providerMessageId","errorMessage","usedFrom","status"]],
+    ["IncidentEvent","INSERT",["id","incidentId","actorType","actorUserId","eventType","eventPayload"]],
+    ["AuditLog","INSERT",["id","userId","orgId","licenseeId","action","entityType","entityId","details"]],
+    ["ActionIdempotencyKey","SELECT",["id","keyHash","action","scope","requestHash","statusCode","responsePayload","completedAt","expiresAt"]],
+    ["ActionIdempotencyKey","INSERT",["id","keyHash","action","scope","requestHash","responsePayload","expiresAt"]],
+    ["ActionIdempotencyKey","UPDATE",["statusCode","responsePayload","completedAt"]],
+  ],
+  ownerPolicies:[
+    ["RefreshToken","SELECT",`current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE}} AND current_setting('app.auth_session_verified',true)='1' AND id=current_setting('app.auth_session_id',true) AND "userId"=current_setting('app.user_id',true) AND "sessionCapabilityHash"=current_setting('app.auth_session_hash',true) AND "sessionCapabilityHashVersion"='sha256-v1'`],
+    ["User","SELECT",`${b03AuthenticatedBinding} AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR "licenseeId"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))`],
+    ["Licensee","SELECT",`${b03AuthenticatedBinding} AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR id=current_setting('app.b03_actor_licensee_id',true) OR id=current_setting('app.b03_licensee_id',true))`],
+    ["Organization","SELECT",`${b03AuthenticatedBinding} AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR id=current_setting('app.b03_actor_org_id',true) OR id=current_setting('app.b03_organization_id',true))`],
+    ["ManufacturerLicenseeLink","SELECT",`${b03AuthenticatedBinding} AND ("manufacturerId"=current_setting('app.b03_actor_id',true) OR "licenseeId"=current_setting('app.b03_licensee_id',true))`],
+    ["Notification","SELECT",`${b03AuthenticatedBinding} AND (current_setting('app.b03_operation',true)='notification-read' OR id=current_setting('app.b03_notification_id',true))`],
+    ["Notification","INSERT",`${b03AuthenticatedBinding} AND current_setting('app.b03_operation',true)='notification-write' AND ("userId"=current_setting('app.b03_target_user_id',true) OR current_setting('app.b03_target_user_id',true)='')`],
+    ["Notification","UPDATE",`${b03AuthenticatedBinding} AND current_setting('app.b03_operation',true) IN ('notification-read-update','notification-email-update') AND (id=current_setting('app.b03_notification_id',true) OR "userId"=current_setting('app.b03_actor_id',true))`],
+    ["Incident","SELECT",`${b03AuthenticatedBinding} AND (id=current_setting('app.b03_incident_id',true) OR "licenseeId"=current_setting('app.b03_licensee_id',true))`],
+    ["QRCode","SELECT",`${b03AuthenticatedBinding} AND current_setting('app.b03_operation',true)='incident-scope-read'`],
+    ["Batch","SELECT",`${b03AuthenticatedBinding} AND current_setting('app.b03_operation',true)='incident-scope-read'`],
+    ["IncidentCommunication","SELECT",`${b03AuthenticatedBinding} AND id=current_setting('app.b03_delivery_id',true)`],
+    ["IncidentCommunication","INSERT",`${b03AuthenticatedBinding} AND current_setting('app.b03_operation',true)='incident-email-write' AND "incidentId"=current_setting('app.b03_incident_id',true)`],
+    ["IncidentCommunication","UPDATE",`${b03AuthenticatedBinding} AND current_setting('app.b03_operation',true)='incident-email-complete' AND "incidentId"=current_setting('app.b03_incident_id',true)`],
+    ["IncidentEvent","INSERT",`${b03AuthenticatedBinding} AND current_setting('app.b03_operation',true)='incident-email-complete' AND "incidentId"=current_setting('app.b03_incident_id',true) AND "actorUserId"=current_setting('app.b03_actor_id',true)`],
+    ["AuditLog","INSERT",`${b03AuthenticatedBinding} AND current_setting('app.b03_operation',true)='incident-email-complete' AND "userId"=current_setting('app.b03_actor_id',true) AND "licenseeId"=current_setting('app.b03_licensee_id',true)`],
+    ["ActionIdempotencyKey","SELECT",`${b03AuthenticatedBinding} AND action='b03-incident-email'`],
+    ["ActionIdempotencyKey","INSERT",`${b03AuthenticatedBinding} AND action='b03-incident-email' AND scope=current_setting('app.b03_incident_id',true)`],
+    ["ActionIdempotencyKey","UPDATE",`${b03AuthenticatedBinding} AND action='b03-incident-email'`],
   ],
 });
 const auditQueueWorkflow = "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox";
@@ -716,6 +1006,8 @@ const publicVerificationSecurity = Object.freeze({
     ["IncidentEvent","INSERT",["id","incidentId","actorType","actorUserId","eventType","eventPayload","createdAt"]],
     ["IncidentEvidence","INSERT",["id","incidentId","fileUrl","storageKey","fileType","uploadedByUserId","uploadedBy","createdAt"]],
     ["SupportTicket","INSERT",["id","incidentId","referenceCode","licenseeId","customerEmail","subject","status","priority","assignedToUserId","slaDueAt","firstResponseAt","resolvedAt","createdAt","updatedAt"]],
+    ["SupportTicket","SELECT",["id","incidentId","referenceCode","customerEmail","status","priority","updatedAt","slaDueAt"]],
+    ["IncidentHandoff","SELECT",["incidentId","currentStage","slaDueAt"]],
     ["RequestAccess","INSERT",["id","referenceCode","fullName","workEmail","companyName","roleTitle","country","monthlyGarmentVolume","message","sourcePage","referrer","status","internalNote","assignedToUserId","reviewedByUserId","reviewedAt","adminEmailDeliveryStatus","adminEmailErrorCode","acknowledgementEmailDeliveryStatus","acknowledgementEmailErrorCode","createdAt","updatedAt"]],
     ["RequestAccess","SELECT",["id"]],
     ["RequestAccess","UPDATE",["adminEmailDeliveryStatus","adminEmailErrorCode","acknowledgementEmailDeliveryStatus","acknowledgementEmailErrorCode","updatedAt"]],
@@ -768,6 +1060,8 @@ const publicVerificationSecurity = Object.freeze({
     ["IncidentEvent","INSERT",`${publicOwner} AND "incidentId"=${publicTargetId}`],
     ["IncidentEvidence","INSERT",`${publicOwner} AND "incidentId"=${publicTargetId}`],
     ["SupportTicket","INSERT",`${publicOwner} AND id=${publicSupportId} AND "incidentId"=${publicTargetId}`],
+    ["SupportTicket","SELECT",`${publicOwner} AND ${publicOperation}='public-verification-support-track' AND "referenceCode"=current_setting('app.public_verification_code',true) AND "customerEmail" IS NOT NULL AND encode(sha256(convert_to(lower("customerEmail"),'UTF8')),'hex')=substr(${publicIdempotency},11)`],
+    ["IncidentHandoff","SELECT",`${publicOwner} AND ${publicOperation}='public-verification-support-track' AND "incidentId"=${publicTargetId}`],
     ["RequestAccess","INSERT",`${publicOwner} AND id=${publicTargetId} AND ${publicOperation}='public-verification-request-access'`],
     ["RequestAccess","SELECT",`${publicOwner} AND id=${publicTargetId} AND ${publicOperation}='public-verification-request-access-delivery'`],
     ["RequestAccess","UPDATE",`${publicOwner} AND id=${publicTargetId} AND ${publicOperation}='public-verification-request-access-delivery'`],
@@ -791,6 +1085,7 @@ const publicIdentityArguments = Object.freeze({
   submit_public_support: "p_public_name text, p_public_email text, p_issue_type text, p_title text, p_description text, p_verified_code text, p_product_reference text, p_source_path text, p_page_url text, p_submitted_at timestamp without time zone, p_request_id text, p_idempotency_digest text",
   complete_request_access_delivery: "p_idempotency_digest text, p_admin_status text, p_admin_error text, p_ack_status text, p_ack_error text, p_completed_at timestamp without time zone, p_request_id text",
   complete_public_support_delivery: "p_idempotency_digest text, p_admin_status text, p_admin_error text, p_ack_status text, p_ack_error text, p_completed_at timestamp without time zone, p_request_id text",
+  track_support_status: "p_reference_code text, p_proof_digest text, p_proof_version integer, p_checked_at timestamp without time zone, p_request_id text",
 });
 const publicContract = ({id,name,signature,identityArguments,returnType,tableCommands,workflow,caller,outputColumns,runtime=true}) => ({
   id:`release-fix-6-${id}`,schema:"app_public",name,signature,
@@ -866,6 +1161,7 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
   publicContract({id:"incident",name:"submit_public_incident",signature:"text,text,text,text,text,boolean,jsonb,timestamp without time zone,text,text,text,text",returnType:"TABLE(accepted boolean, publicReference text, message text)",tableCommands:[["CustomerVerificationSession","SELECT"],["QRCode","SELECT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["Incident","INSERT"],["IncidentEvent","INSERT"],["IncidentEvidence","INSERT"],["SupportTicket","INSERT"],["SecurityEventOutbox","INSERT"]],workflow:"workflow-http-backend-src-controllers-verify-feedback-handlers-ts-report-fraud",caller:"backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:submitPublicIncident",outputColumns:["accepted","publicReference","message"]}),
   publicContract({id:"request-access",name:"submit_request_access",signature:"text,text,text,text,text,text,text,text,text,timestamp without time zone,text,text",returnType:"TABLE(accepted boolean, publicReference text, message text, deliveryRequired boolean)",tableCommands:[["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["RequestAccess","INSERT"]],workflow:"workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-request-access",caller:"backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:submitRequestAccess",outputColumns:["accepted","publicReference","message","deliveryRequired"]}),
   publicContract({id:"support",name:"submit_public_support",signature:"text,text,text,text,text,text,text,text,text,timestamp without time zone,text,text",returnType:"TABLE(accepted boolean, publicReference text, message text, deliveryRequired boolean)",tableCommands:[["QRCode","SELECT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["SupportIssueReport","INSERT"]],workflow:"workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-support-issue",caller:"backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:submitPublicSupport",outputColumns:["accepted","publicReference","message","deliveryRequired"]}),
+  publicContract({id:"support-track",name:"track_support_status",signature:"text,text,integer,timestamp without time zone,text",returnType:"TABLE(referenceCode text, customerFacingStatus text, priority text, updatedAt timestamp without time zone, handoffStage text, slaDueAt timestamp without time zone)",tableCommands:[["SupportTicket","SELECT"],["IncidentHandoff","SELECT"]],workflow:"workflow-http-backend-src-controllers-support-controller-ts-track-support-ticket-public",caller:"backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:trackSupportStatus",outputColumns:["referenceCode","customerFacingStatus","priority","updatedAt","handoffStage","slaDueAt"]}),
   publicContract({id:"request-access-delivery",name:"complete_request_access_delivery",signature:"text,text,text,text,text,timestamp without time zone,text",returnType:"TABLE(updated boolean)",tableCommands:[["ActionIdempotencyKey","SELECT"],["RequestAccess","SELECT"],["RequestAccess","UPDATE"]],workflow:"workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-request-access",caller:"backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:completeRequestAccessDelivery",outputColumns:["updated"]}),
   publicContract({id:"support-delivery",name:"complete_public_support_delivery",signature:"text,text,text,text,text,timestamp without time zone,text",returnType:"TABLE(updated boolean)",tableCommands:[["ActionIdempotencyKey","SELECT"],["SupportIssueReport","SELECT"],["SupportIssueReport","UPDATE"]],workflow:"workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-support-issue",caller:"backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:completePublicSupportDelivery",outputColumns:["updated"]}),
   operationalContract({id:"dashboard-snapshot-scope",name:"dashboard_snapshot_scope",signature:"text,text,text,text,text,text",returnType:"TABLE(scope_fingerprint text)",identityArguments:"p_capability text, p_purpose text, p_request_id text, audit_id text, requested_licensee_id text, route_surface text",tableCommands:operationalCommonCommands,canonicalWorkflowIds:[dashboardWorkflows.scope],repositoryCallers:["backend/src/services/dashboardSnapshotService.ts:computeDashboardSnapshot"],outputColumns:["scope_fingerprint"]}),
@@ -1087,6 +1383,42 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     id:"b03-fail-security-outbox",schema:"app_rls",name:"fail_security_event_outbox",signature:"text,text,timestamp without time zone,integer,text",returnType:"TABLE(terminal boolean, nextAttemptAt timestamp without time zone)",identityArguments:"p_job_id text, p_payload_digest text, p_attempted_at timestamp without time zone, p_attempt integer, p_error_code text",definitionLocation:outboxSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:outboxSecurity,tableCommands:[["SecurityEventOutbox","SELECT"],["SecurityEventOutbox","UPDATE"]],context:"Compare-and-sets the exact claimed delivery attempt to bounded retry or terminal failure without reopening SENT rows.",canonicalWorkflowIds:[securityFlushWorkflow],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:failSecurityEventOutbox"],inputAuthority:"worker identity plus row digest and claimed attempt",outputColumns:["terminal","nextAttemptAt"],disposableProbes:["b03-outbox-postgres18"],
   },
   {
+    id:"b03-primary-superadmin-email",schema:"app_rls",name:"b03_primary_superadmin_email",signature:"",returnType:"TABLE(email text)",identityArguments:"",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"]],context:"Returns at most the oldest live platform administrator email after capability revalidation.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:getPrimarySuperadminEmail"],inputAuthority:"authenticated capability",outputColumns:["email"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
+    id:"b03-superadmin-alert-emails",schema:"app_rls",name:"b03_superadmin_alert_emails",signature:"",returnType:"TABLE(email text)",identityArguments:"",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"]],context:"Returns a bounded live platform administrator delivery list after capability revalidation.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:getSuperadminAlertEmails"],inputAuthority:"authenticated capability",outputColumns:["email"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
+    id:"b03-resolve-incident-email-actor",schema:"app_rls",name:"b03_resolve_incident_email_actor",signature:"text",returnType:"TABLE(id text,email text,name text,role text,active boolean)",identityArguments:"p_actor_user_id text",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"]],context:"Projects only the currently authenticated live actor and rejects caller-selected users.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:resolveIncidentEmailActor"],inputAuthority:"authenticated capability; user ID must equal actor",outputColumns:["id","email","name","role","active"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
+    id:"b03-create-role-notifications",schema:"app_rls",name:"b03_create_role_notifications",signature:"text,text,text,text,text,text,text,jsonb,text[],text",returnType:"TABLE(notificationId text,userId text,userEmail text,userRole text,userLicenseeId text,userOrganizationId text,channel text,writeResult jsonb,sideEffectRequired boolean)",identityArguments:"p_audience text, p_title text, p_body text, p_type text, p_licensee_id text, p_organization_id text, p_incident_id text, p_data jsonb, p_channels text[], p_request_id text",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["ManufacturerLicenseeLink","SELECT"],["Incident","SELECT"],["Notification","INSERT"]],context:"Creates bounded per-recipient notification rows only within the capability-derived actor scope and canonical four-role model.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:createRoleNotifications"],inputAuthority:"authenticated capability; requested scope only narrows database-derived authority",outputColumns:["notificationId","userId","userEmail","userRole","userLicenseeId","userOrganizationId","channel","writeResult","sideEffectRequired"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
+    id:"b03-create-user-notification",schema:"app_rls",name:"b03_create_user_notification",signature:"text,text,text,text,text,text,text,jsonb,text,text",returnType:"TABLE(notificationId text,userId text,userEmail text,userRole text,userLicenseeId text,userOrganizationId text,channel text,writeResult jsonb,sideEffectRequired boolean,notification jsonb)",identityArguments:"p_user_id text, p_title text, p_body text, p_type text, p_licensee_id text, p_organization_id text, p_incident_id text, p_data jsonb, p_channel text, p_request_id text",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["ManufacturerLicenseeLink","SELECT"],["Incident","SELECT"],["Notification","INSERT"]],context:"Creates one notification for a database-visible live target under the actor capability and returns the explicit projection.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:createUserNotification"],inputAuthority:"authenticated capability; target ID is selection-only",outputColumns:["notificationId","userId","userEmail","userRole","userLicenseeId","userOrganizationId","channel","writeResult","sideEffectRequired","notification"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
+    id:"b03-mark-notification-emailed",schema:"app_rls",name:"b03_mark_notification_emailed",signature:"text,timestamp without time zone,text",returnType:"TABLE(updated boolean)",identityArguments:"p_notification_id text, p_emailed_at timestamp without time zone, p_request_id text",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["ManufacturerLicenseeLink","SELECT"],["Notification","UPDATE"]],context:"Idempotently records delivery only for a notification within the live actor scope.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:markNotificationEmailed"],inputAuthority:"authenticated capability; notification ID is selection-only",outputColumns:["updated"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
+    id:"b03-list-notifications",schema:"app_rls",name:"b03_list_notifications_for_user",signature:"text,integer,integer,boolean,timestamp without time zone,text,text",returnType:"TABLE(notifications jsonb,total integer,unread integer)",identityArguments:"p_user_id text, p_limit integer, p_offset integer, p_unread_only boolean, p_cursor_created_at timestamp without time zone, p_cursor_id text, p_request_id text",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["ManufacturerLicenseeLink","SELECT"],["Notification","SELECT"]],context:"Returns one bounded stable page of direct and scoped broadcast notifications for the authenticated user only.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:listNotificationsForUser"],inputAuthority:"authenticated capability; user ID must equal actor",outputColumns:["notifications","total","unread"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
+    id:"b03-mark-notification-read",schema:"app_rls",name:"b03_mark_notification_read",signature:"text,text,timestamp without time zone,text",returnType:"TABLE(notification jsonb)",identityArguments:"p_notification_id text, p_user_id text, p_read_at timestamp without time zone, p_request_id text",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Notification","SELECT"],["Notification","UPDATE"]],context:"Idempotently marks one direct notification read only for its authenticated owner.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:markNotificationRead"],inputAuthority:"authenticated capability; user ID must equal actor",outputColumns:["notification"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
+    id:"b03-mark-all-notifications-read",schema:"app_rls",name:"b03_mark_all_notifications_read",signature:"text,timestamp without time zone,text",returnType:"TABLE(count integer)",identityArguments:"p_user_id text, p_read_at timestamp without time zone, p_request_id text",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Notification","UPDATE"]],context:"Marks only the authenticated user's unread direct web notifications read.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:markAllNotificationsRead"],inputAuthority:"authenticated capability; user ID must equal actor",outputColumns:["count"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
+    id:"b03-resolve-incident-notification-scope",schema:"app_rls",name:"b03_resolve_incident_notification_scope",signature:"text",returnType:"TABLE(incidentId text,licenseeId text,manufacturerOrganizationId text)",identityArguments:"p_incident_id text",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["ManufacturerLicenseeLink","SELECT"],["Incident","SELECT"],["QRCode","SELECT"],["Batch","SELECT"]],context:"Resolves an incident's notification tenant and manufacturer organization only after live actor scope checks.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:resolveIncidentNotificationScope"],inputAuthority:"authenticated capability; incident ID is selection-only",outputColumns:["incidentId","licenseeId","manufacturerOrganizationId"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
+    id:"b03-claim-incident-email",schema:"app_rls",name:"b03_claim_incident_email_delivery",signature:"text,text,text,text,text,text,text,text,text,text,text,text,text,text",returnType:"TABLE(deliveryId text,disposition text,delivered boolean,providerMessageId text,emailErrorCode text,attemptedFrom text,usedFrom text,replyTo text)",identityArguments:"p_incident_id text, p_licensee_id text, p_actor_user_id text, p_sender_mode text, p_to_address text, p_subject text, p_body_preview text, p_attempted_from text, p_used_from text, p_reply_to text, p_template text, p_request_id text, p_idempotency_key text, p_payload_digest text",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["ManufacturerLicenseeLink","SELECT"],["Incident","SELECT"],["IncidentCommunication","INSERT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"]],context:"Claims one digest-bound incident email and creates its queued evidence atomically; replay returns the prior disposition.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:claimIncidentEmailDelivery"],inputAuthority:"authenticated capability and database incident scope",outputColumns:["deliveryId","disposition","delivered","providerMessageId","emailErrorCode","attemptedFrom","usedFrom","replyTo"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
+    id:"b03-complete-incident-email",schema:"app_rls",name:"b03_complete_incident_email_delivery",signature:"text,text,text,text,text,text,text,timestamp without time zone",returnType:"TABLE(communicationId text,eventId text,auditLogId text)",identityArguments:"p_delivery_id text, p_idempotency_key text, p_provider_message_id text, p_email_error_code text, p_status text, p_smtp_config_source text, p_used_from text, p_completed_at timestamp without time zone",definitionLocation:b03AuthenticatedSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:b03AuthenticatedSecurity,tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Incident","SELECT"],["IncidentCommunication","SELECT"],["IncidentCommunication","UPDATE"],["IncidentEvent","INSERT"],["AuditLog","INSERT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","UPDATE"]],context:"Completes the exact claimed delivery, records the actual SMTP sender after fallback, and appends incident and audit evidence atomically; completed replay is stable.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:completeIncidentEmailDelivery"],inputAuthority:"authenticated capability plus prior digest-bound claim",outputColumns:["communicationId","eventId","auditLogId"],disposableProbes:["b03-authenticated-postgres18"],
+  },
+  {
     id: "b03-provision-scheduled-job-credential", schema: "app_rls", name: "provision_scheduled_job_credential", signature: "text,text,text,timestamp with time zone,text,text", returnType: "text",
     identityArguments: "p_credential_id text, p_schedule_id text, p_capability_hash text, p_expires_at timestamp with time zone, p_rotated_from_credential_id text, p_request_id text", definitionLocation: scheduledSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
     security: { ...scheduledSecurity, runtimeExecuteGrantees: ["operator"] }, tableCommands: [["ScheduledJobCredential","SELECT"],["ScheduledJobCredential","INSERT"],["ScheduledJobCredential","UPDATE"]], context: "The exact operator role provisions only a sha256-v1 hash and atomically revokes the predecessor during rotation; PostgreSQL never receives the raw capability.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-b/b03/scheduledJobCredentialService.ts:provisionScheduledJobCredential"], inputAuthority: "operator role plus server-generated credential ID and SHA-256 hash", outputColumns: ["credentialId"], disposableProbes: ["scheduled-job-identity-postgres18"],
@@ -1185,6 +1517,11 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     tableCommands: [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["ManufacturerLicenseeLink","SELECT"]], context: "Returns the existing /auth/me actor projection only after capability verification and live account and tenant validation.", canonicalWorkflowIds: ["workflow-http-backend-src-controllers-auth-controller-ts-me"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:loadAuthenticatedActor"], inputAuthority: "opaque database session capability", outputColumns: ["id","email","name","role","licenseeId","orgId","emailVerifiedAt","pendingEmail","pendingEmailRequestedAt","isActive","status","deletedAt","disabledAt","createdAt","licenseeRecordId","licenseeName","licenseePrefix","licenseeBrandName","licenseeOrgId"], disposableProbes: ["b01-authentication-closure-postgres18"],
   },
   {
+    id: "rf7-load-authenticated-manufacturer-scope", schema: "app_rls", name: "load_authenticated_manufacturer_scope", signature: "text,text,text,text,boolean", returnType: "jsonb",
+    identityArguments: "p_requested_licensee_id text, p_requested_org_id text, p_requested_scope_version text, p_purpose text, p_write_audit boolean", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["ManufacturerLicenseeLink","SELECT"],["AuditLogOutbox","INSERT"]], context: "Returns the live bounded manufacturer-licensee projection for the capability actor, treats requested scope as a narrowing selector, and optionally queues attributed bootstrap or switch evidence.", canonicalWorkflowIds: ["workflow-http-backend-src-middleware-auth-ts-hydrate-tenant-if-needed","workflow-http-backend-src-controllers-auth-controller-ts-me"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:loadAuthenticatedManufacturerScope"], inputAuthority: "opaque database session capability; requested tenant and scope version cannot establish authority", outputColumns: ["selectedLicensee","linkedLicensees"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  },
+  {
     id: "b01-find-capability-refresh-token", schema: "app_rls", name: "find_refresh_token_by_id", signature: "text,text", returnType: "TABLE(id text, userId text, orgId text, expiresAt timestamp without time zone, createdAt timestamp without time zone, createdIpHash text, createdUserAgent text, authenticatedAt timestamp without time zone, mfaVerifiedAt timestamp without time zone, lastUsedAt timestamp without time zone, revokedAt timestamp without time zone, revokedReason text)",
     identityArguments: "p_session_id text, p_user_id text", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
     tableCommands: [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["ManufacturerLicenseeLink","SELECT"]], context: "Returns only the refresh row that is identical to the capability-derived current session.", canonicalWorkflowIds: ["workflow-http-backend-src-controllers-auth-controller-ts-me"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:findRefreshTokenByIdentifier"], inputAuthority: "opaque capability; session ID is equality-checked selector only", outputColumns: ["id","userId","orgId","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt","revokedAt","revokedReason"], disposableProbes: ["b01-authentication-closure-postgres18"],
@@ -1198,6 +1535,245 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     id: "b01-require-capability-recent-mfa", schema: "app_rls", name: "require_recent_mfa_session", signature: "text,timestamp without time zone,integer", returnType: "TABLE(verifiedAt timestamp without time zone)",
     identityArguments: "p_session_id text, p_checked_at timestamp without time zone, p_max_age_minutes integer", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
     tableCommands: [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["ManufacturerLicenseeLink","SELECT"]], context: "Uses the capability-derived current refresh row and its live MFA timestamp; no caller MFA flag establishes assurance.", canonicalWorkflowIds: ["workflow-http-backend-src-middleware-auth-ts-hydrate-tenant-if-needed"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:requireRecentMfaSession"], inputAuthority: "opaque capability plus bounded freshness window", outputColumns: ["verifiedAt"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  },
+  {
+    id: "b01-load-authenticated-password-actor", schema: "app_rls", name: "load_authenticated_password_actor", signature: "", returnType: "TABLE(id text, passwordHash text, role text, status text, isActive boolean, disabledAt timestamp without time zone, deletedAt timestamp without time zone)",
+    identityArguments: "", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"]], context: "Returns the current active actor's password verifier only inside a capability-verified transaction so Node can perform Argon2 or legacy bcrypt proof without exposing it through HTTP.", canonicalWorkflowIds: ["workflow-http-backend-src-controllers-account-controller-ts-change-my-password","workflow-http-backend-src-controllers-auth-session-controller-ts-password-step-up-controller"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:loadAuthenticatedPasswordActor"], inputAuthority: "opaque authenticated-session capability", outputColumns: ["id","passwordHash","role","status","isActive","disabledAt","deletedAt"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  },
+  {
+    id: "b01-list-active-refresh-tokens", schema: "app_rls", name: "list_active_refresh_tokens", signature: "text,timestamp without time zone", returnType: "TABLE(id text, userId text, orgId text, expiresAt timestamp without time zone, createdAt timestamp without time zone, createdIpHash text, createdUserAgent text, authenticatedAt timestamp without time zone, mfaVerifiedAt timestamp without time zone, lastUsedAt timestamp without time zone, revokedAt timestamp without time zone, revokedReason text)",
+    identityArguments: "p_user_id text, p_checked_at timestamp without time zone", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"]], context: "Returns at most 200 live refresh-session metadata rows for the capability-derived actor and never projects bearer or capability hashes.", canonicalWorkflowIds: ["workflow-internal-backend-src-services-auth-refresh-token-service-ts-list-active-refresh-tokens-for-user"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:listActiveRefreshTokenRecords"], inputAuthority: "opaque capability; user ID is equality-checked against its database actor", outputColumns: ["id","userId","orgId","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt","revokedAt","revokedReason"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  },
+  {
+    id: "b01-revoke-all-refresh-tokens", schema: "app_rls", name: "revoke_all_refresh_tokens", signature: "text,text,timestamp without time zone", returnType: "TABLE(revokedCount integer)",
+    identityArguments: "p_user_id text, p_reason text, p_revoked_at timestamp without time zone", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
+    tableCommands: [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"]], context: "Atomically revokes every live refresh and database-session capability for the capability-derived actor using one fixed reason.", canonicalWorkflowIds: ["workflow-internal-backend-src-services-auth-refresh-token-service-ts-revoke-all-user-refresh-tokens"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:revokeAllRefreshTokenRecords"], inputAuthority: "opaque capability; user ID is equality-checked against its database actor", outputColumns: ["revokedCount"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  },
+  {
+    id: "b01-prove-authenticated-password-step-up", schema: "app_rls", name: "prove_authenticated_password_step_up", signature: "text,text,timestamp without time zone", returnType: "TABLE(authorized boolean)",
+    identityArguments: "p_session_id text, p_expected_password_hash text, p_verified_at timestamp without time zone", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
+    tableCommands: [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"]], context: "Binds the Node-verified password hash to the exact live actor and current session before refreshing its password-authentication timestamp.", canonicalWorkflowIds: ["workflow-http-backend-src-controllers-account-controller-ts-change-my-password","workflow-http-backend-src-controllers-auth-session-controller-ts-password-step-up-controller"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:proveAuthenticatedPasswordStepUp"], inputAuthority: "opaque capability plus an exact verifier already read for that same actor in the transaction", outputColumns: ["authorized"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  },
+  {
+    id: "b01-require-recent-sensitive-session", schema: "app_rls", name: "require_recent_sensitive_session", signature: "text,timestamp without time zone,integer,integer", returnType: "TABLE(authorized boolean)",
+    identityArguments: "p_session_id text, p_checked_at timestamp without time zone, p_max_password_age_minutes integer, p_max_mfa_age_minutes integer", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"]], context: "Evaluates password and role-required MFA freshness from the exact live capability session; caller flags cannot establish assurance.", canonicalWorkflowIds: ["workflow-http-backend-src-controllers-account-controller-ts-update-my-profile"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:requireRecentSensitiveSession"], inputAuthority: "opaque capability and bounded server-selected freshness windows", outputColumns: ["authorized"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  },
+  {
+    id: "b01-request-authenticated-email-change", schema: "app_rls", name: "request_authenticated_email_change", signature: "text,text,text,timestamp without time zone,timestamp without time zone,text,text", returnType: "TABLE(changed boolean, verificationRequired boolean, userId text, currentEmail text, pendingEmail text, orgId text, licenseeId text, expiresAt timestamp without time zone)",
+    identityArguments: "p_next_email text, p_token_hash text, p_secret_version text, p_expires_at timestamp without time zone, p_requested_at timestamp without time zone, p_ip_hash text, p_user_agent_hash text", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["User","UPDATE"],["EmailVerificationToken","SELECT"],["EmailVerificationToken","INSERT"],["EmailVerificationToken","UPDATE"]], context: "Locks the capability-derived actor, rejects email collisions, consumes older email-change challenges and stores one hashed bounded challenge plus pending email atomically.", canonicalWorkflowIds: ["workflow-internal-backend-src-services-auth-email-verification-service-ts-request-email-change-verification"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:prepareAuthenticatedEmailChange"], inputAuthority: "opaque capability; normalized email is mutation input while actor and tenant are database-derived", outputColumns: ["changed","verificationRequired","userId","currentEmail","pendingEmail","orgId","licenseeId","expiresAt"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  },
+  {
+    id: "b01-update-authenticated-profile", schema: "app_rls", name: "update_authenticated_profile", signature: "text,boolean,text,timestamp without time zone", returnType: "TABLE(id text, email text, name text, role text, licenseeId text, orgId text, emailVerifiedAt timestamp without time zone, pendingEmail text, pendingEmailRequestedAt timestamp without time zone, isActive boolean, status text, deletedAt timestamp without time zone, disabledAt timestamp without time zone, createdAt timestamp without time zone, licenseeRecordId text, licenseeName text, licenseePrefix text, licenseeBrandName text, licenseeOrgId text)",
+    identityArguments: "p_name text, p_email_change_requested boolean, p_audit_pending_email text, p_changed_at timestamp without time zone", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["User","UPDATE"],["Licensee","SELECT"],["AuditLogOutbox","INSERT"]], context: "Updates only the capability-derived actor name, validates any email-change audit against live pending state, records durable audit evidence and returns the authoritative actor projection.", canonicalWorkflowIds: ["workflow-http-backend-src-controllers-account-controller-ts-update-my-profile"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:updateAuthenticatedProfile"], inputAuthority: "opaque capability; bounded name and already-stored pending email are mutation inputs", outputColumns: ["id","email","name","role","licenseeId","orgId","emailVerifiedAt","pendingEmail","pendingEmailRequestedAt","isActive","status","deletedAt","disabledAt","createdAt","licenseeRecordId","licenseeName","licenseePrefix","licenseeBrandName","licenseeOrgId"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  },
+  {
+    id: "b01-change-authenticated-password", schema: "app_rls", name: "change_authenticated_password", signature: "text,text,timestamp without time zone", returnType: "TABLE(changed boolean)",
+    identityArguments: "p_expected_password_hash text, p_password_hash text, p_changed_at timestamp without time zone", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
+    tableCommands: [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["User","UPDATE"],["AuditLogOutbox","INSERT"]], context: "Uses an expected-hash compare-and-swap to change only the capability actor password, revoke all refresh/session capabilities and write audit evidence atomically.", canonicalWorkflowIds: ["workflow-http-backend-src-controllers-account-controller-ts-change-my-password"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:changeAuthenticatedPassword"], inputAuthority: "opaque capability plus the exact same-transaction password verifier", outputColumns: ["changed"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  },
+  {
+    id: "rf7-b01-admin-mfa-actor", schema: "app_rls", name: "b01_admin_mfa_actor", signature: "", returnType: "TABLE(userId text, role text, organizationId text, licenseeId text)",
+    identityArguments: "", definitionLocation: authenticationClosureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: [] }, internalOnly: true,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"]],
+    context: "Owner-only helper that reuses the authenticated-session actor projection and rejects roles outside the exact RF7 administration allowlist.",
+    canonicalWorkflowIds: ["workflow-http-backend-src-controllers-auth-admin-security-controller-ts-get-admin-mfa-status-controller"],
+    repositoryCallers: ["backend/src/rls-waves/session-b/b01/b01AuthenticationClosureFunctions.sql:admin MFA capabilities"],
+    inputAuthority: "transaction-local context installed by the reviewed authenticated-session capability; no caller-supplied actor or tenant scope",
+    outputColumns: ["userId","role","organizationId","licenseeId"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  },
+  ...[
+    ["rf7-load-admin-mfa-state","load_admin_mfa_state","",[],[["AdminMfaCredential","SELECT"],["AdminWebAuthnCredential","SELECT"],["UserMfaFactor","SELECT"],["UserBackupCode","SELECT"]],"loadAdminMfaState"],
+    ["rf7-begin-admin-totp","begin_admin_totp_enrollment","text,text,text,text,text[],timestamp without time zone,timestamp without time zone",["p_mode text","p_secret_ciphertext text","p_secret_iv text","p_secret_tag text","p_backup_hashes text[]","p_pending_cutoff timestamp without time zone","p_created_at timestamp without time zone"],[["AdminMfaCredential","SELECT"],["AdminMfaCredential","INSERT"],["AdminMfaCredential","UPDATE"],["AdminWebAuthnCredential","SELECT"],["UserMfaFactor","SELECT"],["UserMfaFactor","INSERT"],["UserMfaFactor","UPDATE"],["UserMfaFactor","DELETE"],["UserBackupCode","INSERT"]],"beginAdminTotpEnrollment"],
+    ["rf7-load-admin-totp","load_admin_totp_enrollment","text,timestamp without time zone",["p_mode text","p_pending_cutoff timestamp without time zone"],[["AdminMfaCredential","SELECT"],["AdminWebAuthnCredential","SELECT"],["UserMfaFactor","SELECT"]],"loadAdminTotpEnrollment"],
+    ["rf7-complete-admin-totp","complete_admin_totp_enrollment","text,text,text,text,text,timestamp without time zone,text,text",["p_mode text","p_factor_id text","p_secret_ciphertext text","p_secret_iv text","p_secret_tag text","p_completed_at timestamp without time zone","p_ip_hash text","p_user_agent text"],[["AdminMfaCredential","SELECT"],["AdminMfaCredential","UPDATE"],["UserMfaFactor","SELECT"],["UserMfaFactor","UPDATE"],["UserBackupCode","INSERT"],["UserBackupCode","DELETE"],["AuditLogOutbox","INSERT"]],"completeAdminTotpEnrollment"],
+    ["rf7-load-admin-mfa-verifiers","load_admin_mfa_verifiers","",[],[["AdminMfaCredential","SELECT"],["UserMfaFactor","SELECT"],["UserBackupCode","SELECT"]],"loadAdminMfaVerifiers"],
+    ["rf7-consume-admin-mfa-verifier","consume_admin_mfa_verifier","text,text,text[],text[],timestamp without time zone",["p_method text","p_record_id text","p_expected_legacy_hashes text[]","p_next_legacy_hashes text[]","p_used_at timestamp without time zone"],[["AdminMfaCredential","SELECT"],["AdminMfaCredential","UPDATE"],["UserMfaFactor","INSERT"],["UserMfaFactor","UPDATE"],["UserBackupCode","UPDATE"]],"consumeAdminMfaVerifier"],
+    ["rf7-replace-admin-backup-codes","replace_admin_backup_codes","text[],timestamp without time zone",["p_hashes text[]","p_replaced_at timestamp without time zone"],[["AdminMfaCredential","UPDATE"],["UserBackupCode","INSERT"],["UserBackupCode","DELETE"]],"replaceAdminBackupCodes"],
+    ["rf7-disable-admin-mfa","disable_admin_mfa","timestamp without time zone,text,text",["p_disabled_at timestamp without time zone","p_ip_hash text","p_user_agent text"],[["RefreshToken","UPDATE"],["AdminMfaCredential","UPDATE"],["AdminWebAuthnCredential","DELETE"],["UserMfaFactor","UPDATE"],["UserBackupCode","DELETE"],["AuditLogOutbox","INSERT"]],"disableAdminMfaBoundary"],
+    ["rf7-create-admin-mfa-challenge","create_admin_mfa_challenge","text,text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone",["p_kind text","p_ticket_hash text","p_session_binding_hash text","p_purpose text","p_risk_score integer","p_risk_level text","p_reasons text[]","p_ip_hash text","p_user_agent_hash text","p_max_attempts integer","p_created_at timestamp without time zone","p_expires_at timestamp without time zone"],[["MfaLoginChallenge","INSERT"],["AuthMfaChallenge","SELECT"],["AuthMfaChallenge","INSERT"],["AuthMfaChallenge","UPDATE"],["AuditLogOutbox","INSERT"]],"createAdminMfaChallengeBoundary"],
+    ["rf7-load-admin-mfa-challenge","load_admin_mfa_challenge","text[],text[],timestamp without time zone",["p_ticket_hashes text[]","p_session_binding_hashes text[]","p_checked_at timestamp without time zone"],[["MfaLoginChallenge","SELECT"],["AuthMfaChallenge","SELECT"]],"loadAdminMfaChallengeBoundary"],
+    ["rf7-fail-admin-mfa-challenge","record_admin_mfa_challenge_failure","text,text,text,integer,timestamp without time zone,text,text",["p_kind text","p_challenge_id text","p_action text","p_expected_attempts integer","p_failed_at timestamp without time zone","p_ip_hash text","p_user_agent text"],[["MfaLoginChallenge","UPDATE"],["AuthMfaChallenge","UPDATE"],["AuditLogOutbox","INSERT"]],"recordAdminMfaChallengeFailure"],
+    ["rf7-complete-admin-mfa-challenge","complete_admin_mfa_challenge","text,text,text,timestamp without time zone,text,text",["p_kind text","p_challenge_id text","p_method text","p_completed_at timestamp without time zone","p_ip_hash text","p_user_agent text"],[["MfaLoginChallenge","UPDATE"],["AuthMfaChallenge","UPDATE"],["AuditLogOutbox","INSERT"]],"completeAdminMfaChallengeBoundary"],
+    ["rf7-load-admin-webauthn-credentials","load_admin_webauthn_credentials","",[],[["AdminWebAuthnCredential","SELECT"],["UserMfaFactor","SELECT"]],"loadAdminWebAuthnCredentials"],
+    ["rf7-create-admin-webauthn-challenge","create_admin_webauthn_challenge","text,text,text,text,text,text,text,timestamp without time zone,timestamp without time zone",["p_purpose text","p_ticket_hash text","p_challenge_hash text","p_ip_hash text","p_user_agent_hash text","p_origin text","p_rp_id text","p_created_at timestamp without time zone","p_expires_at timestamp without time zone"],[["AdminWebAuthnCredential","SELECT"],["UserMfaFactor","SELECT"],["AuthWebAuthnChallenge","INSERT"]],"createAdminWebAuthnChallengeBoundary"],
+    ["rf7-load-admin-webauthn-challenge","load_admin_webauthn_challenge","text[],text,text,timestamp without time zone",["p_ticket_hashes text[]","p_purpose text","p_credential_id text","p_checked_at timestamp without time zone"],[["AdminWebAuthnCredential","SELECT"],["UserMfaFactor","SELECT"],["AuthWebAuthnChallenge","SELECT"]],"loadAdminWebAuthnChallengeBoundary"],
+    ["rf7-complete-admin-webauthn-registration","complete_admin_webauthn_registration","text,text,text,text,integer,text[],text,boolean,timestamp without time zone",["p_challenge_id text","p_credential_id text","p_label text","p_public_key text","p_counter integer","p_transports text[]","p_device_type text","p_backed_up boolean","p_completed_at timestamp without time zone"],[["UserMfaFactor","SELECT"],["UserMfaFactor","INSERT"],["UserMfaFactor","UPDATE"],["AdminWebAuthnCredential","SELECT"],["AdminWebAuthnCredential","INSERT"],["AuthWebAuthnChallenge","SELECT"],["AuthWebAuthnChallenge","UPDATE"],["AuditLogOutbox","INSERT"]],"completeAdminWebAuthnRegistrationBoundary"],
+    ["rf7-complete-admin-webauthn-authentication","complete_admin_webauthn_authentication","text,text,text,integer,integer,text,boolean,timestamp without time zone",["p_challenge_id text","p_credential_kind text","p_credential_row_id text","p_expected_counter integer","p_next_counter integer","p_device_type text","p_backed_up boolean","p_completed_at timestamp without time zone"],[["UserMfaFactor","UPDATE"],["AdminWebAuthnCredential","UPDATE"],["AuthWebAuthnChallenge","SELECT"],["AuthWebAuthnChallenge","UPDATE"]],"completeAdminWebAuthnAuthenticationBoundary"],
+    ["rf7-delete-admin-webauthn-credential","delete_admin_webauthn_credential","text,timestamp without time zone",["p_credential_row_id text","p_deleted_at timestamp without time zone"],[["UserMfaFactor","UPDATE"],["AdminWebAuthnCredential","DELETE"],["AuditLogOutbox","INSERT"]],"deleteAdminWebAuthnCredentialBoundary"],
+  ].map(([id,name,signature,args,commands,caller]) => ({
+    id, schema: "app_rls", name, signature, returnType: "jsonb",
+    identityArguments: args.join(", "), definitionLocation: authenticationClosureSource,
+    definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: { ...authenticationClosureSecurity, runtimeExecuteGrantees: ["app"] },
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],...commands],
+    context: "RF7 actor-bound admin MFA persistence capability; cryptographic verification remains in Node and protected row authority remains in PostgreSQL.",
+    canonicalWorkflowIds: ["workflow-http-backend-src-controllers-auth-admin-security-controller-ts-get-admin-mfa-status-controller"],
+    repositoryCallers: [`backend/src/rls-waves/session-b/b01/adminMfaRepository.ts:${caller}`],
+    inputAuthority: "opaque authenticated-session capability; caller user and tenant identifiers cannot establish authority",
+    outputColumns: ["result"], disposableProbes: ["b01-authentication-closure-postgres18"],
+  })),
+  {
+    id: "rf7-risk-analytics-snapshot", schema: "app_rls", name: "risk_analytics_snapshot",
+    signature: "text,text,text,text,text,integer,integer,timestamp without time zone", returnType: "jsonb",
+    identityArguments: "p_capability text, p_purpose text, p_request_id text, p_licensee_id text, p_expected_user_id text, p_lookback_hours integer, p_limit integer, p_checked_at timestamp without time zone",
+    definitionLocation: riskAnalyticsSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: riskAnalyticsSecurity,
+    tableCommands: [
+      ["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],
+      ["ManufacturerLicenseeLink","SELECT"],["SecurityPolicy","SELECT"],["Batch","SELECT"],["QRCode","SELECT"],
+      ["QrScanLog","SELECT"],["PolicyAlert","SELECT"],["Incident","SELECT"],["PolicyRule","SELECT"],["AuditLog","INSERT"],
+    ],
+    context: "Returns one bounded, repeatable, tenant-authoritative risk snapshot and records its read evidence atomically after live capability, actor, organization and licensee revalidation.",
+    canonicalWorkflowIds: ["workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics"],
+    repositoryCallers: ["backend/src/rls-waves/session-c/c02/riskAnalyticsRepository.ts:readRiskAnalyticsSnapshot"],
+    inputAuthority: "opaque authenticated-session capability; licensee ID only selects a database-validated active scope",
+    outputColumns: ["organizationId","policy","batches","scanLogs","alerts","qrs","manufacturers","manufacturerLinks","incidents","policyRules"],
+    disposableProbes: ["risk-analytics-application-path-postgres18"],
+  },
+  {
+    id: "c02-platform-audit-log-details", schema: "app_rls", name: "platform_audit_log_details", signature: "text[]", returnType: "TABLE(id text, ip_address text, user_agent text, user_id text, user_name text)",
+    identityArguments: "audit_ids text[]", definitionLocation: c02AuditTraceSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c02AuditTraceSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["AuditLog","SELECT"]], context: "Returns network and actor details only for a bounded page of audit IDs already proven to belong to the capability-bound platform administrator's explicit live licensee scope.", canonicalWorkflowIds: ["workflow-http-backend-src-controllers-audit-controller-ts-get-logs"], repositoryCallers: ["backend/src/services/auditLogQueryService.ts:queryAuditLogs"], inputAuthority: "opaque authenticated-session capability and a maximum 500 row selector set; database rows establish scope", outputColumns: ["id","ip_address","user_agent","user_id","user_name"], disposableProbes: ["session-c-audit-trace-postgres18"],
+  },
+  {
+    id: "c02-fraud-report-network-details", schema: "app_rls", name: "c02_fraud_report_network_details", signature: "text[]", returnType: "TABLE(id text, ip_address text)",
+    identityArguments: "report_ids text[]", definitionLocation: c02AuditTraceSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c02AuditTraceSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["AuditLog","SELECT"]], context: "Returns only IP details for the bounded CUSTOMER_FRAUD_REPORT page in the capability-derived platform actor's explicit live licensee scope.", canonicalWorkflowIds: ["workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports"], repositoryCallers: ["backend/src/services/fraudReportQueryService.ts:queryFraudReports"], inputAuthority: "opaque authenticated-session capability and a maximum 500 row selector set; database rows establish scope", outputColumns: ["id","ip_address"], disposableProbes: ["session-c-audit-trace-postgres18"],
+  },
+  {
+    id: "c02-respond-fraud-report", schema: "app_rls", name: "c02_respond_fraud_report", signature: "text,text,text,boolean", returnType: "jsonb",
+    identityArguments: "report_id text, response_status text, requested_message text, notify_customer boolean", definitionLocation: c02AuditTraceSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c02AuditTraceSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["AuditLog","SELECT"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]], context: "Locks one fraud report, revalidates a capability-bound unscoped platform administrator with fresh MFA, appends the response and security event atomically, and returns a bounded result.", canonicalWorkflowIds: ["workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report"], repositoryCallers: ["backend/src/rls-waves/session-c/c02/auditTraceRepository.ts:respondToFraudReportInTransaction"], inputAuthority: "opaque authenticated-session capability; report ID is a selector and the database report supplies tenant scope", outputColumns: ["jsonb response"], disposableProbes: ["session-c-audit-trace-postgres18"],
+  },
+  {
+    id: "c03-list-policy-rules", schema: "app_rls", name: "c03_list_policy_rules", signature: "text,boolean,integer,integer", returnType: "jsonb",
+    identityArguments: "rule_type_filter text, active_filter boolean, row_limit integer, row_offset integer", definitionLocation: c03PolicySource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03PolicySecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["PolicyRule","SELECT"]], context: "Returns one bounded policy-rule page only after the authenticated capability has installed a live platform actor and explicit active licensee scope.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts:listPolicyRulesInTransaction"], inputAuthority: "capability-derived actor and licensee; filters and pagination only narrow the projection", outputColumns: ["rules","total"], disposableProbes: ["c03-policy-postgres18"],
+  },
+  {
+    id: "c03-list-platform-policy-rules", schema: "app_rls", name: "c03_list_platform_policy_rules", signature: "text,boolean,integer,integer", returnType: "jsonb",
+    identityArguments: "rule_type_filter text, active_filter boolean, row_limit integer, row_offset integer", definitionLocation: c03PolicySource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03PolicySecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["PolicyRule","SELECT"],["Organization","SELECT"],["Licensee","SELECT"]], context: "Returns a bounded platform policy projection only for a live unscoped platform administrator with fresh MFA.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts:listPlatformPolicyRulesInTransaction"], inputAuthority: "capability-derived unscoped platform actor", outputColumns: ["rules","total"], disposableProbes: ["c03-policy-postgres18"],
+  },
+  {
+    id: "c03-create-policy-rule", schema: "app_rls", name: "c03_create_policy_rule", signature: "jsonb", returnType: "jsonb",
+    identityArguments: "input jsonb", definitionLocation: c03PolicySource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03PolicySecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["PolicyRule","INSERT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"]], context: "Validates an allowlisted policy payload and atomically creates one rule in the capability-derived licensee with request-bound replay protection.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts:createPolicyRuleInTransaction"], inputAuthority: "capability-derived platform actor and licensee; JSON is bounded mutation data only", outputColumns: ["policy rule projection"], disposableProbes: ["c03-policy-postgres18"],
+  },
+  {
+    id: "c03-update-policy-rule", schema: "app_rls", name: "c03_update_policy_rule", signature: "text,jsonb", returnType: "jsonb",
+    identityArguments: "policy_rule_id text, patch jsonb", definitionLocation: c03PolicySource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03PolicySecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["PolicyRule","SELECT"],["PolicyRule","UPDATE"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"]], context: "Locks one capability-visible policy rule, rejects arbitrary fields, and applies one request-bound idempotent patch.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts:updatePolicyRuleInTransaction"], inputAuthority: "capability-derived actor and licensee; rule ID selects only a row in that scope", outputColumns: ["policy rule projection"], disposableProbes: ["c03-policy-postgres18"],
+  },
+  {
+    id: "c03-upsert-feature-flag", schema: "app_rls", name: "c03_upsert_tenant_feature_flag", signature: "text,boolean,jsonb", returnType: "jsonb",
+    identityArguments: "key text, enabled boolean, config jsonb", definitionLocation: c03GovernanceSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03GovernanceSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["TenantFeatureFlag","INSERT"],["TenantFeatureFlag","UPDATE"],["SensitiveActionApproval","SELECT"],["SensitiveActionApproval","UPDATE"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]], context: "Consumes a separate approved maker-checker request before one bounded, idempotent feature-flag upsert and its atomic evidence.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts:upsertTenantFeatureFlagInTransaction"], inputAuthority: "capability-derived platform actor and approved payload", outputColumns: ["tenant feature flag projection"], disposableProbes: ["c03-governance-postgres18"],
+  },
+  {
+    id: "c03-get-retention-policy", schema: "app_rls", name: "c03_get_or_create_retention_policy", signature: "", returnType: "jsonb",
+    identityArguments: "", definitionLocation: c03GovernanceSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03GovernanceSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["EvidenceRetentionPolicy","SELECT"],["EvidenceRetentionPolicy","INSERT"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]], context: "Returns or atomically creates the fixed default retention policy for the capability-derived active licensee.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts:getOrCreateRetentionPolicyInTransaction"], inputAuthority: "capability-derived platform actor and licensee", outputColumns: ["retention policy projection"], disposableProbes: ["c03-governance-postgres18"],
+  },
+  {
+    id: "c03-run-retention-preview", schema: "app_rls", name: "c03_run_retention_lifecycle", signature: "text,text", returnType: "jsonb",
+    identityArguments: "mode text, approval_id text", definitionLocation: c03GovernanceSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03GovernanceSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["EvidenceRetentionPolicy","SELECT"],["EvidenceRetentionPolicy","INSERT"],["Incident","SELECT"],["IncidentEvidence","SELECT"],["EvidenceRetentionJob","INSERT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]], context: "Implements only the non-destructive preview operation; APPLY remains fail-closed pending its separately reviewed maker-checker executor.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts:runRetentionLifecycleInTransaction"], inputAuthority: "capability-derived platform actor and licensee", outputColumns: ["job","policy","cutoffAt","evaluated","eligible","purged","exported"], disposableProbes: ["c03-governance-postgres18"],
+  },
+  {
+    id: "c03-generate-compliance-report", schema: "app_rls", name: "c03_generate_compliance_report", signature: "timestamp with time zone,timestamp with time zone", returnType: "jsonb",
+    identityArguments: "from_at timestamp with time zone, to_at timestamp with time zone", definitionLocation: c03GovernanceSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03GovernanceSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["EvidenceRetentionPolicy","SELECT"],["EvidenceRetentionPolicy","INSERT"],["Incident","SELECT"],["IncidentHandoff","SELECT"],["AuditLog","SELECT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]], context: "Builds one bounded compliance projection from a single capability-authorized snapshot and records its immutable evidence.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts:generateComplianceReportInTransaction"], inputAuthority: "capability-derived platform actor and licensee; timestamps only bound the report window", outputColumns: ["scope","generatedAt","metrics","controls","controlSummary"], disposableProbes: ["c03-governance-postgres18"],
+  },
+  {
+    id: "c03-update-retention-policy", schema: "app_rls", name: "c03_update_retention_policy", signature: "jsonb", returnType: "jsonb",
+    identityArguments: "patch jsonb", definitionLocation: c03GovernanceSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03GovernanceSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["EvidenceRetentionPolicy","SELECT"],["EvidenceRetentionPolicy","INSERT"],["EvidenceRetentionPolicy","UPDATE"],["SensitiveActionApproval","SELECT"],["SensitiveActionApproval","UPDATE"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]], context: "Consumes an exact maker-checker approval before applying an allowlisted retention patch with atomic replay and audit evidence.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts:updateRetentionPolicyInTransaction"], inputAuthority: "capability-derived platform actor plus an exact approved payload", outputColumns: ["retention policy projection"], disposableProbes: ["c03-governance-postgres18"],
+  },
+  {
+    id: "c03-create-sensitive-approval", schema: "app_rls", name: "c03_create_sensitive_action_approval", signature: "jsonb", returnType: "jsonb",
+    identityArguments: "input jsonb", definitionLocation: c03ApprovalSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03ApprovalSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["SensitiveActionApproval","INSERT"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]], context: "Creates one bounded expiring maker-checker request for the capability-derived actor and licensee and records audit evidence atomically.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts:createSensitiveApprovalInTransaction"], inputAuthority: "capability-derived actor and licensee; allowlisted action payload is mutation data", outputColumns: ["approval projection"], disposableProbes: ["c03-approval-postgres18"],
+  },
+  {
+    id: "c03-list-sensitive-approvals", schema: "app_rls", name: "c03_list_sensitive_action_approvals", signature: "text,integer,integer", returnType: "TABLE(result jsonb)",
+    identityArguments: "status_filter text, row_limit integer, row_offset integer", definitionLocation: c03ApprovalSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03ApprovalSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["SensitiveActionApproval","SELECT"]], context: "Returns only a bounded page from the capability-derived active licensee.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts:listSensitiveApprovalsInTransaction"], inputAuthority: "capability-derived actor and licensee; status and pagination only narrow results", outputColumns: ["result"], disposableProbes: ["c03-approval-postgres18"],
+  },
+  {
+    id: "c03-approve-sensitive-approval", schema: "app_rls", name: "c03_approve_sensitive_action_approval", signature: "text,text", returnType: "jsonb",
+    identityArguments: "approval_id text, review_note text", definitionLocation: c03ApprovalSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03ApprovalSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["SensitiveActionApproval","SELECT"],["SensitiveActionApproval","UPDATE"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]], context: "Locks a pending unexpired same-licensee approval, enforces fresh MFA and maker-checker separation, then records approval and evidence atomically.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts:approveSensitiveApprovalInTransaction"], inputAuthority: "capability-derived checker; approval ID is selection-only", outputColumns: ["approval projection"], disposableProbes: ["c03-approval-postgres18"],
+  },
+  {
+    id: "c03-reject-sensitive-approval", schema: "app_rls", name: "c03_reject_sensitive_action_approval", signature: "text,text", returnType: "jsonb",
+    identityArguments: "approval_id text, review_note text", definitionLocation: c03ApprovalSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03ApprovalSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["SensitiveActionApproval","SELECT"],["SensitiveActionApproval","UPDATE"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]], context: "Locks a pending unexpired same-licensee approval, enforces fresh MFA and maker-checker separation, then records rejection and evidence atomically.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts:rejectSensitiveApprovalInTransaction"], inputAuthority: "capability-derived checker; approval ID is selection-only", outputColumns: ["approval projection"], disposableProbes: ["c03-approval-postgres18"],
+  },
+  {
+    id:"c03-assert-restricted-identity",schema:"app_rls",name:"c03_assert_restricted_identity",signature:"text",returnType:"boolean",identityArguments:"expected_identity text",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:{...c03IncidentSecurity,runtimeExecuteGrantees:["preauth","worker"]},
+    tableCommands:[["User","SELECT"]],context:"Compares the requested restricted identity to session_user; it installs no authority and rejects cross-role use.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03RestrictedDatabase.ts:withRestrictedTransaction"],inputAuthority:"database session identity",outputColumns:["allowed"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id:"c03-compute-incident-spam",schema:"app_rls",name:"c03_compute_incident_spam_signal",signature:"text,jsonb",returnType:"boolean",identityArguments:"qr_proof text, contact_hashes jsonb",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:{...c03IncidentSecurity,runtimeExecuteGrantees:["preauth"]},
+    tableCommands:[["QRCode","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","SELECT"]],context:"Resolves one exact immutable QR code under the pre-auth identity and derives a bounded recent-report signal without returning inventory.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:computeIncidentSpamSignalInTransaction"],inputAuthority:"exact QR code; hashes are non-authoritative bounded signals",outputColumns:["suspectedSpam"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id:"c03-compute-incident-severity",schema:"app_rls",name:"c03_compute_incident_severity",signature:"text,jsonb",returnType:"text",identityArguments:"qr_proof text, input jsonb",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:{...c03IncidentSecurity,runtimeExecuteGrantees:["preauth"]},
+    tableCommands:[["QRCode","SELECT"],["Licensee","SELECT"],["Organization","SELECT"]],context:"Resolves one exact immutable QR code before mapping an allowlisted incident type to the established severity model.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:computeIncidentSeverityInTransaction"],inputAuthority:"exact QR code; incident type is bounded classification input",outputColumns:["severity"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id:"c03-create-public-incident",schema:"app_rls",name:"c03_create_public_incident_report",signature:"text,jsonb,jsonb,text",returnType:"jsonb",identityArguments:"qr_proof text, report jsonb, uploads jsonb, idempotency_key text",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:{...c03IncidentSecurity,runtimeExecuteGrantees:["preauth"]},
+    tableCommands:[["QRCode","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","INSERT"],["IncidentEvent","INSERT"],["IncidentEvidence","INSERT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"]],context:"Atomically binds a bounded customer report and evidence list to the exact database QR and tenant with replay protection.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:createPublicIncidentReportInTransaction"],inputAuthority:"exact QR code derives tenant; report fields cannot choose scope",outputColumns:["id","status","severity","createdAt","qrCodeValue"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id:"c03-get-incident-detail",schema:"app_rls",name:"c03_get_incident_detail",signature:"text",returnType:"jsonb",identityArguments:"incident_id text",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:c03IncidentSecurity,
+    tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","SELECT"],["IncidentEvent","SELECT"],["IncidentCommunication","SELECT"],["IncidentEvidence","SELECT"]],context:"Returns one incident and its evidence only after live capability and tenant revalidation.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:getIncidentDetailInTransaction"],inputAuthority:"capability-derived actor; incident ID is selection-only",outputColumns:["incident projection"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id:"c03-list-incidents",schema:"app_rls",name:"c03_list_incidents",signature:"jsonb,integer,integer",returnType:"jsonb",identityArguments:"filters jsonb, row_limit integer, row_offset integer",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:c03IncidentSecurity,
+    tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","SELECT"]],context:"Returns one bounded page and total from the capability-derived active licensee.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:listIncidentsInTransaction"],inputAuthority:"capability-derived actor and licensee; filters only narrow",outputColumns:["rows","total"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id:"c03-patch-incident",schema:"app_rls",name:"c03_patch_incident",signature:"text,jsonb",returnType:"jsonb",identityArguments:"incident_id text, patch jsonb",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:c03IncidentSecurity,
+    tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","SELECT"],["Incident","UPDATE"],["IncidentEvent","INSERT"]],context:"Locks one same-tenant incident, applies only allowlisted fields under fresh MFA and appends an event atomically.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:patchIncidentInTransaction"],inputAuthority:"capability-derived actor and tenant",outputColumns:["incident","changedFields"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id:"c03-record-incident-event",schema:"app_rls",name:"c03_record_incident_event",signature:"text,text,jsonb",returnType:"jsonb",identityArguments:"incident_id text, event_type text, event_payload jsonb",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:c03IncidentSecurity,
+    tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","SELECT"],["IncidentEvent","INSERT"]],context:"Appends one allowlisted event for a capability-visible incident with actor attribution derived from the database session.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:recordIncidentEventInTransaction"],inputAuthority:"capability-derived actor and tenant",outputColumns:["event projection"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id:"c03-add-incident-evidence",schema:"app_rls",name:"c03_add_incident_evidence",signature:"text,jsonb,text",returnType:"jsonb",identityArguments:"incident_id text, evidence jsonb, idempotency_key text",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:c03IncidentSecurity,
+    tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","SELECT"],["IncidentEvidence","INSERT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"]],context:"Adds one bounded evidence record to the same-tenant incident under fresh MFA with deterministic replay.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:addIncidentEvidenceInTransaction"],inputAuthority:"capability-derived actor and tenant",outputColumns:["evidence","tamperChecks"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id:"c03-incident-audit-snapshot",schema:"app_rls",name:"c03_build_incident_evidence_audit_snapshot",signature:"text",returnType:"jsonb",identityArguments:"incident_id text",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:c03IncidentSecurity,
+    tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","SELECT"],["IncidentEvidence","SELECT"],["IncidentEvent","SELECT"]],context:"Builds one stable same-tenant incident evidence snapshot under the authenticated capability.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts:loadIncidentEvidenceAuditSnapshotInTransaction"],inputAuthority:"capability-derived actor and tenant",outputColumns:["incident","evidence","events"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id:"c03-list-ir-alerts",schema:"app_rls",name:"c03_list_ir_alerts",signature:"text,text,text,jsonb,integer,integer",returnType:"TABLE(id text,licensee_id text,alert_type text,severity text,message text,score integer,policy_rule_id text,incident_id text,batch_id text,qr_code_id text,manufacturer_id text,acknowledged_at timestamp with time zone,created_at timestamp with time zone,total_count bigint)",identityArguments:"p_incident_authorization_id text, p_incident_id text, p_licensee_id text, p_filters jsonb, p_row_limit integer, p_row_offset integer",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:c03IncidentSecurity,
+    tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","SELECT"],["PolicyAlert","SELECT"]],context:"Returns a bounded alert page only for a step-up-verified platform incident scope.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts:listIncidentPolicyAlertsInTransaction"],inputAuthority:"capability-derived incident tenant; authorization ID and filters only narrow",outputColumns:["id","licensee_id","alert_type","severity","message","score","policy_rule_id","incident_id","batch_id","qr_code_id","manufacturer_id","acknowledged_at","created_at","total_count"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id:"c03-link-ir-alert",schema:"app_rls",name:"c03_link_ir_alert_incident",signature:"text,text,text,text,text",returnType:"jsonb",identityArguments:"incident_authorization_id text, alert_id text, incident_id text, reason text, idempotency_key text",
+    definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:c03IncidentSecurity,
+    tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","SELECT"],["PolicyAlert","UPDATE"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"]],context:"Links one same-tenant alert to the selected incident under step-up assurance and deterministic replay.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts:linkPolicyAlertToIncidentInTransaction"],inputAuthority:"capability-derived incident tenant; IDs cannot establish scope",outputColumns:["policy alert projection"],disposableProbes:["c03-incident-postgres18"],
   },
   {
     id: "c03-revalidate-compliance-pack-job-actor", schema: "app_rls", name: "c03_revalidate_compliance_pack_job_actor_scope",
@@ -1255,8 +1831,8 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     identityArguments: "p_capability text, p_purpose text, p_request_id text",
     definitionLocation: authenticatedSessionSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
     security: { ...b01Security, functionSource: authenticatedSessionSource, rollbackDefinition: authenticatedSessionRollback, runtimeExecuteGrantees: ["app"] },
-    tableCommands: [["RefreshToken", "SELECT"], ["RefreshToken", "UPDATE"], ["User", "SELECT"]],
-    context: "Hashes the opaque capability in PostgreSQL, derives live user authority from the linked active session, and overwrites transaction-local authenticated context before protected access.",
+    tableCommands: [["RefreshToken", "SELECT"], ["User", "SELECT"]],
+    context: "Hashes the opaque capability in PostgreSQL, holds a shared lock on the linked active session so concurrent verification remains read-only while revocation stays serialized, derives live user authority, and overwrites transaction-local authenticated context before protected access.",
     canonicalWorkflowIds: [], repositoryCallers: [], inputAuthority: "opaque 256-bit bearer capability; purpose and request ID are attribution only", outputColumns: ["sessionId", "userId", "role", "organizationId", "licenseeId", "assurance"], disposableProbes: ["authenticated-session-capability-postgres18"],
   },
   {
@@ -1347,7 +1923,8 @@ export const validateNamedSqlFunctionContracts = (contracts = NAMED_SQL_FUNCTION
     assert(contract.security?.ownerIdentity && contract.security?.ownerRole, "named SQL function contract has no controlled owner");
     assert(contract.security?.searchPath === "pg_catalog,public", "named SQL function contract has an unsafe search path");
     assert(contract.security?.publicExecute === "revoked", "named SQL function contract leaves PUBLIC execution unresolved");
-    assert(contract.security?.runtimeExecuteGrantees?.length, "named SQL function contract has no runtime execute grantee");
+    assert(contract.internalOnly === true || contract.security?.runtimeExecuteGrantees?.length, "named SQL function contract has no runtime execute grantee");
+    assert(!contract.internalOnly || contract.security.runtimeExecuteGrantees.length === 0, "internal-only named SQL function contract has a runtime execute grantee");
     assert(contract.security?.rollbackDefinition?.endsWith(".sql"), "named SQL function contract has no rollback SQL");
     assert(contract.disposableProbes?.length, "named SQL function contract has no disposable probe");
     for (const [table, command] of contract.tableCommands) {

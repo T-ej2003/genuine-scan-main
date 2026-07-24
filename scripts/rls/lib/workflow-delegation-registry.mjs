@@ -4,6 +4,136 @@ import path from "node:path";
 
 export const WORKFLOW_DELEGATIONS = Object.freeze([
   {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-a/tenantDirectoryRepository.ts", function: "readLicenseeDirectory" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/licenseeController.ts", function: "getLicensees" },
+    reason: "The registered list controller owns the licensee-directory workflow; the repository supplies its exact SQL projection.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-a/tenantDirectoryRepository.ts", function: "readLicenseeDetail" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/licenseeController.ts", function: "getLicensee" },
+    reason: "The registered detail controller owns the exact-licensee workflow; the repository supplies its exact SQL projection.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-a/tenantDirectoryRepository.ts", function: "readUserDirectory" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/userController.ts", function: "getUsers" },
+    reason: "The registered user controller owns directory listing; the repository supplies its exact SQL projection.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b01/actorRevalidationRepository.ts", function: "revalidateAuthenticatedActor" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/middleware/auth.ts", function: "hydrateTenantIfNeeded" },
+    reason: "Authentication middleware owns actor hydration; the B01 repository supplies exact live actor revalidation.",
+  },
+  ...[
+    ["loadAuthenticatedActor", "http", "backend/src/controllers/authController.ts", "me"],
+    ["loadAuthenticatedPasswordActor", "http", "backend/src/controllers/accountController.ts", "changeMyPassword"],
+    ["requireRecentMfaSession", "http", "backend/src/middleware/auth.ts", "requireRecentAdminMfa"],
+    ["loadRecentAuthSessionRiskInputs", "internal", "backend/src/services/auth/sessionRiskService.ts", "assessAuthSessionRisk"],
+    ["recordAuthSessionRiskSignal", "internal", "backend/src/services/auth/sessionRiskService.ts", "persistAuthSessionRisk"],
+    ["updateAuthenticatedProfile", "http", "backend/src/controllers/accountController.ts", "updateMyProfile"],
+    ["prepareAuthenticatedEmailChange", "internal", "backend/src/services/auth/emailVerificationService.ts", "requestEmailChangeVerification"],
+    ["proveAuthenticatedPasswordStepUp", "http", "backend/src/controllers/authSessionController.ts", "passwordStepUpController"],
+    ["requireRecentSensitiveSession", "http", "backend/src/controllers/accountController.ts", "updateMyProfile"],
+    ["changeAuthenticatedPassword", "http", "backend/src/controllers/accountController.ts", "changeMyPassword"],
+  ].map(([functionName, executionSurface, sourceFile, canonicalFunction]) => ({
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts", function: functionName },
+    canonical: { executionSurface, sourceFile, function: canonicalFunction },
+    reason: "The registered authentication workflow owns the operation; the B01 repository supplies its exact authenticated SQL capability.",
+  })),
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c01/administrationRepository.ts", function: "call" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/licenseeController.ts", function: "createLicensee" },
+    reason: "The administration repository dispatches a fixed exact-function registry shared by the RF3 mutation controllers; the create-licensee root owns the grouped implementation evidence.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b01/invitationRepository.ts", function: "prepareInvitation" },
+    canonical: { executionSurface: "internal", sourceFile: "backend/src/services/auth/inviteService.ts", function: "createInvite" },
+    reason: "The invitation service owns invite creation; the B01 repository supplies its exact authenticated SQL capability.",
+  },
+  ...[
+    ["createRefreshTokenRecord", "createRefreshToken"],
+    ["findRefreshTokenByIdentifier", "findRefreshTokenById"],
+    ["listActiveRefreshTokenRecords", "listActiveRefreshTokensForUser"],
+    ["revokeAllRefreshTokenRecords", "revokeAllUserRefreshTokens"],
+    ["revokeRefreshTokenByIdentifier", "revokeRefreshTokenById"],
+  ].map(([functionName, canonicalFunction]) => ({
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts", function: functionName },
+    canonical: { executionSurface: "internal", sourceFile: "backend/src/services/auth/refreshTokenService.ts", function: canonicalFunction },
+    reason: "The refresh-token service owns the registered operation; the B01 repository supplies its exact session-credential SQL capability.",
+  })),
+  ...[
+    ["getPrimarySuperadminEmail", "internal", "backend/src/services/incidentEmailService.ts", "sendIncidentEmail"],
+    ["getSuperadminAlertEmails", "internal", "backend/src/services/incidentEmailService.ts", "getSuperadminAlertEmails"],
+    ["resolveIncidentEmailActor", "internal", "backend/src/services/incidentEmailService.ts", "sendIncidentEmail"],
+    ["createRoleNotifications", "internal", "backend/src/services/notificationService.ts", "createRoleNotifications"],
+    ["createUserNotification", "internal", "backend/src/services/notificationService.ts", "createUserNotification"],
+    ["markNotificationEmailed", "internal", "backend/src/services/notificationService.ts", "createUserNotification"],
+    ["listNotificationsForUser", "internal", "backend/src/services/notificationService.ts", "listNotificationsForUser"],
+    ["markNotificationRead", "internal", "backend/src/services/notificationService.ts", "markNotificationRead"],
+    ["markAllNotificationsRead", "internal", "backend/src/services/notificationService.ts", "markAllNotificationsRead"],
+    ["resolveIncidentNotificationScope", "internal", "backend/src/services/notificationService.ts", "notifyIncidentLifecycle"],
+    ["claimIncidentEmailDelivery", "internal", "backend/src/services/incidentEmailService.ts", "sendIncidentEmail"],
+    ["completeIncidentEmailDelivery", "internal", "backend/src/services/incidentEmailService.ts", "sendIncidentEmail"],
+  ].map(([functionName, executionSurface, sourceFile, canonicalFunction]) => ({
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts", function: functionName },
+    canonical: { executionSurface, sourceFile, function: canonicalFunction },
+    reason: "The registered notification or incident-email workflow owns the operation; B03 supplies its exact authenticated SQL capability.",
+  })),
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c02/riskAnalyticsRepository.ts", function: "readRiskAnalyticsSnapshot" },
+    canonical: { executionSurface: "internal", sourceFile: "backend/src/services/analyticsService.ts", function: "getRiskAnalytics" },
+    reason: "The analytics service owns the registered risk workflow; the repository supplies its exact SQL snapshot.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts", function: "verifyRawQr" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/verify/verificationHandlers.ts", function: "verifyQRCode" },
+    reason: "The public verification controller owns raw-code verification; the B02 repository supplies its exact public SQL transaction.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts", function: "verifySignedQr" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/verify/verificationHandlers.ts", function: "verifyQRCode" },
+    reason: "The public verification controller owns signed verification; the B02 repository supplies its exact public SQL transaction.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts", function: "startVerificationSession" },
+    canonical: { executionSurface: "internal", sourceFile: "backend/src/services/customerVerificationSessionService.ts", function: "createCustomerVerificationSession" },
+    reason: "The customer verification service owns session creation; the B02 repository supplies its exact public SQL mutation.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts", function: "readVerificationSession" },
+    canonical: { executionSurface: "internal", sourceFile: "backend/src/services/customerVerificationSessionService.ts", function: "getCustomerVerificationSession" },
+    reason: "The customer verification service owns session retrieval; the B02 repository supplies its exact proof-bound SQL read.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts", function: "submitProductFeedback" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/verify/feedbackHandlers.ts", function: "submitProductFeedback" },
+    reason: "The feedback controller owns product feedback; the B02 repository supplies its exact public SQL mutation.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts", function: "submitPublicIncident" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/verify/feedbackHandlers.ts", function: "reportFraud" },
+    reason: "The fraud-report controller owns concern submission; the B02 repository supplies its exact public SQL mutation.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts", function: "submitRequestAccess" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/publicIntakeController.ts", function: "submitPublicRequestAccess" },
+    reason: "The public intake controller owns access requests; the B02 repository supplies its exact public SQL mutation.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts", function: "submitPublicSupport" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/publicIntakeController.ts", function: "submitPublicSupportIssue" },
+    reason: "The public intake controller owns support requests; the B02 repository supplies its exact public SQL mutation.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts", function: "listSupportTicketRows" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/supportController.ts", function: "listSupportTickets" },
+    reason: "The registered controller owns support-ticket listing; the B02 repository supplies its scoped transaction reads.",
+  },
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts", function: "loadSupportTicketRow" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/supportController.ts", function: "getSupportTicket" },
+    reason: "The registered controller owns support-ticket detail; the B02 repository supplies its scoped transaction read.",
+  },
+  {
     delegated: { executionSurface: "internal", sourceFile: "backend/src/services/auditCsvExportService.ts", function: "readAuditCsvExport" },
     canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/auditController.ts", function: "exportLogsCsv" },
     reason: "The controller owns the registered HTTP export workflow; the service only implements its database read.",
@@ -17,16 +147,6 @@ export const WORKFLOW_DELEGATIONS = Object.freeze([
     delegated: { executionSurface: "internal", sourceFile: "backend/src/services/fraudReportQueryService.ts", function: "queryFraudReports" },
     canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/auditController.ts", function: "getFraudReports" },
     reason: "The controller owns the registered HTTP fraud-report workflow; the service only implements its database read.",
-  },
-  {
-    delegated: { executionSurface: "internal", sourceFile: "backend/src/services/analyticsService.ts", function: "loadRiskPolicy" },
-    canonical: { executionSurface: "internal", sourceFile: "backend/src/services/analyticsService.ts", function: "getRiskAnalytics" },
-    reason: "Both helpers are implementation details of the internal risk-analytics workflow.",
-  },
-  {
-    delegated: { executionSurface: "internal", sourceFile: "backend/src/services/analyticsService.ts", function: "recordRiskAnalyticsRead" },
-    canonical: { executionSurface: "internal", sourceFile: "backend/src/services/analyticsService.ts", function: "getRiskAnalytics" },
-    reason: "Both helpers are implementation details of the internal risk-analytics workflow.",
   },
   {
     delegated: { executionSurface: "internal", sourceFile: "backend/src/services/auth/refreshTokenService.ts", function: "revoke" },

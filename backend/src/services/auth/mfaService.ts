@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, 
 import { AuthRiskLevel, Prisma } from "@prisma/client";
 
 import prisma from "../../config/database";
-import { buildTokenHashCandidates, hashToken, matchesHashedToken, randomOpaqueToken } from "../../utils/security";
+import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
 import { logger } from "../../utils/logger";
 import { buildAdminMfaChallengeExpiry, buildAdminMfaChallengeTtlAuditDetails } from "./authDurationConfig";
 import { revokeAllUserRefreshTokens } from "./refreshTokenService";
@@ -18,6 +18,10 @@ import {
   verifyMfaCodeWithAdapter,
   type MfaEnrollmentMode,
 } from "./mfaAdapter";
+import {
+  createAdminMfaChallengeBoundary,
+  disableAdminMfaBoundary,
+} from "../../rls-waves/session-b/b01/adminMfaRepository";
 
 const TOTP_STEP_SECONDS = 30;
 const TOTP_DIGITS = 6;
@@ -243,41 +247,12 @@ export const disableAdminMfa = async (
   db?: Prisma.TransactionClient,
   audit?: { ipHash: string | null; userAgent: string | null }
 ): Promise<{ enabled: false }> => {
-  if (!db) return prisma.$transaction((tx) => disableAdminMfa(userId, tx, audit));
-  await lockMfaState(db, userId);
-  const now = new Date();
-  await db.adminMfaCredential.updateMany({
-    where: { userId },
-    data: {
-      backupCodesHash: [],
-      isEnabled: false,
-      verifiedAt: null,
-      lastUsedAt: null,
-    },
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  return disableAdminMfaBoundary(db, {
+    disabledAt: new Date(),
+    ipHash: audit?.ipHash || null,
+    userAgent: audit?.userAgent || null,
   });
-  await db.userMfaFactor.updateMany({
-    where: { userId, disabledAt: null },
-    data: { disabledAt: now },
-  });
-  await db.adminWebAuthnCredential.deleteMany({ where: { userId } });
-  await db.userBackupCode.deleteMany({ where: { userId, usedAt: null } });
-  await revokeAllUserRefreshTokens({ userId, reason: "MFA_DISABLED", now }, db);
-  if (audit) {
-    await db.auditLogOutbox.create({
-      data: {
-        payload: {
-          userId,
-          action: "AUTH_MFA_DISABLED",
-          entityType: "User",
-          entityId: userId,
-          details: { actorUserId: userId },
-          ...audit,
-        },
-      },
-    });
-  }
-
-  return { enabled: false };
 };
 
 export const createAdminMfaChallenge = async (params: {
@@ -303,87 +278,35 @@ export const createAdminMfaChallenge = async (params: {
   const bindingHash = sessionBindingHash(params.sessionId);
   const purpose = String(params.purpose || "admin_login").trim() || "admin_login";
   const maxAttempts = Math.max(1, Math.min(10, params.maxAttempts || getMaxChallengeAttempts()));
-
-  if (params.supersedeOpen !== false) {
-    await db.authMfaChallenge.updateMany({
-      where: {
-        userId: params.userId,
-        purpose,
-        ...(bindingHash ? { sessionBindingHash: bindingHash } : {}),
-        consumedAt: null,
-        supersededAt: null,
-        expiresAt: { gt: now },
-      },
-      data: { supersededAt: now },
-    });
-  }
-
-  const challenge = await db.authMfaChallenge.create({
-    data: {
-      userId: params.userId,
-      ticketHash,
-      sessionBindingHash: bindingHash,
-      purpose,
-      riskScore: Math.max(0, Math.min(100, Math.round(params.riskScore || 0))),
-      riskLevel: normalizeRiskLevel(params.riskLevel),
-      reasons: Array.isArray(params.reasons) ? params.reasons.slice(0, 12) : [],
-      createdIpHash: params.ipHash || null,
-      createdUserAgentHash: params.userAgent ? hashToken(params.userAgent) : null,
-      attempts: 0,
-      maxAttempts,
-      expiresAt,
-    },
+  if (!bindingHash) throw new Error("MFA_CHALLENGE_SESSION_REQUIRED");
+  const riskScore = Math.max(0, Math.min(100, Math.round(params.riskScore || 0)));
+  const riskLevel = normalizeRiskLevel(params.riskLevel);
+  const challenge = await createAdminMfaChallengeBoundary(db, {
+    kind: "SESSION",
+    ticketHash,
+    sessionBindingHash: bindingHash,
+    purpose,
+    riskScore,
+    riskLevel,
+    reasons: Array.isArray(params.reasons) ? params.reasons.slice(0, 12) : [],
+    ipHash: params.ipHash || null,
+    userAgentHash: params.userAgent ? hashToken(params.userAgent) : null,
+    maxAttempts,
+    createdAt: now,
+    expiresAt,
   });
   const ttlDetails = buildAdminMfaChallengeTtlAuditDetails(ttlConfig, now, expiresAt);
 
   logger.info("auth_mfa_challenge_issued", {
-    challengeId: challenge.id,
+    challengeId: challenge.challengeId,
     purpose,
     ...ttlDetails,
   });
-
-  await db.auditLogOutbox.create(mfaAuditOutboxRecord({
-    userId: params.userId,
-    action: "AUTH_MFA_CHALLENGE_ISSUED",
-    entityId: challenge.id,
-    details: {
-      purpose,
-      riskScore: challenge.riskScore,
-      riskLevel: challenge.riskLevel,
-      ...ttlDetails,
-      sessionBound: Boolean(bindingHash),
-    },
-    ipHash: params.ipHash,
-    userAgent: params.userAgent,
-  }));
 
   return {
     ticket: rawTicket,
     expiresAt,
   };
-};
-
-const consumeBackupCode = async (
-  userId: string,
-  codesHash: string[],
-  provided: string,
-  db: Pick<Prisma.TransactionClient, "adminMfaCredential"> = prisma
-) => {
-  const index = codesHash.findIndex((entry) => {
-    return matchesHashedToken(String(provided || "").trim().toUpperCase(), entry);
-  });
-  if (index < 0) return false;
-
-  const updated = [...codesHash];
-  updated.splice(index, 1);
-  await db.adminMfaCredential.update({
-    where: { userId },
-    data: {
-      backupCodesHash: updated,
-      lastUsedAt: new Date(),
-    },
-  });
-  return true;
 };
 
 export const verifyAdminMfaCode = async (
@@ -415,198 +338,6 @@ export const completeAdminMfaChallenge = async (params: {
   reasons: string[];
   method: "TOTP" | "BACKUP_CODE";
 }> => {
-  if (!db) {
-    const outcome = await prisma.$transaction(async (tx) => {
-      try {
-        return { ok: true as const, value: await completeAdminMfaChallenge(params, tx) };
-      } catch (error) {
-        if (error instanceof MfaAdapterError && error.commitFailure) {
-          return { ok: false as const, error };
-        }
-        throw error;
-      }
-    });
-    if (!outcome.ok) throw outcome.error;
-    return outcome.value;
-  }
-
-  try {
-    return await completeStableMfaLoginChallenge(params, db);
-  } catch (error) {
-    if (
-      !(error instanceof Error) ||
-      error.message !== "MFA_CHALLENGE_NOT_FOUND" ||
-      (error instanceof MfaAdapterError && error.commitFailure)
-    ) {
-      throw error;
-    }
-  }
-
-  const ticketHashCandidates = buildTokenHashCandidates(String(params.ticket || "").trim());
-  const now = new Date();
-
-  const challenge = await db.authMfaChallenge.findFirst({
-    where: {
-      ticketHash: { in: ticketHashCandidates },
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          licenseeId: true,
-          orgId: true,
-          isActive: true,
-          status: true,
-          deletedAt: true,
-          disabledAt: true,
-        },
-      },
-    },
-  });
-
-  if (!challenge) throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
-  if (challenge.userId !== params.userId) throw new MfaAdapterError("MFA_CHALLENGE_FORBIDDEN", { status: 403 });
-
-  if (challenge.sessionBindingHash) {
-    const bindingCandidates = sessionBindingCandidates(params.sessionId);
-    if (!bindingCandidates.length || !bindingCandidates.includes(challenge.sessionBindingHash)) {
-      throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
-    }
-  } else if (challenge.purpose === "admin_login") {
-    throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
-  }
-
-  if (challenge.supersededAt || challenge.consumedAt) {
-    throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
-  }
-
-  if (challenge.expiresAt.getTime() <= now.getTime()) {
-    await db.auditLogOutbox.create(mfaAuditOutboxRecord({
-      userId: challenge.userId,
-      action: "AUTH_MFA_CHALLENGE_EXPIRED",
-      entityId: challenge.id,
-      details: { purpose: challenge.purpose, expiresAt: challenge.expiresAt.toISOString() },
-      ipHash: params.ipHash,
-      userAgent: params.userAgent,
-    }));
-    throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410, commitFailure: true });
-  }
-
-  if (challenge.attempts >= challenge.maxAttempts) {
-    await db.auditLogOutbox.create(mfaAuditOutboxRecord({
-      userId: challenge.userId,
-      action: "AUTH_MFA_TOO_MANY_ATTEMPTS",
-      entityId: challenge.id,
-      details: { purpose: challenge.purpose, attempts: challenge.attempts, maxAttempts: challenge.maxAttempts },
-      ipHash: params.ipHash,
-      userAgent: params.userAgent,
-    }));
-    throw new MfaAdapterError("MFA_TOO_MANY_ATTEMPTS", { status: 429, retryAfterSeconds: 60, commitFailure: true });
-  }
-
-  const normalizedCode = String(params.code || "").trim();
-  const requestedMethod = params.method || null;
-  const totpShapeOk = /^\d{6}$/.test(normalizedCode.replace(/\s+/g, ""));
-  const backupShapeOk = /^[A-Za-z0-9]{4,8}-[A-Za-z0-9]{4,8}$/.test(normalizedCode);
-  const codeShapeOk =
-    requestedMethod === "totp"
-      ? totpShapeOk
-      : requestedMethod === "backup_code"
-        ? backupShapeOk
-        : totpShapeOk || backupShapeOk;
-  if (!codeShapeOk) {
-    const nextAttempts = challenge.attempts + 1;
-    const updated = await db.authMfaChallenge.updateMany({
-      where: { id: challenge.id, consumedAt: null, supersededAt: null },
-      data: { attempts: { increment: 1 } },
-    });
-    if (updated.count !== 1) throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
-    await db.auditLogOutbox.create(mfaAuditOutboxRecord({
-      userId: challenge.userId,
-      action: nextAttempts >= challenge.maxAttempts ? "AUTH_MFA_TOO_MANY_ATTEMPTS" : "AUTH_MFA_FAILURE",
-      entityId: challenge.id,
-      details: { purpose: challenge.purpose, reason: "INVALID_CODE_SHAPE", attempts: nextAttempts, maxAttempts: challenge.maxAttempts },
-      ipHash: params.ipHash,
-      userAgent: params.userAgent,
-    }));
-    throw new MfaAdapterError(nextAttempts >= challenge.maxAttempts ? "MFA_TOO_MANY_ATTEMPTS" : "INVALID_MFA_CODE", {
-      status: nextAttempts >= challenge.maxAttempts ? 429 : 400,
-      retryAfterSeconds: nextAttempts >= challenge.maxAttempts ? 60 : undefined,
-      commitFailure: true,
-    });
-  }
-
-  let verification: Awaited<ReturnType<typeof verifyAdminMfaCode>>;
-  try {
-    verification = await verifyAdminMfaCode({
-      userId: challenge.userId,
-      code: normalizedCode,
-    }, db);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error || "");
-    if (message === "INVALID_MFA_CODE") {
-      const nextAttempts = challenge.attempts + 1;
-      const updated = await db.authMfaChallenge.updateMany({
-        where: { id: challenge.id, consumedAt: null, supersededAt: null },
-        data: { attempts: { increment: 1 } },
-      });
-      if (updated.count !== 1) throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
-      await db.auditLogOutbox.create(mfaAuditOutboxRecord({
-        userId: challenge.userId,
-        action: nextAttempts >= challenge.maxAttempts ? "AUTH_MFA_TOO_MANY_ATTEMPTS" : "AUTH_MFA_FAILURE",
-        entityId: challenge.id,
-        details: { purpose: challenge.purpose, attempts: nextAttempts, maxAttempts: challenge.maxAttempts },
-        ipHash: params.ipHash,
-        userAgent: params.userAgent,
-      }));
-      throw new MfaAdapterError(nextAttempts >= challenge.maxAttempts ? "MFA_TOO_MANY_ATTEMPTS" : "INVALID_MFA_CODE", {
-        status: nextAttempts >= challenge.maxAttempts ? 429 : 400,
-        retryAfterSeconds: nextAttempts >= challenge.maxAttempts ? 60 : undefined,
-        commitFailure: true,
-      });
-    }
-    throw error;
-  }
-
-  const consumed = await db.authMfaChallenge.updateMany({
-    where: {
-      id: challenge.id,
-      consumedAt: null,
-      supersededAt: null,
-      expiresAt: { gt: now },
-    },
-    data: {
-      consumedAt: now,
-      createdIpHash: params.ipHash || challenge.createdIpHash || null,
-      createdUserAgentHash: params.userAgent ? hashToken(params.userAgent) : challenge.createdUserAgentHash,
-    },
-  });
-
-  if (consumed.count !== 1) {
-    throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
-  }
-
-  await db.auditLogOutbox.create(mfaAuditOutboxRecord({
-    userId: challenge.userId,
-    action: verification.method === "BACKUP_CODE" ? "AUTH_MFA_BACKUP_CODE_USED" : "AUTH_MFA_SUCCESS",
-    entityId: challenge.id,
-    details: {
-      purpose: challenge.purpose,
-      method: verification.method,
-      riskScore: challenge.riskScore,
-      riskLevel: challenge.riskLevel,
-    },
-    ipHash: params.ipHash,
-    userAgent: params.userAgent,
-  }));
-
-  return {
-    userId: challenge.userId,
-    riskScore: challenge.riskScore,
-    riskLevel: challenge.riskLevel,
-    reasons: challenge.reasons,
-    method: verification.method,
-  };
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  return completeStableMfaLoginChallenge(params, db);
 };

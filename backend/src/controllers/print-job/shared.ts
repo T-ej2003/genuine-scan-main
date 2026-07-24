@@ -19,6 +19,7 @@ import {
   beginPrintingIdempotency,
   completePrintingIdempotency,
 } from "../../rls-waves/session-c/c02/printingLifecycleRepository";
+import type { B03AuthenticatedFunctionBoundary } from "../../rls-waves/session-b/b03/repositoryFunctions";
 
 const MANUFACTURER_ROLES: UserRole[] = [UserRole.MANUFACTURER_ADMIN];
 export const PRINT_OPERATIONS_ROLES: UserRole[] = [
@@ -154,11 +155,13 @@ export const notifySystemPrintEvent = async (params: {
   body: string;
   data?: any;
   channels?: NotificationChannel[];
+  databaseBoundary: B03AuthenticatedFunctionBoundary;
 }) => {
   const channels = params.channels && params.channels.length > 0 ? params.channels : [NotificationChannel.WEB];
 
   await Promise.allSettled([
     createRoleNotifications({
+      databaseBoundary: params.databaseBoundary,
       audience: NotificationAudience.SUPER_ADMIN,
       type: params.type,
       title: params.title,
@@ -171,6 +174,7 @@ export const notifySystemPrintEvent = async (params: {
     Promise.resolve([] as any[]),
     params.orgId
       ? createRoleNotifications({
+          databaseBoundary: params.databaseBoundary,
           audience: NotificationAudience.MANUFACTURER,
           licenseeId: params.licenseeId || null,
           orgId: params.orgId,
