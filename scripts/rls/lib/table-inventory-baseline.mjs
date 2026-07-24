@@ -1,8 +1,8 @@
 // Reviewed Prisma/RLS table baseline. Update only with a schema migration and
 // regenerated table inventory; generators and verifiers share this authority.
 export const TABLE_INVENTORY_BASELINE = Object.freeze({
-  tables: 78,
-  forceRlsTargets: 76,
+  tables: 79,
+  forceRlsTargets: 77,
   migrationOnly: 2,
 });
 

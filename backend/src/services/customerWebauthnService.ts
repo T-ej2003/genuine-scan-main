@@ -1,6 +1,13 @@
-import { createHash, createPublicKey, randomBytes, verify as cryptoVerify } from "crypto";
+import { createHash, createPublicKey, randomBytes, randomUUID, verify as cryptoVerify } from "crypto";
 
-import prisma from "../config/database";
+import { getB01PreAuthPrisma } from "../rls-waves/session-b/b01/runtimeClients";
+import {
+  beginCustomerPasskey,
+  deleteCustomerPasskey,
+  finishCustomerPasskey,
+  listCustomerPasskeys,
+  loadCustomerPasskey,
+} from "../rls-waves/session-b/b02/publicBoundaryRepository";
 import { buildTokenHashCandidates, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";
 
 type CustomerWebAuthnChallengePurpose = "ENROLLMENT" | "LOGIN" | "STEP_UP";
@@ -18,8 +25,8 @@ type StoredCustomerChallenge = {
   rpId: string | null;
 };
 
-const challengeStore = () => (prisma as any).customerWebAuthnChallenge;
-const credentialStore = () => (prisma as any).customerWebAuthnCredential;
+const store = () => getB01PreAuthPrisma();
+const requestId = (value?: string) => String(value || randomUUID()).trim();
 
 const parsePositiveIntEnv = (key: string, fallback: number) => {
   const raw = Number(String(process.env[key] || "").trim());
@@ -141,34 +148,21 @@ const assertUserPresence = (flags: number) => {
   }
 };
 
-const loadChallengeByTicket = async (ticket: string, purpose?: CustomerWebAuthnChallengePurpose) => {
-  const store = challengeStore();
-  if (!store?.findFirst) throw new Error("WEBAUTHN_STORAGE_UNAVAILABLE");
-
+const loadChallengeByTicket = async (
+  ticket: string,
+  purpose?: CustomerWebAuthnChallengePurpose,
+  credentialId?: string | null,
+  currentRequestId?: string
+) => {
   const ticketHashCandidates = buildTokenHashCandidates(ticket);
-  const now = new Date();
-  const row = await store.findFirst({
-    where: {
-      ticketHash: { in: ticketHashCandidates },
-      purpose: purpose || undefined,
-      consumedAt: null,
-      expiresAt: { gt: now },
-    },
+  const row = await loadCustomerPasskey(store(), {
+    ticketHashCandidates,
+    purpose: purpose || null,
+    credentialId: credentialId || null,
+    checkedAt: new Date(),
+    requestId: requestId(currentRequestId),
   });
-
-  if (!row) throw new Error("WEBAUTHN_CHALLENGE_NOT_FOUND");
   return row as StoredCustomerChallenge;
-};
-
-const consumeChallenge = async (id: string) => {
-  const store = challengeStore();
-  if (!store?.update) return;
-  await store.update({
-    where: { id },
-    data: {
-      consumedAt: new Date(),
-    },
-  });
 };
 
 const verifyAssertionSignature = (params: {
@@ -186,22 +180,14 @@ const verifyAssertionSignature = (params: {
   return cryptoVerify("sha256", signedPayload, publicKey, params.signature);
 };
 
-export const listCustomerWebAuthnCredentials = async (customerUserId: string) => {
-  const store = credentialStore();
-  if (!store?.findMany) return [];
-
-  const rows = await store.findMany({
-    where: { customerUserId },
-    orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
-    select: {
-      id: true,
-      label: true,
-      credentialId: true,
-      transports: true,
-      lastUsedAt: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+export const listCustomerWebAuthnCredentials = async (params: {
+  customerCapability: string;
+  requestId?: string;
+}) => {
+  const rows = await listCustomerPasskeys(store(), {
+    customerCapability: params.customerCapability,
+    checkedAt: new Date(),
+    requestId: requestId(params.requestId),
   });
 
   return rows.map((row: any) => ({
@@ -216,41 +202,35 @@ export const listCustomerWebAuthnCredentials = async (customerUserId: string) =>
 };
 
 export const beginCustomerWebAuthnRegistration = async (params: {
+  customerCapability: string;
   customerUserId: string;
   email: string;
   displayName?: string | null;
   ipHash?: string | null;
   userAgent?: string | null;
+  requestId?: string;
 }) => {
-  const store = credentialStore();
-  const challenges = challengeStore();
-  if (!store?.findMany || !challenges?.create) throw new Error("WEBAUTHN_STORAGE_UNAVAILABLE");
-
   const ticket = randomOpaqueToken(36);
   const challenge = toBase64Url(randomBytes(32));
   const rpId = deriveRpId();
   const origin = deriveAllowedOrigins()[0] || null;
   const expiresAt = new Date(Date.now() + challengeTtlMinutes() * 60_000);
-  const existingCredentials = await store.findMany({
-    where: { customerUserId: params.customerUserId },
-    select: { credentialId: true },
+  const boundary = await beginCustomerPasskey(store(), {
+    customerCapability: params.customerCapability,
+    customerUserId: params.customerUserId,
+    customerEmail: params.email,
+    purpose: "ENROLLMENT",
+    ticketHash: hashToken(ticket),
+    challengeHash: hashToken(challenge),
+    ipHash: params.ipHash || null,
+    userAgentHash: params.userAgent ? hashToken(normalizeUserAgent(params.userAgent) || params.userAgent) : null,
+    origin,
+    rpId,
+    expiresAt,
+    checkedAt: new Date(),
+    requestId: requestId(params.requestId),
   });
-
-  await challenges.create({
-    data: {
-      customerUserId: params.customerUserId,
-      customerEmail: params.email,
-      purpose: "ENROLLMENT",
-      ticketHash: hashToken(ticket),
-      challengeHash: hashToken(challenge),
-      credentialIds: existingCredentials.map((row: any) => row.credentialId),
-      createdIpHash: params.ipHash || null,
-      createdUserAgentHash: params.userAgent ? hashToken(normalizeUserAgent(params.userAgent) || params.userAgent) : null,
-      origin,
-      rpId,
-      expiresAt,
-    },
-  });
+  const existingCredentials = Array.isArray(boundary.credentials) ? boundary.credentials as Array<any> : [];
 
   return {
     ticket,
@@ -285,6 +265,7 @@ export const beginCustomerWebAuthnRegistration = async (params: {
 };
 
 export const completeCustomerWebAuthnRegistration = async (params: {
+  customerCapability: string;
   customerUserId: string;
   ticket: string;
   label?: string | null;
@@ -301,11 +282,9 @@ export const completeCustomerWebAuthnRegistration = async (params: {
       transports?: string[];
     };
   };
+  requestId?: string;
 }) => {
-  const store = credentialStore();
-  if (!store?.upsert) throw new Error("WEBAUTHN_STORAGE_UNAVAILABLE");
-
-  const challenge = await loadChallengeByTicket(params.ticket, "ENROLLMENT");
+  const challenge = await loadChallengeByTicket(params.ticket, "ENROLLMENT", null, params.requestId);
   if (challenge.customerUserId !== params.customerUserId) {
     throw new Error("WEBAUTHN_CHALLENGE_USER_MISMATCH");
   }
@@ -330,23 +309,11 @@ export const completeCustomerWebAuthnRegistration = async (params: {
   const credentialId = String(params.credential.rawId || params.credential.id || "").trim();
   if (!credentialId) throw new Error("INVALID_WEBAUTHN_CREDENTIAL_ID");
 
-  await store.upsert({
-    where: { credentialId },
-    update: {
-      customerUserId: params.customerUserId,
-      label: String(params.label || "").trim() || "Passkey",
-      publicKeySpki: params.credential.response.publicKey,
-      publicKeyAlgorithm: Number(params.credential.response.publicKeyAlgorithm || -7),
-      counter: authenticatorData.signCount,
-      transports: Array.isArray(params.credential.response.transports)
-        ? params.credential.response.transports.map((value) => String(value || "").trim()).filter(Boolean)
-        : [],
-      lastUsedAt: new Date(),
-    },
-    create: {
-      customerUserId: params.customerUserId,
-      customerEmail: challenge.customerEmail,
-      label: String(params.label || "").trim() || "Passkey",
+  await finishCustomerPasskey(store(), {
+    customerCapability: params.customerCapability,
+    ticketHashCandidates: buildTokenHashCandidates(params.ticket),
+    purpose: "ENROLLMENT",
+    payload: {
       credentialId,
       publicKeySpki: params.credential.response.publicKey,
       publicKeyAlgorithm: Number(params.credential.response.publicKeyAlgorithm || -7),
@@ -354,11 +321,11 @@ export const completeCustomerWebAuthnRegistration = async (params: {
       transports: Array.isArray(params.credential.response.transports)
         ? params.credential.response.transports.map((value) => String(value || "").trim()).filter(Boolean)
         : [],
-      lastUsedAt: new Date(),
+      label: String(params.label || "").trim() || "Passkey",
     },
+    checkedAt: new Date(),
+    requestId: requestId(params.requestId),
   });
-
-  await consumeChallenge(challenge.id);
 
   return {
     ok: true as const,
@@ -367,49 +334,36 @@ export const completeCustomerWebAuthnRegistration = async (params: {
 };
 
 export const beginCustomerWebAuthnAssertion = async (params: {
+  customerCapability?: string | null;
   customerUserId: string;
   email?: string | null;
   purpose?: Exclude<CustomerWebAuthnChallengePurpose, "ENROLLMENT">;
   ipHash?: string | null;
   userAgent?: string | null;
+  requestId?: string;
 }) => {
-  const store = credentialStore();
-  const challenges = challengeStore();
-  if (!store?.findMany || !challenges?.create) throw new Error("WEBAUTHN_STORAGE_UNAVAILABLE");
-
-  const credentials = await store.findMany({
-    where: { customerUserId: params.customerUserId },
-    select: {
-      credentialId: true,
-      transports: true,
-    },
-  });
-
-  if (!credentials.length) {
-    throw new Error("WEBAUTHN_NOT_ENROLLED");
-  }
-
   const ticket = randomOpaqueToken(36);
   const challenge = toBase64Url(randomBytes(32));
   const rpId = deriveRpId();
   const origin = deriveAllowedOrigins()[0] || null;
   const expiresAt = new Date(Date.now() + challengeTtlMinutes() * 60_000);
 
-  await challenges.create({
-    data: {
-      customerUserId: params.customerUserId,
-      customerEmail: params.email || null,
-      purpose: params.purpose || "LOGIN",
-      ticketHash: hashToken(ticket),
-      challengeHash: hashToken(challenge),
-      credentialIds: credentials.map((row: any) => row.credentialId),
-      createdIpHash: params.ipHash || null,
-      createdUserAgentHash: params.userAgent ? hashToken(normalizeUserAgent(params.userAgent) || params.userAgent) : null,
-      origin,
-      rpId,
-      expiresAt,
-    },
+  const boundary = await beginCustomerPasskey(store(), {
+    customerCapability: params.customerCapability || null,
+    customerUserId: params.customerUserId,
+    customerEmail: params.email || "",
+    purpose: params.purpose || "LOGIN",
+    ticketHash: hashToken(ticket),
+    challengeHash: hashToken(challenge),
+    ipHash: params.ipHash || null,
+    userAgentHash: params.userAgent ? hashToken(normalizeUserAgent(params.userAgent) || params.userAgent) : null,
+    origin,
+    rpId,
+    expiresAt,
+    checkedAt: new Date(),
+    requestId: requestId(params.requestId),
   });
+  const credentials = Array.isArray(boundary.credentials) ? boundary.credentials as Array<any> : [];
 
   return {
     ticket,
@@ -429,6 +383,7 @@ export const beginCustomerWebAuthnAssertion = async (params: {
 };
 
 export const completeCustomerWebAuthnAssertion = async (params: {
+  customerCapability?: string | null;
   ticket: string;
   customerUserId?: string | null;
   credential: {
@@ -442,30 +397,20 @@ export const completeCustomerWebAuthnAssertion = async (params: {
       userHandle?: string | null;
     };
   };
+  requestId?: string;
 }) => {
-  const store = credentialStore();
-  if (!store?.findFirst || !store?.update) throw new Error("WEBAUTHN_STORAGE_UNAVAILABLE");
-
-  const challenge = await loadChallengeByTicket(params.ticket);
+  const credentialId = String(params.credential.rawId || params.credential.id || "").trim();
+  const challenge = await loadChallengeByTicket(params.ticket, undefined, credentialId, params.requestId) as StoredCustomerChallenge & {
+    credential?: {
+      id: string; customerUserId: string; customerEmail: string | null;
+      credentialId: string; publicKeySpki: string; counter: number;
+    } | null;
+  };
   if (params.customerUserId && challenge.customerUserId !== params.customerUserId) {
     throw new Error("WEBAUTHN_CHALLENGE_USER_MISMATCH");
   }
 
-  const credentialId = String(params.credential.rawId || params.credential.id || "").trim();
-  const storedCredential = await store.findFirst({
-    where: {
-      customerUserId: challenge.customerUserId,
-      credentialId,
-    },
-    select: {
-      id: true,
-      customerUserId: true,
-      customerEmail: true,
-      credentialId: true,
-      publicKeySpki: true,
-      counter: true,
-    },
-  });
+  const storedCredential = challenge.credential;
   if (!storedCredential) throw new Error("WEBAUTHN_CREDENTIAL_NOT_FOUND");
 
   const clientData = parseClientData(params.credential.response.clientDataJSON);
@@ -500,40 +445,35 @@ export const completeCustomerWebAuthnAssertion = async (params: {
     throw new Error("WEBAUTHN_COUNTER_REPLAY");
   }
 
-  await store.update({
-    where: { id: storedCredential.id },
-    data: {
-      counter: nextCounter > storedCredential.counter ? nextCounter : storedCredential.counter,
-      lastUsedAt: new Date(),
-    },
+  const assertedAt = new Date();
+  await finishCustomerPasskey(store(), {
+    customerCapability: params.customerCapability || null,
+    ticketHashCandidates: buildTokenHashCandidates(params.ticket),
+    purpose: challenge.purpose as CustomerWebAuthnChallengePurpose,
+    payload: { credentialId, nextCounter },
+    checkedAt: assertedAt,
+    requestId: requestId(params.requestId),
   });
-
-  await consumeChallenge(challenge.id);
 
   return {
     ok: true as const,
     purpose: challenge.purpose as CustomerWebAuthnChallengePurpose,
     customerUserId: storedCredential.customerUserId,
     customerEmail: storedCredential.customerEmail,
-    assertedAt: new Date(),
+    assertedAt,
   };
 };
 
 export const deleteCustomerWebAuthnCredential = async (params: {
-  customerUserId: string;
+  customerCapability: string;
   credentialId: string;
+  requestId?: string;
 }) => {
-  const store = credentialStore();
-  if (!store?.deleteMany) return { deleted: false };
-
-  const deleted = await store.deleteMany({
-    where: {
-      id: params.credentialId,
-      customerUserId: params.customerUserId,
-    },
+  const deleted = await deleteCustomerPasskey(store(), {
+    customerCapability: params.customerCapability,
+    credentialRowId: params.credentialId,
+    checkedAt: new Date(),
+    requestId: requestId(params.requestId),
   });
-
-  return {
-    deleted: deleted.count > 0,
-  };
+  return { deleted: Boolean(deleted?.deleted) };
 };

@@ -141,7 +141,7 @@ verifyCodeApp.get("/verify/:code", verifyCodeIpLimiter, verifyCodeActorLimiter, 
 const verifyClaimApp = express();
 verifyClaimApp.use(express.json());
 verifyClaimApp.post(
-  "/verify/:code/claim",
+  "/verify/session/:id/claim",
   verifyClaimRouteLimiter,
   verifyClaimIpLimiter,
   verifyClaimActorLimiter,
@@ -222,7 +222,7 @@ verifySessionMutationApp.post("/verify/session/abc/intake", verifySessionMutatio
 
   await assertRateLimitAfter({
     app: verifyClaimApp,
-    path: "/verify/AADS00000020171/claim",
+    path: "/verify/session/60000000-0000-4000-8000-000000000501/claim",
     body: { token: "ownership-transfer-token" },
     allowed: 12,
     description: "ownership-sensitive claim flow",

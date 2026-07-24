@@ -23,6 +23,7 @@ import {
 import { buildReadyPayload } from "./controllers/healthController";
 import { isRedisConfigured } from "./services/redisService";
 import { logger } from "./utils/logger";
+import { sanitizeRequestTelemetryPath } from "./utils/requestTelemetryPath";
 
 const parseBool = (value: unknown, fallback = false) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -146,7 +147,7 @@ export const createBackendApp = () => {
         (req as express.Request & { unsupportedWorkflowDenial?: boolean }).unsupportedWorkflowDenial === true;
       const pathName = unsupportedWorkflowDenial
         ? UNSUPPORTED_WORKFLOW_DENIAL_TELEMETRY_PATH
-        : req.originalUrl.split("?")[0] || req.path || "/";
+        : sanitizeRequestTelemetryPath(req.originalUrl || req.path || "/");
       const claims = (req as express.Request & { user?: RequestClaimsSnapshot }).user || null;
       const isStagingRlsAllocationMapTelemetry =
         isStagingRlsBatchAllocationMapTelemetryRoute(req.method, pathName) &&
@@ -358,16 +359,17 @@ export const createBackendApp = () => {
 
   app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const requestId = (req as express.Request & { requestId?: string }).requestId;
+    const safePath = sanitizeRequestTelemetryPath(req.originalUrl || req.path || "/");
     captureBackendException(err, {
       requestId,
       method: req.method,
-      path: req.originalUrl,
+      path: safePath,
       status: 500,
     });
     logger.error("Unhandled error", {
       requestId,
       method: req.method,
-      path: req.originalUrl,
+      path: safePath,
       error: getErrorMessage(err),
     });
     res.status(500).json({

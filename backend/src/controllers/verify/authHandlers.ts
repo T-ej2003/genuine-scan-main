@@ -8,6 +8,12 @@ import {
   setCustomerVerifySessionCookie,
 } from "../../services/customerVerifyCookieService";
 import {
+  readCustomerVerifyDatabaseSession,
+  registerCustomerVerifyDatabaseSession,
+  revokeCustomerVerifyDatabaseSession,
+} from "../../services/customerVerifyDatabaseSessionService";
+import { CustomerVerifyRequest } from "../../middleware/customerVerifyAuth";
+import {
   createCustomerOtpChallenge,
   issueCustomerVerifySession,
   maskEmail,
@@ -112,6 +118,7 @@ export const verifyCustomerEmailOtp = async (req: Request, res: Response) => {
     });
 
     const sessionToken = issueCustomerVerifySession(identity);
+    await registerCustomerVerifyDatabaseSession(sessionToken, identity);
     setCustomerVerifySessionCookie(res, sessionToken);
 
     await createAuditLog({
@@ -139,22 +146,45 @@ export const verifyCustomerEmailOtp = async (req: Request, res: Response) => {
   }
 };
 
-export const getCustomerVerifyAuthSession = async (req: any, res: Response) => {
-  if (!req.customer) {
+export const getCustomerVerifyAuthSession = async (req: CustomerVerifyRequest, res: Response) => {
+  if (!req.customerDatabaseCapability) {
     return res.json({
       success: true,
       data: buildAnonymousCustomerVerifyAuthResponse(),
     });
   }
 
-  return res.json({
-    success: true,
-    data: buildCustomerVerifyAuthResponse(req.customer),
-  });
+  try {
+    const session = await readCustomerVerifyDatabaseSession(req.customerDatabaseCapability);
+    if (!session) throw new Error("Customer database session was not found");
+    return res.json({
+      success: true,
+      data: buildCustomerVerifyAuthResponse({
+        userId: session.customerUserId,
+        email: session.customerEmail,
+        authStrength:
+          session.authStrength === "PASSKEY" ? "PASSKEY" :
+          session.authStrength === "SOCIAL" ? "SOCIAL" : "EMAIL_OTP",
+        authProvider: session.authProvider === "GOOGLE" ? "GOOGLE" : "EMAIL_OTP",
+      }),
+    });
+  } catch {
+    clearCustomerVerifySessionCookie(res);
+    return res.json({
+      success: true,
+      data: buildAnonymousCustomerVerifyAuthResponse(),
+    });
+  }
 };
 
-export const logoutCustomerVerifySession = async (req: Request, res: Response) => {
-  clearCustomerVerifySessionCookie(res);
+export const logoutCustomerVerifySession = async (req: CustomerVerifyRequest, res: Response) => {
+  try {
+    if (req.customerDatabaseCapability) {
+      await revokeCustomerVerifyDatabaseSession(req.customerDatabaseCapability);
+    }
+  } finally {
+    clearCustomerVerifySessionCookie(res);
+  }
   await createAuditLog({
     action: "VERIFY_CUSTOMER_LOGOUT",
     entityType: "CustomerVerifyAuth",

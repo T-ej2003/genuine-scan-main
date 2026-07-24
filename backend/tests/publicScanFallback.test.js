@@ -130,9 +130,14 @@ const qrRecord = {
   batch,
 };
 
+let directQrReads = 0;
+let directTransactions = 0;
 const fakePrisma = {
   qRCode: {
-    findUnique: async () => qrRecord,
+    findUnique: async () => {
+      directQrReads += 1;
+      return qrRecord;
+    },
   },
   ownership: {
     findUnique: async () => {
@@ -143,8 +148,9 @@ const fakePrisma = {
     updateMany: async () => ({ count: 0 }),
     findFirst: async () => null,
   },
-  $transaction: async (callback) =>
-    callback({
+  $transaction: async (callback) => {
+    directTransactions += 1;
+    return callback({
       qRCode: {
         update: async () => ({
           ...qrRecord,
@@ -158,7 +164,8 @@ const fakePrisma = {
         findFirst: async () => null,
         create: async (args) => ({ id: "scan-log-1", ...(args?.data || {}) }),
       },
-    }),
+    });
+  },
 };
 
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
@@ -247,20 +254,12 @@ const res = {
 (async () => {
   await scanToken(req, res);
 
-  assert.strictEqual(res.statusCode, 200, "scan fallback should not return 500");
-  assert(res.body && res.body.success === true, "scan fallback should return a success payload");
-  assert.strictEqual(res.body.data.scanStatus, "first_successful_scan", "first scan should remain classified as the initial verification");
-  assert.strictEqual(res.body.data.isAuthentic, true, "valid first scan should remain authentic");
-  assert.strictEqual(res.body.data.ownershipStatus.isClaimed, false, "missing ownership storage should not block verify");
-  assert.strictEqual(res.body.data.totalScans, 1, "audit log failure should not interrupt the verification response");
-  assert.strictEqual(res.body.data.publicStatus, "review_needed", "fallback scans should expose a conservative public-safe status");
-  assert.strictEqual(res.body.data.riskSignalStatus, "needs_brand_review", "fallback scans should expose a conservative public-safe risk signal");
-  assert.strictEqual(res.body.data.proofTier, undefined, "public scans must not expose proof tier internals");
-  assert.strictEqual(res.body.data.proofSource, undefined, "public scans must not expose proof source internals");
-  assert.strictEqual(res.body.data.decisionVersion, undefined, "public scans must not expose decision contract internals");
-  assert.strictEqual(res.body.data.customerTrustLevel, undefined, "public scans must not expose customer trust internals");
+  assert.strictEqual(res.statusCode, 503, "a failed authoritative scan boundary must fail closed");
+  assert.strictEqual(res.body?.success, false);
+  assert.strictEqual(directQrReads, 0, "the public route must not fall back to direct QR reads");
+  assert.strictEqual(directTransactions, 0, "the public route must not fall back to direct QR mutations");
 
-  console.log("public scan fallback test passed");
+  console.log("public scan fail-closed fallback contract passed");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

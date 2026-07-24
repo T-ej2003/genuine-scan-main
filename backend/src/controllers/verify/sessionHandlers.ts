@@ -10,7 +10,6 @@ import {
   revealCustomerVerificationSession,
   saveCustomerTrustIntake,
 } from "../../services/customerVerificationSessionService";
-import { resolvePublicVerificationSessionStartToken } from "../../services/verificationDecisionService";
 
 const startSessionSchema = z
   .object({
@@ -86,11 +85,8 @@ export const startCustomerVerificationSession = async (req: CustomerVerifyReques
       });
     }
 
-    const decisionId = parsed.data.sessionStartToken
-      ? await resolvePublicVerificationSessionStartToken(parsed.data.sessionStartToken)
-      : parsed.data.decisionId || null;
-
-    if (!decisionId) {
+    const sessionStartToken = parsed.data.sessionStartToken || parsed.data.decisionId || null;
+    if (!sessionStartToken) {
       return res.status(400).json({
         success: false,
         error: "Verification session token is invalid or expired",
@@ -98,9 +94,9 @@ export const startCustomerVerificationSession = async (req: CustomerVerifyReques
     }
 
     const session = await createCustomerVerificationSession({
-      decisionId,
+      sessionStartToken,
       entryMethod: parsed.data.entryMethod,
-      customer: req.customer || null,
+      customerCapability: req.customerDatabaseCapability || null,
     });
 
     await createAuditLogSafely({
@@ -108,7 +104,6 @@ export const startCustomerVerificationSession = async (req: CustomerVerifyReques
       entityType: "CustomerVerificationSession",
       entityId: session.sessionId,
       details: {
-        decisionId: session.decisionId,
         entryMethod: session.entryMethod,
       },
       ipAddress: req.ip,
@@ -139,7 +134,7 @@ export const getCustomerVerificationSessionState = async (req: CustomerVerifyReq
 
     const session = await getCustomerVerificationSession({
       sessionId: parsed.data.id,
-      customer: req.customer || null,
+      customerCapability: req.customerDatabaseCapability || null,
       proofToken: req.get("x-verification-session-proof") || null,
     });
 
@@ -185,6 +180,7 @@ export const submitCustomerVerificationIntake = async (req: CustomerVerifyReques
         answers: parsed.data as Record<string, unknown>,
       },
       customer,
+      customerCapability: req.customerDatabaseCapability || "",
       proofToken: req.get("x-verification-session-proof") || null,
     });
 
@@ -232,6 +228,7 @@ export const revealCustomerVerificationResult = async (req: CustomerVerifyReques
     const reveal = await revealCustomerVerificationSession({
       sessionId: params.data.id,
       customer,
+      customerCapability: req.customerDatabaseCapability || "",
       proofToken: req.get("x-verification-session-proof") || null,
     });
 
@@ -240,7 +237,6 @@ export const revealCustomerVerificationResult = async (req: CustomerVerifyReques
       entityType: "CustomerVerificationSession",
       entityId: params.data.id,
       details: {
-        decisionId: reveal.decisionId,
         customerUserId: customer.userId,
       },
       ipAddress: req.ip,

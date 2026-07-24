@@ -51,6 +51,10 @@
       "expectedOwner": "mscqr_rls_cert_owner"
     },
     {
+      "table": "CustomerAuthSession",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
       "table": "CustomerTrustCredential",
       "expectedOwner": "mscqr_rls_cert_owner"
     },

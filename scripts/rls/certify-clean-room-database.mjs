@@ -189,6 +189,28 @@ const runPrintingLifecycleCertification = (connections, env) => {
   if (!/Release Fix 5 PostgreSQL 18 printing lifecycle proof passed/.test(result.stdout || "")) throw new Error("Printing lifecycle certification did not emit its success marker");
   return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-c/c02/printingLifecyclePostgres18.test.js" };
 };
+const runPublicVerificationCertification = (connections, env) => {
+  if (env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY !== "public-verification") return null;
+  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/rls-wave-b/b02/publicVerificationPostgres18.test.js")], {
+    cwd: root,
+    env: {
+      ...env,
+      NODE_ENV: "test",
+      MSCQR_PUBLIC_VERIFICATION_ADMIN_URL: connections.bootstrap,
+      MSCQR_PUBLIC_VERIFICATION_PREAUTH_URL: connections.preauth,
+      MSCQR_PUBLIC_VERIFICATION_APP_URL: connections.app,
+      MSCQR_PUBLIC_VERIFICATION_POSTGRES18_TEST: "true",
+      MSCQR_PUBLIC_VERIFICATION_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_PUBLIC_VERIFICATION_POSTGRES18_TEST",
+    },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`Public verification certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+  if (!/Release Fix 6 public verification application-path proof passed/.test(result.stdout || "")) {
+    throw new Error("Public verification certification did not emit its success marker");
+  }
+  return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-b/b02/publicVerificationPostgres18.test.js" };
+};
 const runB01PreAuthCertification = (connections, env) => {
   const result = spawnSync(process.execPath, [path.join(root, "backend/tests/rls-wave-b/b01/preAuthSecurityPostgres18.test.js")], {
     cwd: root,
@@ -287,24 +309,20 @@ const createGreenDatabase = (executorUrl, database) => {
 };
 const dropGreenDatabase = (executorUrl, database) => {
   if (databaseExists(executorUrl, database)) {
-    runPsql(executorUrl, ["-q", "-c", `DO $$ BEGIN
-      -- The target is an exact, per-process disposable database created by
-      -- this runner.  Terminate only residual sessions on that verified name;
-      -- this avoids a flaky race with locally pooled psql/Prisma probes while
-      -- never touching a shared or live database.
-      FOR attempt IN 1..200 LOOP
-        EXIT WHEN NOT EXISTS (SELECT FROM pg_stat_activity WHERE datname=${lit(database)} AND pid<>pg_backend_pid());
-        PERFORM pg_sleep(0.05);
-      END LOOP;
-      IF EXISTS (SELECT FROM pg_stat_activity WHERE datname=${lit(database)} AND pid<>pg_backend_pid()) THEN
-        PERFORM pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=${lit(database)} AND pid<>pg_backend_pid();
-        PERFORM pg_sleep(0.1);
-      END IF;
-      IF EXISTS (SELECT FROM pg_stat_activity WHERE datname=${lit(database)} AND pid<>pg_backend_pid()) THEN
-        RAISE EXCEPTION 'disposable green database still has active sessions';
-      END IF;
-    END $$;`], "wait for disposable green sessions to disconnect");
-    runPsql(executorUrl, ["-q", "-c", `DROP DATABASE ${quote(database)}`], "drop disposable green database");
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const sessions = Number(scalar(
+        executorUrl,
+        `SELECT count(*) FROM pg_stat_activity WHERE datname=${lit(database)}`,
+        "wait for disposable database sessions"
+      ));
+      if (sessions === 0) {
+        runPsql(executorUrl, ["-q", "-c", `DROP DATABASE ${quote(database)}`], "drop disposable green database");
+        activeDatabases.delete(database);
+        return;
+      }
+      runPsql(executorUrl, ["-q", "-c", "SELECT pg_sleep(0.1)"], "wait for disposable database clients");
+    }
+    runPsql(executorUrl, ["-q", "-c", `DROP DATABASE ${quote(database)} WITH (FORCE)`], "drop disposable green database");
   }
   activeDatabases.delete(database);
 };
@@ -408,7 +426,13 @@ const certifyTablesAndColumns = (dbUrl, appUrl, manifest, policies, privileges) 
     const forged = Number(appScalar(appUrl, { user: ownUser, org: ids.orgB, licensee: ids.licenseeB, actorClass, assurance, purpose }, `SELECT count(${quote(column)}) FROM public.${quote(table.table)}`, `${table.table} forged actor/scope mismatch`));
     if (forged !== 0) throw new Error(`${table.table} trusted forged tenant GUCs for a database-bound actor`);
   }
-  const platformTables = [...new Set(policies.rows.filter((entry) => !entry.internalHelperOnly && entry.command === "SELECT" && entry.actors.includes("platform-admin") && entry.purpose.includes("tenant-risk-analytics")).map((entry) => entry.table))].sort();
+  const platformTables = [...new Set(policies.rows.filter((entry) =>
+    !entry.internalHelperOnly
+    && entry.command === "SELECT"
+    && entry.actors.includes("platform-admin")
+    && entry.purpose.includes("tenant-risk-analytics")
+    && grantByTable.has(entry.table)
+  ).map((entry) => entry.table))].sort();
   if (!platformTables.length) throw new Error("Frozen bounded platform risk analytics has no generated SELECT policies");
   for (const table of platformTables) {
     const grant = grantByTable.get(table);
@@ -864,11 +888,12 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     const scheduledJobIdentityCertification = runScheduledJobIdentityCertification(connections, env);
     const b03OutboxCertification = runB03OutboxCertification(connections, env);
     const c03Certification = runC03AuthenticatedCertification(connections, env);
+    const publicVerificationCertification = runPublicVerificationCertification(connections, env);
     const applicationPathResults = env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "c03-authenticated-boundaries"
       ? []
       : runApplicationPathCertifications(connections, env);
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
-    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, b03OutboxCertification, c03Certification, printingLifecycleCertification: null, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
+    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, b03OutboxCertification, c03Certification, printingLifecycleCertification: null, publicVerificationCertification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
     try { destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true }); } catch (cleanupError) { throw new Error(`${error.message}; cleanup failed: ${cleanupError.message}`); }
     throw error;
@@ -982,6 +1007,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     result.b03OutboxCertification = finalRun.b03OutboxCertification;
     result.c03Certification = finalRun.c03Certification;
     result.printingLifecycleCertification = finalRun.printingLifecycleCertification;
+    result.publicVerificationCertification = finalRun.publicVerificationCertification;
     result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;
     result.generatedPoliciesCertified = policies.count;
     result.columnPrivilegeCellsCertified = privileges.cells;

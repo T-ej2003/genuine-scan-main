@@ -522,9 +522,10 @@ export const incidentSummaryText = (incident: any) =>
 export const mapUploadedEvidence = (files: Express.Multer.File[]) => {
   return files.map((file) => {
     const fileName = String(file.filename || "").trim();
+    if (!fileName) throw new Error("Uploaded evidence is missing its storage key");
     return {
-      fileUrl: fileName ? `/api/incidents/evidence-files/${encodeURIComponent(fileName)}` : null,
-      storageKey: fileName || null,
+      fileUrl: `/api/incidents/evidence-files/${encodeURIComponent(fileName)}`,
+      storageKey: fileName,
       fileType: String(file.mimetype || "application/octet-stream"),
     };
   });

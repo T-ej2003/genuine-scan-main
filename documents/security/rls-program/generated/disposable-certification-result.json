@@ -3,18 +3,26 @@
   "environment": "local-disposable-only",
   "deploymentModel": "clean-room-blue-green",
   "postgresqlMajor": 18,
-  "sourceContractSha256": "745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0",
-  "tablesExpected": 78,
-  "forceRlsTargetsExpected": 76,
-  "tablesCertified": 0,
-  "generatedPoliciesCertified": 235,
+  "sourceContractSha256": "99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9",
+  "tablesExpected": 79,
+  "forceRlsTargetsExpected": 77,
+  "tablesCertified": 77,
+  "generatedPoliciesCertified": 285,
   "columnPrivilegeCellsCertified": 74,
   "workflowCertificationStatus": "pending-application-path-certification",
   "workflowsApplicationPathCertified": 0,
   "applicationPathCertifiedWorkflowIds": [],
   "applicationPathResults": [],
-  "b01PreAuthCertification": null,
-  "scheduledJobIdentityCertification": null,
+  "b01PreAuthCertification": {
+    "status": "application-path-certified",
+    "postgresqlMajor": 18,
+    "testFile": "backend/tests/rls-wave-b/b01/preAuthSecurityPostgres18.test.js"
+  },
+  "scheduledJobIdentityCertification": {
+    "status": "application-path-certified",
+    "postgresqlMajor": 18,
+    "testFile": "backend/tests/rls-wave-b/b03/scheduledJobIdentityPostgres18.test.js"
+  },
   "b03OutboxCertification": null,
   "workflowsProductProhibited": 1,
   "cleanRoomPreflightCertified": true,
@@ -238,23 +246,77 @@
       "blueFingerprintUnchanged": true
     }
   ],
-  "catalogTamperResults": [],
+  "catalogTamperResults": [
+    {
+      "dimension": "policy-definition",
+      "status": "exact-drift-refused",
+      "expectedFailure": "policy definition differs from the sealed generated contract"
+    },
+    {
+      "dimension": "routine-definition",
+      "status": "exact-drift-refused",
+      "expectedFailure": "routine definition or privilege inventory differs"
+    },
+    {
+      "dimension": "routine-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "routine definition or privilege inventory differs"
+    },
+    {
+      "dimension": "schema-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "schema privilege inventory differs"
+    },
+    {
+      "dimension": "table-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "table privilege inventory differs"
+    },
+    {
+      "dimension": "column-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "column privilege inventory differs"
+    },
+    {
+      "dimension": "type-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "type privilege inventory differs"
+    },
+    {
+      "dimension": "database-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "database privilege inventory differs"
+    },
+    {
+      "dimension": "default-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "default privilege definition differs"
+    }
+  ],
   "greenDatabaseResidueCount": 0,
   "managedRoleResidueCount": 0,
   "blueFingerprintUnchanged": true,
   "rollbackVerified": true,
   "policySemanticPreservation": true,
   "columnPrivilegeCertification": true,
-  "exactCatalogTamperCertification": false,
+  "exactCatalogTamperCertification": true,
   "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "c84ba65de5d35c825a56f0925993a72e47864500467a1abf76f44f876e3632ce",
+  "packageChecksumsSha256": "764fca53305294e827f138e9a2f1d805cdc8f4c71ea6d7fc4beea26598571dea",
   "status": "clean-room-full-table-enforcement-certified-workflows-pending",
-  "b01Certification": null,
+  "b01Certification": {
+    "predecessorReplayRejected": true,
+    "rollbackClaimCleared": true,
+    "successorHashPersisted": true,
+    "capabilityVerified": true,
+    "forgedGucDenied": true,
+    "capabilityRevocationEnforced": true
+  },
   "c03Certification": null,
-  "printingLifecycleCertification": {
+  "printingLifecycleCertification": null,
+  "publicVerificationCertification": {
     "status": "application-path-certified",
     "postgresqlMajor": 18,
-    "testFile": "backend/tests/rls-wave-c/c02/printingLifecyclePostgres18.test.js"
+    "testFile": "backend/tests/rls-wave-b/b02/publicVerificationPostgres18.test.js"
   },
-  "disposableCertificationFixtureRows": 38
+  "disposableCertificationFixtureRows": 76
 }

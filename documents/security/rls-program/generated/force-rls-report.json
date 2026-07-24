@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 76,
+  "count": 77,
   "tables": [
     "ActionIdempotencyKey",
     "AdminMfaCredential",
@@ -13,6 +13,7 @@
     "AuthWebAuthnChallenge",
     "Batch",
     "CompliancePackJob",
+    "CustomerAuthSession",
     "CustomerTrustCredential",
     "CustomerTrustIntake",
     "CustomerVerificationSession",

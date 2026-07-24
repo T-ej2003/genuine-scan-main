@@ -1079,7 +1079,7 @@ const gatewayActor = composeRequestResolvers(
   fromUserAgent
 );
 
-const verifyResourceResolver = (req: any) => String(req.params?.code || "").trim() || null;
+const verifyResourceResolver = (req: any) => String(req.params?.code || req.params?.id || "").trim() || null;
 const scanResourceResolver = (req: any) => {
   const token = Array.isArray(req.query?.t) ? req.query.t[0] : req.query?.t;
   return String(token || "").trim() || null;
@@ -1417,6 +1417,7 @@ publicMutationRouter.post("/verify/auth/email-otp/verify", verifyCustomerMutatio
 cookieMutationRouter.post(
   "/verify/auth/logout",
   verifyCustomerCookiePreAuthRouteLimiter,
+  optionalCustomerVerifyAuth,
   verifyCustomerCookieRouteLimiter,
   verifyCustomerCookieMutationIpLimiter,
   verifyCustomerCookieMutationActorLimiter,
@@ -1473,7 +1474,7 @@ cookieMutationRouter.delete(
   deleteCustomerPasskeyCredential
 );
 cookieMutationRouter.post(
-  "/verify/:code/claim",
+  "/verify/session/:id/claim",
   verifyClaimPreAuthRouteLimiter,
   optionalCustomerVerifyAuth,
   verifyClaimRouteLimiter,

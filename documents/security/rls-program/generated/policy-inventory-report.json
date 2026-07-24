@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 235,
+  "count": 285,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -224,6 +224,60 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-action-idempotency-key",
+      "table": "ActionIdempotencyKey",
+      "policyName": "public_verification_actionidempotencykey_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"keyHash\"=current_setting('app.public_verification_idempotency_hash',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-feedback:ActionIdempotencyKey:INSERT",
+        "contract:release-fix-6-incident:ActionIdempotencyKey:INSERT",
+        "contract:release-fix-6-request-access:ActionIdempotencyKey:INSERT",
+        "contract:release-fix-6-support:ActionIdempotencyKey:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-action-idempotency-key",
+      "table": "ActionIdempotencyKey",
+      "policyName": "public_verification_actionidempotencykey_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"keyHash\"=current_setting('app.public_verification_idempotency_hash',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-feedback:ActionIdempotencyKey:SELECT",
+        "contract:release-fix-6-incident:ActionIdempotencyKey:SELECT",
+        "contract:release-fix-6-request-access-delivery:ActionIdempotencyKey:SELECT",
+        "contract:release-fix-6-request-access:ActionIdempotencyKey:SELECT",
+        "contract:release-fix-6-support-delivery:ActionIdempotencyKey:SELECT",
+        "contract:release-fix-6-support:ActionIdempotencyKey:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -863,6 +917,35 @@
     {
       "tableId": "table-audit-log",
       "table": "AuditLog",
+      "policyName": "public_verification_auditlog_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_audit_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-feedback:AuditLog:INSERT",
+        "contract:release-fix-6-ownership-claim:AuditLog:INSERT",
+        "contract:release-fix-6-ownership-transfer-accept:AuditLog:INSERT",
+        "contract:release-fix-6-ownership-transfer-cancel:AuditLog:INSERT",
+        "contract:release-fix-6-ownership-transfer-create:AuditLog:INSERT",
+        "contract:release-fix-6-verify-raw:AuditLog:INSERT",
+        "contract:release-fix-6-verify-signed:AuditLog:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
       "policyName": "qr_system_auditlog_insert",
       "command": "INSERT",
       "actors": [
@@ -1437,6 +1520,31 @@
     {
       "tableId": "table-batch",
       "table": "Batch",
+      "policyName": "public_verification_batch_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_batch_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-claim:Batch:SELECT",
+        "contract:release-fix-6-verify-raw:Batch:SELECT",
+        "contract:release-fix-6-verify-signed:Batch:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-batch",
+      "table": "Batch",
       "policyName": "qr_system_batch_delete",
       "command": "DELETE",
       "actors": [
@@ -1717,6 +1825,405 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-customer-auth-session",
+      "table": "CustomerAuthSession",
+      "policyName": "public_verification_customerauthsession_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-customer-session-issue'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-customer-session-issue:CustomerAuthSession:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-auth-session",
+      "table": "CustomerAuthSession",
+      "policyName": "public_verification_customerauthsession_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"tokenHash\"=current_setting('app.public_verification_customer_session_hash',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-customer-session-read:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-customer-session-revoke:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-ownership-claim:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-ownership-transfer-accept:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-ownership-transfer-cancel:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-ownership-transfer-create:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-passkey-begin:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-passkey-delete:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-passkey-finish:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-passkey-list:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-session-read:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-session-start:CustomerAuthSession:SELECT",
+        "contract:release-fix-6-session-write:CustomerAuthSession:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-auth-session",
+      "table": "CustomerAuthSession",
+      "policyName": "public_verification_customerauthsession_update",
+      "command": "UPDATE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND current_setting('app.public_verification_operation',true) IN ('public-verification-customer-session-read','public-verification-customer-session-revoke','public-verification-customer-verification-session-start','public-verification-customer-verification-session-read','public-verification-customer-verification-session-write','public-verification-customer-ownership','public-verification-customer-passkey')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-customer-session-read:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-customer-session-revoke:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-ownership-claim:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-ownership-transfer-accept:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-ownership-transfer-cancel:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-ownership-transfer-create:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-passkey-begin:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-passkey-delete:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-passkey-finish:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-passkey-list:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-session-read:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-session-start:CustomerAuthSession:UPDATE",
+        "contract:release-fix-6-session-write:CustomerAuthSession:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-trust-intake",
+      "table": "CustomerTrustIntake",
+      "policyName": "public_verification_customertrustintake_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"sessionId\"=current_setting('app.public_verification_session_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-session-write:CustomerTrustIntake:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-trust-intake",
+      "table": "CustomerTrustIntake",
+      "policyName": "public_verification_customertrustintake_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"sessionId\"=current_setting('app.public_verification_session_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-session-write:CustomerTrustIntake:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-trust-intake",
+      "table": "CustomerTrustIntake",
+      "policyName": "public_verification_customertrustintake_update",
+      "command": "UPDATE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"sessionId\"=current_setting('app.public_verification_session_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-session-write:CustomerTrustIntake:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-verification-session",
+      "table": "CustomerVerificationSession",
+      "policyName": "public_verification_customerverificationsession_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_session_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-session-start:CustomerVerificationSession:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-verification-session",
+      "table": "CustomerVerificationSession",
+      "policyName": "public_verification_customerverificationsession_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_session_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-incident:CustomerVerificationSession:SELECT",
+        "contract:release-fix-6-ownership-claim:CustomerVerificationSession:SELECT",
+        "contract:release-fix-6-session-read:CustomerVerificationSession:SELECT",
+        "contract:release-fix-6-session-write:CustomerVerificationSession:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-verification-session",
+      "table": "CustomerVerificationSession",
+      "policyName": "public_verification_customerverificationsession_update",
+      "command": "UPDATE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_session_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-session-write:CustomerVerificationSession:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-web-authn-challenge",
+      "table": "CustomerWebAuthnChallenge",
+      "policyName": "public_verification_customerwebauthnchallenge_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-customer-passkey'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-passkey-begin:CustomerWebAuthnChallenge:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-web-authn-challenge",
+      "table": "CustomerWebAuthnChallenge",
+      "policyName": "public_verification_customerwebauthnchallenge_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"ticketHash\"=ANY(string_to_array(current_setting('app.public_verification_passkey_ticket_hashes',true),',')) AND current_setting('app.public_verification_operation',true)='public-verification-customer-passkey'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-passkey-finish:CustomerWebAuthnChallenge:SELECT",
+        "contract:release-fix-6-passkey-load:CustomerWebAuthnChallenge:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-web-authn-challenge",
+      "table": "CustomerWebAuthnChallenge",
+      "policyName": "public_verification_customerwebauthnchallenge_update",
+      "command": "UPDATE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-customer-passkey'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-passkey-finish:CustomerWebAuthnChallenge:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-web-authn-credential",
+      "table": "CustomerWebAuthnCredential",
+      "policyName": "public_verification_customerwebauthncredential_delete",
+      "command": "DELETE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_support_id',true) AND \"customerUserId\"=current_setting('app.public_verification_customer_user_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-customer-passkey'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-passkey-delete:CustomerWebAuthnCredential:DELETE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-web-authn-credential",
+      "table": "CustomerWebAuthnCredential",
+      "policyName": "public_verification_customerwebauthncredential_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_support_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-customer-passkey'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-passkey-finish:CustomerWebAuthnCredential:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-web-authn-credential",
+      "table": "CustomerWebAuthnCredential",
+      "policyName": "public_verification_customerwebauthncredential_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND current_setting('app.public_verification_operation',true)='public-verification-customer-passkey' AND (\"customerUserId\"=current_setting('app.public_verification_customer_user_id',true) OR id=current_setting('app.public_verification_support_id',true) OR \"credentialId\"=current_setting('app.public_verification_support_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-passkey-begin:CustomerWebAuthnCredential:SELECT",
+        "contract:release-fix-6-passkey-finish:CustomerWebAuthnCredential:SELECT",
+        "contract:release-fix-6-passkey-list:CustomerWebAuthnCredential:SELECT",
+        "contract:release-fix-6-passkey-load:CustomerWebAuthnCredential:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-customer-web-authn-credential",
+      "table": "CustomerWebAuthnCredential",
+      "policyName": "public_verification_customerwebauthncredential_update",
+      "command": "UPDATE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_support_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-customer-passkey'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-passkey-finish:CustomerWebAuthnCredential:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-email-verification-token",
       "table": "EmailVerificationToken",
       "policyName": "b01_preauth_emailverificationtoken_select",
@@ -1886,6 +2393,29 @@
     {
       "tableId": "table-incident",
       "table": "Incident",
+      "policyName": "public_verification_incident_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-incident:Incident:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-incident",
+      "table": "Incident",
       "policyName": "scheduled_capability_incident_select",
       "command": "SELECT",
       "actors": [
@@ -1922,6 +2452,29 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-incident-event",
+      "table": "IncidentEvent",
+      "policyName": "public_verification_incidentevent_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"incidentId\"=current_setting('app.public_verification_target_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-incident:IncidentEvent:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-incident-evidence",
       "table": "IncidentEvidence",
       "policyName": "c03_capability_incidentevidence_select",
@@ -1941,6 +2494,29 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-incident-evidence",
+      "table": "IncidentEvidence",
+      "policyName": "public_verification_incidentevidence_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"incidentId\"=current_setting('app.public_verification_target_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-incident:IncidentEvidence:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -2646,6 +3222,32 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
+      "policyName": "public_verification_licensee_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-session-read:Licensee:SELECT",
+        "contract:release-fix-6-session-start:Licensee:SELECT",
+        "contract:release-fix-6-verify-raw:Licensee:SELECT",
+        "contract:release-fix-6-verify-signed:Licensee:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -3531,6 +4133,30 @@
     {
       "tableId": "table-organization",
       "table": "Organization",
+      "policyName": "public_verification_organization_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_organization_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-verify-raw:Organization:SELECT",
+        "contract:release-fix-6-verify-signed:Organization:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
       "policyName": "qr_system_organization_select",
       "command": "SELECT",
       "actors": [
@@ -3634,6 +4260,150 @@
       ],
       "workflowId": null,
       "route": "GET /licensees, GET /licensees/:id, GET /users",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-ownership",
+      "table": "Ownership",
+      "policyName": "public_verification_ownership_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-ownership-claim'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-claim:Ownership:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-ownership",
+      "table": "Ownership",
+      "policyName": "public_verification_ownership_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-claim:Ownership:SELECT",
+        "contract:release-fix-6-ownership-transfer-accept:Ownership:SELECT",
+        "contract:release-fix-6-ownership-transfer-create:Ownership:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-ownership",
+      "table": "Ownership",
+      "policyName": "public_verification_ownership_update",
+      "command": "UPDATE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true) AND current_setting('app.public_verification_operation',true) IN ('public-verification-ownership-claim','public-verification-ownership-transfer-accept')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-claim:Ownership:UPDATE",
+        "contract:release-fix-6-ownership-transfer-accept:Ownership:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-ownership-transfer",
+      "table": "OwnershipTransfer",
+      "policyName": "public_verification_ownershiptransfer_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_support_id',true) AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-ownership-transfer-create'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-transfer-create:OwnershipTransfer:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-ownership-transfer",
+      "table": "OwnershipTransfer",
+      "policyName": "public_verification_ownershiptransfer_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND (\"qrCodeId\"=current_setting('app.public_verification_qr_id',true) OR \"tokenHash\"=current_setting('app.public_verification_transfer_token_hash',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-transfer-accept:OwnershipTransfer:SELECT",
+        "contract:release-fix-6-ownership-transfer-cancel:OwnershipTransfer:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-ownership-transfer",
+      "table": "OwnershipTransfer",
+      "policyName": "public_verification_ownershiptransfer_update",
+      "command": "UPDATE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true) AND current_setting('app.public_verification_operation',true) IN ('public-verification-ownership-transfer-create','public-verification-ownership-transfer-cancel','public-verification-ownership-transfer-accept')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-transfer-accept:OwnershipTransfer:UPDATE",
+        "contract:release-fix-6-ownership-transfer-cancel:OwnershipTransfer:UPDATE",
+        "contract:release-fix-6-ownership-transfer-create:OwnershipTransfer:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -4946,6 +5716,61 @@
     {
       "tableId": "table-qrcode",
       "table": "QRCode",
+      "policyName": "public_verification_qrcode_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND (id=current_setting('app.public_verification_qr_id',true) OR code=current_setting('app.public_verification_code',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-feedback:QRCode:SELECT",
+        "contract:release-fix-6-incident:QRCode:SELECT",
+        "contract:release-fix-6-ownership-claim:QRCode:SELECT",
+        "contract:release-fix-6-ownership-transfer-accept:QRCode:SELECT",
+        "contract:release-fix-6-ownership-transfer-cancel:QRCode:SELECT",
+        "contract:release-fix-6-ownership-transfer-create:QRCode:SELECT",
+        "contract:release-fix-6-support:QRCode:SELECT",
+        "contract:release-fix-6-verify-raw:QRCode:SELECT",
+        "contract:release-fix-6-verify-signed:QRCode:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-qrcode",
+      "table": "QRCode",
+      "policyName": "public_verification_qrcode_update",
+      "command": "UPDATE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_qr_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-execute'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-verify-raw:QRCode:UPDATE",
+        "contract:release-fix-6-verify-signed:QRCode:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-qrcode",
+      "table": "QRCode",
       "policyName": "qr_system_qrcode_delete",
       "command": "DELETE",
       "actors": [
@@ -5253,6 +6078,54 @@
     {
       "tableId": "table-qr-scan-log",
       "table": "QrScanLog",
+      "policyName": "public_verification_qrscanlog_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-verify-raw:QrScanLog:INSERT",
+        "contract:release-fix-6-verify-signed:QrScanLog:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-qr-scan-log",
+      "table": "QrScanLog",
+      "policyName": "public_verification_qrscanlog_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-verify-raw:QrScanLog:SELECT",
+        "contract:release-fix-6-verify-signed:QrScanLog:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-qr-scan-log",
+      "table": "QrScanLog",
       "policyName": "qr_system_qrscanlog_select",
       "command": "SELECT",
       "actors": [
@@ -5525,6 +6398,99 @@
       ],
       "workflowId": null,
       "route": "C01 administration exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-replacement-chain",
+      "table": "ReplacementChain",
+      "policyName": "public_verification_replacementchain_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND (\"originalQrCodeId\"=current_setting('app.public_verification_qr_id',true) OR \"replacementQrCodeId\"=current_setting('app.public_verification_qr_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-verify-raw:ReplacementChain:SELECT",
+        "contract:release-fix-6-verify-signed:ReplacementChain:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-request-access",
+      "table": "RequestAccess",
+      "policyName": "public_verification_requestaccess_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-request-access'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-request-access:RequestAccess:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-request-access",
+      "table": "RequestAccess",
+      "policyName": "public_verification_requestaccess_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-request-access-delivery'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-request-access-delivery:RequestAccess:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-request-access",
+      "table": "RequestAccess",
+      "policyName": "public_verification_requestaccess_update",
+      "command": "UPDATE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-request-access-delivery'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-request-access-delivery:RequestAccess:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -5816,6 +6782,35 @@
     {
       "tableId": "table-security-event-outbox",
       "table": "SecurityEventOutbox",
+      "policyName": "public_verification_securityeventoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_outbox_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-incident:SecurityEventOutbox:INSERT",
+        "contract:release-fix-6-ownership-claim:SecurityEventOutbox:INSERT",
+        "contract:release-fix-6-ownership-transfer-accept:SecurityEventOutbox:INSERT",
+        "contract:release-fix-6-ownership-transfer-cancel:SecurityEventOutbox:INSERT",
+        "contract:release-fix-6-ownership-transfer-create:SecurityEventOutbox:INSERT",
+        "contract:release-fix-6-verify-raw:SecurityEventOutbox:INSERT",
+        "contract:release-fix-6-verify-signed:SecurityEventOutbox:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-security-event-outbox",
+      "table": "SecurityEventOutbox",
       "policyName": "qr_system_securityeventoutbox_insert",
       "command": "INSERT",
       "actors": [
@@ -5975,6 +6970,98 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-issue-report",
+      "table": "SupportIssueReport",
+      "policyName": "public_verification_supportissuereport_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-support'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-support:SupportIssueReport:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-issue-report",
+      "table": "SupportIssueReport",
+      "policyName": "public_verification_supportissuereport_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-support-delivery'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-support-delivery:SupportIssueReport:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-issue-report",
+      "table": "SupportIssueReport",
+      "policyName": "public_verification_supportissuereport_update",
+      "command": "UPDATE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_target_id',true) AND current_setting('app.public_verification_operation',true)='public-verification-support-delivery'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-support-delivery:SupportIssueReport:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-ticket",
+      "table": "SupportTicket",
+      "policyName": "public_verification_supportticket_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_support_id',true) AND \"incidentId\"=current_setting('app.public_verification_target_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-incident:SupportTicket:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -6666,6 +7753,30 @@
     {
       "tableId": "table-user",
       "table": "User",
+      "policyName": "public_verification_user_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_manufacturer_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-verify-raw:User:SELECT",
+        "contract:release-fix-6-verify-signed:User:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
       "policyName": "qr_system_user_select",
       "command": "SELECT",
       "actors": [
@@ -6824,6 +7935,125 @@
       ],
       "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
       "route": "POST /auth/refresh",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-verification-decision",
+      "table": "VerificationDecision",
+      "policyName": "public_verification_verificationdecision_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_decision_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-verify-raw:VerificationDecision:INSERT",
+        "contract:release-fix-6-verify-signed:VerificationDecision:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-verification-decision",
+      "table": "VerificationDecision",
+      "policyName": "public_verification_verificationdecision_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_decision_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-session-read:VerificationDecision:SELECT",
+        "contract:release-fix-6-session-start:VerificationDecision:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-verification-evidence-snapshot",
+      "table": "VerificationEvidenceSnapshot",
+      "policyName": "public_verification_verificationevidencesnapshot_insert",
+      "command": "INSERT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND \"verificationDecisionId\"=current_setting('app.public_verification_decision_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-verify-raw:VerificationEvidenceSnapshot:INSERT",
+        "contract:release-fix-6-verify-signed:VerificationEvidenceSnapshot:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-verification-evidence-snapshot",
+      "table": "VerificationEvidenceSnapshot",
+      "policyName": "public_verification_verificationevidencesnapshot_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND (\"verificationDecisionId\"=current_setting('app.public_verification_decision_id',true) OR current_setting('app.public_verification_operation',true)='public-verification-session-start')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-session-read:VerificationEvidenceSnapshot:SELECT",
+        "contract:release-fix-6-session-start:VerificationEvidenceSnapshot:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-verification-evidence-snapshot",
+      "table": "VerificationEvidenceSnapshot",
+      "policyName": "public_verification_verificationevidencesnapshot_update",
+      "command": "UPDATE",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND current_setting('app.public_verification_operation',true)='public-verification-session-start'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-session-start:VerificationEvidenceSnapshot:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     }

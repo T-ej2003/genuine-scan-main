@@ -1,73 +1,23 @@
+import { randomUUID } from "crypto";
 import { Response } from "express";
-import {
-  CustomerTrustLevel,
-  VerificationDecisionOutcome,
-  VerificationDegradationMode,
-  VerificationReplacementStatus,
-} from "@prisma/client";
 import { z } from "zod";
 
 import { CustomerVerifyRequest } from "../../middleware/customerVerifyAuth";
-import { recordDegradationEvent } from "../../services/degradationEventService";
+import { getB01PreAuthPrisma } from "../../rls-waves/session-b/b01/runtimeClients";
 import {
-  resolveCustomerTrustLevel,
-  resolveCustomerTrustSignal,
-} from "../../services/customerTrustService";
-import { resolveVerifyUxPolicy } from "../../services/governanceService";
-import { getScanInsight } from "../../services/scanInsightService";
-import { resolveReplacementStatus } from "../../services/replacementChainService";
-import { runPostScanVerificationFlow } from "../../services/publicVerificationPostScanService";
+  verifyRawQr,
+  verifySignedQr,
+  type VerifyRawQrRow,
+} from "../../rls-waves/session-b/b02/publicBoundaryRepository";
 import {
   hashToken as hashQrToken,
   isPrinterTestQrId,
   verifyQrToken,
 } from "../../services/qrTokenService";
-import { persistVerificationDecision } from "../../services/verificationDecisionService";
-import {
-  buildPublicIntegrityErrorBody,
-  isPublicIntegrityDependencyError,
-} from "../../utils/publicIntegrityGuard";
-import {
-  QRStatus,
-  buildPublicVerificationSemantics,
-  VerificationProofSource,
-  buildContainment,
-  buildOwnershipStatus,
-  buildOwnershipTransferView,
-  buildScanSummary,
-  delay,
-  deriveRequestDeviceFingerprint,
-  getDeviceClaimTokenFromRequest,
-  hashIp,
-  hashToken,
-  loadOwnershipByQrCodeId,
-  loadOwnershipTransferByRawToken,
-  loadPendingOwnershipTransferForQr,
-  mapBatch,
-  mapLicensee,
-  normalizeCode,
-  prisma,
-  resolvePublicVerificationReadiness,
-  resolveDuplicateRiskProfile,
-} from "./shared";
-import {
-  buildBlockedVerificationPayload,
-  buildMissingQrVerificationPayload,
-  buildNotReadyVerificationPayload,
-} from "./verificationResponseBuilders";
-import {
-  applyPublicSemantics,
-  buildDecisionResponseBody,
-  resolvePrintTrustState,
-  safeCreateAuditLog,
-} from "./verificationDecisionHelpers";
-import { resolveSignedVerificationTarget } from "./verificationSignedTokenResolver";
+import { deriveRequestDeviceFingerprint, hashIp, hashToken, normalizeCode } from "./shared";
 
-const verifyParamsSchema = z.object({
-  code: z.string().trim().min(2).max(128).optional(),
-}).strict();
-
-const verifyQuerySchema = z.object({
+const paramsSchema = z.object({ code: z.string().trim().max(128).optional() }).strict();
+const querySchema = z.object({
   t: z.string().trim().min(16).max(4096).optional(),
   transfer: z.string().trim().max(512).optional(),
   device: z.string().trim().max(256).optional(),
@@ -76,432 +26,162 @@ const verifyQuerySchema = z.object({
   acc: z.union([z.string().trim().max(40), z.number()]).optional(),
 }).strict();
 
-const qrVerificationInclude = {
+const messageFor = (key: string) => ({
+  "verification.first_scan": "MSCQR verified this released label for the first time.",
+  "verification.repeat": "MSCQR verified this released label again.",
+  "verification.changed_context": "This label was verified from a different context. Check the product and report a concern if anything looks wrong.",
+  "verification.blocked": "This label is not valid for verification.",
+  "verification.not_ready": "This label is not ready for customer verification.",
+  "verification.not_found": "This code could not be verified.",
+}[key] || "Verification completed.");
+
+const responseFor = (
+  row: VerifyRawQrRow,
+  customerAuthenticated: boolean
+) => {
+  const publicStatus = {
+    AUTHENTIC: "verified", AUTHENTIC_REPEAT: "verified", REVIEW: "review_needed",
+    BLOCKED: "blocked", NOT_READY: "not_ready", NOT_FOUND: "not_found",
+  }[row.result] || "not_found";
+  const firstScan = row.messageKey === "verification.first_scan";
+  return ({
+  isAuthentic: row.result === "AUTHENTIC" || row.result === "AUTHENTIC_REPEAT",
+  messageKey: row.messageKey,
+  nextActionKey: row.nextAction,
+  message: messageFor(row.messageKey),
+  code: row.maskedCode,
+  maskedCode: row.maskedCode,
+  brandName: row.brandName,
+  publicStatus,
+  status: publicStatus,
+  scanStatus: firstScan ? "first_successful_scan" : "previously_scanned",
+  riskSignalStatus: row.result === "REVIEW" ? "needs_brand_review"
+    : row.result === "BLOCKED" ? "brand_action_required"
+      : row.result === "NOT_READY" ? "activation_not_complete"
+        : row.result === "NOT_FOUND" ? "not_assessed" : "clear",
+  isFirstScan: firstScan,
+  copyableCodeCaveat: "A QR code can be copied. MSCQR also checks release state and verification history.",
   licensee: {
-    select: {
-      id: true,
-      name: true,
-      prefix: true,
-      brandName: true,
-      location: true,
-      website: true,
-      supportEmail: true,
-      supportPhone: true,
-      suspendedAt: true,
-      suspendedReason: true,
-    },
+    name: row.brandName,
+    brandName: row.brandName,
+    website: row.brandWebsite,
+    supportEmail: row.brandSupportEmail,
+    supportPhone: row.brandSupportPhone,
   },
   batch: {
-    select: {
-      id: true,
-      name: true,
-      printedAt: true,
-      suspendedAt: true,
-      suspendedReason: true,
-      manufacturer: { select: { id: true, name: true, email: true, location: true, website: true } },
+    manufacturer: {
+      name: row.manufacturerName,
+      website: row.manufacturerWebsite,
     },
   },
-  printJob: {
-    select: {
-      id: true,
-      status: true,
-      pipelineState: true,
-      confirmedAt: true,
-      printSession: {
-        select: {
-          status: true,
-          completedAt: true,
-        },
-      },
-    },
+  manufacturerName: row.manufacturerName,
+  manufacturerWebsite: row.manufacturerWebsite,
+  printedAt: row.printedAt,
+  scanSummary: {
+    firstVerifiedAt: row.firstVerifiedAt,
+    latestVerifiedAt: row.latestVerifiedAt,
   },
-} as const;
+  ownershipStatus: {
+    isClaimed: false,
+    isOwnedByRequester: false,
+    isClaimedByAnother: false,
+    canClaim: row.ownershipClaimAvailable,
+  },
+  sessionStartToken: row.sessionStartToken,
+  challenge: {
+    required: row.result === "REVIEW" && !customerAuthenticated,
+    completed: row.result === "REVIEW" && customerAuthenticated,
+  },
+  verifyUxPolicy: {
+    showTimelineCard: true,
+    showRiskCards: false,
+    allowOwnershipClaim: row.ownershipClaimAvailable,
+    allowFraudReport: true,
+    mobileCameraAssist: true,
+  },
+  });
+};
+
+const publicFailure = (res: Response, status: number, error: string) =>
+  res.status(status).json({ success: false, error });
 
 export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) => {
+  const params = paramsSchema.safeParse(req.params || {});
+  const query = querySchema.safeParse(req.query || {});
+  if (!params.success || !query.success) return publicFailure(res, 400, "Invalid verification request");
+
+  const code = normalizeCode(params.data.code || "");
+  const token = query.data.t || null;
+  if (!token && !code) return publicFailure(res, 400, "Invalid QR code format");
+  if (!token && !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(code)) {
+    return publicFailure(res, 400, "Invalid QR code format");
+  }
+
+  const checkedAt = new Date();
+  const requestId = String((req as CustomerVerifyRequest & { requestId?: string }).requestId || randomUUID());
+  const actorIpHash = hashIp(req.ip);
+  const fingerprint = deriveRequestDeviceFingerprint(req);
+  const actorDeviceHash = fingerprint ? hashToken(`device:${fingerprint}`) : null;
+
   try {
-    const paramsParsed = verifyParamsSchema.safeParse(req.params || {});
-    const queryParsed = verifyQuerySchema.safeParse(req.query || {});
-    if (!paramsParsed.success || !queryParsed.success) {
-      const error = paramsParsed.success ? queryParsed.error?.errors[0] : paramsParsed.error?.errors[0];
-      return res.status(400).json({
-        success: false,
-        error: error?.message || "Invalid QR code format",
-      });
-    }
-
-    const normalizedCode = normalizeCode(paramsParsed.data.code || "");
-    const requestQuery = queryParsed.data;
-    const signedToken = String(requestQuery.t || "").trim() || null;
-    const defaultVerifyUxPolicy = await resolveVerifyUxPolicy(null);
-    const proofSource: VerificationProofSource = signedToken ? "SIGNED_LABEL" : "MANUAL_CODE_LOOKUP";
-    const customerUserId = req.customer?.userId || null;
-    const requestDeviceFingerprint = deriveRequestDeviceFingerprint(req);
-    const actorDeviceHash = requestDeviceFingerprint ? hashToken(`device:${requestDeviceFingerprint}`) : null;
-    const deviceClaimToken = getDeviceClaimTokenFromRequest(req);
-    const deviceTokenHash = deviceClaimToken ? hashToken(deviceClaimToken) : null;
-    const requesterIpHash = hashIp(req.ip);
-    let qrCode;
-    let signedPayload: ReturnType<typeof verifyQrToken>["payload"] | null = null;
-    let verifiedSigningMetadata: Record<string, unknown> | null = null;
-
-    if (signedToken) {
-      const signedResolution = await resolveSignedVerificationTarget({
-        actorDeviceHash,
-        customerAuthStrength: req.customer?.authStrength || null,
-        customerUserId,
-        defaultVerifyUxPolicy,
-        deviceTokenHash,
-        normalizedCode: normalizedCode || null,
-        originalUrl: req.originalUrl || req.url,
-        proofSource,
-        qrVerificationInclude,
-        queryToken: signedToken,
-        requestUrl: req.url,
-        requesterIpHash,
-      });
-
-      if (signedResolution.kind === "response") {
-        return res.status(signedResolution.statusCode).json(signedResolution.body);
-      }
-
-      qrCode = signedResolution.value.qrCode;
-      signedPayload = signedResolution.value.signedPayload;
-      verifiedSigningMetadata = signedResolution.value.verifiedSigningMetadata;
-    } else {
-      if (!normalizedCode) {
-        return res.status(400).json({
-          success: false,
-          error: "Invalid QR code format",
-        });
-      }
-
-      qrCode = await prisma.qRCode.findUnique({
-        where: { code: normalizedCode },
-        include: qrVerificationInclude,
-      });
-    }
-
-    if (!qrCode) {
-      await delay(150 + Math.floor(Math.random() * 150));
-      const reasons = ["Code not found in registry."];
-      const semantics = buildPublicVerificationSemantics({
-        classification: "NOT_FOUND",
-        proofSource,
-        notFound: true,
-      });
-      const degradationMode = await safeCreateAuditLog(
-        {
-          action: "VERIFY_FAILED",
-          entityType: "QRCode",
-          entityId: normalizedCode,
-          details: { reason: "Code not found" },
-          ipAddress: req.ip,
-        },
-        { code: normalizedCode || null, route: req.originalUrl || req.url }
-      );
-      const decision = await persistVerificationDecision({
-        code: normalizedCode || null,
-        proofSource,
-        classification: "NOT_FOUND",
-        notFound: true,
-        isAuthentic: false,
-        reasons,
-        customerTrustLevel: resolveCustomerTrustLevel({
-          customerUserId,
-          deviceTokenHash,
-          customerAuthStrength: req.customer?.authStrength || null,
-        }),
-        degradationMode,
-        actorIpHash: requesterIpHash,
-        actorDeviceHash,
-        publicOutcome: semantics.publicOutcome,
-        riskDisposition: semantics.riskDisposition,
-        messageKey: semantics.messageKey,
-        nextActionKey: semantics.nextActionKey,
-        metadata: {
-          route: req.originalUrl || req.url,
-          signedToken: Boolean(signedToken),
-        },
-      });
-
-      return res.json({
-        success: true,
-        data: await buildDecisionResponseBody(
-          applyPublicSemantics(
-            buildMissingQrVerificationPayload({
-              normalizedCode: normalizedCode || null,
-              reasons,
-              verifyUxPolicy: defaultVerifyUxPolicy,
-              proofSource,
-            }),
-            semantics
-          ),
-          decision
-        ),
-      });
-    }
-
-    const verifyUxPolicy = await resolveVerifyUxPolicy(qrCode.licenseeId || null);
-    const riskProfile = await resolveDuplicateRiskProfile(qrCode.licenseeId || null);
-
-    const requestedTransferToken = String(requestQuery.transfer || "").trim() || null;
-    const containment = buildContainment(qrCode);
-    const qrBlocked = qrCode.status === QRStatus.BLOCKED;
-    const readiness = resolvePublicVerificationReadiness(qrCode);
-    const qrReady = readiness.isReady;
-    const replacement = await resolveReplacementStatus(qrCode.id);
-    const baseOwnership = await loadOwnershipByQrCodeId(qrCode.id, { strictStorage: true });
-    const baseOwnershipStatus = buildOwnershipStatus({
-      ownership: baseOwnership,
-      customerUserId,
-      deviceTokenHash,
-      ipHash: requesterIpHash,
-      isReady: qrReady,
-      isBlocked: qrBlocked,
-      allowClaim: verifyUxPolicy.allowOwnershipClaim,
-    });
-    const scanInsight = await getScanInsight(qrCode.id, requestDeviceFingerprint, {
-      currentIpAddress: req.ip || null,
-      licenseeId: qrCode.licenseeId || null,
-      currentCustomerUserId: customerUserId,
-      currentOwnershipId: baseOwnership?.id || null,
-      currentActorTrustedOwnerContext: baseOwnershipStatus.isOwnedByRequester,
-      strictStorage: true,
-    });
-    const baseScanSummary = buildScanSummary({
-      scanCount: Number(qrCode.scanCount || 0),
-      scannedAt: qrCode.scannedAt,
-      scanInsight,
-    });
-    const baseOwnershipTransfer = buildOwnershipTransferView({
-      code: qrCode.code,
-      transfer: requestedTransferToken
-        ? await loadOwnershipTransferByRawToken(requestedTransferToken)
-        : await loadPendingOwnershipTransferForQr(qrCode.id),
-      rawToken: requestedTransferToken,
-      customerUserId,
-      ownershipStatus: baseOwnershipStatus,
-      isReady: qrReady,
-      isBlocked: qrBlocked,
-      transferRequested: Boolean(requestedTransferToken),
-    });
-    const baseTrustSignal = await resolveCustomerTrustSignal({
-      qrCodeId: qrCode.id,
-      customerUserId,
-      deviceTokenHash,
-      ownershipStatus: baseOwnershipStatus,
-      customerAuthStrength: req.customer?.authStrength || null,
-    });
-    const baseCustomerTrustLevel = baseTrustSignal.trustLevel;
-    const basePrintTrustState = resolvePrintTrustState(qrCode, readiness);
-
-    const basePayload = {
-      proofSource,
-      code: qrCode.code,
-      status: qrCode.status,
-      labelState: qrCode.status,
-      printTrustState: basePrintTrustState,
-      issuanceMode: readiness.issuanceMode || null,
-      customerVerifiableAt: readiness.customerVerifiableAt || null,
-      containment,
-      licensee: mapLicensee(qrCode.licensee),
-      batch: mapBatch(qrCode.batch),
-      batchName: qrCode.batch?.name || null,
-      printedAt: qrCode.batch?.printedAt || null,
-      scanCount: baseScanSummary.totalScans,
-      firstScanAt: scanInsight.firstScanAt,
-      firstScanLocation: scanInsight.firstScanLocation,
-      latestScanAt: scanInsight.latestScanAt,
-      latestScanLocation: scanInsight.latestScanLocation,
-      previousScanAt: scanInsight.previousScanAt,
-      previousScanLocation: scanInsight.previousScanLocation,
-      scanSignals: scanInsight.signals,
-    };
-
-    if (qrCode.status === QRStatus.BLOCKED) {
-      const blockedReasons =
-        replacement.replacementStatus === VerificationReplacementStatus.REPLACED_LABEL
-          ? ["This label is no longer valid."]
-          : undefined;
-      const blockedSemantics = buildPublicVerificationSemantics({
-        classification: "BLOCKED_BY_SECURITY",
-        proofSource,
-        replacementStatus: replacement.replacementStatus,
-      });
-      const blockedPayload: any = buildBlockedVerificationPayload({
-        basePayload,
-        containment,
-        scanSummary: baseScanSummary,
-        ownershipStatus: baseOwnershipStatus,
-        ownershipTransfer: baseOwnershipTransfer,
-        verifyUxPolicy,
-      });
-      if (blockedReasons) {
-        blockedPayload.message = "This label is not valid for verification.";
-        blockedPayload.reasons = Array.from(new Set([...blockedReasons, ...(blockedPayload.reasons || [])]));
-        blockedPayload.warningMessage = "Please use the valid label supplied with the product.";
-      }
-      blockedPayload.reasons = Array.from(new Set([...(blockedPayload.reasons || []), ...(baseTrustSignal.messages || [])]));
-      const decision = await persistVerificationDecision({
-        qrCodeId: qrCode.id,
-        code: qrCode.code,
-        licenseeId: qrCode.licenseeId || null,
-        batchId: qrCode.batchId || null,
-        proofSource,
-        classification: "BLOCKED_BY_SECURITY",
-        reasons: blockedPayload.reasons,
-        extraReasonCodes: baseTrustSignal.reasonCodes,
-        isAuthentic: false,
-        scanCount: baseScanSummary.totalScans,
-        riskScore: 100,
-        replacementStatus: replacement.replacementStatus,
-        customerTrustLevel: baseCustomerTrustLevel,
-        actorIpHash: requesterIpHash,
-        actorDeviceHash,
-        replacementChainId: replacement.replacementChainId,
-        publicOutcome: blockedSemantics.publicOutcome,
-        riskDisposition: blockedSemantics.riskDisposition,
-        messageKey: blockedSemantics.messageKey,
-        nextActionKey: blockedSemantics.nextActionKey,
-        scanSummary: baseScanSummary as unknown as Record<string, unknown>,
-        ownershipSnapshot: baseOwnershipStatus as unknown as Record<string, unknown>,
-        lifecycleSnapshot: {
-          readiness,
-          labelState: qrCode.status,
-          printTrustState: basePrintTrustState,
-          replacementStatus: replacement.replacementStatus,
-          issuanceMode: readiness.issuanceMode || null,
-          customerVerifiableAt: readiness.customerVerifiableAt || null,
-          governedProofEligible: Boolean(readiness.governedProofEligible),
-        },
-      });
-      return res.json({
-        success: true,
-        data: await buildDecisionResponseBody(
-          applyPublicSemantics({
-            ...blockedPayload,
-            replacementStatus: replacement.replacementStatus,
-            customerTrustLevel: baseCustomerTrustLevel,
-            labelState: qrCode.status,
-            printTrustState: basePrintTrustState,
-            scanOutcome:
-              replacement.replacementStatus === VerificationReplacementStatus.REPLACED_LABEL ? "REPLACED_LABEL" : "BLOCKED",
-          }, blockedSemantics),
-          decision
-        ),
-      });
-    }
-
-    if (!readiness.isReady) {
-      const reasons = Array.from(
-        new Set([readiness.reason || "Code is not ready for customer verification.", ...(baseTrustSignal.messages || [])])
-      );
-      const notReadySemantics = buildPublicVerificationSemantics({
-        classification: "NOT_READY_FOR_CUSTOMER_USE",
-        proofSource,
-        replacementStatus: replacement.replacementStatus,
-      });
-      const decision = await persistVerificationDecision({
-        qrCodeId: qrCode.id,
-        code: qrCode.code,
-        licenseeId: qrCode.licenseeId || null,
-        batchId: qrCode.batchId || null,
-        proofSource,
-        classification: "NOT_READY_FOR_CUSTOMER_USE",
-        reasons,
-        extraReasonCodes: baseTrustSignal.reasonCodes,
-        isAuthentic: false,
-        scanCount: baseScanSummary.totalScans,
-        riskScore: 70,
-        replacementStatus: replacement.replacementStatus,
-        customerTrustLevel: baseCustomerTrustLevel,
-        actorIpHash: requesterIpHash,
-        actorDeviceHash,
-        replacementChainId: replacement.replacementChainId,
-        publicOutcome: notReadySemantics.publicOutcome,
-        riskDisposition: notReadySemantics.riskDisposition,
-        messageKey: notReadySemantics.messageKey,
-        nextActionKey: notReadySemantics.nextActionKey,
-        scanSummary: baseScanSummary as unknown as Record<string, unknown>,
-        ownershipSnapshot: baseOwnershipStatus as unknown as Record<string, unknown>,
-        lifecycleSnapshot: {
-          readiness,
-          labelState: qrCode.status,
-          printTrustState: basePrintTrustState,
-          replacementStatus: replacement.replacementStatus,
-          issuanceMode: readiness.issuanceMode || null,
-          customerVerifiableAt: readiness.customerVerifiableAt || null,
-          governedProofEligible: Boolean(readiness.governedProofEligible),
-        },
-      });
-      return res.json({
-        success: true,
-        data: await buildDecisionResponseBody(
-          applyPublicSemantics({
-            ...buildNotReadyVerificationPayload({
-              basePayload,
-              status: qrCode.status,
-              scanSummary: baseScanSummary,
-              ownershipStatus: baseOwnershipStatus,
-              ownershipTransfer: baseOwnershipTransfer,
-              verifyUxPolicy,
-              reasons,
-              message: readiness.message,
-            }),
-            replacementStatus: replacement.replacementStatus,
-            customerTrustLevel: baseCustomerTrustLevel,
-            labelState: qrCode.status,
-            printTrustState: basePrintTrustState,
-            scanOutcome: "NOT_READY",
-          }, notReadySemantics),
-          decision
-        ),
-      });
-    }
-
+    const db = getB01PreAuthPrisma();
+    const row = token
+      ? await (() => {
+          const verified = verifyQrToken(token);
+          const payload = verified.payload;
+          if (isPrinterTestQrId(payload.qr_id)) {
+            return Promise.resolve({
+              result: "AUTHENTIC",
+              messageKey: "verification.first_scan",
+              nextAction: "NONE",
+              verificationMethod: "SIGNED_LABEL",
+              maskedCode: "PRINTER_SETUP_TEST",
+              brandName: "MSCQR",
+              brandWebsite: "https://mscqr.com",
+              brandSupportEmail: null,
+              brandSupportPhone: null,
+              manufacturerName: null,
+              manufacturerWebsite: null,
+              printedAt: null,
+              firstVerifiedAt: checkedAt,
+              latestVerifiedAt: checkedAt,
+              ownershipClaimAvailable: false,
+              sessionStartToken: null,
+            });
+          }
+          return verifySignedQr(db, {
+            tokenDigest: hashQrToken(token),
+            qrId: payload.qr_id,
+            licenseeId: payload.licensee_id,
+            batchId: payload.batch_id,
+            manufacturerId: payload.manufacturer_id || null,
+            nonce: payload.nonce,
+            replayEpoch: payload.epoch || 1,
+            keyVersion: payload.kid || verified.signing.keyVersion,
+            issuedAt: new Date(payload.iat * 1000),
+            expiresAt: new Date((payload.exp || 0) * 1000),
+            checkedAt,
+            requestId,
+            actorIpHash,
+            actorDeviceHash,
+          });
+        })()
+      : await verifyRawQr(db, { requestedCode: code, checkedAt, requestId, actorIpHash, actorDeviceHash });
+    if (!row) return publicFailure(res, 404, "Requested information is unavailable.");
     return res.json({
       success: true,
-      data: await runPostScanVerificationFlow({
-        actorDeviceHash,
-        baseOwnership,
-        baseOwnershipStatus,
-        customerUserId,
-        deviceTokenHash,
-        proofSource,
-        qrCode,
-        replacement,
-        requestDeviceFingerprint,
-        requesterIpHash,
-        requestQuery,
-        requestedTransferToken,
-        req,
-        riskProfile,
-        signedPayload,
-        signedToken,
-        verifiedSigningMetadata,
-        verifyUxPolicy,
-      }),
+      data: responseFor(row, Boolean(req.customer)),
     });
   } catch (error) {
-    if (isPublicIntegrityDependencyError(error)) {
-      await recordDegradationEvent({
-        dependencyKey: "public_verification",
-        mode: VerificationDegradationMode.FAIL_CLOSED,
-        code: error.code,
-        message: error.message,
-        context: {
-          route: req.originalUrl || req.url,
-        },
-      });
-      return res.status(error.statusCode).json({
-        ...buildPublicIntegrityErrorBody(error.message, error.code),
-        degradationMode: VerificationDegradationMode.FAIL_CLOSED,
-      });
+    const message = String(error instanceof Error ? error.message : error);
+    if (token && /PUBLIC_VERIFICATION_(?:SIGNED_)?INVALID/.test(message)) {
+      return publicFailure(res, 400, "Request could not be verified.");
     }
-    console.error("Verify error:", error);
-    return res.status(500).json({
+    return res.status(503).json({
       success: false,
-      error: "Verification service unavailable",
+      degraded: true,
+      code: "PUBLIC_VERIFICATION_UNAVAILABLE",
+      error: "Verification is temporarily unavailable.",
     });
   }
 };

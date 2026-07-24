@@ -1,5 +1,6 @@
 import { Response } from "express";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 
 import { CustomerVerifyRequest } from "../../middleware/customerVerifyAuth";
 import { createAuditLogSafely } from "../../services/auditService";
@@ -18,10 +19,13 @@ import {
   normalizeCustomerVerifyEmail,
 } from "../../services/customerVerifyAuthService";
 import { setCustomerVerifySessionCookie } from "../../services/customerVerifyCookieService";
+import { registerCustomerVerifyDatabaseSession } from "../../services/customerVerifyDatabaseSessionService";
 import { hashIp } from "../../utils/security";
 import { buildCustomerVerifyAuthResponse } from "./customerAuthResponsePolicy";
 
 const passkeyLabelSchema = z.string().trim().min(1).max(120).optional();
+const requestId = (req: CustomerVerifyRequest) =>
+  String((req as CustomerVerifyRequest & { requestId?: string }).requestId || randomUUID());
 
 const registrationCredentialSchema = z
   .object({
@@ -110,7 +114,7 @@ const handlePasskeyError = (res: Response, error: any, fallback = "Passkey reque
 export const beginCustomerPasskeyRegistration = async (req: CustomerVerifyRequest, res: Response) => {
   try {
     const customer = req.customer;
-    if (!customer) {
+    if (!customer || !req.customerDatabaseCapability) {
       return res.status(401).json({ success: false, error: "Customer authentication required" });
     }
 
@@ -120,11 +124,13 @@ export const beginCustomerPasskeyRegistration = async (req: CustomerVerifyReques
     }
 
     const options = await beginCustomerWebAuthnRegistration({
+      customerCapability: req.customerDatabaseCapability,
       customerUserId: customer.userId,
       email: customer.email,
       displayName: customer.email,
       ipHash: hashIp(req.ip),
       userAgent: req.get("user-agent") || null,
+      requestId: requestId(req),
     });
 
     await createAuditLogSafely({
@@ -148,7 +154,7 @@ export const beginCustomerPasskeyRegistration = async (req: CustomerVerifyReques
 export const finishCustomerPasskeyRegistration = async (req: CustomerVerifyRequest, res: Response) => {
   try {
     const customer = req.customer;
-    if (!customer) {
+    if (!customer || !req.customerDatabaseCapability) {
       return res.status(401).json({ success: false, error: "Customer authentication required" });
     }
 
@@ -158,10 +164,12 @@ export const finishCustomerPasskeyRegistration = async (req: CustomerVerifyReque
     }
 
     const result = await completeCustomerWebAuthnRegistration({
+      customerCapability: req.customerDatabaseCapability,
       customerUserId: customer.userId,
       ticket: parsed.data.ticket,
       label: parsed.data.label,
       credential: parsed.data.credential,
+      requestId: requestId(req),
     });
 
     const identity = {
@@ -178,6 +186,7 @@ export const finishCustomerPasskeyRegistration = async (req: CustomerVerifyReque
         webauthnVerifiedAt: identity.webauthnVerifiedAt,
       }
     );
+    await registerCustomerVerifyDatabaseSession(token, identity);
     setCustomerVerifySessionCookie(res, token);
 
     await createAuditLogSafely({
@@ -218,11 +227,13 @@ export const beginCustomerPasskeyAssertion = async (req: CustomerVerifyRequest, 
     }
 
     const options = await beginCustomerWebAuthnAssertion({
+      customerCapability: req.customerDatabaseCapability || null,
       customerUserId,
       email,
       purpose: req.customer ? "STEP_UP" : "LOGIN",
       ipHash: hashIp(req.ip),
       userAgent: req.get("user-agent") || null,
+      requestId: requestId(req),
     });
 
     await createAuditLogSafely({
@@ -251,9 +262,11 @@ export const finishCustomerPasskeyAssertion = async (req: CustomerVerifyRequest,
     }
 
     const result = await completeCustomerWebAuthnAssertion({
+      customerCapability: req.customerDatabaseCapability || null,
       ticket: parsed.data.ticket,
       customerUserId: req.customer?.userId || null,
       credential: parsed.data.credential,
+      requestId: requestId(req),
     });
 
     const email = normalizeCustomerVerifyEmail(result.customerEmail || req.customer?.email || "");
@@ -275,6 +288,7 @@ export const finishCustomerPasskeyAssertion = async (req: CustomerVerifyRequest,
         webauthnVerifiedAt: identity.webauthnVerifiedAt,
       }
     );
+    await registerCustomerVerifyDatabaseSession(token, identity);
     setCustomerVerifySessionCookie(res, token);
 
     await createAuditLogSafely({
@@ -304,11 +318,14 @@ export const finishCustomerPasskeyAssertion = async (req: CustomerVerifyRequest,
 export const listCustomerPasskeyCredentials = async (req: CustomerVerifyRequest, res: Response) => {
   try {
     const customer = req.customer;
-    if (!customer) {
+    if (!customer || !req.customerDatabaseCapability) {
       return res.status(401).json({ success: false, error: "Customer authentication required" });
     }
 
-    const items = await listCustomerWebAuthnCredentials(customer.userId);
+    const items = await listCustomerWebAuthnCredentials({
+      customerCapability: req.customerDatabaseCapability,
+      requestId: requestId(req),
+    });
     return res.json({ success: true, data: { items } });
   } catch (error: any) {
     return handlePasskeyError(res, error, "Could not load passkeys");
@@ -318,7 +335,7 @@ export const listCustomerPasskeyCredentials = async (req: CustomerVerifyRequest,
 export const deleteCustomerPasskeyCredential = async (req: CustomerVerifyRequest, res: Response) => {
   try {
     const customer = req.customer;
-    if (!customer) {
+    if (!customer || !req.customerDatabaseCapability) {
       return res.status(401).json({ success: false, error: "Customer authentication required" });
     }
 
@@ -328,8 +345,9 @@ export const deleteCustomerPasskeyCredential = async (req: CustomerVerifyRequest
     }
 
     const result = await deleteCustomerWebAuthnCredential({
-      customerUserId: customer.userId,
+      customerCapability: req.customerDatabaseCapability,
       credentialId,
+      requestId: requestId(req),
     });
 
     await createAuditLogSafely({

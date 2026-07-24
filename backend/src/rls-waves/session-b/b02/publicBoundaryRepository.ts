@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
 
 export type B02PublicFunctionClient = Pick<Prisma.TransactionClient, "$queryRaw">;
@@ -9,6 +9,9 @@ export type VerifyRawQrRow = {
   nextAction: string;
   maskedCode: string;
   brandName: string | null;
+  brandWebsite: string | null;
+  brandSupportEmail: string | null;
+  brandSupportPhone: string | null;
   manufacturerName: string | null;
   manufacturerWebsite: string | null;
   printedAt: Date | null;
@@ -25,8 +28,11 @@ export type StartVerificationSessionRow = {
   sessionProofToken: string;
   maskedCode: string;
   customerFacingState: string;
+  entryMethod: string;
+  authState: string;
   startedAt: Date;
   expiresAt: Date;
+  proofBindingExpiresAt: Date;
   brandName: string | null;
 };
 export type ReadVerificationSessionRow = {
@@ -35,9 +41,13 @@ export type ReadVerificationSessionRow = {
   customerFacingState: string;
   startedAt: Date;
   expiresAt: Date;
+  proofBindingExpiresAt: Date;
+  entryMethod: string;
+  authState: string;
   intakeCompleted: boolean;
   revealed: boolean;
   brandName: string | null;
+  verification: Record<string, unknown> | null;
 };
 export type TrackSupportStatusRow = {
   referenceCode: string;
@@ -46,8 +56,9 @@ export type TrackSupportStatusRow = {
   slaState: string;
 };
 export type AcceptedRow = { accepted: boolean; publicReference: string; message: string };
+type IntakeAcceptedRow = AcceptedRow & { deliveryRequired: boolean };
 
-type FieldType = "string" | "number" | "boolean" | "date";
+type FieldType = "string" | "number" | "boolean" | "date" | "json";
 type Projection = ReadonlyArray<readonly [string, FieldType, boolean?]>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -159,6 +170,8 @@ const exactOne = <T extends Record<string, unknown>>(
     if (nullable && value == null) continue;
     const valid = type === "date"
       ? value instanceof Date && Number.isFinite(value.getTime())
+      : type === "json"
+        ? value !== null && typeof value === "object" && !Array.isArray(value)
       : typeof value === type;
     if (!valid) throw new Error(`${functionName} returned an invalid ${key}`);
   }
@@ -167,12 +180,27 @@ const exactOne = <T extends Record<string, unknown>>(
 
 const verifyRawProjection: Projection = [
   ["result", "string"], ["messageKey", "string"], ["nextAction", "string"], ["maskedCode", "string"],
-  ["brandName", "string", true], ["manufacturerName", "string", true], ["manufacturerWebsite", "string", true],
+  ["brandName", "string", true], ["brandWebsite", "string", true],
+  ["brandSupportEmail", "string", true], ["brandSupportPhone", "string", true],
+  ["manufacturerName", "string", true], ["manufacturerWebsite", "string", true],
   ["printedAt", "date", true], ["firstVerifiedAt", "date", true], ["latestVerifiedAt", "date", true],
   ["ownershipClaimAvailable", "boolean"], ["sessionStartToken", "string", true],
 ];
 const acceptedProjection: Projection = [
   ["accepted", "boolean"], ["publicReference", "string"], ["message", "string"],
+];
+const intakeAcceptedProjection: Projection = [...acceptedProjection, ["deliveryRequired", "boolean"]];
+const sessionStartProjection: Projection = [
+  ["sessionId", "string"], ["sessionProofToken", "string"], ["maskedCode", "string"],
+  ["customerFacingState", "string"], ["entryMethod", "string"], ["authState", "string"],
+  ["startedAt", "date"], ["expiresAt", "date"], ["proofBindingExpiresAt", "date"],
+  ["brandName", "string", true],
+];
+const sessionReadProjection: Projection = [
+  ["sessionId", "string"], ["maskedCode", "string"], ["customerFacingState", "string"],
+  ["startedAt", "date"], ["expiresAt", "date"], ["proofBindingExpiresAt", "date"],
+  ["entryMethod", "string"], ["authState", "string"], ["intakeCompleted", "boolean"],
+  ["revealed", "boolean"], ["brandName", "string", true], ["verification", "json", true],
 ];
 
 const stable = (value: unknown): string => {
@@ -186,6 +214,79 @@ const stable = (value: unknown): string => {
 
 export const b02IdempotencyDigest = (value: unknown) =>
   createHash("sha256").update(stable(value)).digest("hex");
+
+const proof = () => {
+  const raw = randomBytes(32).toString("base64url");
+  return { raw, hash: createHash("sha256").update(raw).digest("hex") };
+};
+
+export const issueCustomerAuthSession = async (
+  db: B02PublicFunctionClient,
+  input: {
+    capability: string;
+    customerUserId: string;
+    customerEmail: string;
+    authStrength: string;
+    authProvider: string;
+    issuedAt: Date;
+    expiresAt: Date;
+    requestId: string;
+  }
+) => {
+  exactInput(input, [
+    "capability", "customerUserId", "customerEmail", "authStrength", "authProvider",
+    "issuedAt", "expiresAt", "requestId",
+  ], "issue_customer_auth_session");
+  const rows = await db.$queryRaw<Array<{ accepted: boolean }>>`
+    SELECT * FROM app_public.issue_customer_auth_session(
+      ${text(input.capability, "customer session capability", 32, 4096)},
+      ${matches(input.customerUserId, "customer user ID", CUSTOMER_USER_ID, 37)},
+      ${email(input.customerEmail, "customer email")},
+      ${oneOf(input.authStrength, "customer authentication strength", ["EMAIL_OTP","PASSKEY","SOCIAL"] as const)},
+      ${oneOf(input.authProvider, "customer authentication provider", ["EMAIL_OTP","GOOGLE"] as const)},
+      ${date(input.issuedAt, "customer session issue time")},
+      ${date(input.expiresAt, "customer session expiry time")},
+      ${requestId(input.requestId)}
+    )
+  `;
+  return exactOne(rows, "app_public.issue_customer_auth_session", [["accepted","boolean"]]);
+};
+
+export const revokeCustomerAuthSession = async (
+  db: B02PublicFunctionClient,
+  input: { capability: string; revokedAt: Date; requestId: string }
+) => {
+  exactInput(input, ["capability","revokedAt","requestId"], "revoke_customer_auth_session");
+  return exactOne(await db.$queryRaw<Array<{ revoked: boolean }>>`
+    SELECT * FROM app_public.revoke_customer_auth_session(
+      ${text(input.capability, "customer session capability", 32, 4096)},
+      ${date(input.revokedAt, "customer session revocation time")},
+      ${requestId(input.requestId)}
+    )
+  `, "app_public.revoke_customer_auth_session", [["revoked","boolean"]]);
+};
+
+export const readCustomerAuthSession = async (
+  db: B02PublicFunctionClient,
+  input: { capability: string; checkedAt: Date; requestId: string }
+) => {
+  exactInput(input, ["capability","checkedAt","requestId"], "read_customer_auth_session");
+  return exactOne(await db.$queryRaw<Array<{
+    customerUserId: string;
+    customerEmail: string;
+    authStrength: string;
+    authProvider: string;
+  }>>`
+    SELECT * FROM app_public.read_customer_auth_session(
+      ${text(input.capability, "customer session capability", 32, 4096)},
+      ${date(input.checkedAt, "customer session check time")},
+      ${requestId(input.requestId)}
+    )
+  `, "app_public.read_customer_auth_session", [
+    ["customerUserId","string"],["customerEmail","string"],
+    ["authStrength","string"],["authProvider","string"],
+  ]);
+};
 
 export const verifyRawQr = async (
   db: B02PublicFunctionClient,
@@ -203,11 +304,13 @@ export const verifyRawQr = async (
   const validatedRequestId = requestId(input.requestId);
   const actorIpHash = optionalDigest(input.actorIpHash, "actor IP digest");
   const actorDeviceHash = optionalDigest(input.actorDeviceHash, "actor device digest");
-  return exactOne(await db.$queryRaw<VerifyRawQrRow[]>`
+  const sessionStart = proof();
+  const row = exactOne(await db.$queryRaw<VerifyRawQrRow[]>`
     SELECT * FROM app_public.verify_raw_qr(
-      ${requestedCode}, ${checkedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}
+      ${requestedCode}, ${checkedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}, ${sessionStart.hash}
     )
   `, "app_public.verify_raw_qr", verifyRawProjection);
+  return row ? { ...row, sessionStartToken: row.ownershipClaimAvailable ? sessionStart.raw : null } : null;
 };
 
 export const verifySignedQr = async (
@@ -250,12 +353,15 @@ export const verifySignedQr = async (
   const validatedRequestId = requestId(input.requestId);
   const actorIpHash = optionalDigest(input.actorIpHash, "actor IP digest");
   const actorDeviceHash = optionalDigest(input.actorDeviceHash, "actor device digest");
-  return exactOne(await db.$queryRaw<VerifySignedQrRow[]>`
+  const sessionStart = proof();
+  const row = exactOne(await db.$queryRaw<VerifySignedQrRow[]>`
     SELECT * FROM app_public.verify_signed_qr(
       ${tokenDigest}, ${qrId}, ${licenseeId}, ${batchId}, ${manufacturerId}, ${nonce}, ${replayEpoch},
-      ${keyVersion}, ${issuedAt}, ${expiresAt}, ${checkedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}
+      ${keyVersion}, ${issuedAt}, ${expiresAt}, ${checkedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash},
+      ${sessionStart.hash}
     )
   `, "app_public.verify_signed_qr", [...verifyRawProjection, ["verificationMethod", "string"]]);
+  return row ? { ...row, sessionStartToken: row.ownershipClaimAvailable ? sessionStart.raw : null } : null;
 };
 
 export const recordQrVerification = async (
@@ -293,25 +399,25 @@ export const startVerificationSession = async (
   input: {
     sessionStartTokenHash: string;
     entryMethod: string;
+    customerCapability?: string | null;
     checkedAt: Date;
     requestId: string;
-    customerUserId?: string | null;
   }
 ) => {
-  exactInput(input, ["sessionStartTokenHash", "entryMethod", "checkedAt", "requestId", "customerUserId"], "start_verification_session");
+  exactInput(input, ["sessionStartTokenHash", "entryMethod", "customerCapability", "checkedAt", "requestId"], "start_verification_session");
   const sessionStartTokenHash = digest(input.sessionStartTokenHash, "session-start token digest");
   const entryMethod = oneOf(input.entryMethod, "verification entry method", ["SIGNED_SCAN", "MANUAL_CODE"] as const);
   const checkedAt = date(input.checkedAt, "session start time");
   const validatedRequestId = requestId(input.requestId);
-  const boundCustomerUserId = customerUserId(input.customerUserId);
-  return exactOne(await db.$queryRaw<StartVerificationSessionRow[]>`
+  const customerCapability = optionalText(input.customerCapability, "customer session capability", 4096);
+  const sessionProof = proof();
+  const row = exactOne(await db.$queryRaw<StartVerificationSessionRow[]>`
     SELECT * FROM app_public.start_verification_session(
-      ${sessionStartTokenHash}, ${entryMethod}, ${checkedAt}, ${validatedRequestId}, ${boundCustomerUserId}
+      ${sessionStartTokenHash}, ${entryMethod}, ${customerCapability}, ${checkedAt}, ${validatedRequestId},
+      ${sessionProof.hash}
     )
-  `, "app_public.start_verification_session", [
-    ["sessionId", "string"], ["sessionProofToken", "string"], ["maskedCode", "string"],
-    ["customerFacingState", "string"], ["startedAt", "date"], ["expiresAt", "date"], ["brandName", "string", true],
-  ]);
+  `, "app_public.start_verification_session", sessionStartProjection);
+  return row ? { ...row, sessionProofToken: sessionProof.raw } : null;
 };
 
 export const readVerificationSession = async (
@@ -319,26 +425,279 @@ export const readVerificationSession = async (
   input: {
     sessionId: string;
     sessionProofHash: string;
+    customerCapability?: string | null;
     checkedAt: Date;
     requestId: string;
-    customerUserId?: string | null;
   }
 ) => {
-  exactInput(input, ["sessionId", "sessionProofHash", "checkedAt", "requestId", "customerUserId"], "read_verification_session");
+  exactInput(input, ["sessionId", "sessionProofHash", "customerCapability", "checkedAt", "requestId"], "read_verification_session");
   const sessionId = uuid(input.sessionId, "verification session ID");
   const sessionProofHash = digest(input.sessionProofHash, "verification-session proof digest");
   const checkedAt = date(input.checkedAt, "session read time");
   const validatedRequestId = requestId(input.requestId);
-  const boundCustomerUserId = customerUserId(input.customerUserId);
+  const customerCapability = optionalText(input.customerCapability, "customer session capability", 4096);
   return exactOne(await db.$queryRaw<ReadVerificationSessionRow[]>`
     SELECT * FROM app_public.read_verification_session(
-      ${sessionId}, ${sessionProofHash}, ${checkedAt}, ${validatedRequestId}, ${boundCustomerUserId}
+      ${sessionId}, ${sessionProofHash}, ${customerCapability}, ${checkedAt}, ${validatedRequestId}
     )
-  `, "app_public.read_verification_session", [
-    ["sessionId", "string"], ["maskedCode", "string"], ["customerFacingState", "string"],
-    ["startedAt", "date"], ["expiresAt", "date"], ["intakeCompleted", "boolean"],
-    ["revealed", "boolean"], ["brandName", "string", true],
-  ]);
+  `, "app_public.read_verification_session", sessionReadProjection);
+};
+
+export const writeVerificationSession = async (
+  db: B02PublicFunctionClient,
+  input: {
+    sessionId: string;
+    sessionProofHash: string;
+    customerCapability: string;
+    operation: "INTAKE" | "REVEAL";
+    payload: Record<string, unknown>;
+    checkedAt: Date;
+    requestId: string;
+  }
+) => {
+  exactInput(input, [
+    "sessionId", "sessionProofHash", "customerCapability",
+    "operation", "payload", "checkedAt", "requestId",
+  ], "write_verification_session");
+  const rows = await db.$queryRaw<Array<{ result: unknown }>>`
+    SELECT app_public.write_verification_session(
+      ${uuid(input.sessionId, "verification session ID")},
+      ${digest(input.sessionProofHash, "verification-session proof digest")},
+      ${text(input.customerCapability, "customer session capability", 32, 4096)},
+      ${input.operation},
+      ${input.payload}::jsonb,
+      ${date(input.checkedAt, "verification session write time")},
+      ${requestId(input.requestId)}
+    ) AS result
+  `;
+  if (rows.length !== 1 || !rows[0]?.result || typeof rows[0].result !== "object") {
+    throw new Error("app_public.write_verification_session returned an unexpected projection");
+  }
+  return rows[0].result as Record<string, unknown>;
+};
+
+const jsonResult = async (
+  rows: Array<{ result: unknown }>,
+  name: string
+) => {
+  if (rows.length !== 1 || !rows[0]?.result || typeof rows[0].result !== "object" || Array.isArray(rows[0].result)) {
+    throw new Error(`${name} returned an unexpected projection`);
+  }
+  return rows[0].result as Record<string, unknown>;
+};
+
+export const claimCustomerOwnership = async (
+  db: B02PublicFunctionClient,
+  input: {
+    customerCapability?: string | null;
+    sessionId: string;
+    sessionProofHash: string;
+    deviceTokenHash?: string | null;
+    ipHash?: string | null;
+    userAgentHash?: string | null;
+    linkOnly: boolean;
+    checkedAt: Date;
+    requestId: string;
+  }
+) => {
+  exactInput(input, [
+    "customerCapability","sessionId","sessionProofHash","deviceTokenHash",
+    "ipHash","userAgentHash","linkOnly","checkedAt","requestId",
+  ], "claim_customer_ownership");
+  if (typeof input.linkOnly !== "boolean") throw new Error("claim_customer_ownership requires linkOnly");
+  return jsonResult(await db.$queryRaw<Array<{ result: unknown }>>`
+    SELECT app_public.claim_customer_ownership(
+      ${optionalText(input.customerCapability, "customer session capability", 4096)},
+      ${uuid(input.sessionId, "verification session ID")},
+      ${digest(input.sessionProofHash, "verification session proof digest")},
+      ${optionalDigest(input.deviceTokenHash, "device claim digest")},
+      ${optionalDigest(input.ipHash, "claim IP digest")},
+      ${optionalDigest(input.userAgentHash, "claim user-agent digest")},
+      ${input.linkOnly},
+      ${date(input.checkedAt, "ownership claim time")},
+      ${requestId(input.requestId)}
+    ) AS result
+  `, "app_public.claim_customer_ownership");
+};
+
+export const createCustomerOwnershipTransfer = async (
+  db: B02PublicFunctionClient,
+  input: {
+    customerCapability: string;
+    requestedCode: string;
+    recipientEmail?: string | null;
+    tokenHash: string;
+    expiresAt: Date;
+    checkedAt: Date;
+    requestId: string;
+  }
+) => {
+  exactInput(input, [
+    "customerCapability","requestedCode","recipientEmail","tokenHash","expiresAt","checkedAt","requestId",
+  ], "create_customer_ownership_transfer");
+  return jsonResult(await db.$queryRaw<Array<{ result: unknown }>>`
+    SELECT app_public.create_customer_ownership_transfer(
+      ${text(input.customerCapability, "customer session capability", 32, 4096)},
+      ${rawQr(input.requestedCode)},
+      ${optionalEmail(input.recipientEmail, "ownership transfer recipient")},
+      ${digest(input.tokenHash, "ownership transfer token digest")},
+      ${date(input.expiresAt, "ownership transfer expiry")},
+      ${date(input.checkedAt, "ownership transfer creation time")},
+      ${requestId(input.requestId)}
+    ) AS result
+  `, "app_public.create_customer_ownership_transfer");
+};
+
+export const cancelCustomerOwnershipTransfer = async (
+  db: B02PublicFunctionClient,
+  input: {
+    customerCapability: string;
+    requestedCode: string;
+    transferId?: string | null;
+    checkedAt: Date;
+    requestId: string;
+  }
+) => {
+  exactInput(input, ["customerCapability","requestedCode","transferId","checkedAt","requestId"], "cancel_customer_ownership_transfer");
+  return jsonResult(await db.$queryRaw<Array<{ result: unknown }>>`
+    SELECT app_public.cancel_customer_ownership_transfer(
+      ${text(input.customerCapability, "customer session capability", 32, 4096)},
+      ${rawQr(input.requestedCode)},
+      ${optionalUuid(input.transferId, "ownership transfer ID")},
+      ${date(input.checkedAt, "ownership transfer cancellation time")},
+      ${requestId(input.requestId)}
+    ) AS result
+  `, "app_public.cancel_customer_ownership_transfer");
+};
+
+export const acceptCustomerOwnershipTransfer = async (
+  db: B02PublicFunctionClient,
+  input: {
+    customerCapability: string;
+    tokenHash: string;
+    ipHash?: string | null;
+    userAgentHash?: string | null;
+    checkedAt: Date;
+    requestId: string;
+  }
+) => {
+  exactInput(input, [
+    "customerCapability","tokenHash","ipHash","userAgentHash","checkedAt","requestId",
+  ], "accept_customer_ownership_transfer");
+  return jsonResult(await db.$queryRaw<Array<{ result: unknown }>>`
+    SELECT app_public.accept_customer_ownership_transfer(
+      ${text(input.customerCapability, "customer session capability", 32, 4096)},
+      ${digest(input.tokenHash, "ownership transfer token digest")},
+      ${optionalDigest(input.ipHash, "ownership transfer IP digest")},
+      ${optionalDigest(input.userAgentHash, "ownership transfer user-agent digest")},
+      ${date(input.checkedAt, "ownership transfer acceptance time")},
+      ${requestId(input.requestId)}
+    ) AS result
+  `, "app_public.accept_customer_ownership_transfer");
+};
+
+export const beginCustomerPasskey = async (
+  db: B02PublicFunctionClient,
+  input: {
+    customerCapability?: string | null; customerUserId: string; customerEmail: string;
+    purpose: "ENROLLMENT" | "LOGIN" | "STEP_UP"; ticketHash: string; challengeHash: string;
+    ipHash?: string | null; userAgentHash?: string | null; origin?: string | null; rpId?: string | null;
+    expiresAt: Date; checkedAt: Date; requestId: string;
+  }
+) => {
+  exactInput(input, ["customerCapability","customerUserId","customerEmail","purpose","ticketHash","challengeHash","ipHash","userAgentHash","origin","rpId","expiresAt","checkedAt","requestId"], "begin_customer_passkey");
+  return jsonResult(await db.$queryRaw<Array<{ result: unknown }>>`
+    SELECT app_public.begin_customer_passkey(
+      ${optionalText(input.customerCapability,"customer session capability",4096)},
+      ${matches(input.customerUserId,"customer user ID",CUSTOMER_USER_ID,37)},
+      ${email(input.customerEmail,"customer email")},
+      ${oneOf(input.purpose,"passkey purpose",["ENROLLMENT","LOGIN","STEP_UP"] as const)},
+      ${digest(input.ticketHash,"passkey ticket digest")},
+      ${digest(input.challengeHash,"passkey challenge digest")},
+      ${optionalDigest(input.ipHash,"passkey IP digest")},
+      ${optionalDigest(input.userAgentHash,"passkey user-agent digest")},
+      ${optionalText(input.origin,"passkey origin",512)},
+      ${optionalText(input.rpId,"passkey relying-party ID",253)},
+      ${date(input.expiresAt,"passkey expiry")},
+      ${date(input.checkedAt,"passkey start time")},
+      ${requestId(input.requestId)}
+    ) AS result
+  `, "app_public.begin_customer_passkey");
+};
+
+export const loadCustomerPasskey = async (
+  db: B02PublicFunctionClient,
+  input: { ticketHashCandidates: string[]; purpose?: "ENROLLMENT" | "LOGIN" | "STEP_UP" | null; credentialId?: string | null; checkedAt: Date; requestId: string }
+) => {
+  exactInput(input, ["ticketHashCandidates","purpose","credentialId","checkedAt","requestId"], "load_customer_passkey");
+  if (!Array.isArray(input.ticketHashCandidates) || input.ticketHashCandidates.length < 1 || input.ticketHashCandidates.length > 4) {
+    throw new Error("passkey ticket digest candidates are invalid");
+  }
+  const hashes = input.ticketHashCandidates.map((value) => digest(value,"passkey ticket digest"));
+  return jsonResult(await db.$queryRaw<Array<{ result: unknown }>>`
+    SELECT app_public.load_customer_passkey(
+      ${hashes}::text[],
+      ${input.purpose ? oneOf(input.purpose,"passkey purpose",["ENROLLMENT","LOGIN","STEP_UP"] as const) : null},
+      ${optionalText(input.credentialId,"passkey credential ID",1024)},
+      ${date(input.checkedAt,"passkey load time")},
+      ${requestId(input.requestId)}
+    ) AS result
+  `, "app_public.load_customer_passkey");
+};
+
+export const finishCustomerPasskey = async (
+  db: B02PublicFunctionClient,
+  input: {
+    customerCapability?: string | null; ticketHashCandidates: string[];
+    purpose: "ENROLLMENT" | "LOGIN" | "STEP_UP"; payload: Record<string, unknown>;
+    checkedAt: Date; requestId: string;
+  }
+) => {
+  exactInput(input, ["customerCapability","ticketHashCandidates","purpose","payload","checkedAt","requestId"], "finish_customer_passkey");
+  if (!Array.isArray(input.ticketHashCandidates) || input.ticketHashCandidates.length < 1 || input.ticketHashCandidates.length > 4) {
+    throw new Error("passkey ticket digest candidates are invalid");
+  }
+  const hashes = input.ticketHashCandidates.map((value) => digest(value,"passkey ticket digest"));
+  return jsonResult(await db.$queryRaw<Array<{ result: unknown }>>`
+    SELECT app_public.finish_customer_passkey(
+      ${optionalText(input.customerCapability,"customer session capability",4096)},
+      ${hashes}::text[],
+      ${oneOf(input.purpose,"passkey purpose",["ENROLLMENT","LOGIN","STEP_UP"] as const)},
+      ${input.payload}::jsonb,
+      ${date(input.checkedAt,"passkey finish time")},
+      ${requestId(input.requestId)}
+    ) AS result
+  `, "app_public.finish_customer_passkey");
+};
+
+export const listCustomerPasskeys = async (
+  db: B02PublicFunctionClient,
+  input: { customerCapability: string; checkedAt: Date; requestId: string }
+) => {
+  exactInput(input, ["customerCapability","checkedAt","requestId"], "list_customer_passkeys");
+  const rows = await db.$queryRaw<Array<{ payload: Record<string, unknown> }>>`
+    SELECT * FROM app_public.list_customer_passkeys(
+      ${text(input.customerCapability,"customer session capability",32,4096)},
+      ${date(input.checkedAt,"passkey list time")},
+      ${requestId(input.requestId)}
+    )
+  `;
+  return rows.map((row) => row.payload);
+};
+
+export const deleteCustomerPasskey = async (
+  db: B02PublicFunctionClient,
+  input: { customerCapability: string; credentialRowId: string; checkedAt: Date; requestId: string }
+) => {
+  exactInput(input, ["customerCapability","credentialRowId","checkedAt","requestId"], "delete_customer_passkey");
+  return exactOne(await db.$queryRaw<Array<{ deleted: boolean }>>`
+    SELECT * FROM app_public.delete_customer_passkey(
+      ${text(input.customerCapability,"customer session capability",32,4096)},
+      ${uuid(input.credentialRowId,"passkey credential row ID")},
+      ${date(input.checkedAt,"passkey deletion time")},
+      ${requestId(input.requestId)}
+    )
+  `, "app_public.delete_customer_passkey", [["deleted","boolean"]]);
 };
 
 export const trackSupportStatus = async (
@@ -410,11 +769,13 @@ export const submitProductFeedback = async (
 export const submitPublicIncident = async (
   db: B02PublicFunctionClient,
   input: {
-    verifiedQrId?: string | null;
+    sessionId: string;
+    sessionProofHash: string;
     incidentType: string;
     description: string;
     contactEmail?: string | null;
     consentToContact: boolean;
+    evidence?: Array<{ fileUrl: string; storageKey: string; fileType: string }>;
     submittedAt: Date;
     requestId: string;
     actorIpHash?: string | null;
@@ -423,10 +784,13 @@ export const submitPublicIncident = async (
   }
 ) => {
   exactInput(input, [
-    "verifiedQrId", "incidentType", "description", "contactEmail", "consentToContact", "submittedAt",
+    "sessionId", "sessionProofHash", "incidentType", "description", "contactEmail", "consentToContact", "evidence", "submittedAt",
     "requestId", "actorIpHash", "actorDeviceHash", "idempotencyDigest",
   ], "submit_public_incident");
-  const verifiedQrId = optionalUuid(input.verifiedQrId, "verified QR ID");
+  const sessionId = uuid(input.sessionId, "verification session ID");
+  const sessionProofHash = digest(input.sessionProofHash, "verification session proof digest");
+  const evidence = input.evidence || [];
+  if (evidence.length > 4) throw new Error("public incident evidence exceeds the supported limit");
   const incidentType = oneOf(input.incidentType, "public incident type", [
     "counterfeit_suspected", "duplicate_scan", "tampered_label", "wrong_product", "other",
   ] as const);
@@ -441,7 +805,8 @@ export const submitPublicIncident = async (
   const idempotencyDigest = digest(input.idempotencyDigest, "public incident idempotency digest");
   return exactOne(await db.$queryRaw<AcceptedRow[]>`
     SELECT * FROM app_public.submit_public_incident(
-      ${verifiedQrId}, ${incidentType}, ${description}, ${contactEmail}, ${input.consentToContact},
+      ${sessionId}, ${sessionProofHash}, ${incidentType}, ${description}, ${contactEmail}, ${input.consentToContact},
+      ${evidence}::jsonb,
       ${submittedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}, ${idempotencyDigest}
     )
   `, "app_public.submit_public_incident", acceptedProjection);
@@ -480,12 +845,12 @@ export const submitRequestAccess = async (
   const submittedAt = date(input.submittedAt, "request-access submission time");
   const validatedRequestId = requestId(input.requestId);
   const idempotencyDigest = digest(input.idempotencyDigest, "request-access idempotency digest");
-  return exactOne(await db.$queryRaw<AcceptedRow[]>`
+  return exactOne(await db.$queryRaw<IntakeAcceptedRow[]>`
     SELECT * FROM app_public.submit_request_access(
       ${fullName}, ${workEmail}, ${companyName}, ${roleTitle}, ${country}, ${monthlyVolume}, ${message},
       ${sourcePage}, ${referrer}, ${submittedAt}, ${validatedRequestId}, ${idempotencyDigest}
     )
-  `, "app_public.submit_request_access", acceptedProjection);
+  `, "app_public.submit_request_access", intakeAcceptedProjection);
 };
 
 export const submitPublicSupport = async (
@@ -496,7 +861,7 @@ export const submitPublicSupport = async (
     issueType: string;
     title: string;
     description: string;
-    verifiedQrId?: string | null;
+    verifiedCode?: string | null;
     productReference?: string | null;
     sourcePath?: string | null;
     pageUrl?: string | null;
@@ -506,7 +871,7 @@ export const submitPublicSupport = async (
   }
 ) => {
   exactInput(input, [
-    "publicName", "publicEmail", "issueType", "title", "description", "verifiedQrId",
+    "publicName", "publicEmail", "issueType", "title", "description", "verifiedCode",
     "productReference", "sourcePath", "pageUrl", "submittedAt", "requestId", "idempotencyDigest",
   ], "submit_public_support");
   const publicName = text(input.publicName, "public support name", 2, 120);
@@ -516,7 +881,7 @@ export const submitPublicSupport = async (
   ] as const);
   const title = text(input.title, "public support title", 5, 160);
   const description = text(input.description, "public support description", 10, 4_000);
-  const verifiedQrId = optionalUuid(input.verifiedQrId, "verified QR ID");
+  const verifiedCode = input.verifiedCode == null || input.verifiedCode === "" ? null : rawQr(input.verifiedCode);
   const productReference = optionalText(input.productReference, "public support product reference", 160);
   const sourcePath = optionalText(input.sourcePath, "public support source path", 500);
   if (sourcePath && (!sourcePath.startsWith("/") || sourcePath.includes(".."))) {
@@ -526,10 +891,65 @@ export const submitPublicSupport = async (
   const submittedAt = date(input.submittedAt, "public support submission time");
   const validatedRequestId = requestId(input.requestId);
   const idempotencyDigest = digest(input.idempotencyDigest, "public support idempotency digest");
-  return exactOne(await db.$queryRaw<AcceptedRow[]>`
+  return exactOne(await db.$queryRaw<IntakeAcceptedRow[]>`
     SELECT * FROM app_public.submit_public_support(
-      ${publicName}, ${publicEmail}, ${issueType}, ${title}, ${description}, ${verifiedQrId},
+      ${publicName}, ${publicEmail}, ${issueType}, ${title}, ${description}, ${verifiedCode},
       ${productReference}, ${sourcePath}, ${pageUrl}, ${submittedAt}, ${validatedRequestId}, ${idempotencyDigest}
     )
-  `, "app_public.submit_public_support", acceptedProjection);
+  `, "app_public.submit_public_support", intakeAcceptedProjection);
 };
+
+type PublicDeliveryCompletion = {
+  idempotencyDigest: string;
+  adminStatus: string;
+  adminError?: string | null;
+  acknowledgementStatus: string;
+  acknowledgementError?: string | null;
+  completedAt: Date;
+  requestId: string;
+};
+
+const deliveryStatus = (value: unknown, label: string) =>
+  oneOf(value, label, ["SENT","DRY_RUN","DISABLED","FAILED","SKIPPED"] as const);
+
+const completePublicDelivery = async (
+  db: B02PublicFunctionClient,
+  functionName: "complete_request_access_delivery" | "complete_public_support_delivery",
+  input: PublicDeliveryCompletion,
+) => {
+  exactInput(input, [
+    "idempotencyDigest", "adminStatus", "adminError", "acknowledgementStatus",
+    "acknowledgementError", "completedAt", "requestId",
+  ], functionName);
+  const args = [
+    digest(input.idempotencyDigest, "public intake idempotency digest"),
+    deliveryStatus(input.adminStatus, "admin delivery status"),
+    optionalText(input.adminError, "admin delivery error", 80),
+    deliveryStatus(input.acknowledgementStatus, "acknowledgement delivery status"),
+    optionalText(input.acknowledgementError, "acknowledgement delivery error", 80),
+    date(input.completedAt, "delivery completion time"),
+    requestId(input.requestId),
+  ] as const;
+  const rows = functionName === "complete_request_access_delivery"
+    ? await db.$queryRaw<Array<{ updated: boolean }>>`
+        SELECT * FROM app_public.complete_request_access_delivery(
+          ${args[0]},${args[1]},${args[2]},${args[3]},${args[4]},${args[5]},${args[6]}
+        )
+      `
+    : await db.$queryRaw<Array<{ updated: boolean }>>`
+        SELECT * FROM app_public.complete_public_support_delivery(
+          ${args[0]},${args[1]},${args[2]},${args[3]},${args[4]},${args[5]},${args[6]}
+        )
+      `;
+  return exactOne(rows, `app_public.${functionName}`, [["updated","boolean"]]);
+};
+
+export const completeRequestAccessDelivery = (
+  db: B02PublicFunctionClient,
+  input: PublicDeliveryCompletion,
+) => completePublicDelivery(db, "complete_request_access_delivery", input);
+
+export const completePublicSupportDelivery = (
+  db: B02PublicFunctionClient,
+  input: PublicDeliveryCompletion,
+) => completePublicDelivery(db, "complete_public_support_delivery", input);

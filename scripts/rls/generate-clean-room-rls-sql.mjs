@@ -185,6 +185,9 @@ const qrSystemContracts = validateNamedSqlFunctionContracts().filter((contract) 
 const printingLifecycleContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "release-fix-5-printing-lifecycle"
 );
+const publicVerificationContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "release-fix-6-public-verification"
+);
 const scheduledContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-b-b03-scheduled"
 );
@@ -247,6 +250,12 @@ const printingLifecycleAppSignatures = printingLifecycleContracts.filter((contra
 const printingLifecycleWorkerSignatures = printingLifecycleContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const printingLifecycleOwnerPrivileges = [...new Map(printingLifecycleContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const printingLifecycleOwnerPolicies = [...new Map(printingLifecycleContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const publicVerificationFunctionSource = publicVerificationContracts.length
+  ? fs.readFileSync(path.join(repoRoot, publicVerificationContracts[0].definitionLocation), "utf8")
+  : "";
+const publicVerificationSignatures = publicVerificationContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("preauth")).map((contract) => `app_public.${contract.name}(${contract.signature})`);
+const publicVerificationOwnerPrivileges = [...new Map(publicVerificationContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const publicVerificationOwnerPolicies = [...new Map(publicVerificationContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const contractEvidenceFor = (contracts, table, command) => contracts
   .filter((contract) => contract.tableCommands.some(([candidateTable, candidateCommand]) => candidateTable === table && candidateCommand === command))
   .map((contract) => `contract:${contract.id}:${table}:${command}`)
@@ -353,6 +362,11 @@ const printingLifecycleOwnerGrantSql = printingLifecycleOwnerPrivileges.map(([ta
     ? `GRANT DELETE ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
     : `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
 ).join("\n");
+const publicVerificationOwnerGrantSql = publicVerificationOwnerPrivileges.map(([table, command, columns]) =>
+  command === "DELETE"
+    ? `GRANT DELETE ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
+    : `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
+).join("\n");
 const scheduledOwnerGrantSql = scheduledOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const outboxOwnerGrantSql = outboxOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const operationalReadOwnerGrantSql = operationalReadOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
@@ -364,6 +378,7 @@ const functionOwnerRows = [
   ...administrationOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: administrationContracts.map((contract) => contract.id) })),
   ...qrSystemOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: qrSystemContracts.map((contract) => contract.id) })),
   ...printingLifecycleOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: printingLifecycleContracts.map((contract) => contract.id) })),
+  ...publicVerificationOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: publicVerificationContracts.map((contract) => contract.id) })),
   ...scheduledOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: scheduledContracts.map((contract) => contract.id) })),
   ...outboxOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: outboxContracts.map((contract) => contract.id) })),
   ...operationalReadOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: operationalReadContracts.map((contract) => contract.id) })),
@@ -689,7 +704,7 @@ const restrictedMigrationOwnershipSql = `
 
 const ownerDefaultPrivilegeHardeningSql = [
   { role: roleNames.owner, schemas: ["public", "app_rls"] },
-  { role: roleNames.authOwner, schemas: ["app_auth"] },
+  { role: roleNames.authOwner, schemas: ["app_auth", "app_public"] },
 ].map(({ role, schemas }) => [
   setRole(role),
   ...["TABLES", "SEQUENCES", "ROUTINES", "TYPES", "SCHEMAS", "LARGE OBJECTS"].map((objectClass) => `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(role)} REVOKE ALL ON ${objectClass} FROM PUBLIC;`),
@@ -721,6 +736,7 @@ GRANT USAGE ON SCHEMA public TO ${q(roleNames.authOwner)};
 ${resetRole}
 CREATE SCHEMA app_rls AUTHORIZATION ${q(roleNames.owner)};
 CREATE SCHEMA app_auth AUTHORIZATION ${q(roleNames.authOwner)};
+CREATE SCHEMA app_public AUTHORIZATION ${q(roleNames.authOwner)};
 REVOKE SELECT ON TABLE mscqr_rls_install.state FROM ${q(roleNames.migration)};
 REVOKE USAGE ON SCHEMA mscqr_rls_install FROM ${q(roleNames.migration)};
 ${ownerDefaultPrivilegeHardeningSql}
@@ -752,6 +768,7 @@ ${c03OwnerGrantSql}
 ${administrationOwnerGrantSql}
 ${qrSystemOwnerGrantSql}
 ${printingLifecycleOwnerGrantSql}
+${publicVerificationOwnerGrantSql}
 ${scheduledOwnerGrantSql}
 ${outboxOwnerGrantSql}
 ${operationalReadOwnerGrantSql}
@@ -759,6 +776,7 @@ GRANT USAGE ON SCHEMA public TO ${q(roleNames.authOwner)};
 ${resetRole}
 ${setRole(roleNames.authOwner)}
 GRANT USAGE ON SCHEMA app_auth TO ${q(roleNames.preauth)};
+GRANT USAGE ON SCHEMA app_public TO ${q(roleNames.preauth)};
 ${resetRole}
 ${setRole(roleNames.owner)}
 GRANT USAGE ON SCHEMA app_rls TO ${q(roleNames.preauth)};
@@ -1485,6 +1503,10 @@ ${resetRole}
 ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
 ${resetRole}` : ""}
+${publicVerificationFunctionSource ? `${setRole(roleNames.authOwner)}
+${publicVerificationFunctionSource}
+${publicVerificationSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
+${resetRole}` : ""}
 ${scheduledFunctionSource ? `${setRole(roleNames.owner)}
 GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
 ${resetRole}
@@ -1525,7 +1547,7 @@ FROM pg_proc p
 JOIN pg_namespace n ON n.oid=p.pronamespace
 JOIN pg_roles owner_role ON owner_role.oid=p.proowner
 JOIN pg_language l ON l.oid=p.prolang
-WHERE n.nspname IN ('app_rls','app_auth');
+WHERE n.nspname IN ('app_rls','app_auth','app_public');
 UPDATE mscqr_rls_install.state SET phase='context-helpers-installed' WHERE singleton;
 `;
 
@@ -1885,6 +1907,15 @@ for (const [table, command, rawPredicate] of printingLifecycleOwnerPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "release-fix-5-printing-lifecycle", ownerIdentity: "identity-auth-function-owner", scope: "verified session or exact connector/worker operation plus row-local printing selector" }))};`);
 }
+for (const [table, command, rawPredicate] of publicVerificationOwnerPolicies) {
+  const predicate = rawPredicate
+    .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
+    .replaceAll("{{PREAUTH_ROLE}}", lit(roleNames.preauth));
+  const policyName = shortName("public_verification", table, command);
+  const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "release-fix-6-public-verification", ownerIdentity: "identity-auth-function-owner", scope: "exact pre-auth function plus row-local verification target" }))};`);
+}
 for (const [table, command, rawPredicate] of scheduledOwnerPolicies) {
   const predicate = rawPredicate
     .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
@@ -1946,6 +1977,7 @@ const expectedTableAclSelect = expectedRowsSelect([
   ...administrationOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
   ...qrSystemOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
   ...printingLifecycleOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
+  ...publicVerificationOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
 ], aclColumns);
 const expectedColumnAclSelect = expectedRowsSelect([
   ...grants.flatMap((grant) => grant.command === "DELETE" ? [] : grant.columns.map((column) => ["public", grant.table, column, roleNames.app, roleNames.owner, grant.command, false])),
@@ -1956,6 +1988,7 @@ const expectedColumnAclSelect = expectedRowsSelect([
   ...administrationOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...qrSystemOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...printingLifecycleOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+  ...publicVerificationOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...scheduledOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...outboxOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...operationalReadOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
@@ -2021,7 +2054,12 @@ const expectedRoutineIdentities = [
   ["app_rls", "operational_read_bind_actor", "p_capability text, p_purpose text, p_request_id text, p_requested_licensee_id text"],
   ["app_auth", "b01_preauth_audit", "p_action text, p_entity_type text, p_entity_id text, p_at timestamp without time zone, p_details jsonb"],
   ["app_rls", "b01_authenticated_actor", "p_expected_user_id text, p_expected_session_id text, p_request_id text"],
-  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...authenticationClosureContracts, ...c03Contracts, ...administrationContracts, ...qrSystemContracts, ...printingLifecycleContracts, ...scheduledContracts, ...outboxContracts, ...operationalReadContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
+  ["app_public", "public_verify_bind", "p_operation text, p_request_id text, p_qr_id text, p_code text, p_decision_id text, p_session_id text, p_idempotency_hash text"],
+  ["app_public", "public_verify_execute", "p_qr_id text, p_proof_source text, p_checked_at timestamp without time zone, p_request_id text, p_actor_ip_hash text, p_actor_device_hash text, p_session_start_token_hash text, p_signed_token_digest text"],
+  ["app_public", "require_customer_auth_session", "p_capability text, p_checked_at timestamp without time zone, p_request_id text, p_operation text"],
+  ["app_public", "public_verify_write_evidence", "p_action text, p_entity_type text, p_entity_id text, p_licensee_id text, p_details jsonb, p_recorded_at timestamp without time zone, p_request_id text"],
+  ["app_public", "record_qr_verification", "p_qr_id text, p_proof_class text, p_outcome_code text, p_scanned_at timestamp without time zone, p_request_id text, p_actor_ip_hash text, p_actor_device_hash text"],
+  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...authenticationClosureContracts, ...c03Contracts, ...administrationContracts, ...qrSystemContracts, ...printingLifecycleContracts, ...publicVerificationContracts, ...scheduledContracts, ...outboxContracts, ...operationalReadContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
 ];
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
@@ -2202,6 +2240,25 @@ const policyInventory = [
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),
+  ...publicVerificationOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("public_verification", table, command),
+    command,
+    actors: ["anonymous"],
+    assurance: "source-rule-specific",
+    purpose: ["release-fix-6-public-verification"],
+    scopeType: "security-definer-owner-and-row-local-public-verification-target",
+    scopePredicate: rawPredicate
+      .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
+      .replaceAll("{{PREAUTH_ROLE}}", lit(roleNames.preauth)),
+    columns: [],
+    sourceCommandRuleIds: contractEvidenceFor(publicVerificationContracts, table, command),
+    workflowId: null,
+    route: "Release Fix 6 exact public verification boundary",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
   ...scheduledOwnerPolicies.map(([table, command, rawPredicate]) => ({
     tableId: tables.find((entry) => entry.physicalTable === table)?.id,
     table,
@@ -2252,6 +2309,7 @@ const expectedSchemaAclRows = [
   ["app_rls", roleNames.authOwner, roleNames.owner, "USAGE", false],
   ["app_auth", roleNames.preauth, roleNames.authOwner, "USAGE", false],
   ["app_auth", roleNames.app, roleNames.authOwner, "USAGE", false],
+  ["app_public", roleNames.preauth, roleNames.authOwner, "USAGE", false],
 ];
 const schemaAclColumns = aclColumns.filter(({ name }) => name !== "object_name");
 const expectedSchemaAclSelect = expectedRowsSelect(expectedSchemaAclRows, schemaAclColumns);
@@ -2260,7 +2318,7 @@ FROM pg_namespace n
 CROSS JOIN LATERAL aclexplode(COALESCE(n.nspacl,acldefault('n',n.nspowner))) acl
 LEFT JOIN pg_roles grantee ON grantee.oid=acl.grantee
 JOIN pg_roles grantor ON grantor.oid=acl.grantor
-WHERE n.nspname IN ('public','app_rls','app_auth','mscqr_rls_install') AND acl.grantee<>n.nspowner`;
+WHERE n.nspname IN ('public','app_rls','app_auth','app_public','mscqr_rls_install') AND acl.grantee<>n.nspowner`;
 const currentTableAclSelect = `SELECT n.nspname AS schema_name,c.relname AS object_name,COALESCE(grantee.rolname,'PUBLIC') AS grantee_name,grantor.rolname AS grantor_name,acl.privilege_type,acl.is_grantable
 FROM pg_class c
 JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -2303,7 +2361,7 @@ FROM pg_proc p
 JOIN pg_namespace n ON n.oid=p.pronamespace
 JOIN pg_roles owner_role ON owner_role.oid=p.proowner
 JOIN pg_language l ON l.oid=p.prolang
-WHERE n.nspname IN ('app_rls','app_auth')`;
+WHERE n.nspname IN ('app_rls','app_auth','app_public')`;
 const currentPolicySelect = `SELECT n.nspname,c.relname,p.polname,p.polpermissive,p.polcmd::text,
   ARRAY(SELECT COALESCE(role_name.rolname,'PUBLIC') FROM unnest(p.polroles) role_oid LEFT JOIN pg_roles role_name ON role_name.oid=role_oid ORDER BY COALESCE(role_name.rolname,'PUBLIC')),
   p.polqual::text,p.polwithcheck::text,obj_description(p.oid,'pg_policy')
@@ -2314,7 +2372,7 @@ WHERE n.nspname='public'`;
 const defaultAclScopeRows = [
   ...[roleNames.migration, roleNames.owner, roleNames.authOwner].flatMap((ownerName) => ["r", "S", "f", "T", "n", "L"].map((objectType) => [ownerName, null, objectType])),
   ...["public", "app_rls"].flatMap((schema) => ["r", "S", "f", "T"].map((objectType) => [roleNames.owner, schema, objectType])),
-  ...["r", "S", "f", "T"].map((objectType) => [roleNames.authOwner, "app_auth", objectType]),
+  ...["r", "S", "f", "T"].flatMap((objectType) => [[roleNames.authOwner, "app_auth", objectType],[roleNames.authOwner, "app_public", objectType]]),
 ];
 const defaultAclScopeColumns = [{ name: "owner_name", type: "text" }, { name: "schema_name", type: "text" }, { name: "object_type", type: "text" }];
 const expectedDefaultAclScopeSelect = expectedRowsSelect(defaultAclScopeRows, defaultAclScopeColumns);
@@ -2325,7 +2383,7 @@ ${requirePackagePhaseSql("policies-installed", "verification")}
   IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_roles r ON r.oid=c.relowner WHERE n.nspname='public' AND c.relname IN (${targetTableList}) AND r.rolname<>${lit(roleNames.owner)}) THEN RAISE EXCEPTION 'application table ownership drifted'; END IF;
   IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_roles r ON r.oid=c.relowner WHERE n.nspname='public' AND c.relname='_prisma_migrations' AND r.rolname<>${lit(roleNames.migration)}) THEN RAISE EXCEPTION 'Prisma migration ledger ownership drifted'; END IF;
   IF EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace JOIN pg_roles r ON r.oid=t.typowner WHERE n.nspname='public' AND t.typtype='e' AND r.rolname<>${lit(roleNames.owner)}) THEN RAISE EXCEPTION 'Prisma enum ownership drifted'; END IF;
-  IF EXISTS (SELECT 1 FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner WHERE (n.nspname IN ('public','app_rls') AND r.rolname<>${lit(roleNames.owner)}) OR (n.nspname='app_auth' AND r.rolname<>${lit(roleNames.authOwner)}) OR (n.nspname='mscqr_rls_install' AND r.rolname<>${lit(administrativeExecutorRole)})) THEN RAISE EXCEPTION 'clean-room schema ownership drifted'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner WHERE (n.nspname IN ('public','app_rls') AND r.rolname<>${lit(roleNames.owner)}) OR (n.nspname IN ('app_auth','app_public') AND r.rolname<>${lit(roleNames.authOwner)}) OR (n.nspname='mscqr_rls_install' AND r.rolname<>${lit(administrativeExecutorRole)})) THEN RAISE EXCEPTION 'clean-room schema ownership drifted'; END IF;
   IF EXISTS (
     (SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='mscqr_rls_install' AND c.relkind='r' EXCEPT SELECT * FROM (VALUES ('expected_policy'),('expected_routine'),('state')) expected(table_name))
     UNION ALL

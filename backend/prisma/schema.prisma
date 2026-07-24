@@ -1694,6 +1694,28 @@ model CustomerVerificationSession {
   @@index([proofBindingExpiresAt])
 }
 
+model CustomerAuthSession {
+  id String @id @default(uuid())
+
+  tokenHash String @unique
+  customerUserId String
+  customerEmail String
+  authStrength String
+  authProvider String?
+
+  issuedAt DateTime @default(now())
+  expiresAt DateTime
+  lastSeenAt DateTime?
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerUserId, expiresAt])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
 model CustomerTrustIntake {
   id String @id @default(uuid())
 

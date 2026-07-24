@@ -758,7 +758,7 @@ export default function VerifyExperience() {
 
   const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
   const passkeySupported = isWebAuthnSupported();
-  const currentCode = normalizeVerifyCode(result?.code || lockedResult?.code || session?.verification?.code || session?.code || codeParam);
+  const currentCode = codeParam;
   const authReady = customerAuthenticated || session?.authState === "VERIFIED";
   const displaySessionSummary = session || null;
   const challengeRequired = Boolean(result?.challenge?.required || lockedResult?.challenge?.required || session?.challengeRequired);
@@ -777,14 +777,14 @@ export default function VerifyExperience() {
   }, []);
 
   const openConcernForm = useCallback(() => {
-    if (!currentCode) {
+    if (!session?.sessionId) {
       setReportOpenError(PUBLIC_REPORT_OPEN_ERROR);
       return;
     }
     setReportOpenError("");
     setReportSubmitError("");
     setShowConcernForm(true);
-  }, [currentCode]);
+  }, [session?.sessionId]);
 
   const loadCustomerPasskeys = useCallback(async () => {
     if (!passkeySupported || !customerAuthenticated) {
@@ -1038,11 +1038,9 @@ export default function VerifyExperience() {
       }
       setSession(nextSession);
 
-      const canonicalCode = normalizeVerifyCode(nextResult.code || nextSession.code || codeParam);
       const params = new URLSearchParams();
       params.set("session", nextSession.sessionId);
-      if (token) params.set("t", token);
-      navigate(`/verify/${encodeURIComponent(canonicalCode)}?${params.toString()}`, { replace: true });
+      navigate(`${codeParam ? `/verify/${encodeURIComponent(codeParam)}` : "/verify"}?${params.toString()}`, { replace: true });
 
       if (nextSession.authState === "VERIFIED" || customerAuthenticated) {
         setFlowStep("purchase");
@@ -1209,8 +1207,12 @@ export default function VerifyExperience() {
       const canonicalCode = normalizeVerifyCode(nextResult.code || nextSession.code || codeParam);
       const params = new URLSearchParams();
       params.set("session", nextSession.sessionId);
-      if (token) params.set("t", token);
-      navigate(`/verify/${encodeURIComponent(canonicalCode)}?${params.toString()}`, { replace: true });
+      navigate(
+        token || !canonicalCode
+          ? `/verify?${params.toString()}`
+          : `/verify/${encodeURIComponent(canonicalCode)}?${params.toString()}`,
+        { replace: true }
+      );
       setFlowStep("purchase");
 
       toast({
@@ -1304,10 +1306,12 @@ export default function VerifyExperience() {
   }, [handleSubmitIntakeAndReveal]);
 
   const handleClaimOwnership = async () => {
-    if (!currentCode) return;
     setClaiming(true);
     try {
-      const response = await apiClient.claimVerifiedProduct(currentCode);
+      const sessionId = session?.sessionId || "";
+      const sessionProof = readSessionProofToken(sessionId);
+      if (!sessionId || !sessionProof) throw new Error("A current verification session is required.");
+      const response = await apiClient.claimVerifiedProduct({ id: sessionId, proof: sessionProof });
       if (!response.success || !response.data) {
         throw new Error(response.error || "Could not claim this product.");
       }
@@ -1356,15 +1360,13 @@ export default function VerifyExperience() {
   };
 
   const handleReportConcern = async () => {
-    if (!currentCode) {
-      setReportSubmitError(PUBLIC_REPORT_SUBMIT_ERROR);
-      return;
-    }
     setReporting(true);
     setReportSubmitError("");
     try {
+      const sessionId = session?.sessionId || "";
+      const sessionProof = readSessionProofToken(sessionId);
+      if (!sessionId || !sessionProof) throw new Error("A current verification session is required.");
       const response = await apiClient.reportFraud({
-        code: currentCode,
         reason: reportReason,
         incidentType: reportReason,
         description: String(intake.notes || "").trim() || `Customer reported ${reportReason.replace(/_/g, " ")} during verification.`,
@@ -1372,8 +1374,8 @@ export default function VerifyExperience() {
         observedStatus: result?.publicStatus || result?.status,
         observedOutcome: result?.publicOutcome || result?.publicStatus || result?.status,
         pageUrl: window.location.href,
-        sessionId: session?.sessionId,
-      });
+        sessionId,
+      }, sessionProof);
       if (!response.success) {
         throw new Error(response.error || "Could not submit the concern.");
       }

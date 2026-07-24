@@ -116,7 +116,6 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
   },
 
   async reportFraud(payload: {
-    code: string;
     reason: string;
     incidentType?: string;
     notes?: string;
@@ -127,8 +126,12 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     sessionId?: string;
     decisionId?: string;
     description?: string;
-  }) {
-    return core.request(`/fraud-report`, { method: "POST", body: JSON.stringify(payload) });
+  }, sessionProofToken?: string) {
+    return core.request(`/fraud-report`, {
+      method: "POST",
+      headers: withVerifySessionHeaders(sessionProofToken),
+      body: JSON.stringify(payload),
+    });
   },
 
   async submitProductFeedback(payload: {
@@ -219,7 +222,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     });
   },
 
-  async claimVerifiedProduct(code: string) {
+  async claimVerifiedProduct(session: { id: string; proof: string }) {
     return core.request<{
       claimResult: string;
       message?: string;
@@ -235,8 +238,12 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
         isClaimedByAnother: boolean;
         canClaim: boolean;
       };
-    }>(`/verify/${encodeURIComponent(code)}/claim`, {
+    }>(`/verify/session/${encodeURIComponent(session.id)}/claim`, {
       method: "POST",
+      headers: {
+        "x-verification-session-id": session.id,
+        "x-verification-session-proof": session.proof,
+      },
     });
   },
 

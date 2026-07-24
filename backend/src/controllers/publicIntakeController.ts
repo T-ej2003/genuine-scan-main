@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { randomUUID } from "crypto";
 import { z } from "zod";
 
 import prisma from "../config/database";
@@ -24,9 +25,12 @@ import {
 } from "../rls-waves/session-b/b02/authenticatedRepositories";
 import {
   b02IdempotencyDigest,
+  completePublicSupportDelivery,
+  completeRequestAccessDelivery,
   submitPublicSupport as submitPublicSupportThroughBoundary,
   submitRequestAccess as submitRequestAccessThroughBoundary,
 } from "../rls-waves/session-b/b02/publicBoundaryRepository";
+import { getB01PreAuthPrisma } from "../rls-waves/session-b/b01/runtimeClients";
 
 const nullableTrimmed = (max: number) => z.string().trim().max(max).optional().or(z.literal(""));
 const honeypotSchema = z.string().max(0).optional().or(z.literal(""));
@@ -103,10 +107,16 @@ export const submitPublicRequestAccess = async (req: Request, res: Response) => 
     const referenceCode = makeReferenceCode("RA");
     const data = parsed.data;
 
-    if (b02BoundariesEnabled()) {
+    if (b02BoundariesEnabled() || process.env.NODE_ENV !== "test") {
       const submittedAt = new Date();
-      const requestId = String((req as Request & { requestId?: string }).requestId || "").trim();
-      const accepted = await submitRequestAccessThroughBoundary(prisma, {
+      const requestId = String((req as Request & { requestId?: string }).requestId || randomUUID()).trim();
+      const idempotencyDigest = b02IdempotencyDigest({
+        workflow: "submit-request-access",
+        workEmail: data.workEmail,
+        companyName: data.companyName,
+        message: data.message,
+      });
+      const accepted = await submitRequestAccessThroughBoundary(getB01PreAuthPrisma(), {
         fullName: data.fullName,
         workEmail: data.workEmail,
         companyName: data.companyName,
@@ -118,23 +128,58 @@ export const submitPublicRequestAccess = async (req: Request, res: Response) => 
         referrer: data.referrer?.trim() || null,
         submittedAt,
         requestId,
-        idempotencyDigest: b02IdempotencyDigest({
-          workflow: "submit-request-access",
-          requestId,
-          workEmail: data.workEmail,
-          submittedAt: submittedAt.toISOString(),
-        }),
+        idempotencyDigest,
       });
       if (!accepted?.accepted) {
         return res.status(503).json({ success: false, error: "Request access intake is temporarily unavailable." });
       }
+      if (!accepted.deliveryRequired) {
+        return res.status(201).json({
+          success: true,
+          data: {
+            referenceCode: accepted.publicReference,
+            status: "NEW",
+            emailDeliveryStatus: "SKIPPED",
+            acknowledgementEmailDeliveryStatus: "SKIPPED",
+            message: accepted.message,
+          },
+        });
+      }
+      const [adminMail, ackMail] = await Promise.all([
+        sendRequestAccessAdminNotification({
+          referenceCode: accepted.publicReference,
+          fullName: data.fullName,
+          workEmail: data.workEmail,
+          companyName: data.companyName,
+          roleTitle: data.role,
+          country: data.country,
+          monthlyGarmentVolume: data.monthlyGarmentVolume,
+          message: data.message,
+          sourcePage: data.sourcePage?.trim() || null,
+        }),
+        sendRequestAccessAcknowledgement({
+          referenceCode: accepted.publicReference,
+          fullName: data.fullName,
+          workEmail: data.workEmail,
+          companyName: data.companyName,
+        }),
+      ]);
+      await completeRequestAccessDelivery(getB01PreAuthPrisma(), {
+        idempotencyDigest,
+        adminStatus: toDeliveryStatus(adminMail),
+        adminError: safeEmailError(adminMail.errorCode),
+        acknowledgementStatus: toDeliveryStatus(ackMail),
+        acknowledgementError: safeEmailError(ackMail.errorCode),
+        completedAt: new Date(),
+        requestId,
+      });
       return res.status(201).json({
         success: true,
         data: {
           referenceCode: accepted.publicReference,
           status: "NEW",
-          emailDeliveryStatus: "QUEUED",
-          acknowledgementEmailDeliveryStatus: "QUEUED",
+          emailDeliveryStatus: toDeliveryStatus(adminMail),
+          acknowledgementEmailDeliveryStatus: toDeliveryStatus(ackMail),
           message: accepted.message,
         },
       });
@@ -231,37 +276,84 @@ export const submitPublicSupportIssue = async (req: Request, res: Response) => {
 
     const referenceCode = makeReferenceCode("SUP");
     const data = parsed.data;
-    if (b02BoundariesEnabled()) {
+    if (b02BoundariesEnabled() || process.env.NODE_ENV !== "test") {
       const submittedAt = new Date();
-      const requestId = String((req as Request & { requestId?: string }).requestId || "").trim();
-      const accepted = await submitPublicSupportThroughBoundary(prisma, {
+      const requestId = String((req as Request & { requestId?: string }).requestId || randomUUID()).trim();
+      const idempotencyDigest = b02IdempotencyDigest({
+        workflow: "submit-public-support",
+        publicEmail: data.email,
+        issueType: data.issueType,
+        title: data.title,
+        message: data.message,
+        verificationCode: data.verificationCode?.trim() || null,
+      });
+      const accepted = await submitPublicSupportThroughBoundary(getB01PreAuthPrisma(), {
         publicName: data.name,
         publicEmail: data.email,
         issueType: data.issueType,
         title: data.title,
         description: data.message,
+        verifiedCode: data.verificationCode?.trim() || null,
         productReference: data.productReference?.trim() || null,
         sourcePath: data.sourcePath?.trim() || "/help/support",
         pageUrl: data.pageUrl?.trim() || null,
         submittedAt,
         requestId,
-        idempotencyDigest: b02IdempotencyDigest({
-          workflow: "submit-public-support",
-          requestId,
-          publicEmail: data.email,
-          submittedAt: submittedAt.toISOString(),
-        }),
+        idempotencyDigest,
       });
       if (!accepted?.accepted) {
         return res.status(503).json({ success: false, error: "Support intake is temporarily unavailable." });
       }
+      if (!accepted.deliveryRequired) {
+        return res.status(201).json({
+          success: true,
+          data: {
+            referenceCode: accepted.publicReference,
+            status: "OPEN",
+            emailDeliveryStatus: "SKIPPED",
+            acknowledgementEmailDeliveryStatus: "SKIPPED",
+            message: accepted.message,
+          },
+        });
+      }
+      const safeVerificationCode = data.verificationCode
+        ? `${"*".repeat(Math.max(4, data.verificationCode.length - 4))}${data.verificationCode.slice(-4)}`
+        : null;
+      const [adminMail, ackMail] = await Promise.all([
+        sendPublicSupportAdminNotification({
+          referenceCode: accepted.publicReference,
+          name: data.name,
+          email: data.email,
+          issueType: data.issueType,
+          title: data.title,
+          message: data.message,
+          verificationCode: safeVerificationCode,
+          productReference: data.productReference?.trim() || null,
+          sourcePath: data.sourcePath?.trim() || "/help/support",
+        }),
+        sendPublicSupportAcknowledgement({
+          referenceCode: accepted.publicReference,
+          name: data.name,
+          email: data.email,
+          title: data.title,
+        }),
+      ]);
+      await completePublicSupportDelivery(getB01PreAuthPrisma(), {
+        idempotencyDigest,
+        adminStatus: toDeliveryStatus(adminMail),
+        adminError: safeEmailError(adminMail.errorCode),
+        acknowledgementStatus: toDeliveryStatus(ackMail),
+        acknowledgementError: safeEmailError(ackMail.errorCode),
+        completedAt: new Date(),
+        requestId,
+      });
       return res.status(201).json({
         success: true,
         data: {
           referenceCode: accepted.publicReference,
           status: "OPEN",
-          emailDeliveryStatus: "QUEUED",
-          acknowledgementEmailDeliveryStatus: "QUEUED",
+          emailDeliveryStatus: toDeliveryStatus(adminMail),
+          acknowledgementEmailDeliveryStatus: toDeliveryStatus(ackMail),
           message: accepted.message,
         },
       });

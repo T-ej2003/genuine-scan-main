@@ -12,19 +12,34 @@ const {
 } = require("../../../dist/rls-waves/session-b/b02/publicBoundaryRepository");
 
 const publicFunctions = [
-  "verify_raw_qr",
-  "verify_signed_qr",
-  "record_qr_verification",
-  "start_verification_session",
+  "accept_customer_ownership_transfer",
+  "begin_customer_passkey",
+  "cancel_customer_ownership_transfer",
+  "claim_customer_ownership",
+  "complete_public_support_delivery",
+  "complete_request_access_delivery",
+  "create_customer_ownership_transfer",
+  "delete_customer_passkey",
+  "finish_customer_passkey",
+  "issue_customer_auth_session",
+  "list_customer_passkeys",
+  "load_customer_passkey",
+  "read_customer_auth_session",
   "read_verification_session",
-  "track_support_status",
+  "record_qr_verification",
+  "revoke_customer_auth_session",
+  "start_verification_session",
   "submit_product_feedback",
   "submit_public_incident",
-  "submit_request_access",
   "submit_public_support",
+  "submit_request_access",
+  "track_support_status",
+  "verify_raw_qr",
+  "verify_signed_qr",
+  "write_verification_session",
 ];
 
-test("B02 public repository exposes only the ten static app_public contracts", () => {
+test("B02 public repository exposes only the reviewed static app_public contracts", () => {
   for (const name of publicFunctions) {
     assert.equal(
       (publicSource.match(new RegExp(`app_public\\.${name}\\(`, "g")) || []).length,
@@ -32,7 +47,8 @@ test("B02 public repository exposes only the ten static app_public contracts", (
       `${name} must be called exactly once from a static tagged query`
     );
   }
-  assert.equal((publicSource.match(/SELECT \* FROM app_public\./g) || []).length, publicFunctions.length);
+  const actual = [...new Set([...publicSource.matchAll(/app_public\.([a-z_]+)\(/g)].map((match) => match[1]))].sort();
+  assert.deepEqual(actual, [...publicFunctions].sort());
   assert.doesNotMatch(publicSource, /\$queryRawUnsafe|\$executeRawUnsafe|Prisma\.raw|\bany\[\]/);
   assert.match(publicSource, /returned more than one row/);
   assert.match(publicSource, /returned an unexpected projection/);
@@ -56,6 +72,9 @@ test("B02 public projection validator rejects extra fields and more than one row
     nextAction: "none",
     maskedCode: "ABCD-1234",
     brandName: null,
+    brandWebsite: null,
+    brandSupportEmail: null,
+    brandSupportPhone: null,
     manufacturerName: null,
     manufacturerWebsite: null,
     printedAt: null,

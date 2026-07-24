@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0'
+    AND source_contract_sha256='99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9'
     AND administrator_role='certification-administrator'
     AND phase='context-helpers-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'runtime grants lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:99a6d9100b277d06a8fb99efacccd14b0d4f5f2ac4856c971ae6eb6b800a02a9')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -215,6 +215,56 @@ GRANT INSERT ("id", "eventType", "payload", "requestId", "organizationId", "lice
 GRANT SELECT ("id", "keyHash", "action", "scope", "requestHash", "statusCode", "responsePayload", "createdAt", "completedAt", "expiresAt") ON TABLE public."ActionIdempotencyKey" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "keyHash", "action", "scope", "requestHash", "createdAt", "expiresAt") ON TABLE public."ActionIdempotencyKey" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("action", "scope", "requestHash", "statusCode", "responsePayload", "createdAt", "completedAt", "expiresAt") ON TABLE public."ActionIdempotencyKey" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "code", "licenseeId", "batchId", "status", "scanCount", "scannedAt", "printedAt", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "replayEpoch", "issuanceMode", "customerVerifiableAt", "signedFirstSeenAt", "lastSignedVerificationAt", "lastSignedVerificationIpHash", "lastSignedVerificationDeviceHash") ON TABLE public."QRCode" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("scanCount", "scannedAt", "lastScanIp", "lastScanUserAgent", "lastScanDevice", "signedFirstSeenAt", "lastSignedVerificationAt", "lastSignedVerificationIpHash", "lastSignedVerificationDeviceHash", "updatedAt") ON TABLE public."QRCode" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "isActive") ON TABLE public."Organization" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "orgId", "name", "brandName", "website", "supportEmail", "supportPhone", "isActive", "suspendedAt") ON TABLE public."Licensee" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "licenseeId", "manufacturerId", "lifecycleState", "printedAt", "suspendedAt") ON TABLE public."Batch" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "name", "website") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "status", "originalQrCodeId", "replacementQrCodeId", "createdAt") ON TABLE public."ReplacementChain" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "qrCodeId", "scannedAt", "ipAddress", "device") ON TABLE public."QrScanLog" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "code", "qrCodeId", "licenseeId", "batchId", "status", "scannedAt", "isFirstScan", "scanCount", "customerUserId", "ownershipId", "ownershipMatchMethod", "isTrustedOwnerContext", "ipAddress", "userAgent", "device", "latitude", "longitude", "accuracy", "locationName", "locationCountry", "locationRegion", "locationCity") ON TABLE public."QrScanLog" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "qrCodeId", "code", "licenseeId", "batchId", "proofSource", "outcome", "classification", "metadata", "createdAt") ON TABLE public."VerificationDecision" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "decisionVersion", "qrCodeId", "code", "licenseeId", "batchId", "proofSource", "proofTier", "outcome", "classification", "reasonCodes", "riskBand", "replacementStatus", "degradationMode", "customerTrustLevel", "isAuthentic", "scanCount", "riskScore", "actorIpHash", "actorDeviceHash", "metadata", "createdAt") ON TABLE public."VerificationDecision" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "verificationDecisionId", "metadata", "createdAt") ON TABLE public."VerificationEvidenceSnapshot" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "verificationDecisionId", "scanSummary", "ownershipSnapshot", "riskSignals", "policySnapshot", "lifecycleSnapshot", "metadata", "createdAt") ON TABLE public."VerificationEvidenceSnapshot" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("metadata") ON TABLE public."VerificationEvidenceSnapshot" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "verificationDecisionId", "qrCodeId", "code", "entryMethod", "authState", "customerUserId", "customerEmail", "intakeCompletedAt", "revealedAt", "expiresAt", "proofBindingTokenHash", "proofBindingIssuedAt", "proofBindingExpiresAt", "proofBindingReplayEpoch", "metadata", "createdAt", "updatedAt") ON TABLE public."CustomerVerificationSession" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "verificationDecisionId", "qrCodeId", "code", "entryMethod", "authState", "customerUserId", "customerEmail", "intakeCompletedAt", "revealedAt", "expiresAt", "proofBindingTokenHash", "proofBindingIssuedAt", "proofBindingExpiresAt", "proofBindingReplayEpoch", "metadata", "createdAt", "updatedAt") ON TABLE public."CustomerVerificationSession" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("authState", "customerUserId", "customerEmail", "intakeCompletedAt", "revealedAt", "updatedAt") ON TABLE public."CustomerVerificationSession" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "sessionId") ON TABLE public."CustomerTrustIntake" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "sessionId", "customerUserId", "customerEmail", "purchaseChannel", "sourceCategory", "platformName", "sellerName", "listingUrl", "orderReference", "storeName", "purchaseCity", "purchaseCountry", "purchaseDate", "packagingState", "packagingConcern", "scanReason", "ownershipIntent", "notes", "answers", "createdAt", "updatedAt") ON TABLE public."CustomerTrustIntake" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("customerUserId", "customerEmail", "purchaseChannel", "sourceCategory", "platformName", "sellerName", "listingUrl", "orderReference", "storeName", "purchaseCity", "purchaseCountry", "purchaseDate", "packagingState", "packagingConcern", "scanReason", "ownershipIntent", "notes", "answers", "updatedAt") ON TABLE public."CustomerTrustIntake" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "tokenHash", "customerUserId", "customerEmail", "authStrength", "authProvider", "issuedAt", "expiresAt", "lastSeenAt", "revokedAt", "createdAt", "updatedAt") ON TABLE public."CustomerAuthSession" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "tokenHash", "customerUserId", "customerEmail", "authStrength", "authProvider", "issuedAt", "expiresAt", "lastSeenAt", "revokedAt", "createdAt", "updatedAt") ON TABLE public."CustomerAuthSession" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("lastSeenAt", "revokedAt", "updatedAt") ON TABLE public."CustomerAuthSession" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "qrCodeId", "userId", "deviceTokenHash", "ipHash", "userAgentHash", "claimSource", "linkedAt", "claimedAt") ON TABLE public."Ownership" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "qrCodeId", "userId", "deviceTokenHash", "ipHash", "userAgentHash", "claimSource", "linkedAt", "claimedAt") ON TABLE public."Ownership" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("userId", "ipHash", "userAgentHash", "claimSource", "linkedAt", "claimedAt") ON TABLE public."Ownership" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "qrCodeId", "ownershipId", "initiatedByCustomerId", "initiatedByEmail", "recipientEmail", "tokenHash", "status", "expiresAt", "acceptedAt", "cancelledAt", "lastViewedAt", "metadata", "createdAt", "updatedAt") ON TABLE public."OwnershipTransfer" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "qrCodeId", "ownershipId", "initiatedByCustomerId", "initiatedByEmail", "recipientEmail", "tokenHash", "status", "expiresAt", "acceptedAt", "cancelledAt", "lastViewedAt", "metadata", "createdAt", "updatedAt") ON TABLE public."OwnershipTransfer" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("status", "acceptedAt", "cancelledAt", "lastViewedAt", "updatedAt") ON TABLE public."OwnershipTransfer" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "customerUserId", "customerEmail", "purpose", "ticketHash", "challengeHash", "credentialIds", "createdIpHash", "createdUserAgentHash", "origin", "rpId", "createdAt", "expiresAt", "consumedAt") ON TABLE public."CustomerWebAuthnChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "customerUserId", "customerEmail", "purpose", "ticketHash", "challengeHash", "credentialIds", "createdIpHash", "createdUserAgentHash", "origin", "rpId", "createdAt", "expiresAt", "consumedAt") ON TABLE public."CustomerWebAuthnChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("consumedAt") ON TABLE public."CustomerWebAuthnChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "customerUserId", "customerEmail", "label", "credentialId", "publicKeySpki", "publicKeyAlgorithm", "counter", "transports", "lastUsedAt", "createdAt", "updatedAt") ON TABLE public."CustomerWebAuthnCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "customerUserId", "customerEmail", "label", "credentialId", "publicKeySpki", "publicKeyAlgorithm", "counter", "transports", "lastUsedAt", "createdAt", "updatedAt") ON TABLE public."CustomerWebAuthnCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("label", "publicKeySpki", "publicKeyAlgorithm", "counter", "transports", "lastUsedAt", "updatedAt") ON TABLE public."CustomerWebAuthnCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT DELETE ON TABLE public."CustomerWebAuthnCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details", "ipAddress", "ipHash", "userAgent", "createdAt") ON TABLE public."AuditLog" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "eventType", "payload", "jobType", "requestId", "payloadDigest", "idempotencyKey", "organizationId", "licenseeId", "manufacturerId", "initiatingUserId", "expiresAt", "claimedAt", "claimLeaseExpiresAt", "sinkEventId", "status", "attempts", "nextAttemptAt", "lastError", "sentAt", "createdAt", "updatedAt") ON TABLE public."SecurityEventOutbox" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "keyHash", "action", "scope", "requestHash", "statusCode", "responsePayload", "createdAt", "completedAt", "expiresAt") ON TABLE public."ActionIdempotencyKey" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "keyHash", "action", "scope", "requestHash", "statusCode", "responsePayload", "createdAt", "completedAt", "expiresAt") ON TABLE public."ActionIdempotencyKey" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "qrCodeId", "qrCodeValue", "scanEventId", "licenseeId", "reportedBy", "customerName", "customerEmail", "customerPhone", "customerCountry", "preferredContactMethod", "consentToContact", "incidentType", "severity", "severityOverridden", "description", "photos", "purchasePlace", "purchaseDate", "productBatchNo", "locationLat", "locationLng", "locationName", "locationCountry", "locationRegion", "locationCity", "ipHash", "userAgentHash", "deviceFingerprintHash", "status", "priority", "assignedToUserId", "slaDueAt", "tags", "internalNotes", "resolutionSummary", "resolutionOutcome", "createdAt", "updatedAt") ON TABLE public."Incident" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "incidentId", "actorType", "actorUserId", "eventType", "eventPayload", "createdAt") ON TABLE public."IncidentEvent" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "incidentId", "fileUrl", "storageKey", "fileType", "uploadedByUserId", "uploadedBy", "createdAt") ON TABLE public."IncidentEvidence" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "incidentId", "referenceCode", "licenseeId", "customerEmail", "subject", "status", "priority", "assignedToUserId", "slaDueAt", "firstResponseAt", "resolvedAt", "createdAt", "updatedAt") ON TABLE public."SupportTicket" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "referenceCode", "fullName", "workEmail", "companyName", "roleTitle", "country", "monthlyGarmentVolume", "message", "sourcePage", "referrer", "status", "internalNote", "assignedToUserId", "reviewedByUserId", "reviewedAt", "adminEmailDeliveryStatus", "adminEmailErrorCode", "acknowledgementEmailDeliveryStatus", "acknowledgementEmailErrorCode", "createdAt", "updatedAt") ON TABLE public."RequestAccess" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id") ON TABLE public."RequestAccess" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("adminEmailDeliveryStatus", "adminEmailErrorCode", "acknowledgementEmailDeliveryStatus", "acknowledgementEmailErrorCode", "updatedAt") ON TABLE public."RequestAccess" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "reporterUserId", "reporterRole", "licenseeId", "referenceCode", "publicName", "publicEmail", "issueType", "verificationCode", "productReference", "priority", "title", "description", "status", "internalNote", "responseMessage", "respondedAt", "respondedByUserId", "emailDeliveryStatus", "emailErrorCode", "acknowledgementEmailDeliveryStatus", "acknowledgementEmailErrorCode", "sourcePath", "pageUrl", "autoDetected", "screenshotPath", "screenshotMime", "screenshotSize", "diagnostics", "createdAt", "updatedAt") ON TABLE public."SupportIssueReport" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id") ON TABLE public."SupportIssueReport" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("emailDeliveryStatus", "emailErrorCode", "acknowledgementEmailDeliveryStatus", "acknowledgementEmailErrorCode", "updatedAt") ON TABLE public."SupportIssueReport" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "identityName", "jobFamily", "scheduleId", "capabilityHash", "capabilityHashVersion", "expiresAt", "revokedAt", "revokedReason", "rotatedFromCredentialId", "lastUsedAt", "createdAt", "updatedAt") ON TABLE public."ScheduledJobCredential" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "identityName", "jobFamily", "scheduleId", "capabilityHash", "capabilityHashVersion", "expiresAt", "rotatedFromCredentialId", "updatedAt") ON TABLE public."ScheduledJobCredential" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("lastUsedAt", "revokedAt", "revokedReason", "updatedAt") ON TABLE public."ScheduledJobCredential" TO "mscqr_rls_cert_auth_owner";
@@ -264,6 +314,7 @@ DO $$ BEGIN
 END $$;
 SET ROLE "mscqr_rls_cert_auth_owner";
 GRANT USAGE ON SCHEMA app_auth TO "mscqr_rls_cert_preauth";
+GRANT USAGE ON SCHEMA app_public TO "mscqr_rls_cert_preauth";
 RESET ROLE;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;

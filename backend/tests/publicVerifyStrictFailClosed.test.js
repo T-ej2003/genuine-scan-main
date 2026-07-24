@@ -134,6 +134,11 @@ const fakePrisma = {
 };
 
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
+mockModule("rls-waves/session-b/b01/runtimeClients.js", { getB01PreAuthPrisma: () => ({}) });
+mockModule("rls-waves/session-b/b02/publicBoundaryRepository.js", {
+  verifyRawQr: async () => { throw qrScanCustomerFkError; },
+  verifySignedQr: async () => null,
+});
 mockModule("services/locationService.js", { reverseGeocode: async () => null });
 mockModule("services/governanceService.js", {
   resolveVerifyUxPolicy: async () => verifyUxPolicy,
@@ -213,7 +218,7 @@ const res = {
   assert.strictEqual(res.statusCode, 503, "legacy public verify should fail closed when scan-log integrity is stale");
   assert.strictEqual(res.body?.success, false, "legacy public verify should return an unsuccessful degraded payload");
   assert.strictEqual(res.body?.degraded, true, "legacy public verify should flag degraded mode");
-  assert.strictEqual(res.body?.code, "PUBLIC_SCAN_LOG_INTEGRITY_STALE", "legacy public verify should expose the degraded code");
+  assert.strictEqual(res.body?.code, "PUBLIC_VERIFICATION_UNAVAILABLE", "legacy public verify should expose the stable boundary code");
 
   console.log("public verify strict fail-closed test passed");
 })().catch((error) => {
