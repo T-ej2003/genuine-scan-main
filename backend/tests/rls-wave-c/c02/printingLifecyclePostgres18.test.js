@@ -157,6 +157,7 @@ async function main() {
   for (const table of ["Batch", "QRCode", "PrintJob", "PrintSession", "PrintItem", "Printer", "PrinterRegistration", "ActionIdempotencyKey"]) {
     denied(app, `SELECT * FROM public."${table}" LIMIT 1`);
   }
+  denied(app, `SELECT "underInvestigationReason" FROM public."QRCode" WHERE id='${ids.qr}'`);
   denied(app, `UPDATE public."QRCode" SET code='forged' WHERE id='${ids.qr}'`);
   denied(app, `SELECT app_rls.install_actor_context('${ids.maker}','MANUFACTURER_ADMIN','${ids.orgA}','${ids.licenseeA}','${ids.maker}','mfa-verified','forged','printing-create-job')`);
   denied(app, `SELECT app_rls.printing_create_job(
@@ -165,6 +166,13 @@ async function main() {
     '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("missing-cap")}","tokenExpiresAt":"${new Date(Date.now() + 3_600_000).toISOString()}"}]'::jsonb
   )`);
   denied(app, `SELECT app_rls.printing_readiness('${caps.outsider}','printing-readiness','${requestId()}','BATCH','${ids.batch}','{}'::jsonb)`);
+  const readiness = json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','BATCH','${ids.batch}','{}'::jsonb
+  )`);
+  assert.equal(readiness.batch.id, ids.batch);
+  assert.deepEqual(Object.keys(readiness.printableItems[0]).sort(), [
+    "batchId", "code", "displayCode", "id", "licenseeId", "replayEpoch", "status",
+  ]);
   const idempotencyStart = json(app, `SELECT app_rls.printing_idempotency(
     '${caps.maker}','printing-idempotency','${requestId()}','BEGIN','PRINT_JOB_CREATE',
     '${idempotencyKeyHash}','${idempotencyRequestHash}',NULL,'{}'::jsonb
@@ -346,6 +354,9 @@ async function main() {
   assert.equal(race.filter((entry) => entry.status !== 0).length, 1, "the conflicting print-job creation must fail closed");
   assert.match(race.find((entry) => entry.status !== 0).output, /ACTIVE_PRINT_JOB_EXISTS|BATCH_BUSY/);
   assert.equal(Number(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "batchId"='${ids.raceBatch}'`)), 1);
+  denied(app, `SELECT app_rls.printing_record_sample(
+    '${caps.maker}','printing-sample-scan','${requestId()}','${created.job.id}','immutable-printing-race-code','{}'::jsonb
+  )`, /QR_NOT_IN_PRINT_JOB/);
 
   const beforeAudit = Number(psql(admin, `SELECT count(*) FROM public."AuditLog" WHERE "entityId"='${ids.batch}'`));
   denied(app, `BEGIN; SELECT app_rls.printing_release_batch(

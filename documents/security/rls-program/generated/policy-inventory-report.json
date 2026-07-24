@@ -3953,6 +3953,7 @@
         "contract:c02-respond-fraud-report:Licensee:SELECT",
         "contract:c03-add-incident-evidence:Licensee:SELECT",
         "contract:c03-approve-sensitive-approval:Licensee:SELECT",
+        "contract:c03-bind-sensitive-approval-actor:Licensee:SELECT",
         "contract:c03-complete-compliance-pack-job:Licensee:SELECT",
         "contract:c03-complete-compliance-pack-rebuild:Licensee:SELECT",
         "contract:c03-compute-incident-severity:Licensee:SELECT",
@@ -4595,6 +4596,7 @@
       "scopePredicate": "(app_rls.c02_audit_trace_session_valid() AND \"manufacturerId\"=current_setting('app.user_id',true) AND \"licenseeId\"=current_setting('app.licensee_id',true)) OR (app_rls.risk_analytics_session_valid() AND \"licenseeId\"=current_setting('app.risk_analytics_licensee_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:c03-bind-sensitive-approval-actor:ManufacturerLicenseeLink:SELECT",
         "contract:rf7-risk-analytics-snapshot:ManufacturerLicenseeLink:SELECT"
       ],
       "workflowId": null,
@@ -5122,6 +5124,7 @@
         "contract:c02-respond-fraud-report:Organization:SELECT",
         "contract:c03-add-incident-evidence:Organization:SELECT",
         "contract:c03-approve-sensitive-approval:Organization:SELECT",
+        "contract:c03-bind-sensitive-approval-actor:Organization:SELECT",
         "contract:c03-complete-compliance-pack-job:Organization:SELECT",
         "contract:c03-complete-compliance-pack-rebuild:Organization:SELECT",
         "contract:c03-compute-incident-severity:Organization:SELECT",
@@ -7700,6 +7703,7 @@
         "contract:c02-respond-fraud-report:RefreshToken:SELECT",
         "contract:c03-add-incident-evidence:RefreshToken:SELECT",
         "contract:c03-approve-sensitive-approval:RefreshToken:SELECT",
+        "contract:c03-bind-sensitive-approval-actor:RefreshToken:SELECT",
         "contract:c03-complete-compliance-pack-job:RefreshToken:SELECT",
         "contract:c03-complete-compliance-pack-rebuild:RefreshToken:SELECT",
         "contract:c03-create-policy-rule:RefreshToken:SELECT",
@@ -8362,10 +8366,11 @@
         "c03-reviewed-boundary"
       ],
       "scopeType": "security-definer-owner-capability-and-resource-derived-context",
-      "scopePredicate": "app_rls.c03_session_valid() AND \"licenseeId\"=current_setting('app.licensee_id',true)",
+      "scopePredicate": "app_rls.c03_session_valid() AND (\"licenseeId\"=current_setting('app.licensee_id',true) OR (current_setting('app.c03_operation',true)='sensitive-action-approval-revalidate' AND id=current_setting('app.c03_approval_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:c03-approve-sensitive-approval:SensitiveActionApproval:SELECT",
+        "contract:c03-bind-sensitive-approval-actor:SensitiveActionApproval:SELECT",
         "contract:c03-list-sensitive-approvals:SensitiveActionApproval:SELECT",
         "contract:c03-reject-sensitive-approval:SensitiveActionApproval:SELECT",
         "contract:c03-update-retention-policy:SensitiveActionApproval:SELECT",
@@ -9188,6 +9193,7 @@
         "contract:c03-add-incident-evidence:User:SELECT",
         "contract:c03-approve-sensitive-approval:User:SELECT",
         "contract:c03-assert-restricted-identity:User:SELECT",
+        "contract:c03-bind-sensitive-approval-actor:User:SELECT",
         "contract:c03-complete-compliance-pack-job:User:SELECT",
         "contract:c03-complete-compliance-pack-rebuild:User:SELECT",
         "contract:c03-create-policy-rule:User:SELECT",

@@ -76,8 +76,13 @@ const allocateLicenseeTopupSchema = z
   });
 
 const isScopeError = (error: unknown) =>
-  error instanceof Error &&
-  /access denied|no licensee association|AUTH_SESSION_CAPABILITY_DENIED/i.test(error.message);
+  (
+    (error as any)?.code === "P2010" &&
+    (error as any)?.meta?.code === "42501" &&
+    String((error as any)?.meta?.message || "").trim() === "ERROR: PRINTING_BOUNDARY_DENIED"
+  ) ||
+  (error instanceof Error &&
+    /access denied|no licensee association|AUTH_SESSION_CAPABILITY_DENIED/i.test(error.message));
 
 const createBatchSchema = z
   .object({
@@ -981,6 +986,9 @@ export const releaseBatch = async (req: AuthRequest, res: Response) => {
   } catch (e) {
     const statusCode = typeof (e as { statusCode?: unknown })?.statusCode === "number" ? Number((e as { statusCode: number }).statusCode) : 500;
     const readiness = (e as { readiness?: unknown })?.readiness || null;
+    if (isScopeError(e)) {
+      return res.status(404).json({ success: false, error: "Batch not found" });
+    }
     if (statusCode === 409) {
       const readinessObj =
         readiness && typeof readiness === "object" && !Array.isArray(readiness)

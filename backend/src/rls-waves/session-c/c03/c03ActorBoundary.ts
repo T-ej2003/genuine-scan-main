@@ -12,7 +12,7 @@ export const C03_RESOURCE_SCOPE_FUNCTIONS = {
   compliancePackJob: "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
   incidentEvidence: "app_auth.require_authenticated_session",
   incidentEvidenceStorage: "app_rls.c03_get_incident_evidence_file_by_storage_key",
-  sensitiveActionApproval: "app_auth.require_authenticated_session",
+  sensitiveActionApproval: "app_rls.c03_bind_sensitive_approval_actor",
 } as const;
 
 export type C03RequiredAssurance = "password-verified" | "mfa-verified" | "step-up-verified";
@@ -189,6 +189,27 @@ export const withC03ResourceTransaction = <T>(
       ) {
         throw new C03AccessError("Access denied to this compliance job");
       }
+    }
+    if (boundary.resourceType === "sensitiveActionApproval") {
+      const rows = await tx.$queryRaw<VerifiedResourceScopeRow[]>`
+        SELECT
+          scope.user_id AS "userId",
+          scope.role,
+          scope.organization_id AS "organizationId",
+          scope.licensee_id AS "licenseeId"
+        FROM app_rls.c03_bind_sensitive_approval_actor(
+          ${context.databaseSessionCapability}, ${context.purpose}, ${context.requestId}, ${boundary.resourceId}
+        ) AS scope
+      `;
+      const scope = rows[0];
+      if (rows.length !== 1 || scope.userId !== context.userId || scope.role !== context.role) {
+        throw new C03AccessError("Access denied to this sensitive approval");
+      }
+      return callback(tx, {
+        ...context,
+        organizationId: scope.organizationId,
+        licenseeId: scope.licenseeId,
+      });
     }
     return callback(tx, context);
   }, isolationLevel);

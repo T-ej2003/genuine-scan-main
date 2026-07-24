@@ -31,6 +31,7 @@ BEGIN
           set_config('app.c03_licensee_id','',true),
           set_config('app.c03_job_id','',true),
           set_config('app.c03_incident_id','',true),
+          set_config('app.c03_approval_id','',true),
           set_config('app.c03_storage_key','',true);
   RETURN QUERY SELECT actor."sessionId"::text,actor."userId"::text,actor.role::text,
     actor."organizationId"::text,actor."licenseeId"::text,actor.assurance::text;
@@ -184,6 +185,40 @@ BEGIN
   PERFORM app_rls.c03_bind_operation('compliance-pack-revalidate',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
   PERFORM app_rls.c03_bind_operation('compliance-pack-revalidate',scope.licensee_id,p_job_id);
+  RETURN QUERY SELECT actor.user_id::text,actor.role::text,scope.organization_id::text,scope.licensee_id::text;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_bind_sensitive_approval_actor(
+  p_capability text,p_purpose text,p_request_id text,p_approval_id text
+) RETURNS TABLE(user_id text,role text,organization_id text,licensee_id text)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; approval_licensee_id text; scope record;
+BEGIN
+  IF p_purpose NOT IN ('sensitive-action-approval-approve','sensitive-action-approval-reject')
+     OR p_approval_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+  THEN RAISE EXCEPTION 'C03_APPROVAL_DENIED' USING ERRCODE='42501'; END IF;
+
+  SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN')
+     OR actor.assurance<>'ADMIN_MFA'
+  THEN RAISE EXCEPTION 'C03_APPROVAL_DENIED' USING ERRCODE='42501'; END IF;
+
+  PERFORM set_config('app.c03_operation','sensitive-action-approval-revalidate',true),
+          set_config('app.c03_approval_id',p_approval_id,true);
+  SELECT "licenseeId" INTO approval_licensee_id
+    FROM public."SensitiveActionApproval"
+   WHERE id=p_approval_id;
+  IF NOT FOUND OR approval_licensee_id IS NULL
+  THEN RAISE EXCEPTION 'C03_APPROVAL_DENIED' USING ERRCODE='42501'; END IF;
+
+  PERFORM set_config('app.c03_licensee_id',approval_licensee_id,true);
+  SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(
+    approval_licensee_id,actor.role,actor.organization_id,actor.licensee_id
+  );
+  PERFORM set_config('app.licensee_id',scope.licensee_id,true),
+          set_config('app.c03_licensee_id',scope.licensee_id,true),
+          set_config('app.c03_operation','sensitive-action-approval-review',true);
   RETURN QUERY SELECT actor.user_id::text,actor.role::text,scope.organization_id::text,scope.licensee_id::text;
 END
 $fn$;
@@ -372,6 +407,7 @@ REVOKE ALL ON FUNCTION app_rls.c03_validate_compliance_result(jsonb) FROM PUBLIC
 REVOKE ALL ON FUNCTION app_rls.c03_queue_audit(text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_build_compliance_report(text,timestamp with time zone,timestamp with time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_revalidate_compliance_pack_job_actor_scope(text,text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_bind_sensitive_approval_actor(text,text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_start_compliance_pack_job(text,text,text,text,text,timestamp with time zone,timestamp with time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_complete_compliance_pack_job(text,text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_fail_compliance_pack_job(text,text,text,text,text) FROM PUBLIC;
@@ -387,6 +423,7 @@ ALTER FUNCTION app_rls.c03_validate_compliance_result(jsonb) OWNER TO {{AUTH_OWN
 ALTER FUNCTION app_rls.c03_queue_audit(text,text,text,jsonb) OWNER TO {{AUTH_OWNER}};
 ALTER FUNCTION app_rls.c03_build_compliance_report(text,timestamp with time zone,timestamp with time zone) OWNER TO {{AUTH_OWNER}};
 ALTER FUNCTION app_rls.c03_revalidate_compliance_pack_job_actor_scope(text,text,text,text) OWNER TO {{AUTH_OWNER}};
+ALTER FUNCTION app_rls.c03_bind_sensitive_approval_actor(text,text,text,text) OWNER TO {{AUTH_OWNER}};
 ALTER FUNCTION app_rls.c03_start_compliance_pack_job(text,text,text,text,text,timestamp with time zone,timestamp with time zone) OWNER TO {{AUTH_OWNER}};
 ALTER FUNCTION app_rls.c03_complete_compliance_pack_job(text,text,text,text,jsonb) OWNER TO {{AUTH_OWNER}};
 ALTER FUNCTION app_rls.c03_fail_compliance_pack_job(text,text,text,text,text) OWNER TO {{AUTH_OWNER}};

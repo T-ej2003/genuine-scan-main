@@ -2,7 +2,10 @@ const assert = require("assert");
 const { P2TestDbSkip, withP2TestApp } = require("./helpers/p2TestDb");
 const { ids, issueBearerTokens, seedP2Fixtures } = require("./helpers/p2SeedFactories");
 
-const authHeader = (token) => ({ authorization: `Bearer ${token}` });
+const authHeader = (token) => ({
+  authorization: `Bearer ${token.accessToken}`,
+  "x-database-session-capability": token.databaseCapability,
+});
 const deniedStatuses = new Set([401, 403, 404, 410, 428]);
 
 const assertSafeResponse = (response, label) => {
@@ -33,9 +36,9 @@ const parseCsv = (text) => {
 };
 
 (async () => {
-  await withP2TestApp(async ({ request, prisma }) => {
+  await withP2TestApp(async ({ request, prisma, preauthPrisma }) => {
     await seedP2Fixtures(prisma);
-    const tokens = await issueBearerTokens();
+    const tokens = await issueBearerTokens(preauthPrisma);
 
     await prisma.supportIssueReport.update({
       where: { id: ids.supportReportA },

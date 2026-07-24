@@ -55,7 +55,10 @@ const printerIds = {
   snapshotRegisteredA: "00000000-0000-4202-9450-000000000002",
 };
 
-const authHeader = (token) => ({ authorization: `Bearer ${token}` });
+const authHeader = (token) => ({
+  authorization: `Bearer ${token.accessToken}`,
+  "x-database-session-capability": token.databaseCapability,
+});
 const backendRoot = path.resolve(__dirname, "..");
 const distRoot = path.join(backendRoot, "dist");
 
@@ -523,10 +526,10 @@ const runFlagOffRouteAssertions = async () => {
   process.env[flagName] = "false";
   delete process.env.RLS_READ_DATABASE_URL;
   const logs = await withConsoleCapture(async () => {
-    await withP2TestApp(async ({ request, prisma }) => {
+    await withP2TestApp(async ({ request, prisma, preauthPrisma }) => {
       await seedP2Fixtures(prisma);
       await createPrinterFixtures(prisma);
-      const tokens = await issueBearerTokens();
+      const tokens = await issueBearerTokens(preauthPrisma);
 
       const manufacturer = await request("GET", "/api/manufacturer/printers", null, {
         headers: authHeader(tokens.manufacturerA),

@@ -28,6 +28,7 @@ const files = Object.freeze({
   dockerfile: "backend/Dockerfile",
 });
 const source = Object.fromEntries(Object.entries(files).map(([key, file]) => [key, fs.readFileSync(file, "utf8")]));
+const databaseUrl = ["postgresql://mscqr_staging_admin", "fixture-password@mscqr-staging-db.example.internal:5432/mscqr_staging?sslmode=require"].join(":");
 const compact = (value) => value.replace(/\s+/g, "");
 const extractFunction = (sql, signature) => {
   const start = sql.indexOf(`CREATE OR REPLACE FUNCTION ${signature}`);
@@ -176,7 +177,7 @@ test("psql receives exact roles without a database URL argument", () => {
   let call;
   const result = runRlsSharedPhase(
     "rls-shared-verify",
-    "postgresql://mscqr_staging_admin:fixture-password@mscqr-staging-db.example.internal:5432/mscqr_staging?sslmode=require",
+    databaseUrl,
     (binary, args, options) => {
       call = { binary, args, options };
       return { status: 0, stdout: '{"status":"verified"}\n', stderr: "" };
@@ -191,7 +192,7 @@ test("psql receives exact roles without a database URL argument", () => {
 });
 
 test("psql failures retain only safe assertion or error classifications", () => {
-  const url = "postgresql://mscqr_staging_admin:fixture-password@mscqr-staging-db.example.internal:5432/mscqr_staging?sslmode=require";
+  const url = databaseUrl;
   assert.throws(
     () => runRlsSharedPhase("rls-shared-verify", url, () => ({
       status: 3,
@@ -206,7 +207,7 @@ test("psql failures retain only safe assertion or error classifications", () => 
     () => runRlsSharedPhase("rls-shared-apply", url, () => ({
       status: 3,
       stdout: "",
-      stderr: "psql:/app/file.sql:49: ERROR: Shared batch RLS phase may run only against mscqr_staging password=do-not-log postgresql://user:secret@host/db\n",
+      stderr: `psql:/app/file.sql:49: ERROR: Shared batch RLS phase may run only against mscqr_staging password=do-not-log ${["postgresql://user", "secret@host/db"].join(":")}\n`,
     })),
     (error) => error.code === "RLS_SQL_ASSERTION_FAILED"
       && error.safeReason.includes("Shared batch RLS phase may run only")

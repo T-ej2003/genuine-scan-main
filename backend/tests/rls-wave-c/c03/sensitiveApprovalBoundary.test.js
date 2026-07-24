@@ -1,7 +1,16 @@
 const assert = require("assert");
+const fs = require("fs");
 const path = require("path");
 
 const distRoot = path.resolve(__dirname, "../../../dist");
+const controllerSource = fs.readFileSync(
+  path.resolve(__dirname, "../../../src/controllers/approvalController.ts"),
+  "utf8"
+);
+const approvalSql = fs.readFileSync(
+  path.resolve(__dirname, "../../../src/rls-waves/session-c/c03/c03ApprovalFunctions.sql"),
+  "utf8"
+);
 const approvalRepository = require(path.join(distRoot, "rls-waves/session-c/c03/c03ApprovalRepository.js"));
 const incidentRepository = require(path.join(distRoot, "rls-waves/session-c/c03/c03IncidentRepository.js"));
 const mockModule = (relativePath, exportsValue) => {
@@ -13,6 +22,7 @@ let actorBoundary = null;
 let resourceBoundary = null;
 let createInput = null;
 let approveNote = null;
+let approvalRepositoryError = null;
 class C03AccessError extends Error {
   constructor(message, statusCode = 403) {
     super(message);
@@ -37,6 +47,7 @@ mockModule("rls-waves/session-c/c03/c03ApprovalRepository.js", {
   },
   listSensitiveApprovalsInTransaction: async () => [],
   approveSensitiveApprovalInTransaction: async (_tx, _approvalId, note) => {
+    if (approvalRepositoryError) throw approvalRepositoryError;
     approveNote = note;
     return { approval: { status: "EXECUTED" } };
   },
@@ -78,6 +89,18 @@ const create = (overrides = {}) => service.createSensitiveActionApproval({
 });
 
 const run = async () => {
+  assert.equal(
+    (controllerSource.match(/databaseSessionCapability:\s*c03DatabaseSessionCapability\(req\)/g) || []).length,
+    3,
+    "all active sensitive-approval routes must pass the authenticated database capability"
+  );
+  assert.doesNotMatch(approvalSql, /SensitiveActionApproval"%ROWTYPE|RETURNING\s+\*|to_jsonb\(a\)/i);
+  assert.equal(
+    (controllerSource.match(/requestId:\s*c03RequestId\(req\)/g) || []).length,
+    3,
+    "all active sensitive-approval routes must pass the canonical request ID"
+  );
+
   await assert.rejects(
     () => create({ securityContext: undefined }),
     (error) => error instanceof C03AccessError && error.statusCode === 401
@@ -121,6 +144,45 @@ const run = async () => {
   assert.equal(resourceBoundary.resourceId, ids.approval);
   assert.equal(resourceBoundary.requiredAssurance, "mfa-verified");
   assert.equal(approveNote, "reviewed");
+
+  approvalRepositoryError = {
+    code: "P2010",
+    meta: { code: "42501", message: "ERROR: C03_APPROVAL_DENIED" },
+  };
+  await assert.rejects(
+    () => service.approveSensitiveActionApproval({
+      approvalId: ids.approval,
+      actor,
+      securityContext: { databaseSessionCapability, requestId: ids.request },
+    }),
+    (error) => error instanceof C03AccessError && error.statusCode === 400 && /cannot approve/i.test(error.message)
+  );
+  approvalRepositoryError = {
+    code: "P2010",
+    meta: { code: "42501", message: "ERROR: C03_SCOPE_DENIED" },
+  };
+  await assert.rejects(
+    () => service.approveSensitiveActionApproval({
+      approvalId: ids.approval,
+      actor,
+      securityContext: { databaseSessionCapability, requestId: ids.request },
+    }),
+    (error) => error instanceof C03AccessError && error.statusCode === 400 && /cannot approve/i.test(error.message)
+  );
+  const unrelatedDatabaseError = {
+    code: "P2010",
+    meta: { code: "42501", message: "ERROR: unrelated permission failure" },
+  };
+  approvalRepositoryError = unrelatedDatabaseError;
+  await assert.rejects(
+    () => service.approveSensitiveActionApproval({
+      approvalId: ids.approval,
+      actor,
+      securityContext: { databaseSessionCapability, requestId: ids.request },
+    }),
+    (error) => error === unrelatedDatabaseError
+  );
+  approvalRepositoryError = null;
 
   resourceBoundary = null;
   await assert.rejects(

@@ -52,6 +52,11 @@ test("B02 public repository exposes only the reviewed static app_public contract
   assert.doesNotMatch(publicSource, /\$queryRawUnsafe|\$executeRawUnsafe|Prisma\.raw|\bany\[\]/);
   assert.match(publicSource, /returned more than one row/);
   assert.match(publicSource, /returned an unexpected projection/);
+  assert.match(
+    publicSource,
+    /\$\{checkedAt\}::timestamp without time zone/,
+    "verify_raw_qr must bind its Date to the exact timestamp-without-time-zone signature"
+  );
 });
 
 test("B02 authenticated repositories cannot accept caller-built Prisma scope or update objects", () => {
@@ -97,6 +102,14 @@ test("B02 public projection validator rejects extra fields and more than one row
     /more than one row/
   );
   assert.deepEqual(await verifyRawQr({ $queryRaw: async () => [valid] }, input), valid);
+  let requestedCode;
+  await verifyRawQr({
+    $queryRaw: async (_strings, ...values) => {
+      [requestedCode] = values;
+      return [valid];
+    },
+  }, { ...input, requestedCode: "c_CaseSensitiveCode123" });
+  assert.equal(requestedCode, "c_CaseSensitiveCode123");
 });
 
 test("B02 public validation fails before executing a protected query", async () => {

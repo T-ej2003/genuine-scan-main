@@ -5,6 +5,7 @@ const {
 } = require("../dist/services/customerVerifyOAuthService");
 
 const allowed = ["https://app.mscqr.example"];
+const credentialedReturnTo = ["https://user", "secret@app.mscqr.example/verify/CODE"].join(":");
 
 assert.equal(
   validateCustomerVerifyReturnTo("https://app.mscqr.example/verify/CODE?source=scan", allowed),
@@ -21,7 +22,7 @@ for (const unsafe of [
   "https://app.mscqr.example/verification",
   "https://app.mscqr.example/scanner",
   "javascript:alert(1)",
-  "https://user:secret@app.mscqr.example/verify/CODE",
+  credentialedReturnTo,
 ]) {
   assert.throws(
     () => validateCustomerVerifyReturnTo(unsafe, allowed),

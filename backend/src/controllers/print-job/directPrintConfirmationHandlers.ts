@@ -1,6 +1,7 @@
 import { Response } from "express";
 
 import { AuthRequest } from "../../middleware/auth";
+import { extractPublicCodeFromSampleScan } from "../../services/printSampleScanService";
 import {
   readPrintingProjection,
   recordPrintingSample,
@@ -11,6 +12,7 @@ import {
   printJobIdParamSchema,
   sampleScanSchema,
 } from "./shared";
+import { describePrintJobCreateFailure } from "./errorResponses";
 
 export const confirmDirectPrintItem = async (_req: AuthRequest, res: Response) =>
   res.status(410).json({
@@ -24,14 +26,18 @@ const boundary = (req: AuthRequest) => ({
 });
 
 const failure = (error: any, fallback: string) => {
-  const code = String(error?.code || error?.message || "");
-  const status = Number(error?.statusCode || (/DENIED|42501/.test(code) ? 403 : /NOT_FOUND/.test(code) ? 404 : 409));
+  const mapped = describePrintJobCreateFailure(error);
+  if (mapped.payload.code !== "internal_print_job_create_failed") {
+    return { status: mapped.status, payload: mapped.payload };
+  }
   return {
-    status,
+    status: 500,
     payload: {
       success: false,
-      error: status >= 500 ? fallback : String(error?.message || fallback),
-      ...(code ? { code, errorCode: code } : {}),
+      error: fallback,
+      message: fallback,
+      code: "internal_print_job_create_failed",
+      errorCode: "internal_print_job_create_failed",
     },
   };
 };
@@ -85,7 +91,7 @@ export const capturePrintJobSampleScan = async (req: AuthRequest, res: Response)
     const result = await recordPrintingSample({
       ...boundary(req),
       jobId: params.data.id,
-      code: body.data.publicCode,
+      code: extractPublicCodeFromSampleScan(body.data.publicCode),
       evidence: { source: "authenticated-print-sample" },
     });
     return res.json({ success: true, data: result });

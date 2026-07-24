@@ -19,13 +19,14 @@ const ids = {
 };
 
 let queryResult = [];
+let queryResults = [];
 let queryError = null;
 let lastQuery = "";
 const tx = {
   $queryRaw: async (strings) => {
     lastQuery = Array.from(strings).join("?");
     if (queryError) throw queryError;
-    return queryResult;
+    return queryResults.length ? queryResults.shift() : queryResult;
   },
 };
 mockModule("config/database.js", { __esModule: true, default: { $transaction: async (callback) => callback(tx) } });
@@ -99,6 +100,26 @@ const run = async () => {
   }, async (_db, verified) => verified);
   assert.equal(resource.sessionId, ids.session);
   assert.match(lastQuery, /app_rls\.c03_revalidate_compliance_pack_job_actor_scope/);
+
+  queryResults = [
+    [actorRow({ role: "SUPER_ADMIN", organizationId: null, licenseeId: null })],
+    [{
+      userId: ids.actor,
+      role: "SUPER_ADMIN",
+      organizationId: ids.org,
+      licenseeId: ids.licensee,
+    }],
+  ];
+  const approval = await withC03ResourceTransaction({
+    ...boundary(),
+    purpose: "sensitive-action-approval-reject",
+    resourceId: ids.resource,
+    resourceType: "sensitiveActionApproval",
+    allowedRoles: ["SUPER_ADMIN"],
+  }, async (_db, verified) => verified);
+  assert.equal(approval.licenseeId, ids.licensee);
+  assert.equal(approval.organizationId, ids.org);
+  assert.match(lastQuery, /app_rls\.c03_bind_sensitive_approval_actor/);
 
   queryError = new Error("AUTHENTICATED_SESSION_REVOKED");
   await assert.rejects(

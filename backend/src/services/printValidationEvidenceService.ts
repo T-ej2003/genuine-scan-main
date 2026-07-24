@@ -39,16 +39,28 @@ export const generatePrintValidationEvidenceReport = async (params: {
   printJobId?: string | null;
   includePublicCode?: boolean;
 }) => {
-  const report = await readPrintingProjection({
-    capability: params.capability,
-    requestId: params.requestId,
-    operation: "VALIDATION_EVIDENCE",
-    subjectId: params.batchId,
-    options: {
-      printJobId: params.printJobId || null,
-      includePublicCode: Boolean(params.includePublicCode),
-    },
-  });
+  let report;
+  try {
+    report = await readPrintingProjection({
+      capability: params.capability,
+      requestId: params.requestId,
+      operation: "VALIDATION_EVIDENCE",
+      subjectId: params.batchId,
+      options: {
+        printJobId: params.printJobId || null,
+        includePublicCode: Boolean(params.includePublicCode),
+      },
+    });
+  } catch (error: any) {
+    if (
+      error?.code === "P2010" &&
+      error?.meta?.code === "42501" &&
+      String(error?.meta?.message || "").trim() === "ERROR: PRINTING_BOUNDARY_DENIED"
+    ) {
+      throw Object.assign(new Error("Validation evidence not found."), { statusCode: 404 });
+    }
+    throw error;
+  }
   if (!report?.batch?.id) {
     throw Object.assign(new Error("Validation evidence not found."), { statusCode: 404 });
   }

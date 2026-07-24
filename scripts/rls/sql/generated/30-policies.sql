@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0'
+    AND source_contract_sha256='79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1'
     AND administrator_role='certification-administrator'
     AND phase='runtime-grants-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'policy package lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -548,7 +548,7 @@ CREATE POLICY "c03_capability_evidenceretentionpolicy_update" ON public."Evidenc
 COMMENT ON POLICY "c03_capability_evidenceretentionpolicy_update" ON public."EvidenceRetentionPolicy" IS '{"boundary":"c03-authenticated-capability","ownerIdentity":"identity-auth-function-owner","scope":"verified session plus operation-specific selector"}';
 CREATE POLICY "c03_capability_evidenceretentionjob_insert" ON public."EvidenceRetentionJob" AS PERMISSIVE FOR INSERT TO "mscqr_rls_cert_auth_owner" WITH CHECK (app_rls.c03_session_valid() AND "licenseeId"=current_setting('app.licensee_id',true) AND "startedByUserId"=current_setting('app.user_id',true));
 COMMENT ON POLICY "c03_capability_evidenceretentionjob_insert" ON public."EvidenceRetentionJob" IS '{"boundary":"c03-authenticated-capability","ownerIdentity":"identity-auth-function-owner","scope":"verified session plus operation-specific selector"}';
-CREATE POLICY "c03_capability_sensitiveactionapproval_select" ON public."SensitiveActionApproval" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (app_rls.c03_session_valid() AND "licenseeId"=current_setting('app.licensee_id',true));
+CREATE POLICY "c03_capability_sensitiveactionapproval_select" ON public."SensitiveActionApproval" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (app_rls.c03_session_valid() AND ("licenseeId"=current_setting('app.licensee_id',true) OR (current_setting('app.c03_operation',true)='sensitive-action-approval-revalidate' AND id=current_setting('app.c03_approval_id',true))));
 COMMENT ON POLICY "c03_capability_sensitiveactionapproval_select" ON public."SensitiveActionApproval" IS '{"boundary":"c03-authenticated-capability","ownerIdentity":"identity-auth-function-owner","scope":"verified session plus operation-specific selector"}';
 CREATE POLICY "c03_capability_sensitiveactionapproval_update" ON public."SensitiveActionApproval" AS PERMISSIVE FOR UPDATE TO "mscqr_rls_cert_auth_owner" USING (app_rls.c03_session_valid() AND "licenseeId"=current_setting('app.licensee_id',true) AND current_setting('app.user_id',true)<>"requestedByUserId") WITH CHECK (app_rls.c03_session_valid() AND "licenseeId"=current_setting('app.licensee_id',true) AND current_setting('app.user_id',true)<>"requestedByUserId");
 COMMENT ON POLICY "c03_capability_sensitiveactionapproval_update" ON public."SensitiveActionApproval" IS '{"boundary":"c03-authenticated-capability","ownerIdentity":"identity-auth-function-owner","scope":"verified session plus operation-specific selector"}';

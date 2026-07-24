@@ -27,7 +27,10 @@ if (!isTruthy(process.env.MSCQR_STAGING_RLS_BATCHES_READ_TEST)) {
   process.exit(0);
 }
 
-const authHeader = (token) => ({ authorization: `Bearer ${token}` });
+const authHeader = (token) => ({
+  authorization: `Bearer ${token.accessToken}`,
+  "x-database-session-capability": token.databaseCapability,
+});
 const backendRoot = path.resolve(__dirname, "..");
 const distRoot = path.join(backendRoot, "dist");
 
@@ -172,9 +175,9 @@ const runFlagOffRouteAssertions = async () => {
   process.env[flagName] = "false";
   delete process.env.RLS_READ_DATABASE_URL;
   const logs = await withConsoleCapture(async () => {
-    await withP2TestApp(async ({ request, prisma }) => {
+    await withP2TestApp(async ({ request, prisma, preauthPrisma }) => {
       await seedP2Fixtures(prisma);
-      const tokens = await issueBearerTokens();
+      const tokens = await issueBearerTokens(preauthPrisma);
 
       const licensee = await request("GET", "/api/qr/batches", null, { headers: authHeader(tokens.licenseeAdminA) });
       assertBatchMarkers(licensee, "P2 Batch A", "P2 Batch B", "flag off licensee batch list");

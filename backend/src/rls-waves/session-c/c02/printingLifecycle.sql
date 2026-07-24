@@ -214,7 +214,9 @@ BEGIN
           'licenseeId',q."licenseeId",'status',q.status,'replayEpoch',q."replayEpoch"
         ) ORDER BY q."displayCode",q.id)
         FROM (
-          SELECT q.* FROM public."QRCode" q
+          SELECT q.id,q.code,q."displayCode",q."licenseeId",q."batchId",
+            q.status,q."replayEpoch",q."printJobId"
+          FROM public."QRCode" q
            WHERE q."batchId"=batch_row.id
              AND q.status IN ('ALLOCATED'::public."QRStatus",'ACTIVATED'::public."QRStatus")
              AND (nullif(p_options->>'rangeStart','') IS NULL OR q."displayCode">=p_options->>'rangeStart')
@@ -265,7 +267,7 @@ BEGIN
             set_config('app.printing_approved_user_id',coalesce(approved_user_id,''),true);
     RETURN (
       WITH selected_sample AS (
-        SELECT q.*
+        SELECT q.id,q.code,q.status,q."printedAt",q."createdAt",q."batchId",q."printJobId"
         FROM public."QRCode" q
         WHERE q."batchId"=target_batch_id AND q."printJobId"=job_row.id
           AND (
@@ -1866,9 +1868,13 @@ BEGIN
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,job_row."batchId");
   PERFORM set_config('app.printing_job_id',p_job_id,true);
   IF p_purpose<>'printing-sample-scan' OR job_row.status<>'CONFIRMED' THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
-  SELECT q.id INTO STRICT qr_row FROM public."QRCode" q
-   WHERE q.code=btrim(p_qr_code) AND q."batchId"=job_row."batchId" AND q."printJobId"=job_row.id
-     AND q.status='PRINTED';
+  BEGIN
+    SELECT q.id INTO STRICT qr_row FROM public."QRCode" q
+     WHERE q.code=btrim(p_qr_code) AND q."batchId"=job_row."batchId" AND q."printJobId"=job_row.id
+       AND q.status='PRINTED';
+  EXCEPTION WHEN NO_DATA_FOUND THEN
+    RAISE EXCEPTION 'QR_NOT_IN_PRINT_JOB';
+  END;
   IF EXISTS (SELECT 1 FROM public."PrintAuditEvent" e WHERE e."printJobId"=job_row.id
     AND e."qrCodeId"=qr_row.id AND e."eventType"='SAMPLE_SCAN_PASSED')
   THEN RETURN jsonb_build_object('idempotent',true,'qrCodeId',qr_row.id); END IF;
@@ -1905,7 +1911,8 @@ CREATE OR REPLACE FUNCTION app_rls.printing_release_batch(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE actor record; batch_row record; maker_id text; now_at timestamp without time zone:=transaction_timestamp();
-  released_count integer; approval_row public."SensitiveActionApproval"%ROWTYPE;
+  released_count integer; approval_id text; approval_requested_by text; approval_status text;
+  approval_expires_at timestamp without time zone;
   effective_decision text:=p_decision;
 BEGIN
   IF p_purpose<>'printing-release' OR p_decision NOT IN ('REQUEST','APPROVE','REJECT')
@@ -1919,7 +1926,9 @@ BEGIN
     AND j.status='CONFIRMED' ORDER BY j."confirmedAt" DESC NULLS LAST,j."createdAt" DESC LIMIT 1;
   IF maker_id IS NULL THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
   IF p_decision='REQUEST' THEN
-    SELECT a.* INTO approval_row FROM public."SensitiveActionApproval" a
+    SELECT a.id,a."requestedByUserId",a.status,a."expiresAt"
+      INTO approval_id,approval_requested_by,approval_status,approval_expires_at
+      FROM public."SensitiveActionApproval" a
      WHERE a."actionKey"='BATCH_RELEASE' AND a."entityType"='Batch' AND a."entityId"=p_batch_id
        AND a.status='PENDING' AND a."expiresAt">now_at
      ORDER BY a."createdAt" DESC,a.id DESC LIMIT 1 FOR UPDATE;
@@ -1938,22 +1947,23 @@ BEGIN
         ),'requestedByUserId',actor."userId",'releaseBoundary','supply_chain'),
         jsonb_build_object('reason',nullif(btrim(p_reason),''),'totalCodes',batch_row."totalCodes"),
         'PENDING',now_at+interval '30 minutes',now_at,now_at
-      ) RETURNING * INTO approval_row;
+      ) RETURNING id,"requestedByUserId",status,"expiresAt"
+        INTO approval_id,approval_requested_by,approval_status,approval_expires_at;
       PERFORM app_rls.printing_write_audit(actor."userId",actor.role,actor."organizationId",actor."batchLicenseeId",
-        'BATCH_RELEASE_REQUESTED','Batch',p_batch_id,jsonb_build_object('approvalId',approval_row.id));
-      RETURN jsonb_build_object('batchId',p_batch_id,'approvalRequired',true,'approvalId',approval_row.id,
-        'status',approval_row.status,'expiresAt',approval_row."expiresAt",'idempotent',false);
+        'BATCH_RELEASE_REQUESTED','Batch',p_batch_id,jsonb_build_object('approvalId',approval_id));
+      RETURN jsonb_build_object('batchId',p_batch_id,'approvalRequired',true,'approvalId',approval_id,
+        'status',approval_status,'expiresAt',approval_expires_at,'idempotent',false);
     END IF;
-    IF approval_row."requestedByUserId"=actor."userId" THEN
-      RETURN jsonb_build_object('batchId',p_batch_id,'approvalRequired',true,'approvalId',approval_row.id,
-        'status',approval_row.status,'expiresAt',approval_row."expiresAt",'idempotent',true);
+    IF approval_requested_by=actor."userId" THEN
+      RETURN jsonb_build_object('batchId',p_batch_id,'approvalRequired',true,'approvalId',approval_id,
+        'status',approval_status,'expiresAt',approval_expires_at,'idempotent',true);
     END IF;
     IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN') THEN
       RAISE EXCEPTION 'CHECKER_REQUIRED' USING ERRCODE='42501';
     END IF;
     UPDATE public."SensitiveActionApproval" SET status='EXECUTED',"reviewedByUserId"=actor."userId",
       "reviewedAt"=now_at,"executedByUserId"=actor."userId","executedAt"=now_at,"updatedAt"=now_at
-      WHERE id=approval_row.id;
+      WHERE id=approval_id;
     effective_decision:='APPROVE';
   END IF;
   IF maker_id=actor."userId" THEN RAISE EXCEPTION 'MAKER_CANNOT_APPROVE' USING ERRCODE='42501'; END IF;
@@ -1976,12 +1986,12 @@ BEGIN
   END IF;
   PERFORM app_rls.printing_write_audit(actor."userId",actor.role,actor."organizationId",actor."batchLicenseeId",
     'BATCH_RELEASE_'||effective_decision,'Batch',p_batch_id,
-    jsonb_build_object('makerId',maker_id,'approvalId',approval_row.id,
+    jsonb_build_object('makerId',maker_id,'approvalId',approval_id,
       'reason',nullif(btrim(p_reason),''),'releasedCodes',coalesce(released_count,0)));
   RETURN jsonb_build_object('batchId',p_batch_id,'decision',effective_decision,'lifecycleState',
     CASE WHEN effective_decision='APPROVE' THEN 'RELEASED' ELSE 'FAILED' END,
-    'releasedCodes',coalesce(released_count,0),'approvalRequired',approval_row.id IS NOT NULL,
-    'approvalId',approval_row.id);
+    'releasedCodes',coalesce(released_count,0),'approvalRequired',approval_id IS NOT NULL,
+    'approvalId',approval_id);
 END
 $fn$;
 

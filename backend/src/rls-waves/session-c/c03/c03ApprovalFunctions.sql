@@ -23,7 +23,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_create_sensitive_action_approval(input js
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; created public."SensitiveActionApproval"%ROWTYPE;
+DECLARE actor record; created record;
 DECLARE action_key text := input->>'actionKey';
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_approval_actor('sensitive-action-approval-request');
@@ -44,7 +44,10 @@ BEGIN
     NULLIF(input->>'entityType',''),NULLIF(input->>'entityId',''),input->'payload',
     input->'summary',NULLIF(input->>'requestIpHash',''),NULLIF(input->>'requestUserAgentHash',''),
     transaction_timestamp()+interval '30 minutes',transaction_timestamp()
-  ) RETURNING * INTO created;
+  ) RETURNING
+    id,"actionKey",status,"requestedByUserId","reviewedByUserId","executedByUserId",
+    "licenseeId","entityType","entityId",payload,summary,"expiresAt","createdAt","executedAt"
+    INTO created;
   PERFORM app_rls.c03_governance_audit('SENSITIVE_ACTION_APPROVAL_REQUESTED','SensitiveActionApproval',created.id,
     jsonb_build_object('actionKey',action_key,'requestedByUserId',actor.user_id));
   RETURN to_jsonb(created);
@@ -63,7 +66,14 @@ BEGIN
     RAISE EXCEPTION 'C03_APPROVAL_LIST_INVALID' USING ERRCODE='22023';
   END IF;
   RETURN QUERY
-  SELECT to_jsonb(a)
+  SELECT jsonb_build_object(
+      'id',a.id,'actionKey',a."actionKey",'status',a.status,
+      'requestedByUserId',a."requestedByUserId",'reviewedByUserId',a."reviewedByUserId",
+      'executedByUserId',a."executedByUserId",'licenseeId',a."licenseeId",
+      'entityType',a."entityType",'entityId',a."entityId",'payload',a.payload,
+      'summary',a.summary,'expiresAt',a."expiresAt",'createdAt',a."createdAt",
+      'executedAt',a."executedAt"
+    )
     FROM public."SensitiveActionApproval" a
    WHERE a."licenseeId"=actor.licensee_id
      AND (status_filter IS NULL OR a.status=status_filter)
@@ -78,7 +88,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_review_sensitive_action_approval(
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; approval public."SensitiveActionApproval"%ROWTYPE;
+DECLARE actor record; approval record;
 BEGIN
   IF p_decision NOT IN ('APPROVED','REJECTED') OR length(COALESCE(p_review_note,''))>500 THEN
     RAISE EXCEPTION 'C03_APPROVAL_REVIEW_INVALID' USING ERRCODE='22023';
@@ -86,7 +96,8 @@ BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_approval_actor(
     CASE p_decision WHEN 'APPROVED' THEN 'sensitive-action-approval-approve' ELSE 'sensitive-action-approval-reject' END
   );
-  SELECT * INTO approval FROM public."SensitiveActionApproval"
+  SELECT id,"actionKey",status,"requestedByUserId","expiresAt"
+    INTO approval FROM public."SensitiveActionApproval"
    WHERE id=p_approval_id AND "licenseeId"=actor.licensee_id FOR UPDATE;
   IF NOT FOUND OR approval.status<>'PENDING' OR approval."expiresAt"<=transaction_timestamp()
      OR approval."requestedByUserId"=actor.user_id THEN
@@ -95,7 +106,11 @@ BEGIN
   UPDATE public."SensitiveActionApproval"
      SET status=p_decision,"reviewedByUserId"=actor.user_id,"reviewNote"=NULLIF(p_review_note,''),
          "reviewedAt"=transaction_timestamp(),"updatedAt"=transaction_timestamp()
-   WHERE id=p_approval_id RETURNING * INTO approval;
+   WHERE id=p_approval_id
+   RETURNING
+     id,"actionKey",status,"requestedByUserId","reviewedByUserId","executedByUserId",
+     "licenseeId","entityType","entityId",payload,summary,"expiresAt","createdAt","executedAt"
+     INTO approval;
   PERFORM app_rls.c03_governance_audit('SENSITIVE_ACTION_APPROVAL_'||p_decision,'SensitiveActionApproval',approval.id,
     jsonb_build_object('actionKey',approval."actionKey",'requestedByUserId',approval."requestedByUserId",'reviewedByUserId',actor.user_id));
   RETURN to_jsonb(approval);

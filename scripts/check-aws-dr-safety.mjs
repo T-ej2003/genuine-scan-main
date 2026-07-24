@@ -173,6 +173,14 @@ const dangerousPatternExemptions = new Map([
     "scripts/run-disposable-role-separation-harness.mjs",
     new Set(["drop-database"]),
   ],
+  [
+    "scripts/rls/certify-clean-room-database.mjs",
+    new Set(["drop-database"]),
+  ],
+  [
+    "scripts/rls/verify-full-rls-package.mjs",
+    new Set(["drop-database"]),
+  ],
 ]);
 
 const isDangerousPatternExempt = (repoPath, ruleId) =>

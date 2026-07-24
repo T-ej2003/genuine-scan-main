@@ -5,7 +5,10 @@ const JSZip = require("jszip");
 const { P2TestDbSkip, withP2TestApp } = require("./helpers/p2TestDb");
 const { emails, ids, issueBearerTokens, passwords, seedP2Fixtures } = require("./helpers/p2SeedFactories");
 
-const authHeader = (token) => ({ authorization: `Bearer ${token}` });
+const authHeader = (token) => ({
+  authorization: `Bearer ${token.accessToken}`,
+  "x-database-session-capability": token.databaseCapability,
+});
 const deniedStatuses = new Set([401, 403, 404, 410, 428]);
 
 const assertDenied = (response, label) => {
@@ -27,9 +30,9 @@ const assertNoCrossTenantLeak = (response, forbiddenMarker, label) => {
 };
 
 (async () => {
-  await withP2TestApp(async ({ baseUrl, request, prisma }) => {
+  await withP2TestApp(async ({ baseUrl, request, prisma, preauthPrisma }) => {
     const fixtures = await seedP2Fixtures(prisma);
-    const tokens = await issueBearerTokens();
+    const tokens = await issueBearerTokens(preauthPrisma);
 
     const loginOk = await request("POST", "/api/auth/login", {
       email: emails.manufacturerA,

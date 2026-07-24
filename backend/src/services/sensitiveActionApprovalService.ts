@@ -100,6 +100,12 @@ const reviewNote = (value?: string | null) => {
   return note || null;
 };
 
+const approvalDenials = new Set(["ERROR: C03_APPROVAL_DENIED", "ERROR: C03_SCOPE_DENIED"]);
+const isApprovalDenied = (error: any) =>
+  error?.code === "P2010" &&
+  error?.meta?.code === "42501" &&
+  approvalDenials.has(String(error?.meta?.message || "").trim());
+
 const userAgentHash = (value?: string | null) => {
   const normalized = normalizeUserAgent(value || undefined);
   return normalized ? hashToken(normalized) : null;
@@ -174,18 +180,23 @@ export const approveSensitiveActionApproval = async (input: {
 }) => {
   const security = requireSecurityContext(input.actor, input.securityContext);
   const note = reviewNote(input.reviewNote);
-  return withC03ResourceTransaction(
-    {
-      databaseSessionCapability: security.databaseSessionCapability,
-      requestId: security.requestId,
-      purpose: "sensitive-action-approval-approve",
-      resourceId: input.approvalId,
-      resourceType: "sensitiveActionApproval",
-      allowedRoles: allApplicationRoles,
-      requiredAssurance: "mfa-verified",
-    },
-    (tx) => approveSensitiveApprovalInTransaction<any>(tx, input.approvalId, note)
-  );
+  try {
+    return await withC03ResourceTransaction(
+      {
+        databaseSessionCapability: security.databaseSessionCapability,
+        requestId: security.requestId,
+        purpose: "sensitive-action-approval-approve",
+        resourceId: input.approvalId,
+        resourceType: "sensitiveActionApproval",
+        allowedRoles: allApplicationRoles,
+        requiredAssurance: "mfa-verified",
+      },
+      (tx) => approveSensitiveApprovalInTransaction<any>(tx, input.approvalId, note)
+    );
+  } catch (error) {
+    if (isApprovalDenied(error)) throw new C03AccessError("This actor cannot approve this request", 400);
+    throw error;
+  }
 };
 
 export const rejectSensitiveActionApproval = async (input: {
@@ -198,16 +209,21 @@ export const rejectSensitiveActionApproval = async (input: {
 }) => {
   const security = requireSecurityContext(input.actor, input.securityContext);
   const note = reviewNote(input.reviewNote);
-  return withC03ResourceTransaction(
-    {
-      databaseSessionCapability: security.databaseSessionCapability,
-      requestId: security.requestId,
-      purpose: "sensitive-action-approval-reject",
-      resourceId: input.approvalId,
-      resourceType: "sensitiveActionApproval",
-      allowedRoles: allApplicationRoles,
-      requiredAssurance: "mfa-verified",
-    },
-    (tx) => rejectSensitiveApprovalInTransaction<any>(tx, input.approvalId, note)
-  );
+  try {
+    return await withC03ResourceTransaction(
+      {
+        databaseSessionCapability: security.databaseSessionCapability,
+        requestId: security.requestId,
+        purpose: "sensitive-action-approval-reject",
+        resourceId: input.approvalId,
+        resourceType: "sensitiveActionApproval",
+        allowedRoles: allApplicationRoles,
+        requiredAssurance: "mfa-verified",
+      },
+      (tx) => rejectSensitiveApprovalInTransaction<any>(tx, input.approvalId, note)
+    );
+  } catch (error) {
+    if (isApprovalDenied(error)) throw new C03AccessError("This actor cannot reject this request", 400);
+    throw error;
+  }
 };

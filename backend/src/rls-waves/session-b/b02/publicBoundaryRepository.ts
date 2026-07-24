@@ -66,7 +66,7 @@ type Projection = ReadonlyArray<readonly [string, FieldType, boolean?]>;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const VERSIONED_DIGEST = /^(?:[A-Za-z0-9._-]{1,32}:)?[a-f0-9]{64}$/;
 const CUSTOMER_USER_ID = /^cust_[a-f0-9]{32}$/;
-const RAW_QR = /^[A-Z0-9][A-Z0-9_-]{7,127}$/;
+const RAW_QR = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/;
 const REFERENCE = /^[A-Z0-9][A-Z0-9_-]{3,63}$/;
 
 const exactInput = (input: object, keys: readonly string[], label: string) => {
@@ -146,7 +146,7 @@ const optionalUrl = (value: unknown, label: string, maximum: number) =>
   value == null || value === "" ? null : url(value, label, maximum);
 
 const rawQr = (value: unknown) => {
-  const normalized = text(value, "requested QR code", 8, 128).toUpperCase();
+  const normalized = text(value, "requested QR code", 8, 128);
   if (!RAW_QR.test(normalized)) throw new Error("requested QR code is malformed");
   return normalized;
 };
@@ -309,7 +309,12 @@ export const verifyRawQr = async (
   const sessionStart = proof();
   const row = exactOne(await db.$queryRaw<VerifyRawQrRow[]>`
     SELECT * FROM app_public.verify_raw_qr(
-      ${requestedCode}, ${checkedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}, ${sessionStart.hash}
+      ${requestedCode}::text,
+      ${checkedAt}::timestamp without time zone,
+      ${validatedRequestId}::text,
+      ${actorIpHash}::text,
+      ${actorDeviceHash}::text,
+      ${sessionStart.hash}::text
     )
   `, "app_public.verify_raw_qr", verifyRawProjection);
   return row ? { ...row, sessionStartToken: row.ownershipClaimAvailable ? sessionStart.raw : null } : null;

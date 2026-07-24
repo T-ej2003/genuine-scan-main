@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0'
+    AND source_contract_sha256='79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1'
     AND administrator_role='certification-administrator'
     AND phase='ownership-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'context helpers lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -4346,7 +4346,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_create_sensitive_action_approval(input js
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; created public."SensitiveActionApproval"%ROWTYPE;
+DECLARE actor record; created record;
 DECLARE action_key text := input->>'actionKey';
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_approval_actor('sensitive-action-approval-request');
@@ -4367,7 +4367,10 @@ BEGIN
     NULLIF(input->>'entityType',''),NULLIF(input->>'entityId',''),input->'payload',
     input->'summary',NULLIF(input->>'requestIpHash',''),NULLIF(input->>'requestUserAgentHash',''),
     transaction_timestamp()+interval '30 minutes',transaction_timestamp()
-  ) RETURNING * INTO created;
+  ) RETURNING
+    id,"actionKey",status,"requestedByUserId","reviewedByUserId","executedByUserId",
+    "licenseeId","entityType","entityId",payload,summary,"expiresAt","createdAt","executedAt"
+    INTO created;
   PERFORM app_rls.c03_governance_audit('SENSITIVE_ACTION_APPROVAL_REQUESTED','SensitiveActionApproval',created.id,
     jsonb_build_object('actionKey',action_key,'requestedByUserId',actor.user_id));
   RETURN to_jsonb(created);
@@ -4386,7 +4389,14 @@ BEGIN
     RAISE EXCEPTION 'C03_APPROVAL_LIST_INVALID' USING ERRCODE='22023';
   END IF;
   RETURN QUERY
-  SELECT to_jsonb(a)
+  SELECT jsonb_build_object(
+      'id',a.id,'actionKey',a."actionKey",'status',a.status,
+      'requestedByUserId',a."requestedByUserId",'reviewedByUserId',a."reviewedByUserId",
+      'executedByUserId',a."executedByUserId",'licenseeId',a."licenseeId",
+      'entityType',a."entityType",'entityId',a."entityId",'payload',a.payload,
+      'summary',a.summary,'expiresAt',a."expiresAt",'createdAt',a."createdAt",
+      'executedAt',a."executedAt"
+    )
     FROM public."SensitiveActionApproval" a
    WHERE a."licenseeId"=actor.licensee_id
      AND (status_filter IS NULL OR a.status=status_filter)
@@ -4401,7 +4411,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_review_sensitive_action_approval(
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; approval public."SensitiveActionApproval"%ROWTYPE;
+DECLARE actor record; approval record;
 BEGIN
   IF p_decision NOT IN ('APPROVED','REJECTED') OR length(COALESCE(p_review_note,''))>500 THEN
     RAISE EXCEPTION 'C03_APPROVAL_REVIEW_INVALID' USING ERRCODE='22023';
@@ -4409,7 +4419,8 @@ BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_approval_actor(
     CASE p_decision WHEN 'APPROVED' THEN 'sensitive-action-approval-approve' ELSE 'sensitive-action-approval-reject' END
   );
-  SELECT * INTO approval FROM public."SensitiveActionApproval"
+  SELECT id,"actionKey",status,"requestedByUserId","expiresAt"
+    INTO approval FROM public."SensitiveActionApproval"
    WHERE id=p_approval_id AND "licenseeId"=actor.licensee_id FOR UPDATE;
   IF NOT FOUND OR approval.status<>'PENDING' OR approval."expiresAt"<=transaction_timestamp()
      OR approval."requestedByUserId"=actor.user_id THEN
@@ -4418,7 +4429,11 @@ BEGIN
   UPDATE public."SensitiveActionApproval"
      SET status=p_decision,"reviewedByUserId"=actor.user_id,"reviewNote"=NULLIF(p_review_note,''),
          "reviewedAt"=transaction_timestamp(),"updatedAt"=transaction_timestamp()
-   WHERE id=p_approval_id RETURNING * INTO approval;
+   WHERE id=p_approval_id
+   RETURNING
+     id,"actionKey",status,"requestedByUserId","reviewedByUserId","executedByUserId",
+     "licenseeId","entityType","entityId",payload,summary,"expiresAt","createdAt","executedAt"
+     INTO approval;
   PERFORM app_rls.c03_governance_audit('SENSITIVE_ACTION_APPROVAL_'||p_decision,'SensitiveActionApproval',approval.id,
     jsonb_build_object('actionKey',approval."actionKey",'requestedByUserId',approval."requestedByUserId",'reviewedByUserId',actor.user_id));
   RETURN to_jsonb(approval);
@@ -4473,6 +4488,7 @@ BEGIN
           set_config('app.c03_licensee_id','',true),
           set_config('app.c03_job_id','',true),
           set_config('app.c03_incident_id','',true),
+          set_config('app.c03_approval_id','',true),
           set_config('app.c03_storage_key','',true);
   RETURN QUERY SELECT actor."sessionId"::text,actor."userId"::text,actor.role::text,
     actor."organizationId"::text,actor."licenseeId"::text,actor.assurance::text;
@@ -4626,6 +4642,40 @@ BEGIN
   PERFORM app_rls.c03_bind_operation('compliance-pack-revalidate',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
   PERFORM app_rls.c03_bind_operation('compliance-pack-revalidate',scope.licensee_id,p_job_id);
+  RETURN QUERY SELECT actor.user_id::text,actor.role::text,scope.organization_id::text,scope.licensee_id::text;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_bind_sensitive_approval_actor(
+  p_capability text,p_purpose text,p_request_id text,p_approval_id text
+) RETURNS TABLE(user_id text,role text,organization_id text,licensee_id text)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; approval_licensee_id text; scope record;
+BEGIN
+  IF p_purpose NOT IN ('sensitive-action-approval-approve','sensitive-action-approval-reject')
+     OR p_approval_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+  THEN RAISE EXCEPTION 'C03_APPROVAL_DENIED' USING ERRCODE='42501'; END IF;
+
+  SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN')
+     OR actor.assurance<>'ADMIN_MFA'
+  THEN RAISE EXCEPTION 'C03_APPROVAL_DENIED' USING ERRCODE='42501'; END IF;
+
+  PERFORM set_config('app.c03_operation','sensitive-action-approval-revalidate',true),
+          set_config('app.c03_approval_id',p_approval_id,true);
+  SELECT "licenseeId" INTO approval_licensee_id
+    FROM public."SensitiveActionApproval"
+   WHERE id=p_approval_id;
+  IF NOT FOUND OR approval_licensee_id IS NULL
+  THEN RAISE EXCEPTION 'C03_APPROVAL_DENIED' USING ERRCODE='42501'; END IF;
+
+  PERFORM set_config('app.c03_licensee_id',approval_licensee_id,true);
+  SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(
+    approval_licensee_id,actor.role,actor.organization_id,actor.licensee_id
+  );
+  PERFORM set_config('app.licensee_id',scope.licensee_id,true),
+          set_config('app.c03_licensee_id',scope.licensee_id,true),
+          set_config('app.c03_operation','sensitive-action-approval-review',true);
   RETURN QUERY SELECT actor.user_id::text,actor.role::text,scope.organization_id::text,scope.licensee_id::text;
 END
 $fn$;
@@ -4814,6 +4864,7 @@ REVOKE ALL ON FUNCTION app_rls.c03_validate_compliance_result(jsonb) FROM PUBLIC
 REVOKE ALL ON FUNCTION app_rls.c03_queue_audit(text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_build_compliance_report(text,timestamp with time zone,timestamp with time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_revalidate_compliance_pack_job_actor_scope(text,text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_bind_sensitive_approval_actor(text,text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_start_compliance_pack_job(text,text,text,text,text,timestamp with time zone,timestamp with time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_complete_compliance_pack_job(text,text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_fail_compliance_pack_job(text,text,text,text,text) FROM PUBLIC;
@@ -4829,6 +4880,7 @@ ALTER FUNCTION app_rls.c03_validate_compliance_result(jsonb) OWNER TO "mscqr_rls
 ALTER FUNCTION app_rls.c03_queue_audit(text,text,text,jsonb) OWNER TO "mscqr_rls_cert_auth_owner";
 ALTER FUNCTION app_rls.c03_build_compliance_report(text,timestamp with time zone,timestamp with time zone) OWNER TO "mscqr_rls_cert_auth_owner";
 ALTER FUNCTION app_rls.c03_revalidate_compliance_pack_job_actor_scope(text,text,text,text) OWNER TO "mscqr_rls_cert_auth_owner";
+ALTER FUNCTION app_rls.c03_bind_sensitive_approval_actor(text,text,text,text) OWNER TO "mscqr_rls_cert_auth_owner";
 ALTER FUNCTION app_rls.c03_start_compliance_pack_job(text,text,text,text,text,timestamp with time zone,timestamp with time zone) OWNER TO "mscqr_rls_cert_auth_owner";
 ALTER FUNCTION app_rls.c03_complete_compliance_pack_job(text,text,text,text,jsonb) OWNER TO "mscqr_rls_cert_auth_owner";
 ALTER FUNCTION app_rls.c03_fail_compliance_pack_job(text,text,text,text,text) OWNER TO "mscqr_rls_cert_auth_owner";
@@ -5807,6 +5859,7 @@ GRANT EXECUTE ON FUNCTION app_rls.c02_fraud_report_network_details(text[]) TO "m
 GRANT EXECUTE ON FUNCTION app_rls.c02_respond_fraud_report(text,text,text,boolean) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_add_incident_evidence(text,jsonb,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_approve_sensitive_action_approval(text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_bind_sensitive_approval_actor(text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_build_incident_evidence_audit_snapshot(text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_complete_compliance_pack_job(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_complete_compliance_pack_rebuild(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
@@ -7441,7 +7494,9 @@ BEGIN
           'licenseeId',q."licenseeId",'status',q.status,'replayEpoch',q."replayEpoch"
         ) ORDER BY q."displayCode",q.id)
         FROM (
-          SELECT q.* FROM public."QRCode" q
+          SELECT q.id,q.code,q."displayCode",q."licenseeId",q."batchId",
+            q.status,q."replayEpoch",q."printJobId"
+          FROM public."QRCode" q
            WHERE q."batchId"=batch_row.id
              AND q.status IN ('ALLOCATED'::public."QRStatus",'ACTIVATED'::public."QRStatus")
              AND (nullif(p_options->>'rangeStart','') IS NULL OR q."displayCode">=p_options->>'rangeStart')
@@ -7492,7 +7547,7 @@ BEGIN
             set_config('app.printing_approved_user_id',coalesce(approved_user_id,''),true);
     RETURN (
       WITH selected_sample AS (
-        SELECT q.*
+        SELECT q.id,q.code,q.status,q."printedAt",q."createdAt",q."batchId",q."printJobId"
         FROM public."QRCode" q
         WHERE q."batchId"=target_batch_id AND q."printJobId"=job_row.id
           AND (
@@ -9093,9 +9148,13 @@ BEGIN
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,job_row."batchId");
   PERFORM set_config('app.printing_job_id',p_job_id,true);
   IF p_purpose<>'printing-sample-scan' OR job_row.status<>'CONFIRMED' THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
-  SELECT q.id INTO STRICT qr_row FROM public."QRCode" q
-   WHERE q.code=btrim(p_qr_code) AND q."batchId"=job_row."batchId" AND q."printJobId"=job_row.id
-     AND q.status='PRINTED';
+  BEGIN
+    SELECT q.id INTO STRICT qr_row FROM public."QRCode" q
+     WHERE q.code=btrim(p_qr_code) AND q."batchId"=job_row."batchId" AND q."printJobId"=job_row.id
+       AND q.status='PRINTED';
+  EXCEPTION WHEN NO_DATA_FOUND THEN
+    RAISE EXCEPTION 'QR_NOT_IN_PRINT_JOB';
+  END;
   IF EXISTS (SELECT 1 FROM public."PrintAuditEvent" e WHERE e."printJobId"=job_row.id
     AND e."qrCodeId"=qr_row.id AND e."eventType"='SAMPLE_SCAN_PASSED')
   THEN RETURN jsonb_build_object('idempotent',true,'qrCodeId',qr_row.id); END IF;
@@ -9132,7 +9191,8 @@ CREATE OR REPLACE FUNCTION app_rls.printing_release_batch(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE actor record; batch_row record; maker_id text; now_at timestamp without time zone:=transaction_timestamp();
-  released_count integer; approval_row public."SensitiveActionApproval"%ROWTYPE;
+  released_count integer; approval_id text; approval_requested_by text; approval_status text;
+  approval_expires_at timestamp without time zone;
   effective_decision text:=p_decision;
 BEGIN
   IF p_purpose<>'printing-release' OR p_decision NOT IN ('REQUEST','APPROVE','REJECT')
@@ -9146,7 +9206,9 @@ BEGIN
     AND j.status='CONFIRMED' ORDER BY j."confirmedAt" DESC NULLS LAST,j."createdAt" DESC LIMIT 1;
   IF maker_id IS NULL THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
   IF p_decision='REQUEST' THEN
-    SELECT a.* INTO approval_row FROM public."SensitiveActionApproval" a
+    SELECT a.id,a."requestedByUserId",a.status,a."expiresAt"
+      INTO approval_id,approval_requested_by,approval_status,approval_expires_at
+      FROM public."SensitiveActionApproval" a
      WHERE a."actionKey"='BATCH_RELEASE' AND a."entityType"='Batch' AND a."entityId"=p_batch_id
        AND a.status='PENDING' AND a."expiresAt">now_at
      ORDER BY a."createdAt" DESC,a.id DESC LIMIT 1 FOR UPDATE;
@@ -9165,22 +9227,23 @@ BEGIN
         ),'requestedByUserId',actor."userId",'releaseBoundary','supply_chain'),
         jsonb_build_object('reason',nullif(btrim(p_reason),''),'totalCodes',batch_row."totalCodes"),
         'PENDING',now_at+interval '30 minutes',now_at,now_at
-      ) RETURNING * INTO approval_row;
+      ) RETURNING id,"requestedByUserId",status,"expiresAt"
+        INTO approval_id,approval_requested_by,approval_status,approval_expires_at;
       PERFORM app_rls.printing_write_audit(actor."userId",actor.role,actor."organizationId",actor."batchLicenseeId",
-        'BATCH_RELEASE_REQUESTED','Batch',p_batch_id,jsonb_build_object('approvalId',approval_row.id));
-      RETURN jsonb_build_object('batchId',p_batch_id,'approvalRequired',true,'approvalId',approval_row.id,
-        'status',approval_row.status,'expiresAt',approval_row."expiresAt",'idempotent',false);
+        'BATCH_RELEASE_REQUESTED','Batch',p_batch_id,jsonb_build_object('approvalId',approval_id));
+      RETURN jsonb_build_object('batchId',p_batch_id,'approvalRequired',true,'approvalId',approval_id,
+        'status',approval_status,'expiresAt',approval_expires_at,'idempotent',false);
     END IF;
-    IF approval_row."requestedByUserId"=actor."userId" THEN
-      RETURN jsonb_build_object('batchId',p_batch_id,'approvalRequired',true,'approvalId',approval_row.id,
-        'status',approval_row.status,'expiresAt',approval_row."expiresAt",'idempotent',true);
+    IF approval_requested_by=actor."userId" THEN
+      RETURN jsonb_build_object('batchId',p_batch_id,'approvalRequired',true,'approvalId',approval_id,
+        'status',approval_status,'expiresAt',approval_expires_at,'idempotent',true);
     END IF;
     IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN') THEN
       RAISE EXCEPTION 'CHECKER_REQUIRED' USING ERRCODE='42501';
     END IF;
     UPDATE public."SensitiveActionApproval" SET status='EXECUTED',"reviewedByUserId"=actor."userId",
       "reviewedAt"=now_at,"executedByUserId"=actor."userId","executedAt"=now_at,"updatedAt"=now_at
-      WHERE id=approval_row.id;
+      WHERE id=approval_id;
     effective_decision:='APPROVE';
   END IF;
   IF maker_id=actor."userId" THEN RAISE EXCEPTION 'MAKER_CANNOT_APPROVE' USING ERRCODE='42501'; END IF;
@@ -9203,12 +9266,12 @@ BEGIN
   END IF;
   PERFORM app_rls.printing_write_audit(actor."userId",actor.role,actor."organizationId",actor."batchLicenseeId",
     'BATCH_RELEASE_'||effective_decision,'Batch',p_batch_id,
-    jsonb_build_object('makerId',maker_id,'approvalId',approval_row.id,
+    jsonb_build_object('makerId',maker_id,'approvalId',approval_id,
       'reason',nullif(btrim(p_reason),''),'releasedCodes',coalesce(released_count,0)));
   RETURN jsonb_build_object('batchId',p_batch_id,'decision',effective_decision,'lifecycleState',
     CASE WHEN effective_decision='APPROVE' THEN 'RELEASED' ELSE 'FAILED' END,
-    'releasedCodes',coalesce(released_count,0),'approvalRequired',approval_row.id IS NOT NULL,
-    'approvalId',approval_row.id);
+    'releasedCodes',coalesce(released_count,0),'approvalRequired',approval_id IS NOT NULL,
+    'approvalId',approval_id);
 END
 $fn$;
 

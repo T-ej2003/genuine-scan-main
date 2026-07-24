@@ -14,7 +14,9 @@ class P2TestDbSkip extends Error {
 }
 
 const backendRoot = path.resolve(__dirname, "../..");
+const repoRoot = path.resolve(backendRoot, "..");
 const distRoot = path.join(backendRoot, "dist");
+const generatedRlsRoot = path.join(repoRoot, "scripts/rls/sql/generated");
 
 const randomSecret = () => randomBytes(32).toString("hex");
 
@@ -31,9 +33,27 @@ const runPsql = (adminUrl, sql) => {
   });
 };
 
+const runPsqlFile = (databaseUrl, file, variables = {}) => {
+  const args = [databaseUrl, "-v", "ON_ERROR_STOP=1"];
+  for (const [name, value] of Object.entries(variables)) args.push("-v", `${name}=${value}`);
+  args.push("-f", path.join(generatedRlsRoot, file));
+  execFileSync("psql", args, {
+    cwd: generatedRlsRoot,
+    env: { ...process.env },
+    stdio: "pipe",
+  });
+};
+
 const buildUrlForDatabase = (adminUrl, databaseName) => {
   const parsed = new URL(adminUrl);
   parsed.pathname = `/${databaseName}`;
+  return parsed.toString();
+};
+
+const buildUrlForRole = (databaseUrl, role) => {
+  const parsed = new URL(databaseUrl);
+  parsed.username = role;
+  parsed.password = "";
   return parsed.toString();
 };
 
@@ -67,16 +87,25 @@ const resolveDatabase = () => {
     throw new P2TestDbSkip("Set P2_TEST_DATABASE_URL/P2_TEST_DATABASE_ADMIN_URL or P2_TEST_DB_* parts to run real DB-backed P2 tests.");
   }
 
-  const databaseName = `mscqr_p2_test_${process.pid}_${Date.now()}`.toLowerCase();
+  const databaseName = `mscqr_full_rls_cert_p2_${process.pid}_${Date.now()}`.toLowerCase();
   const databaseUrl = buildUrlForDatabase(adminUrl, databaseName);
   assertSafeTestDatabaseUrl(databaseUrl);
   runPsql(adminUrl, `CREATE DATABASE ${quoteIdent(databaseName)}`);
   return { databaseUrl, createdDatabaseName: databaseName, adminUrl };
 };
 
+const cleanupGeneratedRlsRoles = ({ adminUrl, createdDatabaseName }) => {
+  if (!adminUrl || !createdDatabaseName) return;
+  runPsqlFile(adminUrl, "clean-room-cleanup.sql", { candidate_database: createdDatabaseName });
+};
+
 const dropDatabase = ({ adminUrl, createdDatabaseName }) => {
   if (!adminUrl || !createdDatabaseName) return;
-  runPsql(adminUrl, `DROP DATABASE IF EXISTS ${quoteIdent(createdDatabaseName)} WITH (FORCE)`);
+  const bootstrapUrl = buildUrlForRole(
+    adminUrl,
+    String(process.env.P2_TEST_DB_BOOTSTRAP_USER || "mscqr_p2_test").trim()
+  );
+  runPsql(bootstrapUrl, `DROP DATABASE IF EXISTS ${quoteIdent(createdDatabaseName)} WITH (FORCE)`);
 };
 
 const hasMigrationHistory = () => {
@@ -107,6 +136,33 @@ const runPrismaSchemaSetup = (databaseUrl) => {
   runPrisma(databaseUrl, ["db", "push", "--skip-generate"]);
 };
 
+const runGeneratedRlsSchemaSetup = (databaseInfo) => {
+  if (!databaseInfo.adminUrl || !databaseInfo.createdDatabaseName) {
+    throw new Error("The full-RLS P2 harness requires a fresh disposable database created from P2_TEST_DATABASE_ADMIN_URL.");
+  }
+
+  const administratorUrl = databaseInfo.databaseUrl;
+  const migrationUrl = buildUrlForRole(administratorUrl, "mscqr_rls_cert_migration");
+  console.log("p2 test db: installing generated RF7 package bootstrap");
+  databaseInfo.packageBootstrapStarted = true;
+  runPsqlFile(administratorUrl, "admin-bootstrap.sql");
+  runPsqlFile(migrationUrl, "migration.sql");
+  runPrismaSchemaSetup(migrationUrl);
+  runPsqlFile(administratorUrl, "admin-ownership.sql");
+  runPsqlFile(administratorUrl, "runtime-policy.sql");
+  runPsqlFile(administratorUrl, "verification.sql");
+  databaseInfo.packageInstalled = true;
+  return {
+    administratorUrl,
+    runtimeUrl: buildUrlForRole(administratorUrl, "mscqr_rls_cert_app"),
+    preauthUrl: buildUrlForRole(administratorUrl, "mscqr_rls_cert_preauth"),
+    seedUrl: buildUrlForRole(
+      administratorUrl,
+      String(process.env.P2_TEST_DB_BOOTSTRAP_USER || "mscqr_p2_test").trim()
+    ),
+  };
+};
+
 const clearDistRequireCache = () => {
   for (const key of Object.keys(require.cache)) {
     if (key.startsWith(distRoot)) delete require.cache[key];
@@ -135,7 +191,9 @@ const request = async (baseUrl, method, route, body, options = {}) => {
 const withP2TestApp = async (callback) => {
   let databaseInfo = null;
   let server = null;
-  let prisma = null;
+  let runtimePrisma = null;
+  let seedPrisma = null;
+  let preauthPrisma = null;
 
   process.env.NODE_ENV = "test";
   process.env.JWT_SECRET = process.env.JWT_SECRET || randomSecret();
@@ -149,12 +207,17 @@ const withP2TestApp = async (callback) => {
 
   try {
     databaseInfo = resolveDatabase();
-    process.env.DATABASE_URL = databaseInfo.databaseUrl;
-    runPrismaSchemaSetup(databaseInfo.databaseUrl);
+    const urls = runGeneratedRlsSchemaSetup(databaseInfo);
+    process.env.DATABASE_URL = urls.runtimeUrl;
+    process.env.PREAUTH_DATABASE_URL = urls.preauthUrl;
+    process.env.AUTHENTICATED_APP_DATABASE_URL = urls.runtimeUrl;
     clearDistRequireCache();
 
     const databaseModule = require("../../dist/config/database");
-    prisma = databaseModule.default || databaseModule;
+    runtimePrisma = databaseModule.default || databaseModule;
+    const { PrismaClient } = require("@prisma/client");
+    seedPrisma = new PrismaClient({ datasources: { db: { url: urls.seedUrl } } });
+    preauthPrisma = new PrismaClient({ datasources: { db: { url: urls.preauthUrl } } });
     const { createBackendApp } = require("../../dist/app");
     const app = createBackendApp();
 
@@ -163,20 +226,33 @@ const withP2TestApp = async (callback) => {
     });
     const address = server.address();
     const baseUrl = `http://127.0.0.1:${address.port}`;
-    await callback({ baseUrl, prisma, request: (method, route, body, options) => request(baseUrl, method, route, body, options) });
+    await callback({
+      baseUrl,
+      prisma: seedPrisma,
+      preauthPrisma,
+      runtimePrisma,
+      request: (method, route, body, options) => request(baseUrl, method, route, body, options),
+    });
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
-    if (prisma?.$disconnect) await prisma.$disconnect().catch(() => {});
-    if (databaseInfo?.createdDatabaseName) dropDatabase(databaseInfo);
+    if (runtimePrisma?.$disconnect) await runtimePrisma.$disconnect().catch(() => {});
+    if (seedPrisma?.$disconnect) await seedPrisma.$disconnect().catch(() => {});
+    if (preauthPrisma?.$disconnect) await preauthPrisma.$disconnect().catch(() => {});
+    if (databaseInfo?.createdDatabaseName) {
+      dropDatabase(databaseInfo);
+      if (databaseInfo.packageBootstrapStarted) cleanupGeneratedRlsRoles(databaseInfo);
+    }
   }
 };
 
 module.exports = {
   P2TestDbSkip,
   assertSafeTestDatabaseUrl,
+  cleanupGeneratedRlsRoles,
   dropP2TestDatabase: dropDatabase,
   request,
   resolveP2TestDatabase: resolveDatabase,
+  runGeneratedRlsSchemaSetup,
   runPrismaSchemaSetup,
   withP2TestApp,
 };

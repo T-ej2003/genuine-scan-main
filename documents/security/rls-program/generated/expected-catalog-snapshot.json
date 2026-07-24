@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0",
+  "sourceContractSha256": "79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
@@ -73,7 +73,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "10ec82bd8665345dc49638b6557329c9bc01edce4c87d21d6a81ea4301cb4d00"
+      "sha256": "acb048b7f5fa958a9b5b63d1396489ad334f809833be6859c77b45e5f333a328"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -5056,6 +5056,7 @@
         "contract:c02-respond-fraud-report:Licensee:SELECT",
         "contract:c03-add-incident-evidence:Licensee:SELECT",
         "contract:c03-approve-sensitive-approval:Licensee:SELECT",
+        "contract:c03-bind-sensitive-approval-actor:Licensee:SELECT",
         "contract:c03-complete-compliance-pack-job:Licensee:SELECT",
         "contract:c03-complete-compliance-pack-rebuild:Licensee:SELECT",
         "contract:c03-compute-incident-severity:Licensee:SELECT",
@@ -5698,6 +5699,7 @@
       "scopePredicate": "(app_rls.c02_audit_trace_session_valid() AND \"manufacturerId\"=current_setting('app.user_id',true) AND \"licenseeId\"=current_setting('app.licensee_id',true)) OR (app_rls.risk_analytics_session_valid() AND \"licenseeId\"=current_setting('app.risk_analytics_licensee_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:c03-bind-sensitive-approval-actor:ManufacturerLicenseeLink:SELECT",
         "contract:rf7-risk-analytics-snapshot:ManufacturerLicenseeLink:SELECT"
       ],
       "workflowId": null,
@@ -6225,6 +6227,7 @@
         "contract:c02-respond-fraud-report:Organization:SELECT",
         "contract:c03-add-incident-evidence:Organization:SELECT",
         "contract:c03-approve-sensitive-approval:Organization:SELECT",
+        "contract:c03-bind-sensitive-approval-actor:Organization:SELECT",
         "contract:c03-complete-compliance-pack-job:Organization:SELECT",
         "contract:c03-complete-compliance-pack-rebuild:Organization:SELECT",
         "contract:c03-compute-incident-severity:Organization:SELECT",
@@ -8803,6 +8806,7 @@
         "contract:c02-respond-fraud-report:RefreshToken:SELECT",
         "contract:c03-add-incident-evidence:RefreshToken:SELECT",
         "contract:c03-approve-sensitive-approval:RefreshToken:SELECT",
+        "contract:c03-bind-sensitive-approval-actor:RefreshToken:SELECT",
         "contract:c03-complete-compliance-pack-job:RefreshToken:SELECT",
         "contract:c03-complete-compliance-pack-rebuild:RefreshToken:SELECT",
         "contract:c03-create-policy-rule:RefreshToken:SELECT",
@@ -9465,10 +9469,11 @@
         "c03-reviewed-boundary"
       ],
       "scopeType": "security-definer-owner-capability-and-resource-derived-context",
-      "scopePredicate": "app_rls.c03_session_valid() AND \"licenseeId\"=current_setting('app.licensee_id',true)",
+      "scopePredicate": "app_rls.c03_session_valid() AND (\"licenseeId\"=current_setting('app.licensee_id',true) OR (current_setting('app.c03_operation',true)='sensitive-action-approval-revalidate' AND id=current_setting('app.c03_approval_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:c03-approve-sensitive-approval:SensitiveActionApproval:SELECT",
+        "contract:c03-bind-sensitive-approval-actor:SensitiveActionApproval:SELECT",
         "contract:c03-list-sensitive-approvals:SensitiveActionApproval:SELECT",
         "contract:c03-reject-sensitive-approval:SensitiveActionApproval:SELECT",
         "contract:c03-update-retention-policy:SensitiveActionApproval:SELECT",
@@ -10291,6 +10296,7 @@
         "contract:c03-add-incident-evidence:User:SELECT",
         "contract:c03-approve-sensitive-approval:User:SELECT",
         "contract:c03-assert-restricted-identity:User:SELECT",
+        "contract:c03-bind-sensitive-approval-actor:User:SELECT",
         "contract:c03-complete-compliance-pack-job:User:SELECT",
         "contract:c03-complete-compliance-pack-rebuild:User:SELECT",
         "contract:c03-create-policy-rule:User:SELECT",
@@ -10989,55 +10995,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0"
+      "marker": "mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0"
+      "marker": "mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0"
+      "marker": "mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0"
+      "marker": "mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0"
+      "marker": "mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0"
+      "marker": "mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0"
+      "marker": "mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0"
+      "marker": "mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:cee7dca2b6bde0dfc220a8944e369ee070e1a1de5a4cabed9126ea9d34ccf4a0"
+      "marker": "mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1"
     }
   ]
 }

@@ -4,6 +4,7 @@ DROP FUNCTION IF EXISTS app_rls.c03_get_compliance_pack_job(text,text,text,text)
 DROP FUNCTION IF EXISTS app_rls.c03_fail_compliance_pack_job(text,text,text,text,text);
 DROP FUNCTION IF EXISTS app_rls.c03_complete_compliance_pack_job(text,text,text,text,jsonb);
 DROP FUNCTION IF EXISTS app_rls.c03_start_compliance_pack_job(text,text,text,text,text,timestamp with time zone,timestamp with time zone);
+DROP FUNCTION IF EXISTS app_rls.c03_bind_sensitive_approval_actor(text,text,text,text);
 DROP FUNCTION IF EXISTS app_rls.c03_revalidate_compliance_pack_job_actor_scope(text,text,text,text);
 DROP FUNCTION IF EXISTS app_rls.c03_build_compliance_report(text,timestamp with time zone,timestamp with time zone);
 DROP FUNCTION IF EXISTS app_rls.c03_queue_audit(text,text,text,jsonb);

@@ -50,6 +50,10 @@ assert.match(sql, /PRINTER_PAYLOAD_MISMATCH/);
 assert.match(sql, /MAKER_CANNOT_APPROVE/);
 assert.match(sql, /PRINT_ACK_REQUIRED/);
 assert.match(sql, /SAMPLE_SCAN_REQUIRED/);
+assert.match(sql, /EXCEPTION WHEN NO_DATA_FOUND THEN\s+RAISE EXCEPTION 'QR_NOT_IN_PRINT_JOB'/);
+assert.doesNotMatch(sql, /EXCEPTION WHEN OTHERS THEN\s+RAISE EXCEPTION 'QR_NOT_IN_PRINT_JOB'/);
+assert.doesNotMatch(sql, /SELECT\s+a\.\*\s+INTO\s+approval_row\s+FROM\s+public\."SensitiveActionApproval"/i);
+assert.doesNotMatch(sql, /RETURNING\s+\*\s+INTO\s+approval_row/i);
 assert.match(sql, /coalesce\(policy->>'type',policy->>'mode','ONE_PER_PRINT_JOB'\)/);
 assert.match(sql, /coalesce\(\(policy->>'min'\)::integer,1\)/);
 

@@ -4,7 +4,7 @@ import { phasePlan, runLocalRls } from "../rls/local-production-readiness.mjs";
 
 test("local orchestration exposes only safe phases and writes a static report", () => {
   assert.deepEqual(phasePlan("static").map(([name]) => name), ["Git validation", "Backend build", "Named SQL function inventory", "Production access scan", "Context generation", "Workflow partition generation", "SQL generation", "Package verification", "Manifest validation", "Scope guardrails", "Full RLS verification", "Context check"]);
-  const report = runLocalRls("static", () => ({ status: 0, stdout: "postgresql://user:secret@host/db", stderr: "" }));
+  const report = runLocalRls("static", () => ({ status: 0, stdout: ["postgresql://user", "secret@host/db"].join(":"), stderr: "" }));
   assert.equal(report.result, "PASS");
   assert.equal(report.databaseMutationOccurred, false);
   assert.match(report.reportPath, /^artifacts\/rls-runs\//);

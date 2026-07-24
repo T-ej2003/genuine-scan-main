@@ -135,6 +135,17 @@ const batchStateErrorCodes = new Set<PrintJobErrorCode>([
   "RECOVERY_REQUIRED_BEFORE_NEW_PRINT",
 ]);
 
+const reviewedSqlLifecycleErrors = {
+  QR_NOT_IN_PRINT_JOB: "This sample QR does not belong to this print job.",
+} as const satisfies Partial<Record<PrintJobErrorCode, string>>;
+
+const extractReviewedSqlLifecycleError = (error: any): keyof typeof reviewedSqlLifecycleErrors | null => {
+  if (error?.code !== "P2010" || error?.meta?.code !== "P0001") return null;
+  const match = /^ERROR:\s+([A-Z][A-Z0-9_]*)(?:\r?\n|$)/.exec(String(error?.meta?.message || ""));
+  if (!match || !(match[1] in reviewedSqlLifecycleErrors)) return null;
+  return match[1] as keyof typeof reviewedSqlLifecycleErrors;
+};
+
 const classifyPrinterReadinessError = (printerStatus: PrinterStatusLike | null | undefined): PrintJobErrorCode => {
   if ((printerStatus as any)?.persistentSessionUpdateRequired || (printerStatus as any)?.connectorUpdateRequired) {
     return "CONNECTOR_UPDATE_REQUIRED";
@@ -190,6 +201,17 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
   logReason: string;
 } => {
   const msg = String(error?.message || "");
+  const reviewedSqlLifecycleError = extractReviewedSqlLifecycleError(error);
+  if (reviewedSqlLifecycleError) {
+    return {
+      status: 409,
+      logReason: reviewedSqlLifecycleError.toLowerCase(),
+      payload: withFailureContext({
+        code: reviewedSqlLifecycleError,
+        message: reviewedSqlLifecycleErrors[reviewedSqlLifecycleError],
+      }, context),
+    };
+  }
   if (typeof error?.code === "string" && batchStateErrorCodes.has(error.code as PrintJobErrorCode)) {
     const code = error.code as PrintJobErrorCode;
     const stateDetails =

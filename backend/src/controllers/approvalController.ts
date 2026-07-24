@@ -7,6 +7,11 @@ import {
   listSensitiveActionApprovals,
   rejectSensitiveActionApproval,
 } from "../services/sensitiveActionApprovalService";
+import {
+  C03AccessError,
+  c03DatabaseSessionCapability,
+  c03RequestId,
+} from "../rls-waves/session-c/c03/c03ActorBoundary";
 
 const approvalListQuerySchema = z.object({
   status: z.string().trim().max(40).optional(),
@@ -47,6 +52,10 @@ export const listApprovalsController = async (req: AuthRequest, res: Response) =
       status: parsed.data.status || null,
       limit: parsed.data.limit,
       offset: parsed.data.offset,
+      securityContext: {
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
+        requestId: c03RequestId(req),
+      },
     });
 
     return res.json({
@@ -84,16 +93,19 @@ export const approveApprovalController = async (req: AuthRequest, res: Response)
       reviewNote: bodyParsed.data.note || null,
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
+      securityContext: {
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
+        requestId: c03RequestId(req),
+      },
     });
 
     return res.json({ success: true, data: result });
   } catch (error: any) {
     console.error("approveApprovalController error:", error);
-    return res.status(400).json({
-      success: false,
-      error: error?.message || "Failed to approve request",
-      data: error?.approval ? { approval: error.approval } : undefined,
-    });
+    if (error instanceof C03AccessError) {
+      return res.status(error.statusCode).json({ success: false, error: error.message });
+    }
+    return res.status(500).json({ success: false, error: "Failed to approve request" });
   }
 };
 
@@ -118,11 +130,18 @@ export const rejectApprovalController = async (req: AuthRequest, res: Response) 
       reviewNote: bodyParsed.data.note || null,
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
+      securityContext: {
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
+        requestId: c03RequestId(req),
+      },
     });
 
     return res.json({ success: true, data: result });
   } catch (error: any) {
     console.error("rejectApprovalController error:", error);
-    return res.status(400).json({ success: false, error: error?.message || "Failed to reject request" });
+    if (error instanceof C03AccessError) {
+      return res.status(error.statusCode).json({ success: false, error: error.message });
+    }
+    return res.status(500).json({ success: false, error: "Failed to reject request" });
   }
 };

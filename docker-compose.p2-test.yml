@@ -2,7 +2,7 @@ name: mscqr-p2-auth-security
 
 services:
   p2-postgres:
-    image: postgres:16
+    image: postgres:18.4
     container_name: mscqr-p2-auth-security-postgres
     restart: unless-stopped
     environment:
@@ -18,7 +18,9 @@ services:
       retries: 20
       start_period: 5s
     tmpfs:
-      - /var/lib/postgresql/data
+      - /var/lib/postgresql
+    volumes:
+      - ./scripts/p2-postgres18-init.sql:/docker-entrypoint-initdb.d/10-certification-administrator.sql:ro
 
   p2-redis:
     image: redis:8-alpine
