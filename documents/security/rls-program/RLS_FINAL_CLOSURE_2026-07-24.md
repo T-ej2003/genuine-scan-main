@@ -15,11 +15,11 @@ Staging and production have not been activated by this evidence revision.
 - Starting commit: `def002eb922b4e4b3350412a2803b969cbff709d`
 - Branch: `rls-full-integration`
 - Generated source contract:
-  `7e90d508424b3f462e27740cbf77e9e33ca515fe5327b5d412bfa9c06e89840f`
+  `3bfb1a088762efe8c8787845bbae32159e121b4729eee9715020ee9059660cb1`
 - Generated package checksum:
-  `9e1cf4cd0674875590889e83ca45f687a65b2378456355de9eaa3c30f02c43c2`
+  `8f0ae6951ccdc82e26442df4aa826da8f427770855383c613a8d932db73b532a`
 - Deterministic generated-tree checksum:
-  `1b310c6d27da52092b280f9e5460e4cf2c7166e018fc4bd567c403c174b032ea`
+  `783fd51851d9ec8da816956c76c92b0b0131ec22857d6f4edae3392263b87d57`
 
 ## Removed compatibility authority
 
@@ -115,6 +115,10 @@ Focused runs no longer overwrite the full certification result.
 - Frontend typecheck, 61 test files / 241 tests, and production build: passed.
 - Disposable P2 PostgreSQL 18.4 release-readiness and system integration:
   passed.
+- The P2 harness installs the exact generated package through the canonical
+  certification administrator, then removes its database and temporary roles.
+- Prisma migration replay and drift checks include the schema-declared
+  `RefreshToken.sessionCapabilityHash` unique constraint.
 - Release-candidate gate and staging-smoke configuration contracts: passed.
 - Security release gate and Prisma-scope guardrails: passed.
 - Frontend/backend production dependency audit: zero high or critical

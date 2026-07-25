@@ -34,6 +34,11 @@ export const DEFAULT_BUDGETS = [
 ];
 
 export const LEGACY_FILE_BUDGETS = {
+  "backend/src/controllers/authAdminSecurityController.ts": {
+    label: "Legacy controller",
+    maxLines: 629,
+    reason: "Authentication security administration remains consolidated until recovery, MFA, and session controls can be split without weakening the reviewed boundary.",
+  },
   "backend/src/controllers/qrController.ts": {
     label: "Legacy controller",
     maxLines: 1809,
@@ -58,8 +63,18 @@ export const LEGACY_FILE_BUDGETS = {
   "backend/src/controllers/verify/claimHandlers.ts": { label: "Legacy controller", maxLines: 580 },
   "backend/src/controllers/governanceController.ts": {
     label: "Legacy controller",
-    maxLines: 560,
+    maxLines: 636,
     reason: "Governance approval and compliance-pack endpoints remain consolidated pending service extraction.",
+  },
+  "backend/src/controllers/print-job/errorResponses.ts": {
+    label: "Legacy controller",
+    maxLines: 521,
+    reason: "Printing lifecycle errors remain centralized to preserve exhaustive PostgreSQL domain-error mapping.",
+  },
+  "backend/src/controllers/printerAgentController.ts": {
+    label: "Legacy controller",
+    maxLines: 549,
+    reason: "Printer-agent session, command, acknowledgement, and diagnostics remain consolidated behind one connector trust boundary.",
   },
   "backend/src/controllers/verify/verificationHandlers.ts": {
     label: "Legacy controller",

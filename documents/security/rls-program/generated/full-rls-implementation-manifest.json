@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "024813de47671ad2d1590c9e03cd731bcda555157ef96879ef0d2c01d25b5d8d",
+  "sourceContractSha256": "3bfb1a088762efe8c8787845bbae32159e121b4729eee9715020ee9059660cb1",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
@@ -227,7 +227,7 @@
     "directPolicySlices": 13,
     "generatedPolicies": 339,
     "columnPrivilegeCells": 60,
-    "prismaMigrations": 53,
+    "prismaMigrations": 54,
     "prismaEnums": 58,
     "registeredWorkflowCallPaths": 338,
     "applicationPathCertifiedWorkflows": 10
@@ -243,7 +243,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:024813de47671ad2d1590c9e03cd731bcda555157ef96879ef0d2c01d25b5d8d",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:3bfb1a088762efe8c8787845bbae32159e121b4729eee9715020ee9059660cb1",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
@@ -480,6 +480,10 @@
     {
       "name": "20260723110000_add_customer_auth_session",
       "sha256": "320db337e988db43889b1c8ce9ddd7ed7135f843c5758d919e7e3df1bcf9b640"
+    },
+    {
+      "name": "20260725190000_add_refresh_token_session_capability_hash_unique",
+      "sha256": "527b505fbab91a9efd19f50f5df990a19bf823efd611cd9032a00789997b09c2"
     }
   ],
   "prohibitions": [

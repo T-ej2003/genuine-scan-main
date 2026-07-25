@@ -17,6 +17,9 @@ const backendRoot = path.resolve(__dirname, "../..");
 const repoRoot = path.resolve(backendRoot, "..");
 const distRoot = path.join(backendRoot, "dist");
 const generatedRlsRoot = path.join(repoRoot, "scripts/rls/sql/generated");
+const certificationAdministrator = "certification-administrator";
+const quotedCertificationAdministrator = `"${certificationAdministrator}"`;
+const certificationAdministratorSql = path.join(repoRoot, "scripts/p2-postgres18-init.sql");
 
 const randomSecret = () => randomBytes(32).toString("hex");
 
@@ -44,6 +47,21 @@ const runPsqlFile = (databaseUrl, file, variables = {}) => {
   });
 };
 
+const runPsqlSourceFile = (databaseUrl, file) => {
+  execFileSync("psql", [databaseUrl, "-v", "ON_ERROR_STOP=1", "-f", file], {
+    cwd: repoRoot,
+    env: { ...process.env },
+    stdio: "pipe",
+  });
+};
+
+const psqlScalar = (databaseUrl, sql) =>
+  execFileSync("psql", [databaseUrl, "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql], {
+    cwd: backendRoot,
+    env: { ...process.env },
+    encoding: "utf8",
+  }).trim();
+
 const buildUrlForDatabase = (adminUrl, databaseName) => {
   const parsed = new URL(adminUrl);
   parsed.pathname = `/${databaseName}`;
@@ -61,6 +79,12 @@ const bootstrapUser = (adminUrl) => {
   const adminUser = decodeURIComponent(new URL(adminUrl).username);
   return String(process.env.P2_TEST_DB_BOOTSTRAP_USER
     || (adminUser === "certification-administrator" ? "mscqr_p2_test" : adminUser)).trim();
+};
+
+const ensureCertificationAdministrator = (adminUrl) => {
+  if (psqlScalar(adminUrl, `SELECT count(*) FROM pg_roles WHERE rolname='${certificationAdministrator}'`) === "1") return false;
+  runPsqlSourceFile(adminUrl, certificationAdministratorSql);
+  return true;
 };
 
 const buildP2DatabaseUrlFromParts = () => {
@@ -93,22 +117,38 @@ const resolveDatabase = () => {
     throw new P2TestDbSkip("Set P2_TEST_DATABASE_URL/P2_TEST_DATABASE_ADMIN_URL or P2_TEST_DB_* parts to run real DB-backed P2 tests.");
   }
 
-  const databaseName = `mscqr_full_rls_cert_p2_${process.pid}_${Date.now()}`.toLowerCase();
-  const databaseUrl = buildUrlForDatabase(adminUrl, databaseName);
-  assertSafeTestDatabaseUrl(databaseUrl);
-  runPsql(adminUrl, `CREATE DATABASE ${quoteIdent(databaseName)}`);
-  return { databaseUrl, createdDatabaseName: databaseName, adminUrl };
+  const createdCertificationAdministrator = ensureCertificationAdministrator(adminUrl);
+  try {
+    const databaseName = `mscqr_full_rls_cert_p2_${process.pid}_${Date.now()}`.toLowerCase();
+    const databaseUrl = buildUrlForDatabase(adminUrl, databaseName);
+    assertSafeTestDatabaseUrl(databaseUrl);
+    runPsql(adminUrl, `CREATE DATABASE ${quoteIdent(databaseName)} OWNER ${quotedCertificationAdministrator} TEMPLATE template0`);
+    return { databaseUrl, createdDatabaseName: databaseName, adminUrl, createdCertificationAdministrator };
+  } catch (error) {
+    if (createdCertificationAdministrator) runPsql(adminUrl, `DROP ROLE ${quotedCertificationAdministrator}`);
+    throw error;
+  }
 };
 
 const cleanupGeneratedRlsRoles = ({ adminUrl, createdDatabaseName }) => {
   if (!adminUrl || !createdDatabaseName) return;
-  runPsqlFile(adminUrl, "clean-room-cleanup.sql", { candidate_database: createdDatabaseName });
+  runPsqlFile(buildUrlForRole(adminUrl, certificationAdministrator), "clean-room-cleanup.sql", { candidate_database: createdDatabaseName });
 };
 
 const dropDatabase = ({ adminUrl, createdDatabaseName }) => {
   if (!adminUrl || !createdDatabaseName) return;
-  const bootstrapUrl = buildUrlForRole(adminUrl, bootstrapUser(adminUrl));
-  runPsql(bootstrapUrl, `DROP DATABASE IF EXISTS ${quoteIdent(createdDatabaseName)} WITH (FORCE)`);
+  runPsql(buildUrlForRole(adminUrl, bootstrapUser(adminUrl)), `DROP DATABASE IF EXISTS ${quoteIdent(createdDatabaseName)} WITH (FORCE)`);
+};
+
+const cleanupCertificationAdministrator = ({ adminUrl, createdCertificationAdministrator }) => {
+  if (adminUrl && createdCertificationAdministrator) {
+    runPsql(adminUrl, `DROP ROLE ${quotedCertificationAdministrator}`);
+  }
+};
+
+const dropP2TestDatabase = (databaseInfo) => {
+  dropDatabase(databaseInfo);
+  cleanupCertificationAdministrator(databaseInfo);
 };
 
 const hasMigrationHistory = () => {
@@ -144,7 +184,7 @@ const runGeneratedRlsSchemaSetup = (databaseInfo) => {
     throw new Error("The full-RLS P2 harness requires a fresh disposable database created from P2_TEST_DATABASE_ADMIN_URL.");
   }
 
-  const administratorUrl = databaseInfo.databaseUrl;
+  const administratorUrl = buildUrlForRole(databaseInfo.databaseUrl, certificationAdministrator);
   const migrationUrl = buildUrlForRole(administratorUrl, "mscqr_rls_cert_migration");
   console.log("p2 test db: installing generated RF7 package bootstrap");
   databaseInfo.packageBootstrapStarted = true;
@@ -159,7 +199,7 @@ const runGeneratedRlsSchemaSetup = (databaseInfo) => {
     administratorUrl,
     runtimeUrl: buildUrlForRole(administratorUrl, "mscqr_rls_cert_app"),
     preauthUrl: buildUrlForRole(administratorUrl, "mscqr_rls_cert_preauth"),
-    seedUrl: buildUrlForRole(administratorUrl, bootstrapUser(administratorUrl)),
+    seedUrl: buildUrlForRole(databaseInfo.databaseUrl, bootstrapUser(databaseInfo.adminUrl)),
   };
 };
 
@@ -240,7 +280,11 @@ const withP2TestApp = async (callback) => {
     if (preauthPrisma?.$disconnect) await preauthPrisma.$disconnect().catch(() => {});
     if (databaseInfo?.createdDatabaseName) {
       dropDatabase(databaseInfo);
-      if (databaseInfo.packageBootstrapStarted) cleanupGeneratedRlsRoles(databaseInfo);
+      try {
+        if (databaseInfo.packageBootstrapStarted) cleanupGeneratedRlsRoles(databaseInfo);
+      } finally {
+        cleanupCertificationAdministrator(databaseInfo);
+      }
     }
   }
 };
@@ -249,7 +293,7 @@ module.exports = {
   P2TestDbSkip,
   assertSafeTestDatabaseUrl,
   cleanupGeneratedRlsRoles,
-  dropP2TestDatabase: dropDatabase,
+  dropP2TestDatabase,
   request,
   resolveP2TestDatabase: resolveDatabase,
   runGeneratedRlsSchemaSetup,
