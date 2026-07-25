@@ -7,6 +7,7 @@ import type { CanonicalDbContext } from "../lib/canonicalDbContext";
 import { createAuditLogInTransaction } from "../services/auditService";
 import {
   C03AccessError,
+  c03CanonicalDbContext,
   c03DatabaseSessionCapability,
   c03RequestId,
   withC03ActorTransaction,
@@ -85,7 +86,7 @@ export const listIrPolicies = async (req: AuthRequest, res: Response) => {
       const data = licenseeId
         ? await listPolicyRulesInTransaction<{ rules: any[]; total: number }>(tx, input)
         : await listPlatformPolicyRulesInTransaction<{ rules: any[]; total: number }>(tx, input);
-      await createAuditLogInTransaction(tx, context, {
+      await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
         action: "IR_POLICY_RULES_LISTED",
         entityType: "PolicyRule",
         entityId: licenseeId || "PLATFORM",
@@ -157,7 +158,7 @@ export const createIrPolicy = async (req: AuthRequest, res: Response) => {
         });
         const { __c03Replay, ...result } = raw;
         if (!__c03Replay) {
-          await createAuditLogInTransaction(tx, context, {
+          await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
             action: "POLICY_RULE_CREATED",
             entityType: "PolicyRule",
             entityId: result.id,
@@ -215,7 +216,7 @@ export const patchIrPolicy = async (req: AuthRequest, res: Response) => {
         const raw = await updatePolicyRuleInTransaction<any>(tx, id, parsed.data);
         const { __c03Replay, ...result } = raw;
         if (!__c03Replay) {
-          await createAuditLogInTransaction(tx, context, {
+          await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
             action: "POLICY_RULE_UPDATED",
             entityType: "PolicyRule",
             entityId: id,

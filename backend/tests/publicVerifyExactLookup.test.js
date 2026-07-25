@@ -18,6 +18,10 @@ assert.match(sql, /p_requested_code<>btrim\(p_requested_code\)/);
 assert.doesNotMatch(sql, /lower\(p_requested_code\)|upper\(p_requested_code\)/);
 assert.match(rawFunction, /IF qr_id IS NULL THEN[\s\S]*pg_sleep\(0\.015 \+ random\(\)\*0\.010\)/);
 assert.doesNotMatch(signedFunction, /pg_sleep/);
+assert(
+  signedFunction.indexOf("set_config('app.public_verification_batch_id'") <
+    signedFunction.indexOf('FROM public."Batch" b WHERE b.id=qr."batchId"')
+);
 assert(rawFunction.indexOf("length(p_requested_code)>128") < rawFunction.indexOf("pg_sleep("));
 
 const executeFunction = sql.slice(sql.indexOf("CREATE OR REPLACE FUNCTION app_public.public_verify_execute"),

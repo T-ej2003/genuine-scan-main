@@ -20,6 +20,7 @@ are `SUPER_ADMIN`, `PLATFORM_SUPER_ADMIN`, `LICENSEE_ADMIN`, and
 - QR list, statistics, batch summaries, tracking inventory, and audit-export
   projections;
 - batch creation from unassigned QR capacity;
+- batch rename through the same tenant-bound command capability;
 - batch deletion and bulk deletion with QR disassociation;
 - manufacturer assignment with child-batch creation;
 - allocation-request approval;
@@ -42,7 +43,7 @@ handle for `SIGINT`/`SIGTERM`, and the HTTP process starts no duplicate.
 | --- | --- |
 | `qr_allocate_range(text,text,text,text,integer,integer,text,text)` | Platform allocation, range, received batch, immutable QR identities, event, audit, and outbox |
 | `qr_approve_allocation_request(text,text,text,text,text)` | Atomic approval plus allocation for one pending request |
-| `qr_batch_command(text,text,text,text,jsonb)` | Fixed `CREATE_BATCH`, `DELETE_BATCH`, `BULK_DELETE_BATCHES`, or `ASSIGN_MANUFACTURER` command |
+| `qr_batch_command(text,text,text,text,jsonb)` | Fixed `CREATE_BATCH`, `DELETE_BATCH`, `BULK_DELETE_BATCHES`, `ASSIGN_MANUFACTURER`, `RENAME_BATCH`, or `AUDIT_CODE_EXPORT` command |
 | `qr_read_codes(text,text,text,text,text,text,integer,integer)` | Minimal tenant-scoped QR projection |
 | `qr_inventory_projection(text,text,text,text,text,text,text,text,integer,integer)` | Batch-led, database-paginated inventory projection with an independent matching-batch total |
 | `qr_export_codes(text,text,text,text)` | Capability-scoped immutable audit-export projection for batch, QR, trace-event, and policy-alert evidence |
@@ -67,6 +68,7 @@ access the protected tables directly. PUBLIC has no execution.
 | Allocate range | unused per-licensee numeric capacity | new `DORMANT` QR rows |
 | Create batch | unbatched `DORMANT` rows | selected rows become `ALLOCATED` |
 | Assign manufacturer | source-batch `DORMANT`, `ACTIVE`, or `ALLOCATED` rows without print job | selected rows become `ALLOCATED` in a linked child batch |
+| Rename batch | tenant-owned batch visible to a platform or licensee administrator | only the reviewed batch name changes |
 | Delete batch | unprinted, unreleased, lineage-free batch; QR not `PRINTED`, `REDEEMED`, or `SCANNED` | eligible QR rows return to unbatched `DORMANT` |
 | Bulk delete batches | same constraints for one licensee | eligible QR rows return to unbatched `DORMANT` |
 | Bind token metadata | exact generated QR IDs in one licensee | status and immutable code unchanged |

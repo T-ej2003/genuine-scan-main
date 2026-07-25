@@ -99,6 +99,7 @@ async function main() {
   assert.equal(psql(preauth, `SELECT "userId" FROM app_auth.consume_email_verification_token(ARRAY['${wrongPurposeHash}'],transaction_timestamp()::timestamp)`), "");
   const failures = await concurrent(preauth, "SELECT \"failedLoginAttempts\" FROM app_auth.record_password_failure('b01-active@example.invalid',transaction_timestamp()::timestamp,5,15)");
   assert.deepEqual(failures.map(Number).sort((a,b)=>a-b), [1,2]);
+  assert.equal(psql(bootstrap, `SELECT count(*) FROM public."AuditLogOutbox" WHERE payload->>'userId'='${ids.active}' AND payload->>'action'='AUTH_LOGIN_FAIL'`), "2");
   assert.equal(psql(preauth, `SELECT "deliveryRequired" FROM app_auth.request_password_reset('b01-active@example.invalid','${activeHash}',(transaction_timestamp()+interval '1 hour')::timestamp,transaction_timestamp()::timestamp,NULL,NULL)`), "t");
   assert.equal(psql(bootstrap, `SELECT count(*) FROM public."PasswordReset" WHERE "tokenHash"='${activeHash}' AND "usedAt" IS NULL AND "expiresAt">transaction_timestamp()`), "1");
   assert.equal(psql(bootstrap, `BEGIN; SET LOCAL ROLE mscqr_rls_cert_auth_owner; SELECT set_config('app.b01_preauth_operation','reset-consume',true),set_config('app.b01_preauth_hashes','${activeHash}',true),set_config('app.b01_preauth_user_id','${ids.active}',true); SELECT (SELECT count(*) FROM public."PasswordReset" WHERE "tokenHash"='${activeHash}')::text||':'||(SELECT count(*) FROM public."User" WHERE id='${ids.active}')::text; ROLLBACK`), "1:1");

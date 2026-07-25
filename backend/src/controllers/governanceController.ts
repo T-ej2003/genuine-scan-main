@@ -24,6 +24,7 @@ import {
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 import {
   C03AccessError,
+  c03CanonicalDbContext,
   c03DatabaseSessionCapability,
   c03RequestId,
   withC03ActorTransaction,
@@ -127,7 +128,7 @@ export const getFeatureFlags = async (req: AuthRequest, res: Response) => {
       },
       async (tx, context) => {
         const rows = await listTenantFeatureFlags(licenseeId, tx);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "TENANT_FEATURE_FLAGS_LISTED",
           entityType: "TenantFeatureFlag",
           entityId: licenseeId,
@@ -226,7 +227,7 @@ export const getRetentionPolicyController = async (req: AuthRequest, res: Respon
       },
       async (tx, context) => {
         const row = await getOrCreateRetentionPolicy(licenseeId, tx);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "EVIDENCE_RETENTION_POLICY_READ",
           entityType: "EvidenceRetentionPolicy",
           entityId: row.id,
@@ -366,7 +367,7 @@ export const runRetentionJobController = async (req: AuthRequest, res: Response)
           startedByUserId: req.user!.userId,
           mode: parsed.data.mode,
         }, tx);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "EVIDENCE_RETENTION_JOB_RUN",
           entityType: "EvidenceRetentionJob",
           entityId: row.job.id,
@@ -408,7 +409,7 @@ export const exportIncidentEvidenceBundleController = async (req: AuthRequest, r
       },
       async (tx, context) => {
         const row = await loadIncidentEvidenceAuditSnapshot(incidentId, tx);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "INCIDENT_EVIDENCE_BUNDLE_EXPORTED",
           entityType: "Incident",
           entityId: incidentId,
@@ -425,7 +426,7 @@ export const exportIncidentEvidenceBundleController = async (req: AuthRequest, r
     const bundle = await buildIncidentEvidenceAuditBundle(snapshot);
 
     res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename=\"${bundle.fileName}\"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${bundle.fileName}"`);
     return res.status(200).send(bundle.buffer);
   } catch (error) {
     console.error("exportIncidentEvidenceBundleController error:", error);
@@ -467,7 +468,7 @@ export const generateComplianceReportController = async (req: AuthRequest, res: 
           from,
           to,
         }, tx);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "COMPLIANCE_REPORT_GENERATED",
           entityType: "ComplianceReport",
           entityId: licenseeId,
@@ -586,7 +587,7 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
       },
       async (tx, context) => {
         const result = await loadCompliancePackJobInTransaction<any>(tx, context, paramsParsed.data.id);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "COMPLIANCE_PACK_DOWNLOADED",
           entityType: "CompliancePackJob",
           entityId: paramsParsed.data.id,
@@ -625,7 +626,7 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
     }
 
     res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename=\"${row.fileName}\"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${row.fileName}"`);
     return res.status(200).send(buffer);
   } catch (error) {
     console.error("downloadCompliancePackJobController error:", error);

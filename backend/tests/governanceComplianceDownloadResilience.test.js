@@ -43,6 +43,7 @@ class C03AccessError extends Error {
 }
 mockModule("rls-waves/session-c/c03/c03ActorBoundary.js", {
   C03AccessError,
+  c03CanonicalDbContext: (context) => context,
   c03DatabaseSessionCapability: () => "test-capability",
   c03RequestId: () => "00000000-0000-4000-8000-000000000501",
   withC03ActorTransaction: async (_boundary, callback) => callback({}, { licenseeId: "lic-1" }),

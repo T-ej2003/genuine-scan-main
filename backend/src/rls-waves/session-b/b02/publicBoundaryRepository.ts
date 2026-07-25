@@ -383,8 +383,9 @@ export const verifySignedQr = async (
   const sessionStart = proof();
   const row = exactOne(await db.$queryRaw<VerifySignedQrBoundaryRow[]>`
     SELECT * FROM app_public.verify_signed_qr(
-      ${tokenDigest}, ${qrId}, ${licenseeId}, ${batchId}, ${manufacturerId}, ${nonce}, ${replayEpoch},
-      ${keyVersion}, ${issuedAt}, ${expiresAt}, ${checkedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash},
+      ${tokenDigest}, ${qrId}, ${licenseeId}, ${batchId}, ${manufacturerId}, ${nonce}, ${replayEpoch}::integer,
+      ${keyVersion}, ${issuedAt}::timestamp without time zone, ${expiresAt}::timestamp without time zone,
+      ${checkedAt}::timestamp without time zone, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash},
       ${sessionStart.hash}
     )
   `, "app_public.verify_signed_qr", [...verifyRawProjection, ["verificationMethod", "string"]]);

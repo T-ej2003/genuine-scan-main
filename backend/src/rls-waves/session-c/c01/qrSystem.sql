@@ -146,13 +146,38 @@ DECLARE actor record; source_batch record; target_licensee text; target_org text
   target_manufacturer text; batch_id text; quantity integer; batch_name text;
   ids text[]; selected_ids text[]; selected_count integer; affected integer;
   start_code text; end_code text; remaining_count integer; remaining_start text; remaining_end text;
-  result jsonb;
+  exported_count bigint; export_status text; export_query text; result jsonb;
 BEGIN
-  IF p_purpose<>'qr-batch-command' OR p_operation NOT IN ('CREATE_BATCH','DELETE_BATCH','BULK_DELETE_BATCHES','ASSIGN_MANUFACTURER')
+  IF p_purpose<>'qr-batch-command' OR p_operation NOT IN ('CREATE_BATCH','DELETE_BATCH','BULK_DELETE_BATCHES','ASSIGN_MANUFACTURER','RENAME_BATCH','AUDIT_CODE_EXPORT')
      OR jsonb_typeof(p_payload)<>'object' THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,NULL);
+
+  IF p_operation='AUDIT_CODE_EXPORT' THEN
+    target_licensee:=NULLIF(p_payload->>'licenseeId','');
+    export_status:=NULLIF(p_payload->>'status','');
+    export_query:=NULLIF(p_payload->>'query','');
+    IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+       OR p_payload->>'count' !~ '^(0|[1-9][0-9]*)$'
+       OR (target_licensee IS NOT NULL AND target_licensee !~* '^[0-9a-f-]{36}$')
+       OR (export_status IS NOT NULL AND export_status NOT IN ('DORMANT','ACTIVE','ALLOCATED','ACTIVATED','PRINTED','REDEEMED','BLOCKED','SCANNED'))
+       OR length(coalesce(export_query,''))>500
+    THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    exported_count:=(p_payload->>'count')::bigint;
+    IF target_licensee IS NOT NULL THEN
+      SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(
+        p_capability,p_purpose,p_request_id,target_licensee
+      );
+      SELECT l."orgId" INTO STRICT target_org FROM public."Licensee" l WHERE l.id=target_licensee;
+    END IF;
+    PERFORM set_config('app.qr_batch_action',p_operation,true);
+    PERFORM app_rls.qr_write_audit(
+      actor."userId",target_org,target_licensee,'EXPORT_QR_CODES','QRCode',NULL,
+      jsonb_build_object('status',export_status,'query',export_query,'count',exported_count)
+    );
+    RETURN jsonb_build_object('exportedCount',exported_count);
+  END IF;
 
   IF p_operation='CREATE_BATCH' THEN
     IF actor.role<>'LICENSEE_ADMIN' OR actor."licenseeId" IS NULL THEN
@@ -207,7 +232,7 @@ BEGIN
       'totalCodes',quantity,'lifecycleState','CODES_GENERATED');
   END IF;
 
-  IF p_operation IN ('DELETE_BATCH','ASSIGN_MANUFACTURER') THEN
+  IF p_operation IN ('DELETE_BATCH','ASSIGN_MANUFACTURER','RENAME_BATCH') THEN
     IF p_payload->>'batchId' !~* '^[0-9a-f-]{36}$' THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
     PERFORM set_config('app.qr_source_batch_id',p_payload->>'batchId',true);
     SELECT b.id,b.name,b."licenseeId",b."manufacturerId",b."rootBatchId",b."printedAt",b."releasedAt"
@@ -238,6 +263,23 @@ BEGIN
     PERFORM app_rls.qr_write_audit(actor."userId",target_org,target_licensee,'DELETE_BATCH','Batch',source_batch.id,
       jsonb_build_object('unassignedCount',affected));
     RETURN jsonb_build_object('deletedBatchId',source_batch.id,'unassignedCount',affected);
+  END IF;
+
+  IF p_operation='RENAME_BATCH' THEN
+    batch_name:=btrim(p_payload->>'name');
+    IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN')
+       OR length(batch_name) NOT BETWEEN 2 AND 120 THEN
+      RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+    END IF;
+    IF batch_name=source_batch.name THEN
+      RETURN jsonb_build_object('id',source_batch.id,'name',source_batch.name,'licenseeId',target_licensee);
+    END IF;
+    UPDATE public."Batch" SET name=batch_name,"updatedAt"=transaction_timestamp() WHERE id=source_batch.id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    SELECT l."orgId" INTO STRICT target_org FROM public."Licensee" l WHERE l.id=target_licensee;
+    PERFORM app_rls.qr_write_audit(actor."userId",target_org,target_licensee,'RENAME_BATCH','Batch',source_batch.id,
+      jsonb_build_object('from',source_batch.name,'to',batch_name));
+    RETURN jsonb_build_object('id',source_batch.id,'name',batch_name,'licenseeId',target_licensee);
   END IF;
 
   IF p_operation='BULK_DELETE_BATCHES' THEN

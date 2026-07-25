@@ -188,17 +188,22 @@ const seedP2Fixtures = async (prisma) => {
     ],
   });
 
+  const tokenIssuedAt = new Date(Math.floor(Date.now() / 1000) * 1000);
+  const tokenExpiresAt = new Date(tokenIssuedAt.getTime() + 3600_000);
   const tokenA = signQrPayload({
     qr_id: ids.qrA,
     batch_id: ids.batchA,
     licensee_id: ids.licenseeA,
     manufacturer_id: ids.manufacturerA,
     epoch: 1,
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600,
+    iat: Math.floor(tokenIssuedAt.getTime() / 1000),
+    exp: Math.floor(tokenExpiresAt.getTime() / 1000),
     nonce: "p2-scan-a-nonce",
   });
-  await prisma.qRCode.update({ where: { id: ids.qrA }, data: { tokenHash: hashToken(tokenA), tokenIssuedAt: new Date(), tokenExpiresAt: new Date(Date.now() + 3600_000) } });
+  await prisma.qRCode.update({
+    where: { id: ids.qrA },
+    data: { tokenHash: hashToken(tokenA), tokenIssuedAt, tokenExpiresAt },
+  });
 
   await prisma.qrScanLog.createMany({
     data: [

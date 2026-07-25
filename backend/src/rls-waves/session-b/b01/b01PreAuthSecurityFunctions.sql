@@ -6,7 +6,7 @@ CREATE OR REPLACE FUNCTION app_auth.b01_preauth_audit(
   p_action text, p_entity_type text, p_entity_id text, p_at timestamp without time zone, p_details jsonb DEFAULT '{}'::jsonb
 ) RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 BEGIN
-  IF p_action NOT IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED')
+  IF p_action NOT IN ('AUTH_LOGIN_FAIL','AUTH_LOGIN_LOCKED','AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED')
      OR current_setting('app.b01_preauth_user_id',true)='' THEN
     RAISE EXCEPTION 'B01_PREAUTH_AUDIT_DENIED' USING ERRCODE='42501';
   END IF;
@@ -56,7 +56,7 @@ CREATE OR REPLACE FUNCTION app_auth.record_password_failure(
   p_requested_email text,p_attempted_at timestamp without time zone,p_max_attempts integer,p_lockout_minutes integer
 ) RETURNS TABLE("failedLoginAttempts" integer,"lockedUntil" timestamp without time zone)
 LANGUAGE plpgsql VOLATILE PARALLEL UNSAFE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE candidate_count integer;
+DECLARE candidate_count integer; actor_row record;
 BEGIN
   IF p_requested_email IS NULL OR length(p_requested_email) NOT BETWEEN 3 AND 320
      OR p_requested_email IS DISTINCT FROM lower(btrim(p_requested_email))
@@ -72,6 +72,17 @@ BEGIN
           set_config('app.b01_preauth_licensee_id','',true),set_config('app.b01_preauth_pending_email','',true);
   SELECT count(*)::integer INTO candidate_count FROM public."User" u WHERE lower(u.email)=p_requested_email;
   IF candidate_count<>1 THEN RETURN; END IF;
+  SELECT u.id,u."orgId",u."licenseeId",u."failedLoginAttempts",u."lockedUntil"
+    INTO STRICT actor_row FROM public."User" u WHERE lower(u.email)=p_requested_email FOR UPDATE;
+  PERFORM set_config('app.b01_preauth_user_id',actor_row.id,true),
+          set_config('app.b01_preauth_org_id',coalesce(actor_row."orgId",''),true),
+          set_config('app.b01_preauth_licensee_id',coalesce(actor_row."licenseeId",''),true);
+  IF actor_row."lockedUntil" IS NOT NULL AND actor_row."lockedUntil">p_attempted_at THEN
+    PERFORM app_auth.b01_preauth_audit('AUTH_LOGIN_LOCKED','User',actor_row.id,p_attempted_at,
+      jsonb_build_object('lockedUntil',actor_row."lockedUntil"));
+    RETURN QUERY SELECT actor_row."failedLoginAttempts"::integer,actor_row."lockedUntil"::timestamp;
+    RETURN;
+  END IF;
   RETURN QUERY
   UPDATE public."User" u SET
     "failedLoginAttempts"=u."failedLoginAttempts"+1,
@@ -81,6 +92,8 @@ BEGIN
     "updatedAt"=p_attempted_at
   WHERE lower(u.email)=p_requested_email
   RETURNING u."failedLoginAttempts",u."lockedUntil";
+  PERFORM app_auth.b01_preauth_audit('AUTH_LOGIN_FAIL','User',actor_row.id,p_attempted_at,
+    jsonb_build_object('reason','INVALID_CREDENTIALS'));
 END
 $fn$;
 

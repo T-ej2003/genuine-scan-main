@@ -25,6 +25,7 @@ import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExist
 import { buildPublicIncidentReportResponse } from "./incidents/publicIncidentResponse";
 import {
   C03AccessError,
+  c03CanonicalDbContext,
   c03DatabaseSessionCapability,
   c03RequestId,
   withC03ActorTransaction,
@@ -338,7 +339,7 @@ export const listIncidents = async (req: AuthRequest, res: Response) => {
             offset,
           },
         }, tx);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "INCIDENTS_LISTED",
           entityType: "Incident",
           entityId: licenseeId,
@@ -388,7 +389,7 @@ export const getIncident = async (req: AuthRequest, res: Response) => {
           licenseeId: req.user!.licenseeId,
           linkedLicenseeIds: req.user!.linkedLicenseeIds,
         }, tx);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "INCIDENT_DETAIL_READ",
           entityType: "Incident",
           entityId: incidentId,
@@ -433,7 +434,7 @@ export const patchIncident = async (req: AuthRequest, res: Response) => {
       },
       async (tx, context) => {
         const changed = await patchIncidentInTransaction<any>(tx, incidentId, parsed.data);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "INCIDENT_UPDATED",
           entityType: "Incident",
           entityId: incidentId,
@@ -480,7 +481,7 @@ export const addIncidentEventNote = async (req: AuthRequest, res: Response) => {
           eventType: IncidentEventType.NOTE_ADDED,
           eventPayload: { note: parsed.data.note },
         }, tx);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "INCIDENT_NOTE_ADDED",
           entityType: "Incident",
           entityId: incidentId,
@@ -534,7 +535,7 @@ export const addIncidentEvidence = async (req: AuthRequest, res: Response) => {
       },
       async (tx, context) => {
         const row = await addIncidentEvidenceInTransaction<any>(tx, incidentId, mapped, idempotencyKey);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "INCIDENT_EVIDENCE_ADDED",
           entityType: "Incident",
           entityId: incidentId,
@@ -689,7 +690,7 @@ export const exportIncidentPdfHook = async (req: AuthRequest, res: Response) => 
           eventType: IncidentEventType.EXPORTED,
           eventPayload: { format: "pdf", status: "requested" },
         }, tx);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "INCIDENT_EXPORT_REQUESTED",
           entityType: "Incident",
           entityId: incidentId,
@@ -732,7 +733,7 @@ export const serveIncidentEvidenceFile = async (req: AuthRequest, res: Response)
       },
       async (tx, context) => {
         const row = await loadIncidentEvidenceFileInTransaction<any>(tx, context, fileName);
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "INCIDENT_EVIDENCE_FILE_READ",
           entityType: "IncidentEvidence",
           entityId: row.id,

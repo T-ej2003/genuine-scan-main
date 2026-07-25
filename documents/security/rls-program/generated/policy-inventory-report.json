@@ -1381,7 +1381,7 @@
         "b01-preauth-reviewed-boundary"
       ],
       "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_preauth_user_id',true) AND payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_preauth_user_id',true) AND payload->>'action' IN ('AUTH_LOGIN_FAIL','AUTH_LOGIN_LOCKED','AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b01-consume-email-verification:AuditLogOutbox:INSERT",

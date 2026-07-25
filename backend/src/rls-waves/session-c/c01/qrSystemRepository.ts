@@ -157,7 +157,7 @@ export const bindBreakGlassTokens = async (input: {
 export const mutateBatch = async <T>(input: {
   capability: string;
   requestId: string;
-  operation: "CREATE_BATCH" | "DELETE_BATCH" | "BULK_DELETE_BATCHES" | "ASSIGN_MANUFACTURER";
+  operation: "CREATE_BATCH" | "DELETE_BATCH" | "BULK_DELETE_BATCHES" | "ASSIGN_MANUFACTURER" | "RENAME_BATCH" | "AUDIT_CODE_EXPORT";
   payload: Record<string, unknown>;
 }) => {
   const payload = JSON.stringify(input.payload);

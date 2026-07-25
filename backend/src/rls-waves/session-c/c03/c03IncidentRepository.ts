@@ -107,8 +107,8 @@ export const listIncidentsInTransaction = async <T>(
     await tx.$queryRaw<JsonRow[]>`
       SELECT app_rls.c03_list_incidents(
         ${json(input.filters)}::jsonb,
-        ${input.limit},
-        ${input.offset}
+        ${input.limit}::integer,
+        ${input.offset}::integer
       ) AS result
     `,
     "list incidents"

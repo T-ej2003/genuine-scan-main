@@ -7,6 +7,7 @@ import { createAuditLogInTransaction } from "../services/auditService";
 import { createRoleNotifications } from "../services/notificationService";
 import {
   C03AccessError,
+  c03CanonicalDbContext,
   c03DatabaseSessionCapability,
   c03RequestId,
   withC03ResourceTransaction,
@@ -105,7 +106,7 @@ export const listIrAlerts = async (req: AuthRequest, res: Response) => {
           limit,
           offset,
         });
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "IR_POLICY_ALERTS_LISTED",
           entityType: "PolicyAlert",
           entityId: incidentId,
@@ -169,7 +170,7 @@ export const patchIrAlert = async (req: AuthRequest, res: Response) => {
           reason,
           idempotencyKey,
         });
-        await createAuditLogInTransaction(tx, context, {
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
           action: "POLICY_ALERT_LINKED_TO_INCIDENT",
           entityType: "PolicyAlert",
           entityId: id,

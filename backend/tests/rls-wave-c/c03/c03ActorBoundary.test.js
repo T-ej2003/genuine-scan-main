@@ -33,6 +33,7 @@ mockModule("config/database.js", { __esModule: true, default: { $transaction: as
 
 const {
   C03AccessError,
+  c03CanonicalDbContext,
   withC03ActorTransaction,
   withC03ResourceTransaction,
 } = require("../../../dist/rls-waves/session-c/c03/c03ActorBoundary");
@@ -63,6 +64,16 @@ const run = async () => {
   assert.equal(context.userId, ids.actor);
   assert.equal(context.licenseeId, ids.licensee);
   assert.equal(context.databaseSessionCapability, ids.capability);
+  assert.deepEqual(c03CanonicalDbContext(context), {
+    userId: ids.actor,
+    role: "LICENSEE_ADMIN",
+    organizationId: ids.org,
+    licenseeId: ids.licensee,
+    manufacturerId: null,
+    authAssurance: "mfa-verified",
+    requestId: ids.request,
+    purpose: "compliance-pack-start",
+  });
   assert.match(lastQuery, /app_auth\.require_authenticated_session/);
   assert.doesNotMatch(lastQuery, /install_actor_context|c03_revalidate_actor_scope/);
 

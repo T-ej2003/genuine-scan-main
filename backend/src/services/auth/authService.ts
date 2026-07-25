@@ -531,29 +531,22 @@ export const loginWithPassword = async (input: {
   const now = new Date();
 
   if (!user) {
-    await createAuditLog({
-      action: "AUTH_LOGIN_FAIL",
-      entityType: "User",
-      entityId: null,
-      details: { reason: "INVALID_CREDENTIALS" },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any);
+    await recordPasswordLoginFailure({
+      normalizedEmail: email,
+      attemptedAt: now,
+      maxAttempts: getMaxLoginAttempts(),
+      lockoutMinutes: getLockoutMinutes(),
+    });
     throw new Error("Invalid email or password");
   }
 
   if (user.lockedUntil && user.lockedUntil.getTime() > now.getTime()) {
-    await createAuditLog({
-      userId: user.id,
-      licenseeId: user.licenseeId || undefined,
-      orgId: user.orgId || undefined,
-      action: "AUTH_LOGIN_LOCKED",
-      entityType: "User",
-      entityId: user.id,
-      details: { lockedUntil: user.lockedUntil },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any);
+    await recordPasswordLoginFailure({
+      normalizedEmail: email,
+      attemptedAt: now,
+      maxAttempts: getMaxLoginAttempts(),
+      lockoutMinutes: getLockoutMinutes(),
+    });
     throw new Error("Account temporarily locked. Try again later.");
   }
 
@@ -578,14 +571,6 @@ export const loginWithPassword = async (input: {
       maxAttempts,
       lockoutMinutes: getLockoutMinutes(),
     });
-    await createAuditLog({
-      action: "AUTH_LOGIN_FAIL",
-      entityType: "User",
-      entityId: null,
-      details: { reason: "INVALID_CREDENTIALS" },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any);
 
     throw new Error("Invalid email or password");
   }

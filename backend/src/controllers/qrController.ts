@@ -7,11 +7,10 @@ import { z } from "zod";
 import { Prisma, QRStatus, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { createAuditLog } from "../services/auditService";
 import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { createUserNotification } from "../services/notificationService";
 import { buildLineageSuccessMessage } from "../services/batchAllocationService";
-import { buildScopedWhere, findScopedBatch } from "../services/accessControlService";
+import { buildScopedWhere } from "../services/accessControlService";
 import { listScopedBatchReadPayload } from "../services/stagingRlsBatchReadService";
 import { getScopedBatchAllocationMapPayload } from "../services/stagingRlsBatchAllocationMapService";
 import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
@@ -488,35 +487,20 @@ export const renameBatch = async (req: AuthRequest, res: Response) => {
     }
     const batchId = paramsParsed.data.id;
 
-    const existing = await findScopedBatch(req.user!, batchId, {
-      select: { id: true, name: true, licenseeId: true },
-    });
-    if (!existing) return res.status(404).json({ success: false, error: "Batch not found" });
-
-    const nextName = parsed.data.name.trim();
-    if (nextName === existing.name) {
-      return res.json({ success: true, data: existing });
-    }
-
-    const updated = await prisma.batch.update({
-      where: { id: existing.id },
-      data: { name: nextName },
-    });
-
-    await createAuditLog({
-      userId: auth.userId,
-      licenseeId: existing.licenseeId,
-      action: "RENAME_BATCH",
-      entityType: "Batch",
-      entityId: existing.id,
-      details: { from: existing.name, to: nextName },
-      ipAddress: req.ip,
+    const updated = await mutateQrBatch<{ id: string; name: string; licenseeId: string }>({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: qrRequestId(req),
+      operation: "RENAME_BATCH",
+      payload: { batchId, name: parsed.data.name.trim() },
     });
 
     return res.json({ success: true, data: updated });
   } catch (e: any) {
     console.error("renameBatch error:", e);
-    return res.status(500).json({ success: false, error: e?.message || "Internal server error" });
+    if (isQrBoundaryDenied(e)) {
+      return res.status(404).json({ success: false, error: "Batch not found" });
+    }
+    return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };
 
@@ -1097,13 +1081,16 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
       await file.close();
     }
 
-    await createAuditLog({
-      userId,
-      licenseeId: (req.query.licenseeId as string | undefined) || undefined,
-      action: "EXPORT_QR_CODES",
-      entityType: "QRCode",
-      details: { status: status || null, query: q || null, count: exportedCount },
-      ipAddress: req.ip,
+    await mutateQrBatch<{ exportedCount: number }>({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: qrRequestId(req),
+      operation: "AUDIT_CODE_EXPORT",
+      payload: {
+        licenseeId: (req.query.licenseeId as string | undefined) || null,
+        status: status || null,
+        query: q || null,
+        count: exportedCount,
+      },
     });
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");

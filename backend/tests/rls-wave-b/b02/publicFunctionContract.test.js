@@ -57,6 +57,9 @@ test("B02 public repository exposes only the reviewed static app_public contract
     /\$\{checkedAt\}::timestamp without time zone/,
     "verify_raw_qr must bind its Date to the exact timestamp-without-time-zone signature"
   );
+  assert.match(publicSource, /\$\{replayEpoch\}::integer/);
+  assert.match(publicSource, /\$\{issuedAt\}::timestamp without time zone/);
+  assert.match(publicSource, /\$\{expiresAt\}::timestamp without time zone/);
 });
 
 test("B02 authenticated repositories cannot accept caller-built Prisma scope or update objects", () => {

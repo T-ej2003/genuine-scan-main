@@ -61,6 +61,7 @@ test("production C03 callers do not use the generic context installer", () => {
   assert.match(production, /databaseSessionCapability/);
   assert.match(production, /c03_start_compliance_pack_job/);
   assert.match(production, /c03_get_incident_evidence_file_by_storage_key/);
+  assert.match(production, /\$\{input\.limit\}::integer[\s\S]*\$\{input\.offset\}::integer/);
 });
 
 test("generated C03 package has exact grants and no blanket execute grant", () => {

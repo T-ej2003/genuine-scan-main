@@ -3,7 +3,7 @@
   "environment": "local-disposable-only",
   "deploymentModel": "clean-room-blue-green",
   "postgresqlMajor": 18,
-  "sourceContractSha256": "3bfb1a088762efe8c8787845bbae32159e121b4729eee9715020ee9059660cb1",
+  "sourceContractSha256": "ff8a4a6506d0b4786a7908b0f138b75ee26e2332909a476fa93af848f03a5bb6",
   "tablesExpected": 79,
   "forceRlsTargetsExpected": 77,
   "tablesCertified": 77,
@@ -301,7 +301,7 @@
   "columnPrivilegeCertification": true,
   "exactCatalogTamperCertification": true,
   "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "8f0ae6951ccdc82e26442df4aa826da8f427770855383c613a8d932db73b532a",
+  "packageChecksumsSha256": "aae47bc45fedbd9110026b2c645db4a12e079d31b858693a701e863d75017c21",
   "status": "clean-room-full-table-enforcement-certified-workflows-pending",
   "b01Certification": {
     "predecessorReplayRejected": true,
@@ -318,5 +318,5 @@
     "postgresqlMajor": 18,
     "testFile": "backend/tests/rls-wave-b/b02/publicVerificationPostgres18.test.js"
   },
-  "disposableCertificationFixtureRows": 76
+  "disposableCertificationFixtureRows": 78
 }

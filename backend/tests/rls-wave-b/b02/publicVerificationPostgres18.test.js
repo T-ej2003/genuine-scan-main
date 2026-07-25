@@ -64,6 +64,8 @@ async function main() {
   assert.equal(Number(psql(admin, "select current_setting('server_version_num')::int/10000")), 18);
   const customerCapability = randomBytes(32).toString("base64url");
   const customerUserId = "cust_11111111111111111111111111111111";
+  const tokenIssuedAt = new Date(Date.now() - 60_000).toISOString();
+  const tokenExpiresAt = new Date(Date.now() + 3_600_000).toISOString();
 
   psql(admin, `
     INSERT INTO public."Organization"(id,name,"isActive","updatedAt")
@@ -84,8 +86,8 @@ async function main() {
       "issuanceMode","customerVerifiableAt","tokenNonce","tokenHash","tokenIssuedAt",
       "tokenExpiresAt","replayEpoch","printedAt","updatedAt")
       VALUES('${ids.qr}','PUBLICCODE01','PUB-0001','${ids.licensee}','${ids.batch}','PRINTED',
-        'GOVERNED_PRINT',now(),'public_nonce_1234','${hash("signed-token")}',now()-interval '1 minute',
-        now()+interval '1 hour',1,now(),now());
+        'GOVERNED_PRINT',now(),'public_nonce_1234','${hash("signed-token")}',
+        '${tokenIssuedAt}'::timestamp,'${tokenExpiresAt}'::timestamp,1,now(),now());
   `);
 
   for (const table of ["QRCode", "QrScanLog", "VerificationDecision", "VerificationEvidenceSnapshot",
@@ -112,6 +114,14 @@ async function main() {
   assert.equal(Number(psql(admin, `SELECT count(*) FROM public."SecurityEventOutbox"
     WHERE "eventType"='PUBLIC_VERIFICATION_DECISION'
       AND payload->>'classification'='NOT_READY_FOR_CUSTOMER_USE'`)), 1);
+  const signedNotReady = json(preauth, `SELECT row_to_json(v) FROM app_public.verify_signed_qr(
+    '${hash("signed-token")}','${ids.qr}','${ids.licensee}','${ids.batch}','${ids.manufacturer}',
+    'public_nonce_1234',1,'test-v1',
+    '${tokenIssuedAt}'::timestamp,'${tokenExpiresAt}'::timestamp,
+    now()::timestamp,'signed-not-ready','${hash("signed-ip")}','${hash("signed-device")}',
+    '${hash("signed-session")}'
+  ) v`);
+  assert.equal(signedNotReady.result, "NOT_READY");
   const notReadySession = json(preauth, `SELECT row_to_json(s) FROM app_public.start_verification_session(
     '${hash("session-not-ready")}','MANUAL_CODE',NULL,now()::timestamp,
     'not-ready-session-start','${hash("proof-not-ready")}'

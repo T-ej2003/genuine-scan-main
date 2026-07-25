@@ -110,6 +110,10 @@ async function main(){
   denied(`SELECT app_rls.qr_delete_codes('${caps.tenant}','qr-code-delete','40000000-0000-4000-8000-000000000645',ARRAY['40000000-0000-4000-8000-000000000508'],ARRAY[]::text[])`);
   const tenantRead=JSON.parse(last(app,`SELECT jsonb_build_object('rows',payload,'total',total)::text FROM app_rls.qr_read_codes('${caps.tenant}','qr-code-read','40000000-0000-4000-8000-000000000602','${ids.licenseeA}',NULL,NULL,100,0)`));
   assert.equal(tenantRead.total,7);
+  const exportAudit=JSON.parse(call("qr_batch_command",`'${caps.platform}','qr-batch-command','40000000-0000-4000-8000-000000000649','AUDIT_CODE_EXPORT','{"licenseeId":"${ids.licenseeA}","status":"DORMANT","query":null,"count":7}'::jsonb`));
+  assert.equal(exportAudit.exportedCount,7);
+  assert.equal(last(bootstrap,`SELECT count(*) FROM public."AuditLog" WHERE action='EXPORT_QR_CODES' AND "licenseeId"='${ids.licenseeA}' AND details->>'count'='7'`),"1");
+  denied(`SELECT app_rls.qr_batch_command('${caps.tenant}','qr-batch-command','40000000-0000-4000-8000-000000000650','AUDIT_CODE_EXPORT','{"count":7}'::jsonb)`);
   const pagedCodes=[];
   for(let offset=0;offset<tenantRead.total;offset+=2){
     const page=JSON.parse(last(app,`SELECT jsonb_build_object('rows',payload,'total',total)::text FROM app_rls.qr_read_codes('${caps.tenant}','qr-code-read','40000000-0000-4000-8000-000000000602','${ids.licenseeA}',NULL,NULL,2,${offset})`));
@@ -126,6 +130,11 @@ async function main(){
   assert.equal(child.manufacturerId,ids.manufacturer); assert.equal(child.allocated,1);
   const created=JSON.parse(call("qr_batch_command",`'${caps.tenant}','qr-batch-command','40000000-0000-4000-8000-000000000605','CREATE_BATCH','{"name":"Tenant batch","quantity":2}'::jsonb`));
   assert.equal(created.totalCodes,2);
+  const renamed=JSON.parse(call("qr_batch_command",`'${caps.tenant}','qr-batch-command','40000000-0000-4000-8000-000000000647','RENAME_BATCH','{"batchId":"${created.id}","name":"Renamed tenant batch"}'::jsonb`));
+  assert.deepEqual(renamed,{id:created.id,name:"Renamed tenant batch",licenseeId:ids.licenseeA});
+  run(bootstrap,`INSERT INTO public."Batch"(id,name,"licenseeId","startCode","endCode","totalCodes","updatedAt")
+    VALUES('40000000-0000-4000-8000-000000000702','Other tenant batch','${ids.licenseeB}','QRB0000010001','QRB0000010001',1,now())`);
+  denied(`SELECT app_rls.qr_batch_command('${caps.tenant}','qr-batch-command','40000000-0000-4000-8000-000000000648','RENAME_BATCH','{"batchId":"40000000-0000-4000-8000-000000000702","name":"Cross tenant rename"}'::jsonb)`);
   run(bootstrap,`INSERT INTO public."Batch"(id,name,"licenseeId","startCode","endCode","totalCodes","updatedAt")
     VALUES('40000000-0000-4000-8000-000000000701','Empty source batch','${ids.licenseeA}','QRAEMPTY0001','QRAEMPTY0000',0,now())`);
   const page1=run(app,`SELECT jsonb_build_object('payload',payload,'total',total)::text FROM app_rls.qr_inventory_projection('${caps.tenant}','qr-inventory-read','40000000-0000-4000-8000-000000000614','${ids.licenseeA}',NULL,NULL,NULL,NULL,1,0)`).map(JSON.parse);
@@ -161,7 +170,7 @@ async function main(){
   assert.deepEqual(exported.policyAlerts.map(({id})=>id),["40000000-0000-4000-8000-000000000720"]);
   assert.equal(exported.policyAlerts[0].acknowledgedByUser.id,ids.tenant);
   assert.equal(last(app,`SELECT count(*) FROM public."TraceEvent"`),"0");
-  assert.equal(last(app,`SELECT count(*) FROM public."PolicyAlert"`),"0");
+  denied(`SELECT count(*) FROM public."PolicyAlert"`,/permission denied/);
   run(bootstrap,`INSERT INTO public."QrScanLog"(id,code,"qrCodeId","licenseeId","batchId",status,"isFirstScan","isTrustedOwnerContext","scannedAt")
     SELECT '40000000-0000-4000-8000-000000000730',q.code,q.id,q."licenseeId",q."batchId",q.status,true,false,now()
       FROM public."QRCode" q WHERE q."batchId"='${created.id}' ORDER BY q.id LIMIT 1`);

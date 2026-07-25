@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='3bfb1a088762efe8c8787845bbae32159e121b4729eee9715020ee9059660cb1'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:3bfb1a088762efe8c8787845bbae32159e121b4729eee9715020ee9059660cb1'
+    AND source_contract_sha256='ff8a4a6506d0b4786a7908b0f138b75ee26e2332909a476fa93af848f03a5bb6'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:ff8a4a6506d0b4786a7908b0f138b75ee26e2332909a476fa93af848f03a5bb6'
     AND administrator_role='certification-administrator'
     AND phase='ownership-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'context helpers lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:3bfb1a088762efe8c8787845bbae32159e121b4729eee9715020ee9059660cb1')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:ff8a4a6506d0b4786a7908b0f138b75ee26e2332909a476fa93af848f03a5bb6')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -1488,7 +1488,7 @@ CREATE OR REPLACE FUNCTION app_auth.b01_preauth_audit(
   p_action text, p_entity_type text, p_entity_id text, p_at timestamp without time zone, p_details jsonb DEFAULT '{}'::jsonb
 ) RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 BEGIN
-  IF p_action NOT IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED')
+  IF p_action NOT IN ('AUTH_LOGIN_FAIL','AUTH_LOGIN_LOCKED','AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED')
      OR current_setting('app.b01_preauth_user_id',true)='' THEN
     RAISE EXCEPTION 'B01_PREAUTH_AUDIT_DENIED' USING ERRCODE='42501';
   END IF;
@@ -1538,7 +1538,7 @@ CREATE OR REPLACE FUNCTION app_auth.record_password_failure(
   p_requested_email text,p_attempted_at timestamp without time zone,p_max_attempts integer,p_lockout_minutes integer
 ) RETURNS TABLE("failedLoginAttempts" integer,"lockedUntil" timestamp without time zone)
 LANGUAGE plpgsql VOLATILE PARALLEL UNSAFE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE candidate_count integer;
+DECLARE candidate_count integer; actor_row record;
 BEGIN
   IF p_requested_email IS NULL OR length(p_requested_email) NOT BETWEEN 3 AND 320
      OR p_requested_email IS DISTINCT FROM lower(btrim(p_requested_email))
@@ -1554,6 +1554,17 @@ BEGIN
           set_config('app.b01_preauth_licensee_id','',true),set_config('app.b01_preauth_pending_email','',true);
   SELECT count(*)::integer INTO candidate_count FROM public."User" u WHERE lower(u.email)=p_requested_email;
   IF candidate_count<>1 THEN RETURN; END IF;
+  SELECT u.id,u."orgId",u."licenseeId",u."failedLoginAttempts",u."lockedUntil"
+    INTO STRICT actor_row FROM public."User" u WHERE lower(u.email)=p_requested_email FOR UPDATE;
+  PERFORM set_config('app.b01_preauth_user_id',actor_row.id,true),
+          set_config('app.b01_preauth_org_id',coalesce(actor_row."orgId",''),true),
+          set_config('app.b01_preauth_licensee_id',coalesce(actor_row."licenseeId",''),true);
+  IF actor_row."lockedUntil" IS NOT NULL AND actor_row."lockedUntil">p_attempted_at THEN
+    PERFORM app_auth.b01_preauth_audit('AUTH_LOGIN_LOCKED','User',actor_row.id,p_attempted_at,
+      jsonb_build_object('lockedUntil',actor_row."lockedUntil"));
+    RETURN QUERY SELECT actor_row."failedLoginAttempts"::integer,actor_row."lockedUntil"::timestamp;
+    RETURN;
+  END IF;
   RETURN QUERY
   UPDATE public."User" u SET
     "failedLoginAttempts"=u."failedLoginAttempts"+1,
@@ -1563,6 +1574,8 @@ BEGIN
     "updatedAt"=p_attempted_at
   WHERE lower(u.email)=p_requested_email
   RETURNING u."failedLoginAttempts",u."lockedUntil";
+  PERFORM app_auth.b01_preauth_audit('AUTH_LOGIN_FAIL','User',actor_row.id,p_attempted_at,
+    jsonb_build_object('reason','INVALID_CREDENTIALS'));
 END
 $fn$;
 
@@ -6710,13 +6723,38 @@ DECLARE actor record; source_batch record; target_licensee text; target_org text
   target_manufacturer text; batch_id text; quantity integer; batch_name text;
   ids text[]; selected_ids text[]; selected_count integer; affected integer;
   start_code text; end_code text; remaining_count integer; remaining_start text; remaining_end text;
-  result jsonb;
+  exported_count bigint; export_status text; export_query text; result jsonb;
 BEGIN
-  IF p_purpose<>'qr-batch-command' OR p_operation NOT IN ('CREATE_BATCH','DELETE_BATCH','BULK_DELETE_BATCHES','ASSIGN_MANUFACTURER')
+  IF p_purpose<>'qr-batch-command' OR p_operation NOT IN ('CREATE_BATCH','DELETE_BATCH','BULK_DELETE_BATCHES','ASSIGN_MANUFACTURER','RENAME_BATCH','AUDIT_CODE_EXPORT')
      OR jsonb_typeof(p_payload)<>'object' THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,NULL);
+
+  IF p_operation='AUDIT_CODE_EXPORT' THEN
+    target_licensee:=NULLIF(p_payload->>'licenseeId','');
+    export_status:=NULLIF(p_payload->>'status','');
+    export_query:=NULLIF(p_payload->>'query','');
+    IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+       OR p_payload->>'count' !~ '^(0|[1-9][0-9]*)$'
+       OR (target_licensee IS NOT NULL AND target_licensee !~* '^[0-9a-f-]{36}$')
+       OR (export_status IS NOT NULL AND export_status NOT IN ('DORMANT','ACTIVE','ALLOCATED','ACTIVATED','PRINTED','REDEEMED','BLOCKED','SCANNED'))
+       OR length(coalesce(export_query,''))>500
+    THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    exported_count:=(p_payload->>'count')::bigint;
+    IF target_licensee IS NOT NULL THEN
+      SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(
+        p_capability,p_purpose,p_request_id,target_licensee
+      );
+      SELECT l."orgId" INTO STRICT target_org FROM public."Licensee" l WHERE l.id=target_licensee;
+    END IF;
+    PERFORM set_config('app.qr_batch_action',p_operation,true);
+    PERFORM app_rls.qr_write_audit(
+      actor."userId",target_org,target_licensee,'EXPORT_QR_CODES','QRCode',NULL,
+      jsonb_build_object('status',export_status,'query',export_query,'count',exported_count)
+    );
+    RETURN jsonb_build_object('exportedCount',exported_count);
+  END IF;
 
   IF p_operation='CREATE_BATCH' THEN
     IF actor.role<>'LICENSEE_ADMIN' OR actor."licenseeId" IS NULL THEN
@@ -6771,7 +6809,7 @@ BEGIN
       'totalCodes',quantity,'lifecycleState','CODES_GENERATED');
   END IF;
 
-  IF p_operation IN ('DELETE_BATCH','ASSIGN_MANUFACTURER') THEN
+  IF p_operation IN ('DELETE_BATCH','ASSIGN_MANUFACTURER','RENAME_BATCH') THEN
     IF p_payload->>'batchId' !~* '^[0-9a-f-]{36}$' THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
     PERFORM set_config('app.qr_source_batch_id',p_payload->>'batchId',true);
     SELECT b.id,b.name,b."licenseeId",b."manufacturerId",b."rootBatchId",b."printedAt",b."releasedAt"
@@ -6802,6 +6840,23 @@ BEGIN
     PERFORM app_rls.qr_write_audit(actor."userId",target_org,target_licensee,'DELETE_BATCH','Batch',source_batch.id,
       jsonb_build_object('unassignedCount',affected));
     RETURN jsonb_build_object('deletedBatchId',source_batch.id,'unassignedCount',affected);
+  END IF;
+
+  IF p_operation='RENAME_BATCH' THEN
+    batch_name:=btrim(p_payload->>'name');
+    IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN')
+       OR length(batch_name) NOT BETWEEN 2 AND 120 THEN
+      RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+    END IF;
+    IF batch_name=source_batch.name THEN
+      RETURN jsonb_build_object('id',source_batch.id,'name',source_batch.name,'licenseeId',target_licensee);
+    END IF;
+    UPDATE public."Batch" SET name=batch_name,"updatedAt"=transaction_timestamp() WHERE id=source_batch.id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    SELECT l."orgId" INTO STRICT target_org FROM public."Licensee" l WHERE l.id=target_licensee;
+    PERFORM app_rls.qr_write_audit(actor."userId",target_org,target_licensee,'RENAME_BATCH','Batch',source_batch.id,
+      jsonb_build_object('from',source_batch.name,'to',batch_name));
+    RETURN jsonb_build_object('id',source_batch.id,'name',batch_name,'licenseeId',target_licensee);
   END IF;
 
   IF p_operation='BULK_DELETE_BATCHES' THEN
@@ -10514,6 +10569,7 @@ BEGIN
      OR qr."tokenExpiresAt"<=p_checked_at THEN
     RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
   END IF;
+  PERFORM set_config('app.public_verification_batch_id',coalesce(qr."batchId",''),true);
   IF qr."batchId" IS NOT NULL THEN
     SELECT b.id,b."manufacturerId" INTO batch
     FROM public."Batch" b WHERE b.id=qr."batchId";

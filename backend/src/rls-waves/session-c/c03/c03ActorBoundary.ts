@@ -45,6 +45,17 @@ export type C03VerifiedDbContext = CanonicalDbContext & {
   sessionId: string;
 };
 
+export const c03CanonicalDbContext = (context: CanonicalDbContext): CanonicalDbContext => ({
+  userId: context.userId,
+  role: context.role,
+  organizationId: context.organizationId ?? null,
+  licenseeId: context.licenseeId ?? null,
+  manufacturerId: context.manufacturerId ?? null,
+  authAssurance: context.authAssurance,
+  requestId: context.requestId,
+  purpose: context.purpose,
+});
+
 export const c03RequestId = (request: { requestId?: unknown; get?: (name: string) => string | undefined }) =>
   String(request.requestId || request.get?.("x-request-id") || "").trim();
 

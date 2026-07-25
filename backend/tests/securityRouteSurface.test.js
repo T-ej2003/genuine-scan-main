@@ -160,6 +160,7 @@ const licenseeAdmin = {
   }
   mockModule("rls-waves/session-c/c03/c03ActorBoundary.js", {
     C03AccessError,
+    c03CanonicalDbContext: (context) => context,
     c03DatabaseSessionCapability: () => "test-capability",
     c03RequestId: () => "security-route-surface",
     withC03ResourceTransaction: async () => {

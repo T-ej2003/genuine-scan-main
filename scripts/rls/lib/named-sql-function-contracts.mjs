@@ -152,7 +152,7 @@ const preAuthSecurity = Object.freeze({
     ["RefreshToken", "UPDATE", `(${preAuthOwner} AND ${preAuthOperation} IN ('reset-consume','email-consume') AND "userId"=${preAuthUserId})`],
     ["Licensee", "SELECT", `(${preAuthOwner} AND ${preAuthOperation} IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_licensee_id',true) AND "orgId"=current_setting('app.b01_preauth_org_id',true))`],
     ["Organization", "SELECT", `(${preAuthOwner} AND ${preAuthOperation} IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_org_id',true))`],
-    ["AuditLogOutbox", "INSERT", `(${preAuthOwner} AND ${preAuthUserId}<>'' AND payload->>'userId'=${preAuthUserId} AND payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))`],
+    ["AuditLogOutbox", "INSERT", `(${preAuthOwner} AND ${preAuthUserId}<>'' AND payload->>'userId'=${preAuthUserId} AND payload->>'action' IN ('AUTH_LOGIN_FAIL','AUTH_LOGIN_LOCKED','AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))`],
   ],
 });
 
@@ -774,7 +774,7 @@ const qrSystemSecurity = Object.freeze({
     ["QRCode","DELETE",[]],
     ["Batch","SELECT",["id","licenseeId","name","manufacturerId","parentBatchId","rootBatchId","startCode","endCode","totalCodes","lifecycleState","printedAt","releasedAt","createdAt","updatedAt"]],
     ["Batch","INSERT",["id","name","licenseeId","manufacturerId","parentBatchId","rootBatchId","startCode","endCode","totalCodes","lifecycleState","updatedAt"]],
-    ["Batch","UPDATE",["startCode","endCode","totalCodes","updatedAt"]],
+    ["Batch","UPDATE",["name","startCode","endCode","totalCodes","updatedAt"]],
     ["Batch","DELETE",[]],
     ["QrAllocationRequest","SELECT",["id","licenseeId","requestedByUserId","quantity","startNumber","endNumber","batchName","status"]],
     ["QrAllocationRequest","UPDATE",["status","approvedByUserId","approvedAt","decisionNote","startNumber","endNumber","quantity","updatedAt"]],

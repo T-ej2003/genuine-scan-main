@@ -968,7 +968,8 @@
         "table-user"
       ],
       "tablesWritten": [
-        "table-user"
+        "table-user",
+        "table-audit-log-outbox"
       ],
       "exactAllowedColumns": [
         {
@@ -987,6 +988,15 @@
           "columns": [
             "failedLoginAttempts",
             "lockedUntil",
+            "updatedAt"
+          ]
+        },
+        {
+          "tableId": "table-audit-log-outbox",
+          "command": "INSERT",
+          "columns": [
+            "id",
+            "payload",
             "updatedAt"
           ]
         }

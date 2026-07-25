@@ -112,10 +112,16 @@ const assertNoCrossTenantLeak = (response, forbiddenMarker, label) => {
     assertDenied(supportAsManufacturer, "manufacturer support tickets");
     assertNoCrossTenantLeak(supportAsManufacturer, "P2 Support B", "manufacturer support tickets");
 
-    const supportAsAdmin = await request("GET", "/api/support/tickets", null, { headers: authHeader(tokens.superAdmin) });
-    assert.strictEqual(supportAsAdmin.status, 200, supportAsAdmin.text);
-    assert.match(supportAsAdmin.text, /P2 Support A/);
-    assert.match(supportAsAdmin.text, /P2 Support B/);
+    const unscopedSupportAsAdmin = await request("GET", "/api/support/tickets", null, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assertDenied(unscopedSupportAsAdmin, "platform support tickets without a licensee selector");
+
+    const supportAsAdmin = await request("GET", `/api/support/tickets?licenseeId=${ids.licenseeA}`, null, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assertDenied(supportAsAdmin, "platform support tickets before the bounded support-read family is activated");
+    assertNoCrossTenantLeak(supportAsAdmin, "P2 Support B", "platform scoped support ticket denial");
     assertSafeResponse(supportAsAdmin, "platform support tickets");
 
     const incidentsA = await request("GET", "/api/incidents", null, { headers: authHeader(tokens.licenseeAdminA) });

@@ -542,6 +542,7 @@ BEGIN
      OR qr."tokenExpiresAt"<=p_checked_at THEN
     RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
   END IF;
+  PERFORM set_config('app.public_verification_batch_id',coalesce(qr."batchId",''),true);
   IF qr."batchId" IS NOT NULL THEN
     SELECT b.id,b."manufacturerId" INTO batch
     FROM public."Batch" b WHERE b.id=qr."batchId";

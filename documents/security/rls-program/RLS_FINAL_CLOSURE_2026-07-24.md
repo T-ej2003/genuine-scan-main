@@ -15,11 +15,11 @@ Staging and production have not been activated by this evidence revision.
 - Starting commit: `def002eb922b4e4b3350412a2803b969cbff709d`
 - Branch: `rls-full-integration`
 - Generated source contract:
-  `3bfb1a088762efe8c8787845bbae32159e121b4729eee9715020ee9059660cb1`
+  `ff8a4a6506d0b4786a7908b0f138b75ee26e2332909a476fa93af848f03a5bb6`
 - Generated package checksum:
-  `8f0ae6951ccdc82e26442df4aa826da8f427770855383c613a8d932db73b532a`
+  `aae47bc45fedbd9110026b2c645db4a12e079d31b858693a701e863d75017c21`
 - Deterministic generated-tree checksum:
-  `783fd51851d9ec8da816956c76c92b0b0131ec22857d6f4edae3392263b87d57`
+  `5651baa31514f4dee169e388aaaad35ecbf41789f76432a7fe62dd050d6d16e0`
 
 ## Removed compatibility authority
 
@@ -123,6 +123,15 @@ Focused runs no longer overwrite the full certification result.
 - Security release gate and Prisma-scope guardrails: passed.
 - Frontend/backend production dependency audit: zero high or critical
   findings.
+- Public verification records scan history only for ready-state
+  `FIRST_SCAN`, `LEGIT_REPEAT`, and `SUSPICIOUS_DUPLICATE` decisions.
+  Report-session proof is independent of ownership eligibility, reviewed
+  signed-token denials map to the public 400 contract, and unknown manual
+  codes receive bounded 15–25 ms padding before the generic not-found result.
+- Failed-login evidence, QR batch rename, and QR export completion now use
+  exact capability functions. C03 audit projections strip session capability
+  material before the shared audit writer, while retaining it only for the
+  database call that verifies authority.
 - RLS generation repeated byte-identically and full package verification:
   passed.
 - Restricted-owner projection contract: 20 active sources passed; one

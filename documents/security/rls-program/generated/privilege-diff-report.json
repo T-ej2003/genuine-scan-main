@@ -2602,6 +2602,7 @@
       "table": "Batch",
       "command": "UPDATE",
       "columns": [
+        "name",
         "startCode",
         "endCode",
         "totalCodes",
