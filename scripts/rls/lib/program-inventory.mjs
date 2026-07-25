@@ -516,7 +516,7 @@ const boundaryFor = (file, fn, surface) => {
 };
 
 export const scanProductionAccess = () => {
-  const ts = require(path.join(repoRoot, "backend/node_modules/typescript"));
+  const ts = require("typescript");
   const models = parseSchema();
   const delegates = new Map(models.map((model) => [model.name[0].toLowerCase() + model.name.slice(1), model]));
   const modelsByName = new Map(models.map((model) => [model.name, model]));
@@ -833,7 +833,7 @@ const ROUTE_GUARDS = ["authenticate", "requirePlatformAdmin", "requireLicenseeAd
 let routeEvidenceByHandler;
 const routeEvidenceFor = (functionName) => {
   if (!routeEvidenceByHandler) {
-    const ts = require(path.join(repoRoot, "backend/node_modules/typescript"));
+    const ts = require("typescript");
     routeEvidenceByHandler = new Map();
     const files = [...walk(path.join(repoRoot, "backend/src/routes")), path.join(repoRoot, "backend/src/app.ts")];
     for (const file of files) {

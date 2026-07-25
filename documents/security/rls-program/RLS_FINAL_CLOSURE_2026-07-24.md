@@ -15,11 +15,11 @@ Staging and production have not been activated by this evidence revision.
 - Starting commit: `def002eb922b4e4b3350412a2803b969cbff709d`
 - Branch: `rls-full-integration`
 - Generated source contract:
-  `33aa82a9b8715cda77a6a3892dc2b0c9970da4484976b7db060397c61b1f88d4`
+  `7e90d508424b3f462e27740cbf77e9e33ca515fe5327b5d412bfa9c06e89840f`
 - Generated package checksum:
-  `85e47e13313490583d3d123980b7e7f77bc59cf12e471383b9848076dc1975ad`
+  `9e1cf4cd0674875590889e83ca45f687a65b2378456355de9eaa3c30f02c43c2`
 - Deterministic generated-tree checksum:
-  `14d029e8669f140cf59a0697edc4d281539db6a209940700c8a091d5ca58f0c1`
+  `1b310c6d27da52092b280f9e5460e4cf2c7166e018fc4bd567c403c174b032ea`
 
 ## Removed compatibility authority
 
@@ -126,6 +126,8 @@ Focused runs no longer overwrite the full certification result.
 - Staging/production executor, IAM, broker, receipt, and Terraform contracts:
   99 tests passed.
 - Staging and production Terraform formatting and offline validation: passed.
+- Root-owned RLS scanners resolve the root lockfile's TypeScript dependency,
+  allowing minimal CI jobs to run guardrails without a second backend install.
 - Disposable P2 and certification containers, networks, databases, and roles:
   removed after the local gate.
 

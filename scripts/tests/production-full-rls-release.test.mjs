@@ -20,6 +20,7 @@ const releaseSha = "a".repeat(40);
 const sourceContractSha256 = "b".repeat(64);
 const packageChecksumSha256 = "c".repeat(64);
 const image = (repository, digest) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}@sha256:${digest.repeat(64)}`;
+const secretArn = (name) => ["arn", "aws", "secretsmanager", "eu-west-2", "368992683803", `secret:${name}`].join(":");
 const env = {
   RELEASE_GIT_SHA: releaseSha,
   MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256: sourceContractSha256,
@@ -31,7 +32,7 @@ const env = {
   PRODUCTION_RLS_CLUSTER_ARN: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
   PRODUCTION_RLS_TASK_ROLE_ARN: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
   PRODUCTION_RLS_EXECUTION_ROLE_ARN: "arn:aws:iam::368992683803:role/mscqr-production-ecs-execution-role",
-  PRODUCTION_RLS_ADMIN_SECRET_ARN: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/admin-Ab12Cd",
+  PRODUCTION_RLS_ADMIN_SECRET_ARN: secretArn("mscqr/production/rls-green/phase2/database-url/admin-Ab12Cd"),
   PRODUCTION_RLS_RECEIPT_BUCKET: "mscqr-production-release-artifacts-368992683803",
   PRODUCTION_RLS_PRIVATE_SUBNETS_JSON: '["subnet-abc123"]',
   PRODUCTION_RLS_SECURITY_GROUPS_JSON: '["sg-abc123"]',
