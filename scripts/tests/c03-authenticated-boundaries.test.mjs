@@ -19,7 +19,9 @@ const expected = new Map([
 ]);
 
 test("C03 public boundaries have exact capability contracts and internal helpers stay private", () => {
-  const contracts = validateNamedSqlFunctionContracts().filter(({ security }) => security.deploymentPhase === "session-c-c03");
+  const contracts = validateNamedSqlFunctionContracts().filter(
+    ({ name, security }) => security.deploymentPhase === "session-c-c03" && expected.has(name),
+  );
   assert.equal(contracts.length, expected.size);
   assert.deepEqual(new Map(contracts.map(({ name, signature }) => [name, signature])), expected);
   for (const contract of contracts) {
@@ -34,6 +36,8 @@ test("C03 public boundaries have exact capability contracts and internal helpers
 
   const source = read("backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql");
   assert.match(source, /app_auth\.require_authenticated_session\(p_capability,p_purpose,p_request_id\)/);
+  assert.match(source, /job_id:=gen_random_uuid\(\)::text;/);
+  assert.doesNotMatch(source, /job\.id:=/);
   assert.doesNotMatch(source, /install_actor_context/);
   for (const helper of [
     "c03_require_authenticated_actor", "c03_assert_live_licensee_scope", "c03_bind_operation",

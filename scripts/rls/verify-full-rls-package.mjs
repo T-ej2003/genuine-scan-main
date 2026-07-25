@@ -7,8 +7,10 @@ import { calculateCleanRoomSourceContract } from "./lib/clean-room-source-contra
 import { buildRegisteredCallPathEvidence } from "./lib/application-path-certifications.mjs";
 import { EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT, EXPECTED_WORKFLOW_COUNT } from "./lib/workflow-inventory-baseline.mjs";
 import { NAMED_SQL_FUNCTION_CONTRACTS } from "./lib/named-sql-function-contracts.mjs";
+import { validateRestrictedOwnerProjections } from "./lib/restricted-owner-projection-contract.mjs";
 
 const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+validateRestrictedOwnerProjections({ repoRoot: root, contracts: NAMED_SQL_FUNCTION_CONTRACTS });
 const generatedRoot = path.join(root, "documents/security/rls-program/generated");
 const sqlRoot = path.join(root, "scripts/rls/sql/generated");
 const programmeRoot = path.join(root, "documents/security/rls-program");

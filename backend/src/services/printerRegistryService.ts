@@ -9,7 +9,6 @@ import {
 import { createHash, randomBytes } from "crypto";
 
 import prisma from "../config/database";
-import { RlsReadTransactionClient } from "../config/rlsReadDatabase";
 import { inspectIppPrinter } from "../printing/ippClient";
 import {
   ensurePrinterProfileForPrinter,
@@ -264,7 +263,7 @@ const buildGatewayPrinterStatus = (printer: RegisteredPrinterRecord): PrinterReg
 
 export const buildPrinterRegistryStatus = async (
   printer: RegisteredPrinterRecord,
-  userContext?: { userId: string; db?: RlsReadTransactionClient }
+  userContext?: { userId: string; db?: Prisma.TransactionClient }
 ): Promise<PrinterRegistryStatus> => {
   if (printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
     if (printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
@@ -531,7 +530,7 @@ export const listRegisteredPrintersForManufacturer = async (params: {
   licenseeId?: string | null;
   licenseeIds?: string[] | null;
   includeInactive?: boolean;
-  db?: RlsReadTransactionClient;
+  db?: Prisma.TransactionClient;
 }) => {
   const db = params.db || prisma;
   const printers = (await db.printer.findMany({

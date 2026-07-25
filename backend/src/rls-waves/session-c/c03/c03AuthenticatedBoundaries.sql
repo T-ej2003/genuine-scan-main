@@ -173,14 +173,14 @@ CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_compliance_pack_job_actor_scop
   p_capability text,p_purpose text,p_request_id text,p_job_id text
 ) RETURNS TABLE(user_id text,role text,organization_id text,licensee_id text)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job public."CompliancePackJob"%ROWTYPE; scope record;
+DECLARE actor record; job record; scope record;
 BEGIN
   IF p_job_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
   IF actor.assurance<>'ADMIN_MFA' THEN RAISE EXCEPTION 'C03_COMPLIANCE_MFA_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-revalidate','',p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id;
+  SELECT j."licenseeId" INTO job FROM public."CompliancePackJob" j WHERE j.id=p_job_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-revalidate',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
@@ -228,8 +228,8 @@ CREATE OR REPLACE FUNCTION app_rls.c03_start_compliance_pack_job(
   p_trigger_type text,p_from timestamptz,p_to timestamptz
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; scope record; job public."CompliancePackJob"%ROWTYPE; report jsonb;
-DECLARE replay_key text; request_hash text; prior public."ActionIdempotencyKey"%ROWTYPE;
+DECLARE actor record; scope record; report jsonb; job_id text;
+DECLARE replay_key text; request_hash text; prior record;
 BEGIN
   IF p_purpose<>'compliance-pack-start' OR p_trigger_type<>'MANUAL'
   THEN RAISE EXCEPTION 'C03_COMPLIANCE_START_DENIED' USING ERRCODE='42501'; END IF;
@@ -244,21 +244,22 @@ BEGIN
   VALUES (gen_random_uuid()::text,replay_key,'c03-compliance-start',scope.licensee_id,request_hash,transaction_timestamp()+interval '24 hours')
   ON CONFLICT ("keyHash") DO NOTHING;
   IF NOT FOUND THEN
-    SELECT * INTO prior FROM public."ActionIdempotencyKey" WHERE "keyHash"=replay_key FOR UPDATE;
+    SELECT k."requestHash",k."completedAt",k."responsePayload" INTO prior
+      FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=replay_key FOR UPDATE;
     IF prior."requestHash" IS DISTINCT FROM request_hash OR prior."completedAt" IS NULL OR prior."responsePayload" IS NULL
     THEN RAISE EXCEPTION 'C03_COMPLIANCE_REPLAY_CONFLICT' USING ERRCODE='40001'; END IF;
     RETURN prior."responsePayload";
   END IF;
-  job.id:=gen_random_uuid()::text;
-  PERFORM app_rls.c03_bind_operation('compliance-pack-start',scope.licensee_id,job.id);
+  job_id:=gen_random_uuid()::text;
+  PERFORM app_rls.c03_bind_operation('compliance-pack-start',scope.licensee_id,job_id);
   INSERT INTO public."CompliancePackJob" (id,"licenseeId",status,"triggerType","periodFrom","periodTo","startedByUserId","startedAt","updatedAt")
-  VALUES (job.id,scope.licensee_id,'RUNNING',p_trigger_type,p_from,p_to,actor.user_id,transaction_timestamp(),transaction_timestamp())
-  RETURNING * INTO job;
+  VALUES (job_id,scope.licensee_id,'RUNNING',p_trigger_type,p_from,p_to,actor.user_id,transaction_timestamp(),transaction_timestamp());
   report:=app_rls.c03_build_compliance_report(scope.licensee_id,p_from,p_to);
-  PERFORM app_rls.c03_queue_audit('COMPLIANCE_PACK_STARTED','CompliancePackJob',job.id,jsonb_build_object('triggerType',p_trigger_type,'periodFrom',p_from,'periodTo',p_to));
-  UPDATE public."ActionIdempotencyKey" SET "statusCode"=200,"responsePayload"=jsonb_build_object('job',to_jsonb(job),'report',report),"completedAt"=transaction_timestamp()
+  PERFORM app_rls.c03_queue_audit('COMPLIANCE_PACK_STARTED','CompliancePackJob',job_id,jsonb_build_object('triggerType',p_trigger_type,'periodFrom',p_from,'periodTo',p_to));
+  UPDATE public."ActionIdempotencyKey" SET "statusCode"=200,"responsePayload"=jsonb_build_object(
+    'job',app_rls.c03_compliance_job_projection(job_id),'report',report),"completedAt"=transaction_timestamp()
    WHERE "keyHash"=replay_key;
-  RETURN jsonb_build_object('job',to_jsonb(job),'report',report);
+  RETURN jsonb_build_object('job',app_rls.c03_compliance_job_projection(job_id),'report',report);
 END
 $fn$;
 
@@ -266,19 +267,20 @@ CREATE OR REPLACE FUNCTION app_rls.c03_complete_compliance_pack_job(
   p_capability text,p_purpose text,p_request_id text,p_job_id text,p_result jsonb
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job public."CompliancePackJob"%ROWTYPE; scope record; projected jsonb;
+DECLARE actor record; job record; scope record; projected jsonb;
 BEGIN
   IF p_purpose<>'compliance-pack-complete' THEN RAISE EXCEPTION 'C03_COMPLIANCE_COMPLETE_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_validate_compliance_result(p_result);
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
   IF actor.assurance<>'ADMIN_MFA' THEN RAISE EXCEPTION 'C03_COMPLIANCE_MFA_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-complete','',p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id;
+  SELECT j."licenseeId" INTO job FROM public."CompliancePackJob" j WHERE j.id=p_job_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-complete',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
   PERFORM app_rls.c03_bind_operation('compliance-pack-complete',scope.licensee_id,p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id AND "licenseeId"=scope.licensee_id FOR UPDATE;
+  SELECT j.status,j."storageKey",j."integrityHash" INTO job FROM public."CompliancePackJob" j
+    WHERE j.id=p_job_id AND j."licenseeId"=scope.licensee_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   IF job.status='COMPLETED' AND job."storageKey"=p_result->>'storageKey' AND job."integrityHash"=p_result->>'integrityHash' THEN RETURN app_rls.c03_compliance_job_projection(p_job_id); END IF;
   IF job.status<>'RUNNING' THEN RAISE EXCEPTION 'C03_COMPLIANCE_TRANSITION_DENIED' USING ERRCODE='40001'; END IF;
@@ -295,19 +297,20 @@ CREATE OR REPLACE FUNCTION app_rls.c03_fail_compliance_pack_job(
   p_capability text,p_purpose text,p_request_id text,p_job_id text,p_error_code text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job public."CompliancePackJob"%ROWTYPE; scope record; projected jsonb;
+DECLARE actor record; job record; scope record; projected jsonb;
 BEGIN
   IF p_purpose<>'compliance-pack-fail' OR p_error_code !~ '^[A-Z0-9_:-]{1,160}$'
   THEN RAISE EXCEPTION 'C03_COMPLIANCE_FAIL_DENIED' USING ERRCODE='42501'; END IF;
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
   IF actor.assurance<>'ADMIN_MFA' THEN RAISE EXCEPTION 'C03_COMPLIANCE_MFA_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-fail','',p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id;
+  SELECT j."licenseeId" INTO job FROM public."CompliancePackJob" j WHERE j.id=p_job_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-fail',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
   PERFORM app_rls.c03_bind_operation('compliance-pack-fail',scope.licensee_id,p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id AND "licenseeId"=scope.licensee_id FOR UPDATE;
+  SELECT j.status,j."errorMessage" INTO job FROM public."CompliancePackJob" j
+    WHERE j.id=p_job_id AND j."licenseeId"=scope.licensee_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   IF job.status='FAILED' AND job."errorMessage"=p_error_code THEN RETURN app_rls.c03_compliance_job_projection(p_job_id); END IF;
   IF job.status<>'RUNNING' THEN RAISE EXCEPTION 'C03_COMPLIANCE_TRANSITION_DENIED' USING ERRCODE='40001'; END IF;
@@ -322,14 +325,15 @@ CREATE OR REPLACE FUNCTION app_rls.c03_get_compliance_pack_job(
   p_capability text,p_purpose text,p_request_id text,p_job_id text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job public."CompliancePackJob"%ROWTYPE; scope record; report jsonb;
+DECLARE actor record; job record; scope record; report jsonb;
 BEGIN
   IF p_purpose NOT IN ('compliance-pack-download','compliance-pack-rebuild-read')
   THEN RAISE EXCEPTION 'C03_COMPLIANCE_READ_DENIED' USING ERRCODE='42501'; END IF;
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
   IF actor.assurance<>'ADMIN_MFA' THEN RAISE EXCEPTION 'C03_COMPLIANCE_MFA_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-get','',p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id;
+  SELECT j."licenseeId",j."periodFrom",j."periodTo" INTO job
+    FROM public."CompliancePackJob" j WHERE j.id=p_job_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-get',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
@@ -343,19 +347,20 @@ CREATE OR REPLACE FUNCTION app_rls.c03_complete_compliance_pack_rebuild(
   p_capability text,p_purpose text,p_request_id text,p_job_id text,p_result jsonb
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job public."CompliancePackJob"%ROWTYPE; scope record; projected jsonb;
+DECLARE actor record; job record; scope record; projected jsonb;
 BEGIN
   IF p_purpose<>'compliance-pack-rebuild-complete' THEN RAISE EXCEPTION 'C03_COMPLIANCE_REBUILD_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_validate_compliance_result(p_result);
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
   IF actor.assurance<>'ADMIN_MFA' THEN RAISE EXCEPTION 'C03_COMPLIANCE_MFA_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-rebuild','',p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id;
+  SELECT j."licenseeId" INTO job FROM public."CompliancePackJob" j WHERE j.id=p_job_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-rebuild',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
   PERFORM app_rls.c03_bind_operation('compliance-pack-rebuild',scope.licensee_id,p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id AND "licenseeId"=scope.licensee_id FOR UPDATE;
+  SELECT j.status,j."storageKey",j."integrityHash" INTO job FROM public."CompliancePackJob" j
+    WHERE j.id=p_job_id AND j."licenseeId"=scope.licensee_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   IF job.status<>'COMPLETED' THEN RAISE EXCEPTION 'C03_COMPLIANCE_TRANSITION_DENIED' USING ERRCODE='40001'; END IF;
   IF job."storageKey"=p_result->>'storageKey' AND job."integrityHash"=p_result->>'integrityHash' THEN RETURN app_rls.c03_compliance_job_projection(p_job_id); END IF;

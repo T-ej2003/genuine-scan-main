@@ -153,3 +153,35 @@ variable "enable_container_insights" {
   description = "Enable ECS Container Insights."
   default     = true
 }
+
+variable "enable_full_rls_green_executor" {
+  type        = bool
+  description = "Provision the isolated production full-RLS green executor role, log group, and exact runtime secrets."
+  default     = false
+}
+
+variable "full_rls_green_admin_secret_arn" {
+  type        = string
+  description = "Exact production green non-superuser administrator DATABASE_URL secret ARN."
+  default     = ""
+  validation {
+    condition = !var.enable_full_rls_green_executor || can(regex(
+      "^arn:aws:secretsmanager:eu-west-2:[0-9]{12}:secret:mscqr/production/rls-green/phase2/database-url/admin-[A-Za-z0-9]{6}$",
+      var.full_rls_green_admin_secret_arn
+    ))
+    error_message = "full_rls_green_admin_secret_arn must identify the exact production green administrator secret."
+  }
+}
+
+variable "full_rls_receipt_bucket_arn" {
+  type        = string
+  description = "Production artifact bucket ARN used only for immutable full-RLS receipts."
+  default     = ""
+  validation {
+    condition = !var.enable_full_rls_green_executor || can(regex(
+      "^arn:aws:s3:::mscqr-production-[a-z0-9-]+-artifacts-[0-9]{12}$",
+      var.full_rls_receipt_bucket_arn
+    ))
+    error_message = "full_rls_receipt_bucket_arn must identify the reviewed production artifacts bucket."
+  }
+}

@@ -38,7 +38,7 @@ const credentialIdentity = (url: URL) =>
 
 const runtimeRole = (url: URL, suffix: "preauth" | "app") => {
   const role = decodeURIComponent(url.username);
-  const match = role.match(new RegExp(`^mscqr_(dev|staging|prod)_${suffix}$`));
+  const match = role.match(new RegExp(`^mscqr_(dev|stg|prd)_rls_[a-z][a-z0-9_]{0,15}_${suffix}$`));
   if (!match) {
     throw new B01RuntimeConfigurationError(
       "B01_RUNTIME_DATABASE_ROLE_INVALID",

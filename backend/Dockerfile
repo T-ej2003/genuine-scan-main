@@ -70,3 +70,10 @@ EXPOSE 4000
 USER node
 
 CMD ["/usr/local/bin/start-runtime.sh"]
+
+FROM runtime AS rls-executor
+
+COPY --chown=node:node scripts/rls/sql/generated ./scripts/rls/sql/generated
+COPY --chown=node:node documents/security/rls-program/generated ./documents/security/rls-program/generated
+
+CMD ["node", "scripts/staging-full-rls-green-executor.mjs"]

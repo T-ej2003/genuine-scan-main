@@ -40,7 +40,7 @@ CREATE OR REPLACE FUNCTION app_auth.issue_authenticated_session_capability(
   p_expires_at timestamp without time zone
 ) RETURNS TABLE("id" text,"expiresAt" timestamp without time zone)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE session_row public."RefreshToken"%ROWTYPE; capability_hash text;
+DECLARE session_row record; capability_hash text;
 BEGIN
   IF p_refresh_token_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
      OR p_refresh_token_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$'
@@ -64,7 +64,7 @@ BEGIN
      AND rt."tokenHash"=p_refresh_token_hash
      AND rt."revokedAt" IS NULL
      AND rt."expiresAt">clock_timestamp()
-  RETURNING rt.* INTO session_row;
+  RETURNING rt.id,rt."expiresAt",rt."mfaVerifiedAt",rt."sessionCapabilityHash" INTO session_row;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED_SESSION' USING ERRCODE='42501';
   END IF;

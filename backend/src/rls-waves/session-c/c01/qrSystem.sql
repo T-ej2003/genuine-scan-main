@@ -210,7 +210,8 @@ BEGIN
   IF p_operation IN ('DELETE_BATCH','ASSIGN_MANUFACTURER') THEN
     IF p_payload->>'batchId' !~* '^[0-9a-f-]{36}$' THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
     PERFORM set_config('app.qr_source_batch_id',p_payload->>'batchId',true);
-    SELECT b.* INTO source_batch FROM public."Batch" b WHERE b.id=p_payload->>'batchId' FOR UPDATE;
+    SELECT b.id,b.name,b."licenseeId",b."manufacturerId",b."rootBatchId",b."printedAt",b."releasedAt"
+      INTO source_batch FROM public."Batch" b WHERE b.id=p_payload->>'batchId' FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
     target_licensee:=source_batch."licenseeId";
     SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,target_licensee);
@@ -379,7 +380,10 @@ BEGIN
     p_source,start_code,end_code,total);
   PERFORM app_rls.qr_write_audit(actor."userId",l."orgId",p_licensee_id,'ALLOCATED','QRRange',range_id,
     jsonb_build_object('requestId',p_request_id,'source',p_source,'startCode',start_code,'endCode',end_code,'created',total,'receivedBatchId',batch_id));
-  SELECT jsonb_build_object('range',to_jsonb(r),'startCode',start_code,'endCode',end_code,'totalCodes',total,
+  SELECT jsonb_build_object('range',jsonb_build_object(
+      'id',r.id,'licenseeId',r."licenseeId",'startCode',r."startCode",'endCode',r."endCode",
+      'totalCodes',r."totalCodes",'usedCodes',r."usedCodes",'createdAt',r."createdAt",'updatedAt',r."updatedAt"
+    ),'startCode',start_code,'endCode',end_code,'totalCodes',total,
     'receivedBatchId',batch_id,'receivedBatchName',b.name,'codes',COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id',q.id,'licenseeId',q."licenseeId",'batchId',q."batchId",'replayEpoch',q."replayEpoch",'tokenNonce',q."tokenNonce",
       'tokenIssuedAt',q."tokenIssuedAt",'tokenExpiresAt',q."tokenExpiresAt") ORDER BY q."displayCode")

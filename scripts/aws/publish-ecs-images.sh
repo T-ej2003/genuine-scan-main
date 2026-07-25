@@ -3,9 +3,9 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/aws/publish-ecs-images.sh <backend|frontend|worker|both|all>
+Usage: scripts/aws/publish-ecs-images.sh <backend|frontend|worker|rls-executor|both|all>
 
-Build and push the production backend/frontend/worker runtime images to ECR with
+Build and push the production backend/frontend/worker/runtime-boundary images to ECR with
 docker buildx. The default output is an ECS/Fargate-ready linux/amd64 manifest
 tagged with the immutable current git SHA.
 
@@ -45,9 +45,9 @@ if [[ -z "$SERVICE_SCOPE" ]]; then
 fi
 
 case "$SERVICE_SCOPE" in
-  backend|frontend|worker|both|all) ;;
+  backend|frontend|worker|rls-executor|both|all) ;;
   *)
-    echo "Expected backend, frontend, worker, both, or all. Got: $SERVICE_SCOPE" >&2
+    echo "Expected backend, frontend, worker, rls-executor, both, or all. Got: $SERVICE_SCOPE" >&2
     exit 1
     ;;
 esac
@@ -104,12 +104,16 @@ case "$SERVICE_SCOPE" in
     SERVICES=("worker")
     REPOSITORIES=("$WORKER_ECR_REPO")
     ;;
+  rls-executor)
+    SERVICES=("rls-executor")
+    REPOSITORIES=("$BACKEND_ECR_REPO")
+    ;;
   both)
     SERVICES=("backend" "frontend")
     REPOSITORIES=("$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO")
     ;;
   all)
-    SERVICES=("backend" "frontend" "worker")
+    SERVICES=("backend" "frontend" "worker" "rls-executor")
     REPOSITORIES=("$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO" "$WORKER_ECR_REPO")
     ;;
 esac
@@ -139,6 +143,7 @@ image_uri_for_service() {
     backend) printf '%s/%s:%s' "$ECR_REGISTRY" "$BACKEND_ECR_REPO" "$IMAGE_TAG" ;;
     frontend) printf '%s/%s:%s' "$ECR_REGISTRY" "$FRONTEND_ECR_REPO" "$IMAGE_TAG" ;;
     worker) printf '%s/%s:%s' "$ECR_REGISTRY" "$WORKER_ECR_REPO" "$IMAGE_TAG" ;;
+    rls-executor) printf '%s/%s:%s-rls-executor' "$ECR_REGISTRY" "$BACKEND_ECR_REPO" "$IMAGE_TAG" ;;
     *) echo "Unsupported service: $service" >&2; return 1 ;;
   esac
 }
@@ -149,6 +154,7 @@ dockerfile_for_service() {
     backend) printf '%s' "$BACKEND_DOCKERFILE" ;;
     frontend) printf '%s' "$FRONTEND_DOCKERFILE" ;;
     worker) printf '%s' "$WORKER_DOCKERFILE" ;;
+    rls-executor) printf '%s' "$BACKEND_DOCKERFILE" ;;
     *) echo "Unsupported service: $service" >&2; return 1 ;;
   esac
 }
@@ -159,7 +165,17 @@ context_for_service() {
     backend) printf '%s' "$BACKEND_BUILD_CONTEXT" ;;
     frontend) printf '%s' "$FRONTEND_BUILD_CONTEXT" ;;
     worker) printf '%s' "$WORKER_BUILD_CONTEXT" ;;
+    rls-executor) printf '%s' "$BACKEND_BUILD_CONTEXT" ;;
     *) echo "Unsupported service: $service" >&2; return 1 ;;
+  esac
+}
+
+target_for_service() {
+  case "$1" in
+    frontend) printf '' ;;
+    rls-executor) printf 'rls-executor' ;;
+    backend|worker) printf 'runtime' ;;
+    *) echo "Unsupported service: $1" >&2; return 1 ;;
   esac
 }
 
@@ -169,6 +185,8 @@ for service in "${SERVICES[@]}"; do
   image_uri="$(image_uri_for_service "$service")"
   dockerfile="$(dockerfile_for_service "$service")"
   build_context="$(context_for_service "$service")"
+  target="$(target_for_service "$service")"
+  published_tag="${image_uri##*:}"
   IMAGE_URIS+=("$image_uri")
 
   echo
@@ -177,7 +195,7 @@ for service in "${SERVICES[@]}"; do
   echo "  Context: ${build_context}"
   echo "  Image: ${image_uri}"
 
-  docker buildx build \
+  build_args=(
     --builder "$BUILDER_NAME" \
     --platform "$PLATFORMS" \
     --file "$dockerfile" \
@@ -185,7 +203,13 @@ for service in "${SERVICES[@]}"; do
     --build-arg "RELEASE_GIT_SHA=${IMAGE_TAG}" \
     --label "org.opencontainers.image.revision=${IMAGE_TAG}" \
     --label "org.opencontainers.image.source=${REMOTE_URL}" \
-    --label "org.opencontainers.image.title=mscqr-${service}" \
+    --label "org.opencontainers.image.title=mscqr-${service}"
+  )
+  if [[ -n "$target" ]]; then
+    build_args+=(--target "$target")
+  fi
+  docker buildx build \
+    "${build_args[@]}" \
     --push \
     --tag "$image_uri" \
     "$build_context"
@@ -200,11 +224,11 @@ for service in "${SERVICES[@]}"; do
       aws ecr describe-images \
         --region "$AWS_REGION" \
         --repository-name "$repository_name" \
-        --image-ids imageTag="$IMAGE_TAG" \
+        --image-ids imageTag="$published_tag" \
         --query 'imageDetails[0].imageDigest' \
         --output text
     )"
-    node --input-type=module - "$OUTPUT_FILE" "$service" "$repository_name" "$image_uri" "$IMAGE_TAG" "$image_digest" <<'NODE'
+    node --input-type=module - "$OUTPUT_FILE" "$service" "$repository_name" "$image_uri" "$published_tag" "$image_digest" <<'NODE'
 import fs from "node:fs";
 
 const [outputPath, service, repositoryName, imageUri, imageTag, imageDigest] = process.argv.slice(2);

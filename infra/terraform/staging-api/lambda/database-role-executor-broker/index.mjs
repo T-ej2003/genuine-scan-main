@@ -1,12 +1,26 @@
 export const BLUE_EXECUTOR_MODES = Object.freeze([
   "probe", "provision", "verify",
-  "rls-shared-apply", "rls-shared-verify", "rls-shared-rollback",
 ]);
-const ALLOWED_MODES = new Set(BLUE_EXECUTOR_MODES);
+export const GREEN_EXECUTOR_MODES = Object.freeze([
+  "full-rls-capability-preflight",
+  "full-rls-role-provision",
+  "full-rls-role-verify",
+  "full-rls-admin-bootstrap",
+  "full-rls-admin-ownership",
+  "full-rls-runtime-policy",
+  "full-rls-verification",
+  "full-rls-rollback",
+]);
+const ALLOWED_MODES = new Set([...BLUE_EXECUTOR_MODES, ...GREEN_EXECUTOR_MODES]);
 export const MUTATING_MODE_CONFIRMATIONS = Object.freeze({
   provision: "MSCQR_PROVISION_STAGING_DATABASE_ROLE_CREDENTIALS",
-  "rls-shared-apply": "MSCQR_APPLY_STAGING_RLS_SHARED_BATCH_PHASE",
-  "rls-shared-rollback": "MSCQR_ROLLBACK_STAGING_RLS_SHARED_BATCH_PHASE",
+});
+export const GREEN_MUTATING_MODE_CONFIRMATIONS = Object.freeze({
+  "full-rls-role-provision": "MSCQR_STAGING_GREEN_PROVISION_RUNTIME_ROLES",
+  "full-rls-admin-bootstrap": "MSCQR_STAGING_GREEN_CREATE_AND_BOOTSTRAP_DATABASE",
+  "full-rls-admin-ownership": "MSCQR_STAGING_GREEN_INSTALL_OWNERSHIP_GRANTS",
+  "full-rls-runtime-policy": "MSCQR_STAGING_GREEN_INSTALL_RUNTIME_POLICIES",
+  "full-rls-rollback": "MSCQR_STAGING_GREEN_ROLLBACK_EXACT_PACKAGE",
 });
 
 export function validateBrokerEvent(event) {
@@ -14,7 +28,8 @@ export function validateBrokerEvent(event) {
     throw new Error("Request must contain the reviewed mode fields.");
   }
   if (typeof event.mode !== "string" || !ALLOWED_MODES.has(event.mode)) throw new Error("Mode is outside the reviewed executor set.");
-  const expectedConfirmation = MUTATING_MODE_CONFIRMATIONS[event.mode];
+  const expectedConfirmation = MUTATING_MODE_CONFIRMATIONS[event.mode]
+    || GREEN_MUTATING_MODE_CONFIRMATIONS[event.mode];
   const expectedKeys = expectedConfirmation ? ["confirmation", "mode"] : ["mode"];
   if (Object.keys(event).sort().join(",") !== expectedKeys.join(",")) throw new Error("Request contains unreviewed fields.");
   if (expectedConfirmation && event.confirmation !== expectedConfirmation) throw new Error("Mutating executor mode requires its distinct exact confirmation.");
@@ -23,9 +38,11 @@ export function validateBrokerEvent(event) {
 
 export function fixedRunTaskRequest(mode, config, confirmation) {
   validateBrokerEvent({ mode, ...(confirmation === undefined ? {} : { confirmation }) });
+  const greenTaskDefinition = config.greenTaskDefinitionArns?.[mode];
+  const green = GREEN_EXECUTOR_MODES.includes(mode);
   return {
     cluster: config.clusterArn,
-    taskDefinition: config.taskDefinitionArn,
+    taskDefinition: green ? greenTaskDefinition : config.taskDefinitionArn,
     launchType: "FARGATE",
     count: 1,
     networkConfiguration: {
@@ -35,9 +52,9 @@ export function fixedRunTaskRequest(mode, config, confirmation) {
         assignPublicIp: "DISABLED",
       },
     },
-    overrides: {
+    ...(green ? {} : { overrides: {
       containerOverrides: [{ name: "db-admin", environment: [{ name: "MSCQR_VPC_EXECUTOR_MODE", value: mode }] }],
-    },
+    } }),
   };
 }
 
@@ -50,8 +67,14 @@ export function createBrokerHandler({ runTask, config, audit = () => {} }) {
       reason,
       requestId: typeof context.awsRequestId === "string" ? context.awsRequestId : "unavailable",
     });
+    const greenTaskDefinitions = Object.entries(config.greenTaskDefinitionArns || {});
     if (!/^arn:aws:ecs:eu-west-2:368992683803:cluster\/mscqr-staging-euw2-main$/.test(config.clusterArn || "")
         || !/^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-staging-database-role-admin:[1-9][0-9]*$/.test(config.taskDefinitionArn || "")
+        || greenTaskDefinitions.length !== GREEN_EXECUTOR_MODES.length
+        || greenTaskDefinitions.some(([mode, arn]) =>
+          !GREEN_EXECUTOR_MODES.includes(mode)
+          || !new RegExp(`^arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-full-rls-green-${mode.replace("full-rls-", "")}:[1-9][0-9]*$`).test(arn)
+        )
         || !Array.isArray(config.subnets) || !config.subnets.length || config.subnets.some((value) => !/^subnet-[a-f0-9]+$/.test(value))
         || !Array.isArray(config.securityGroups) || !config.securityGroups.length || config.securityGroups.some((value) => !/^sg-[a-f0-9]+$/.test(value))
         || !/^[a-f0-9]{64}$/.test(config.executorContractSha256 || "")
@@ -63,8 +86,9 @@ export function createBrokerHandler({ runTask, config, audit = () => {} }) {
     try { mode = validateBrokerEvent(event); }
     catch (error) { record("blocked", "untrusted", "request"); throw error; }
     record("accepted", mode, "validated");
+    const request = fixedRunTaskRequest(mode, config, event.confirmation);
     let response;
-    try { response = await runTask(fixedRunTaskRequest(mode, config, event.confirmation)); }
+    try { response = await runTask(request); }
     catch { record("blocked", mode, "run-task"); throw new Error("Reviewed disposable task launch failed; detail suppressed."); }
     if ((response?.failures || []).length || response?.tasks?.length !== 1) {
       record("blocked", mode, "task-count");
@@ -79,7 +103,8 @@ export function createBrokerHandler({ runTask, config, audit = () => {} }) {
     record("started", mode, "single-task");
     return {
       status: "started", taskArn,
-      taskDefinitionArn: config.taskDefinitionArn,
+      taskDefinitionArn: request.taskDefinition,
+      executor: GREEN_EXECUTOR_MODES.includes(mode) ? "green" : "blue",
       executorContractSha256: config.executorContractSha256,
       brokerSourceSha256: config.brokerSourceSha256,
     };
@@ -89,6 +114,7 @@ export function createBrokerHandler({ runTask, config, audit = () => {} }) {
 const configFromEnvironment = () => ({
   clusterArn: process.env.BROKER_CLUSTER_ARN,
   taskDefinitionArn: process.env.BROKER_TASK_DEFINITION_ARN,
+  greenTaskDefinitionArns: JSON.parse(process.env.BROKER_GREEN_TASK_DEFINITIONS_JSON || "{}"),
   subnets: JSON.parse(process.env.BROKER_PRIVATE_SUBNETS_JSON || "[]"),
   securityGroups: JSON.parse(process.env.BROKER_SECURITY_GROUPS_JSON || "[]"),
   executorContractSha256: process.env.BROKER_EXECUTOR_CONTRACT_SHA256,

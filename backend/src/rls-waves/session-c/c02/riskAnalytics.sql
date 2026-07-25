@@ -127,7 +127,11 @@ BEGIN
    WHERE s."licenseeId"=p_licensee_id AND s."batchId" IS NOT NULL
      AND s."scannedAt" BETWEEN p_checked_at-(p_lookback_hours||' hours')::interval AND p_checked_at;
 
-  SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY a."batchId",a.id),'[]'::jsonb)
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'id',a.id,'licenseeId',a."licenseeId",'batchId',a."batchId",'qrCodeId',a."qrCodeId",
+      'manufacturerId',a."manufacturerId",'incidentId',a."incidentId",
+      'policyRuleId',a."policyRuleId",'acknowledgedAt',a."acknowledgedAt"
+    ) ORDER BY a."batchId",a.id),'[]'::jsonb)
     INTO alerts_payload FROM public."PolicyAlert" a
    WHERE a."licenseeId"=p_licensee_id AND a."batchId" IS NOT NULL AND a."acknowledgedAt" IS NULL;
 

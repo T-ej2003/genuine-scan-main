@@ -9,9 +9,11 @@ import {
   buildRegisteredCallPathEvidence,
 } from "./lib/application-path-certifications.mjs";
 import { NAMED_SQL_FUNCTION_CONTRACTS, validateNamedSqlFunctionContracts } from "./lib/named-sql-function-contracts.mjs";
+import { validateRestrictedOwnerProjections } from "./lib/restricted-owner-projection-contract.mjs";
 import { TABLE_INVENTORY_BASELINE } from "./lib/table-inventory-baseline.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+validateRestrictedOwnerProjections({ repoRoot, contracts: NAMED_SQL_FUNCTION_CONTRACTS });
 const programRoot = path.join(repoRoot, "documents/security/rls-program");
 const sqlRoot = path.join(repoRoot, "scripts/rls/sql/generated");
 const generatedRoot = path.join(programRoot, "generated");
@@ -169,7 +171,7 @@ const administrativeExecutorRoles = {
   certification: "certification-administrator",
   development: "mscqr_dev_admin",
   staging: "mscqr_staging_admin",
-  production: "unresolved-production-administrator",
+  production: "mscqr_prod_admin",
 };
 const administrativeExecutorRole = administrativeExecutorRoles[targetEnvironment];
 const candidateDatabasePatterns = {

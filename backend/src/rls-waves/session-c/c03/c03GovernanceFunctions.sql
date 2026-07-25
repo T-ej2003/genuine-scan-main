@@ -43,7 +43,7 @@ DECLARE
     current_setting('app.request_id', true), 'UTF8')), 'hex');
   request_hash text := encode(sha256(convert_to(COALESCE(payload, '{}'::jsonb)::text, 'UTF8')), 'hex');
   inserted integer;
-  prior public."ActionIdempotencyKey"%ROWTYPE;
+  prior record;
 BEGIN
   INSERT INTO public."ActionIdempotencyKey" (id,"keyHash",action,scope,"requestHash","expiresAt")
   VALUES (gen_random_uuid()::text,key_value,'c03-governance-' || command_name,
@@ -51,7 +51,8 @@ BEGIN
   ON CONFLICT ("keyHash") DO NOTHING;
   GET DIAGNOSTICS inserted = ROW_COUNT;
   IF inserted = 1 THEN RETURN QUERY SELECT false,NULL::jsonb; RETURN; END IF;
-  SELECT * INTO prior FROM public."ActionIdempotencyKey" WHERE "keyHash"=key_value FOR UPDATE;
+  SELECT k."requestHash",k."completedAt",k."responsePayload" INTO prior
+    FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=key_value FOR UPDATE;
   IF prior."requestHash" IS DISTINCT FROM request_hash THEN
     RAISE EXCEPTION 'C03_GOVERNANCE_REPLAY_CONFLICT' USING ERRCODE='40001';
   END IF;
@@ -99,13 +100,15 @@ CREATE OR REPLACE FUNCTION app_rls.c03_require_governance_approval(action_key te
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE approval public."SensitiveActionApproval"%ROWTYPE;
+DECLARE approval record;
 DECLARE approval_id text := current_setting('app.c03_approval_id', true);
 BEGIN
   IF approval_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
     RAISE EXCEPTION 'C03_GOVERNANCE_APPROVAL_REQUIRED' USING ERRCODE='42501';
   END IF;
-  SELECT * INTO approval FROM public."SensitiveActionApproval" WHERE id=approval_id FOR UPDATE;
+  SELECT a."actionKey",a.status,a."expiresAt",a."licenseeId",a."reviewedByUserId",
+    a."requestedByUserId",a."executedAt",a.payload INTO approval
+    FROM public."SensitiveActionApproval" a WHERE a.id=approval_id FOR UPDATE;
   IF NOT FOUND OR approval."actionKey" IS DISTINCT FROM action_key
      OR approval.status IS DISTINCT FROM 'APPROVED' OR approval."expiresAt"<=transaction_timestamp()
      OR approval."licenseeId" IS DISTINCT FROM current_setting('app.licensee_id',true)
@@ -133,7 +136,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_upsert_tenant_feature_flag(key text, enab
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; replay record; row public."TenantFeatureFlag"%ROWTYPE; response jsonb; approval_id text;
+DECLARE actor record; replay record; row record; response jsonb; approval_id text;
 DECLARE payload jsonb;
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_governance_actor(ARRAY['sensitive-action-approval-approve']);
@@ -149,7 +152,7 @@ BEGIN
   VALUES (gen_random_uuid()::text,actor.licensee_id,key,enabled,config,actor.user_id,transaction_timestamp())
   ON CONFLICT ("licenseeId",key) DO UPDATE SET enabled=EXCLUDED.enabled,config=EXCLUDED.config,
     "updatedByUserId"=EXCLUDED."updatedByUserId","updatedAt"=transaction_timestamp()
-  RETURNING * INTO row;
+  RETURNING id,"licenseeId",key,enabled,config,"updatedByUserId","createdAt","updatedAt" INTO row;
   response := to_jsonb(row);
   PERFORM app_rls.c03_governance_audit('TENANT_FEATURE_FLAG_UPSERTED','TenantFeatureFlag',row.id,
     jsonb_build_object('key',key,'enabled',enabled,'approvalId',approval_id));
@@ -163,19 +166,22 @@ CREATE OR REPLACE FUNCTION app_rls.c03_get_or_create_retention_policy()
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; row public."EvidenceRetentionPolicy"%ROWTYPE; inserted boolean := false;
+DECLARE actor record; row record; inserted boolean := false;
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_governance_actor(ARRAY[
     'governance-retention-policy-read','governance-retention-preview','governance-compliance-report',
     'compliance-pack-start','compliance-pack-download','compliance-pack-rebuild-read',
     'sensitive-action-approval-approve'
   ]);
-  SELECT * INTO row FROM public."EvidenceRetentionPolicy" WHERE "licenseeId"=actor.licensee_id FOR UPDATE;
+  SELECT p.id,p."licenseeId",p."retentionDays",p."purgeEnabled",p."exportBeforePurge",
+    p."legalHoldTags",p."updatedByUserId",p."createdAt",p."updatedAt" INTO row
+    FROM public."EvidenceRetentionPolicy" p WHERE p."licenseeId"=actor.licensee_id FOR UPDATE;
   IF NOT FOUND THEN
     INSERT INTO public."EvidenceRetentionPolicy"
       (id,"licenseeId","retentionDays","purgeEnabled","exportBeforePurge","legalHoldTags","updatedAt")
     VALUES (gen_random_uuid()::text,actor.licensee_id,180,false,true,ARRAY['legal_hold','compliance_hold'],transaction_timestamp())
-    RETURNING * INTO row;
+    RETURNING id,"licenseeId","retentionDays","purgeEnabled","exportBeforePurge",
+      "legalHoldTags","updatedByUserId","createdAt","updatedAt" INTO row;
     inserted := true;
   END IF;
   IF inserted THEN
@@ -189,8 +195,8 @@ CREATE OR REPLACE FUNCTION app_rls.c03_run_retention_lifecycle(mode text, approv
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; replay record; policy public."EvidenceRetentionPolicy"%ROWTYPE;
-DECLARE job public."EvidenceRetentionJob"%ROWTYPE; cutoff_at timestamptz; evaluated integer; eligible integer; response jsonb;
+DECLARE actor record; replay record; policy record;
+DECLARE job record; cutoff_at timestamptz; evaluated integer; eligible integer; response jsonb;
 BEGIN
   IF mode NOT IN ('PREVIEW','APPLY') THEN RAISE EXCEPTION 'C03_RETENTION_MODE_INVALID' USING ERRCODE='22023'; END IF;
   IF mode='APPLY' THEN
@@ -201,7 +207,9 @@ BEGIN
   SELECT * INTO replay FROM app_rls.c03_governance_replay('retention-preview','{"mode":"PREVIEW"}'::jsonb);
   IF replay.replayed THEN RETURN replay.result || '{"__c03Replay":true}'::jsonb; END IF;
   PERFORM app_rls.c03_get_or_create_retention_policy();
-  SELECT * INTO policy FROM public."EvidenceRetentionPolicy" WHERE "licenseeId"=actor.licensee_id FOR UPDATE;
+  SELECT p.id,p."licenseeId",p."retentionDays",p."purgeEnabled",p."exportBeforePurge",
+    p."legalHoldTags",p."updatedByUserId",p."createdAt",p."updatedAt" INTO policy
+    FROM public."EvidenceRetentionPolicy" p WHERE p."licenseeId"=actor.licensee_id FOR UPDATE;
   cutoff_at := transaction_timestamp()-make_interval(days=>policy."retentionDays");
   SELECT count(*),count(*) FILTER (WHERE NOT (COALESCE(incident.tags,ARRAY[]::text[]) && policy."legalHoldTags"))
     INTO evaluated,eligible
@@ -213,7 +221,8 @@ BEGIN
   VALUES (gen_random_uuid()::text,actor.licensee_id,'PREVIEW','PREVIEW',cutoff_at,evaluated,0,0,
     jsonb_build_object('eligibleCount',eligible,'skippedDueToLegalHold',evaluated-eligible,
       'purgeEnabled',policy."purgeEnabled"),actor.user_id,transaction_timestamp(),transaction_timestamp())
-  RETURNING * INTO job;
+  RETURNING id,"licenseeId",status,mode,"cutoffAt","recordsEvaluated","recordsPurged",
+    "recordsExported",summary,"startedByUserId","startedAt","finishedAt","createdAt" INTO job;
   response := jsonb_build_object('job',to_jsonb(job),'policy',to_jsonb(policy),'cutoffAt',cutoff_at,
     'evaluated',evaluated,'eligible',eligible,'purged',0,'exported',0);
   PERFORM app_rls.c03_governance_audit('EVIDENCE_RETENTION_JOB_PREVIEWED','EvidenceRetentionJob',job.id,
@@ -227,7 +236,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_generate_compliance_report(from_at timest
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; replay record; policy public."EvidenceRetentionPolicy"%ROWTYPE; response jsonb;
+DECLARE actor record; replay record; policy record; response jsonb;
 DECLARE total_incidents integer; resolved_incidents integer; breached_incidents integer; fraud_reports integer;
 DECLARE audit_events integer; failed_logins integer; handoff jsonb; payload jsonb;
 BEGIN
@@ -241,7 +250,8 @@ BEGIN
   SELECT * INTO replay FROM app_rls.c03_governance_replay('compliance-report',payload);
   IF replay.replayed THEN RETURN replay.result || '{"__c03Replay":true}'::jsonb; END IF;
   PERFORM app_rls.c03_get_or_create_retention_policy();
-  SELECT * INTO policy FROM public."EvidenceRetentionPolicy" WHERE "licenseeId"=actor.licensee_id;
+  SELECT p."retentionDays",p."purgeEnabled",p."exportBeforePurge",p."legalHoldTags" INTO policy
+    FROM public."EvidenceRetentionPolicy" p WHERE p."licenseeId"=actor.licensee_id;
   SELECT count(*),count(*) FILTER (WHERE status::text IN ('RESOLVED','CLOSED')),
          count(*) FILTER (WHERE "slaDueAt"<transaction_timestamp() AND status::text NOT IN ('RESOLVED','CLOSED')),
          count(*) FILTER (WHERE "reportedBy"='CUSTOMER')
@@ -287,7 +297,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_update_retention_policy(patch jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; replay record; row public."EvidenceRetentionPolicy"%ROWTYPE; response jsonb; approval_id text; payload jsonb;
+DECLARE actor record; replay record; row record; response jsonb; approval_id text; payload jsonb;
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_governance_actor(ARRAY['sensitive-action-approval-approve']);
   IF jsonb_typeof(patch)<>'object' OR patch='{}'::jsonb OR EXISTS (
@@ -307,7 +317,9 @@ BEGIN
     "exportBeforePurge"=CASE WHEN patch?'exportBeforePurge' THEN (patch->>'exportBeforePurge')::boolean ELSE p."exportBeforePurge" END,
     "legalHoldTags"=CASE WHEN patch?'legalHoldTags' THEN ARRAY(SELECT jsonb_array_elements_text(patch->'legalHoldTags')) ELSE p."legalHoldTags" END,
     "updatedByUserId"=actor.user_id,"updatedAt"=transaction_timestamp()
-  WHERE p."licenseeId"=actor.licensee_id RETURNING * INTO row;
+  WHERE p."licenseeId"=actor.licensee_id
+  RETURNING id,"licenseeId","retentionDays","purgeEnabled","exportBeforePurge",
+    "legalHoldTags","updatedByUserId","createdAt","updatedAt" INTO row;
   response := to_jsonb(row);
   PERFORM app_rls.c03_governance_audit('EVIDENCE_RETENTION_POLICY_UPDATED','EvidenceRetentionPolicy',row.id,
     jsonb_build_object('approvalId',approval_id,'changedFields',(SELECT jsonb_agg(k) FROM jsonb_object_keys(patch) k)));

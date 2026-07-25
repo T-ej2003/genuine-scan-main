@@ -168,7 +168,49 @@ variable "db_allocated_storage_gb" {
 variable "db_engine_version" {
   type        = string
   description = "PostgreSQL engine version for staging. Match production major version when supported."
-  default     = "18.3"
+  default     = "18.4"
+}
+
+variable "activate_full_rls_green_runtime" {
+  type        = bool
+  description = "Switch the staging backend to the verified full-RLS green runtime credentials."
+  default     = false
+}
+
+variable "full_rls_green_executor_image_uri" {
+  type        = string
+  description = "Immutable staging full-RLS executor image reference."
+  validation {
+    condition     = can(regex("@sha256:[a-f0-9]{64}$", var.full_rls_green_executor_image_uri))
+    error_message = "The full-RLS executor image must use an immutable sha256 digest."
+  }
+}
+
+variable "full_rls_green_release_sha" {
+  type        = string
+  description = "Exact release commit bound to the staging full-RLS package."
+  validation {
+    condition     = can(regex("^[a-f0-9]{40}$", var.full_rls_green_release_sha))
+    error_message = "The full-RLS release SHA must be a full Git commit SHA."
+  }
+}
+
+variable "full_rls_green_source_contract_sha256" {
+  type        = string
+  description = "Certified source-contract hash embedded in the staging full-RLS executor."
+  validation {
+    condition     = can(regex("^[a-f0-9]{64}$", var.full_rls_green_source_contract_sha256))
+    error_message = "The full-RLS source contract must be a sha256 value."
+  }
+}
+
+variable "full_rls_green_package_checksum_sha256" {
+  type        = string
+  description = "Certified checksum-manifest hash embedded in the staging full-RLS executor."
+  validation {
+    condition     = can(regex("^[a-f0-9]{64}$", var.full_rls_green_package_checksum_sha256))
+    error_message = "The full-RLS package checksum must be a sha256 value."
+  }
 }
 
 variable "staging_secret_arns" {
@@ -186,6 +228,7 @@ variable "staging_secret_arns" {
     customer_verify_token_secret    = string
     incident_hash_salt_current      = string
     auth_mfa_encryption_key         = string
+    rls_green_admin_database_url    = string
   })
   description = "Secrets Manager ARNs for staging runtime secrets. Values must point under mscqr/staging/* and contain no secret material."
   sensitive   = true
@@ -196,6 +239,11 @@ variable "staging_secret_arns" {
       can(regex(":secret:mscqr/staging/", arn)) && !can(regex("(?i):secret:mscqr/(prod|production)/", arn))
     ])
     error_message = "All staging_secret_arns must reference Secrets Manager names under mscqr/staging/* and must not reference prod/production."
+  }
+
+  validation {
+    condition     = can(regex(":secret:mscqr/staging/rls-green/phase2/database-url/admin-[A-Za-z0-9]{6}$", var.staging_secret_arns.rls_green_admin_database_url))
+    error_message = "rls_green_admin_database_url must reference the exact isolated staging green administrator secret."
   }
 }
 

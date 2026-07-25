@@ -200,7 +200,9 @@ BEGIN
   END IF;
 
   IF p_operation IN ('BATCH','RELEASE','PRINTABLE_ITEMS') THEN
-    SELECT b.* INTO STRICT batch_row FROM public."Batch" b WHERE b.id=target_batch_id;
+    SELECT b.id,b.name,b."licenseeId",b."manufacturerId",b."lifecycleState",
+      b."sampleScanPolicy",b."totalCodes",b."printedAt",b."releasedAt"
+      INTO STRICT batch_row FROM public."Batch" b WHERE b.id=target_batch_id;
     RETURN jsonb_build_object(
       'batch',jsonb_build_object(
         'id',batch_row.id,'name',batch_row.name,'licenseeId',batch_row."licenseeId",
@@ -247,13 +249,21 @@ BEGIN
           ceil(batch_row."totalCodes"*GREATEST(coalesce((batch_row."sampleScanPolicy"->>'percentage')::numeric,1),0.01)/100)::integer
         )
         ELSE 1 END,
-      'latestJob',(SELECT to_jsonb(j) - 'printLockTokenHash' FROM public."PrintJob" j
-        WHERE j."batchId"=batch_row.id ORDER BY j."createdAt" DESC LIMIT 1)
+      'latestJob',(SELECT to_jsonb(j) FROM (
+        SELECT job.id,job."jobNumber",job."batchId",job."manufacturerId",job."printerId",
+          job.status,job."printMode",job."pipelineState",job."payloadType",job."payloadHash",
+          job.quantity,job."itemCount",job."rangeStart",job."rangeEnd",job."sentAt",
+          job."completedAt",job."failureReason",job."reprintOfJobId",job."approvedByUserId",
+          job."reprintReason",job."confirmedAt",job."createdAt",job."updatedAt"
+        FROM public."PrintJob" job WHERE job."batchId"=batch_row.id
+        ORDER BY job."createdAt" DESC LIMIT 1
+      ) j)
     );
   END IF;
 
   IF p_operation='VALIDATION_EVIDENCE' THEN
-    SELECT j.* INTO STRICT job_row
+    SELECT j.id,j."approvedByUserId",j.status,j."pipelineState",j."itemCount",j.quantity,
+      j."payloadHash",j."sentAt",j."confirmedAt",j."printerId" INTO STRICT job_row
       FROM public."PrintJob" j
       WHERE j."batchId"=target_batch_id
         AND (nullif(p_options->>'printJobId','') IS NULL OR j.id=p_options->>'printJobId')
@@ -383,44 +393,68 @@ BEGIN
 
   IF p_operation='PRINTER_LIST' THEN
     RETURN coalesce((
-      SELECT jsonb_agg(to_jsonb(p)-'gatewaySecretHash' ORDER BY p."isDefault" DESC,p.name,p.id)
-      FROM public."Printer" p
-      WHERE (coalesce((p_options->>'includeInactive')::boolean,false) OR p."isActive")
+      SELECT jsonb_agg(to_jsonb(p) ORDER BY p."isDefault" DESC,p.name,p.id)
+      FROM (
+        SELECT printer.id,printer.name,printer.vendor,printer.model,printer."connectionType",
+          printer."commandLanguage",printer."ipAddress",printer.host,printer.port,printer."resourcePath",
+          printer."tlsEnabled",printer."printerUri",printer."deliveryMode",printer."gatewayId",
+          printer."gatewayLastSeenAt",printer."gatewayStatus",printer."gatewayLastError",
+          printer."nativePrinterId",printer."agentId",printer."deviceFingerprint",
+          printer."printerRegistrationId",printer."orgId",printer."licenseeId",
+          printer."assignedUserId",printer."createdByUserId",printer."isActive",printer."isDefault",
+          printer."lastSeenAt",printer."lastValidatedAt",printer."lastValidationStatus",
+          printer."lastValidationMessage",printer."capabilitySummary",printer."calibrationProfile",
+          printer.metadata,printer."createdAt",printer."updatedAt"
+        FROM public."Printer" printer
+        WHERE (coalesce((p_options->>'includeInactive')::boolean,false) OR printer."isActive")
         AND (
           actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
           OR (actor.role='LICENSEE_ADMIN'
-            AND p."licenseeId"=actor."licenseeId" AND p."orgId"=actor."organizationId")
+            AND printer."licenseeId"=actor."licenseeId" AND printer."orgId"=actor."organizationId")
           OR (actor.role='MANUFACTURER_ADMIN' AND (
-            p."assignedUserId"=actor."userId"
+            printer."assignedUserId"=actor."userId"
             OR EXISTS (
               SELECT 1 FROM public."PrinterRegistration" pr
-              WHERE pr.id=p."printerRegistrationId" AND pr."userId"=actor."userId"
+              WHERE pr.id=printer."printerRegistrationId" AND pr."userId"=actor."userId"
                 AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL
             )
             OR EXISTS (
               SELECT 1 FROM public."ManufacturerLicenseeLink" ml
-              WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=p."licenseeId"
+              WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=printer."licenseeId"
             )
           ))
         )
+      ) p
     ),'[]'::jsonb);
   END IF;
 
   IF p_operation='PRINTER' THEN
     RETURN (
-      SELECT to_jsonb(p)-'gatewaySecretHash'
-      FROM public."Printer" p
-      WHERE p.id=p_subject_id AND (
+      SELECT to_jsonb(p)
+      FROM (
+        SELECT printer.id,printer.name,printer.vendor,printer.model,printer."connectionType",
+          printer."commandLanguage",printer."ipAddress",printer.host,printer.port,printer."resourcePath",
+          printer."tlsEnabled",printer."printerUri",printer."deliveryMode",printer."gatewayId",
+          printer."gatewayLastSeenAt",printer."gatewayStatus",printer."gatewayLastError",
+          printer."nativePrinterId",printer."agentId",printer."deviceFingerprint",
+          printer."printerRegistrationId",printer."orgId",printer."licenseeId",
+          printer."assignedUserId",printer."createdByUserId",printer."isActive",printer."isDefault",
+          printer."lastSeenAt",printer."lastValidatedAt",printer."lastValidationStatus",
+          printer."lastValidationMessage",printer."capabilitySummary",printer."calibrationProfile",
+          printer.metadata,printer."createdAt",printer."updatedAt"
+        FROM public."Printer" printer
+        WHERE printer.id=p_subject_id AND (
         actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
         OR (actor.role='LICENSEE_ADMIN'
-          AND p."licenseeId"=actor."licenseeId" AND p."orgId"=actor."organizationId")
-        OR p."assignedUserId"=actor."userId"
+          AND printer."licenseeId"=actor."licenseeId" AND printer."orgId"=actor."organizationId")
+        OR printer."assignedUserId"=actor."userId"
         OR EXISTS (
           SELECT 1 FROM public."PrinterRegistration" pr
-          WHERE pr.id=p."printerRegistrationId" AND pr."userId"=actor."userId"
+          WHERE pr.id=printer."printerRegistrationId" AND pr."userId"=actor."userId"
             AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL
         )
       )
+      ) p
     );
   END IF;
 
@@ -430,14 +464,16 @@ BEGIN
     END IF;
     RETURN (
       WITH registration AS (
-        SELECT pr.*
+        SELECT pr.id,pr."agentId",pr."deviceFingerprint",pr."trustStatus",pr."trustReason",
+          pr."approvedAt",pr."lastSeenAt",pr."updatedAt"
         FROM public."PrinterRegistration" pr
         WHERE pr."userId"=actor."userId" AND pr."revokedAt" IS NULL
           AND pr."trustStatus"<>'REVOKED'::public."PrinterTrustStatus"
         ORDER BY pr."approvedAt" DESC NULLS LAST,pr."lastSeenAt" DESC NULLS LAST,pr."updatedAt" DESC
         LIMIT 1
       ), attestation AS (
-        SELECT pa.*
+        SELECT pa.id,pa."printerRegistrationId",pa.metadata,pa."expiresAt",pa."trustValid",
+          pa."signatureValid",pa."attestedAt",pa."rejectionReason",pa."createdAt"
         FROM public."PrinterAttestation" pa
         JOIN registration pr ON pr.id=pa."printerRegistrationId"
         ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
@@ -493,12 +529,32 @@ BEGIN
   END IF;
 
   IF p_operation IN ('JOB','REISSUE') THEN
-    SELECT j.* INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=target_job_id;
+    SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,
+      j."printMode",j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",
+      j."rangeStart",j."rangeEnd",j."sentAt",j."completedAt",j."failureReason",
+      j."reprintOfJobId",j."approvedByUserId",j."reprintReason",j."confirmedAt",
+      j."createdAt",j."updatedAt" INTO STRICT job_row
+      FROM public."PrintJob" j WHERE j.id=target_job_id;
     RETURN jsonb_build_object(
-      'job',to_jsonb(job_row)-'printLockTokenHash',
-      'session',(SELECT to_jsonb(ps) FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id),
+      'job',to_jsonb(job_row),
+      'session',(SELECT to_jsonb(ps) FROM (
+        SELECT session.id,session."printJobId",session."batchId",session."manufacturerId",
+          session."printerRegistrationId",session."printerId",session.status,session."totalItems",
+          session."issuedItems",session."confirmedItems",session."frozenItems",session."failedReason",
+          session."startedAt",session."completedAt",session."createdAt",session."updatedAt"
+        FROM public."PrintSession" session WHERE session."printJobId"=job_row.id
+      ) ps),
       'items',coalesce((SELECT jsonb_agg(
-        (to_jsonb(pi)-'currentRenderTokenHash')||jsonb_build_object(
+        jsonb_build_object(
+          'id',pi.id,'printSessionId',pi."printSessionId",'qrCodeId',pi."qrCodeId",'code',pi.code,
+          'state',pi.state,'pipelineState',pi."pipelineState",'issueSequence',pi."issueSequence",
+          'attemptCount',pi."attemptCount",'deviceJobRef',pi."deviceJobRef",
+          'dispatchMetadata',pi."dispatchMetadata",'confirmationEvidence',pi."confirmationEvidence",
+          'issuedAt',pi."issuedAt",'dispatchedAt',pi."dispatchedAt",'agentAckedAt',pi."agentAckedAt",
+          'confirmationDeadlineAt',pi."confirmationDeadlineAt",'printConfirmedAt',pi."printConfirmedAt",
+          'closedAt',pi."closedAt",'frozenAt',pi."frozenAt",'failedAt',pi."failedAt",
+          'failureReason',pi."failureReason",'deadLetterReason',pi."deadLetterReason",
+          'createdAt',pi."createdAt",'updatedAt',pi."updatedAt",
           'qrCode',jsonb_build_object('id',q.id,'code',q.code,'displayCode',q."displayCode",'status',q.status)
         ) ORDER BY pi."issueSequence" NULLS LAST,pi.id
       ) FROM public."PrintItem" pi
@@ -520,11 +576,19 @@ BEGIN
           'printer',jsonb_build_object('id',p.id,'name',p.name)
         )
       )
-      FROM public."PrintReissueRequest" r
+      FROM (
+        SELECT request.id,request."originalPrintJobId",request."replacementPrintJobId",
+          request."requestedByUserId",request."approvedByUserId",request."licenseeId",
+          request."manufacturerId",request."batchId",request."requestedByRole",
+          request."targetApproverRole",request.quantity,request."affectedRangeStart",
+          request."affectedRangeEnd",request."decisionNote",request."approvalReferenceId",
+          request.status,request.reason,request."rejectionReason",request."approvedAt",
+          request."rejectedAt",request."executedAt",request."createdAt",request."updatedAt"
+        FROM public."PrintReissueRequest" request WHERE request.id=p_subject_id
+      ) r
       JOIN public."PrintJob" j ON j.id=r."originalPrintJobId"
       JOIN public."Batch" b ON b.id=j."batchId"
       JOIN public."Printer" p ON p.id=j."printerId"
-      WHERE r.id=p_subject_id
     );
   END IF;
 
@@ -532,7 +596,12 @@ BEGIN
     RETURN coalesce((
       SELECT jsonb_agg(to_jsonb(x) ORDER BY x."createdAt" DESC,x.id DESC)
       FROM (
-        SELECT r.*,jsonb_build_object(
+        SELECT r.id,r."originalPrintJobId",r."replacementPrintJobId",r."requestedByUserId",
+          r."approvedByUserId",r."licenseeId",r."manufacturerId",r."batchId",r."requestedByRole",
+          r."targetApproverRole",r.quantity,r."affectedRangeStart",r."affectedRangeEnd",
+          r."decisionNote",r."approvalReferenceId",r.status,r.reason,r."rejectionReason",
+          r."approvedAt",r."rejectedAt",r."executedAt",r."createdAt",r."updatedAt",
+          jsonb_build_object(
           'id',j.id,'jobNumber',j."jobNumber",'status',j.status,'quantity',j.quantity,
           'itemCount',j."itemCount",'rangeStart',j."rangeStart",'rangeEnd',j."rangeEnd",
           'batch',jsonb_build_object('id',b.id,'name',b.name,'licenseeId',b."licenseeId"),
@@ -624,7 +693,7 @@ SET search_path=pg_catalog,public
 AS $fn$
 DECLARE
   actor record;
-  printer_row public."Printer"%ROWTYPE;
+  printer_row record;
   scope_licensee text;
   scope_org text;
   now_at timestamp without time zone:=transaction_timestamp();
@@ -659,7 +728,13 @@ BEGIN
       OR actor."licenseeId" IS DISTINCT FROM scope_licensee
     ) THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
   ELSE
-    SELECT * INTO STRICT printer_row FROM public."Printer" p WHERE p.id=p_printer_id FOR UPDATE;
+    SELECT p.id,p.name,p.vendor,p.model,p."connectionType",p."commandLanguage",p."ipAddress",p.host,p.port,
+      p."resourcePath",p."tlsEnabled",p."printerUri",p."deliveryMode",p."gatewayId",p."gatewayLastSeenAt",
+      p."gatewayStatus",p."gatewayLastError",p."nativePrinterId",p."agentId",p."deviceFingerprint",
+      p."printerRegistrationId",p."orgId",p."licenseeId",p."assignedUserId",p."createdByUserId",
+      p."isActive",p."isDefault",p."lastSeenAt",p."lastValidatedAt",p."lastValidationStatus",
+      p."lastValidationMessage",p."capabilitySummary",p."calibrationProfile",p.metadata,p."createdAt",p."updatedAt"
+      INTO STRICT printer_row FROM public."Printer" p WHERE p.id=p_printer_id FOR UPDATE;
     scope_licensee:=printer_row."licenseeId";
     scope_org:=printer_row."orgId";
     IF actor.role='LICENSEE_ADMIN' AND (
@@ -718,7 +793,12 @@ BEGIN
       scope_org,scope_licensee,actor."userId",coalesce((p_payload->>'isActive')::boolean,true),
       coalesce((p_payload->>'isDefault')::boolean,false),p_payload->'capabilitySummary',
       p_payload->'calibrationProfile',now_at,now_at
-    ) RETURNING * INTO printer_row;
+    ) RETURNING id,name,vendor,model,"connectionType","commandLanguage","ipAddress",host,port,
+      "resourcePath","tlsEnabled","printerUri","deliveryMode","gatewayId","gatewayLastSeenAt",
+      "gatewayStatus","gatewayLastError","nativePrinterId","agentId","deviceFingerprint",
+      "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
+      "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
+      "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
   ELSIF p_operation='UPDATE' THEN
     IF printer_row."connectionType"='LOCAL_AGENT'
        AND p_payload - ARRAY['lastValidationStatus','lastValidationMessage','metadata']::text[] <> '{}'::jsonb
@@ -749,7 +829,13 @@ BEGIN
       "lastValidationMessage"=CASE WHEN p_payload ? 'lastValidationMessage'
         THEN nullif(left(p_payload->>'lastValidationMessage',500),'') ELSE "lastValidationMessage" END,
       "updatedAt"=now_at
-      WHERE id=p_printer_id RETURNING * INTO printer_row;
+      WHERE id=p_printer_id
+      RETURNING id,name,vendor,model,"connectionType","commandLanguage","ipAddress",host,port,
+        "resourcePath","tlsEnabled","printerUri","deliveryMode","gatewayId","gatewayLastSeenAt",
+        "gatewayStatus","gatewayLastError","nativePrinterId","agentId","deviceFingerprint",
+        "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
+        "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
+        "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
   ELSIF p_operation='RELINK' THEN
     IF NOT EXISTS (
       SELECT 1 FROM public."PrinterRegistration" pr
@@ -776,13 +862,25 @@ BEGIN
       "assignedUserId"=actor."userId","isActive"=true,"isDefault"=true,
       "lastSeenAt"=now_at,"lastValidatedAt"=now_at,"lastValidationStatus"='READY',
       "lastValidationMessage"=NULL,"updatedAt"=now_at
-      WHERE id=p_printer_id RETURNING * INTO printer_row;
+      WHERE id=p_printer_id
+      RETURNING id,name,vendor,model,"connectionType","commandLanguage","ipAddress",host,port,
+        "resourcePath","tlsEnabled","printerUri","deliveryMode","gatewayId","gatewayLastSeenAt",
+        "gatewayStatus","gatewayLastError","nativePrinterId","agentId","deviceFingerprint",
+        "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
+        "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
+        "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
   ELSIF p_operation='DELETE' THEN
     IF printer_row."connectionType"='LOCAL_AGENT'
        OR EXISTS (SELECT 1 FROM public."PrintJob" j
          WHERE j."printerId"=printer_row.id AND j.status IN ('PENDING','SENT','PAUSED'))
     THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
-    DELETE FROM public."Printer" p WHERE p.id=p_printer_id RETURNING * INTO printer_row;
+    DELETE FROM public."Printer" p WHERE p.id=p_printer_id
+    RETURNING id,name,vendor,model,"connectionType","commandLanguage","ipAddress",host,port,
+      "resourcePath","tlsEnabled","printerUri","deliveryMode","gatewayId","gatewayLastSeenAt",
+      "gatewayStatus","gatewayLastError","nativePrinterId","agentId","deviceFingerprint",
+      "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
+      "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
+      "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
   END IF;
 
   audit_action:=CASE p_operation
@@ -799,8 +897,7 @@ BEGIN
       'deliveryMode',printer_row."deliveryMode",
       'evidence',coalesce(p_payload->'evidence','{}'::jsonb))
   );
-  RETURN (to_jsonb(printer_row)-'gatewaySecretHash')
-    ||jsonb_build_object('removed',p_operation='DELETE');
+  RETURN to_jsonb(printer_row)||jsonb_build_object('removed',p_operation='DELETE');
 END
 $fn$;
 
@@ -820,7 +917,7 @@ SET search_path=pg_catalog,public
 AS $fn$
 DECLARE
   actor record;
-  row_value public."ActionIdempotencyKey"%ROWTYPE;
+  row_value record;
   inserted boolean:=false;
   expected_scope text;
   now_at timestamp without time zone:=transaction_timestamp();
@@ -840,7 +937,8 @@ BEGIN
   PERFORM set_config('app.printing_operation','printing-idempotency-'||lower(p_operation),true),
           set_config('app.printing_idempotency_key_hash',p_key_hash,true);
 
-  SELECT * INTO row_value FROM public."ActionIdempotencyKey"
+  SELECT k.id,k."keyHash",k.action,k.scope,k."requestHash",k."statusCode",k."responsePayload",
+    k."completedAt",k."expiresAt" INTO row_value FROM public."ActionIdempotencyKey" k
     WHERE "keyHash"=p_key_hash FOR UPDATE;
   IF p_operation='ABORT' THEN
     IF NOT FOUND THEN RETURN jsonb_build_object('aborted',true,'idempotent',true); END IF;
@@ -859,7 +957,9 @@ BEGIN
       action=p_action,scope=expected_scope,"requestHash"=p_request_hash,
       "statusCode"=NULL,"responsePayload"=NULL,"completedAt"=NULL,
       "createdAt"=now_at,"expiresAt"=now_at+interval '10 minutes'
-      WHERE "keyHash"=p_key_hash RETURNING * INTO row_value;
+      WHERE "keyHash"=p_key_hash
+      RETURNING id,"keyHash",action,scope,"requestHash","statusCode","responsePayload","completedAt","expiresAt"
+      INTO row_value;
     inserted:=true;
   ELSIF NOT FOUND THEN
     BEGIN
@@ -868,10 +968,12 @@ BEGIN
       ) VALUES (
         gen_random_uuid()::text,p_key_hash,p_action,expected_scope,p_request_hash,
         now_at,now_at+interval '10 minutes'
-      ) RETURNING * INTO row_value;
+      ) RETURNING id,"keyHash",action,scope,"requestHash","statusCode","responsePayload","completedAt","expiresAt"
+      INTO row_value;
       inserted:=true;
     EXCEPTION WHEN unique_violation THEN
-      SELECT * INTO STRICT row_value FROM public."ActionIdempotencyKey"
+      SELECT k.id,k."keyHash",k.action,k.scope,k."requestHash",k."statusCode",k."responsePayload",
+        k."completedAt",k."expiresAt" INTO STRICT row_value FROM public."ActionIdempotencyKey" k
         WHERE "keyHash"=p_key_hash FOR UPDATE;
     END;
   END IF;
@@ -916,7 +1018,7 @@ SET search_path=pg_catalog,public
 AS $fn$
 DECLARE
   actor record;
-  registration public."PrinterRegistration"%ROWTYPE;
+  registration record;
   printer_input jsonb;
   printer_id text;
   native_id text;
@@ -937,7 +1039,9 @@ BEGIN
           set_config('app.printing_user_id',actor."userId",true);
 
   IF p_operation='LOOKUP' THEN
-    SELECT pr.* INTO registration
+    SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId",pr."deviceFingerprint",pr."agentId",
+      pr."publicKeyPem",pr."trustStatus",pr."revokedAt",pr."approvedAt",pr."lastSeenAt",pr."updatedAt"
+      INTO registration
       FROM public."PrinterRegistration" pr
       WHERE pr."userId"=actor."userId" AND pr."revokedAt" IS NULL
         AND (
@@ -969,7 +1073,9 @@ BEGIN
      OR jsonb_array_length(coalesce(p_payload->'printers','[]'::jsonb))>50
   THEN RAISE EXCEPTION 'CONNECTOR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
 
-  SELECT pr.* INTO registration
+  SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId",pr."deviceFingerprint",pr."agentId",
+    pr."publicKeyPem",pr."trustStatus",pr."revokedAt",pr."approvedAt",pr."lastSeenAt",pr."updatedAt"
+    INTO registration
     FROM public."PrinterRegistration" pr
     WHERE pr."userId"=actor."userId"
       AND pr."deviceFingerprint"=btrim(p_payload->>'deviceFingerprint')
@@ -987,7 +1093,8 @@ BEGIN
       CASE WHEN trust_valid THEN 'TRUSTED' ELSE 'FAILED' END::public."PrinterTrustStatus",
       CASE WHEN trust_valid THEN NULL ELSE left(coalesce(p_payload->>'rejectionReason','Signature verification failed'),500) END,
       CASE WHEN trust_valid THEN now_at END,now_at,now_at,now_at
-    ) RETURNING * INTO registration;
+    ) RETURNING id,"userId","orgId","licenseeId","deviceFingerprint","agentId","publicKeyPem",
+      "trustStatus","revokedAt","approvedAt","lastSeenAt","updatedAt" INTO registration;
   ELSE
     PERFORM set_config('app.printing_registration_id',registration.id,true);
     IF registration."revokedAt" IS NOT NULL
@@ -1002,7 +1109,9 @@ BEGIN
       "trustReason"=CASE WHEN trust_valid THEN NULL ELSE left(coalesce(p_payload->>'rejectionReason','Signature verification failed'),500) END,
       "approvedAt"=CASE WHEN trust_valid THEN coalesce("approvedAt",now_at) ELSE "approvedAt" END,
       "lastSeenAt"=now_at,"updatedAt"=now_at
-      WHERE id=registration.id RETURNING * INTO registration;
+      WHERE id=registration.id
+      RETURNING id,"userId","orgId","licenseeId","deviceFingerprint","agentId","publicKeyPem",
+        "trustStatus","revokedAt","approvedAt","lastSeenAt","updatedAt" INTO registration;
   END IF;
 
   IF trust_valid THEN
@@ -1084,7 +1193,7 @@ DECLARE
   actor record;
   connector_actor record;
   registration record;
-  printer_row public."Printer"%ROWTYPE;
+  printer_row record;
   current_job jsonb;
   next_job jsonb;
   now_at timestamp without time zone:=transaction_timestamp();
@@ -1106,7 +1215,8 @@ BEGIN
     THEN RAISE EXCEPTION 'PRINTING_TEST_LABEL_DENIED' USING ERRCODE='42501'; END IF;
     PERFORM set_config('app.printing_operation','printing-test-label-queue',true),
             set_config('app.printing_printer_id',p_printer_id,true);
-    SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+    SELECT p.id,p.metadata,p."orgId",p."licenseeId",p."connectionType",p."deliveryMode",
+      p."nativePrinterId",p."ipAddress",p.host,p.port INTO STRICT printer_row FROM public."Printer" p
       WHERE p.id=p_printer_id AND p."connectionType"='LOCAL_AGENT' AND p."isActive"
         AND p."assignedUserId"=actor."userId"
         AND EXISTS (
@@ -1133,7 +1243,9 @@ BEGIN
     UPDATE public."Printer" SET
       metadata=jsonb_set(coalesce(metadata,'{}'::jsonb),'{pendingLocalAgentTestLabel}',p_job,true),
       "updatedAt"=now_at
-      WHERE id=printer_row.id RETURNING * INTO printer_row;
+      WHERE id=printer_row.id
+      RETURNING id,metadata,"orgId","licenseeId","connectionType","deliveryMode",
+        "nativePrinterId","ipAddress",host,port INTO printer_row;
     PERFORM app_rls.printing_write_audit(
       actor."userId",actor.role,printer_row."orgId",printer_row."licenseeId",
       'PRINTER_TEST_LABEL_QUEUED','Printer',printer_row.id,
@@ -1155,7 +1267,8 @@ BEGIN
           set_config('app.printing_request_id',p_request_id,true),
           set_config('app.printing_registration_id',p_connector->>'registrationId',true),
           set_config('app.printing_printer_id',p_printer_id,true);
-  SELECT pr.* INTO STRICT registration FROM public."PrinterRegistration" pr
+  SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId" INTO STRICT registration
+    FROM public."PrinterRegistration" pr
     WHERE pr.id=p_connector->>'registrationId'
       AND pr."agentId"=p_connector->>'agentId'
       AND pr."deviceFingerprint"=p_connector->>'deviceFingerprint'
@@ -1171,7 +1284,9 @@ BEGIN
     WHERE pa."printerRegistrationId"=registration.id
       AND pa."signatureValid" AND pa."trustValid" AND pa."expiresAt">now_at
   ) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;
-  SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+  SELECT p.id,p.metadata,p."orgId",p."licenseeId",p."connectionType",p."deliveryMode",
+    p."nativePrinterId",p."ipAddress",p.host,p.port,p."printerUri",p."commandLanguage"
+    INTO STRICT printer_row FROM public."Printer" p
     WHERE p.id=p_printer_id AND p."printerRegistrationId"=registration.id
       AND p."isActive" AND p."connectionType"='LOCAL_AGENT'
     FOR UPDATE;
@@ -1299,7 +1414,8 @@ BEGIN
     RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended('printing_batch_'||p_batch_id,0));
-  SELECT * INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
+  SELECT b.id,b."licenseeId",b."lifecycleState",b."releasedAt",b."suspendedAt"
+    INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
   IF batch_row."lifecycleState" NOT IN ('CODES_GENERATED'::public."BatchLifecycleState",'PRINT_ACKNOWLEDGED'::public."BatchLifecycleState")
      OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
   THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
@@ -1309,7 +1425,8 @@ BEGIN
        AND j.status IN ('PENDING','SENT','PAUSED') AND ps.status IN ('ACTIVE','PAUSED','RESUME_PENDING')
   ) THEN RAISE EXCEPTION 'ACTIVE_PRINT_JOB_EXISTS'; END IF;
 
-  SELECT * INTO printer_row FROM public."Printer" p
+  SELECT p.id,p."connectionType",p."commandLanguage",p."printerRegistrationId",p."nativePrinterId"
+    INTO printer_row FROM public."Printer" p
    WHERE p.id=p_printer_id AND p."isActive"
      AND p."licenseeId"=batch_row."licenseeId"
      AND (
@@ -1433,14 +1550,16 @@ BEGIN
     p_capability,p_purpose,p_request_id,NULL
   );
   PERFORM set_config('app.printing_job_id',p_job_id,true);
-  SELECT j.* INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
+  SELECT j.id,j."batchId",j."manufacturerId",j.status
+    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(
     p_capability,p_purpose,p_request_id,job_row."batchId"
   );
   IF actor.role='MANUFACTURER_ADMIN' AND job_row."manufacturerId"<>actor."userId" THEN
     RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
-  SELECT ps.* INTO STRICT session_row FROM public."PrintSession" ps WHERE ps."printJobId"=p_job_id FOR UPDATE;
+  SELECT ps.id,ps.status INTO STRICT session_row
+    FROM public."PrintSession" ps WHERE ps."printJobId"=p_job_id FOR UPDATE;
   PERFORM set_config('app.printing_job_id',p_job_id,true),
           set_config('app.printing_session_row_id',session_row.id,true);
 
@@ -1515,7 +1634,7 @@ BEGIN
           set_config('app.printing_registration_id',p_registration_id,true),
           set_config('app.printing_job_id',coalesce(p_job_id,''),true),
           set_config('app.printing_item_id',coalesce(p_item_id,''),true);
-  SELECT pr.* INTO STRICT registration FROM public."PrinterRegistration" pr
+  SELECT pr."userId" INTO STRICT registration FROM public."PrinterRegistration" pr
    WHERE pr.id=p_registration_id AND pr."agentId"=p_agent_id
      AND pr."deviceFingerprint"=p_device_fingerprint
      AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL;
@@ -1527,19 +1646,23 @@ BEGIN
     p_issued_at,p_issued_at+interval '2 minutes',true,true,
     jsonb_build_object('operation',p_operation,'requestId',p_request_id),now_at
   );
-  SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+  SELECT p.id,p.name,p."connectionType",p."commandLanguage",p."nativePrinterId",
+    p."ipAddress",p.port,p."calibrationProfile",p."capabilitySummary",p.metadata
+    INTO STRICT printer_row FROM public."Printer" p
    WHERE (p.id=p_printer_id OR p."nativePrinterId"=p_printer_id)
      AND p."printerRegistrationId"=p_registration_id AND p."isActive"
    ORDER BY (p.id=p_printer_id) DESC,p."isDefault" DESC,p."updatedAt" DESC LIMIT 1;
   PERFORM set_config('app.printing_printer_id',printer_row.id,true);
   IF p_operation='CLAIM' THEN
-    SELECT j.* INTO job_row FROM public."PrintJob" j
+    SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId"
+      INTO job_row FROM public."PrintJob" j
      WHERE j."printerId"=printer_row.id AND j."manufacturerId"=registration."userId"
        AND j."printMode"='LOCAL_AGENT' AND j.status IN ('PENDING','SENT')
      ORDER BY j."createdAt",j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
   ELSE
-    SELECT j.* INTO STRICT job_row FROM public."PrintJob" j
+    SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId"
+      INTO STRICT job_row FROM public."PrintJob" j
      WHERE j.id=p_job_id AND j."printerId"=printer_row.id AND j."manufacturerId"=registration."userId"
        AND j."printMode"='LOCAL_AGENT' FOR UPDATE;
   END IF;
@@ -1549,7 +1672,7 @@ BEGIN
   PERFORM set_config('app.printing_licensee_id',(
     SELECT b."licenseeId" FROM public."Batch" b WHERE b.id=job_row."batchId"
   ),true);
-  SELECT ps.* INTO STRICT session_row FROM public."PrintSession" ps
+  SELECT ps.id,ps."issuedItems" INTO STRICT session_row FROM public."PrintSession" ps
    WHERE ps."printJobId"=job_row.id AND ps."printerRegistrationId"=p_registration_id
      AND ps.status='ACTIVE' FOR UPDATE;
   audit_actor:=registration."userId";
@@ -1557,7 +1680,8 @@ BEGIN
           set_config('app.printing_printer_id',printer_row.id,true);
 
   IF p_operation='CLAIM' THEN
-    SELECT pi.* INTO item_row FROM public."PrintItem" pi
+    SELECT pi.id,pi."qrCodeId",pi.code,pi.state,pi."issueSequence"
+      INTO item_row FROM public."PrintItem" pi
      WHERE pi."printSessionId"=session_row.id AND pi.state='RESERVED'
      ORDER BY pi."issueSequence" NULLS LAST,pi.id FOR UPDATE SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
@@ -1609,7 +1733,7 @@ BEGIN
     );
   END IF;
 
-  SELECT pi.* INTO STRICT item_row FROM public."PrintItem" pi
+  SELECT pi.id,pi."qrCodeId",pi.state INTO STRICT item_row FROM public."PrintItem" pi
    WHERE pi.id=p_item_id AND pi."printSessionId"=session_row.id FOR UPDATE;
   IF p_operation='ACK' THEN
     IF item_row.state='AGENT_ACKED' THEN
@@ -1689,13 +1813,21 @@ BEGIN
           set_config('app.printing_gateway_id',coalesce(p_gateway_id,''),true),
           set_config('app.printing_gateway_secret_hash',coalesce(p_gateway_secret_hash,''),true);
   IF p_kind='LOCAL_AGENT' THEN
-    SELECT pr.* INTO STRICT registration FROM public."PrinterRegistration" pr
+    SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId",pr."agentId",pr."deviceFingerprint",
+      pr."publicKeyPem",pr."trustStatus",pr."approvedAt",pr."revokedAt",pr."lastSeenAt"
+      INTO STRICT registration FROM public."PrinterRegistration" pr
       WHERE pr."agentId"=p_agent_id AND pr."deviceFingerprint"=p_device_fingerprint
         AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL
       ORDER BY pr."lastSeenAt" DESC NULLS LAST,pr."updatedAt" DESC LIMIT 1;
     PERFORM set_config('app.printing_registration_id',registration.id,true),
             set_config('app.printing_user_id',registration."userId",true);
-    SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+    SELECT p.id,p.name,p.vendor,p.model,p."connectionType",p."commandLanguage",p."ipAddress",p.host,p.port,
+      p."resourcePath",p."tlsEnabled",p."printerUri",p."deliveryMode",p."gatewayId",p."gatewayLastSeenAt",
+      p."gatewayStatus",p."gatewayLastError",p."nativePrinterId",p."agentId",p."deviceFingerprint",
+      p."printerRegistrationId",p."orgId",p."licenseeId",p."assignedUserId",p."createdByUserId",
+      p."isActive",p."isDefault",p."lastSeenAt",p."lastValidatedAt",p."lastValidationStatus",
+      p."lastValidationMessage",p."capabilitySummary",p."calibrationProfile",p.metadata,p."createdAt",p."updatedAt"
+      INTO STRICT printer_row FROM public."Printer" p
       WHERE p."printerRegistrationId"=registration.id AND p."isActive"
         AND (p.id=p_printer_selector OR p."nativePrinterId"=p_printer_selector)
       ORDER BY (p.id=p_printer_selector) DESC,p."isDefault" DESC,p."updatedAt" DESC LIMIT 1;
@@ -1716,7 +1848,7 @@ BEGIN
         'trustStatus',registration."trustStatus",'approvedAt',registration."approvedAt",
         'revokedAt',registration."revokedAt",'lastSeenAt',registration."lastSeenAt"
       ),
-      'printer',to_jsonb(printer_row)-'gatewaySecretHash',
+      'printer',to_jsonb(printer_row),
       'eligibleForPrinting',registration."publicKeyPem" LIKE '%BEGIN%' AND printer_row."isActive"
         AND attestation_row."signatureValid" AND attestation_row."trustValid"
         AND attestation_row."expiresAt">now_at
@@ -1725,7 +1857,13 @@ BEGIN
           IN (printer_row.id,coalesce(printer_row."nativePrinterId",''))
     );
   END IF;
-  SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+  SELECT p.id,p.name,p.vendor,p.model,p."connectionType",p."commandLanguage",p."ipAddress",p.host,p.port,
+    p."resourcePath",p."tlsEnabled",p."printerUri",p."deliveryMode",p."gatewayId",p."gatewayLastSeenAt",
+    p."gatewayStatus",p."gatewayLastError",p."nativePrinterId",p."agentId",p."deviceFingerprint",
+    p."printerRegistrationId",p."orgId",p."licenseeId",p."assignedUserId",p."createdByUserId",
+    p."isActive",p."isDefault",p."lastSeenAt",p."lastValidatedAt",p."lastValidationStatus",
+    p."lastValidationMessage",p."capabilitySummary",p."calibrationProfile",p.metadata,p."createdAt",p."updatedAt"
+    INTO STRICT printer_row FROM public."Printer" p
     WHERE p."gatewayId"=p_gateway_id AND p."gatewaySecretHash"=p_gateway_secret_hash
       AND p."deliveryMode"='SITE_GATEWAY' AND p."isActive"
       AND (p_printer_selector IS NULL OR p_printer_selector='' OR p.id=p_printer_selector);
@@ -1734,7 +1872,7 @@ BEGIN
     UPDATE public."Printer" SET "gatewayLastSeenAt"=now_at,"gatewayStatus"='ONLINE',
       "gatewayLastError"=NULL,"updatedAt"=now_at WHERE id=printer_row.id;
   END IF;
-  RETURN jsonb_build_object('printer',to_jsonb(printer_row)-'gatewaySecretHash','eligibleForPrinting',true);
+  RETURN jsonb_build_object('printer',to_jsonb(printer_row),'eligibleForPrinting',true);
 END
 $fn$;
 
@@ -1758,7 +1896,13 @@ BEGIN
           set_config('app.printing_gateway_secret_hash',p_gateway_secret_hash,true),
           set_config('app.printing_job_id',coalesce(p_job_id,''),true),
           set_config('app.printing_item_id',coalesce(p_item_id,''),true);
-  SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+  SELECT p.id,p.name,p.vendor,p.model,p."connectionType",p."commandLanguage",p."ipAddress",p.host,p.port,
+    p."resourcePath",p."tlsEnabled",p."printerUri",p."deliveryMode",p."gatewayId",p."gatewayLastSeenAt",
+    p."gatewayStatus",p."gatewayLastError",p."nativePrinterId",p."agentId",p."deviceFingerprint",
+    p."printerRegistrationId",p."orgId",p."licenseeId",p."assignedUserId",p."createdByUserId",
+    p."isActive",p."isDefault",p."lastSeenAt",p."lastValidatedAt",p."lastValidationStatus",
+    p."lastValidationMessage",p."capabilitySummary",p."calibrationProfile",p.metadata,p."createdAt",p."updatedAt"
+    INTO STRICT printer_row FROM public."Printer" p
     WHERE p."gatewayId"=p_gateway_id AND p."gatewaySecretHash"=p_gateway_secret_hash
       AND p."deliveryMode"='SITE_GATEWAY'
       AND p."connectionType"=p_mode::public."PrinterConnectionType" AND p."isActive"
@@ -1767,23 +1911,34 @@ BEGIN
   UPDATE public."Printer" SET "gatewayLastSeenAt"=now_at,"gatewayStatus"='ONLINE',
     "gatewayLastError"=NULL,"updatedAt"=now_at WHERE id=printer_row.id;
   IF p_operation='CLAIM' THEN
-    SELECT j.* INTO job_row FROM public."PrintJob" j
+    SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
+      j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",j."rangeStart",
+      j."rangeEnd",j."sentAt",j."completedAt",j."failureReason",j."reprintOfJobId",
+      j."approvedByUserId",j."reprintReason",j."confirmedAt",j."createdAt",j."updatedAt"
+      INTO job_row FROM public."PrintJob" j
       WHERE j."printerId"=printer_row.id
         AND j."printMode"=p_mode::public."PrintDispatchMode"
         AND j.status IN ('PENDING','SENT')
       ORDER BY j."createdAt",j.id FOR UPDATE SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
   ELSE
-    SELECT j.* INTO STRICT job_row FROM public."PrintJob" j
+    SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
+      j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",j."rangeStart",
+      j."rangeEnd",j."sentAt",j."completedAt",j."failureReason",j."reprintOfJobId",
+      j."approvedByUserId",j."reprintReason",j."confirmedAt",j."createdAt",j."updatedAt"
+      INTO STRICT job_row FROM public."PrintJob" j
       WHERE j.id=p_job_id AND j."printerId"=printer_row.id
         AND j."printMode"=p_mode::public."PrintDispatchMode" FOR UPDATE;
   END IF;
   PERFORM set_config('app.printing_job_id',job_row.id,true),
           set_config('app.printing_batch_id',job_row."batchId",true);
-  SELECT ps.* INTO STRICT session_row FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id FOR UPDATE;
+  SELECT ps.id,ps."printJobId",ps."batchId",ps."manufacturerId",ps."printerRegistrationId",
+    ps."printerId",ps.status,ps."totalItems",ps."issuedItems",ps."confirmedItems",ps."frozenItems",
+    ps."failedReason",ps."startedAt",ps."completedAt",ps."createdAt",ps."updatedAt"
+    INTO STRICT session_row FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id FOR UPDATE;
   PERFORM set_config('app.printing_session_row_id',session_row.id,true);
   IF p_operation='CLAIM' THEN
-    SELECT pi.* INTO item_row FROM public."PrintItem" pi
+    SELECT pi.id,pi."qrCodeId",pi.state INTO item_row FROM public."PrintItem" pi
       WHERE pi."printSessionId"=session_row.id AND pi.state='RESERVED'
       ORDER BY pi."issueSequence" NULLS LAST,pi.id FOR UPDATE SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false,'printJobId',job_row.id); END IF;
@@ -1795,8 +1950,8 @@ BEGIN
       "sentAt"=coalesce("sentAt",now_at),"updatedAt"=now_at WHERE id=job_row.id;
     UPDATE public."Batch" SET "lifecycleState"='PRINT_ACKNOWLEDGED',"updatedAt"=now_at
       WHERE id=job_row."batchId" AND "lifecycleState"='CODES_GENERATED';
-    RETURN jsonb_build_object('available',true,'job',to_jsonb(job_row)-'printLockTokenHash',
-      'session',to_jsonb(session_row),'printer',to_jsonb(printer_row)-'gatewaySecretHash',
+    RETURN jsonb_build_object('available',true,'job',to_jsonb(job_row),
+      'session',to_jsonb(session_row),'printer',to_jsonb(printer_row),
       'item',(SELECT jsonb_build_object(
         'id',pi.id,'qrCodeId',q.id,'code',q.code,'displayCode',q."displayCode",
         'batchId',q."batchId",'licenseeId',q."licenseeId",'tokenNonce',q."tokenNonce",
@@ -1804,7 +1959,7 @@ BEGIN
         'tokenHash',q."tokenHash",'replayEpoch',q."replayEpoch"
       ) FROM public."PrintItem" pi JOIN public."QRCode" q ON q.id=pi."qrCodeId" WHERE pi.id=item_row.id));
   END IF;
-  SELECT pi.* INTO STRICT item_row FROM public."PrintItem" pi
+  SELECT pi.id,pi."qrCodeId",pi.state INTO STRICT item_row FROM public."PrintItem" pi
     WHERE pi.id=p_item_id AND pi."printSessionId"=session_row.id FOR UPDATE;
   PERFORM set_config('app.printing_item_id',item_row.id,true);
   IF p_operation='ACK' THEN
@@ -1864,7 +2019,8 @@ DECLARE actor record; job_row record; qr_row record; policy jsonb; required_coun
 BEGIN
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
   PERFORM set_config('app.printing_job_id',p_job_id,true);
-  SELECT j.* INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
+  SELECT j.id,j."batchId",j.status,j.quantity
+    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,job_row."batchId");
   PERFORM set_config('app.printing_job_id',p_job_id,true);
   IF p_purpose<>'printing-sample-scan' OR job_row.status<>'CONFIRMED' THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
@@ -1921,7 +2077,8 @@ BEGIN
   IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN') THEN
     RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
-  SELECT b.* INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
+  SELECT b.id,b."lifecycleState",b."releasedAt",b."totalCodes"
+    INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
   SELECT j."manufacturerId" INTO maker_id FROM public."PrintJob" j WHERE j."batchId"=p_batch_id
     AND j.status='CONFIRMED' ORDER BY j."confirmedAt" DESC NULLS LAST,j."createdAt" DESC LIMIT 1;
   IF maker_id IS NULL THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
@@ -2013,7 +2170,8 @@ BEGIN
   IF p_operation='CREATE' THEN
     SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
     PERFORM set_config('app.printing_job_id',p_original_job_id,true);
-    SELECT j.* INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_original_job_id FOR UPDATE;
+    SELECT j.id,j."batchId",j."manufacturerId",j.status
+      INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_original_job_id FOR UPDATE;
     SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,job_row."batchId");
     PERFORM set_config('app.printing_job_id',p_original_job_id,true);
     IF actor.role<>'MANUFACTURER_ADMIN' OR job_row."manufacturerId"<>actor."userId"
@@ -2022,7 +2180,16 @@ BEGIN
     SELECT r.id INTO request_id FROM public."PrintReissueRequest" r
       WHERE r."originalPrintJobId"=job_row.id AND r.status IN ('PENDING','APPROVED') FOR UPDATE;
     IF request_id IS NOT NULL THEN
-      RETURN (SELECT to_jsonb(r)||jsonb_build_object('idempotent',true) FROM public."PrintReissueRequest" r WHERE r.id=request_id);
+      RETURN (SELECT to_jsonb(r)||jsonb_build_object('idempotent',true) FROM (
+        SELECT request.id,request."originalPrintJobId",request."replacementPrintJobId",
+          request."requestedByUserId",request."approvedByUserId",request."licenseeId",
+          request."manufacturerId",request."batchId",request."requestedByRole",
+          request."targetApproverRole",request.quantity,request."affectedRangeStart",
+          request."affectedRangeEnd",request."decisionNote",request."approvalReferenceId",
+          request.status,request.reason,request."rejectionReason",request."approvedAt",
+          request."rejectedAt",request."executedAt",request."createdAt",request."updatedAt"
+        FROM public."PrintReissueRequest" request WHERE request.id=request_id
+      ) r);
     END IF;
     request_id:=gen_random_uuid()::text;
     PERFORM set_config('app.printing_reissue_id',request_id,true);
@@ -2033,11 +2200,20 @@ BEGIN
     ) VALUES (
       request_id,job_row.id,actor."userId",actor."batchLicenseeId",job_row."manufacturerId",job_row."batchId",
       actor.role,'LICENSEE_ADMIN',p_quantity,p_range_start,p_range_end,'PENDING',btrim(p_reason),now_at,now_at
-    ) RETURNING * INTO request_row;
+    ) RETURNING id,"originalPrintJobId","replacementPrintJobId","requestedByUserId",
+      "approvedByUserId","licenseeId","manufacturerId","batchId","requestedByRole",
+      "targetApproverRole",quantity,"affectedRangeStart","affectedRangeEnd","decisionNote",
+      "approvalReferenceId",status,reason,"rejectionReason","approvedAt","rejectedAt",
+      "executedAt","createdAt","updatedAt" INTO request_row;
   ELSE
     SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
     PERFORM set_config('app.printing_reissue_id',p_reissue_id,true);
-    SELECT r.* INTO STRICT request_row FROM public."PrintReissueRequest" r
+    SELECT r.id,r."originalPrintJobId",r."replacementPrintJobId",r."requestedByUserId",
+      r."approvedByUserId",r."licenseeId",r."manufacturerId",r."batchId",r."requestedByRole",
+      r."targetApproverRole",r.quantity,r."affectedRangeStart",r."affectedRangeEnd",r."decisionNote",
+      r."approvalReferenceId",r.status,r.reason,r."rejectionReason",r."approvedAt",r."rejectedAt",
+      r."executedAt",r."createdAt",r."updatedAt" INTO STRICT request_row
+      FROM public."PrintReissueRequest" r
       WHERE r.id=p_reissue_id FOR UPDATE;
     PERFORM set_config('app.printing_job_id',request_row."originalPrintJobId",true);
     SELECT j."batchId" INTO STRICT target_batch_id FROM public."PrintJob" j
@@ -2052,7 +2228,10 @@ BEGIN
       IF request_row.status::text='EXECUTED' THEN
         RETURN to_jsonb(request_row)||jsonb_build_object('idempotent',true);
       END IF;
-      SELECT j.*,ps.id AS original_session_id,ps."printerRegistrationId" AS original_registration_id INTO STRICT job_row
+      SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
+        j."payloadType",j.quantity,j."itemCount",
+        ps.id AS original_session_id,ps."printerRegistrationId" AS original_registration_id
+        INTO STRICT job_row
         FROM public."PrintJob" j JOIN public."PrintSession" ps ON ps."printJobId"=j.id
         WHERE j.id=request_row."originalPrintJobId" FOR UPDATE OF j,ps;
       IF job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED','CANCELLED')
@@ -2122,7 +2301,12 @@ BEGIN
       THEN RAISE EXCEPTION 'NOT_ENOUGH_CODES'; END IF;
       UPDATE public."PrintReissueRequest" SET status='EXECUTED',
         "replacementPrintJobId"=replacement_job_id,"executedAt"=now_at,"updatedAt"=now_at
-        WHERE id=request_row.id RETURNING * INTO request_row;
+        WHERE id=request_row.id
+        RETURNING id,"originalPrintJobId","replacementPrintJobId","requestedByUserId",
+          "approvedByUserId","licenseeId","manufacturerId","batchId","requestedByRole",
+          "targetApproverRole",quantity,"affectedRangeStart","affectedRangeEnd","decisionNote",
+          "approvalReferenceId",status,reason,"rejectionReason","approvedAt","rejectedAt",
+          "executedAt","createdAt","updatedAt" INTO request_row;
       request_id:=request_row.id;
     ELSE
       IF p_operation='CANCEL' THEN
@@ -2145,7 +2329,12 @@ BEGIN
       IF p_operation='FORWARD' THEN
         UPDATE public."PrintReissueRequest" SET "targetApproverRole"='SUPER_ADMIN',
           "decisionNote"=nullif(btrim(p_decision_note),''),"updatedAt"=now_at
-          WHERE id=request_row.id RETURNING * INTO request_row;
+          WHERE id=request_row.id
+          RETURNING id,"originalPrintJobId","replacementPrintJobId","requestedByUserId",
+            "approvedByUserId","licenseeId","manufacturerId","batchId","requestedByRole",
+            "targetApproverRole",quantity,"affectedRangeStart","affectedRangeEnd","decisionNote",
+            "approvalReferenceId",status,reason,"rejectionReason","approvedAt","rejectedAt",
+            "executedAt","createdAt","updatedAt" INTO request_row;
       ELSE
     UPDATE public."PrintReissueRequest" SET
       status=CASE p_operation WHEN 'APPROVE' THEN 'APPROVED' WHEN 'REJECT' THEN 'REJECTED' ELSE 'CANCELLED' END::public."ReissueRequestStatus",
@@ -2154,7 +2343,12 @@ BEGIN
       "rejectedAt"=CASE WHEN p_operation='REJECT' THEN now_at ELSE "rejectedAt" END,
       "decisionNote"=nullif(btrim(p_decision_note),''),
       "rejectionReason"=CASE WHEN p_operation='REJECT' THEN nullif(btrim(p_reason),'') ELSE "rejectionReason" END,
-      "updatedAt"=now_at WHERE id=request_row.id RETURNING * INTO request_row;
+      "updatedAt"=now_at WHERE id=request_row.id
+      RETURNING id,"originalPrintJobId","replacementPrintJobId","requestedByUserId",
+        "approvedByUserId","licenseeId","manufacturerId","batchId","requestedByRole",
+        "targetApproverRole",quantity,"affectedRangeStart","affectedRangeEnd","decisionNote",
+        "approvalReferenceId",status,reason,"rejectionReason","approvedAt","rejectedAt",
+        "executedAt","createdAt","updatedAt" INTO request_row;
       END IF;
     request_id:=request_row.id;
     END IF;
@@ -2230,7 +2424,11 @@ BEGIN
   IF p_operation IN ('CLAIM_DIRECT','CLAIM_IPP') THEN
     mode_value:=CASE p_operation WHEN 'CLAIM_DIRECT' THEN 'NETWORK_DIRECT' ELSE 'NETWORK_IPP' END;
     page_limit:=LEAST(GREATEST(coalesce(NULLIF(p_details->>'limit','')::integer,25),1),250);
-    SELECT j.* INTO job_row FROM public."PrintJob" j
+    SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
+      j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",j."rangeStart",
+      j."rangeEnd",j."sentAt",j."completedAt",j."failureReason",j."reprintOfJobId",
+      j."approvedByUserId",j."reprintReason",j."confirmedAt",j."createdAt",j."updatedAt"
+      INTO job_row FROM public."PrintJob" j
       WHERE (p_job_id IS NULL OR j.id=p_job_id) AND j."printMode"=mode_value
         AND j.status IN ('PENDING','SENT') AND EXISTS (
           SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
@@ -2241,7 +2439,11 @@ BEGIN
     PERFORM set_config('app.printing_job_id',job_row.id,true),
             set_config('app.printing_batch_id',job_row."batchId",true),
             set_config('app.printing_printer_id',job_row."printerId",true);
-    SELECT ps.* INTO STRICT session_row FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id FOR UPDATE;
+    SELECT ps.id,ps."printJobId",ps."batchId",ps."manufacturerId",ps."printerRegistrationId",
+      ps."printerId",ps.status,ps."totalItems",ps."issuedItems",ps."confirmedItems",ps."frozenItems",
+      ps."failedReason",ps."startedAt",ps."completedAt",ps."createdAt",ps."updatedAt"
+      INTO STRICT session_row FROM public."PrintSession" ps
+      WHERE ps."printJobId"=job_row.id FOR UPDATE;
     PERFORM set_config('app.printing_session_row_id',session_row.id,true);
     WITH selected AS (
       SELECT pi.id FROM public."PrintItem" pi
@@ -2260,9 +2462,21 @@ BEGIN
     UPDATE public."Batch" SET "lifecycleState"='PRINT_ACKNOWLEDGED',"updatedAt"=now_at
       WHERE id=job_row."batchId" AND "lifecycleState"='CODES_GENERATED';
     RETURN jsonb_build_object(
-      'available',true,'job',to_jsonb(job_row)-'printLockTokenHash',
+      'available',true,'job',to_jsonb(job_row),
       'session',to_jsonb(session_row),
-      'printer',(SELECT to_jsonb(p)-'gatewaySecretHash' FROM public."Printer" p WHERE p.id=job_row."printerId"),
+      'printer',(SELECT to_jsonb(p) FROM (
+        SELECT printer.id,printer.name,printer.vendor,printer.model,printer."connectionType",
+          printer."commandLanguage",printer."ipAddress",printer.host,printer.port,printer."resourcePath",
+          printer."tlsEnabled",printer."printerUri",printer."deliveryMode",printer."gatewayId",
+          printer."gatewayLastSeenAt",printer."gatewayStatus",printer."gatewayLastError",
+          printer."nativePrinterId",printer."agentId",printer."deviceFingerprint",
+          printer."printerRegistrationId",printer."orgId",printer."licenseeId",
+          printer."assignedUserId",printer."createdByUserId",printer."isActive",printer."isDefault",
+          printer."lastSeenAt",printer."lastValidatedAt",printer."lastValidationStatus",
+          printer."lastValidationMessage",printer."capabilitySummary",printer."calibrationProfile",
+          printer.metadata,printer."createdAt",printer."updatedAt"
+        FROM public."Printer" printer WHERE printer.id=job_row."printerId"
+      ) p),
       'batch',(SELECT jsonb_build_object('id',b.id,'name',b.name,'licenseeId',b."licenseeId",
         'manufacturerId',b."manufacturerId") FROM public."Batch" b WHERE b.id=job_row."batchId"),
       'items',coalesce((SELECT jsonb_agg(jsonb_build_object(
@@ -2276,11 +2490,13 @@ BEGIN
     );
   END IF;
 
-  SELECT j.* INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
+  SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j."printMode"
+    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
   PERFORM set_config('app.printing_job_id',job_row.id,true),
           set_config('app.printing_batch_id',job_row."batchId",true),
           set_config('app.printing_printer_id',job_row."printerId",true);
-  SELECT ps.* INTO STRICT session_row FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id FOR UPDATE;
+  SELECT ps.id INTO STRICT session_row FROM public."PrintSession" ps
+    WHERE ps."printJobId"=job_row.id FOR UPDATE;
   PERFORM set_config('app.printing_session_row_id',session_row.id,true);
   SELECT coalesce(array_agg(value #>> '{}'),'{}'::text[]) INTO item_ids
     FROM jsonb_array_elements(coalesce(p_details->'itemIds','[]'::jsonb));

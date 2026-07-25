@@ -91,6 +91,93 @@ resource "aws_cloudwatch_log_group" "worker" {
   tags              = merge(local.common_tags, { Component = "worker" })
 }
 
+resource "aws_cloudwatch_log_group" "full_rls_green" {
+  count             = var.enable_full_rls_green_executor ? 1 : 0
+  name              = "/ecs/mscqr-production/full-rls-green"
+  retention_in_days = var.log_retention_days
+  tags              = merge(local.common_tags, { Component = "full-rls-green-executor" })
+}
+
+resource "aws_iam_role" "full_rls_green_executor" {
+  count = var.enable_full_rls_green_executor ? 1 : 0
+  name  = "mscqr-production-full-rls-green-executor-task"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = merge(local.common_tags, { Component = "full-rls-green-executor" })
+}
+
+resource "aws_secretsmanager_secret" "full_rls_green_runtime" {
+  for_each                = var.enable_full_rls_green_executor ? toset(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"]) : toset([])
+  name                    = "mscqr/production/rls-green/phase2/database-url/${each.key}"
+  description             = "MSCQR production full-RLS green ${each.key} database URL"
+  recovery_window_in_days = 30
+  tags                    = merge(local.common_tags, { Component = "full-rls-green-runtime", Role = each.key })
+}
+
+resource "aws_iam_role_policy" "full_rls_green_executor" {
+  count = var.enable_full_rls_green_executor ? 1 : 0
+  name  = "mscqr-production-full-rls-green-executor"
+  role  = aws_iam_role.full_rls_green_executor[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ReadOnlyProductionGreenAdministratorCredential"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
+        Resource = var.full_rls_green_admin_secret_arn
+      },
+      {
+        Sid      = "ProvisionOnlyExactProductionGreenRuntimeCredentials"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"]
+        Resource = [for secret in aws_secretsmanager_secret.full_rls_green_runtime : secret.arn]
+      },
+      {
+        Sid      = "AppendOnlyProductionGreenReceipts"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${var.full_rls_receipt_bucket_arn}/rls-receipts/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "full_rls_green_execution_secret" {
+  count = var.enable_full_rls_green_executor ? 1 : 0
+  name  = "mscqr-production-full-rls-green-execution-secret"
+  role  = element(reverse(split("/", var.backend_execution_role_arn)), 0)
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "ReadOnlyProductionGreenAdministratorCredentialAtTaskStart"
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = var.full_rls_green_admin_secret_arn
+    }]
+  })
+}
+
+check "full_rls_green_execution_role_guard" {
+  assert {
+    condition = !var.enable_full_rls_green_executor || can(regex(
+      "^arn:aws:iam::[0-9]{12}:role/mscqr-production-ecs-execution-role$",
+      var.backend_execution_role_arn
+    ))
+    error_message = "The production green executor must use the reviewed ECS execution role."
+  }
+}
+
 resource "aws_ecs_cluster" "this" {
   name = var.cluster_name
 

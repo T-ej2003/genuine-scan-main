@@ -301,7 +301,9 @@ BEGIN
 
   RETURN QUERY
   WITH visible AS MATERIALIZED (
-    SELECT l.*
+    SELECT l.id,l."orgId",l.name,l.prefix,l.description,l."brandName",l.location,l.website,
+           l."supportEmail",l."supportPhone",l.metadata,l."isActive",l."suspendedAt",
+           l."suspendedReason",l."createdAt",l."updatedAt"
     FROM public."Licensee" l
     JOIN public."Organization" o ON o.id=l."orgId"
     WHERE (selector IS NULL OR l.id=selector)

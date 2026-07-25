@@ -366,7 +366,8 @@ BEGIN
   PERFORM set_config('app.b03_operation','notification-read',true);
 
   WITH visible AS (
-    SELECT n.*
+    SELECT n.id,n."userId",n."orgId",n."licenseeId",n."incidentId",n.audience,n.channel,
+      n.type,n.title,n.body,n.data,n."readAt",n."emailedAt",n."createdAt",n."updatedAt"
     FROM public."Notification" n
     WHERE n.channel='WEB'
       AND (n."userId"=actor.user_id OR (
@@ -419,14 +420,18 @@ BEGIN
   END IF;
   PERFORM set_config('app.b03_operation','notification-read-update',true),
           set_config('app.b03_notification_id',p_notification_id,true);
-  SELECT n.* INTO selected FROM public."Notification" n
+  SELECT n.id,n."userId",n."orgId",n."licenseeId",n."incidentId",n.audience,n.channel,
+    n.type,n.title,n.body,n.data,n."readAt",n."emailedAt",n."createdAt",n."updatedAt"
+    INTO selected FROM public."Notification" n
   WHERE n.id=p_notification_id AND n.channel='WEB' AND n."userId"=actor.user_id
   FOR UPDATE;
   IF NOT FOUND THEN RETURN QUERY SELECT NULL::jsonb; RETURN; END IF;
   UPDATE public."Notification" n
   SET "readAt"=coalesce(n."readAt",p_read_at),"updatedAt"=clock_timestamp()
   WHERE n.id=selected.id
-  RETURNING n.* INTO selected;
+  RETURNING n.id,n."userId",n."orgId",n."licenseeId",n."incidentId",n.audience,n.channel,
+    n.type,n.title,n.body,n.data,n."readAt",n."emailedAt",n."createdAt",n."updatedAt"
+    INTO selected;
   RETURN QUERY SELECT to_jsonb(selected);
 END
 $fn$;
@@ -524,7 +529,8 @@ BEGIN
   END IF;
 
   PERFORM set_config('app.b03_licensee_id',coalesce(incident_scope."licenseeId",''),true);
-  SELECT * INTO existing FROM public."ActionIdempotencyKey" k
+  SELECT k.id,k."requestHash",k."statusCode",k."responsePayload",k."completedAt"
+    INTO existing FROM public."ActionIdempotencyKey" k
   WHERE k."keyHash"=p_idempotency_key FOR UPDATE;
   IF FOUND THEN
     IF existing."requestHash" IS DISTINCT FROM p_payload_digest THEN
@@ -586,7 +592,8 @@ BEGIN
   END IF;
   PERFORM set_config('app.b03_operation','incident-email-complete',true);
   PERFORM set_config('app.b03_delivery_id',p_delivery_id,true);
-  SELECT * INTO idem FROM public."ActionIdempotencyKey" k
+  SELECT k.id,k."responsePayload",k."completedAt"
+    INTO idem FROM public."ActionIdempotencyKey" k
   WHERE k."keyHash"=p_idempotency_key AND k.action='b03-incident-email' FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B03_INCIDENT_EMAIL_CLAIM_REQUIRED' USING ERRCODE='42501'; END IF;
   IF idem."completedAt" IS NOT NULL THEN
@@ -594,7 +601,8 @@ BEGIN
       idem."responsePayload"->>'eventId',idem."responsePayload"->>'auditLogId';
     RETURN;
   END IF;
-  SELECT c.* INTO delivery FROM public."IncidentCommunication" c
+  SELECT c.id,c."incidentId",c."attemptedFrom",c."replyTo"
+    INTO delivery FROM public."IncidentCommunication" c
   WHERE c.id=p_delivery_id AND c.id=(idem."responsePayload"->>'deliveryId') FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B03_INCIDENT_EMAIL_CLAIM_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.b03_incident_id',delivery."incidentId",true);

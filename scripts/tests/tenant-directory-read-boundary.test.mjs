@@ -35,6 +35,7 @@ test("Release Fix 2 admits only the four approved caller roles", () => {
   }
   assert.doesNotMatch(source, /'MANUFACTURER'/);
   assert.doesNotMatch(rbac, /UserRole\.MANUFACTURER\b/);
+  assert.doesNotMatch(source, /SELECT\s+l\.\*\s+FROM\s+public\."Licensee"/i);
 });
 
 test("three routes use exact repository reads without legacy context or direct Prisma", () => {

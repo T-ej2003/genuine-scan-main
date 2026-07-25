@@ -7,7 +7,6 @@ const createBlock = source.match(/for role, secret_name in \{([\s\S]*?)\}\s*: \{
 const allowed = new Map([
   ["mscqr/staging/database-url/app", "app"],
   ["mscqr/staging/database-url/migrator", "migrator"],
-  ["mscqr/staging/database-url/rls-read", "rls-read"],
 ]);
 const requiredTags = { Environment: "staging", Application: "mscqr", Purpose: "database-role-credential", ManagedBy: "manual-reviewed-script" };
 

@@ -83,7 +83,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_create_public_incident_report(
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE qr record; prior public."ActionIdempotencyKey"%ROWTYPE; incident public."Incident"%ROWTYPE;
+DECLARE qr record; prior record; incident record;
 DECLARE request_hash text; response jsonb; upload jsonb; evidence_id text;
 BEGIN
   IF jsonb_typeof(report)<>'object' OR jsonb_typeof(uploads)<>'array'
@@ -103,8 +103,8 @@ BEGIN
     'c03-public-incident',qr.licensee_id,request_hash,transaction_timestamp()+interval '24 hours')
   ON CONFLICT("keyHash") DO NOTHING;
   IF NOT FOUND THEN
-    SELECT * INTO prior FROM public."ActionIdempotencyKey"
-     WHERE "keyHash"=encode(sha256(convert_to('public-incident|'||idempotency_key,'UTF8')),'hex') FOR UPDATE;
+    SELECT k."requestHash",k."responsePayload" INTO prior FROM public."ActionIdempotencyKey" k
+     WHERE k."keyHash"=encode(sha256(convert_to('public-incident|'||idempotency_key,'UTF8')),'hex') FOR UPDATE;
     IF prior."requestHash" IS DISTINCT FROM request_hash THEN RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_REPLAY_CONFLICT' USING ERRCODE='40001'; END IF;
     IF prior."responsePayload" IS NULL THEN RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_REPLAY_IN_PROGRESS' USING ERRCODE='40001'; END IF;
     RETURN prior."responsePayload";
@@ -128,7 +128,7 @@ BEGIN
     NULLIF(report->>'deviceFingerprintHash',''),'NEW','P3',
     transaction_timestamp()+CASE report->>'severity' WHEN 'CRITICAL' THEN interval '4 hours' WHEN 'HIGH' THEN interval '24 hours' WHEN 'MEDIUM' THEN interval '72 hours' ELSE interval '168 hours' END,
     ARRAY(SELECT jsonb_array_elements_text(COALESCE(report->'tags','[]'::jsonb)))
-  ) RETURNING * INTO incident;
+  ) RETURNING id,status,severity,"createdAt","qrCodeValue" INTO incident;
   PERFORM set_config('app.c03_public_incident_id',incident.id,true);
   INSERT INTO public."IncidentEvent"(id,"incidentId","actorType","eventType","eventPayload")
   VALUES(gen_random_uuid()::text,incident.id,'CUSTOMER','CREATED',jsonb_build_object('source','public_report'));
@@ -172,10 +172,35 @@ DECLARE actor record; result jsonb;
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,current_setting('app.purpose',true));
   SELECT to_jsonb(i)||jsonb_build_object(
-    'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM public."IncidentEvent" e WHERE e."incidentId"=i.id),'[]'::jsonb),
-    'communications',COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c."createdAt" DESC,c.id DESC) FROM public."IncidentCommunication" c WHERE c."incidentId"=i.id),'[]'::jsonb),
-    'evidence',COALESCE((SELECT jsonb_agg(to_jsonb(v) ORDER BY v."createdAt" DESC,v.id DESC) FROM public."IncidentEvidence" v WHERE v."incidentId"=i.id),'[]'::jsonb)
-  ) INTO result FROM public."Incident" i WHERE i.id=incident_id AND i."licenseeId"=actor.licensee_id;
+    'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM (
+      SELECT event.id,event."incidentId",event."actorType",event."actorUserId",event."eventType",
+        event."eventPayload",event."createdAt" FROM public."IncidentEvent" event WHERE event."incidentId"=i.id
+    ) e),'[]'::jsonb),
+    'communications',COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c."createdAt" DESC,c.id DESC) FROM (
+      SELECT comm.id,comm."incidentId",comm.direction,comm.channel,comm."toAddress",comm.subject,
+        comm."bodyPreview",comm."attemptedFrom",comm."usedFrom",comm."replyTo",comm."providerMessageId",
+        comm."errorMessage",comm.status,comm."createdAt"
+      FROM public."IncidentCommunication" comm WHERE comm."incidentId"=i.id
+    ) c),'[]'::jsonb),
+    'evidence',COALESCE((SELECT jsonb_agg(to_jsonb(v) ORDER BY v."createdAt" DESC,v.id DESC) FROM (
+      SELECT evidence.id,evidence."incidentId",evidence."fileUrl",evidence."storageKey",evidence."fileType",
+        evidence."uploadedByUserId",evidence."uploadedBy",evidence."createdAt"
+      FROM public."IncidentEvidence" evidence WHERE evidence."incidentId"=i.id
+    ) v),'[]'::jsonb)
+  ) INTO result FROM (
+    SELECT incident.id,incident."qrCodeId",incident."qrCodeValue",incident."scanEventId",incident."licenseeId",
+      incident."reportedBy",incident."customerName",incident."customerEmail",incident."customerPhone",
+      incident."customerCountry",incident."preferredContactMethod",incident."consentToContact",
+      incident."incidentType",incident.severity,incident."severityOverridden",incident.description,
+      incident.photos,incident."purchasePlace",incident."purchaseDate",incident."productBatchNo",
+      incident."locationLat",incident."locationLng",incident."locationName",incident."locationCountry",
+      incident."locationRegion",incident."locationCity",incident."ipHash",incident."userAgentHash",
+      incident."deviceFingerprintHash",incident.status,incident.priority,incident."assignedToUserId",
+      incident."slaDueAt",incident.tags,incident."internalNotes",incident."resolutionSummary",
+      incident."resolutionOutcome",incident."createdAt",incident."updatedAt"
+    FROM public."Incident" incident
+    WHERE incident.id=incident_id AND incident."licenseeId"=actor.licensee_id
+  ) i;
   RETURN result;
 END;
 $$;
@@ -205,7 +230,15 @@ BEGIN
       AND (NOT filters?'dateFrom' OR i."createdAt">=(filters->>'dateFrom')::timestamptz)
       AND (NOT filters?'dateTo' OR i."createdAt"<=(filters->>'dateTo')::timestamptz))
   ) INTO result FROM (
-    SELECT i.* FROM public."Incident" i WHERE i."licenseeId"=actor.licensee_id
+    SELECT i.id,i."qrCodeId",i."qrCodeValue",i."scanEventId",i."licenseeId",i."reportedBy",
+      i."customerName",i."customerEmail",i."customerPhone",i."customerCountry",i."preferredContactMethod",
+      i."consentToContact",i."incidentType",i.severity,i."severityOverridden",i.description,i.photos,
+      i."purchasePlace",i."purchaseDate",i."productBatchNo",i."locationLat",i."locationLng",
+      i."locationName",i."locationCountry",i."locationRegion",i."locationCity",i."ipHash",
+      i."userAgentHash",i."deviceFingerprintHash",i.status,i.priority,i."assignedToUserId",
+      i."slaDueAt",i.tags,i."internalNotes",i."resolutionSummary",i."resolutionOutcome",
+      i."createdAt",i."updatedAt"
+    FROM public."Incident" i WHERE i."licenseeId"=actor.licensee_id
       AND (NOT filters?'status' OR i.status::text=filters->>'status')
       AND (NOT filters?'severity' OR i.severity::text=filters->>'severity')
       AND (NOT filters?'assignedTo' OR i."assignedToUserId"=filters->>'assignedTo')
@@ -223,14 +256,14 @@ CREATE OR REPLACE FUNCTION app_rls.c03_patch_incident(incident_id text, patch js
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; prior public."Incident"%ROWTYPE; changed text[]:=ARRAY[]::text[]; updated public."Incident"%ROWTYPE;
+DECLARE actor record; changed text[]:=ARRAY[]::text[]; updated record;
 BEGIN
   IF jsonb_typeof(patch)<>'object' OR patch='{}'::jsonb OR EXISTS(SELECT 1 FROM jsonb_object_keys(patch) k
     WHERE k NOT IN ('status','assignedToUserId','internalNotes','tags','severity','priority','resolutionSummary','resolutionOutcome')) THEN
     RAISE EXCEPTION 'C03_INCIDENT_PATCH_INVALID' USING ERRCODE='22023';
   END IF;
   SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,'incident-update','mfa-verified');
-  SELECT * INTO prior FROM public."Incident" WHERE id=incident_id AND "licenseeId"=actor.licensee_id FOR UPDATE;
+  PERFORM 1 FROM public."Incident" WHERE id=incident_id AND "licenseeId"=actor.licensee_id FOR UPDATE;
   UPDATE public."Incident" i SET
     status=CASE WHEN patch?'status' THEN (patch->>'status')::public."IncidentStatus" ELSE i.status END,
     "assignedToUserId"=CASE WHEN patch?'assignedToUserId' THEN NULLIF(patch->>'assignedToUserId','') ELSE i."assignedToUserId" END,
@@ -242,7 +275,14 @@ BEGIN
     "resolutionSummary"=CASE WHEN patch?'resolutionSummary' THEN NULLIF(patch->>'resolutionSummary','') ELSE i."resolutionSummary" END,
     "resolutionOutcome"=CASE WHEN patch?'resolutionOutcome' THEN NULLIF(patch->>'resolutionOutcome','')::public."IncidentResolutionOutcome" ELSE i."resolutionOutcome" END,
     "updatedAt"=transaction_timestamp()
-   WHERE i.id=incident_id RETURNING * INTO updated;
+   WHERE i.id=incident_id
+   RETURNING id,"qrCodeId","qrCodeValue","scanEventId","licenseeId","reportedBy","customerName",
+     "customerEmail","customerPhone","customerCountry","preferredContactMethod","consentToContact",
+     "incidentType",severity,"severityOverridden",description,photos,"purchasePlace","purchaseDate",
+     "productBatchNo","locationLat","locationLng","locationName","locationCountry","locationRegion",
+     "locationCity","ipHash","userAgentHash","deviceFingerprintHash",status,priority,"assignedToUserId",
+     "slaDueAt",tags,"internalNotes","resolutionSummary","resolutionOutcome","createdAt","updatedAt"
+   INTO updated;
   SELECT array_agg(k) INTO changed FROM jsonb_object_keys(patch) k;
   INSERT INTO public."IncidentEvent"(id,"incidentId","actorType","actorUserId","eventType","eventPayload")
   VALUES(gen_random_uuid()::text,incident_id,'ADMIN',actor.user_id,'UPDATED_FIELDS',jsonb_build_object('changedFields',changed));
@@ -254,7 +294,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_record_incident_event(incident_id text, e
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; created public."IncidentEvent"%ROWTYPE; purpose text:=current_setting('app.purpose',true);
+DECLARE actor record; created record; purpose text:=current_setting('app.purpose',true);
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,purpose,
     CASE WHEN purpose IN ('incident-note-add','incident-update','incident-pdf-export') THEN 'mfa-verified' ELSE 'password-verified' END);
@@ -263,7 +303,7 @@ BEGIN
   END IF;
   INSERT INTO public."IncidentEvent"(id,"incidentId","actorType","actorUserId","eventType","eventPayload")
   VALUES(gen_random_uuid()::text,incident_id,'ADMIN',actor.user_id,event_type::public."IncidentEventType",event_payload)
-  RETURNING * INTO created;
+  RETURNING id,"incidentId","actorType","actorUserId","eventType","eventPayload","createdAt" INTO created;
   RETURN to_jsonb(created);
 END;
 $$;
@@ -272,7 +312,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_add_incident_evidence(incident_id text, e
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; created public."IncidentEvidence"%ROWTYPE; key_hash text;
+DECLARE actor record; created record; key_hash text;
 BEGIN
   IF jsonb_typeof(evidence)<>'object' OR length(idempotency_key) NOT BETWEEN 8 AND 200
      OR length(COALESCE(evidence->>'fileUrl',''))>1000 OR length(COALESCE(evidence->>'storageKey',''))>1000
@@ -290,7 +330,9 @@ BEGIN
   END IF;
   INSERT INTO public."IncidentEvidence"(id,"incidentId","fileUrl","storageKey","fileType","uploadedByUserId","uploadedBy")
   VALUES(gen_random_uuid()::text,incident_id,NULLIF(evidence->>'fileUrl',''),NULLIF(evidence->>'storageKey',''),
-    NULLIF(evidence->>'fileType',''),actor.user_id,'ADMIN') RETURNING * INTO created;
+    NULLIF(evidence->>'fileType',''),actor.user_id,'ADMIN')
+  RETURNING id,"incidentId","fileUrl","storageKey","fileType","uploadedByUserId","uploadedBy","createdAt"
+  INTO created;
   UPDATE public."ActionIdempotencyKey" SET "statusCode"=201,"responsePayload"=jsonb_build_object('evidence',to_jsonb(created)),
     "completedAt"=transaction_timestamp() WHERE "keyHash"=key_hash;
   RETURN jsonb_build_object('evidence',to_jsonb(created),'tamperChecks',NULL);
@@ -305,9 +347,29 @@ DECLARE actor record;
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,current_setting('app.purpose',true),'mfa-verified');
   RETURN jsonb_build_object(
-    'incident',(SELECT to_jsonb(i) FROM public."Incident" i WHERE i.id=incident_id),
-    'evidence',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM public."IncidentEvidence" e WHERE e."incidentId"=incident_id),'[]'::jsonb),
-    'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM public."IncidentEvent" e WHERE e."incidentId"=incident_id),'[]'::jsonb)
+    'incident',(SELECT to_jsonb(i) FROM (
+      SELECT incident.id,incident."qrCodeId",incident."qrCodeValue",incident."scanEventId",incident."licenseeId",
+        incident."reportedBy",incident."customerName",incident."customerEmail",incident."customerPhone",
+        incident."customerCountry",incident."preferredContactMethod",incident."consentToContact",
+        incident."incidentType",incident.severity,incident."severityOverridden",incident.description,
+        incident.photos,incident."purchasePlace",incident."purchaseDate",incident."productBatchNo",
+        incident."locationLat",incident."locationLng",incident."locationName",incident."locationCountry",
+        incident."locationRegion",incident."locationCity",incident."ipHash",incident."userAgentHash",
+        incident."deviceFingerprintHash",incident.status,incident.priority,incident."assignedToUserId",
+        incident."slaDueAt",incident.tags,incident."internalNotes",incident."resolutionSummary",
+        incident."resolutionOutcome",incident."createdAt",incident."updatedAt"
+      FROM public."Incident" incident WHERE incident.id=incident_id
+    ) i),
+    'evidence',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM (
+      SELECT evidence.id,evidence."incidentId",evidence."fileUrl",evidence."storageKey",evidence."fileType",
+        evidence."uploadedByUserId",evidence."uploadedBy",evidence."createdAt"
+      FROM public."IncidentEvidence" evidence WHERE evidence."incidentId"=incident_id
+    ) e),'[]'::jsonb),
+    'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM (
+      SELECT event.id,event."incidentId",event."actorType",event."actorUserId",event."eventType",
+        event."eventPayload",event."createdAt"
+      FROM public."IncidentEvent" event WHERE event."incidentId"=incident_id
+    ) e),'[]'::jsonb)
   );
 END;
 $$;
@@ -347,7 +409,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_link_ir_alert_incident(
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; alert public."PolicyAlert"%ROWTYPE; key_hash text;
+DECLARE actor record; alert record; key_hash text;
 BEGIN
   IF incident_authorization_id !~* '^[0-9a-f-]{36}$' OR length(reason) NOT BETWEEN 3 AND 600
      OR length(idempotency_key) NOT BETWEEN 8 AND 200 THEN RAISE EXCEPTION 'C03_IR_ALERT_INVALID' USING ERRCODE='22023'; END IF;
@@ -359,7 +421,9 @@ BEGIN
   ON CONFLICT("keyHash") DO NOTHING;
   IF NOT FOUND THEN RETURN (SELECT "responsePayload" FROM public."ActionIdempotencyKey" WHERE "keyHash"=key_hash); END IF;
   UPDATE public."PolicyAlert" SET "incidentId"=incident_id WHERE id=alert_id AND "licenseeId"=actor.licensee_id
-   RETURNING * INTO alert;
+   RETURNING id,"licenseeId","alertType",severity,message,score,"policyRuleId","incidentId",
+     "batchId","qrCodeId","manufacturerId","acknowledgedAt","acknowledgedByUserId",details,"createdAt"
+   INTO alert;
   IF NOT FOUND THEN RAISE EXCEPTION 'C03_IR_ALERT_DENIED' USING ERRCODE='42501'; END IF;
   UPDATE public."ActionIdempotencyKey" SET "statusCode"=200,"responsePayload"=to_jsonb(alert),"completedAt"=transaction_timestamp()
    WHERE "keyHash"=key_hash;

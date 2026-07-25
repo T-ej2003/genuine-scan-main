@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION app_rls.scheduled_job_prepare(
   p_request_id text
 ) RETURNS text
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE capability_hash text; credential public."ScheduledJobCredential"%ROWTYPE;
+DECLARE capability_hash text; credential record;
 BEGIN
   IF session_user <> {{SCHEDULED_ROLE}}
      OR p_capability !~ '^[A-Za-z0-9_-]{43}$'
@@ -45,7 +45,7 @@ BEGIN
      AND c."scheduleId"=p_schedule_id
      AND c."revokedAt" IS NULL
      AND c."expiresAt">clock_timestamp()
-   RETURNING c.* INTO credential;
+   RETURNING c.id INTO credential;
   IF NOT FOUND THEN RAISE EXCEPTION 'SCHEDULED_JOB_IDENTITY_DENIED' USING ERRCODE='42501'; END IF;
 
   PERFORM set_config('app.scheduled_credential_id',credential.id,true),
@@ -177,15 +177,17 @@ CREATE OR REPLACE FUNCTION app_rls.scheduled_get_compliance_pack_job(
   p_capability text,p_schedule_id text,p_request_id text,p_job_id text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE job public."CompliancePackJob"%ROWTYPE; report_value jsonb;
+DECLARE job record; report_value jsonb;
 BEGIN
   PERFORM app_rls.scheduled_job_prepare(p_capability,p_schedule_id,'get',p_request_id);
   PERFORM set_config('app.scheduled_job_id',p_job_id,true);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=p_schedule_id;
+  SELECT j."licenseeId",j."periodFrom",j."periodTo" INTO job
+    FROM public."CompliancePackJob" j
+    WHERE j.id=p_job_id AND j."triggerType"='SCHEDULED' AND j."scheduledScheduleId"=p_schedule_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'SCHEDULED_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.scheduled_licensee_id',job."licenseeId",true),set_config('app.licensee_id',job."licenseeId",true);
   report_value:=app_rls.c03_build_compliance_report(job."licenseeId",job."periodFrom",job."periodTo");
-  RETURN jsonb_build_object('job',to_jsonb(job),'report',report_value);
+  RETURN jsonb_build_object('job',app_rls.c03_compliance_job_projection(p_job_id),'report',report_value);
 END
 $fn$;
 
@@ -193,7 +195,7 @@ CREATE OR REPLACE FUNCTION app_rls.scheduled_complete_compliance_pack_job(
   p_capability text,p_schedule_id text,p_request_id text,p_job_id text,p_result jsonb
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE job public."CompliancePackJob"%ROWTYPE;
+DECLARE job record;
 BEGIN
   IF jsonb_typeof(p_result)<>'object' OR p_result->>'fileName' IS NULL OR p_result->>'storageKey' IS NULL
      OR p_result->>'integrityHash' !~ '^[0-9a-f]{64}$' OR octet_length(p_result::text)>65536
@@ -203,11 +205,12 @@ BEGIN
   UPDATE public."CompliancePackJob" SET status='COMPLETED',"fileName"=p_result->>'fileName',"storageKey"=p_result->>'storageKey',
     "integrityHash"=p_result->>'integrityHash',"signatureAlgorithm"=p_result->>'signatureAlgorithm',summary=p_result,
     "finishedAt"=transaction_timestamp(),"updatedAt"=transaction_timestamp()
-    WHERE id=p_job_id AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=p_schedule_id AND status='RUNNING' RETURNING * INTO job;
+    WHERE id=p_job_id AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=p_schedule_id AND status='RUNNING'
+    RETURNING id,"licenseeId","storageKey" INTO job;
   IF NOT FOUND THEN RAISE EXCEPTION 'SCHEDULED_COMPLIANCE_TRANSITION_DENIED' USING ERRCODE='40001'; END IF;
   PERFORM set_config('app.scheduled_licensee_id',job."licenseeId",true),set_config('app.licensee_id',job."licenseeId",true);
   PERFORM app_rls.scheduled_job_queue_audit('COMPLIANCE_PACK_COMPLETED',job.id,job."licenseeId",jsonb_build_object('storageKey',job."storageKey"));
-  RETURN to_jsonb(job);
+  RETURN app_rls.c03_compliance_job_projection(p_job_id);
 END
 $fn$;
 
@@ -215,17 +218,18 @@ CREATE OR REPLACE FUNCTION app_rls.scheduled_fail_compliance_pack_job(
   p_capability text,p_schedule_id text,p_request_id text,p_job_id text,p_error_code text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE job public."CompliancePackJob"%ROWTYPE;
+DECLARE job record;
 BEGIN
   IF p_error_code !~ '^[A-Z][A-Z0-9_]{2,127}$' THEN RAISE EXCEPTION 'SCHEDULED_COMPLIANCE_ERROR_INVALID' USING ERRCODE='22023'; END IF;
   PERFORM app_rls.scheduled_job_prepare(p_capability,p_schedule_id,'fail',p_request_id);
   PERFORM set_config('app.scheduled_job_id',p_job_id,true);
   UPDATE public."CompliancePackJob" SET status='FAILED',"errorMessage"=p_error_code,"finishedAt"=transaction_timestamp(),"updatedAt"=transaction_timestamp()
-    WHERE id=p_job_id AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=p_schedule_id AND status='RUNNING' RETURNING * INTO job;
+    WHERE id=p_job_id AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=p_schedule_id AND status='RUNNING'
+    RETURNING id,"licenseeId" INTO job;
   IF NOT FOUND THEN RAISE EXCEPTION 'SCHEDULED_COMPLIANCE_TRANSITION_DENIED' USING ERRCODE='40001'; END IF;
   PERFORM set_config('app.scheduled_licensee_id',job."licenseeId",true),set_config('app.licensee_id',job."licenseeId",true);
   PERFORM app_rls.scheduled_job_queue_audit('COMPLIANCE_PACK_FAILED',job.id,job."licenseeId",jsonb_build_object('errorCode',p_error_code));
-  RETURN to_jsonb(job);
+  RETURN app_rls.c03_compliance_job_projection(p_job_id);
 END
 $fn$;
 

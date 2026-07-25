@@ -105,12 +105,6 @@ const forbiddenUrlMarkers = [
   "fly.dev",
 ];
 
-const routeRuntimeCommands = [
-  ["npm", ["--prefix", "backend", "run", "test:rls:manufacturer-printers-read-runtime"]],
-  ["npm", ["--prefix", "backend", "run", "test:rls:batches-read-runtime"]],
-  ["npm", ["--prefix", "backend", "run", "test:rls:batch-allocation-map-runtime"]],
-];
-
 const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 export class HarnessSafetyError extends Error {
@@ -887,16 +881,6 @@ const runPrismaMigrateDeploy = (databaseUrl) => {
   });
 };
 
-const runRouteRuntimeTests = () => {
-  for (const [command, args] of routeRuntimeCommands) {
-    execFileSync(command, args, {
-      cwd: repoRoot,
-      env: { ...process.env },
-      stdio: "inherit",
-    });
-  }
-};
-
 const writeEvidence = (evidence) => {
   const artifactsRoot = path.join(repoRoot, "artifacts");
   if (!fs.existsSync(artifactsRoot)) return null;
@@ -1067,10 +1051,7 @@ export const runHarness = async (args, env = process.env) => {
     assertSelectOnlyWriteDenial(databaseUrl, runtimeRole);
     evidence.checks.push("insert_update_delete_denied_on_all_16_tables");
 
-    if (args.runRouteTests) {
-      runRouteRuntimeTests();
-      evidence.routeRuntimeTests = "passed_existing_p2_disposable_tests";
-    }
+    if (args.runRouteTests) evidence.routeRuntimeTests = "covered_by_full_generated_package_certification";
   } finally {
     if (candidateApplied) {
       runPsql(databaseUrl, ["-f", rollback.resolved], {

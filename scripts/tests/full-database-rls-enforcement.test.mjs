@@ -6,7 +6,11 @@ import test from "node:test";
 import { TABLE_INVENTORY_BASELINE } from "../rls/lib/table-inventory-baseline.mjs";
 import { fileURLToPath } from "node:url";
 
-import { assertSafeAdminUrl, FullRlsCertificationSafetyError } from "../rls/certify-full-database.mjs";
+import {
+  assertSafeAdminUrl,
+  certificationEvidencePath,
+  FullRlsCertificationSafetyError,
+} from "../rls/certify-full-database.mjs";
 import { validateGeneratedPackage } from "../rls/verify-full-rls-package.mjs";
 
 const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -18,6 +22,18 @@ const packageInputs = () => ({
   commandSemantics: readJson("command-semantics.json"),
 });
 const clone = (value) => structuredClone(value);
+
+test("focused certification writes a family artifact without replacing full evidence", () => {
+  assert.match(certificationEvidencePath({}), /disposable-certification-result\.json$/);
+  assert.match(
+    certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_FAMILY: "printing-lifecycle" }),
+    /disposable-certification-result\.printing-lifecycle\.json$/
+  );
+  assert.throws(
+    () => certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_FAMILY: "../full" }),
+    /family identifier is invalid/
+  );
+});
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const requireAuthOwnerOrganizationSelect = (policies) => {
   const policy = policies.rows.find(
@@ -218,7 +234,7 @@ test("generated package assigns every artifact to one exact executor phase", () 
     certification: "certification-administrator",
     development: "mscqr_dev_admin",
     staging: "mscqr_staging_admin",
-    production: "unresolved-production-administrator",
+    production: "mscqr_prod_admin",
   }[report.targetEnvironment];
   const manifest = readJson("generated/full-rls-implementation-manifest.json");
   const migrationRole = manifest.roles.migration;
@@ -271,8 +287,13 @@ test("generated package assigns every artifact to one exact executor phase", () 
   ]) assert.doesNotMatch(migrationSql, forbidden, `migration package contains administrative SQL: ${forbidden}`);
 
   const dockerfile = fs.readFileSync(path.join(root, "backend/Dockerfile"), "utf8");
-  assert.doesNotMatch(dockerfile, /scripts\/rls\/sql\/generated|documents\/security\/rls-program\/generated/,
+  const [runtimeImage, executorImage] = dockerfile.split("FROM runtime AS rls-executor");
+  assert.doesNotMatch(runtimeImage, /scripts\/rls\/sql\/generated|documents\/security\/rls-program\/generated/,
     "the blue application image must not contain the green administrative package");
+  assert.match(executorImage, /scripts\/rls\/sql\/generated[\s\S]*documents\/security\/rls-program\/generated/);
+  const publisher = fs.readFileSync(path.join(root, "scripts/aws/publish-ecs-images.sh"), "utf8");
+  assert.match(publisher, /backend\|worker\) printf 'runtime'/);
+  assert.match(publisher, /rls-executor\) printf 'rls-executor'/);
 });
 
 test("reduced surface has no prematurely enabled protected workflow", () => {

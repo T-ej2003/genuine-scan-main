@@ -68,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          required_workflows=(quality-gate.yml secret-scan.yml deployment-audit.yml)
+          required_workflows=(quality-gate.yml secret-scan.yml deployment-audit.yml auth-security-tests.yml release-candidate-gate.yml)
 
           for workflow_file in "${required_workflows[@]}"; do
             echo "Triggering ${workflow_file} for ${TARGET_SHA}"
@@ -84,7 +84,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
           TARGET_EVENTS: push,workflow_dispatch
-          REQUIRED_WORKFLOW_FILES: quality-gate.yml,secret-scan.yml,deployment-audit.yml
+          REQUIRED_WORKFLOW_FILES: quality-gate.yml,secret-scan.yml,deployment-audit.yml,auth-security-tests.yml,release-candidate-gate.yml
           MAX_ATTEMPTS: 90
           POLL_SECONDS: 30
         run: node scripts/github/check-required-workflow-gates.mjs

@@ -140,7 +140,6 @@ test("verification receipt is fresh, complete, staging-only, and bound to the cu
     executorTaskDefinitionArn: `arn:aws:ecs:${C.region}:${C.accountId}:task-definition/mscqr-staging-database-role-admin:2`,
     executorTaskArn: `arn:aws:ecs:${C.region}:${C.accountId}:task/${C.cluster}/fixture`,
     verifiedRoles: Object.values(C.roles),
-    rlsRouteFlags: Object.fromEntries(C.routeFlags.map((name) => [name, "false"])),
     verifiedAt: "2026-07-13T09:30:00Z",
   };
   assert.equal(assertDatabaseRoleVerificationReceipt(receipt, { currentTaskDefinitionArn: receipt.backendTaskDefinitionArn, now }), receipt);

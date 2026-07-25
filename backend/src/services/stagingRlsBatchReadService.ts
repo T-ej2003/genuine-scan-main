@@ -220,7 +220,6 @@ export const listScopedBatchReadPayload = async (params: LoadBatchListPayloadPar
       }
     );
     recordStagingRlsBatchReadProof({
-      flagEnabled: true,
       contextClass,
       durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
       rowCount: payload.rows.length,
@@ -229,7 +228,6 @@ export const listScopedBatchReadPayload = async (params: LoadBatchListPayloadPar
     return payload;
   } catch (error) {
     recordStagingRlsBatchReadProof({
-      flagEnabled: true,
       contextClass,
       durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
       rowCount: 0,

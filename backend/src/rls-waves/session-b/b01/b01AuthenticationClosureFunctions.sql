@@ -1184,7 +1184,10 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
   PERFORM set_config('app.auth_closure_operation','mfa-webauthn-challenge-read',true);
   SELECT jsonb_build_object(
-    'challenge',to_jsonb(c),
+    'challenge',jsonb_build_object(
+      'id',c.id,'userId',c."userId",'challengeHash',c."challengeHash",
+      'origin',c.origin,'rpId',c."rpId"
+    ),
     'factor',(SELECT to_jsonb(x) FROM (
       SELECT f.id,f."credentialId",f."publicKey",f.counter,f.transports
       FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId" AND f.type='WEBAUTHN'

@@ -89,7 +89,7 @@ CREATE OR REPLACE FUNCTION app_public.require_customer_auth_session(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public
 AS $$
-DECLARE session_row public."CustomerAuthSession"%ROWTYPE;
+DECLARE session_row record;
 BEGIN
   IF length(p_capability)<32 OR length(p_capability)>4096
      OR p_checked_at IS NULL
@@ -98,16 +98,18 @@ BEGIN
   END IF;
   PERFORM app_public.public_verify_bind('public-verification-'||p_operation,p_request_id,NULL,NULL,NULL,NULL,NULL);
   PERFORM set_config('app.public_verification_customer_session_hash',encode(sha256(convert_to(p_capability,'UTF8')),'hex'),true);
-  SELECT s.* INTO session_row
+  SELECT s.id,s."customerUserId",s."customerEmail",s."authStrength",s."authProvider",
+    s."expiresAt",s."revokedAt" INTO session_row
   FROM public."CustomerAuthSession" s
   WHERE s."tokenHash"=encode(sha256(convert_to(p_capability,'UTF8')),'hex');
   IF session_row.id IS NULL OR session_row."revokedAt" IS NOT NULL OR session_row."expiresAt"<=p_checked_at THEN
     RAISE EXCEPTION 'PUBLIC_CUSTOMER_SESSION_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.public_verification_target_id',session_row.id,true);
-  UPDATE public."CustomerAuthSession" SET "lastSeenAt"=p_checked_at,"updatedAt"=p_checked_at
-  WHERE id=session_row.id AND "revokedAt" IS NULL AND "expiresAt">p_checked_at
-  RETURNING * INTO session_row;
+  UPDATE public."CustomerAuthSession" AS s SET "lastSeenAt"=p_checked_at,"updatedAt"=p_checked_at
+  WHERE s.id=session_row.id AND s."revokedAt" IS NULL AND s."expiresAt">p_checked_at
+  RETURNING s.id,s."customerUserId",s."customerEmail",s."authStrength",s."authProvider",s."expiresAt",s."revokedAt"
+  INTO session_row;
   IF session_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_CUSTOMER_SESSION_DENIED' USING ERRCODE='42501';
   END IF;
@@ -147,7 +149,7 @@ CREATE OR REPLACE FUNCTION app_public.revoke_customer_auth_session(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public
 AS $$
-DECLARE session_row public."CustomerAuthSession"%ROWTYPE;
+DECLARE session_row record;
 BEGIN
   IF length(p_capability)<32 OR length(p_capability)>4096 OR p_revoked_at IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_CUSTOMER_SESSION_DENIED' USING ERRCODE='42501';
@@ -159,7 +161,7 @@ BEGIN
     'app.public_verification_customer_session_hash',
     encode(sha256(convert_to(p_capability,'UTF8')),'hex'),true
   );
-  SELECT s.* INTO session_row FROM public."CustomerAuthSession" s
+  SELECT s.id INTO session_row FROM public."CustomerAuthSession" s
   WHERE s."tokenHash"=encode(sha256(convert_to(p_capability,'UTF8')),'hex');
   IF session_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_CUSTOMER_SESSION_DENIED' USING ERRCODE='42501';
@@ -202,12 +204,12 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public
 AS $$
 DECLARE
-  qr public."QRCode"%ROWTYPE;
-  batch public."Batch"%ROWTYPE;
-  brand public."Licensee"%ROWTYPE;
-  organization public."Organization"%ROWTYPE;
-  manufacturer public."User"%ROWTYPE;
-  previous_scan public."QrScanLog"%ROWTYPE;
+  qr record;
+  batch record;
+  brand record;
+  organization record;
+  manufacturer record;
+  previous_scan record;
   replacement_status text := 'NONE';
   classification text;
   outcome public."VerificationDecisionOutcome";
@@ -236,6 +238,10 @@ BEGIN
      OR (p_signed_token_digest IS NOT NULL AND p_signed_token_digest !~ '^(?:[A-Za-z0-9._-]{1,32}:)?[a-f0-9]{64}$') THEN
     RAISE EXCEPTION 'PUBLIC_VERIFICATION_INVALID_INPUT' USING ERRCODE='22023';
   END IF;
+  SELECT NULL::text AS id,NULL::text AS "licenseeId",NULL::text AS "manufacturerId",
+    NULL::text AS "lifecycleState",NULL::timestamp AS "printedAt",NULL::timestamp AS "suspendedAt" INTO batch;
+  SELECT NULL::text AS id,NULL::text AS name,NULL::text AS website INTO manufacturer;
+  SELECT NULL::text AS id,NULL::timestamp AS "scannedAt",NULL::text AS "ipAddress",NULL::text AS device INTO previous_scan;
 
   PERFORM app_public.public_verify_bind(
     'public-verification-execute',p_request_id,p_qr_id,NULL,decision_id,NULL,NULL
@@ -245,21 +251,17 @@ BEGIN
   SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."scanCount",q."scannedAt",q."printedAt",
     q."issuanceMode",q."customerVerifiableAt",q."signedFirstSeenAt",q."lastSignedVerificationAt",
     q."lastSignedVerificationIpHash",q."lastSignedVerificationDeviceHash"
-  INTO STRICT qr.id,qr.code,qr."licenseeId",qr."batchId",qr.status,qr."scanCount",
-    qr."scannedAt",qr."printedAt",qr."issuanceMode",qr."customerVerifiableAt",
-    qr."signedFirstSeenAt",qr."lastSignedVerificationAt",
-    qr."lastSignedVerificationIpHash",qr."lastSignedVerificationDeviceHash"
+  INTO STRICT qr
   FROM public."QRCode" q WHERE q.id=p_qr_id FOR UPDATE;
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
   PERFORM set_config('app.public_verification_batch_id',coalesce(qr."batchId",''),true);
   SELECT l.id,l."orgId",l.name,l."brandName",l.website,l."supportEmail",l."supportPhone",
     l."isActive",l."suspendedAt"
-  INTO brand.id,brand."orgId",brand.name,brand."brandName",brand.website,
-    brand."supportEmail",brand."supportPhone",brand."isActive",brand."suspendedAt"
+  INTO brand
   FROM public."Licensee" l WHERE l.id=qr."licenseeId";
   IF brand.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_VERIFICATION_SCOPE_INVALID' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_organization_id',brand."orgId",true);
-  SELECT o.id,o."isActive" INTO organization.id,organization."isActive"
+  SELECT o.id,o."isActive" INTO organization
   FROM public."Organization" o WHERE o.id=brand."orgId";
   IF organization.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_VERIFICATION_SCOPE_INVALID' USING ERRCODE='42501';
@@ -269,20 +271,19 @@ BEGIN
   END IF;
   IF qr."batchId" IS NOT NULL THEN
     SELECT b.id,b."licenseeId",b."manufacturerId",b."lifecycleState",b."printedAt",b."suspendedAt"
-    INTO batch.id,batch."licenseeId",batch."manufacturerId",batch."lifecycleState",
-      batch."printedAt",batch."suspendedAt"
+    INTO batch
     FROM public."Batch" b WHERE b.id=qr."batchId";
     IF batch.id IS NULL OR batch."licenseeId"<>qr."licenseeId" THEN
       RAISE EXCEPTION 'PUBLIC_VERIFICATION_SCOPE_INVALID' USING ERRCODE='42501';
     END IF;
     IF batch.id IS NOT NULL AND batch."manufacturerId" IS NOT NULL THEN
       PERFORM set_config('app.public_verification_manufacturer_id',batch."manufacturerId",true);
-      SELECT u.id,u.name,u.website INTO manufacturer.id,manufacturer.name,manufacturer.website
+      SELECT u.id,u.name,u.website INTO manufacturer
       FROM public."User" u WHERE u.id=batch."manufacturerId";
     END IF;
   END IF;
   SELECT s.id,s."scannedAt",s."ipAddress",s.device
-  INTO previous_scan.id,previous_scan."scannedAt",previous_scan."ipAddress",previous_scan.device
+  INTO previous_scan
   FROM public."QrScanLog" s
   WHERE s."qrCodeId"=qr.id
   ORDER BY s."scannedAt" DESC,s.id DESC LIMIT 1;
@@ -500,7 +501,7 @@ CREATE OR REPLACE FUNCTION app_public.verify_signed_qr(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public
 AS $$
-DECLARE qr public."QRCode"%ROWTYPE; batch public."Batch"%ROWTYPE;
+DECLARE qr record; batch record;
 BEGIN
   IF p_token_digest !~ '^(?:[A-Za-z0-9._-]{1,32}:)?[a-f0-9]{64}$'
      OR length(coalesce(p_nonce,'')) NOT BETWEEN 8 AND 256
@@ -514,8 +515,7 @@ BEGIN
   );
   SELECT q.id,q."licenseeId",q."batchId",q."tokenHash",q."tokenNonce",q."replayEpoch",
     q."tokenIssuedAt",q."tokenExpiresAt"
-  INTO qr.id,qr."licenseeId",qr."batchId",qr."tokenHash",qr."tokenNonce",qr."replayEpoch",
-    qr."tokenIssuedAt",qr."tokenExpiresAt"
+  INTO qr
   FROM public."QRCode" q WHERE q.id=p_qr_id;
   IF qr.id IS NULL OR qr."licenseeId"<>p_licensee_id
      OR qr."batchId" IS DISTINCT FROM p_batch_id
@@ -530,7 +530,7 @@ BEGIN
     RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
   END IF;
   IF qr."batchId" IS NOT NULL THEN
-    SELECT b.id,b."manufacturerId" INTO batch.id,batch."manufacturerId"
+    SELECT b.id,b."manufacturerId" INTO batch
     FROM public."Batch" b WHERE b.id=qr."batchId";
     IF batch."manufacturerId" IS DISTINCT FROM p_manufacturer_id THEN
       RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
@@ -575,8 +575,8 @@ CREATE OR REPLACE FUNCTION app_public.start_verification_session(
 )
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE evidence public."VerificationEvidenceSnapshot"%ROWTYPE;
-  decision public."VerificationDecision"%ROWTYPE;
+DECLARE evidence record;
+  decision record;
   customer record;
   session_id text:=gen_random_uuid()::text;
   expires_at timestamp without time zone:=p_checked_at+interval '24 hours';
@@ -597,7 +597,7 @@ BEGIN
     'public-verification-session-start',p_request_id,NULL,NULL,NULL,session_id,NULL
   );
   SELECT e.id,e."verificationDecisionId",e.metadata
-  INTO evidence.id,evidence."verificationDecisionId",evidence.metadata
+  INTO evidence
   FROM public."VerificationEvidenceSnapshot" e
   WHERE e.metadata#>>'{publicSessionStart,tokenHash}'=p_session_start_token_hash
   ORDER BY e."createdAt" DESC LIMIT 1 FOR UPDATE;
@@ -608,7 +608,7 @@ BEGIN
   END IF;
   PERFORM set_config('app.public_verification_decision_id',evidence."verificationDecisionId",true);
   SELECT d.id,d."qrCodeId",d.code,d."licenseeId"
-  INTO STRICT decision.id,decision."qrCodeId",decision.code,decision."licenseeId"
+  INTO STRICT decision
   FROM public."VerificationDecision" d
   WHERE d.id=evidence."verificationDecisionId";
   IF decision."licenseeId" IS NOT NULL THEN
@@ -651,8 +651,8 @@ CREATE OR REPLACE FUNCTION app_public.read_verification_session(
 )
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE s public."CustomerVerificationSession"%ROWTYPE; d public."VerificationDecision"%ROWTYPE;
-  evidence public."VerificationEvidenceSnapshot"%ROWTYPE; brand_name text;
+DECLARE s record; d record;
+  evidence record; brand_name text;
   customer record;
 BEGIN
   SELECT NULL::text AS "customerUserId",NULL::text AS "customerEmail" INTO customer;
@@ -667,9 +667,7 @@ BEGIN
   SELECT cs.id,cs."verificationDecisionId",cs.code,cs."entryMethod",cs."authState",cs."customerUserId",
     cs."intakeCompletedAt",cs."revealedAt",cs."expiresAt",cs."proofBindingTokenHash",
     cs."proofBindingExpiresAt",cs."createdAt"
-  INTO s.id,s."verificationDecisionId",s.code,s."entryMethod",s."authState",s."customerUserId",
-    s."intakeCompletedAt",s."revealedAt",s."expiresAt",s."proofBindingTokenHash",
-    s."proofBindingExpiresAt",s."createdAt"
+  INTO s
   FROM public."CustomerVerificationSession" cs WHERE cs.id=p_session_id;
   IF s.id IS NULL OR s."expiresAt"<=p_checked_at OR s."proofBindingExpiresAt"<=p_checked_at
      OR s."proofBindingTokenHash" IS DISTINCT FROM p_session_proof_hash
@@ -677,9 +675,9 @@ BEGIN
     RAISE EXCEPTION 'PUBLIC_VERIFICATION_SESSION_INVALID' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.public_verification_decision_id',s."verificationDecisionId",true);
-  SELECT vd.id,vd."licenseeId" INTO STRICT d.id,d."licenseeId"
+  SELECT vd.id,vd."licenseeId" INTO STRICT d
   FROM public."VerificationDecision" vd WHERE vd.id=s."verificationDecisionId";
-  SELECT e.id,e.metadata INTO evidence.id,evidence.metadata
+  SELECT e.id,e.metadata INTO evidence
   FROM public."VerificationEvidenceSnapshot" e
   WHERE e."verificationDecisionId"=d.id ORDER BY e."createdAt" DESC LIMIT 1;
   PERFORM set_config('app.public_verification_licensee_id',coalesce(d."licenseeId",''),true);
@@ -703,7 +701,7 @@ CREATE OR REPLACE FUNCTION app_public.write_verification_session(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE s public."CustomerVerificationSession"%ROWTYPE; intake_id text; customer record;
+DECLARE s record; intake_id text; customer record;
 BEGIN
   IF p_operation NOT IN ('INTAKE','REVEAL') THEN
     RAISE EXCEPTION 'PUBLIC_VERIFICATION_SESSION_INVALID' USING ERRCODE='22023';
@@ -715,7 +713,7 @@ BEGIN
     'public-verification-session-write',p_request_id,NULL,NULL,NULL,p_session_id,NULL
   );
   SELECT cs.id,cs."customerUserId",cs."expiresAt",cs."proofBindingTokenHash",cs."proofBindingExpiresAt"
-  INTO s.id,s."customerUserId",s."expiresAt",s."proofBindingTokenHash",s."proofBindingExpiresAt"
+  INTO s
   FROM public."CustomerVerificationSession" cs WHERE cs.id=p_session_id FOR UPDATE;
   IF s.id IS NULL OR s."expiresAt"<=p_checked_at OR s."proofBindingExpiresAt"<=p_checked_at
      OR s."proofBindingTokenHash"<>p_session_proof_hash
@@ -823,8 +821,8 @@ CREATE OR REPLACE FUNCTION app_public.claim_customer_ownership(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE customer record; session_row public."CustomerVerificationSession"%ROWTYPE;
-  qr public."QRCode"%ROWTYPE; batch_state text; ownership public."Ownership"%ROWTYPE;
+DECLARE customer record; session_row record;
+  qr record; batch_state text; ownership record;
   ownership_id text:=gen_random_uuid()::text; action text; result text;
 BEGIN
   SELECT NULL::text AS "customerUserId",NULL::text AS "customerEmail" INTO customer;
@@ -845,7 +843,7 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-ownership-claim',p_request_id,NULL,NULL,NULL,p_session_id,NULL
   );
-  SELECT s.* INTO session_row FROM public."CustomerVerificationSession" s
+  SELECT s.id,s."customerUserId",s."qrCodeId" INTO session_row FROM public."CustomerVerificationSession" s
   WHERE s.id=p_session_id AND s."proofBindingTokenHash"=p_session_proof_hash
     AND s."proofBindingExpiresAt">p_checked_at AND s."expiresAt">p_checked_at;
   IF session_row.id IS NULL OR
@@ -855,7 +853,7 @@ BEGIN
   END IF;
   PERFORM set_config('app.public_verification_qr_id',session_row."qrCodeId",true);
   SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."issuanceMode",q."customerVerifiableAt"
-  INTO qr.id,qr.code,qr."licenseeId",qr."batchId",qr.status,qr."issuanceMode",qr."customerVerifiableAt"
+  INTO qr
   FROM public."QRCode" q WHERE q.id=session_row."qrCodeId";
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_TARGET_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
@@ -868,7 +866,8 @@ BEGIN
      OR (qr."issuanceMode"='GOVERNED_PRINT' AND qr."customerVerifiableAt" IS NULL) THEN
     RAISE EXCEPTION 'PUBLIC_OWNERSHIP_NOT_READY' USING ERRCODE='55000';
   END IF;
-  SELECT o.* INTO ownership FROM public."Ownership" o WHERE o."qrCodeId"=qr.id FOR UPDATE;
+  SELECT o.id,o."userId",o."deviceTokenHash",o."claimedAt" INTO ownership
+    FROM public."Ownership" o WHERE o."qrCodeId"=qr.id FOR UPDATE;
   IF ownership.id IS NULL THEN
     IF p_link_only THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_NOT_FOUND' USING ERRCODE='42501'; END IF;
     PERFORM set_config('app.public_verification_target_id',ownership_id,true);
@@ -878,7 +877,7 @@ BEGIN
       ownership_id,qr.id,customer."customerUserId",p_device_token_hash,p_ip_hash,p_user_agent_hash,
       CASE WHEN customer."customerUserId" IS NULL THEN 'DEVICE' ELSE 'USER' END,
       CASE WHEN customer."customerUserId" IS NULL THEN NULL ELSE p_checked_at END,p_checked_at
-    ) RETURNING * INTO ownership;
+    ) RETURNING id,"userId","deviceTokenHash","claimedAt" INTO ownership;
     result:=CASE WHEN customer."customerUserId" IS NULL THEN 'CLAIMED_DEVICE' ELSE 'CLAIMED_USER' END;
     action:='VERIFY_CLAIM_SUCCESS';
   ELSIF ownership."userId"=customer."customerUserId"
@@ -886,7 +885,8 @@ BEGIN
     PERFORM set_config('app.public_verification_target_id',ownership.id,true);
     IF customer."customerUserId" IS NOT NULL AND ownership."userId" IS NULL THEN
       UPDATE public."Ownership" SET "userId"=customer."customerUserId","linkedAt"=p_checked_at,
-        "claimSource"='DEVICE_AND_USER' WHERE id=ownership.id RETURNING * INTO ownership;
+        "claimSource"='DEVICE_AND_USER' WHERE id=ownership.id
+      RETURNING id,"userId","deviceTokenHash","claimedAt" INTO ownership;
       result:='LINKED_TO_SIGNED_IN_ACCOUNT'; action:='VERIFY_CLAIM_LINKED_TO_USER';
     ELSE
       result:='ALREADY_OWNED_BY_YOU'; action:='VERIFY_CLAIM_IDEMPOTENT';
@@ -921,7 +921,7 @@ CREATE OR REPLACE FUNCTION app_public.create_customer_ownership_transfer(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE customer record; qr public."QRCode"%ROWTYPE; ownership public."Ownership"%ROWTYPE;
+DECLARE customer record; qr record; ownership record;
   transfer_id text:=gen_random_uuid()::text;
 BEGIN
   SELECT * INTO customer FROM app_public.require_customer_auth_session(
@@ -935,12 +935,12 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-ownership-transfer-create',p_request_id,NULL,p_requested_code,NULL,NULL,NULL
   );
-  SELECT q.id,q.code,q."licenseeId" INTO qr.id,qr.code,qr."licenseeId"
+  SELECT q.id,q.code,q."licenseeId" INTO qr
   FROM public."QRCode" q WHERE q.code=p_requested_code;
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_TARGET_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_qr_id',qr.id,true);
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
-  SELECT o.* INTO ownership FROM public."Ownership" o
+  SELECT o.id INTO ownership FROM public."Ownership" o
   WHERE o."qrCodeId"=qr.id AND o."userId"=customer."customerUserId" FOR UPDATE;
   IF ownership.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_target_id',ownership.id,true);
@@ -975,8 +975,8 @@ CREATE OR REPLACE FUNCTION app_public.cancel_customer_ownership_transfer(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE customer record; qr public."QRCode"%ROWTYPE; changed integer;
-  transfer public."OwnershipTransfer"%ROWTYPE;
+DECLARE customer record; qr record; changed integer;
+  transfer record;
 BEGIN
   SELECT * INTO customer FROM app_public.require_customer_auth_session(
     p_customer_capability,p_checked_at,p_request_id,'customer-ownership'
@@ -984,12 +984,12 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-ownership-transfer-cancel',p_request_id,NULL,p_requested_code,NULL,NULL,NULL
   );
-  SELECT q.id,q.code,q."licenseeId" INTO qr.id,qr.code,qr."licenseeId"
+  SELECT q.id,q.code,q."licenseeId" INTO qr
   FROM public."QRCode" q WHERE q.code=p_requested_code;
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_TARGET_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_qr_id',qr.id,true);
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
-  SELECT t.* INTO transfer FROM public."OwnershipTransfer" t
+  SELECT t.id,t."initiatedByEmail",t."recipientEmail" INTO transfer FROM public."OwnershipTransfer" t
   WHERE t."qrCodeId"=qr.id AND t."initiatedByCustomerId"=customer."customerUserId"
     AND t.status='PENDING' AND (p_transfer_id IS NULL OR t.id=p_transfer_id)
   ORDER BY t."createdAt" DESC,t.id DESC LIMIT 1 FOR UPDATE;
@@ -1017,8 +1017,8 @@ CREATE OR REPLACE FUNCTION app_public.accept_customer_ownership_transfer(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE customer record; transfer public."OwnershipTransfer"%ROWTYPE; qr public."QRCode"%ROWTYPE;
-  ownership public."Ownership"%ROWTYPE;
+DECLARE customer record; transfer record; qr record;
+  ownership record;
 BEGIN
   SELECT * INTO customer FROM app_public.require_customer_auth_session(
     p_customer_capability,p_checked_at,p_request_id,'customer-ownership'
@@ -1030,7 +1030,8 @@ BEGIN
     'public-verification-ownership-transfer-accept',p_request_id,NULL,NULL,NULL,NULL,NULL
   );
   PERFORM set_config('app.public_verification_transfer_token_hash',p_token_hash,true);
-  SELECT t.* INTO transfer FROM public."OwnershipTransfer" t
+  SELECT t.id,t.status,t."expiresAt",t."initiatedByCustomerId",t."recipientEmail",
+    t."qrCodeId",t."ownershipId",t."initiatedByEmail" INTO transfer FROM public."OwnershipTransfer" t
   WHERE t."tokenHash"=p_token_hash FOR UPDATE;
   IF transfer.id IS NULL OR transfer.status<>'PENDING' OR transfer."expiresAt"<=p_checked_at
      OR transfer."initiatedByCustomerId"=customer."customerUserId"
@@ -1040,11 +1041,11 @@ BEGIN
   END IF;
   PERFORM set_config('app.public_verification_qr_id',transfer."qrCodeId",true);
   PERFORM set_config('app.public_verification_support_id',transfer.id,true);
-  SELECT q.id,q.code,q."licenseeId" INTO STRICT qr.id,qr.code,qr."licenseeId"
+  SELECT q.id,q.code,q."licenseeId" INTO STRICT qr
   FROM public."QRCode" q WHERE q.id=transfer."qrCodeId";
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
   PERFORM set_config('app.public_verification_target_id',transfer."ownershipId",true);
-  SELECT o.* INTO STRICT ownership FROM public."Ownership" o
+  SELECT o.id INTO STRICT ownership FROM public."Ownership" o
   WHERE o.id=transfer."ownershipId" AND o."qrCodeId"=qr.id FOR UPDATE;
   UPDATE public."OwnershipTransfer" SET status='ACCEPTED',"acceptedAt"=p_checked_at,
     "lastViewedAt"=p_checked_at,"updatedAt"=p_checked_at WHERE id=transfer.id;
@@ -1124,8 +1125,8 @@ CREATE OR REPLACE FUNCTION app_public.load_customer_passkey(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE challenge public."CustomerWebAuthnChallenge"%ROWTYPE;
-  credential public."CustomerWebAuthnCredential"%ROWTYPE;
+DECLARE challenge record;
+  credential record;
 BEGIN
   IF coalesce(array_length(p_ticket_hashes,1),0)<1 OR array_length(p_ticket_hashes,1)>4
      OR EXISTS (SELECT 1 FROM unnest(p_ticket_hashes) h
@@ -1135,7 +1136,9 @@ BEGIN
   END IF;
   PERFORM app_public.public_verify_bind('public-verification-customer-passkey',p_request_id);
   PERFORM set_config('app.public_verification_passkey_ticket_hashes',array_to_string(p_ticket_hashes,','),true);
-  SELECT c.* INTO challenge FROM public."CustomerWebAuthnChallenge" c
+  SELECT c.id,c."customerUserId",c."customerEmail",c.purpose,c."challengeHash",
+    c."credentialIds",c."expiresAt",c.origin,c."rpId" INTO challenge
+    FROM public."CustomerWebAuthnChallenge" c
   WHERE c."ticketHash"=ANY(p_ticket_hashes)
     AND (p_purpose IS NULL OR c.purpose=p_purpose)
     AND c."consumedAt" IS NULL AND c."expiresAt">p_checked_at
@@ -1144,7 +1147,8 @@ BEGIN
   PERFORM set_config('app.public_verification_target_id',challenge.id,true);
   IF p_credential_id IS NOT NULL THEN
     PERFORM set_config('app.public_verification_support_id',p_credential_id,true);
-    SELECT c.* INTO credential FROM public."CustomerWebAuthnCredential" c
+    SELECT c.id,c."customerUserId",c."customerEmail",c."credentialId",c."publicKeySpki",c.counter
+      INTO credential FROM public."CustomerWebAuthnCredential" c
     WHERE c."customerUserId"=challenge."customerUserId" AND c."credentialId"=p_credential_id;
     IF credential.id IS NULL OR NOT p_credential_id=ANY(challenge."credentialIds") THEN
       RAISE EXCEPTION 'WEBAUTHN_CREDENTIAL_NOT_FOUND' USING ERRCODE='02000';
@@ -1170,8 +1174,8 @@ CREATE OR REPLACE FUNCTION app_public.finish_customer_passkey(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE challenge public."CustomerWebAuthnChallenge"%ROWTYPE;
-  credential public."CustomerWebAuthnCredential"%ROWTYPE; customer record;
+DECLARE challenge record;
+  credential record; customer record;
   credential_id text:=p_payload->>'credentialId'; next_counter integer;
 BEGIN
   IF p_purpose NOT IN ('ENROLLMENT','LOGIN','STEP_UP')
@@ -1189,7 +1193,8 @@ BEGIN
     PERFORM app_public.public_verify_bind('public-verification-customer-passkey',p_request_id);
   END IF;
   PERFORM set_config('app.public_verification_passkey_ticket_hashes',array_to_string(p_ticket_hashes,','),true);
-  SELECT c.* INTO challenge FROM public."CustomerWebAuthnChallenge" c
+  SELECT c.id,c."customerUserId",c."customerEmail",c.purpose,c."credentialIds",c."expiresAt"
+    INTO challenge FROM public."CustomerWebAuthnChallenge" c
   WHERE c."ticketHash"=ANY(p_ticket_hashes) AND c.purpose=p_purpose
     AND c."consumedAt" IS NULL AND c."expiresAt">p_checked_at
   ORDER BY c."createdAt" DESC LIMIT 1;
@@ -1198,7 +1203,7 @@ BEGIN
   UPDATE public."CustomerWebAuthnChallenge"
   SET "consumedAt"=p_checked_at
   WHERE id=challenge.id AND "consumedAt" IS NULL AND "expiresAt">p_checked_at
-  RETURNING * INTO challenge;
+  RETURNING id,"customerUserId","customerEmail",purpose,"credentialIds","expiresAt" INTO challenge;
   IF challenge.id IS NULL THEN RAISE EXCEPTION 'WEBAUTHN_CHALLENGE_NOT_FOUND' USING ERRCODE='02000'; END IF;
   PERFORM set_config('app.public_verification_customer_user_id',challenge."customerUserId",true);
   IF p_purpose IN ('ENROLLMENT','STEP_UP')
@@ -1212,7 +1217,8 @@ BEGIN
       RAISE EXCEPTION 'PUBLIC_PASSKEY_INVALID' USING ERRCODE='22023';
     END IF;
     PERFORM set_config('app.public_verification_support_id',credential_id,true);
-    SELECT c.* INTO credential FROM public."CustomerWebAuthnCredential" c
+    SELECT c.id,c."customerUserId",c."credentialId",c.counter INTO credential
+      FROM public."CustomerWebAuthnCredential" c
     WHERE c."credentialId"=credential_id;
     IF credential.id IS NOT NULL AND credential."customerUserId"<>challenge."customerUserId" THEN
       RAISE EXCEPTION 'PUBLIC_PASSKEY_DENIED' USING ERRCODE='42501';
@@ -1229,7 +1235,7 @@ BEGIN
         (p_payload->>'counter')::integer,
         ARRAY(SELECT jsonb_array_elements_text(coalesce(p_payload->'transports','[]'::jsonb))),
         p_checked_at,p_checked_at,p_checked_at
-      ) RETURNING * INTO credential;
+      ) RETURNING id,"customerUserId","credentialId",counter INTO credential;
     ELSE
       PERFORM set_config('app.public_verification_support_id',credential.id,true);
       UPDATE public."CustomerWebAuthnCredential" SET
@@ -1239,17 +1245,19 @@ BEGIN
         counter=(p_payload->>'counter')::integer,
         transports=ARRAY(SELECT jsonb_array_elements_text(coalesce(p_payload->'transports','[]'::jsonb))),
         "lastUsedAt"=p_checked_at,"updatedAt"=p_checked_at
-      WHERE id=credential.id RETURNING * INTO credential;
+      WHERE id=credential.id RETURNING id,"customerUserId","credentialId",counter INTO credential;
     END IF;
   ELSE
     PERFORM set_config('app.public_verification_support_id',credential_id,true);
-    SELECT c.* INTO credential FROM public."CustomerWebAuthnCredential" c
+    SELECT c.id,c."customerUserId",c."credentialId",c.counter INTO credential
+      FROM public."CustomerWebAuthnCredential" c
     WHERE c."customerUserId"=challenge."customerUserId" AND c."credentialId"=credential_id;
     IF credential.id IS NULL OR NOT credential_id=ANY(challenge."credentialIds") THEN
       RAISE EXCEPTION 'WEBAUTHN_CREDENTIAL_NOT_FOUND' USING ERRCODE='02000';
     END IF;
     PERFORM set_config('app.public_verification_support_id',credential.id,true);
-    SELECT c.* INTO credential FROM public."CustomerWebAuthnCredential" c
+    SELECT c.id,c."customerUserId",c."credentialId",c.counter INTO credential
+      FROM public."CustomerWebAuthnCredential" c
     WHERE c.id=credential.id FOR UPDATE;
     next_counter:=(p_payload->>'nextCounter')::integer;
     IF next_counter<credential.counter OR (next_counter>0 AND credential.counter>0 AND next_counter<=credential.counter) THEN
@@ -1314,7 +1322,7 @@ CREATE OR REPLACE FUNCTION app_public.submit_product_feedback(
 ) RETURNS TABLE("accepted" boolean,"publicReference" text,"message" text)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE qr public."QRCode"%ROWTYPE; key_row public."ActionIdempotencyKey"%ROWTYPE;
+DECLARE qr record; key_row record;
   reference text:='FB-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,12)); audit_id text;
 BEGIN
   IF p_rating<1 OR p_rating>5 OR p_satisfaction NOT IN
@@ -1325,10 +1333,10 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-feedback',p_request_id,NULL,p_requested_code,NULL,NULL,p_idempotency_digest
   );
-  SELECT q.id,q."licenseeId" INTO qr.id,qr."licenseeId"
+  SELECT q.id,q."licenseeId" INTO qr
   FROM public."QRCode" q WHERE q.code=p_requested_code;
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_FEEDBACK_TARGET_INVALID' USING ERRCODE='42501'; END IF;
-  SELECT k.id,k."responsePayload" INTO key_row.id,key_row."responsePayload"
+  SELECT k.id,k."responsePayload" INTO key_row
   FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=p_idempotency_digest;
   IF key_row.id IS NOT NULL THEN
     RETURN QUERY SELECT true,coalesce(key_row."responsePayload"->>'reference',reference),
@@ -1363,8 +1371,8 @@ CREATE OR REPLACE FUNCTION app_public.submit_public_incident(
 ) RETURNS TABLE("accepted" boolean,"publicReference" text,"message" text)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE qr public."QRCode"%ROWTYPE; session_row public."CustomerVerificationSession"%ROWTYPE;
-  key_row public."ActionIdempotencyKey"%ROWTYPE;
+DECLARE qr record; session_row record;
+  key_row record;
   incident_id text:=gen_random_uuid()::text; ticket_id text:=gen_random_uuid()::text;
   outbox_id text:=gen_random_uuid()::text;
   reference text:='INC-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,12));
@@ -1381,21 +1389,21 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-incident',p_request_id,NULL,NULL,NULL,p_session_id,p_idempotency_digest
   );
-  SELECT s.* INTO session_row FROM public."CustomerVerificationSession" s
+  SELECT s.id,s."qrCodeId" INTO session_row FROM public."CustomerVerificationSession" s
   WHERE s.id=p_session_id AND s."proofBindingTokenHash"=p_session_proof_hash
     AND s."proofBindingExpiresAt">p_submitted_at AND s."expiresAt">p_submitted_at;
   IF session_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_INCIDENT_SESSION_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.public_verification_qr_id',session_row."qrCodeId",true);
-  SELECT q.id,q.code,q."licenseeId" INTO qr.id,qr.code,qr."licenseeId"
+  SELECT q.id,q.code,q."licenseeId" INTO qr
   FROM public."QRCode" q WHERE q.id=session_row."qrCodeId";
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_INCIDENT_TARGET_INVALID' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_qr_id',qr.id,true);
   PERFORM set_config('app.public_verification_target_id',incident_id,true);
   PERFORM set_config('app.public_verification_support_id',ticket_id,true);
   PERFORM set_config('app.public_verification_outbox_id',outbox_id,true);
-  SELECT k.id,k."responsePayload" INTO key_row.id,key_row."responsePayload"
+  SELECT k.id,k."responsePayload" INTO key_row
   FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=p_idempotency_digest;
   IF key_row.id IS NOT NULL THEN
     RETURN QUERY SELECT true,key_row."responsePayload"->>'reference','Concern submitted successfully.'; RETURN;
@@ -1480,7 +1488,7 @@ CREATE OR REPLACE FUNCTION app_public.submit_request_access(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
 DECLARE
-  existing public."ActionIdempotencyKey"%ROWTYPE;
+  existing record;
   row_id text:=gen_random_uuid()::text;
   reference text:='RA-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,12));
 BEGIN
@@ -1497,7 +1505,7 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-request-access',p_request_id,NULL,NULL,NULL,NULL,p_idempotency_digest
   );
-  SELECT k.id,k."responsePayload" INTO existing.id,existing."responsePayload"
+  SELECT k.id,k."responsePayload" INTO existing
   FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=p_idempotency_digest;
   IF existing.id IS NOT NULL THEN
     RETURN QUERY SELECT true,existing."responsePayload"->>'reference',
@@ -1537,8 +1545,8 @@ CREATE OR REPLACE FUNCTION app_public.submit_public_support(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
 DECLARE
-  existing public."ActionIdempotencyKey"%ROWTYPE;
-  qr public."QRCode"%ROWTYPE;
+  existing record;
+  qr record;
   row_id text:=gen_random_uuid()::text;
   reference text:='SUP-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,12));
 BEGIN
@@ -1555,12 +1563,12 @@ BEGIN
     'public-verification-support',p_request_id,NULL,p_verified_code,NULL,NULL,p_idempotency_digest
   );
   IF p_verified_code IS NOT NULL THEN
-    SELECT q.id,q.code,q."licenseeId" INTO qr.id,qr.code,qr."licenseeId"
+    SELECT q.id,q.code,q."licenseeId" INTO qr
     FROM public."QRCode" q WHERE q.code=p_verified_code;
     IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_SUPPORT_TARGET_INVALID' USING ERRCODE='42501'; END IF;
     PERFORM set_config('app.public_verification_qr_id',qr.id,true);
   END IF;
-  SELECT k.id,k."responsePayload" INTO existing.id,existing."responsePayload"
+  SELECT k.id,k."responsePayload" INTO existing
   FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=p_idempotency_digest;
   IF existing.id IS NOT NULL THEN
     RETURN QUERY SELECT true,existing."responsePayload"->>'reference',
@@ -1603,7 +1611,7 @@ CREATE OR REPLACE FUNCTION app_public.complete_request_access_delivery(
 ) RETURNS TABLE("updated" boolean)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE key_row public."ActionIdempotencyKey"%ROWTYPE;
+DECLARE key_row record;
 BEGIN
   IF p_idempotency_digest !~ '^(?:[A-Za-z0-9._-]{1,32}:)?[a-f0-9]{64}$'
      OR p_admin_status NOT IN ('SENT','DRY_RUN','DISABLED','FAILED','SKIPPED')
@@ -1615,7 +1623,7 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-request-access-delivery',p_request_id,NULL,NULL,NULL,NULL,p_idempotency_digest
   );
-  SELECT k.* INTO key_row FROM public."ActionIdempotencyKey" k
+  SELECT k.id,k.scope INTO key_row FROM public."ActionIdempotencyKey" k
   WHERE k."keyHash"=p_idempotency_digest AND k.action='PUBLIC_REQUEST_ACCESS';
   IF key_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_REQUEST_ACCESS_DELIVERY_DENIED' USING ERRCODE='42501';
@@ -1641,7 +1649,7 @@ CREATE OR REPLACE FUNCTION app_public.complete_public_support_delivery(
 ) RETURNS TABLE("updated" boolean)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE key_row public."ActionIdempotencyKey"%ROWTYPE;
+DECLARE key_row record;
 BEGIN
   IF p_idempotency_digest !~ '^(?:[A-Za-z0-9._-]{1,32}:)?[a-f0-9]{64}$'
      OR p_admin_status NOT IN ('SENT','DRY_RUN','DISABLED','FAILED','SKIPPED')
@@ -1653,7 +1661,7 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-support-delivery',p_request_id,NULL,NULL,NULL,NULL,p_idempotency_digest
   );
-  SELECT k.* INTO key_row FROM public."ActionIdempotencyKey" k
+  SELECT k.id,k.scope INTO key_row FROM public."ActionIdempotencyKey" k
   WHERE k."keyHash"=p_idempotency_digest AND k.action='PUBLIC_SUPPORT';
   IF key_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_SUPPORT_DELIVERY_DENIED' USING ERRCODE='42501';

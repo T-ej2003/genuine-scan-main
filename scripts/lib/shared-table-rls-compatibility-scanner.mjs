@@ -64,7 +64,7 @@ const hasRlsContextAncestor = (ts, node) => {
   for (let current = node.parent; current; current = current.parent) {
     if (!ts.isCallExpression(current)) continue;
     const name = propertyName(ts, current.expression) || current.expression.getText();
-    if (["withRlsPrototypeTransaction", "withStagingRlsBatchReadContext"].includes(name)) return true;
+    if (name === "withRlsPrototypeTransaction") return true;
   }
   return false;
 };

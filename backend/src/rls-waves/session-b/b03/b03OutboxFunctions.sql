@@ -65,7 +65,10 @@ BEGIN
   ), claimed AS (
     UPDATE public."AuditLogOutbox" o SET attempts=o.attempts+1,"claimedAt"=p_attempted_at,
       "claimLeaseExpiresAt"=p_attempted_at+interval '5 minutes',"updatedAt"=transaction_timestamp()
-    FROM candidates c WHERE o.id=c.id RETURNING o.*
+    FROM candidates c WHERE o.id=c.id
+    RETURNING o.id,o."jobType",o."requestId",o."payloadDigest",o."idempotencyKey",
+      o."organizationId",o."licenseeId",o."manufacturerId",o."initiatingUserId",
+      o."expiresAt",o.attempts
   ) SELECT c.id,c."jobType",c."requestId",c."payloadDigest",c."idempotencyKey",c."organizationId",c."licenseeId",c."manufacturerId",c."initiatingUserId",c."expiresAt",c.attempts FROM claimed c;
 END
 $fn$;
@@ -77,7 +80,10 @@ DECLARE o record; v_audit_id text; v_security_id text; v_security_payload jsonb;
 BEGIN
   PERFORM app_rls.b03_bind_outbox_operation('audit-consume',p_job_id,p_payload_digest);
   IF session_user<>{{WORKER_ROLE}} THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
-  SELECT q.* INTO o FROM public."AuditLogOutbox" q WHERE q.id=p_job_id AND q."payloadDigest"=p_payload_digest FOR UPDATE;
+  SELECT q.id,q.payload,q."requestId",q."organizationId",q."licenseeId",q."manufacturerId",
+    q."initiatingUserId",q."expiresAt",q."claimLeaseExpiresAt",q.status,q."flushedAuditLogId"
+    INTO o FROM public."AuditLogOutbox" q
+    WHERE q.id=p_job_id AND q."payloadDigest"=p_payload_digest FOR UPDATE;
   IF NOT FOUND OR o."expiresAt"<=p_attempted_at OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   IF o.status='SENT' THEN RETURN QUERY SELECT o."flushedAuditLogId",true; RETURN; END IF;
@@ -154,7 +160,25 @@ BEGIN
   IF session_user<>{{WORKER_ROLE}} OR p_job_type NOT IN ('AUDIT_LOG','CSP_VIOLATION') OR p_batch_size NOT BETWEEN 1 AND 200
      OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
-  RETURN QUERY WITH candidates AS (SELECT o.id FROM public."SecurityEventOutbox" o WHERE o."jobType"=p_job_type AND o.status IN ('QUEUED','FAILED') AND o."nextAttemptAt"<=p_attempted_at AND o."expiresAt">p_attempted_at AND o.attempts<10 AND (o."claimLeaseExpiresAt" IS NULL OR o."claimLeaseExpiresAt"<=p_attempted_at) ORDER BY o."createdAt",o.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size), claimed AS (UPDATE public."SecurityEventOutbox" o SET attempts=o.attempts+1,"claimedAt"=p_attempted_at,"claimLeaseExpiresAt"=p_attempted_at+interval '5 minutes',"updatedAt"=transaction_timestamp() FROM candidates c WHERE o.id=c.id RETURNING o.*) SELECT c.id,c."jobType",c."requestId",c."payloadDigest",c."idempotencyKey",c."organizationId",c."licenseeId",c."manufacturerId",c."initiatingUserId",c."expiresAt",c.attempts,c."eventType",c.payload,c."createdAt" FROM claimed c;
+  RETURN QUERY WITH candidates AS (
+    SELECT o.id FROM public."SecurityEventOutbox" o
+    WHERE o."jobType"=p_job_type AND o.status IN ('QUEUED','FAILED')
+      AND o."nextAttemptAt"<=p_attempted_at AND o."expiresAt">p_attempted_at
+      AND o.attempts<10 AND (o."claimLeaseExpiresAt" IS NULL OR o."claimLeaseExpiresAt"<=p_attempted_at)
+    ORDER BY o."createdAt",o.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size
+  ), claimed AS (
+    UPDATE public."SecurityEventOutbox" o
+    SET attempts=o.attempts+1,"claimedAt"=p_attempted_at,
+      "claimLeaseExpiresAt"=p_attempted_at+interval '5 minutes',"updatedAt"=transaction_timestamp()
+    FROM candidates c WHERE o.id=c.id
+    RETURNING o.id,o."jobType",o."requestId",o."payloadDigest",o."idempotencyKey",
+      o."organizationId",o."licenseeId",o."manufacturerId",o."initiatingUserId",
+      o."expiresAt",o.attempts,o."eventType",o.payload,o."createdAt"
+  )
+  SELECT c.id,c."jobType",c."requestId",c."payloadDigest",c."idempotencyKey",
+    c."organizationId",c."licenseeId",c."manufacturerId",c."initiatingUserId",
+    c."expiresAt",c.attempts,c."eventType",c.payload,c."createdAt"
+  FROM claimed c;
 END
 $fn$;
 
@@ -166,7 +190,9 @@ BEGIN
   IF session_user<>{{WORKER_ROLE}} OR length(p_sink_event_id) NOT BETWEEN 1 AND 191
      OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
-  SELECT q.* INTO o FROM public."SecurityEventOutbox" q WHERE q.id=p_job_id AND q."payloadDigest"=p_payload_digest FOR UPDATE;
+  SELECT q.id,q.status,q."sinkEventId",q."claimLeaseExpiresAt"
+    INTO o FROM public."SecurityEventOutbox" q
+    WHERE q.id=p_job_id AND q."payloadDigest"=p_payload_digest FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   IF o.status='SENT' THEN
     IF o."sinkEventId" IS DISTINCT FROM p_sink_event_id THEN RAISE EXCEPTION 'B03_OUTBOX_REPLAY_MISMATCH' USING ERRCODE='23505'; END IF;

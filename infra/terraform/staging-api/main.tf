@@ -33,12 +33,9 @@ locals {
     { name = "RUN_BACKGROUND_WORKERS", value = "false" },
     { name = "OBJECT_STORAGE_REGION", value = var.aws_region },
     { name = "OBJECT_STORAGE_BUCKET", value = local.artifacts_bucket },
-    { name = "MSCQR_STAGING_RLS_BATCHES_READ_ENABLED", value = "false" },
-    { name = "MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED", value = "false" },
-    { name = "MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED", value = "false" },
   ]
 
-  backend_secrets = {
+  backend_secrets = merge({
     DATABASE_URL                    = var.staging_secret_arns.database_url
     REDIS_URL                       = var.staging_secret_arns.redis_url
     JWT_SECRET_CURRENT              = var.staging_secret_arns.jwt_secret_current
@@ -52,11 +49,31 @@ locals {
     CUSTOMER_VERIFY_TOKEN_SECRET    = var.staging_secret_arns.customer_verify_token_secret
     INCIDENT_HASH_SALT_CURRENT      = var.staging_secret_arns.incident_hash_salt_current
     AUTH_MFA_ENCRYPTION_KEY         = var.staging_secret_arns.auth_mfa_encryption_key
-  }
+  }, local.full_rls_green_backend_secrets)
 
   app_database_secret_arn_pattern        = "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/staging/database-url/app-*"
   database_role_executor_contract_sha256 = filesha256("${path.module}/../../../documents/security/rls-program/staging-full-rls-executor-contract.json")
   database_role_broker_source_sha256     = filesha256("${path.module}/lambda/database-role-executor-broker/index.mjs")
+  full_rls_green_modes = {
+    full-rls-capability-preflight = null
+    full-rls-role-provision       = "MSCQR_STAGING_GREEN_PROVISION_RUNTIME_ROLES"
+    full-rls-role-verify          = null
+    full-rls-admin-bootstrap      = "MSCQR_STAGING_GREEN_CREATE_AND_BOOTSTRAP_DATABASE"
+    full-rls-admin-ownership      = "MSCQR_STAGING_GREEN_INSTALL_OWNERSHIP_GRANTS"
+    full-rls-runtime-policy       = "MSCQR_STAGING_GREEN_INSTALL_RUNTIME_POLICIES"
+    full-rls-verification         = null
+    full-rls-rollback             = "MSCQR_STAGING_GREEN_ROLLBACK_EXACT_PACKAGE"
+  }
+  full_rls_green_runtime_secrets = {
+    for key in ["app", "read", "preauth", "worker", "scheduled", "operator", "migration"] :
+    key => "mscqr/staging/rls-green/phase2/database-url/${key}"
+  }
+  full_rls_green_backend_secrets = var.activate_full_rls_green_runtime ? {
+    DATABASE_URL                   = aws_secretsmanager_secret.full_rls_green_runtime["app"].arn
+    AUTHENTICATED_APP_DATABASE_URL = aws_secretsmanager_secret.full_rls_green_runtime["app"].arn
+    PREAUTH_DATABASE_URL           = aws_secretsmanager_secret.full_rls_green_runtime["preauth"].arn
+    MSCQR_C03_PREAUTH_DATABASE_URL = aws_secretsmanager_secret.full_rls_green_runtime["preauth"].arn
+  } : {}
 }
 
 check "staging_name_guard" {
@@ -175,9 +192,12 @@ resource "aws_iam_role_policy" "ecs_execution_staging_secrets" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = concat(values(local.backend_secrets), [local.app_database_secret_arn_pattern])
+        Effect = "Allow"
+        Action = ["secretsmanager:GetSecretValue"]
+        Resource = concat(
+          values(local.backend_secrets),
+          [local.app_database_secret_arn_pattern, var.staging_secret_arns.rls_green_admin_database_url]
+        )
       }
     ]
   })
@@ -211,6 +231,21 @@ resource "aws_iam_role" "database_role_admin_task" {
       Action    = "sts:AssumeRole"
     }]
   })
+}
+
+resource "aws_iam_role" "full_rls_green_executor_task" {
+  name = "mscqr-staging-full-rls-green-executor-task"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = merge(local.common_tags, { Component = "full-rls-green-executor" })
 }
 
 resource "aws_iam_role" "database_role_cutover" {
@@ -424,7 +459,6 @@ resource "aws_iam_role_policy" "database_role_admin_task_secrets" {
         for role, secret_name in {
           app      = "mscqr/staging/database-url/app"
           migrator = "mscqr/staging/database-url/migrator"
-          rls-read = "mscqr/staging/database-url/rls-read"
           } : {
           Sid      = "Create${replace(title(role), "-", "")}DatabaseRoleSecret"
           Effect   = "Allow"
@@ -456,13 +490,52 @@ resource "aws_iam_role_policy" "database_role_admin_task_secrets" {
         Resource = [
           "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/staging/database-url/app-*",
           "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/staging/database-url/migrator-*",
-          "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/staging/database-url/rls-read-*",
         ]
         Condition = {
           StringEquals = { "aws:RequestedRegion" = var.aws_region }
         }
       }]
     )
+  })
+}
+
+resource "aws_secretsmanager_secret" "full_rls_green_runtime" {
+  for_each                = local.full_rls_green_runtime_secrets
+  name                    = each.value
+  description             = "MSCQR staging full-RLS green ${each.key} database URL"
+  recovery_window_in_days = 30
+  tags = merge(local.common_tags, {
+    Component = "full-rls-green-runtime"
+    Role      = each.key
+  })
+}
+
+resource "aws_iam_role_policy" "full_rls_green_executor" {
+  name = "mscqr-staging-full-rls-green-executor"
+  role = aws_iam_role.full_rls_green_executor_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ReadOnlyGreenAdministratorCredential"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
+        Resource = var.staging_secret_arns.rls_green_admin_database_url
+      },
+      {
+        Sid      = "ProvisionOnlyExactGreenRuntimeCredentials"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"]
+        Resource = [for secret in aws_secretsmanager_secret.full_rls_green_runtime : secret.arn]
+      },
+      {
+        Sid      = "AppendOnlyGreenReceipts"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.artifacts.arn}/rls-receipts/*"
+      }
+    ]
   })
 }
 
@@ -787,16 +860,11 @@ resource "aws_ecs_task_definition" "database_role_admin" {
   }
 
   container_definitions = jsonencode([{
-    name      = "db-admin"
-    image     = var.backend_image_uri
-    essential = true
-    command   = ["node", "scripts/staging-database-role-vpc-executor.mjs"]
-    environment = concat(
-      [
-        { name = "MSCQR_VPC_EXECUTOR_MODE", value = "probe" },
-      ],
-      [for entry in local.backend_environment : entry if startswith(entry.name, "MSCQR_STAGING_RLS_")]
-    )
+    name                   = "db-admin"
+    image                  = var.backend_image_uri
+    essential              = true
+    command                = ["node", "scripts/staging-database-role-vpc-executor.mjs"]
+    environment            = [{ name = "MSCQR_VPC_EXECUTOR_MODE", value = "probe" }]
     secrets                = [{ name = "DATABASE_URL", valueFrom = var.staging_secret_arns.database_url }]
     user                   = "node"
     privileged             = false
@@ -818,6 +886,64 @@ resource "aws_ecs_task_definition" "database_role_admin" {
   }])
 
   tags = merge(local.common_tags, { Component = "database-role-admin" })
+}
+
+resource "aws_ecs_task_definition" "full_rls_green" {
+  for_each                 = local.full_rls_green_modes
+  family                   = "mscqr-staging-full-rls-green-${replace(each.key, "full-rls-", "")}"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_execution.arn
+  task_role_arn            = aws_iam_role.full_rls_green_executor_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+
+  container_definitions = jsonencode([{
+    name      = "full-rls-green"
+    image     = var.full_rls_green_executor_image_uri
+    essential = true
+    command   = ["node", "scripts/staging-full-rls-green-executor.mjs"]
+    environment = concat([
+      { name = "MSCQR_FULL_RLS_MODE", value = each.key },
+      { name = "MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256", value = var.full_rls_green_source_contract_sha256 },
+      { name = "MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256", value = var.full_rls_green_package_checksum_sha256 },
+      { name = "MSCQR_FULL_RLS_RECEIPT_BUCKET", value = aws_s3_bucket.artifacts.id },
+      { name = "RELEASE_GIT_SHA", value = var.full_rls_green_release_sha },
+      ], each.value == null ? [] : [
+      { name = "MSCQR_FULL_RLS_CONFIRMATION", value = each.value }
+    ])
+    secrets = [{
+      name      = "DATABASE_URL"
+      valueFrom = var.staging_secret_arns.rls_green_admin_database_url
+    }]
+    user                   = "node"
+    privileged             = false
+    readonlyRootFilesystem = true
+    linuxParameters = {
+      initProcessEnabled = true
+      capabilities       = { add = [], drop = ["ALL"] }
+      devices            = []
+      tmpfs              = []
+    }
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.backend.name
+        awslogs-region        = var.aws_region
+        awslogs-stream-prefix = "full-rls-green"
+      }
+    }
+  }])
+
+  tags = merge(local.common_tags, {
+    Component = "full-rls-green-executor"
+    Mode      = each.key
+  })
 }
 
 data "archive_file" "database_role_executor_broker" {
@@ -847,19 +973,26 @@ resource "aws_iam_role_policy" "database_role_executor_broker" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "RunReviewedDisposableDatabaseRoleTask"
-        Effect   = "Allow"
-        Action   = ["ecs:RunTask"]
-        Resource = "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-staging-database-role-admin:*"
+        Sid    = "RunReviewedDisposableDatabaseRoleTask"
+        Effect = "Allow"
+        Action = ["ecs:RunTask"]
+        Resource = concat(
+          ["arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-staging-database-role-admin:*"],
+          [for task in aws_ecs_task_definition.full_rls_green : task.arn]
+        )
         Condition = {
           ArnEquals = { "ecs:cluster" = aws_ecs_cluster.staging.arn }
         }
       },
       {
-        Sid      = "PassOnlyReviewedDatabaseRoleTaskRoles"
-        Effect   = "Allow"
-        Action   = ["iam:PassRole"]
-        Resource = [aws_iam_role.database_role_admin_task.arn, aws_iam_role.ecs_execution.arn]
+        Sid    = "PassOnlyReviewedDatabaseRoleTaskRoles"
+        Effect = "Allow"
+        Action = ["iam:PassRole"]
+        Resource = [
+          aws_iam_role.database_role_admin_task.arn,
+          aws_iam_role.full_rls_green_executor_task.arn,
+          aws_iam_role.ecs_execution.arn
+        ]
         Condition = {
           StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
         }
@@ -895,8 +1028,11 @@ resource "aws_lambda_function" "database_role_executor_broker" {
 
   environment {
     variables = {
-      BROKER_CLUSTER_ARN              = aws_ecs_cluster.staging.arn
-      BROKER_TASK_DEFINITION_ARN      = aws_ecs_task_definition.database_role_admin.arn
+      BROKER_CLUSTER_ARN         = aws_ecs_cluster.staging.arn
+      BROKER_TASK_DEFINITION_ARN = aws_ecs_task_definition.database_role_admin.arn
+      BROKER_GREEN_TASK_DEFINITIONS_JSON = jsonencode({
+        for mode, task in aws_ecs_task_definition.full_rls_green : mode => task.arn
+      })
       BROKER_PRIVATE_SUBNETS_JSON     = jsonencode(var.app_private_subnet_ids)
       BROKER_SECURITY_GROUPS_JSON     = jsonencode([aws_security_group.ecs.id])
       BROKER_EXECUTOR_CONTRACT_SHA256 = local.database_role_executor_contract_sha256

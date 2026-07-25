@@ -1,5 +1,9 @@
 # MSCQR RLS Production Rollout Checklist - 2026-06-30
 
+> Historical checklist, superseded by
+> `documents/security/rls-program/RLS_FINAL_CLOSURE_2026-07-24.md`.
+> The staged route flags and fallback model named below no longer exist.
+
 This operator checklist supports `documents/security/MSCQR_RLS_PRODUCTION_ROLLOUT_PLAN_2026-06-30.md`. It is a planning artifact only. Do not enable production RLS, global RLS, Prisma migrations, route wiring, or production database changes from this checklist.
 
 ## Owner Signoff

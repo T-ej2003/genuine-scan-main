@@ -312,7 +312,7 @@ AS $$
 DECLARE
   actor record;
   replay record;
-  created public."PolicyRule"%ROWTYPE;
+  created record;
   result jsonb;
 BEGIN
   IF jsonb_typeof(input) IS DISTINCT FROM 'object'
@@ -357,7 +357,10 @@ BEGIN
      NULLIF(input->>'incidentPriority','')::public."IncidentPriority",
      CASE WHEN input ? 'actionConfig' THEN input->'actionConfig' ELSE NULL END,
      transaction_timestamp())
-  RETURNING * INTO created;
+  RETURNING id, "orgId", "licenseeId", "manufacturerId", "createdByUserId",
+    name, description, "ruleType", "isActive", threshold, "windowMinutes",
+    severity, "autoCreateIncident", "incidentSeverity", "incidentPriority",
+    "actionConfig", "createdAt", "updatedAt" INTO created;
   result := to_jsonb(created);
   PERFORM app_rls.c03_complete_policy_command('create', result);
   RETURN result || '{"__c03Replay":false}'::jsonb;
@@ -371,9 +374,8 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  current_row public."PolicyRule"%ROWTYPE;
   replay record;
-  updated public."PolicyRule"%ROWTYPE;
+  updated record;
   result jsonb;
 BEGIN
   IF policy_rule_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -390,7 +392,7 @@ BEGIN
     current_setting('app.licensee_id', true),
     'incident-response-policy-update'
   );
-  SELECT * INTO current_row
+  PERFORM 1
     FROM public."PolicyRule"
    WHERE id = policy_rule_id
      AND "licenseeId" = current_setting('app.licensee_id', true)
@@ -415,7 +417,10 @@ BEGIN
          "actionConfig" = CASE WHEN patch ? 'actionConfig' THEN patch->'actionConfig' ELSE p."actionConfig" END,
          "updatedAt" = transaction_timestamp()
    WHERE p.id = policy_rule_id
-  RETURNING * INTO updated;
+  RETURNING id, "orgId", "licenseeId", "manufacturerId", "createdByUserId",
+    name, description, "ruleType", "isActive", threshold, "windowMinutes",
+    severity, "autoCreateIncident", "incidentSeverity", "incidentPriority",
+    "actionConfig", "createdAt", "updatedAt" INTO updated;
   IF length(updated.name) NOT BETWEEN 3 AND 120 OR updated.threshold NOT BETWEEN 1 AND 100000
      OR updated."windowMinutes" NOT BETWEEN 1 AND 43200 THEN
     RAISE EXCEPTION 'C03_POLICY_UPDATE_INVALID' USING ERRCODE = '22023';

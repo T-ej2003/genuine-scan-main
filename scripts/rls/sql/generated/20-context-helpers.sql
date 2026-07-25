@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1'
+    AND source_contract_sha256='33aa82a9b8715cda77a6a3892dc2b0c9970da4484976b7db060397c61b1f88d4'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:33aa82a9b8715cda77a6a3892dc2b0c9970da4484976b7db060397c61b1f88d4'
     AND administrator_role='certification-administrator'
     AND phase='ownership-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'context helpers lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:33aa82a9b8715cda77a6a3892dc2b0c9970da4484976b7db060397c61b1f88d4')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -1027,7 +1027,9 @@ BEGIN
 
   RETURN QUERY
   WITH visible AS MATERIALIZED (
-    SELECT l.*
+    SELECT l.id,l."orgId",l.name,l.prefix,l.description,l."brandName",l.location,l.website,
+           l."supportEmail",l."supportPhone",l.metadata,l."isActive",l."suspendedAt",
+           l."suspendedReason",l."createdAt",l."updatedAt"
     FROM public."Licensee" l
     JOIN public."Organization" o ON o.id=l."orgId"
     WHERE (selector IS NULL OR l.id=selector)
@@ -1297,7 +1299,7 @@ CREATE OR REPLACE FUNCTION app_auth.claim_refresh_token_rotation(
   "licenseeId" text,"manufacturerId" text,"authAssurance" text,"expiresAt" timestamp without time zone,
   "authenticatedAt" timestamp without time zone,"mfaVerifiedAt" timestamp without time zone)
 LANGUAGE plpgsql SECURITY DEFINER VOLATILE SET search_path=pg_catalog,public AS $fn$
-DECLARE t public."RefreshToken"%ROWTYPE; u record; selected_licensee text; selected_manufacturer text; candidate_count integer;
+DECLARE t record; u record; selected_licensee text; selected_manufacturer text; candidate_count integer;
 BEGIN
   PERFORM app_auth.b01_bind_bearer(p_hashes,p_request_id);
   IF p_checked_at IS NULL OR abs(extract(epoch FROM p_checked_at-clock_timestamp())) > 300 THEN
@@ -1306,7 +1308,9 @@ BEGIN
   SELECT count(*) INTO candidate_count FROM public."RefreshToken" rt WHERE rt."tokenHash"=ANY(p_hashes);
   IF candidate_count=0 THEN RETURN; END IF;
   IF candidate_count<>1 THEN RAISE EXCEPTION 'B01_REFRESH_CLAIM_AMBIGUOUS' USING ERRCODE='42501'; END IF;
-  SELECT rt.* INTO t FROM public."RefreshToken" rt WHERE rt."tokenHash"=ANY(p_hashes) FOR UPDATE;
+  SELECT rt.id,rt."userId",rt."orgId",rt."revokedAt",rt."replacedByTokenHash",rt."expiresAt",
+    rt."authenticatedAt",rt."mfaVerifiedAt",rt."rotationRequestId"
+    INTO t FROM public."RefreshToken" rt WHERE rt."tokenHash"=ANY(p_hashes) FOR UPDATE;
   PERFORM app_auth.b01_bind_predecessor(t.id,t."userId",t."orgId",'claim');
   SELECT usr.id,usr.email,usr.name,usr.role,usr."orgId",usr."licenseeId",usr.status,usr."isActive",usr."disabledAt",usr."deletedAt",usr."emailVerifiedAt" INTO u FROM public."User" usr WHERE usr.id=t."userId";
   IF NOT FOUND OR NOT u."isActive" OR u."status"::text<>'ACTIVE' OR u."disabledAt" IS NOT NULL OR u."deletedAt" IS NOT NULL THEN
@@ -1360,10 +1364,11 @@ CREATE OR REPLACE FUNCTION app_auth.load_refresh_session_state(
   p_token_id text,p_hashes text[],p_requested_licensee_id text,p_requested_scope_version text,p_checked_at timestamp without time zone,p_request_id text
 ) RETURNS TABLE("userId" text,"email" text,"name" text,"role" text,"legacyLicenseeId" text,"legacyOrganizationId" text,"emailVerifiedAt" timestamp without time zone,"sessionLicenseeId" text,"sessionOrganizationId" text,"scopeVersion" text,"selectedLicenseeId" text,"selectedLicenseeName" text,"selectedLicenseePrefix" text,"selectedLicenseeBrandName" text,"selectedLicenseeOrganizationId" text,"linkedLicensees" jsonb,"mfaRequired" boolean,"mfaEnabled" boolean,"mfaEnrolled" boolean,"mfaLastUsedAt" timestamp without time zone,"mfaMethods" text[],"mfaPreferredMethod" text)
 LANGUAGE plpgsql SECURITY DEFINER VOLATILE SET search_path=pg_catalog,public AS $fn$
-DECLARE t public."RefreshToken"%ROWTYPE; u record; selected record; links jsonb; mfa_enabled boolean; mfa_last timestamp without time zone; methods text[];
+DECLARE t record; u record; selected record; links jsonb; mfa_enabled boolean; mfa_last timestamp without time zone; methods text[];
 BEGIN
   PERFORM app_auth.b01_bind_bearer(p_hashes,p_request_id);
-  SELECT rt.* INTO t FROM public."RefreshToken" rt WHERE rt.id=p_token_id AND rt."tokenHash"=ANY(p_hashes) FOR UPDATE;
+  SELECT rt.id,rt."userId",rt."orgId",rt."revokedAt",rt."expiresAt",rt."rotationRequestId"
+    INTO t FROM public."RefreshToken" rt WHERE rt.id=p_token_id AND rt."tokenHash"=ANY(p_hashes) FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B01_REFRESH_BEARER_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_auth.b01_bind_predecessor(t.id,t."userId",t."orgId",'load-state');
   IF t."revokedAt" IS NOT NULL OR t."expiresAt"<=p_checked_at OR t."rotationRequestId" IS DISTINCT FROM p_request_id THEN RAISE EXCEPTION 'B01_REFRESH_BEARER_DENIED' USING ERRCODE='42501'; END IF;
@@ -1392,10 +1397,11 @@ $fn$;
 
 CREATE OR REPLACE FUNCTION app_auth.create_refresh_mfa_challenge(p_token_id text,p_hashes text[],p_user_id text,p_ticket_hash text,p_session_binding_hash text,p_risk_score integer,p_risk_level text,p_reasons text[],p_ip_hash text,p_user_agent_hash text,p_max_attempts integer,p_expires_at timestamp without time zone,p_created_at timestamp without time zone,p_request_id text)
 RETURNS TABLE("challengeId" text,"created" boolean) LANGUAGE plpgsql SECURITY DEFINER VOLATILE SET search_path=pg_catalog,public AS $fn$
-DECLARE t public."RefreshToken"%ROWTYPE; challenge_id text;
+DECLARE t record; challenge_id text;
 BEGIN
   PERFORM app_auth.b01_bind_bearer(p_hashes,p_request_id);
-  SELECT rt.* INTO t FROM public."RefreshToken" rt WHERE rt.id=p_token_id AND rt."tokenHash"=ANY(p_hashes) FOR UPDATE;
+  SELECT rt.id,rt."userId",rt."orgId",rt."revokedAt",rt."expiresAt",rt."rotationRequestId"
+    INTO t FROM public."RefreshToken" rt WHERE rt.id=p_token_id AND rt."tokenHash"=ANY(p_hashes) FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B01_REFRESH_MFA_CHALLENGE_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_auth.b01_bind_predecessor(t.id,t."userId",t."orgId",'create-mfa');
   IF t."userId" IS DISTINCT FROM p_user_id OR t."revokedAt" IS NOT NULL OR t."expiresAt"<=p_created_at OR t."rotationRequestId" IS DISTINCT FROM p_request_id OR p_max_attempts NOT BETWEEN 1 AND 10 OR p_risk_score NOT BETWEEN 0 AND 100 OR p_risk_level NOT IN ('LOW','MEDIUM','HIGH','CRITICAL') OR coalesce(array_length(p_reasons,1),0) NOT BETWEEN 1 AND 12 OR p_ticket_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$' OR p_session_binding_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$' OR p_expires_at<=p_created_at OR p_expires_at>p_created_at+interval '15 minutes' THEN RAISE EXCEPTION 'B01_REFRESH_MFA_CHALLENGE_DENIED' USING ERRCODE='42501'; END IF;
@@ -1408,10 +1414,11 @@ $fn$;
 
 CREATE OR REPLACE FUNCTION app_auth.revoke_refresh_token_scope(p_token_id text,p_hashes text[],p_user_id text,p_scope text,p_reason text,p_revoked_at timestamp without time zone,p_request_id text)
 RETURNS TABLE("revokedCount" integer) LANGUAGE plpgsql SECURITY DEFINER VOLATILE SET search_path=pg_catalog,public AS $fn$
-DECLARE t public."RefreshToken"%ROWTYPE; changed integer;
+DECLARE t record; changed integer;
 BEGIN
   PERFORM app_auth.b01_bind_bearer(p_hashes,p_request_id);
-  SELECT rt.* INTO t FROM public."RefreshToken" rt WHERE rt.id=p_token_id AND rt."tokenHash"=ANY(p_hashes) FOR UPDATE;
+  SELECT rt.id,rt."userId",rt."orgId",rt."revokedAt",rt."rotationRequestId",rt."rotationCompletedAt"
+    INTO t FROM public."RefreshToken" rt WHERE rt.id=p_token_id AND rt."tokenHash"=ANY(p_hashes) FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B01_REFRESH_REVOCATION_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_auth.b01_bind_predecessor(t.id,t."userId",t."orgId",'revoke-scope');
   IF t."userId" IS DISTINCT FROM p_user_id OR t."revokedAt" IS NOT NULL OR t."rotationRequestId" IS DISTINCT FROM p_request_id OR t."rotationCompletedAt" IS NOT NULL OR p_scope NOT IN ('token','password-only','all') OR p_reason NOT IN ('ACCOUNT_UNAVAILABLE','MFA_STATE_CHANGED','MFA_REQUIRED_AFTER_POLICY_CHANGE') THEN RAISE EXCEPTION 'B01_REFRESH_REVOCATION_DENIED' USING ERRCODE='42501'; END IF;
@@ -1422,10 +1429,12 @@ $fn$;
 
 CREATE OR REPLACE FUNCTION app_auth.complete_refresh_token_rotation(p_token_id text,p_hashes text[],p_user_id text,p_organization_id text,p_token_hash text,p_expires_at timestamp without time zone,p_ip_hash text,p_user_agent text,p_authenticated_at timestamp without time zone,p_mfa_verified_at timestamp without time zone,p_rotated_at timestamp without time zone,p_request_id text)
 RETURNS TABLE("id" text,"expiresAt" timestamp without time zone) LANGUAGE plpgsql SECURITY DEFINER VOLATILE SET search_path=pg_catalog,public AS $fn$
-DECLARE t public."RefreshToken"%ROWTYPE; successor_id text; changed integer;
+DECLARE t record; successor_id text; changed integer;
 BEGIN
   PERFORM app_auth.b01_bind_bearer(p_hashes,p_request_id);
-  SELECT rt.* INTO t FROM public."RefreshToken" rt WHERE rt.id=p_token_id AND rt."tokenHash"=ANY(p_hashes) FOR UPDATE;
+  SELECT rt.id,rt."userId",rt."orgId",rt."revokedAt",rt."expiresAt",rt."rotationRequestId",
+    rt."rotationCompletedAt",rt."authenticatedAt",rt."mfaVerifiedAt"
+    INTO t FROM public."RefreshToken" rt WHERE rt.id=p_token_id AND rt."tokenHash"=ANY(p_hashes) FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B01_REFRESH_ROTATION_CLAIM_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_auth.b01_bind_predecessor(t.id,t."userId",t."orgId",'complete-rotation');
   IF p_rotated_at IS NULL OR abs(extract(epoch FROM p_rotated_at-clock_timestamp())) > 300
@@ -1862,7 +1871,7 @@ CREATE OR REPLACE FUNCTION app_auth.issue_authenticated_session_capability(
   p_expires_at timestamp without time zone
 ) RETURNS TABLE("id" text,"expiresAt" timestamp without time zone)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE session_row public."RefreshToken"%ROWTYPE; capability_hash text;
+DECLARE session_row record; capability_hash text;
 BEGIN
   IF p_refresh_token_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
      OR p_refresh_token_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$'
@@ -1886,7 +1895,7 @@ BEGIN
      AND rt."tokenHash"=p_refresh_token_hash
      AND rt."revokedAt" IS NULL
      AND rt."expiresAt">clock_timestamp()
-  RETURNING rt.* INTO session_row;
+  RETURNING rt.id,rt."expiresAt",rt."mfaVerifiedAt",rt."sessionCapabilityHash" INTO session_row;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED_SESSION' USING ERRCODE='42501';
   END IF;
@@ -3215,7 +3224,10 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('mfa_state:'||actor."userId",0));
   PERFORM set_config('app.auth_closure_operation','mfa-webauthn-challenge-read',true);
   SELECT jsonb_build_object(
-    'challenge',to_jsonb(c),
+    'challenge',jsonb_build_object(
+      'id',c.id,'userId',c."userId",'challengeHash',c."challengeHash",
+      'origin',c.origin,'rpId',c."rpId"
+    ),
     'factor',(SELECT to_jsonb(x) FROM (
       SELECT f.id,f."credentialId",f."publicKey",f.counter,f.transports
       FROM public."UserMfaFactor" f WHERE f."userId"=actor."userId" AND f.type='WEBAUTHN'
@@ -4022,7 +4034,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_create_public_incident_report(
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE qr record; prior public."ActionIdempotencyKey"%ROWTYPE; incident public."Incident"%ROWTYPE;
+DECLARE qr record; prior record; incident record;
 DECLARE request_hash text; response jsonb; upload jsonb; evidence_id text;
 BEGIN
   IF jsonb_typeof(report)<>'object' OR jsonb_typeof(uploads)<>'array'
@@ -4042,8 +4054,8 @@ BEGIN
     'c03-public-incident',qr.licensee_id,request_hash,transaction_timestamp()+interval '24 hours')
   ON CONFLICT("keyHash") DO NOTHING;
   IF NOT FOUND THEN
-    SELECT * INTO prior FROM public."ActionIdempotencyKey"
-     WHERE "keyHash"=encode(sha256(convert_to('public-incident|'||idempotency_key,'UTF8')),'hex') FOR UPDATE;
+    SELECT k."requestHash",k."responsePayload" INTO prior FROM public."ActionIdempotencyKey" k
+     WHERE k."keyHash"=encode(sha256(convert_to('public-incident|'||idempotency_key,'UTF8')),'hex') FOR UPDATE;
     IF prior."requestHash" IS DISTINCT FROM request_hash THEN RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_REPLAY_CONFLICT' USING ERRCODE='40001'; END IF;
     IF prior."responsePayload" IS NULL THEN RAISE EXCEPTION 'C03_PUBLIC_INCIDENT_REPLAY_IN_PROGRESS' USING ERRCODE='40001'; END IF;
     RETURN prior."responsePayload";
@@ -4067,7 +4079,7 @@ BEGIN
     NULLIF(report->>'deviceFingerprintHash',''),'NEW','P3',
     transaction_timestamp()+CASE report->>'severity' WHEN 'CRITICAL' THEN interval '4 hours' WHEN 'HIGH' THEN interval '24 hours' WHEN 'MEDIUM' THEN interval '72 hours' ELSE interval '168 hours' END,
     ARRAY(SELECT jsonb_array_elements_text(COALESCE(report->'tags','[]'::jsonb)))
-  ) RETURNING * INTO incident;
+  ) RETURNING id,status,severity,"createdAt","qrCodeValue" INTO incident;
   PERFORM set_config('app.c03_public_incident_id',incident.id,true);
   INSERT INTO public."IncidentEvent"(id,"incidentId","actorType","eventType","eventPayload")
   VALUES(gen_random_uuid()::text,incident.id,'CUSTOMER','CREATED',jsonb_build_object('source','public_report'));
@@ -4111,10 +4123,35 @@ DECLARE actor record; result jsonb;
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,current_setting('app.purpose',true));
   SELECT to_jsonb(i)||jsonb_build_object(
-    'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM public."IncidentEvent" e WHERE e."incidentId"=i.id),'[]'::jsonb),
-    'communications',COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c."createdAt" DESC,c.id DESC) FROM public."IncidentCommunication" c WHERE c."incidentId"=i.id),'[]'::jsonb),
-    'evidence',COALESCE((SELECT jsonb_agg(to_jsonb(v) ORDER BY v."createdAt" DESC,v.id DESC) FROM public."IncidentEvidence" v WHERE v."incidentId"=i.id),'[]'::jsonb)
-  ) INTO result FROM public."Incident" i WHERE i.id=incident_id AND i."licenseeId"=actor.licensee_id;
+    'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM (
+      SELECT event.id,event."incidentId",event."actorType",event."actorUserId",event."eventType",
+        event."eventPayload",event."createdAt" FROM public."IncidentEvent" event WHERE event."incidentId"=i.id
+    ) e),'[]'::jsonb),
+    'communications',COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c."createdAt" DESC,c.id DESC) FROM (
+      SELECT comm.id,comm."incidentId",comm.direction,comm.channel,comm."toAddress",comm.subject,
+        comm."bodyPreview",comm."attemptedFrom",comm."usedFrom",comm."replyTo",comm."providerMessageId",
+        comm."errorMessage",comm.status,comm."createdAt"
+      FROM public."IncidentCommunication" comm WHERE comm."incidentId"=i.id
+    ) c),'[]'::jsonb),
+    'evidence',COALESCE((SELECT jsonb_agg(to_jsonb(v) ORDER BY v."createdAt" DESC,v.id DESC) FROM (
+      SELECT evidence.id,evidence."incidentId",evidence."fileUrl",evidence."storageKey",evidence."fileType",
+        evidence."uploadedByUserId",evidence."uploadedBy",evidence."createdAt"
+      FROM public."IncidentEvidence" evidence WHERE evidence."incidentId"=i.id
+    ) v),'[]'::jsonb)
+  ) INTO result FROM (
+    SELECT incident.id,incident."qrCodeId",incident."qrCodeValue",incident."scanEventId",incident."licenseeId",
+      incident."reportedBy",incident."customerName",incident."customerEmail",incident."customerPhone",
+      incident."customerCountry",incident."preferredContactMethod",incident."consentToContact",
+      incident."incidentType",incident.severity,incident."severityOverridden",incident.description,
+      incident.photos,incident."purchasePlace",incident."purchaseDate",incident."productBatchNo",
+      incident."locationLat",incident."locationLng",incident."locationName",incident."locationCountry",
+      incident."locationRegion",incident."locationCity",incident."ipHash",incident."userAgentHash",
+      incident."deviceFingerprintHash",incident.status,incident.priority,incident."assignedToUserId",
+      incident."slaDueAt",incident.tags,incident."internalNotes",incident."resolutionSummary",
+      incident."resolutionOutcome",incident."createdAt",incident."updatedAt"
+    FROM public."Incident" incident
+    WHERE incident.id=incident_id AND incident."licenseeId"=actor.licensee_id
+  ) i;
   RETURN result;
 END;
 $$;
@@ -4144,7 +4181,15 @@ BEGIN
       AND (NOT filters?'dateFrom' OR i."createdAt">=(filters->>'dateFrom')::timestamptz)
       AND (NOT filters?'dateTo' OR i."createdAt"<=(filters->>'dateTo')::timestamptz))
   ) INTO result FROM (
-    SELECT i.* FROM public."Incident" i WHERE i."licenseeId"=actor.licensee_id
+    SELECT i.id,i."qrCodeId",i."qrCodeValue",i."scanEventId",i."licenseeId",i."reportedBy",
+      i."customerName",i."customerEmail",i."customerPhone",i."customerCountry",i."preferredContactMethod",
+      i."consentToContact",i."incidentType",i.severity,i."severityOverridden",i.description,i.photos,
+      i."purchasePlace",i."purchaseDate",i."productBatchNo",i."locationLat",i."locationLng",
+      i."locationName",i."locationCountry",i."locationRegion",i."locationCity",i."ipHash",
+      i."userAgentHash",i."deviceFingerprintHash",i.status,i.priority,i."assignedToUserId",
+      i."slaDueAt",i.tags,i."internalNotes",i."resolutionSummary",i."resolutionOutcome",
+      i."createdAt",i."updatedAt"
+    FROM public."Incident" i WHERE i."licenseeId"=actor.licensee_id
       AND (NOT filters?'status' OR i.status::text=filters->>'status')
       AND (NOT filters?'severity' OR i.severity::text=filters->>'severity')
       AND (NOT filters?'assignedTo' OR i."assignedToUserId"=filters->>'assignedTo')
@@ -4162,14 +4207,14 @@ CREATE OR REPLACE FUNCTION app_rls.c03_patch_incident(incident_id text, patch js
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; prior public."Incident"%ROWTYPE; changed text[]:=ARRAY[]::text[]; updated public."Incident"%ROWTYPE;
+DECLARE actor record; changed text[]:=ARRAY[]::text[]; updated record;
 BEGIN
   IF jsonb_typeof(patch)<>'object' OR patch='{}'::jsonb OR EXISTS(SELECT 1 FROM jsonb_object_keys(patch) k
     WHERE k NOT IN ('status','assignedToUserId','internalNotes','tags','severity','priority','resolutionSummary','resolutionOutcome')) THEN
     RAISE EXCEPTION 'C03_INCIDENT_PATCH_INVALID' USING ERRCODE='22023';
   END IF;
   SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,'incident-update','mfa-verified');
-  SELECT * INTO prior FROM public."Incident" WHERE id=incident_id AND "licenseeId"=actor.licensee_id FOR UPDATE;
+  PERFORM 1 FROM public."Incident" WHERE id=incident_id AND "licenseeId"=actor.licensee_id FOR UPDATE;
   UPDATE public."Incident" i SET
     status=CASE WHEN patch?'status' THEN (patch->>'status')::public."IncidentStatus" ELSE i.status END,
     "assignedToUserId"=CASE WHEN patch?'assignedToUserId' THEN NULLIF(patch->>'assignedToUserId','') ELSE i."assignedToUserId" END,
@@ -4181,7 +4226,14 @@ BEGIN
     "resolutionSummary"=CASE WHEN patch?'resolutionSummary' THEN NULLIF(patch->>'resolutionSummary','') ELSE i."resolutionSummary" END,
     "resolutionOutcome"=CASE WHEN patch?'resolutionOutcome' THEN NULLIF(patch->>'resolutionOutcome','')::public."IncidentResolutionOutcome" ELSE i."resolutionOutcome" END,
     "updatedAt"=transaction_timestamp()
-   WHERE i.id=incident_id RETURNING * INTO updated;
+   WHERE i.id=incident_id
+   RETURNING id,"qrCodeId","qrCodeValue","scanEventId","licenseeId","reportedBy","customerName",
+     "customerEmail","customerPhone","customerCountry","preferredContactMethod","consentToContact",
+     "incidentType",severity,"severityOverridden",description,photos,"purchasePlace","purchaseDate",
+     "productBatchNo","locationLat","locationLng","locationName","locationCountry","locationRegion",
+     "locationCity","ipHash","userAgentHash","deviceFingerprintHash",status,priority,"assignedToUserId",
+     "slaDueAt",tags,"internalNotes","resolutionSummary","resolutionOutcome","createdAt","updatedAt"
+   INTO updated;
   SELECT array_agg(k) INTO changed FROM jsonb_object_keys(patch) k;
   INSERT INTO public."IncidentEvent"(id,"incidentId","actorType","actorUserId","eventType","eventPayload")
   VALUES(gen_random_uuid()::text,incident_id,'ADMIN',actor.user_id,'UPDATED_FIELDS',jsonb_build_object('changedFields',changed));
@@ -4193,7 +4245,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_record_incident_event(incident_id text, e
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; created public."IncidentEvent"%ROWTYPE; purpose text:=current_setting('app.purpose',true);
+DECLARE actor record; created record; purpose text:=current_setting('app.purpose',true);
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,purpose,
     CASE WHEN purpose IN ('incident-note-add','incident-update','incident-pdf-export') THEN 'mfa-verified' ELSE 'password-verified' END);
@@ -4202,7 +4254,7 @@ BEGIN
   END IF;
   INSERT INTO public."IncidentEvent"(id,"incidentId","actorType","actorUserId","eventType","eventPayload")
   VALUES(gen_random_uuid()::text,incident_id,'ADMIN',actor.user_id,event_type::public."IncidentEventType",event_payload)
-  RETURNING * INTO created;
+  RETURNING id,"incidentId","actorType","actorUserId","eventType","eventPayload","createdAt" INTO created;
   RETURN to_jsonb(created);
 END;
 $$;
@@ -4211,7 +4263,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_add_incident_evidence(incident_id text, e
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; created public."IncidentEvidence"%ROWTYPE; key_hash text;
+DECLARE actor record; created record; key_hash text;
 BEGIN
   IF jsonb_typeof(evidence)<>'object' OR length(idempotency_key) NOT BETWEEN 8 AND 200
      OR length(COALESCE(evidence->>'fileUrl',''))>1000 OR length(COALESCE(evidence->>'storageKey',''))>1000
@@ -4229,7 +4281,9 @@ BEGIN
   END IF;
   INSERT INTO public."IncidentEvidence"(id,"incidentId","fileUrl","storageKey","fileType","uploadedByUserId","uploadedBy")
   VALUES(gen_random_uuid()::text,incident_id,NULLIF(evidence->>'fileUrl',''),NULLIF(evidence->>'storageKey',''),
-    NULLIF(evidence->>'fileType',''),actor.user_id,'ADMIN') RETURNING * INTO created;
+    NULLIF(evidence->>'fileType',''),actor.user_id,'ADMIN')
+  RETURNING id,"incidentId","fileUrl","storageKey","fileType","uploadedByUserId","uploadedBy","createdAt"
+  INTO created;
   UPDATE public."ActionIdempotencyKey" SET "statusCode"=201,"responsePayload"=jsonb_build_object('evidence',to_jsonb(created)),
     "completedAt"=transaction_timestamp() WHERE "keyHash"=key_hash;
   RETURN jsonb_build_object('evidence',to_jsonb(created),'tamperChecks',NULL);
@@ -4244,9 +4298,29 @@ DECLARE actor record;
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_incident_actor(incident_id,current_setting('app.purpose',true),'mfa-verified');
   RETURN jsonb_build_object(
-    'incident',(SELECT to_jsonb(i) FROM public."Incident" i WHERE i.id=incident_id),
-    'evidence',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM public."IncidentEvidence" e WHERE e."incidentId"=incident_id),'[]'::jsonb),
-    'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM public."IncidentEvent" e WHERE e."incidentId"=incident_id),'[]'::jsonb)
+    'incident',(SELECT to_jsonb(i) FROM (
+      SELECT incident.id,incident."qrCodeId",incident."qrCodeValue",incident."scanEventId",incident."licenseeId",
+        incident."reportedBy",incident."customerName",incident."customerEmail",incident."customerPhone",
+        incident."customerCountry",incident."preferredContactMethod",incident."consentToContact",
+        incident."incidentType",incident.severity,incident."severityOverridden",incident.description,
+        incident.photos,incident."purchasePlace",incident."purchaseDate",incident."productBatchNo",
+        incident."locationLat",incident."locationLng",incident."locationName",incident."locationCountry",
+        incident."locationRegion",incident."locationCity",incident."ipHash",incident."userAgentHash",
+        incident."deviceFingerprintHash",incident.status,incident.priority,incident."assignedToUserId",
+        incident."slaDueAt",incident.tags,incident."internalNotes",incident."resolutionSummary",
+        incident."resolutionOutcome",incident."createdAt",incident."updatedAt"
+      FROM public."Incident" incident WHERE incident.id=incident_id
+    ) i),
+    'evidence',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM (
+      SELECT evidence.id,evidence."incidentId",evidence."fileUrl",evidence."storageKey",evidence."fileType",
+        evidence."uploadedByUserId",evidence."uploadedBy",evidence."createdAt"
+      FROM public."IncidentEvidence" evidence WHERE evidence."incidentId"=incident_id
+    ) e),'[]'::jsonb),
+    'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."createdAt",e.id) FROM (
+      SELECT event.id,event."incidentId",event."actorType",event."actorUserId",event."eventType",
+        event."eventPayload",event."createdAt"
+      FROM public."IncidentEvent" event WHERE event."incidentId"=incident_id
+    ) e),'[]'::jsonb)
   );
 END;
 $$;
@@ -4286,7 +4360,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_link_ir_alert_incident(
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; alert public."PolicyAlert"%ROWTYPE; key_hash text;
+DECLARE actor record; alert record; key_hash text;
 BEGIN
   IF incident_authorization_id !~* '^[0-9a-f-]{36}$' OR length(reason) NOT BETWEEN 3 AND 600
      OR length(idempotency_key) NOT BETWEEN 8 AND 200 THEN RAISE EXCEPTION 'C03_IR_ALERT_INVALID' USING ERRCODE='22023'; END IF;
@@ -4298,7 +4372,9 @@ BEGIN
   ON CONFLICT("keyHash") DO NOTHING;
   IF NOT FOUND THEN RETURN (SELECT "responsePayload" FROM public."ActionIdempotencyKey" WHERE "keyHash"=key_hash); END IF;
   UPDATE public."PolicyAlert" SET "incidentId"=incident_id WHERE id=alert_id AND "licenseeId"=actor.licensee_id
-   RETURNING * INTO alert;
+   RETURNING id,"licenseeId","alertType",severity,message,score,"policyRuleId","incidentId",
+     "batchId","qrCodeId","manufacturerId","acknowledgedAt","acknowledgedByUserId",details,"createdAt"
+   INTO alert;
   IF NOT FOUND THEN RAISE EXCEPTION 'C03_IR_ALERT_DENIED' USING ERRCODE='42501'; END IF;
   UPDATE public."ActionIdempotencyKey" SET "statusCode"=200,"responsePayload"=to_jsonb(alert),"completedAt"=transaction_timestamp()
    WHERE "keyHash"=key_hash;
@@ -4630,14 +4706,14 @@ CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_compliance_pack_job_actor_scop
   p_capability text,p_purpose text,p_request_id text,p_job_id text
 ) RETURNS TABLE(user_id text,role text,organization_id text,licensee_id text)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job public."CompliancePackJob"%ROWTYPE; scope record;
+DECLARE actor record; job record; scope record;
 BEGIN
   IF p_job_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
   IF actor.assurance<>'ADMIN_MFA' THEN RAISE EXCEPTION 'C03_COMPLIANCE_MFA_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-revalidate','',p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id;
+  SELECT j."licenseeId" INTO job FROM public."CompliancePackJob" j WHERE j.id=p_job_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-revalidate',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
@@ -4685,8 +4761,8 @@ CREATE OR REPLACE FUNCTION app_rls.c03_start_compliance_pack_job(
   p_trigger_type text,p_from timestamptz,p_to timestamptz
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; scope record; job public."CompliancePackJob"%ROWTYPE; report jsonb;
-DECLARE replay_key text; request_hash text; prior public."ActionIdempotencyKey"%ROWTYPE;
+DECLARE actor record; scope record; report jsonb; job_id text;
+DECLARE replay_key text; request_hash text; prior record;
 BEGIN
   IF p_purpose<>'compliance-pack-start' OR p_trigger_type<>'MANUAL'
   THEN RAISE EXCEPTION 'C03_COMPLIANCE_START_DENIED' USING ERRCODE='42501'; END IF;
@@ -4701,21 +4777,22 @@ BEGIN
   VALUES (gen_random_uuid()::text,replay_key,'c03-compliance-start',scope.licensee_id,request_hash,transaction_timestamp()+interval '24 hours')
   ON CONFLICT ("keyHash") DO NOTHING;
   IF NOT FOUND THEN
-    SELECT * INTO prior FROM public."ActionIdempotencyKey" WHERE "keyHash"=replay_key FOR UPDATE;
+    SELECT k."requestHash",k."completedAt",k."responsePayload" INTO prior
+      FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=replay_key FOR UPDATE;
     IF prior."requestHash" IS DISTINCT FROM request_hash OR prior."completedAt" IS NULL OR prior."responsePayload" IS NULL
     THEN RAISE EXCEPTION 'C03_COMPLIANCE_REPLAY_CONFLICT' USING ERRCODE='40001'; END IF;
     RETURN prior."responsePayload";
   END IF;
-  job.id:=gen_random_uuid()::text;
-  PERFORM app_rls.c03_bind_operation('compliance-pack-start',scope.licensee_id,job.id);
+  job_id:=gen_random_uuid()::text;
+  PERFORM app_rls.c03_bind_operation('compliance-pack-start',scope.licensee_id,job_id);
   INSERT INTO public."CompliancePackJob" (id,"licenseeId",status,"triggerType","periodFrom","periodTo","startedByUserId","startedAt","updatedAt")
-  VALUES (job.id,scope.licensee_id,'RUNNING',p_trigger_type,p_from,p_to,actor.user_id,transaction_timestamp(),transaction_timestamp())
-  RETURNING * INTO job;
+  VALUES (job_id,scope.licensee_id,'RUNNING',p_trigger_type,p_from,p_to,actor.user_id,transaction_timestamp(),transaction_timestamp());
   report:=app_rls.c03_build_compliance_report(scope.licensee_id,p_from,p_to);
-  PERFORM app_rls.c03_queue_audit('COMPLIANCE_PACK_STARTED','CompliancePackJob',job.id,jsonb_build_object('triggerType',p_trigger_type,'periodFrom',p_from,'periodTo',p_to));
-  UPDATE public."ActionIdempotencyKey" SET "statusCode"=200,"responsePayload"=jsonb_build_object('job',to_jsonb(job),'report',report),"completedAt"=transaction_timestamp()
+  PERFORM app_rls.c03_queue_audit('COMPLIANCE_PACK_STARTED','CompliancePackJob',job_id,jsonb_build_object('triggerType',p_trigger_type,'periodFrom',p_from,'periodTo',p_to));
+  UPDATE public."ActionIdempotencyKey" SET "statusCode"=200,"responsePayload"=jsonb_build_object(
+    'job',app_rls.c03_compliance_job_projection(job_id),'report',report),"completedAt"=transaction_timestamp()
    WHERE "keyHash"=replay_key;
-  RETURN jsonb_build_object('job',to_jsonb(job),'report',report);
+  RETURN jsonb_build_object('job',app_rls.c03_compliance_job_projection(job_id),'report',report);
 END
 $fn$;
 
@@ -4723,19 +4800,20 @@ CREATE OR REPLACE FUNCTION app_rls.c03_complete_compliance_pack_job(
   p_capability text,p_purpose text,p_request_id text,p_job_id text,p_result jsonb
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job public."CompliancePackJob"%ROWTYPE; scope record; projected jsonb;
+DECLARE actor record; job record; scope record; projected jsonb;
 BEGIN
   IF p_purpose<>'compliance-pack-complete' THEN RAISE EXCEPTION 'C03_COMPLIANCE_COMPLETE_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_validate_compliance_result(p_result);
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
   IF actor.assurance<>'ADMIN_MFA' THEN RAISE EXCEPTION 'C03_COMPLIANCE_MFA_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-complete','',p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id;
+  SELECT j."licenseeId" INTO job FROM public."CompliancePackJob" j WHERE j.id=p_job_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-complete',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
   PERFORM app_rls.c03_bind_operation('compliance-pack-complete',scope.licensee_id,p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id AND "licenseeId"=scope.licensee_id FOR UPDATE;
+  SELECT j.status,j."storageKey",j."integrityHash" INTO job FROM public."CompliancePackJob" j
+    WHERE j.id=p_job_id AND j."licenseeId"=scope.licensee_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   IF job.status='COMPLETED' AND job."storageKey"=p_result->>'storageKey' AND job."integrityHash"=p_result->>'integrityHash' THEN RETURN app_rls.c03_compliance_job_projection(p_job_id); END IF;
   IF job.status<>'RUNNING' THEN RAISE EXCEPTION 'C03_COMPLIANCE_TRANSITION_DENIED' USING ERRCODE='40001'; END IF;
@@ -4752,19 +4830,20 @@ CREATE OR REPLACE FUNCTION app_rls.c03_fail_compliance_pack_job(
   p_capability text,p_purpose text,p_request_id text,p_job_id text,p_error_code text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job public."CompliancePackJob"%ROWTYPE; scope record; projected jsonb;
+DECLARE actor record; job record; scope record; projected jsonb;
 BEGIN
   IF p_purpose<>'compliance-pack-fail' OR p_error_code !~ '^[A-Z0-9_:-]{1,160}$'
   THEN RAISE EXCEPTION 'C03_COMPLIANCE_FAIL_DENIED' USING ERRCODE='42501'; END IF;
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
   IF actor.assurance<>'ADMIN_MFA' THEN RAISE EXCEPTION 'C03_COMPLIANCE_MFA_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-fail','',p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id;
+  SELECT j."licenseeId" INTO job FROM public."CompliancePackJob" j WHERE j.id=p_job_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-fail',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
   PERFORM app_rls.c03_bind_operation('compliance-pack-fail',scope.licensee_id,p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id AND "licenseeId"=scope.licensee_id FOR UPDATE;
+  SELECT j.status,j."errorMessage" INTO job FROM public."CompliancePackJob" j
+    WHERE j.id=p_job_id AND j."licenseeId"=scope.licensee_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   IF job.status='FAILED' AND job."errorMessage"=p_error_code THEN RETURN app_rls.c03_compliance_job_projection(p_job_id); END IF;
   IF job.status<>'RUNNING' THEN RAISE EXCEPTION 'C03_COMPLIANCE_TRANSITION_DENIED' USING ERRCODE='40001'; END IF;
@@ -4779,14 +4858,15 @@ CREATE OR REPLACE FUNCTION app_rls.c03_get_compliance_pack_job(
   p_capability text,p_purpose text,p_request_id text,p_job_id text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job public."CompliancePackJob"%ROWTYPE; scope record; report jsonb;
+DECLARE actor record; job record; scope record; report jsonb;
 BEGIN
   IF p_purpose NOT IN ('compliance-pack-download','compliance-pack-rebuild-read')
   THEN RAISE EXCEPTION 'C03_COMPLIANCE_READ_DENIED' USING ERRCODE='42501'; END IF;
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
   IF actor.assurance<>'ADMIN_MFA' THEN RAISE EXCEPTION 'C03_COMPLIANCE_MFA_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-get','',p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id;
+  SELECT j."licenseeId",j."periodFrom",j."periodTo" INTO job
+    FROM public."CompliancePackJob" j WHERE j.id=p_job_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-get',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
@@ -4800,19 +4880,20 @@ CREATE OR REPLACE FUNCTION app_rls.c03_complete_compliance_pack_rebuild(
   p_capability text,p_purpose text,p_request_id text,p_job_id text,p_result jsonb
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job public."CompliancePackJob"%ROWTYPE; scope record; projected jsonb;
+DECLARE actor record; job record; scope record; projected jsonb;
 BEGIN
   IF p_purpose<>'compliance-pack-rebuild-complete' THEN RAISE EXCEPTION 'C03_COMPLIANCE_REBUILD_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_validate_compliance_result(p_result);
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
   IF actor.assurance<>'ADMIN_MFA' THEN RAISE EXCEPTION 'C03_COMPLIANCE_MFA_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-rebuild','',p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id;
+  SELECT j."licenseeId" INTO job FROM public."CompliancePackJob" j WHERE j.id=p_job_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('compliance-pack-rebuild',job."licenseeId",p_job_id);
   SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(job."licenseeId",actor.role,actor.organization_id,actor.licensee_id);
   PERFORM app_rls.c03_bind_operation('compliance-pack-rebuild',scope.licensee_id,p_job_id);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id AND "licenseeId"=scope.licensee_id FOR UPDATE;
+  SELECT j.status,j."storageKey",j."integrityHash" INTO job FROM public."CompliancePackJob" j
+    WHERE j.id=p_job_id AND j."licenseeId"=scope.licensee_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'C03_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   IF job.status<>'COMPLETED' THEN RAISE EXCEPTION 'C03_COMPLIANCE_TRANSITION_DENIED' USING ERRCODE='40001'; END IF;
   IF job."storageKey"=p_result->>'storageKey' AND job."integrityHash"=p_result->>'integrityHash' THEN RETURN app_rls.c03_compliance_job_projection(p_job_id); END IF;
@@ -5202,7 +5283,7 @@ AS $$
 DECLARE
   actor record;
   replay record;
-  created public."PolicyRule"%ROWTYPE;
+  created record;
   result jsonb;
 BEGIN
   IF jsonb_typeof(input) IS DISTINCT FROM 'object'
@@ -5247,7 +5328,10 @@ BEGIN
      NULLIF(input->>'incidentPriority','')::public."IncidentPriority",
      CASE WHEN input ? 'actionConfig' THEN input->'actionConfig' ELSE NULL END,
      transaction_timestamp())
-  RETURNING * INTO created;
+  RETURNING id, "orgId", "licenseeId", "manufacturerId", "createdByUserId",
+    name, description, "ruleType", "isActive", threshold, "windowMinutes",
+    severity, "autoCreateIncident", "incidentSeverity", "incidentPriority",
+    "actionConfig", "createdAt", "updatedAt" INTO created;
   result := to_jsonb(created);
   PERFORM app_rls.c03_complete_policy_command('create', result);
   RETURN result || '{"__c03Replay":false}'::jsonb;
@@ -5261,9 +5345,8 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  current_row public."PolicyRule"%ROWTYPE;
   replay record;
-  updated public."PolicyRule"%ROWTYPE;
+  updated record;
   result jsonb;
 BEGIN
   IF policy_rule_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -5280,7 +5363,7 @@ BEGIN
     current_setting('app.licensee_id', true),
     'incident-response-policy-update'
   );
-  SELECT * INTO current_row
+  PERFORM 1
     FROM public."PolicyRule"
    WHERE id = policy_rule_id
      AND "licenseeId" = current_setting('app.licensee_id', true)
@@ -5305,7 +5388,10 @@ BEGIN
          "actionConfig" = CASE WHEN patch ? 'actionConfig' THEN patch->'actionConfig' ELSE p."actionConfig" END,
          "updatedAt" = transaction_timestamp()
    WHERE p.id = policy_rule_id
-  RETURNING * INTO updated;
+  RETURNING id, "orgId", "licenseeId", "manufacturerId", "createdByUserId",
+    name, description, "ruleType", "isActive", threshold, "windowMinutes",
+    severity, "autoCreateIncident", "incidentSeverity", "incidentPriority",
+    "actionConfig", "createdAt", "updatedAt" INTO updated;
   IF length(updated.name) NOT BETWEEN 3 AND 120 OR updated.threshold NOT BETWEEN 1 AND 100000
      OR updated."windowMinutes" NOT BETWEEN 1 AND 43200 THEN
     RAISE EXCEPTION 'C03_POLICY_UPDATE_INVALID' USING ERRCODE = '22023';
@@ -5372,7 +5458,7 @@ DECLARE
     current_setting('app.request_id', true), 'UTF8')), 'hex');
   request_hash text := encode(sha256(convert_to(COALESCE(payload, '{}'::jsonb)::text, 'UTF8')), 'hex');
   inserted integer;
-  prior public."ActionIdempotencyKey"%ROWTYPE;
+  prior record;
 BEGIN
   INSERT INTO public."ActionIdempotencyKey" (id,"keyHash",action,scope,"requestHash","expiresAt")
   VALUES (gen_random_uuid()::text,key_value,'c03-governance-' || command_name,
@@ -5380,7 +5466,8 @@ BEGIN
   ON CONFLICT ("keyHash") DO NOTHING;
   GET DIAGNOSTICS inserted = ROW_COUNT;
   IF inserted = 1 THEN RETURN QUERY SELECT false,NULL::jsonb; RETURN; END IF;
-  SELECT * INTO prior FROM public."ActionIdempotencyKey" WHERE "keyHash"=key_value FOR UPDATE;
+  SELECT k."requestHash",k."completedAt",k."responsePayload" INTO prior
+    FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=key_value FOR UPDATE;
   IF prior."requestHash" IS DISTINCT FROM request_hash THEN
     RAISE EXCEPTION 'C03_GOVERNANCE_REPLAY_CONFLICT' USING ERRCODE='40001';
   END IF;
@@ -5428,13 +5515,15 @@ CREATE OR REPLACE FUNCTION app_rls.c03_require_governance_approval(action_key te
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE approval public."SensitiveActionApproval"%ROWTYPE;
+DECLARE approval record;
 DECLARE approval_id text := current_setting('app.c03_approval_id', true);
 BEGIN
   IF approval_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
     RAISE EXCEPTION 'C03_GOVERNANCE_APPROVAL_REQUIRED' USING ERRCODE='42501';
   END IF;
-  SELECT * INTO approval FROM public."SensitiveActionApproval" WHERE id=approval_id FOR UPDATE;
+  SELECT a."actionKey",a.status,a."expiresAt",a."licenseeId",a."reviewedByUserId",
+    a."requestedByUserId",a."executedAt",a.payload INTO approval
+    FROM public."SensitiveActionApproval" a WHERE a.id=approval_id FOR UPDATE;
   IF NOT FOUND OR approval."actionKey" IS DISTINCT FROM action_key
      OR approval.status IS DISTINCT FROM 'APPROVED' OR approval."expiresAt"<=transaction_timestamp()
      OR approval."licenseeId" IS DISTINCT FROM current_setting('app.licensee_id',true)
@@ -5462,7 +5551,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_upsert_tenant_feature_flag(key text, enab
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; replay record; row public."TenantFeatureFlag"%ROWTYPE; response jsonb; approval_id text;
+DECLARE actor record; replay record; row record; response jsonb; approval_id text;
 DECLARE payload jsonb;
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_governance_actor(ARRAY['sensitive-action-approval-approve']);
@@ -5478,7 +5567,7 @@ BEGIN
   VALUES (gen_random_uuid()::text,actor.licensee_id,key,enabled,config,actor.user_id,transaction_timestamp())
   ON CONFLICT ("licenseeId",key) DO UPDATE SET enabled=EXCLUDED.enabled,config=EXCLUDED.config,
     "updatedByUserId"=EXCLUDED."updatedByUserId","updatedAt"=transaction_timestamp()
-  RETURNING * INTO row;
+  RETURNING id,"licenseeId",key,enabled,config,"updatedByUserId","createdAt","updatedAt" INTO row;
   response := to_jsonb(row);
   PERFORM app_rls.c03_governance_audit('TENANT_FEATURE_FLAG_UPSERTED','TenantFeatureFlag',row.id,
     jsonb_build_object('key',key,'enabled',enabled,'approvalId',approval_id));
@@ -5492,19 +5581,22 @@ CREATE OR REPLACE FUNCTION app_rls.c03_get_or_create_retention_policy()
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; row public."EvidenceRetentionPolicy"%ROWTYPE; inserted boolean := false;
+DECLARE actor record; row record; inserted boolean := false;
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_governance_actor(ARRAY[
     'governance-retention-policy-read','governance-retention-preview','governance-compliance-report',
     'compliance-pack-start','compliance-pack-download','compliance-pack-rebuild-read',
     'sensitive-action-approval-approve'
   ]);
-  SELECT * INTO row FROM public."EvidenceRetentionPolicy" WHERE "licenseeId"=actor.licensee_id FOR UPDATE;
+  SELECT p.id,p."licenseeId",p."retentionDays",p."purgeEnabled",p."exportBeforePurge",
+    p."legalHoldTags",p."updatedByUserId",p."createdAt",p."updatedAt" INTO row
+    FROM public."EvidenceRetentionPolicy" p WHERE p."licenseeId"=actor.licensee_id FOR UPDATE;
   IF NOT FOUND THEN
     INSERT INTO public."EvidenceRetentionPolicy"
       (id,"licenseeId","retentionDays","purgeEnabled","exportBeforePurge","legalHoldTags","updatedAt")
     VALUES (gen_random_uuid()::text,actor.licensee_id,180,false,true,ARRAY['legal_hold','compliance_hold'],transaction_timestamp())
-    RETURNING * INTO row;
+    RETURNING id,"licenseeId","retentionDays","purgeEnabled","exportBeforePurge",
+      "legalHoldTags","updatedByUserId","createdAt","updatedAt" INTO row;
     inserted := true;
   END IF;
   IF inserted THEN
@@ -5518,8 +5610,8 @@ CREATE OR REPLACE FUNCTION app_rls.c03_run_retention_lifecycle(mode text, approv
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; replay record; policy public."EvidenceRetentionPolicy"%ROWTYPE;
-DECLARE job public."EvidenceRetentionJob"%ROWTYPE; cutoff_at timestamptz; evaluated integer; eligible integer; response jsonb;
+DECLARE actor record; replay record; policy record;
+DECLARE job record; cutoff_at timestamptz; evaluated integer; eligible integer; response jsonb;
 BEGIN
   IF mode NOT IN ('PREVIEW','APPLY') THEN RAISE EXCEPTION 'C03_RETENTION_MODE_INVALID' USING ERRCODE='22023'; END IF;
   IF mode='APPLY' THEN
@@ -5530,7 +5622,9 @@ BEGIN
   SELECT * INTO replay FROM app_rls.c03_governance_replay('retention-preview','{"mode":"PREVIEW"}'::jsonb);
   IF replay.replayed THEN RETURN replay.result || '{"__c03Replay":true}'::jsonb; END IF;
   PERFORM app_rls.c03_get_or_create_retention_policy();
-  SELECT * INTO policy FROM public."EvidenceRetentionPolicy" WHERE "licenseeId"=actor.licensee_id FOR UPDATE;
+  SELECT p.id,p."licenseeId",p."retentionDays",p."purgeEnabled",p."exportBeforePurge",
+    p."legalHoldTags",p."updatedByUserId",p."createdAt",p."updatedAt" INTO policy
+    FROM public."EvidenceRetentionPolicy" p WHERE p."licenseeId"=actor.licensee_id FOR UPDATE;
   cutoff_at := transaction_timestamp()-make_interval(days=>policy."retentionDays");
   SELECT count(*),count(*) FILTER (WHERE NOT (COALESCE(incident.tags,ARRAY[]::text[]) && policy."legalHoldTags"))
     INTO evaluated,eligible
@@ -5542,7 +5636,8 @@ BEGIN
   VALUES (gen_random_uuid()::text,actor.licensee_id,'PREVIEW','PREVIEW',cutoff_at,evaluated,0,0,
     jsonb_build_object('eligibleCount',eligible,'skippedDueToLegalHold',evaluated-eligible,
       'purgeEnabled',policy."purgeEnabled"),actor.user_id,transaction_timestamp(),transaction_timestamp())
-  RETURNING * INTO job;
+  RETURNING id,"licenseeId",status,mode,"cutoffAt","recordsEvaluated","recordsPurged",
+    "recordsExported",summary,"startedByUserId","startedAt","finishedAt","createdAt" INTO job;
   response := jsonb_build_object('job',to_jsonb(job),'policy',to_jsonb(policy),'cutoffAt',cutoff_at,
     'evaluated',evaluated,'eligible',eligible,'purged',0,'exported',0);
   PERFORM app_rls.c03_governance_audit('EVIDENCE_RETENTION_JOB_PREVIEWED','EvidenceRetentionJob',job.id,
@@ -5556,7 +5651,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_generate_compliance_report(from_at timest
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; replay record; policy public."EvidenceRetentionPolicy"%ROWTYPE; response jsonb;
+DECLARE actor record; replay record; policy record; response jsonb;
 DECLARE total_incidents integer; resolved_incidents integer; breached_incidents integer; fraud_reports integer;
 DECLARE audit_events integer; failed_logins integer; handoff jsonb; payload jsonb;
 BEGIN
@@ -5570,7 +5665,8 @@ BEGIN
   SELECT * INTO replay FROM app_rls.c03_governance_replay('compliance-report',payload);
   IF replay.replayed THEN RETURN replay.result || '{"__c03Replay":true}'::jsonb; END IF;
   PERFORM app_rls.c03_get_or_create_retention_policy();
-  SELECT * INTO policy FROM public."EvidenceRetentionPolicy" WHERE "licenseeId"=actor.licensee_id;
+  SELECT p."retentionDays",p."purgeEnabled",p."exportBeforePurge",p."legalHoldTags" INTO policy
+    FROM public."EvidenceRetentionPolicy" p WHERE p."licenseeId"=actor.licensee_id;
   SELECT count(*),count(*) FILTER (WHERE status::text IN ('RESOLVED','CLOSED')),
          count(*) FILTER (WHERE "slaDueAt"<transaction_timestamp() AND status::text NOT IN ('RESOLVED','CLOSED')),
          count(*) FILTER (WHERE "reportedBy"='CUSTOMER')
@@ -5616,7 +5712,7 @@ CREATE OR REPLACE FUNCTION app_rls.c03_update_retention_policy(patch jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-DECLARE actor record; replay record; row public."EvidenceRetentionPolicy"%ROWTYPE; response jsonb; approval_id text; payload jsonb;
+DECLARE actor record; replay record; row record; response jsonb; approval_id text; payload jsonb;
 BEGIN
   SELECT * INTO actor FROM app_rls.c03_require_governance_actor(ARRAY['sensitive-action-approval-approve']);
   IF jsonb_typeof(patch)<>'object' OR patch='{}'::jsonb OR EXISTS (
@@ -5636,7 +5732,9 @@ BEGIN
     "exportBeforePurge"=CASE WHEN patch?'exportBeforePurge' THEN (patch->>'exportBeforePurge')::boolean ELSE p."exportBeforePurge" END,
     "legalHoldTags"=CASE WHEN patch?'legalHoldTags' THEN ARRAY(SELECT jsonb_array_elements_text(patch->'legalHoldTags')) ELSE p."legalHoldTags" END,
     "updatedByUserId"=actor.user_id,"updatedAt"=transaction_timestamp()
-  WHERE p."licenseeId"=actor.licensee_id RETURNING * INTO row;
+  WHERE p."licenseeId"=actor.licensee_id
+  RETURNING id,"licenseeId","retentionDays","purgeEnabled","exportBeforePurge",
+    "legalHoldTags","updatedByUserId","createdAt","updatedAt" INTO row;
   response := to_jsonb(row);
   PERFORM app_rls.c03_governance_audit('EVIDENCE_RETENTION_POLICY_UPDATED','EvidenceRetentionPolicy',row.id,
     jsonb_build_object('approvalId',approval_id,'changedFields',(SELECT jsonb_agg(k) FROM jsonb_object_keys(patch) k)));
@@ -5788,7 +5886,11 @@ BEGIN
    WHERE s."licenseeId"=p_licensee_id AND s."batchId" IS NOT NULL
      AND s."scannedAt" BETWEEN p_checked_at-(p_lookback_hours||' hours')::interval AND p_checked_at;
 
-  SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY a."batchId",a.id),'[]'::jsonb)
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'id',a.id,'licenseeId',a."licenseeId",'batchId',a."batchId",'qrCodeId',a."qrCodeId",
+      'manufacturerId',a."manufacturerId",'incidentId',a."incidentId",
+      'policyRuleId',a."policyRuleId",'acknowledgedAt',a."acknowledgedAt"
+    ) ORDER BY a."batchId",a.id),'[]'::jsonb)
     INTO alerts_payload FROM public."PolicyAlert" a
    WHERE a."licenseeId"=p_licensee_id AND a."batchId" IS NOT NULL AND a."acknowledgedAt" IS NULL;
 
@@ -6064,7 +6166,13 @@ BEGIN
         (new_user_id,lower(payload->'admin'->>'email'),payload->'admin'->>'passwordHash',payload->'admin'->>'name','LICENSEE_ADMIN'::public."UserRole",
          target,target,'ACTIVE'::public."UserStatus",true,transaction_timestamp(),transaction_timestamp());
     END IF;
-    SELECT jsonb_build_object('licensee',to_jsonb(l),'adminUser',(
+    SELECT jsonb_build_object('licensee',jsonb_build_object(
+      'id',l.id,'orgId',l."orgId",'name',l.name,'prefix',l.prefix,'description',l.description,
+      'brandName',l."brandName",'location',l.location,'website',l.website,'supportEmail',l."supportEmail",
+      'supportPhone',l."supportPhone",'metadata',l.metadata,'isActive',l."isActive",
+      'suspendedAt',l."suspendedAt",'suspendedReason',l."suspendedReason",
+      'createdAt',l."createdAt",'updatedAt',l."updatedAt"
+    ),'adminUser',(
       SELECT app_rls.session_c_user_projection(u.id) FROM public."User" u WHERE u."licenseeId"=target AND u.role='LICENSEE_ADMIN'::public."UserRole" LIMIT 1
     ),'replayed',false) INTO result FROM public."Licensee" l WHERE l.id=target;
     PERFORM app_rls.session_c_write_audit(actor."userId",target,target,
@@ -6098,7 +6206,13 @@ BEGIN
         "supportPhone"=CASE WHEN patch?'supportPhone' THEN patch->>'supportPhone' ELSE "supportPhone" END,
         "isActive"=CASE WHEN patch?'isActive' THEN (patch->>'isActive')::boolean ELSE "isActive" END,"updatedAt"=transaction_timestamp()
       WHERE id=target;
-      SELECT jsonb_build_object('licensee',to_jsonb(l)) INTO result FROM public."Licensee" l WHERE l.id=target;
+      SELECT jsonb_build_object('licensee',jsonb_build_object(
+        'id',l.id,'orgId',l."orgId",'name',l.name,'prefix',l.prefix,'description',l.description,
+        'brandName',l."brandName",'location',l.location,'website',l.website,'supportEmail',l."supportEmail",
+        'supportPhone',l."supportPhone",'metadata',l.metadata,'isActive',l."isActive",
+        'suspendedAt',l."suspendedAt",'suspendedReason',l."suspendedReason",
+        'createdAt',l."createdAt",'updatedAt',l."updatedAt"
+      )) INTO result FROM public."Licensee" l WHERE l.id=target;
       PERFORM app_rls.session_c_write_audit(actor."userId",target_org,target,'UPDATE_LICENSEE','Licensee',target,
         jsonb_build_object('workflowId','workflow-http-backend-src-controllers-licensee-controller-ts-update-licensee','requestId',p_request_id,'purposeCode',p_purpose,'changed',coalesce(audit_details->'changed','[]'::jsonb)),audit_details->>'ipHash',audit_details->>'userAgent');
       RETURN result;
@@ -6660,7 +6774,8 @@ BEGIN
   IF p_operation IN ('DELETE_BATCH','ASSIGN_MANUFACTURER') THEN
     IF p_payload->>'batchId' !~* '^[0-9a-f-]{36}$' THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
     PERFORM set_config('app.qr_source_batch_id',p_payload->>'batchId',true);
-    SELECT b.* INTO source_batch FROM public."Batch" b WHERE b.id=p_payload->>'batchId' FOR UPDATE;
+    SELECT b.id,b.name,b."licenseeId",b."manufacturerId",b."rootBatchId",b."printedAt",b."releasedAt"
+      INTO source_batch FROM public."Batch" b WHERE b.id=p_payload->>'batchId' FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
     target_licensee:=source_batch."licenseeId";
     SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,target_licensee);
@@ -6829,7 +6944,10 @@ BEGIN
     p_source,start_code,end_code,total);
   PERFORM app_rls.qr_write_audit(actor."userId",l."orgId",p_licensee_id,'ALLOCATED','QRRange',range_id,
     jsonb_build_object('requestId',p_request_id,'source',p_source,'startCode',start_code,'endCode',end_code,'created',total,'receivedBatchId',batch_id));
-  SELECT jsonb_build_object('range',to_jsonb(r),'startCode',start_code,'endCode',end_code,'totalCodes',total,
+  SELECT jsonb_build_object('range',jsonb_build_object(
+      'id',r.id,'licenseeId',r."licenseeId",'startCode',r."startCode",'endCode',r."endCode",
+      'totalCodes',r."totalCodes",'usedCodes',r."usedCodes",'createdAt',r."createdAt",'updatedAt',r."updatedAt"
+    ),'startCode',start_code,'endCode',end_code,'totalCodes',total,
     'receivedBatchId',batch_id,'receivedBatchName',b.name,'codes',COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'id',q.id,'licenseeId',q."licenseeId",'batchId',q."batchId",'replayEpoch',q."replayEpoch",'tokenNonce',q."tokenNonce",
       'tokenIssuedAt',q."tokenIssuedAt",'tokenExpiresAt',q."tokenExpiresAt") ORDER BY q."displayCode")
@@ -7480,7 +7598,9 @@ BEGIN
   END IF;
 
   IF p_operation IN ('BATCH','RELEASE','PRINTABLE_ITEMS') THEN
-    SELECT b.* INTO STRICT batch_row FROM public."Batch" b WHERE b.id=target_batch_id;
+    SELECT b.id,b.name,b."licenseeId",b."manufacturerId",b."lifecycleState",
+      b."sampleScanPolicy",b."totalCodes",b."printedAt",b."releasedAt"
+      INTO STRICT batch_row FROM public."Batch" b WHERE b.id=target_batch_id;
     RETURN jsonb_build_object(
       'batch',jsonb_build_object(
         'id',batch_row.id,'name',batch_row.name,'licenseeId',batch_row."licenseeId",
@@ -7527,13 +7647,21 @@ BEGIN
           ceil(batch_row."totalCodes"*GREATEST(coalesce((batch_row."sampleScanPolicy"->>'percentage')::numeric,1),0.01)/100)::integer
         )
         ELSE 1 END,
-      'latestJob',(SELECT to_jsonb(j) - 'printLockTokenHash' FROM public."PrintJob" j
-        WHERE j."batchId"=batch_row.id ORDER BY j."createdAt" DESC LIMIT 1)
+      'latestJob',(SELECT to_jsonb(j) FROM (
+        SELECT job.id,job."jobNumber",job."batchId",job."manufacturerId",job."printerId",
+          job.status,job."printMode",job."pipelineState",job."payloadType",job."payloadHash",
+          job.quantity,job."itemCount",job."rangeStart",job."rangeEnd",job."sentAt",
+          job."completedAt",job."failureReason",job."reprintOfJobId",job."approvedByUserId",
+          job."reprintReason",job."confirmedAt",job."createdAt",job."updatedAt"
+        FROM public."PrintJob" job WHERE job."batchId"=batch_row.id
+        ORDER BY job."createdAt" DESC LIMIT 1
+      ) j)
     );
   END IF;
 
   IF p_operation='VALIDATION_EVIDENCE' THEN
-    SELECT j.* INTO STRICT job_row
+    SELECT j.id,j."approvedByUserId",j.status,j."pipelineState",j."itemCount",j.quantity,
+      j."payloadHash",j."sentAt",j."confirmedAt",j."printerId" INTO STRICT job_row
       FROM public."PrintJob" j
       WHERE j."batchId"=target_batch_id
         AND (nullif(p_options->>'printJobId','') IS NULL OR j.id=p_options->>'printJobId')
@@ -7663,44 +7791,68 @@ BEGIN
 
   IF p_operation='PRINTER_LIST' THEN
     RETURN coalesce((
-      SELECT jsonb_agg(to_jsonb(p)-'gatewaySecretHash' ORDER BY p."isDefault" DESC,p.name,p.id)
-      FROM public."Printer" p
-      WHERE (coalesce((p_options->>'includeInactive')::boolean,false) OR p."isActive")
+      SELECT jsonb_agg(to_jsonb(p) ORDER BY p."isDefault" DESC,p.name,p.id)
+      FROM (
+        SELECT printer.id,printer.name,printer.vendor,printer.model,printer."connectionType",
+          printer."commandLanguage",printer."ipAddress",printer.host,printer.port,printer."resourcePath",
+          printer."tlsEnabled",printer."printerUri",printer."deliveryMode",printer."gatewayId",
+          printer."gatewayLastSeenAt",printer."gatewayStatus",printer."gatewayLastError",
+          printer."nativePrinterId",printer."agentId",printer."deviceFingerprint",
+          printer."printerRegistrationId",printer."orgId",printer."licenseeId",
+          printer."assignedUserId",printer."createdByUserId",printer."isActive",printer."isDefault",
+          printer."lastSeenAt",printer."lastValidatedAt",printer."lastValidationStatus",
+          printer."lastValidationMessage",printer."capabilitySummary",printer."calibrationProfile",
+          printer.metadata,printer."createdAt",printer."updatedAt"
+        FROM public."Printer" printer
+        WHERE (coalesce((p_options->>'includeInactive')::boolean,false) OR printer."isActive")
         AND (
           actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
           OR (actor.role='LICENSEE_ADMIN'
-            AND p."licenseeId"=actor."licenseeId" AND p."orgId"=actor."organizationId")
+            AND printer."licenseeId"=actor."licenseeId" AND printer."orgId"=actor."organizationId")
           OR (actor.role='MANUFACTURER_ADMIN' AND (
-            p."assignedUserId"=actor."userId"
+            printer."assignedUserId"=actor."userId"
             OR EXISTS (
               SELECT 1 FROM public."PrinterRegistration" pr
-              WHERE pr.id=p."printerRegistrationId" AND pr."userId"=actor."userId"
+              WHERE pr.id=printer."printerRegistrationId" AND pr."userId"=actor."userId"
                 AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL
             )
             OR EXISTS (
               SELECT 1 FROM public."ManufacturerLicenseeLink" ml
-              WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=p."licenseeId"
+              WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=printer."licenseeId"
             )
           ))
         )
+      ) p
     ),'[]'::jsonb);
   END IF;
 
   IF p_operation='PRINTER' THEN
     RETURN (
-      SELECT to_jsonb(p)-'gatewaySecretHash'
-      FROM public."Printer" p
-      WHERE p.id=p_subject_id AND (
+      SELECT to_jsonb(p)
+      FROM (
+        SELECT printer.id,printer.name,printer.vendor,printer.model,printer."connectionType",
+          printer."commandLanguage",printer."ipAddress",printer.host,printer.port,printer."resourcePath",
+          printer."tlsEnabled",printer."printerUri",printer."deliveryMode",printer."gatewayId",
+          printer."gatewayLastSeenAt",printer."gatewayStatus",printer."gatewayLastError",
+          printer."nativePrinterId",printer."agentId",printer."deviceFingerprint",
+          printer."printerRegistrationId",printer."orgId",printer."licenseeId",
+          printer."assignedUserId",printer."createdByUserId",printer."isActive",printer."isDefault",
+          printer."lastSeenAt",printer."lastValidatedAt",printer."lastValidationStatus",
+          printer."lastValidationMessage",printer."capabilitySummary",printer."calibrationProfile",
+          printer.metadata,printer."createdAt",printer."updatedAt"
+        FROM public."Printer" printer
+        WHERE printer.id=p_subject_id AND (
         actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
         OR (actor.role='LICENSEE_ADMIN'
-          AND p."licenseeId"=actor."licenseeId" AND p."orgId"=actor."organizationId")
-        OR p."assignedUserId"=actor."userId"
+          AND printer."licenseeId"=actor."licenseeId" AND printer."orgId"=actor."organizationId")
+        OR printer."assignedUserId"=actor."userId"
         OR EXISTS (
           SELECT 1 FROM public."PrinterRegistration" pr
-          WHERE pr.id=p."printerRegistrationId" AND pr."userId"=actor."userId"
+          WHERE pr.id=printer."printerRegistrationId" AND pr."userId"=actor."userId"
             AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL
         )
       )
+      ) p
     );
   END IF;
 
@@ -7710,14 +7862,16 @@ BEGIN
     END IF;
     RETURN (
       WITH registration AS (
-        SELECT pr.*
+        SELECT pr.id,pr."agentId",pr."deviceFingerprint",pr."trustStatus",pr."trustReason",
+          pr."approvedAt",pr."lastSeenAt",pr."updatedAt"
         FROM public."PrinterRegistration" pr
         WHERE pr."userId"=actor."userId" AND pr."revokedAt" IS NULL
           AND pr."trustStatus"<>'REVOKED'::public."PrinterTrustStatus"
         ORDER BY pr."approvedAt" DESC NULLS LAST,pr."lastSeenAt" DESC NULLS LAST,pr."updatedAt" DESC
         LIMIT 1
       ), attestation AS (
-        SELECT pa.*
+        SELECT pa.id,pa."printerRegistrationId",pa.metadata,pa."expiresAt",pa."trustValid",
+          pa."signatureValid",pa."attestedAt",pa."rejectionReason",pa."createdAt"
         FROM public."PrinterAttestation" pa
         JOIN registration pr ON pr.id=pa."printerRegistrationId"
         ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
@@ -7773,12 +7927,32 @@ BEGIN
   END IF;
 
   IF p_operation IN ('JOB','REISSUE') THEN
-    SELECT j.* INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=target_job_id;
+    SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,
+      j."printMode",j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",
+      j."rangeStart",j."rangeEnd",j."sentAt",j."completedAt",j."failureReason",
+      j."reprintOfJobId",j."approvedByUserId",j."reprintReason",j."confirmedAt",
+      j."createdAt",j."updatedAt" INTO STRICT job_row
+      FROM public."PrintJob" j WHERE j.id=target_job_id;
     RETURN jsonb_build_object(
-      'job',to_jsonb(job_row)-'printLockTokenHash',
-      'session',(SELECT to_jsonb(ps) FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id),
+      'job',to_jsonb(job_row),
+      'session',(SELECT to_jsonb(ps) FROM (
+        SELECT session.id,session."printJobId",session."batchId",session."manufacturerId",
+          session."printerRegistrationId",session."printerId",session.status,session."totalItems",
+          session."issuedItems",session."confirmedItems",session."frozenItems",session."failedReason",
+          session."startedAt",session."completedAt",session."createdAt",session."updatedAt"
+        FROM public."PrintSession" session WHERE session."printJobId"=job_row.id
+      ) ps),
       'items',coalesce((SELECT jsonb_agg(
-        (to_jsonb(pi)-'currentRenderTokenHash')||jsonb_build_object(
+        jsonb_build_object(
+          'id',pi.id,'printSessionId',pi."printSessionId",'qrCodeId',pi."qrCodeId",'code',pi.code,
+          'state',pi.state,'pipelineState',pi."pipelineState",'issueSequence',pi."issueSequence",
+          'attemptCount',pi."attemptCount",'deviceJobRef',pi."deviceJobRef",
+          'dispatchMetadata',pi."dispatchMetadata",'confirmationEvidence',pi."confirmationEvidence",
+          'issuedAt',pi."issuedAt",'dispatchedAt',pi."dispatchedAt",'agentAckedAt',pi."agentAckedAt",
+          'confirmationDeadlineAt',pi."confirmationDeadlineAt",'printConfirmedAt',pi."printConfirmedAt",
+          'closedAt',pi."closedAt",'frozenAt',pi."frozenAt",'failedAt',pi."failedAt",
+          'failureReason',pi."failureReason",'deadLetterReason',pi."deadLetterReason",
+          'createdAt',pi."createdAt",'updatedAt',pi."updatedAt",
           'qrCode',jsonb_build_object('id',q.id,'code',q.code,'displayCode',q."displayCode",'status',q.status)
         ) ORDER BY pi."issueSequence" NULLS LAST,pi.id
       ) FROM public."PrintItem" pi
@@ -7800,11 +7974,19 @@ BEGIN
           'printer',jsonb_build_object('id',p.id,'name',p.name)
         )
       )
-      FROM public."PrintReissueRequest" r
+      FROM (
+        SELECT request.id,request."originalPrintJobId",request."replacementPrintJobId",
+          request."requestedByUserId",request."approvedByUserId",request."licenseeId",
+          request."manufacturerId",request."batchId",request."requestedByRole",
+          request."targetApproverRole",request.quantity,request."affectedRangeStart",
+          request."affectedRangeEnd",request."decisionNote",request."approvalReferenceId",
+          request.status,request.reason,request."rejectionReason",request."approvedAt",
+          request."rejectedAt",request."executedAt",request."createdAt",request."updatedAt"
+        FROM public."PrintReissueRequest" request WHERE request.id=p_subject_id
+      ) r
       JOIN public."PrintJob" j ON j.id=r."originalPrintJobId"
       JOIN public."Batch" b ON b.id=j."batchId"
       JOIN public."Printer" p ON p.id=j."printerId"
-      WHERE r.id=p_subject_id
     );
   END IF;
 
@@ -7812,7 +7994,12 @@ BEGIN
     RETURN coalesce((
       SELECT jsonb_agg(to_jsonb(x) ORDER BY x."createdAt" DESC,x.id DESC)
       FROM (
-        SELECT r.*,jsonb_build_object(
+        SELECT r.id,r."originalPrintJobId",r."replacementPrintJobId",r."requestedByUserId",
+          r."approvedByUserId",r."licenseeId",r."manufacturerId",r."batchId",r."requestedByRole",
+          r."targetApproverRole",r.quantity,r."affectedRangeStart",r."affectedRangeEnd",
+          r."decisionNote",r."approvalReferenceId",r.status,r.reason,r."rejectionReason",
+          r."approvedAt",r."rejectedAt",r."executedAt",r."createdAt",r."updatedAt",
+          jsonb_build_object(
           'id',j.id,'jobNumber',j."jobNumber",'status',j.status,'quantity',j.quantity,
           'itemCount',j."itemCount",'rangeStart',j."rangeStart",'rangeEnd',j."rangeEnd",
           'batch',jsonb_build_object('id',b.id,'name',b.name,'licenseeId',b."licenseeId"),
@@ -7904,7 +8091,7 @@ SET search_path=pg_catalog,public
 AS $fn$
 DECLARE
   actor record;
-  printer_row public."Printer"%ROWTYPE;
+  printer_row record;
   scope_licensee text;
   scope_org text;
   now_at timestamp without time zone:=transaction_timestamp();
@@ -7939,7 +8126,13 @@ BEGIN
       OR actor."licenseeId" IS DISTINCT FROM scope_licensee
     ) THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
   ELSE
-    SELECT * INTO STRICT printer_row FROM public."Printer" p WHERE p.id=p_printer_id FOR UPDATE;
+    SELECT p.id,p.name,p.vendor,p.model,p."connectionType",p."commandLanguage",p."ipAddress",p.host,p.port,
+      p."resourcePath",p."tlsEnabled",p."printerUri",p."deliveryMode",p."gatewayId",p."gatewayLastSeenAt",
+      p."gatewayStatus",p."gatewayLastError",p."nativePrinterId",p."agentId",p."deviceFingerprint",
+      p."printerRegistrationId",p."orgId",p."licenseeId",p."assignedUserId",p."createdByUserId",
+      p."isActive",p."isDefault",p."lastSeenAt",p."lastValidatedAt",p."lastValidationStatus",
+      p."lastValidationMessage",p."capabilitySummary",p."calibrationProfile",p.metadata,p."createdAt",p."updatedAt"
+      INTO STRICT printer_row FROM public."Printer" p WHERE p.id=p_printer_id FOR UPDATE;
     scope_licensee:=printer_row."licenseeId";
     scope_org:=printer_row."orgId";
     IF actor.role='LICENSEE_ADMIN' AND (
@@ -7998,7 +8191,12 @@ BEGIN
       scope_org,scope_licensee,actor."userId",coalesce((p_payload->>'isActive')::boolean,true),
       coalesce((p_payload->>'isDefault')::boolean,false),p_payload->'capabilitySummary',
       p_payload->'calibrationProfile',now_at,now_at
-    ) RETURNING * INTO printer_row;
+    ) RETURNING id,name,vendor,model,"connectionType","commandLanguage","ipAddress",host,port,
+      "resourcePath","tlsEnabled","printerUri","deliveryMode","gatewayId","gatewayLastSeenAt",
+      "gatewayStatus","gatewayLastError","nativePrinterId","agentId","deviceFingerprint",
+      "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
+      "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
+      "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
   ELSIF p_operation='UPDATE' THEN
     IF printer_row."connectionType"='LOCAL_AGENT'
        AND p_payload - ARRAY['lastValidationStatus','lastValidationMessage','metadata']::text[] <> '{}'::jsonb
@@ -8029,7 +8227,13 @@ BEGIN
       "lastValidationMessage"=CASE WHEN p_payload ? 'lastValidationMessage'
         THEN nullif(left(p_payload->>'lastValidationMessage',500),'') ELSE "lastValidationMessage" END,
       "updatedAt"=now_at
-      WHERE id=p_printer_id RETURNING * INTO printer_row;
+      WHERE id=p_printer_id
+      RETURNING id,name,vendor,model,"connectionType","commandLanguage","ipAddress",host,port,
+        "resourcePath","tlsEnabled","printerUri","deliveryMode","gatewayId","gatewayLastSeenAt",
+        "gatewayStatus","gatewayLastError","nativePrinterId","agentId","deviceFingerprint",
+        "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
+        "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
+        "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
   ELSIF p_operation='RELINK' THEN
     IF NOT EXISTS (
       SELECT 1 FROM public."PrinterRegistration" pr
@@ -8056,13 +8260,25 @@ BEGIN
       "assignedUserId"=actor."userId","isActive"=true,"isDefault"=true,
       "lastSeenAt"=now_at,"lastValidatedAt"=now_at,"lastValidationStatus"='READY',
       "lastValidationMessage"=NULL,"updatedAt"=now_at
-      WHERE id=p_printer_id RETURNING * INTO printer_row;
+      WHERE id=p_printer_id
+      RETURNING id,name,vendor,model,"connectionType","commandLanguage","ipAddress",host,port,
+        "resourcePath","tlsEnabled","printerUri","deliveryMode","gatewayId","gatewayLastSeenAt",
+        "gatewayStatus","gatewayLastError","nativePrinterId","agentId","deviceFingerprint",
+        "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
+        "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
+        "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
   ELSIF p_operation='DELETE' THEN
     IF printer_row."connectionType"='LOCAL_AGENT'
        OR EXISTS (SELECT 1 FROM public."PrintJob" j
          WHERE j."printerId"=printer_row.id AND j.status IN ('PENDING','SENT','PAUSED'))
     THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
-    DELETE FROM public."Printer" p WHERE p.id=p_printer_id RETURNING * INTO printer_row;
+    DELETE FROM public."Printer" p WHERE p.id=p_printer_id
+    RETURNING id,name,vendor,model,"connectionType","commandLanguage","ipAddress",host,port,
+      "resourcePath","tlsEnabled","printerUri","deliveryMode","gatewayId","gatewayLastSeenAt",
+      "gatewayStatus","gatewayLastError","nativePrinterId","agentId","deviceFingerprint",
+      "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
+      "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
+      "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
   END IF;
 
   audit_action:=CASE p_operation
@@ -8079,8 +8295,7 @@ BEGIN
       'deliveryMode',printer_row."deliveryMode",
       'evidence',coalesce(p_payload->'evidence','{}'::jsonb))
   );
-  RETURN (to_jsonb(printer_row)-'gatewaySecretHash')
-    ||jsonb_build_object('removed',p_operation='DELETE');
+  RETURN to_jsonb(printer_row)||jsonb_build_object('removed',p_operation='DELETE');
 END
 $fn$;
 
@@ -8100,7 +8315,7 @@ SET search_path=pg_catalog,public
 AS $fn$
 DECLARE
   actor record;
-  row_value public."ActionIdempotencyKey"%ROWTYPE;
+  row_value record;
   inserted boolean:=false;
   expected_scope text;
   now_at timestamp without time zone:=transaction_timestamp();
@@ -8120,7 +8335,8 @@ BEGIN
   PERFORM set_config('app.printing_operation','printing-idempotency-'||lower(p_operation),true),
           set_config('app.printing_idempotency_key_hash',p_key_hash,true);
 
-  SELECT * INTO row_value FROM public."ActionIdempotencyKey"
+  SELECT k.id,k."keyHash",k.action,k.scope,k."requestHash",k."statusCode",k."responsePayload",
+    k."completedAt",k."expiresAt" INTO row_value FROM public."ActionIdempotencyKey" k
     WHERE "keyHash"=p_key_hash FOR UPDATE;
   IF p_operation='ABORT' THEN
     IF NOT FOUND THEN RETURN jsonb_build_object('aborted',true,'idempotent',true); END IF;
@@ -8139,7 +8355,9 @@ BEGIN
       action=p_action,scope=expected_scope,"requestHash"=p_request_hash,
       "statusCode"=NULL,"responsePayload"=NULL,"completedAt"=NULL,
       "createdAt"=now_at,"expiresAt"=now_at+interval '10 minutes'
-      WHERE "keyHash"=p_key_hash RETURNING * INTO row_value;
+      WHERE "keyHash"=p_key_hash
+      RETURNING id,"keyHash",action,scope,"requestHash","statusCode","responsePayload","completedAt","expiresAt"
+      INTO row_value;
     inserted:=true;
   ELSIF NOT FOUND THEN
     BEGIN
@@ -8148,10 +8366,12 @@ BEGIN
       ) VALUES (
         gen_random_uuid()::text,p_key_hash,p_action,expected_scope,p_request_hash,
         now_at,now_at+interval '10 minutes'
-      ) RETURNING * INTO row_value;
+      ) RETURNING id,"keyHash",action,scope,"requestHash","statusCode","responsePayload","completedAt","expiresAt"
+      INTO row_value;
       inserted:=true;
     EXCEPTION WHEN unique_violation THEN
-      SELECT * INTO STRICT row_value FROM public."ActionIdempotencyKey"
+      SELECT k.id,k."keyHash",k.action,k.scope,k."requestHash",k."statusCode",k."responsePayload",
+        k."completedAt",k."expiresAt" INTO STRICT row_value FROM public."ActionIdempotencyKey" k
         WHERE "keyHash"=p_key_hash FOR UPDATE;
     END;
   END IF;
@@ -8196,7 +8416,7 @@ SET search_path=pg_catalog,public
 AS $fn$
 DECLARE
   actor record;
-  registration public."PrinterRegistration"%ROWTYPE;
+  registration record;
   printer_input jsonb;
   printer_id text;
   native_id text;
@@ -8217,7 +8437,9 @@ BEGIN
           set_config('app.printing_user_id',actor."userId",true);
 
   IF p_operation='LOOKUP' THEN
-    SELECT pr.* INTO registration
+    SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId",pr."deviceFingerprint",pr."agentId",
+      pr."publicKeyPem",pr."trustStatus",pr."revokedAt",pr."approvedAt",pr."lastSeenAt",pr."updatedAt"
+      INTO registration
       FROM public."PrinterRegistration" pr
       WHERE pr."userId"=actor."userId" AND pr."revokedAt" IS NULL
         AND (
@@ -8249,7 +8471,9 @@ BEGIN
      OR jsonb_array_length(coalesce(p_payload->'printers','[]'::jsonb))>50
   THEN RAISE EXCEPTION 'CONNECTOR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
 
-  SELECT pr.* INTO registration
+  SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId",pr."deviceFingerprint",pr."agentId",
+    pr."publicKeyPem",pr."trustStatus",pr."revokedAt",pr."approvedAt",pr."lastSeenAt",pr."updatedAt"
+    INTO registration
     FROM public."PrinterRegistration" pr
     WHERE pr."userId"=actor."userId"
       AND pr."deviceFingerprint"=btrim(p_payload->>'deviceFingerprint')
@@ -8267,7 +8491,8 @@ BEGIN
       CASE WHEN trust_valid THEN 'TRUSTED' ELSE 'FAILED' END::public."PrinterTrustStatus",
       CASE WHEN trust_valid THEN NULL ELSE left(coalesce(p_payload->>'rejectionReason','Signature verification failed'),500) END,
       CASE WHEN trust_valid THEN now_at END,now_at,now_at,now_at
-    ) RETURNING * INTO registration;
+    ) RETURNING id,"userId","orgId","licenseeId","deviceFingerprint","agentId","publicKeyPem",
+      "trustStatus","revokedAt","approvedAt","lastSeenAt","updatedAt" INTO registration;
   ELSE
     PERFORM set_config('app.printing_registration_id',registration.id,true);
     IF registration."revokedAt" IS NOT NULL
@@ -8282,7 +8507,9 @@ BEGIN
       "trustReason"=CASE WHEN trust_valid THEN NULL ELSE left(coalesce(p_payload->>'rejectionReason','Signature verification failed'),500) END,
       "approvedAt"=CASE WHEN trust_valid THEN coalesce("approvedAt",now_at) ELSE "approvedAt" END,
       "lastSeenAt"=now_at,"updatedAt"=now_at
-      WHERE id=registration.id RETURNING * INTO registration;
+      WHERE id=registration.id
+      RETURNING id,"userId","orgId","licenseeId","deviceFingerprint","agentId","publicKeyPem",
+        "trustStatus","revokedAt","approvedAt","lastSeenAt","updatedAt" INTO registration;
   END IF;
 
   IF trust_valid THEN
@@ -8364,7 +8591,7 @@ DECLARE
   actor record;
   connector_actor record;
   registration record;
-  printer_row public."Printer"%ROWTYPE;
+  printer_row record;
   current_job jsonb;
   next_job jsonb;
   now_at timestamp without time zone:=transaction_timestamp();
@@ -8386,7 +8613,8 @@ BEGIN
     THEN RAISE EXCEPTION 'PRINTING_TEST_LABEL_DENIED' USING ERRCODE='42501'; END IF;
     PERFORM set_config('app.printing_operation','printing-test-label-queue',true),
             set_config('app.printing_printer_id',p_printer_id,true);
-    SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+    SELECT p.id,p.metadata,p."orgId",p."licenseeId",p."connectionType",p."deliveryMode",
+      p."nativePrinterId",p."ipAddress",p.host,p.port INTO STRICT printer_row FROM public."Printer" p
       WHERE p.id=p_printer_id AND p."connectionType"='LOCAL_AGENT' AND p."isActive"
         AND p."assignedUserId"=actor."userId"
         AND EXISTS (
@@ -8413,7 +8641,9 @@ BEGIN
     UPDATE public."Printer" SET
       metadata=jsonb_set(coalesce(metadata,'{}'::jsonb),'{pendingLocalAgentTestLabel}',p_job,true),
       "updatedAt"=now_at
-      WHERE id=printer_row.id RETURNING * INTO printer_row;
+      WHERE id=printer_row.id
+      RETURNING id,metadata,"orgId","licenseeId","connectionType","deliveryMode",
+        "nativePrinterId","ipAddress",host,port INTO printer_row;
     PERFORM app_rls.printing_write_audit(
       actor."userId",actor.role,printer_row."orgId",printer_row."licenseeId",
       'PRINTER_TEST_LABEL_QUEUED','Printer',printer_row.id,
@@ -8435,7 +8665,8 @@ BEGIN
           set_config('app.printing_request_id',p_request_id,true),
           set_config('app.printing_registration_id',p_connector->>'registrationId',true),
           set_config('app.printing_printer_id',p_printer_id,true);
-  SELECT pr.* INTO STRICT registration FROM public."PrinterRegistration" pr
+  SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId" INTO STRICT registration
+    FROM public."PrinterRegistration" pr
     WHERE pr.id=p_connector->>'registrationId'
       AND pr."agentId"=p_connector->>'agentId'
       AND pr."deviceFingerprint"=p_connector->>'deviceFingerprint'
@@ -8451,7 +8682,9 @@ BEGIN
     WHERE pa."printerRegistrationId"=registration.id
       AND pa."signatureValid" AND pa."trustValid" AND pa."expiresAt">now_at
   ) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;
-  SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+  SELECT p.id,p.metadata,p."orgId",p."licenseeId",p."connectionType",p."deliveryMode",
+    p."nativePrinterId",p."ipAddress",p.host,p.port,p."printerUri",p."commandLanguage"
+    INTO STRICT printer_row FROM public."Printer" p
     WHERE p.id=p_printer_id AND p."printerRegistrationId"=registration.id
       AND p."isActive" AND p."connectionType"='LOCAL_AGENT'
     FOR UPDATE;
@@ -8579,7 +8812,8 @@ BEGIN
     RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended('printing_batch_'||p_batch_id,0));
-  SELECT * INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
+  SELECT b.id,b."licenseeId",b."lifecycleState",b."releasedAt",b."suspendedAt"
+    INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
   IF batch_row."lifecycleState" NOT IN ('CODES_GENERATED'::public."BatchLifecycleState",'PRINT_ACKNOWLEDGED'::public."BatchLifecycleState")
      OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
   THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
@@ -8589,7 +8823,8 @@ BEGIN
        AND j.status IN ('PENDING','SENT','PAUSED') AND ps.status IN ('ACTIVE','PAUSED','RESUME_PENDING')
   ) THEN RAISE EXCEPTION 'ACTIVE_PRINT_JOB_EXISTS'; END IF;
 
-  SELECT * INTO printer_row FROM public."Printer" p
+  SELECT p.id,p."connectionType",p."commandLanguage",p."printerRegistrationId",p."nativePrinterId"
+    INTO printer_row FROM public."Printer" p
    WHERE p.id=p_printer_id AND p."isActive"
      AND p."licenseeId"=batch_row."licenseeId"
      AND (
@@ -8713,14 +8948,16 @@ BEGIN
     p_capability,p_purpose,p_request_id,NULL
   );
   PERFORM set_config('app.printing_job_id',p_job_id,true);
-  SELECT j.* INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
+  SELECT j.id,j."batchId",j."manufacturerId",j.status
+    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(
     p_capability,p_purpose,p_request_id,job_row."batchId"
   );
   IF actor.role='MANUFACTURER_ADMIN' AND job_row."manufacturerId"<>actor."userId" THEN
     RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
-  SELECT ps.* INTO STRICT session_row FROM public."PrintSession" ps WHERE ps."printJobId"=p_job_id FOR UPDATE;
+  SELECT ps.id,ps.status INTO STRICT session_row
+    FROM public."PrintSession" ps WHERE ps."printJobId"=p_job_id FOR UPDATE;
   PERFORM set_config('app.printing_job_id',p_job_id,true),
           set_config('app.printing_session_row_id',session_row.id,true);
 
@@ -8795,7 +9032,7 @@ BEGIN
           set_config('app.printing_registration_id',p_registration_id,true),
           set_config('app.printing_job_id',coalesce(p_job_id,''),true),
           set_config('app.printing_item_id',coalesce(p_item_id,''),true);
-  SELECT pr.* INTO STRICT registration FROM public."PrinterRegistration" pr
+  SELECT pr."userId" INTO STRICT registration FROM public."PrinterRegistration" pr
    WHERE pr.id=p_registration_id AND pr."agentId"=p_agent_id
      AND pr."deviceFingerprint"=p_device_fingerprint
      AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL;
@@ -8807,19 +9044,23 @@ BEGIN
     p_issued_at,p_issued_at+interval '2 minutes',true,true,
     jsonb_build_object('operation',p_operation,'requestId',p_request_id),now_at
   );
-  SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+  SELECT p.id,p.name,p."connectionType",p."commandLanguage",p."nativePrinterId",
+    p."ipAddress",p.port,p."calibrationProfile",p."capabilitySummary",p.metadata
+    INTO STRICT printer_row FROM public."Printer" p
    WHERE (p.id=p_printer_id OR p."nativePrinterId"=p_printer_id)
      AND p."printerRegistrationId"=p_registration_id AND p."isActive"
    ORDER BY (p.id=p_printer_id) DESC,p."isDefault" DESC,p."updatedAt" DESC LIMIT 1;
   PERFORM set_config('app.printing_printer_id',printer_row.id,true);
   IF p_operation='CLAIM' THEN
-    SELECT j.* INTO job_row FROM public."PrintJob" j
+    SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId"
+      INTO job_row FROM public."PrintJob" j
      WHERE j."printerId"=printer_row.id AND j."manufacturerId"=registration."userId"
        AND j."printMode"='LOCAL_AGENT' AND j.status IN ('PENDING','SENT')
      ORDER BY j."createdAt",j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
   ELSE
-    SELECT j.* INTO STRICT job_row FROM public."PrintJob" j
+    SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId"
+      INTO STRICT job_row FROM public."PrintJob" j
      WHERE j.id=p_job_id AND j."printerId"=printer_row.id AND j."manufacturerId"=registration."userId"
        AND j."printMode"='LOCAL_AGENT' FOR UPDATE;
   END IF;
@@ -8829,7 +9070,7 @@ BEGIN
   PERFORM set_config('app.printing_licensee_id',(
     SELECT b."licenseeId" FROM public."Batch" b WHERE b.id=job_row."batchId"
   ),true);
-  SELECT ps.* INTO STRICT session_row FROM public."PrintSession" ps
+  SELECT ps.id,ps."issuedItems" INTO STRICT session_row FROM public."PrintSession" ps
    WHERE ps."printJobId"=job_row.id AND ps."printerRegistrationId"=p_registration_id
      AND ps.status='ACTIVE' FOR UPDATE;
   audit_actor:=registration."userId";
@@ -8837,7 +9078,8 @@ BEGIN
           set_config('app.printing_printer_id',printer_row.id,true);
 
   IF p_operation='CLAIM' THEN
-    SELECT pi.* INTO item_row FROM public."PrintItem" pi
+    SELECT pi.id,pi."qrCodeId",pi.code,pi.state,pi."issueSequence"
+      INTO item_row FROM public."PrintItem" pi
      WHERE pi."printSessionId"=session_row.id AND pi.state='RESERVED'
      ORDER BY pi."issueSequence" NULLS LAST,pi.id FOR UPDATE SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
@@ -8889,7 +9131,7 @@ BEGIN
     );
   END IF;
 
-  SELECT pi.* INTO STRICT item_row FROM public."PrintItem" pi
+  SELECT pi.id,pi."qrCodeId",pi.state INTO STRICT item_row FROM public."PrintItem" pi
    WHERE pi.id=p_item_id AND pi."printSessionId"=session_row.id FOR UPDATE;
   IF p_operation='ACK' THEN
     IF item_row.state='AGENT_ACKED' THEN
@@ -8969,13 +9211,21 @@ BEGIN
           set_config('app.printing_gateway_id',coalesce(p_gateway_id,''),true),
           set_config('app.printing_gateway_secret_hash',coalesce(p_gateway_secret_hash,''),true);
   IF p_kind='LOCAL_AGENT' THEN
-    SELECT pr.* INTO STRICT registration FROM public."PrinterRegistration" pr
+    SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId",pr."agentId",pr."deviceFingerprint",
+      pr."publicKeyPem",pr."trustStatus",pr."approvedAt",pr."revokedAt",pr."lastSeenAt"
+      INTO STRICT registration FROM public."PrinterRegistration" pr
       WHERE pr."agentId"=p_agent_id AND pr."deviceFingerprint"=p_device_fingerprint
         AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL
       ORDER BY pr."lastSeenAt" DESC NULLS LAST,pr."updatedAt" DESC LIMIT 1;
     PERFORM set_config('app.printing_registration_id',registration.id,true),
             set_config('app.printing_user_id',registration."userId",true);
-    SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+    SELECT p.id,p.name,p.vendor,p.model,p."connectionType",p."commandLanguage",p."ipAddress",p.host,p.port,
+      p."resourcePath",p."tlsEnabled",p."printerUri",p."deliveryMode",p."gatewayId",p."gatewayLastSeenAt",
+      p."gatewayStatus",p."gatewayLastError",p."nativePrinterId",p."agentId",p."deviceFingerprint",
+      p."printerRegistrationId",p."orgId",p."licenseeId",p."assignedUserId",p."createdByUserId",
+      p."isActive",p."isDefault",p."lastSeenAt",p."lastValidatedAt",p."lastValidationStatus",
+      p."lastValidationMessage",p."capabilitySummary",p."calibrationProfile",p.metadata,p."createdAt",p."updatedAt"
+      INTO STRICT printer_row FROM public."Printer" p
       WHERE p."printerRegistrationId"=registration.id AND p."isActive"
         AND (p.id=p_printer_selector OR p."nativePrinterId"=p_printer_selector)
       ORDER BY (p.id=p_printer_selector) DESC,p."isDefault" DESC,p."updatedAt" DESC LIMIT 1;
@@ -8996,7 +9246,7 @@ BEGIN
         'trustStatus',registration."trustStatus",'approvedAt',registration."approvedAt",
         'revokedAt',registration."revokedAt",'lastSeenAt',registration."lastSeenAt"
       ),
-      'printer',to_jsonb(printer_row)-'gatewaySecretHash',
+      'printer',to_jsonb(printer_row),
       'eligibleForPrinting',registration."publicKeyPem" LIKE '%BEGIN%' AND printer_row."isActive"
         AND attestation_row."signatureValid" AND attestation_row."trustValid"
         AND attestation_row."expiresAt">now_at
@@ -9005,7 +9255,13 @@ BEGIN
           IN (printer_row.id,coalesce(printer_row."nativePrinterId",''))
     );
   END IF;
-  SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+  SELECT p.id,p.name,p.vendor,p.model,p."connectionType",p."commandLanguage",p."ipAddress",p.host,p.port,
+    p."resourcePath",p."tlsEnabled",p."printerUri",p."deliveryMode",p."gatewayId",p."gatewayLastSeenAt",
+    p."gatewayStatus",p."gatewayLastError",p."nativePrinterId",p."agentId",p."deviceFingerprint",
+    p."printerRegistrationId",p."orgId",p."licenseeId",p."assignedUserId",p."createdByUserId",
+    p."isActive",p."isDefault",p."lastSeenAt",p."lastValidatedAt",p."lastValidationStatus",
+    p."lastValidationMessage",p."capabilitySummary",p."calibrationProfile",p.metadata,p."createdAt",p."updatedAt"
+    INTO STRICT printer_row FROM public."Printer" p
     WHERE p."gatewayId"=p_gateway_id AND p."gatewaySecretHash"=p_gateway_secret_hash
       AND p."deliveryMode"='SITE_GATEWAY' AND p."isActive"
       AND (p_printer_selector IS NULL OR p_printer_selector='' OR p.id=p_printer_selector);
@@ -9014,7 +9270,7 @@ BEGIN
     UPDATE public."Printer" SET "gatewayLastSeenAt"=now_at,"gatewayStatus"='ONLINE',
       "gatewayLastError"=NULL,"updatedAt"=now_at WHERE id=printer_row.id;
   END IF;
-  RETURN jsonb_build_object('printer',to_jsonb(printer_row)-'gatewaySecretHash','eligibleForPrinting',true);
+  RETURN jsonb_build_object('printer',to_jsonb(printer_row),'eligibleForPrinting',true);
 END
 $fn$;
 
@@ -9038,7 +9294,13 @@ BEGIN
           set_config('app.printing_gateway_secret_hash',p_gateway_secret_hash,true),
           set_config('app.printing_job_id',coalesce(p_job_id,''),true),
           set_config('app.printing_item_id',coalesce(p_item_id,''),true);
-  SELECT p.* INTO STRICT printer_row FROM public."Printer" p
+  SELECT p.id,p.name,p.vendor,p.model,p."connectionType",p."commandLanguage",p."ipAddress",p.host,p.port,
+    p."resourcePath",p."tlsEnabled",p."printerUri",p."deliveryMode",p."gatewayId",p."gatewayLastSeenAt",
+    p."gatewayStatus",p."gatewayLastError",p."nativePrinterId",p."agentId",p."deviceFingerprint",
+    p."printerRegistrationId",p."orgId",p."licenseeId",p."assignedUserId",p."createdByUserId",
+    p."isActive",p."isDefault",p."lastSeenAt",p."lastValidatedAt",p."lastValidationStatus",
+    p."lastValidationMessage",p."capabilitySummary",p."calibrationProfile",p.metadata,p."createdAt",p."updatedAt"
+    INTO STRICT printer_row FROM public."Printer" p
     WHERE p."gatewayId"=p_gateway_id AND p."gatewaySecretHash"=p_gateway_secret_hash
       AND p."deliveryMode"='SITE_GATEWAY'
       AND p."connectionType"=p_mode::public."PrinterConnectionType" AND p."isActive"
@@ -9047,23 +9309,34 @@ BEGIN
   UPDATE public."Printer" SET "gatewayLastSeenAt"=now_at,"gatewayStatus"='ONLINE',
     "gatewayLastError"=NULL,"updatedAt"=now_at WHERE id=printer_row.id;
   IF p_operation='CLAIM' THEN
-    SELECT j.* INTO job_row FROM public."PrintJob" j
+    SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
+      j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",j."rangeStart",
+      j."rangeEnd",j."sentAt",j."completedAt",j."failureReason",j."reprintOfJobId",
+      j."approvedByUserId",j."reprintReason",j."confirmedAt",j."createdAt",j."updatedAt"
+      INTO job_row FROM public."PrintJob" j
       WHERE j."printerId"=printer_row.id
         AND j."printMode"=p_mode::public."PrintDispatchMode"
         AND j.status IN ('PENDING','SENT')
       ORDER BY j."createdAt",j.id FOR UPDATE SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
   ELSE
-    SELECT j.* INTO STRICT job_row FROM public."PrintJob" j
+    SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
+      j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",j."rangeStart",
+      j."rangeEnd",j."sentAt",j."completedAt",j."failureReason",j."reprintOfJobId",
+      j."approvedByUserId",j."reprintReason",j."confirmedAt",j."createdAt",j."updatedAt"
+      INTO STRICT job_row FROM public."PrintJob" j
       WHERE j.id=p_job_id AND j."printerId"=printer_row.id
         AND j."printMode"=p_mode::public."PrintDispatchMode" FOR UPDATE;
   END IF;
   PERFORM set_config('app.printing_job_id',job_row.id,true),
           set_config('app.printing_batch_id',job_row."batchId",true);
-  SELECT ps.* INTO STRICT session_row FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id FOR UPDATE;
+  SELECT ps.id,ps."printJobId",ps."batchId",ps."manufacturerId",ps."printerRegistrationId",
+    ps."printerId",ps.status,ps."totalItems",ps."issuedItems",ps."confirmedItems",ps."frozenItems",
+    ps."failedReason",ps."startedAt",ps."completedAt",ps."createdAt",ps."updatedAt"
+    INTO STRICT session_row FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id FOR UPDATE;
   PERFORM set_config('app.printing_session_row_id',session_row.id,true);
   IF p_operation='CLAIM' THEN
-    SELECT pi.* INTO item_row FROM public."PrintItem" pi
+    SELECT pi.id,pi."qrCodeId",pi.state INTO item_row FROM public."PrintItem" pi
       WHERE pi."printSessionId"=session_row.id AND pi.state='RESERVED'
       ORDER BY pi."issueSequence" NULLS LAST,pi.id FOR UPDATE SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false,'printJobId',job_row.id); END IF;
@@ -9075,8 +9348,8 @@ BEGIN
       "sentAt"=coalesce("sentAt",now_at),"updatedAt"=now_at WHERE id=job_row.id;
     UPDATE public."Batch" SET "lifecycleState"='PRINT_ACKNOWLEDGED',"updatedAt"=now_at
       WHERE id=job_row."batchId" AND "lifecycleState"='CODES_GENERATED';
-    RETURN jsonb_build_object('available',true,'job',to_jsonb(job_row)-'printLockTokenHash',
-      'session',to_jsonb(session_row),'printer',to_jsonb(printer_row)-'gatewaySecretHash',
+    RETURN jsonb_build_object('available',true,'job',to_jsonb(job_row),
+      'session',to_jsonb(session_row),'printer',to_jsonb(printer_row),
       'item',(SELECT jsonb_build_object(
         'id',pi.id,'qrCodeId',q.id,'code',q.code,'displayCode',q."displayCode",
         'batchId',q."batchId",'licenseeId',q."licenseeId",'tokenNonce',q."tokenNonce",
@@ -9084,7 +9357,7 @@ BEGIN
         'tokenHash',q."tokenHash",'replayEpoch',q."replayEpoch"
       ) FROM public."PrintItem" pi JOIN public."QRCode" q ON q.id=pi."qrCodeId" WHERE pi.id=item_row.id));
   END IF;
-  SELECT pi.* INTO STRICT item_row FROM public."PrintItem" pi
+  SELECT pi.id,pi."qrCodeId",pi.state INTO STRICT item_row FROM public."PrintItem" pi
     WHERE pi.id=p_item_id AND pi."printSessionId"=session_row.id FOR UPDATE;
   PERFORM set_config('app.printing_item_id',item_row.id,true);
   IF p_operation='ACK' THEN
@@ -9144,7 +9417,8 @@ DECLARE actor record; job_row record; qr_row record; policy jsonb; required_coun
 BEGIN
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
   PERFORM set_config('app.printing_job_id',p_job_id,true);
-  SELECT j.* INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
+  SELECT j.id,j."batchId",j.status,j.quantity
+    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,job_row."batchId");
   PERFORM set_config('app.printing_job_id',p_job_id,true);
   IF p_purpose<>'printing-sample-scan' OR job_row.status<>'CONFIRMED' THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
@@ -9201,7 +9475,8 @@ BEGIN
   IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN') THEN
     RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
-  SELECT b.* INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
+  SELECT b.id,b."lifecycleState",b."releasedAt",b."totalCodes"
+    INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
   SELECT j."manufacturerId" INTO maker_id FROM public."PrintJob" j WHERE j."batchId"=p_batch_id
     AND j.status='CONFIRMED' ORDER BY j."confirmedAt" DESC NULLS LAST,j."createdAt" DESC LIMIT 1;
   IF maker_id IS NULL THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
@@ -9293,7 +9568,8 @@ BEGIN
   IF p_operation='CREATE' THEN
     SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
     PERFORM set_config('app.printing_job_id',p_original_job_id,true);
-    SELECT j.* INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_original_job_id FOR UPDATE;
+    SELECT j.id,j."batchId",j."manufacturerId",j.status
+      INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_original_job_id FOR UPDATE;
     SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,job_row."batchId");
     PERFORM set_config('app.printing_job_id',p_original_job_id,true);
     IF actor.role<>'MANUFACTURER_ADMIN' OR job_row."manufacturerId"<>actor."userId"
@@ -9302,7 +9578,16 @@ BEGIN
     SELECT r.id INTO request_id FROM public."PrintReissueRequest" r
       WHERE r."originalPrintJobId"=job_row.id AND r.status IN ('PENDING','APPROVED') FOR UPDATE;
     IF request_id IS NOT NULL THEN
-      RETURN (SELECT to_jsonb(r)||jsonb_build_object('idempotent',true) FROM public."PrintReissueRequest" r WHERE r.id=request_id);
+      RETURN (SELECT to_jsonb(r)||jsonb_build_object('idempotent',true) FROM (
+        SELECT request.id,request."originalPrintJobId",request."replacementPrintJobId",
+          request."requestedByUserId",request."approvedByUserId",request."licenseeId",
+          request."manufacturerId",request."batchId",request."requestedByRole",
+          request."targetApproverRole",request.quantity,request."affectedRangeStart",
+          request."affectedRangeEnd",request."decisionNote",request."approvalReferenceId",
+          request.status,request.reason,request."rejectionReason",request."approvedAt",
+          request."rejectedAt",request."executedAt",request."createdAt",request."updatedAt"
+        FROM public."PrintReissueRequest" request WHERE request.id=request_id
+      ) r);
     END IF;
     request_id:=gen_random_uuid()::text;
     PERFORM set_config('app.printing_reissue_id',request_id,true);
@@ -9313,11 +9598,20 @@ BEGIN
     ) VALUES (
       request_id,job_row.id,actor."userId",actor."batchLicenseeId",job_row."manufacturerId",job_row."batchId",
       actor.role,'LICENSEE_ADMIN',p_quantity,p_range_start,p_range_end,'PENDING',btrim(p_reason),now_at,now_at
-    ) RETURNING * INTO request_row;
+    ) RETURNING id,"originalPrintJobId","replacementPrintJobId","requestedByUserId",
+      "approvedByUserId","licenseeId","manufacturerId","batchId","requestedByRole",
+      "targetApproverRole",quantity,"affectedRangeStart","affectedRangeEnd","decisionNote",
+      "approvalReferenceId",status,reason,"rejectionReason","approvedAt","rejectedAt",
+      "executedAt","createdAt","updatedAt" INTO request_row;
   ELSE
     SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
     PERFORM set_config('app.printing_reissue_id',p_reissue_id,true);
-    SELECT r.* INTO STRICT request_row FROM public."PrintReissueRequest" r
+    SELECT r.id,r."originalPrintJobId",r."replacementPrintJobId",r."requestedByUserId",
+      r."approvedByUserId",r."licenseeId",r."manufacturerId",r."batchId",r."requestedByRole",
+      r."targetApproverRole",r.quantity,r."affectedRangeStart",r."affectedRangeEnd",r."decisionNote",
+      r."approvalReferenceId",r.status,r.reason,r."rejectionReason",r."approvedAt",r."rejectedAt",
+      r."executedAt",r."createdAt",r."updatedAt" INTO STRICT request_row
+      FROM public."PrintReissueRequest" r
       WHERE r.id=p_reissue_id FOR UPDATE;
     PERFORM set_config('app.printing_job_id',request_row."originalPrintJobId",true);
     SELECT j."batchId" INTO STRICT target_batch_id FROM public."PrintJob" j
@@ -9332,7 +9626,10 @@ BEGIN
       IF request_row.status::text='EXECUTED' THEN
         RETURN to_jsonb(request_row)||jsonb_build_object('idempotent',true);
       END IF;
-      SELECT j.*,ps.id AS original_session_id,ps."printerRegistrationId" AS original_registration_id INTO STRICT job_row
+      SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
+        j."payloadType",j.quantity,j."itemCount",
+        ps.id AS original_session_id,ps."printerRegistrationId" AS original_registration_id
+        INTO STRICT job_row
         FROM public."PrintJob" j JOIN public."PrintSession" ps ON ps."printJobId"=j.id
         WHERE j.id=request_row."originalPrintJobId" FOR UPDATE OF j,ps;
       IF job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED','CANCELLED')
@@ -9402,7 +9699,12 @@ BEGIN
       THEN RAISE EXCEPTION 'NOT_ENOUGH_CODES'; END IF;
       UPDATE public."PrintReissueRequest" SET status='EXECUTED',
         "replacementPrintJobId"=replacement_job_id,"executedAt"=now_at,"updatedAt"=now_at
-        WHERE id=request_row.id RETURNING * INTO request_row;
+        WHERE id=request_row.id
+        RETURNING id,"originalPrintJobId","replacementPrintJobId","requestedByUserId",
+          "approvedByUserId","licenseeId","manufacturerId","batchId","requestedByRole",
+          "targetApproverRole",quantity,"affectedRangeStart","affectedRangeEnd","decisionNote",
+          "approvalReferenceId",status,reason,"rejectionReason","approvedAt","rejectedAt",
+          "executedAt","createdAt","updatedAt" INTO request_row;
       request_id:=request_row.id;
     ELSE
       IF p_operation='CANCEL' THEN
@@ -9425,7 +9727,12 @@ BEGIN
       IF p_operation='FORWARD' THEN
         UPDATE public."PrintReissueRequest" SET "targetApproverRole"='SUPER_ADMIN',
           "decisionNote"=nullif(btrim(p_decision_note),''),"updatedAt"=now_at
-          WHERE id=request_row.id RETURNING * INTO request_row;
+          WHERE id=request_row.id
+          RETURNING id,"originalPrintJobId","replacementPrintJobId","requestedByUserId",
+            "approvedByUserId","licenseeId","manufacturerId","batchId","requestedByRole",
+            "targetApproverRole",quantity,"affectedRangeStart","affectedRangeEnd","decisionNote",
+            "approvalReferenceId",status,reason,"rejectionReason","approvedAt","rejectedAt",
+            "executedAt","createdAt","updatedAt" INTO request_row;
       ELSE
     UPDATE public."PrintReissueRequest" SET
       status=CASE p_operation WHEN 'APPROVE' THEN 'APPROVED' WHEN 'REJECT' THEN 'REJECTED' ELSE 'CANCELLED' END::public."ReissueRequestStatus",
@@ -9434,7 +9741,12 @@ BEGIN
       "rejectedAt"=CASE WHEN p_operation='REJECT' THEN now_at ELSE "rejectedAt" END,
       "decisionNote"=nullif(btrim(p_decision_note),''),
       "rejectionReason"=CASE WHEN p_operation='REJECT' THEN nullif(btrim(p_reason),'') ELSE "rejectionReason" END,
-      "updatedAt"=now_at WHERE id=request_row.id RETURNING * INTO request_row;
+      "updatedAt"=now_at WHERE id=request_row.id
+      RETURNING id,"originalPrintJobId","replacementPrintJobId","requestedByUserId",
+        "approvedByUserId","licenseeId","manufacturerId","batchId","requestedByRole",
+        "targetApproverRole",quantity,"affectedRangeStart","affectedRangeEnd","decisionNote",
+        "approvalReferenceId",status,reason,"rejectionReason","approvedAt","rejectedAt",
+        "executedAt","createdAt","updatedAt" INTO request_row;
       END IF;
     request_id:=request_row.id;
     END IF;
@@ -9510,7 +9822,11 @@ BEGIN
   IF p_operation IN ('CLAIM_DIRECT','CLAIM_IPP') THEN
     mode_value:=CASE p_operation WHEN 'CLAIM_DIRECT' THEN 'NETWORK_DIRECT' ELSE 'NETWORK_IPP' END;
     page_limit:=LEAST(GREATEST(coalesce(NULLIF(p_details->>'limit','')::integer,25),1),250);
-    SELECT j.* INTO job_row FROM public."PrintJob" j
+    SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
+      j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",j."rangeStart",
+      j."rangeEnd",j."sentAt",j."completedAt",j."failureReason",j."reprintOfJobId",
+      j."approvedByUserId",j."reprintReason",j."confirmedAt",j."createdAt",j."updatedAt"
+      INTO job_row FROM public."PrintJob" j
       WHERE (p_job_id IS NULL OR j.id=p_job_id) AND j."printMode"=mode_value
         AND j.status IN ('PENDING','SENT') AND EXISTS (
           SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
@@ -9521,7 +9837,11 @@ BEGIN
     PERFORM set_config('app.printing_job_id',job_row.id,true),
             set_config('app.printing_batch_id',job_row."batchId",true),
             set_config('app.printing_printer_id',job_row."printerId",true);
-    SELECT ps.* INTO STRICT session_row FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id FOR UPDATE;
+    SELECT ps.id,ps."printJobId",ps."batchId",ps."manufacturerId",ps."printerRegistrationId",
+      ps."printerId",ps.status,ps."totalItems",ps."issuedItems",ps."confirmedItems",ps."frozenItems",
+      ps."failedReason",ps."startedAt",ps."completedAt",ps."createdAt",ps."updatedAt"
+      INTO STRICT session_row FROM public."PrintSession" ps
+      WHERE ps."printJobId"=job_row.id FOR UPDATE;
     PERFORM set_config('app.printing_session_row_id',session_row.id,true);
     WITH selected AS (
       SELECT pi.id FROM public."PrintItem" pi
@@ -9540,9 +9860,21 @@ BEGIN
     UPDATE public."Batch" SET "lifecycleState"='PRINT_ACKNOWLEDGED',"updatedAt"=now_at
       WHERE id=job_row."batchId" AND "lifecycleState"='CODES_GENERATED';
     RETURN jsonb_build_object(
-      'available',true,'job',to_jsonb(job_row)-'printLockTokenHash',
+      'available',true,'job',to_jsonb(job_row),
       'session',to_jsonb(session_row),
-      'printer',(SELECT to_jsonb(p)-'gatewaySecretHash' FROM public."Printer" p WHERE p.id=job_row."printerId"),
+      'printer',(SELECT to_jsonb(p) FROM (
+        SELECT printer.id,printer.name,printer.vendor,printer.model,printer."connectionType",
+          printer."commandLanguage",printer."ipAddress",printer.host,printer.port,printer."resourcePath",
+          printer."tlsEnabled",printer."printerUri",printer."deliveryMode",printer."gatewayId",
+          printer."gatewayLastSeenAt",printer."gatewayStatus",printer."gatewayLastError",
+          printer."nativePrinterId",printer."agentId",printer."deviceFingerprint",
+          printer."printerRegistrationId",printer."orgId",printer."licenseeId",
+          printer."assignedUserId",printer."createdByUserId",printer."isActive",printer."isDefault",
+          printer."lastSeenAt",printer."lastValidatedAt",printer."lastValidationStatus",
+          printer."lastValidationMessage",printer."capabilitySummary",printer."calibrationProfile",
+          printer.metadata,printer."createdAt",printer."updatedAt"
+        FROM public."Printer" printer WHERE printer.id=job_row."printerId"
+      ) p),
       'batch',(SELECT jsonb_build_object('id',b.id,'name',b.name,'licenseeId',b."licenseeId",
         'manufacturerId',b."manufacturerId") FROM public."Batch" b WHERE b.id=job_row."batchId"),
       'items',coalesce((SELECT jsonb_agg(jsonb_build_object(
@@ -9556,11 +9888,13 @@ BEGIN
     );
   END IF;
 
-  SELECT j.* INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
+  SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j."printMode"
+    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
   PERFORM set_config('app.printing_job_id',job_row.id,true),
           set_config('app.printing_batch_id',job_row."batchId",true),
           set_config('app.printing_printer_id',job_row."printerId",true);
-  SELECT ps.* INTO STRICT session_row FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id FOR UPDATE;
+  SELECT ps.id INTO STRICT session_row FROM public."PrintSession" ps
+    WHERE ps."printJobId"=job_row.id FOR UPDATE;
   PERFORM set_config('app.printing_session_row_id',session_row.id,true);
   SELECT coalesce(array_agg(value #>> '{}'),'{}'::text[]) INTO item_ids
     FROM jsonb_array_elements(coalesce(p_details->'itemIds','[]'::jsonb));
@@ -9727,7 +10061,7 @@ CREATE OR REPLACE FUNCTION app_public.require_customer_auth_session(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public
 AS $$
-DECLARE session_row public."CustomerAuthSession"%ROWTYPE;
+DECLARE session_row record;
 BEGIN
   IF length(p_capability)<32 OR length(p_capability)>4096
      OR p_checked_at IS NULL
@@ -9736,16 +10070,18 @@ BEGIN
   END IF;
   PERFORM app_public.public_verify_bind('public-verification-'||p_operation,p_request_id,NULL,NULL,NULL,NULL,NULL);
   PERFORM set_config('app.public_verification_customer_session_hash',encode(sha256(convert_to(p_capability,'UTF8')),'hex'),true);
-  SELECT s.* INTO session_row
+  SELECT s.id,s."customerUserId",s."customerEmail",s."authStrength",s."authProvider",
+    s."expiresAt",s."revokedAt" INTO session_row
   FROM public."CustomerAuthSession" s
   WHERE s."tokenHash"=encode(sha256(convert_to(p_capability,'UTF8')),'hex');
   IF session_row.id IS NULL OR session_row."revokedAt" IS NOT NULL OR session_row."expiresAt"<=p_checked_at THEN
     RAISE EXCEPTION 'PUBLIC_CUSTOMER_SESSION_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.public_verification_target_id',session_row.id,true);
-  UPDATE public."CustomerAuthSession" SET "lastSeenAt"=p_checked_at,"updatedAt"=p_checked_at
-  WHERE id=session_row.id AND "revokedAt" IS NULL AND "expiresAt">p_checked_at
-  RETURNING * INTO session_row;
+  UPDATE public."CustomerAuthSession" AS s SET "lastSeenAt"=p_checked_at,"updatedAt"=p_checked_at
+  WHERE s.id=session_row.id AND s."revokedAt" IS NULL AND s."expiresAt">p_checked_at
+  RETURNING s.id,s."customerUserId",s."customerEmail",s."authStrength",s."authProvider",s."expiresAt",s."revokedAt"
+  INTO session_row;
   IF session_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_CUSTOMER_SESSION_DENIED' USING ERRCODE='42501';
   END IF;
@@ -9785,7 +10121,7 @@ CREATE OR REPLACE FUNCTION app_public.revoke_customer_auth_session(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public
 AS $$
-DECLARE session_row public."CustomerAuthSession"%ROWTYPE;
+DECLARE session_row record;
 BEGIN
   IF length(p_capability)<32 OR length(p_capability)>4096 OR p_revoked_at IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_CUSTOMER_SESSION_DENIED' USING ERRCODE='42501';
@@ -9797,7 +10133,7 @@ BEGIN
     'app.public_verification_customer_session_hash',
     encode(sha256(convert_to(p_capability,'UTF8')),'hex'),true
   );
-  SELECT s.* INTO session_row FROM public."CustomerAuthSession" s
+  SELECT s.id INTO session_row FROM public."CustomerAuthSession" s
   WHERE s."tokenHash"=encode(sha256(convert_to(p_capability,'UTF8')),'hex');
   IF session_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_CUSTOMER_SESSION_DENIED' USING ERRCODE='42501';
@@ -9840,12 +10176,12 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public
 AS $$
 DECLARE
-  qr public."QRCode"%ROWTYPE;
-  batch public."Batch"%ROWTYPE;
-  brand public."Licensee"%ROWTYPE;
-  organization public."Organization"%ROWTYPE;
-  manufacturer public."User"%ROWTYPE;
-  previous_scan public."QrScanLog"%ROWTYPE;
+  qr record;
+  batch record;
+  brand record;
+  organization record;
+  manufacturer record;
+  previous_scan record;
   replacement_status text := 'NONE';
   classification text;
   outcome public."VerificationDecisionOutcome";
@@ -9874,6 +10210,10 @@ BEGIN
      OR (p_signed_token_digest IS NOT NULL AND p_signed_token_digest !~ '^(?:[A-Za-z0-9._-]{1,32}:)?[a-f0-9]{64}$') THEN
     RAISE EXCEPTION 'PUBLIC_VERIFICATION_INVALID_INPUT' USING ERRCODE='22023';
   END IF;
+  SELECT NULL::text AS id,NULL::text AS "licenseeId",NULL::text AS "manufacturerId",
+    NULL::text AS "lifecycleState",NULL::timestamp AS "printedAt",NULL::timestamp AS "suspendedAt" INTO batch;
+  SELECT NULL::text AS id,NULL::text AS name,NULL::text AS website INTO manufacturer;
+  SELECT NULL::text AS id,NULL::timestamp AS "scannedAt",NULL::text AS "ipAddress",NULL::text AS device INTO previous_scan;
 
   PERFORM app_public.public_verify_bind(
     'public-verification-execute',p_request_id,p_qr_id,NULL,decision_id,NULL,NULL
@@ -9883,21 +10223,17 @@ BEGIN
   SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."scanCount",q."scannedAt",q."printedAt",
     q."issuanceMode",q."customerVerifiableAt",q."signedFirstSeenAt",q."lastSignedVerificationAt",
     q."lastSignedVerificationIpHash",q."lastSignedVerificationDeviceHash"
-  INTO STRICT qr.id,qr.code,qr."licenseeId",qr."batchId",qr.status,qr."scanCount",
-    qr."scannedAt",qr."printedAt",qr."issuanceMode",qr."customerVerifiableAt",
-    qr."signedFirstSeenAt",qr."lastSignedVerificationAt",
-    qr."lastSignedVerificationIpHash",qr."lastSignedVerificationDeviceHash"
+  INTO STRICT qr
   FROM public."QRCode" q WHERE q.id=p_qr_id FOR UPDATE;
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
   PERFORM set_config('app.public_verification_batch_id',coalesce(qr."batchId",''),true);
   SELECT l.id,l."orgId",l.name,l."brandName",l.website,l."supportEmail",l."supportPhone",
     l."isActive",l."suspendedAt"
-  INTO brand.id,brand."orgId",brand.name,brand."brandName",brand.website,
-    brand."supportEmail",brand."supportPhone",brand."isActive",brand."suspendedAt"
+  INTO brand
   FROM public."Licensee" l WHERE l.id=qr."licenseeId";
   IF brand.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_VERIFICATION_SCOPE_INVALID' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_organization_id',brand."orgId",true);
-  SELECT o.id,o."isActive" INTO organization.id,organization."isActive"
+  SELECT o.id,o."isActive" INTO organization
   FROM public."Organization" o WHERE o.id=brand."orgId";
   IF organization.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_VERIFICATION_SCOPE_INVALID' USING ERRCODE='42501';
@@ -9907,20 +10243,19 @@ BEGIN
   END IF;
   IF qr."batchId" IS NOT NULL THEN
     SELECT b.id,b."licenseeId",b."manufacturerId",b."lifecycleState",b."printedAt",b."suspendedAt"
-    INTO batch.id,batch."licenseeId",batch."manufacturerId",batch."lifecycleState",
-      batch."printedAt",batch."suspendedAt"
+    INTO batch
     FROM public."Batch" b WHERE b.id=qr."batchId";
     IF batch.id IS NULL OR batch."licenseeId"<>qr."licenseeId" THEN
       RAISE EXCEPTION 'PUBLIC_VERIFICATION_SCOPE_INVALID' USING ERRCODE='42501';
     END IF;
     IF batch.id IS NOT NULL AND batch."manufacturerId" IS NOT NULL THEN
       PERFORM set_config('app.public_verification_manufacturer_id',batch."manufacturerId",true);
-      SELECT u.id,u.name,u.website INTO manufacturer.id,manufacturer.name,manufacturer.website
+      SELECT u.id,u.name,u.website INTO manufacturer
       FROM public."User" u WHERE u.id=batch."manufacturerId";
     END IF;
   END IF;
   SELECT s.id,s."scannedAt",s."ipAddress",s.device
-  INTO previous_scan.id,previous_scan."scannedAt",previous_scan."ipAddress",previous_scan.device
+  INTO previous_scan
   FROM public."QrScanLog" s
   WHERE s."qrCodeId"=qr.id
   ORDER BY s."scannedAt" DESC,s.id DESC LIMIT 1;
@@ -10138,7 +10473,7 @@ CREATE OR REPLACE FUNCTION app_public.verify_signed_qr(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public
 AS $$
-DECLARE qr public."QRCode"%ROWTYPE; batch public."Batch"%ROWTYPE;
+DECLARE qr record; batch record;
 BEGIN
   IF p_token_digest !~ '^(?:[A-Za-z0-9._-]{1,32}:)?[a-f0-9]{64}$'
      OR length(coalesce(p_nonce,'')) NOT BETWEEN 8 AND 256
@@ -10152,8 +10487,7 @@ BEGIN
   );
   SELECT q.id,q."licenseeId",q."batchId",q."tokenHash",q."tokenNonce",q."replayEpoch",
     q."tokenIssuedAt",q."tokenExpiresAt"
-  INTO qr.id,qr."licenseeId",qr."batchId",qr."tokenHash",qr."tokenNonce",qr."replayEpoch",
-    qr."tokenIssuedAt",qr."tokenExpiresAt"
+  INTO qr
   FROM public."QRCode" q WHERE q.id=p_qr_id;
   IF qr.id IS NULL OR qr."licenseeId"<>p_licensee_id
      OR qr."batchId" IS DISTINCT FROM p_batch_id
@@ -10168,7 +10502,7 @@ BEGIN
     RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
   END IF;
   IF qr."batchId" IS NOT NULL THEN
-    SELECT b.id,b."manufacturerId" INTO batch.id,batch."manufacturerId"
+    SELECT b.id,b."manufacturerId" INTO batch
     FROM public."Batch" b WHERE b.id=qr."batchId";
     IF batch."manufacturerId" IS DISTINCT FROM p_manufacturer_id THEN
       RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
@@ -10213,8 +10547,8 @@ CREATE OR REPLACE FUNCTION app_public.start_verification_session(
 )
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE evidence public."VerificationEvidenceSnapshot"%ROWTYPE;
-  decision public."VerificationDecision"%ROWTYPE;
+DECLARE evidence record;
+  decision record;
   customer record;
   session_id text:=gen_random_uuid()::text;
   expires_at timestamp without time zone:=p_checked_at+interval '24 hours';
@@ -10235,7 +10569,7 @@ BEGIN
     'public-verification-session-start',p_request_id,NULL,NULL,NULL,session_id,NULL
   );
   SELECT e.id,e."verificationDecisionId",e.metadata
-  INTO evidence.id,evidence."verificationDecisionId",evidence.metadata
+  INTO evidence
   FROM public."VerificationEvidenceSnapshot" e
   WHERE e.metadata#>>'{publicSessionStart,tokenHash}'=p_session_start_token_hash
   ORDER BY e."createdAt" DESC LIMIT 1 FOR UPDATE;
@@ -10246,7 +10580,7 @@ BEGIN
   END IF;
   PERFORM set_config('app.public_verification_decision_id',evidence."verificationDecisionId",true);
   SELECT d.id,d."qrCodeId",d.code,d."licenseeId"
-  INTO STRICT decision.id,decision."qrCodeId",decision.code,decision."licenseeId"
+  INTO STRICT decision
   FROM public."VerificationDecision" d
   WHERE d.id=evidence."verificationDecisionId";
   IF decision."licenseeId" IS NOT NULL THEN
@@ -10289,8 +10623,8 @@ CREATE OR REPLACE FUNCTION app_public.read_verification_session(
 )
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE s public."CustomerVerificationSession"%ROWTYPE; d public."VerificationDecision"%ROWTYPE;
-  evidence public."VerificationEvidenceSnapshot"%ROWTYPE; brand_name text;
+DECLARE s record; d record;
+  evidence record; brand_name text;
   customer record;
 BEGIN
   SELECT NULL::text AS "customerUserId",NULL::text AS "customerEmail" INTO customer;
@@ -10305,9 +10639,7 @@ BEGIN
   SELECT cs.id,cs."verificationDecisionId",cs.code,cs."entryMethod",cs."authState",cs."customerUserId",
     cs."intakeCompletedAt",cs."revealedAt",cs."expiresAt",cs."proofBindingTokenHash",
     cs."proofBindingExpiresAt",cs."createdAt"
-  INTO s.id,s."verificationDecisionId",s.code,s."entryMethod",s."authState",s."customerUserId",
-    s."intakeCompletedAt",s."revealedAt",s."expiresAt",s."proofBindingTokenHash",
-    s."proofBindingExpiresAt",s."createdAt"
+  INTO s
   FROM public."CustomerVerificationSession" cs WHERE cs.id=p_session_id;
   IF s.id IS NULL OR s."expiresAt"<=p_checked_at OR s."proofBindingExpiresAt"<=p_checked_at
      OR s."proofBindingTokenHash" IS DISTINCT FROM p_session_proof_hash
@@ -10315,9 +10647,9 @@ BEGIN
     RAISE EXCEPTION 'PUBLIC_VERIFICATION_SESSION_INVALID' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.public_verification_decision_id',s."verificationDecisionId",true);
-  SELECT vd.id,vd."licenseeId" INTO STRICT d.id,d."licenseeId"
+  SELECT vd.id,vd."licenseeId" INTO STRICT d
   FROM public."VerificationDecision" vd WHERE vd.id=s."verificationDecisionId";
-  SELECT e.id,e.metadata INTO evidence.id,evidence.metadata
+  SELECT e.id,e.metadata INTO evidence
   FROM public."VerificationEvidenceSnapshot" e
   WHERE e."verificationDecisionId"=d.id ORDER BY e."createdAt" DESC LIMIT 1;
   PERFORM set_config('app.public_verification_licensee_id',coalesce(d."licenseeId",''),true);
@@ -10341,7 +10673,7 @@ CREATE OR REPLACE FUNCTION app_public.write_verification_session(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE s public."CustomerVerificationSession"%ROWTYPE; intake_id text; customer record;
+DECLARE s record; intake_id text; customer record;
 BEGIN
   IF p_operation NOT IN ('INTAKE','REVEAL') THEN
     RAISE EXCEPTION 'PUBLIC_VERIFICATION_SESSION_INVALID' USING ERRCODE='22023';
@@ -10353,7 +10685,7 @@ BEGIN
     'public-verification-session-write',p_request_id,NULL,NULL,NULL,p_session_id,NULL
   );
   SELECT cs.id,cs."customerUserId",cs."expiresAt",cs."proofBindingTokenHash",cs."proofBindingExpiresAt"
-  INTO s.id,s."customerUserId",s."expiresAt",s."proofBindingTokenHash",s."proofBindingExpiresAt"
+  INTO s
   FROM public."CustomerVerificationSession" cs WHERE cs.id=p_session_id FOR UPDATE;
   IF s.id IS NULL OR s."expiresAt"<=p_checked_at OR s."proofBindingExpiresAt"<=p_checked_at
      OR s."proofBindingTokenHash"<>p_session_proof_hash
@@ -10461,8 +10793,8 @@ CREATE OR REPLACE FUNCTION app_public.claim_customer_ownership(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE customer record; session_row public."CustomerVerificationSession"%ROWTYPE;
-  qr public."QRCode"%ROWTYPE; batch_state text; ownership public."Ownership"%ROWTYPE;
+DECLARE customer record; session_row record;
+  qr record; batch_state text; ownership record;
   ownership_id text:=gen_random_uuid()::text; action text; result text;
 BEGIN
   SELECT NULL::text AS "customerUserId",NULL::text AS "customerEmail" INTO customer;
@@ -10483,7 +10815,7 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-ownership-claim',p_request_id,NULL,NULL,NULL,p_session_id,NULL
   );
-  SELECT s.* INTO session_row FROM public."CustomerVerificationSession" s
+  SELECT s.id,s."customerUserId",s."qrCodeId" INTO session_row FROM public."CustomerVerificationSession" s
   WHERE s.id=p_session_id AND s."proofBindingTokenHash"=p_session_proof_hash
     AND s."proofBindingExpiresAt">p_checked_at AND s."expiresAt">p_checked_at;
   IF session_row.id IS NULL OR
@@ -10493,7 +10825,7 @@ BEGIN
   END IF;
   PERFORM set_config('app.public_verification_qr_id',session_row."qrCodeId",true);
   SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."issuanceMode",q."customerVerifiableAt"
-  INTO qr.id,qr.code,qr."licenseeId",qr."batchId",qr.status,qr."issuanceMode",qr."customerVerifiableAt"
+  INTO qr
   FROM public."QRCode" q WHERE q.id=session_row."qrCodeId";
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_TARGET_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
@@ -10506,7 +10838,8 @@ BEGIN
      OR (qr."issuanceMode"='GOVERNED_PRINT' AND qr."customerVerifiableAt" IS NULL) THEN
     RAISE EXCEPTION 'PUBLIC_OWNERSHIP_NOT_READY' USING ERRCODE='55000';
   END IF;
-  SELECT o.* INTO ownership FROM public."Ownership" o WHERE o."qrCodeId"=qr.id FOR UPDATE;
+  SELECT o.id,o."userId",o."deviceTokenHash",o."claimedAt" INTO ownership
+    FROM public."Ownership" o WHERE o."qrCodeId"=qr.id FOR UPDATE;
   IF ownership.id IS NULL THEN
     IF p_link_only THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_NOT_FOUND' USING ERRCODE='42501'; END IF;
     PERFORM set_config('app.public_verification_target_id',ownership_id,true);
@@ -10516,7 +10849,7 @@ BEGIN
       ownership_id,qr.id,customer."customerUserId",p_device_token_hash,p_ip_hash,p_user_agent_hash,
       CASE WHEN customer."customerUserId" IS NULL THEN 'DEVICE' ELSE 'USER' END,
       CASE WHEN customer."customerUserId" IS NULL THEN NULL ELSE p_checked_at END,p_checked_at
-    ) RETURNING * INTO ownership;
+    ) RETURNING id,"userId","deviceTokenHash","claimedAt" INTO ownership;
     result:=CASE WHEN customer."customerUserId" IS NULL THEN 'CLAIMED_DEVICE' ELSE 'CLAIMED_USER' END;
     action:='VERIFY_CLAIM_SUCCESS';
   ELSIF ownership."userId"=customer."customerUserId"
@@ -10524,7 +10857,8 @@ BEGIN
     PERFORM set_config('app.public_verification_target_id',ownership.id,true);
     IF customer."customerUserId" IS NOT NULL AND ownership."userId" IS NULL THEN
       UPDATE public."Ownership" SET "userId"=customer."customerUserId","linkedAt"=p_checked_at,
-        "claimSource"='DEVICE_AND_USER' WHERE id=ownership.id RETURNING * INTO ownership;
+        "claimSource"='DEVICE_AND_USER' WHERE id=ownership.id
+      RETURNING id,"userId","deviceTokenHash","claimedAt" INTO ownership;
       result:='LINKED_TO_SIGNED_IN_ACCOUNT'; action:='VERIFY_CLAIM_LINKED_TO_USER';
     ELSE
       result:='ALREADY_OWNED_BY_YOU'; action:='VERIFY_CLAIM_IDEMPOTENT';
@@ -10559,7 +10893,7 @@ CREATE OR REPLACE FUNCTION app_public.create_customer_ownership_transfer(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE customer record; qr public."QRCode"%ROWTYPE; ownership public."Ownership"%ROWTYPE;
+DECLARE customer record; qr record; ownership record;
   transfer_id text:=gen_random_uuid()::text;
 BEGIN
   SELECT * INTO customer FROM app_public.require_customer_auth_session(
@@ -10573,12 +10907,12 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-ownership-transfer-create',p_request_id,NULL,p_requested_code,NULL,NULL,NULL
   );
-  SELECT q.id,q.code,q."licenseeId" INTO qr.id,qr.code,qr."licenseeId"
+  SELECT q.id,q.code,q."licenseeId" INTO qr
   FROM public."QRCode" q WHERE q.code=p_requested_code;
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_TARGET_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_qr_id',qr.id,true);
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
-  SELECT o.* INTO ownership FROM public."Ownership" o
+  SELECT o.id INTO ownership FROM public."Ownership" o
   WHERE o."qrCodeId"=qr.id AND o."userId"=customer."customerUserId" FOR UPDATE;
   IF ownership.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_target_id',ownership.id,true);
@@ -10613,8 +10947,8 @@ CREATE OR REPLACE FUNCTION app_public.cancel_customer_ownership_transfer(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE customer record; qr public."QRCode"%ROWTYPE; changed integer;
-  transfer public."OwnershipTransfer"%ROWTYPE;
+DECLARE customer record; qr record; changed integer;
+  transfer record;
 BEGIN
   SELECT * INTO customer FROM app_public.require_customer_auth_session(
     p_customer_capability,p_checked_at,p_request_id,'customer-ownership'
@@ -10622,12 +10956,12 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-ownership-transfer-cancel',p_request_id,NULL,p_requested_code,NULL,NULL,NULL
   );
-  SELECT q.id,q.code,q."licenseeId" INTO qr.id,qr.code,qr."licenseeId"
+  SELECT q.id,q.code,q."licenseeId" INTO qr
   FROM public."QRCode" q WHERE q.code=p_requested_code;
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_TARGET_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_qr_id',qr.id,true);
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
-  SELECT t.* INTO transfer FROM public."OwnershipTransfer" t
+  SELECT t.id,t."initiatedByEmail",t."recipientEmail" INTO transfer FROM public."OwnershipTransfer" t
   WHERE t."qrCodeId"=qr.id AND t."initiatedByCustomerId"=customer."customerUserId"
     AND t.status='PENDING' AND (p_transfer_id IS NULL OR t.id=p_transfer_id)
   ORDER BY t."createdAt" DESC,t.id DESC LIMIT 1 FOR UPDATE;
@@ -10655,8 +10989,8 @@ CREATE OR REPLACE FUNCTION app_public.accept_customer_ownership_transfer(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE customer record; transfer public."OwnershipTransfer"%ROWTYPE; qr public."QRCode"%ROWTYPE;
-  ownership public."Ownership"%ROWTYPE;
+DECLARE customer record; transfer record; qr record;
+  ownership record;
 BEGIN
   SELECT * INTO customer FROM app_public.require_customer_auth_session(
     p_customer_capability,p_checked_at,p_request_id,'customer-ownership'
@@ -10668,7 +11002,8 @@ BEGIN
     'public-verification-ownership-transfer-accept',p_request_id,NULL,NULL,NULL,NULL,NULL
   );
   PERFORM set_config('app.public_verification_transfer_token_hash',p_token_hash,true);
-  SELECT t.* INTO transfer FROM public."OwnershipTransfer" t
+  SELECT t.id,t.status,t."expiresAt",t."initiatedByCustomerId",t."recipientEmail",
+    t."qrCodeId",t."ownershipId",t."initiatedByEmail" INTO transfer FROM public."OwnershipTransfer" t
   WHERE t."tokenHash"=p_token_hash FOR UPDATE;
   IF transfer.id IS NULL OR transfer.status<>'PENDING' OR transfer."expiresAt"<=p_checked_at
      OR transfer."initiatedByCustomerId"=customer."customerUserId"
@@ -10678,11 +11013,11 @@ BEGIN
   END IF;
   PERFORM set_config('app.public_verification_qr_id',transfer."qrCodeId",true);
   PERFORM set_config('app.public_verification_support_id',transfer.id,true);
-  SELECT q.id,q.code,q."licenseeId" INTO STRICT qr.id,qr.code,qr."licenseeId"
+  SELECT q.id,q.code,q."licenseeId" INTO STRICT qr
   FROM public."QRCode" q WHERE q.id=transfer."qrCodeId";
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
   PERFORM set_config('app.public_verification_target_id',transfer."ownershipId",true);
-  SELECT o.* INTO STRICT ownership FROM public."Ownership" o
+  SELECT o.id INTO STRICT ownership FROM public."Ownership" o
   WHERE o.id=transfer."ownershipId" AND o."qrCodeId"=qr.id FOR UPDATE;
   UPDATE public."OwnershipTransfer" SET status='ACCEPTED',"acceptedAt"=p_checked_at,
     "lastViewedAt"=p_checked_at,"updatedAt"=p_checked_at WHERE id=transfer.id;
@@ -10762,8 +11097,8 @@ CREATE OR REPLACE FUNCTION app_public.load_customer_passkey(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE challenge public."CustomerWebAuthnChallenge"%ROWTYPE;
-  credential public."CustomerWebAuthnCredential"%ROWTYPE;
+DECLARE challenge record;
+  credential record;
 BEGIN
   IF coalesce(array_length(p_ticket_hashes,1),0)<1 OR array_length(p_ticket_hashes,1)>4
      OR EXISTS (SELECT 1 FROM unnest(p_ticket_hashes) h
@@ -10773,7 +11108,9 @@ BEGIN
   END IF;
   PERFORM app_public.public_verify_bind('public-verification-customer-passkey',p_request_id);
   PERFORM set_config('app.public_verification_passkey_ticket_hashes',array_to_string(p_ticket_hashes,','),true);
-  SELECT c.* INTO challenge FROM public."CustomerWebAuthnChallenge" c
+  SELECT c.id,c."customerUserId",c."customerEmail",c.purpose,c."challengeHash",
+    c."credentialIds",c."expiresAt",c.origin,c."rpId" INTO challenge
+    FROM public."CustomerWebAuthnChallenge" c
   WHERE c."ticketHash"=ANY(p_ticket_hashes)
     AND (p_purpose IS NULL OR c.purpose=p_purpose)
     AND c."consumedAt" IS NULL AND c."expiresAt">p_checked_at
@@ -10782,7 +11119,8 @@ BEGIN
   PERFORM set_config('app.public_verification_target_id',challenge.id,true);
   IF p_credential_id IS NOT NULL THEN
     PERFORM set_config('app.public_verification_support_id',p_credential_id,true);
-    SELECT c.* INTO credential FROM public."CustomerWebAuthnCredential" c
+    SELECT c.id,c."customerUserId",c."customerEmail",c."credentialId",c."publicKeySpki",c.counter
+      INTO credential FROM public."CustomerWebAuthnCredential" c
     WHERE c."customerUserId"=challenge."customerUserId" AND c."credentialId"=p_credential_id;
     IF credential.id IS NULL OR NOT p_credential_id=ANY(challenge."credentialIds") THEN
       RAISE EXCEPTION 'WEBAUTHN_CREDENTIAL_NOT_FOUND' USING ERRCODE='02000';
@@ -10808,8 +11146,8 @@ CREATE OR REPLACE FUNCTION app_public.finish_customer_passkey(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE challenge public."CustomerWebAuthnChallenge"%ROWTYPE;
-  credential public."CustomerWebAuthnCredential"%ROWTYPE; customer record;
+DECLARE challenge record;
+  credential record; customer record;
   credential_id text:=p_payload->>'credentialId'; next_counter integer;
 BEGIN
   IF p_purpose NOT IN ('ENROLLMENT','LOGIN','STEP_UP')
@@ -10827,7 +11165,8 @@ BEGIN
     PERFORM app_public.public_verify_bind('public-verification-customer-passkey',p_request_id);
   END IF;
   PERFORM set_config('app.public_verification_passkey_ticket_hashes',array_to_string(p_ticket_hashes,','),true);
-  SELECT c.* INTO challenge FROM public."CustomerWebAuthnChallenge" c
+  SELECT c.id,c."customerUserId",c."customerEmail",c.purpose,c."credentialIds",c."expiresAt"
+    INTO challenge FROM public."CustomerWebAuthnChallenge" c
   WHERE c."ticketHash"=ANY(p_ticket_hashes) AND c.purpose=p_purpose
     AND c."consumedAt" IS NULL AND c."expiresAt">p_checked_at
   ORDER BY c."createdAt" DESC LIMIT 1;
@@ -10836,7 +11175,7 @@ BEGIN
   UPDATE public."CustomerWebAuthnChallenge"
   SET "consumedAt"=p_checked_at
   WHERE id=challenge.id AND "consumedAt" IS NULL AND "expiresAt">p_checked_at
-  RETURNING * INTO challenge;
+  RETURNING id,"customerUserId","customerEmail",purpose,"credentialIds","expiresAt" INTO challenge;
   IF challenge.id IS NULL THEN RAISE EXCEPTION 'WEBAUTHN_CHALLENGE_NOT_FOUND' USING ERRCODE='02000'; END IF;
   PERFORM set_config('app.public_verification_customer_user_id',challenge."customerUserId",true);
   IF p_purpose IN ('ENROLLMENT','STEP_UP')
@@ -10850,7 +11189,8 @@ BEGIN
       RAISE EXCEPTION 'PUBLIC_PASSKEY_INVALID' USING ERRCODE='22023';
     END IF;
     PERFORM set_config('app.public_verification_support_id',credential_id,true);
-    SELECT c.* INTO credential FROM public."CustomerWebAuthnCredential" c
+    SELECT c.id,c."customerUserId",c."credentialId",c.counter INTO credential
+      FROM public."CustomerWebAuthnCredential" c
     WHERE c."credentialId"=credential_id;
     IF credential.id IS NOT NULL AND credential."customerUserId"<>challenge."customerUserId" THEN
       RAISE EXCEPTION 'PUBLIC_PASSKEY_DENIED' USING ERRCODE='42501';
@@ -10867,7 +11207,7 @@ BEGIN
         (p_payload->>'counter')::integer,
         ARRAY(SELECT jsonb_array_elements_text(coalesce(p_payload->'transports','[]'::jsonb))),
         p_checked_at,p_checked_at,p_checked_at
-      ) RETURNING * INTO credential;
+      ) RETURNING id,"customerUserId","credentialId",counter INTO credential;
     ELSE
       PERFORM set_config('app.public_verification_support_id',credential.id,true);
       UPDATE public."CustomerWebAuthnCredential" SET
@@ -10877,17 +11217,19 @@ BEGIN
         counter=(p_payload->>'counter')::integer,
         transports=ARRAY(SELECT jsonb_array_elements_text(coalesce(p_payload->'transports','[]'::jsonb))),
         "lastUsedAt"=p_checked_at,"updatedAt"=p_checked_at
-      WHERE id=credential.id RETURNING * INTO credential;
+      WHERE id=credential.id RETURNING id,"customerUserId","credentialId",counter INTO credential;
     END IF;
   ELSE
     PERFORM set_config('app.public_verification_support_id',credential_id,true);
-    SELECT c.* INTO credential FROM public."CustomerWebAuthnCredential" c
+    SELECT c.id,c."customerUserId",c."credentialId",c.counter INTO credential
+      FROM public."CustomerWebAuthnCredential" c
     WHERE c."customerUserId"=challenge."customerUserId" AND c."credentialId"=credential_id;
     IF credential.id IS NULL OR NOT credential_id=ANY(challenge."credentialIds") THEN
       RAISE EXCEPTION 'WEBAUTHN_CREDENTIAL_NOT_FOUND' USING ERRCODE='02000';
     END IF;
     PERFORM set_config('app.public_verification_support_id',credential.id,true);
-    SELECT c.* INTO credential FROM public."CustomerWebAuthnCredential" c
+    SELECT c.id,c."customerUserId",c."credentialId",c.counter INTO credential
+      FROM public."CustomerWebAuthnCredential" c
     WHERE c.id=credential.id FOR UPDATE;
     next_counter:=(p_payload->>'nextCounter')::integer;
     IF next_counter<credential.counter OR (next_counter>0 AND credential.counter>0 AND next_counter<=credential.counter) THEN
@@ -10952,7 +11294,7 @@ CREATE OR REPLACE FUNCTION app_public.submit_product_feedback(
 ) RETURNS TABLE("accepted" boolean,"publicReference" text,"message" text)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE qr public."QRCode"%ROWTYPE; key_row public."ActionIdempotencyKey"%ROWTYPE;
+DECLARE qr record; key_row record;
   reference text:='FB-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,12)); audit_id text;
 BEGIN
   IF p_rating<1 OR p_rating>5 OR p_satisfaction NOT IN
@@ -10963,10 +11305,10 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-feedback',p_request_id,NULL,p_requested_code,NULL,NULL,p_idempotency_digest
   );
-  SELECT q.id,q."licenseeId" INTO qr.id,qr."licenseeId"
+  SELECT q.id,q."licenseeId" INTO qr
   FROM public."QRCode" q WHERE q.code=p_requested_code;
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_FEEDBACK_TARGET_INVALID' USING ERRCODE='42501'; END IF;
-  SELECT k.id,k."responsePayload" INTO key_row.id,key_row."responsePayload"
+  SELECT k.id,k."responsePayload" INTO key_row
   FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=p_idempotency_digest;
   IF key_row.id IS NOT NULL THEN
     RETURN QUERY SELECT true,coalesce(key_row."responsePayload"->>'reference',reference),
@@ -11001,8 +11343,8 @@ CREATE OR REPLACE FUNCTION app_public.submit_public_incident(
 ) RETURNS TABLE("accepted" boolean,"publicReference" text,"message" text)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE qr public."QRCode"%ROWTYPE; session_row public."CustomerVerificationSession"%ROWTYPE;
-  key_row public."ActionIdempotencyKey"%ROWTYPE;
+DECLARE qr record; session_row record;
+  key_row record;
   incident_id text:=gen_random_uuid()::text; ticket_id text:=gen_random_uuid()::text;
   outbox_id text:=gen_random_uuid()::text;
   reference text:='INC-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,12));
@@ -11019,21 +11361,21 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-incident',p_request_id,NULL,NULL,NULL,p_session_id,p_idempotency_digest
   );
-  SELECT s.* INTO session_row FROM public."CustomerVerificationSession" s
+  SELECT s.id,s."qrCodeId" INTO session_row FROM public."CustomerVerificationSession" s
   WHERE s.id=p_session_id AND s."proofBindingTokenHash"=p_session_proof_hash
     AND s."proofBindingExpiresAt">p_submitted_at AND s."expiresAt">p_submitted_at;
   IF session_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_INCIDENT_SESSION_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.public_verification_qr_id',session_row."qrCodeId",true);
-  SELECT q.id,q.code,q."licenseeId" INTO qr.id,qr.code,qr."licenseeId"
+  SELECT q.id,q.code,q."licenseeId" INTO qr
   FROM public."QRCode" q WHERE q.id=session_row."qrCodeId";
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_INCIDENT_TARGET_INVALID' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_qr_id',qr.id,true);
   PERFORM set_config('app.public_verification_target_id',incident_id,true);
   PERFORM set_config('app.public_verification_support_id',ticket_id,true);
   PERFORM set_config('app.public_verification_outbox_id',outbox_id,true);
-  SELECT k.id,k."responsePayload" INTO key_row.id,key_row."responsePayload"
+  SELECT k.id,k."responsePayload" INTO key_row
   FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=p_idempotency_digest;
   IF key_row.id IS NOT NULL THEN
     RETURN QUERY SELECT true,key_row."responsePayload"->>'reference','Concern submitted successfully.'; RETURN;
@@ -11118,7 +11460,7 @@ CREATE OR REPLACE FUNCTION app_public.submit_request_access(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
 DECLARE
-  existing public."ActionIdempotencyKey"%ROWTYPE;
+  existing record;
   row_id text:=gen_random_uuid()::text;
   reference text:='RA-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,12));
 BEGIN
@@ -11135,7 +11477,7 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-request-access',p_request_id,NULL,NULL,NULL,NULL,p_idempotency_digest
   );
-  SELECT k.id,k."responsePayload" INTO existing.id,existing."responsePayload"
+  SELECT k.id,k."responsePayload" INTO existing
   FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=p_idempotency_digest;
   IF existing.id IS NOT NULL THEN
     RETURN QUERY SELECT true,existing."responsePayload"->>'reference',
@@ -11175,8 +11517,8 @@ CREATE OR REPLACE FUNCTION app_public.submit_public_support(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
 DECLARE
-  existing public."ActionIdempotencyKey"%ROWTYPE;
-  qr public."QRCode"%ROWTYPE;
+  existing record;
+  qr record;
   row_id text:=gen_random_uuid()::text;
   reference text:='SUP-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,12));
 BEGIN
@@ -11193,12 +11535,12 @@ BEGIN
     'public-verification-support',p_request_id,NULL,p_verified_code,NULL,NULL,p_idempotency_digest
   );
   IF p_verified_code IS NOT NULL THEN
-    SELECT q.id,q.code,q."licenseeId" INTO qr.id,qr.code,qr."licenseeId"
+    SELECT q.id,q.code,q."licenseeId" INTO qr
     FROM public."QRCode" q WHERE q.code=p_verified_code;
     IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_SUPPORT_TARGET_INVALID' USING ERRCODE='42501'; END IF;
     PERFORM set_config('app.public_verification_qr_id',qr.id,true);
   END IF;
-  SELECT k.id,k."responsePayload" INTO existing.id,existing."responsePayload"
+  SELECT k.id,k."responsePayload" INTO existing
   FROM public."ActionIdempotencyKey" k WHERE k."keyHash"=p_idempotency_digest;
   IF existing.id IS NOT NULL THEN
     RETURN QUERY SELECT true,existing."responsePayload"->>'reference',
@@ -11241,7 +11583,7 @@ CREATE OR REPLACE FUNCTION app_public.complete_request_access_delivery(
 ) RETURNS TABLE("updated" boolean)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE key_row public."ActionIdempotencyKey"%ROWTYPE;
+DECLARE key_row record;
 BEGIN
   IF p_idempotency_digest !~ '^(?:[A-Za-z0-9._-]{1,32}:)?[a-f0-9]{64}$'
      OR p_admin_status NOT IN ('SENT','DRY_RUN','DISABLED','FAILED','SKIPPED')
@@ -11253,7 +11595,7 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-request-access-delivery',p_request_id,NULL,NULL,NULL,NULL,p_idempotency_digest
   );
-  SELECT k.* INTO key_row FROM public."ActionIdempotencyKey" k
+  SELECT k.id,k.scope INTO key_row FROM public."ActionIdempotencyKey" k
   WHERE k."keyHash"=p_idempotency_digest AND k.action='PUBLIC_REQUEST_ACCESS';
   IF key_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_REQUEST_ACCESS_DELIVERY_DENIED' USING ERRCODE='42501';
@@ -11279,7 +11621,7 @@ CREATE OR REPLACE FUNCTION app_public.complete_public_support_delivery(
 ) RETURNS TABLE("updated" boolean)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
-DECLARE key_row public."ActionIdempotencyKey"%ROWTYPE;
+DECLARE key_row record;
 BEGIN
   IF p_idempotency_digest !~ '^(?:[A-Za-z0-9._-]{1,32}:)?[a-f0-9]{64}$'
      OR p_admin_status NOT IN ('SENT','DRY_RUN','DISABLED','FAILED','SKIPPED')
@@ -11291,7 +11633,7 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-support-delivery',p_request_id,NULL,NULL,NULL,NULL,p_idempotency_digest
   );
-  SELECT k.* INTO key_row FROM public."ActionIdempotencyKey" k
+  SELECT k.id,k.scope INTO key_row FROM public."ActionIdempotencyKey" k
   WHERE k."keyHash"=p_idempotency_digest AND k.action='PUBLIC_SUPPORT';
   IF key_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_SUPPORT_DELIVERY_DENIED' USING ERRCODE='42501';
@@ -11427,7 +11769,7 @@ CREATE OR REPLACE FUNCTION app_rls.scheduled_job_prepare(
   p_request_id text
 ) RETURNS text
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE capability_hash text; credential public."ScheduledJobCredential"%ROWTYPE;
+DECLARE capability_hash text; credential record;
 BEGIN
   IF session_user <> 'mscqr_rls_cert_scheduled'
      OR p_capability !~ '^[A-Za-z0-9_-]{43}$'
@@ -11464,7 +11806,7 @@ BEGIN
      AND c."scheduleId"=p_schedule_id
      AND c."revokedAt" IS NULL
      AND c."expiresAt">clock_timestamp()
-   RETURNING c.* INTO credential;
+   RETURNING c.id INTO credential;
   IF NOT FOUND THEN RAISE EXCEPTION 'SCHEDULED_JOB_IDENTITY_DENIED' USING ERRCODE='42501'; END IF;
 
   PERFORM set_config('app.scheduled_credential_id',credential.id,true),
@@ -11596,15 +11938,17 @@ CREATE OR REPLACE FUNCTION app_rls.scheduled_get_compliance_pack_job(
   p_capability text,p_schedule_id text,p_request_id text,p_job_id text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE job public."CompliancePackJob"%ROWTYPE; report_value jsonb;
+DECLARE job record; report_value jsonb;
 BEGIN
   PERFORM app_rls.scheduled_job_prepare(p_capability,p_schedule_id,'get',p_request_id);
   PERFORM set_config('app.scheduled_job_id',p_job_id,true);
-  SELECT * INTO job FROM public."CompliancePackJob" WHERE id=p_job_id AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=p_schedule_id;
+  SELECT j."licenseeId",j."periodFrom",j."periodTo" INTO job
+    FROM public."CompliancePackJob" j
+    WHERE j.id=p_job_id AND j."triggerType"='SCHEDULED' AND j."scheduledScheduleId"=p_schedule_id;
   IF NOT FOUND OR job."licenseeId" IS NULL THEN RAISE EXCEPTION 'SCHEDULED_COMPLIANCE_JOB_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.scheduled_licensee_id',job."licenseeId",true),set_config('app.licensee_id',job."licenseeId",true);
   report_value:=app_rls.c03_build_compliance_report(job."licenseeId",job."periodFrom",job."periodTo");
-  RETURN jsonb_build_object('job',to_jsonb(job),'report',report_value);
+  RETURN jsonb_build_object('job',app_rls.c03_compliance_job_projection(p_job_id),'report',report_value);
 END
 $fn$;
 
@@ -11612,7 +11956,7 @@ CREATE OR REPLACE FUNCTION app_rls.scheduled_complete_compliance_pack_job(
   p_capability text,p_schedule_id text,p_request_id text,p_job_id text,p_result jsonb
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE job public."CompliancePackJob"%ROWTYPE;
+DECLARE job record;
 BEGIN
   IF jsonb_typeof(p_result)<>'object' OR p_result->>'fileName' IS NULL OR p_result->>'storageKey' IS NULL
      OR p_result->>'integrityHash' !~ '^[0-9a-f]{64}$' OR octet_length(p_result::text)>65536
@@ -11622,11 +11966,12 @@ BEGIN
   UPDATE public."CompliancePackJob" SET status='COMPLETED',"fileName"=p_result->>'fileName',"storageKey"=p_result->>'storageKey',
     "integrityHash"=p_result->>'integrityHash',"signatureAlgorithm"=p_result->>'signatureAlgorithm',summary=p_result,
     "finishedAt"=transaction_timestamp(),"updatedAt"=transaction_timestamp()
-    WHERE id=p_job_id AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=p_schedule_id AND status='RUNNING' RETURNING * INTO job;
+    WHERE id=p_job_id AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=p_schedule_id AND status='RUNNING'
+    RETURNING id,"licenseeId","storageKey" INTO job;
   IF NOT FOUND THEN RAISE EXCEPTION 'SCHEDULED_COMPLIANCE_TRANSITION_DENIED' USING ERRCODE='40001'; END IF;
   PERFORM set_config('app.scheduled_licensee_id',job."licenseeId",true),set_config('app.licensee_id',job."licenseeId",true);
   PERFORM app_rls.scheduled_job_queue_audit('COMPLIANCE_PACK_COMPLETED',job.id,job."licenseeId",jsonb_build_object('storageKey',job."storageKey"));
-  RETURN to_jsonb(job);
+  RETURN app_rls.c03_compliance_job_projection(p_job_id);
 END
 $fn$;
 
@@ -11634,17 +11979,18 @@ CREATE OR REPLACE FUNCTION app_rls.scheduled_fail_compliance_pack_job(
   p_capability text,p_schedule_id text,p_request_id text,p_job_id text,p_error_code text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE job public."CompliancePackJob"%ROWTYPE;
+DECLARE job record;
 BEGIN
   IF p_error_code !~ '^[A-Z][A-Z0-9_]{2,127}$' THEN RAISE EXCEPTION 'SCHEDULED_COMPLIANCE_ERROR_INVALID' USING ERRCODE='22023'; END IF;
   PERFORM app_rls.scheduled_job_prepare(p_capability,p_schedule_id,'fail',p_request_id);
   PERFORM set_config('app.scheduled_job_id',p_job_id,true);
   UPDATE public."CompliancePackJob" SET status='FAILED',"errorMessage"=p_error_code,"finishedAt"=transaction_timestamp(),"updatedAt"=transaction_timestamp()
-    WHERE id=p_job_id AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=p_schedule_id AND status='RUNNING' RETURNING * INTO job;
+    WHERE id=p_job_id AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=p_schedule_id AND status='RUNNING'
+    RETURNING id,"licenseeId" INTO job;
   IF NOT FOUND THEN RAISE EXCEPTION 'SCHEDULED_COMPLIANCE_TRANSITION_DENIED' USING ERRCODE='40001'; END IF;
   PERFORM set_config('app.scheduled_licensee_id',job."licenseeId",true),set_config('app.licensee_id',job."licenseeId",true);
   PERFORM app_rls.scheduled_job_queue_audit('COMPLIANCE_PACK_FAILED',job.id,job."licenseeId",jsonb_build_object('errorCode',p_error_code));
-  RETURN to_jsonb(job);
+  RETURN app_rls.c03_compliance_job_projection(p_job_id);
 END
 $fn$;
 
@@ -11747,7 +12093,10 @@ BEGIN
   ), claimed AS (
     UPDATE public."AuditLogOutbox" o SET attempts=o.attempts+1,"claimedAt"=p_attempted_at,
       "claimLeaseExpiresAt"=p_attempted_at+interval '5 minutes',"updatedAt"=transaction_timestamp()
-    FROM candidates c WHERE o.id=c.id RETURNING o.*
+    FROM candidates c WHERE o.id=c.id
+    RETURNING o.id,o."jobType",o."requestId",o."payloadDigest",o."idempotencyKey",
+      o."organizationId",o."licenseeId",o."manufacturerId",o."initiatingUserId",
+      o."expiresAt",o.attempts
   ) SELECT c.id,c."jobType",c."requestId",c."payloadDigest",c."idempotencyKey",c."organizationId",c."licenseeId",c."manufacturerId",c."initiatingUserId",c."expiresAt",c.attempts FROM claimed c;
 END
 $fn$;
@@ -11759,7 +12108,10 @@ DECLARE o record; v_audit_id text; v_security_id text; v_security_payload jsonb;
 BEGIN
   PERFORM app_rls.b03_bind_outbox_operation('audit-consume',p_job_id,p_payload_digest);
   IF session_user<>'mscqr_rls_cert_worker' THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
-  SELECT q.* INTO o FROM public."AuditLogOutbox" q WHERE q.id=p_job_id AND q."payloadDigest"=p_payload_digest FOR UPDATE;
+  SELECT q.id,q.payload,q."requestId",q."organizationId",q."licenseeId",q."manufacturerId",
+    q."initiatingUserId",q."expiresAt",q."claimLeaseExpiresAt",q.status,q."flushedAuditLogId"
+    INTO o FROM public."AuditLogOutbox" q
+    WHERE q.id=p_job_id AND q."payloadDigest"=p_payload_digest FOR UPDATE;
   IF NOT FOUND OR o."expiresAt"<=p_attempted_at OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   IF o.status='SENT' THEN RETURN QUERY SELECT o."flushedAuditLogId",true; RETURN; END IF;
@@ -11836,7 +12188,25 @@ BEGIN
   IF session_user<>'mscqr_rls_cert_worker' OR p_job_type NOT IN ('AUDIT_LOG','CSP_VIOLATION') OR p_batch_size NOT BETWEEN 1 AND 200
      OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
-  RETURN QUERY WITH candidates AS (SELECT o.id FROM public."SecurityEventOutbox" o WHERE o."jobType"=p_job_type AND o.status IN ('QUEUED','FAILED') AND o."nextAttemptAt"<=p_attempted_at AND o."expiresAt">p_attempted_at AND o.attempts<10 AND (o."claimLeaseExpiresAt" IS NULL OR o."claimLeaseExpiresAt"<=p_attempted_at) ORDER BY o."createdAt",o.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size), claimed AS (UPDATE public."SecurityEventOutbox" o SET attempts=o.attempts+1,"claimedAt"=p_attempted_at,"claimLeaseExpiresAt"=p_attempted_at+interval '5 minutes',"updatedAt"=transaction_timestamp() FROM candidates c WHERE o.id=c.id RETURNING o.*) SELECT c.id,c."jobType",c."requestId",c."payloadDigest",c."idempotencyKey",c."organizationId",c."licenseeId",c."manufacturerId",c."initiatingUserId",c."expiresAt",c.attempts,c."eventType",c.payload,c."createdAt" FROM claimed c;
+  RETURN QUERY WITH candidates AS (
+    SELECT o.id FROM public."SecurityEventOutbox" o
+    WHERE o."jobType"=p_job_type AND o.status IN ('QUEUED','FAILED')
+      AND o."nextAttemptAt"<=p_attempted_at AND o."expiresAt">p_attempted_at
+      AND o.attempts<10 AND (o."claimLeaseExpiresAt" IS NULL OR o."claimLeaseExpiresAt"<=p_attempted_at)
+    ORDER BY o."createdAt",o.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size
+  ), claimed AS (
+    UPDATE public."SecurityEventOutbox" o
+    SET attempts=o.attempts+1,"claimedAt"=p_attempted_at,
+      "claimLeaseExpiresAt"=p_attempted_at+interval '5 minutes',"updatedAt"=transaction_timestamp()
+    FROM candidates c WHERE o.id=c.id
+    RETURNING o.id,o."jobType",o."requestId",o."payloadDigest",o."idempotencyKey",
+      o."organizationId",o."licenseeId",o."manufacturerId",o."initiatingUserId",
+      o."expiresAt",o.attempts,o."eventType",o.payload,o."createdAt"
+  )
+  SELECT c.id,c."jobType",c."requestId",c."payloadDigest",c."idempotencyKey",
+    c."organizationId",c."licenseeId",c."manufacturerId",c."initiatingUserId",
+    c."expiresAt",c.attempts,c."eventType",c.payload,c."createdAt"
+  FROM claimed c;
 END
 $fn$;
 
@@ -11848,7 +12218,9 @@ BEGIN
   IF session_user<>'mscqr_rls_cert_worker' OR length(p_sink_event_id) NOT BETWEEN 1 AND 191
      OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
-  SELECT q.* INTO o FROM public."SecurityEventOutbox" q WHERE q.id=p_job_id AND q."payloadDigest"=p_payload_digest FOR UPDATE;
+  SELECT q.id,q.status,q."sinkEventId",q."claimLeaseExpiresAt"
+    INTO o FROM public."SecurityEventOutbox" q
+    WHERE q.id=p_job_id AND q."payloadDigest"=p_payload_digest FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   IF o.status='SENT' THEN
     IF o."sinkEventId" IS DISTINCT FROM p_sink_event_id THEN RAISE EXCEPTION 'B03_OUTBOX_REPLAY_MISMATCH' USING ERRCODE='23505'; END IF;
@@ -12278,7 +12650,8 @@ BEGIN
   PERFORM set_config('app.b03_operation','notification-read',true);
 
   WITH visible AS (
-    SELECT n.*
+    SELECT n.id,n."userId",n."orgId",n."licenseeId",n."incidentId",n.audience,n.channel,
+      n.type,n.title,n.body,n.data,n."readAt",n."emailedAt",n."createdAt",n."updatedAt"
     FROM public."Notification" n
     WHERE n.channel='WEB'
       AND (n."userId"=actor.user_id OR (
@@ -12331,14 +12704,18 @@ BEGIN
   END IF;
   PERFORM set_config('app.b03_operation','notification-read-update',true),
           set_config('app.b03_notification_id',p_notification_id,true);
-  SELECT n.* INTO selected FROM public."Notification" n
+  SELECT n.id,n."userId",n."orgId",n."licenseeId",n."incidentId",n.audience,n.channel,
+    n.type,n.title,n.body,n.data,n."readAt",n."emailedAt",n."createdAt",n."updatedAt"
+    INTO selected FROM public."Notification" n
   WHERE n.id=p_notification_id AND n.channel='WEB' AND n."userId"=actor.user_id
   FOR UPDATE;
   IF NOT FOUND THEN RETURN QUERY SELECT NULL::jsonb; RETURN; END IF;
   UPDATE public."Notification" n
   SET "readAt"=coalesce(n."readAt",p_read_at),"updatedAt"=clock_timestamp()
   WHERE n.id=selected.id
-  RETURNING n.* INTO selected;
+  RETURNING n.id,n."userId",n."orgId",n."licenseeId",n."incidentId",n.audience,n.channel,
+    n.type,n.title,n.body,n.data,n."readAt",n."emailedAt",n."createdAt",n."updatedAt"
+    INTO selected;
   RETURN QUERY SELECT to_jsonb(selected);
 END
 $fn$;
@@ -12436,7 +12813,8 @@ BEGIN
   END IF;
 
   PERFORM set_config('app.b03_licensee_id',coalesce(incident_scope."licenseeId",''),true);
-  SELECT * INTO existing FROM public."ActionIdempotencyKey" k
+  SELECT k.id,k."requestHash",k."statusCode",k."responsePayload",k."completedAt"
+    INTO existing FROM public."ActionIdempotencyKey" k
   WHERE k."keyHash"=p_idempotency_key FOR UPDATE;
   IF FOUND THEN
     IF existing."requestHash" IS DISTINCT FROM p_payload_digest THEN
@@ -12498,7 +12876,8 @@ BEGIN
   END IF;
   PERFORM set_config('app.b03_operation','incident-email-complete',true);
   PERFORM set_config('app.b03_delivery_id',p_delivery_id,true);
-  SELECT * INTO idem FROM public."ActionIdempotencyKey" k
+  SELECT k.id,k."responsePayload",k."completedAt"
+    INTO idem FROM public."ActionIdempotencyKey" k
   WHERE k."keyHash"=p_idempotency_key AND k.action='b03-incident-email' FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B03_INCIDENT_EMAIL_CLAIM_REQUIRED' USING ERRCODE='42501'; END IF;
   IF idem."completedAt" IS NOT NULL THEN
@@ -12506,7 +12885,8 @@ BEGIN
       idem."responsePayload"->>'eventId',idem."responsePayload"->>'auditLogId';
     RETURN;
   END IF;
-  SELECT c.* INTO delivery FROM public."IncidentCommunication" c
+  SELECT c.id,c."incidentId",c."attemptedFrom",c."replyTo"
+    INTO delivery FROM public."IncidentCommunication" c
   WHERE c.id=p_delivery_id AND c.id=(idem."responsePayload"->>'deliveryId') FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B03_INCIDENT_EMAIL_CLAIM_REQUIRED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.b03_incident_id',delivery."incidentId",true);

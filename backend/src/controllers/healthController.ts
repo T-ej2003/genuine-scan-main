@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
 
 import prisma from "../config/database";
-import { getRlsReadDatabaseHealth } from "../config/rlsReadDatabase";
 import { getLatencySummary } from "../observability/requestMetrics";
 import { releaseMetadata } from "../observability/release";
 import { getObjectStorageHealth } from "../services/objectStorageService";
@@ -36,14 +35,13 @@ const getDatabaseHealth = async () => {
 };
 
 export const collectDependencyHealth = async () => {
-  const [database, rlsReadDatabase, redis, objectStorage] = await Promise.all([
+  const [database, redis, objectStorage] = await Promise.all([
     getDatabaseHealth(),
-    getRlsReadDatabaseHealth(),
     getRedisHealth(),
     getObjectStorageHealth(),
   ]);
 
-  return { database, rlsReadDatabase, redis, objectStorage };
+  return { database, redis, objectStorage };
 };
 
 export const buildReadyPayload = async () => {
@@ -52,7 +50,6 @@ export const buildReadyPayload = async () => {
   const strictProductionDependencies = process.env.NODE_ENV === "production";
   const ready =
     dependencies.database.ready &&
-    dependencies.rlsReadDatabase.ready &&
     (strictProductionDependencies
       ? dependencies.redis.configured && dependencies.redis.ready
       : !dependencies.redis.configured || dependencies.redis.ready) &&

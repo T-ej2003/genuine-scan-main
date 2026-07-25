@@ -152,7 +152,13 @@ BEGIN
         (new_user_id,lower(payload->'admin'->>'email'),payload->'admin'->>'passwordHash',payload->'admin'->>'name','LICENSEE_ADMIN'::public."UserRole",
          target,target,'ACTIVE'::public."UserStatus",true,transaction_timestamp(),transaction_timestamp());
     END IF;
-    SELECT jsonb_build_object('licensee',to_jsonb(l),'adminUser',(
+    SELECT jsonb_build_object('licensee',jsonb_build_object(
+      'id',l.id,'orgId',l."orgId",'name',l.name,'prefix',l.prefix,'description',l.description,
+      'brandName',l."brandName",'location',l.location,'website',l.website,'supportEmail',l."supportEmail",
+      'supportPhone',l."supportPhone",'metadata',l.metadata,'isActive',l."isActive",
+      'suspendedAt',l."suspendedAt",'suspendedReason',l."suspendedReason",
+      'createdAt',l."createdAt",'updatedAt',l."updatedAt"
+    ),'adminUser',(
       SELECT app_rls.session_c_user_projection(u.id) FROM public."User" u WHERE u."licenseeId"=target AND u.role='LICENSEE_ADMIN'::public."UserRole" LIMIT 1
     ),'replayed',false) INTO result FROM public."Licensee" l WHERE l.id=target;
     PERFORM app_rls.session_c_write_audit(actor."userId",target,target,
@@ -186,7 +192,13 @@ BEGIN
         "supportPhone"=CASE WHEN patch?'supportPhone' THEN patch->>'supportPhone' ELSE "supportPhone" END,
         "isActive"=CASE WHEN patch?'isActive' THEN (patch->>'isActive')::boolean ELSE "isActive" END,"updatedAt"=transaction_timestamp()
       WHERE id=target;
-      SELECT jsonb_build_object('licensee',to_jsonb(l)) INTO result FROM public."Licensee" l WHERE l.id=target;
+      SELECT jsonb_build_object('licensee',jsonb_build_object(
+        'id',l.id,'orgId',l."orgId",'name',l.name,'prefix',l.prefix,'description',l.description,
+        'brandName',l."brandName",'location',l.location,'website',l.website,'supportEmail',l."supportEmail",
+        'supportPhone',l."supportPhone",'metadata',l.metadata,'isActive',l."isActive",
+        'suspendedAt',l."suspendedAt",'suspendedReason',l."suspendedReason",
+        'createdAt',l."createdAt",'updatedAt',l."updatedAt"
+      )) INTO result FROM public."Licensee" l WHERE l.id=target;
       PERFORM app_rls.session_c_write_audit(actor."userId",target_org,target,'UPDATE_LICENSEE','Licensee',target,
         jsonb_build_object('workflowId','workflow-http-backend-src-controllers-licensee-controller-ts-update-licensee','requestId',p_request_id,'purposeCode',p_purpose,'changed',coalesce(audit_details->'changed','[]'::jsonb)),audit_details->>'ipHash',audit_details->>'userAgent');
       RETURN result;

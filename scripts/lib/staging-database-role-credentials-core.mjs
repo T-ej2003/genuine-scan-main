@@ -20,26 +20,13 @@ export const STAGING_DATABASE_ROLE_CONTEXT = Object.freeze({
   roles: Object.freeze({
     app: "mscqr_staging_app",
     migrator: "mscqr_staging_migrator",
-    rlsRead: "mscqr_staging_rls_read",
   }),
   secretNames: Object.freeze({
     app: "mscqr/staging/database-url/app",
     migrator: "mscqr/staging/database-url/migrator",
-    rlsRead: "mscqr/staging/database-url/rls-read",
   }),
-  routeFlags: Object.freeze([
-    "MSCQR_STAGING_RLS_BATCHES_READ_ENABLED",
-    "MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED",
-    "MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED",
-  ]),
   expectedPublicApplicationRelations: 78,
 });
-
-export const REVIEWED_RLS_READ_TABLES = Object.freeze([
-  "Organization", "Licensee", "User", "ManufacturerLicenseeLink", "Batch", "InventoryStatusRollup",
-  "QRCode", "PrintJob", "PrintSession", "PrintItem", "PrinterRegistration", "Printer",
-  "PrinterAttestation", "PrinterAgentSession", "PrinterProfile", "PrinterProfileSnapshot",
-]);
 
 export const RUNTIME_IDENTITY_BEGIN = "MSCQR_DB_IDENTITY_BEGIN";
 export const RUNTIME_IDENTITY_END = "MSCQR_DB_IDENTITY_END";
@@ -201,7 +188,6 @@ export function assertDatabaseRoleVerificationReceipt(receipt, { currentTaskDefi
   if (JSON.stringify([...(receipt.verifiedRoles || [])].sort()) !== JSON.stringify([...expectedRoles].sort())) {
     throw new StagingDatabaseRoleSafetyError("Database-role verification receipt does not cover the complete reviewed role matrix.");
   }
-  assertRlsRouteFlagsFalse(receipt.rlsRouteFlags);
   return receipt;
 }
 
@@ -422,13 +408,12 @@ export function mergeTaskDefinitions(...groups) {
   return [...definitions.values()];
 }
 
-export function inventoryDatabaseConsumers(taskDefinitions, services = [], scheduledTargets = [], adminSecretIds = [], appSecretIds = [], rlsReadSecretIds = []) {
+export function inventoryDatabaseConsumers(taskDefinitions, services = [], scheduledTargets = [], adminSecretIds = [], appSecretIds = []) {
   const adminIds = new Set((adminSecretIds || []).map(toText).filter(Boolean));
   const appIds = new Set((appSecretIds || []).map(toText).filter(Boolean));
-  const rlsReadIds = new Set((rlsReadSecretIds || []).map(toText).filter(Boolean));
-  const classifiedIds = [...adminIds, ...appIds, ...rlsReadIds];
+  const classifiedIds = [...adminIds, ...appIds];
   if (new Set(classifiedIds).size !== classifiedIds.length) {
-    throw new StagingDatabaseRoleSafetyError("Admin, app, and RLS-read database secret identifiers must be distinct.", "DATABASE_SECRET_CLASSIFICATION_AMBIGUOUS");
+    throw new StagingDatabaseRoleSafetyError("Admin and app database secret identifiers must be distinct.", "DATABASE_SECRET_CLASSIFICATION_AMBIGUOUS");
   }
   const consumers = [];
   for (const definition of mergeTaskDefinitions(taskDefinitions || [])) {
@@ -441,11 +426,11 @@ export function inventoryDatabaseConsumers(taskDefinitions, services = [], sched
     const contexts = activeContexts.length ? activeContexts : [{ service: null, schedule: null }];
     for (const container of definition.containerDefinitions || []) {
       for (const secret of container.secrets || []) {
-        if (!["DATABASE_URL", "RLS_READ_DATABASE_URL"].includes(secret?.name) && !adminIds.has(secret?.valueFrom)) continue;
+        if (secret?.name !== "DATABASE_URL" && !adminIds.has(secret?.valueFrom)) continue;
         for (const context of contexts) consumers.push({
           taskDefinitionArn: arn, family: definition.family, ...context, container: container.name,
           variable: secret.name, secretId: secret.valueFrom,
-          classification: adminIds.has(secret.valueFrom) ? "admin" : appIds.has(secret.valueFrom) ? "app" : rlsReadIds.has(secret.valueFrom) ? "rls-read" : "review-required",
+          classification: adminIds.has(secret.valueFrom) ? "admin" : appIds.has(secret.valueFrom) ? "app" : "review-required",
         });
       }
     }
@@ -457,7 +442,7 @@ export function assertActiveReviewedBackendDatabaseConsumer(consumers, { expecte
   const active = (consumers || []).filter((consumer) => consumer.service || consumer.schedule);
   const matches = active.filter((consumer) => consumer.service === STAGING_DATABASE_ROLE_CONTEXT.service && consumer.container === STAGING_DATABASE_ROLE_CONTEXT.backendContainer && consumer.variable === "DATABASE_URL");
   if (matches.length !== 1) throw new StagingDatabaseRoleSafetyError("Expected exactly one active reviewed staging backend service DATABASE_URL consumer.", "ACTIVE_BACKEND_DATABASE_CONSUMER_INVARIANT");
-  if (active.some((consumer) => consumer !== matches[0] && ["DATABASE_URL", "RLS_READ_DATABASE_URL"].includes(consumer.variable))) {
+  if (active.some((consumer) => consumer !== matches[0] && consumer.variable === "DATABASE_URL")) {
     throw new StagingDatabaseRoleSafetyError("An additional active database consumer blocks the staging database-role workflow.", "ACTIVE_DATABASE_CONSUMER_INVARIANT");
   }
   const allowed = expectedClassification ? [expectedClassification] : ["admin", "app"];
@@ -525,21 +510,6 @@ export function extractBackendContainer(taskDefinition, containerName = STAGING_
   return matches[0];
 }
 
-export function extractRlsRouteFlags(taskDefinition, containerName = STAGING_DATABASE_ROLE_CONTEXT.backendContainer) {
-  const container = extractBackendContainer(taskDefinition, containerName);
-  const environment = new Map((container.environment || []).map((entry) => [entry?.name, entry?.value]));
-  return Object.fromEntries(STAGING_DATABASE_ROLE_CONTEXT.routeFlags.map((name) => [name, environment.get(name)]));
-}
-
-export function assertRlsRouteFlagsFalse(flags) {
-  for (const name of STAGING_DATABASE_ROLE_CONTEXT.routeFlags) {
-    if (flags?.[name] !== "false") {
-      throw new StagingDatabaseRoleSafetyError(`${name} must be explicitly false.`);
-    }
-  }
-  return true;
-}
-
 export function findDatabaseUrlSecret(taskDefinition, containerName = STAGING_DATABASE_ROLE_CONTEXT.backendContainer) {
   const container = extractBackendContainer(taskDefinition, containerName);
   const matches = (container.secrets || []).filter((entry) => entry?.name === "DATABASE_URL" && toText(entry.valueFrom));
@@ -580,7 +550,6 @@ export function assertTaskDefinitionOnlyDatabaseSecretChanged({ before, after, c
   if (JSON.stringify(expected) !== JSON.stringify(after)) {
     throw new StagingDatabaseRoleSafetyError("Task definition drift detected: only backend DATABASE_URL may change.", "TASK_DEFINITION_DRIFT");
   }
-  assertRlsRouteFlagsFalse(extractRlsRouteFlags(after, containerName));
   return true;
 }
 
@@ -588,7 +557,6 @@ export function mutateTaskDefinitionDatabaseSecret({ taskDefinition, tags = [], 
   assertStagingOnlyName("Target app secret ARN", appSecretArn);
   const original = taskDefinitionRegistrationPayload(taskDefinition, tags);
   findDatabaseUrlSecret(original, containerName);
-  assertRlsRouteFlagsFalse(extractRlsRouteFlags(original, containerName));
   const proposed = clone(original);
   const container = extractBackendContainer(proposed, containerName);
   const databaseSecret = (container.secrets || []).filter((entry) => entry?.name === "DATABASE_URL");
@@ -608,7 +576,6 @@ export function sanitizedTaskDefinitionDiff({ before, after, containerName = STA
       after: afterSecret,
     }],
     unrelatedChanges: [],
-    rlsRouteFlags: extractRlsRouteFlags(after, containerName),
   };
 }
 
@@ -724,7 +691,6 @@ export function assertRoleInventory(inventory) {
     [STAGING_DATABASE_ROLE_CONTEXT.ownerRole, false],
     [STAGING_DATABASE_ROLE_CONTEXT.roles.app, true],
     [STAGING_DATABASE_ROLE_CONTEXT.roles.migrator, true],
-    [STAGING_DATABASE_ROLE_CONTEXT.roles.rlsRead, true],
   ];
   for (const [name, canLogin] of expected) {
     const role = byName.get(name);
@@ -740,7 +706,7 @@ export function assertRoleInventory(inventory) {
       migratorMemberships[0].adminOption || migratorMemberships[0].inheritOption || !migratorMemberships[0].setOption) {
     throw new StagingDatabaseRoleSafetyError("Migrator must have exactly one SET-only owner membership.");
   }
-  for (const role of [STAGING_DATABASE_ROLE_CONTEXT.roles.app, STAGING_DATABASE_ROLE_CONTEXT.roles.rlsRead]) {
+  for (const role of [STAGING_DATABASE_ROLE_CONTEXT.roles.app]) {
     if (memberships.some((item) => item.member === role)) {
       throw new StagingDatabaseRoleSafetyError(`${role} must have no role memberships.`);
     }

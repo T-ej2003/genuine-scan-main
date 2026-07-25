@@ -12,7 +12,6 @@ export const STAGING_RLS_BATCH_ALLOCATION_MAP_ROUTE = "GET /api/qr/batches/:id/a
 export type StagingRlsBatchAllocationMapResultShape = "allocation_map" | "not_found" | "unknown";
 
 type StagingRlsBatchAllocationMapProofInput = {
-  flagEnabled: boolean;
   contextClass: StagingRlsBatchReadContextClass;
   durationMs: number;
   resultShape: StagingRlsBatchAllocationMapResultShape;
@@ -28,7 +27,6 @@ export const buildStagingRlsBatchAllocationMapProofEvent = (
 ) => ({
   metric: "staging_rls_batch_allocation_map",
   route: STAGING_RLS_BATCH_ALLOCATION_MAP_ROUTE,
-  flagEnabled: input.flagEnabled,
   contextClass: input.contextClass,
   durationMs: roundDuration(input.durationMs),
   resultShape: input.resultShape,

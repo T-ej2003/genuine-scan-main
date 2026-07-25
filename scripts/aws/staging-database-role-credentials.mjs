@@ -16,7 +16,6 @@ import {
   assertExpectedAwsIdentity,
   assertReviewedDatabaseConsumers,
   assertRollbackTarget,
-  assertRlsRouteFlagsFalse,
   assertServiceStable,
   assertStagingOnlyName,
   assertTaskDefinitionOnlyDatabaseSecretChanged,
@@ -26,7 +25,6 @@ import {
   createPrivateEvidenceDirectory,
   createRestrictiveTempDirectory,
   compensateEcsCutoverFailure,
-  extractRlsRouteFlags,
   findDatabaseUrlSecret,
   inventoryDatabaseConsumers,
   mergeTaskDefinitions,
@@ -122,7 +120,6 @@ function discoverBase() {
   assertStagingOnlyName("ECS cluster", C.cluster); assertStagingOnlyName("ECS service", service.serviceName);
   const taskArn = assertRollbackTarget(service.taskDefinition);
   const described = awsJson(["ecs", "describe-task-definition", "--task-definition", taskArn, "--include", "TAGS"]);
-  assertRlsRouteFlagsFalse(extractRlsRouteFlags(described.taskDefinition));
   return { identity, service, taskArn, taskDefinition: described.taskDefinition, tags: described.tags || [], adminSecretId: findDatabaseUrlSecret(described.taskDefinition) };
 }
 
@@ -158,8 +155,7 @@ function databaseConsumerInventory(base, { expectedClassification = null, preser
     return matches[0] || "";
   };
   const discoveredAppSecretArn = appSecretArn || uniqueMatchingSecret("app");
-  const rlsReadSecretArn = uniqueMatchingSecret("rls-read");
-  const consumers = inventoryDatabaseConsumers(definitions, activeServices, activeSchedules, [preservedAdminSecretId], discoveredAppSecretArn ? [discoveredAppSecretArn] : [], rlsReadSecretArn ? [rlsReadSecretArn] : []);
+  const consumers = inventoryDatabaseConsumers(definitions, activeServices, activeSchedules, [preservedAdminSecretId], discoveredAppSecretArn ? [discoveredAppSecretArn] : []);
   const reviewed = consumers.map((consumer) => {
     let requiredRole = "no-runtime-credential";
     if (consumer.service === C.service && consumer.container === C.backendContainer && consumer.variable === "DATABASE_URL") requiredRole = C.roles.app;
@@ -245,7 +241,6 @@ function provisionOrVerify(command) {
       executorTaskDefinitionArn: executorPlan(base).arn,
       executorTaskArn: result.taskArn,
       verifiedRoles: Object.values(C.roles),
-      rlsRouteFlags: extractRlsRouteFlags(base.taskDefinition),
       verifiedAt: new Date().toISOString(),
     };
     verificationReceiptPath = path.relative(ROOT, writeSanitizedEvidence(evidence, "verification-receipt.json", receipt));
@@ -362,7 +357,7 @@ async function rollback() { const base = discoverBase(); assertDatabaseRoleCutov
 export async function execute() {
   if (process.argv.includes("--help")) return { status: "help", usage: usage() };
   if (interrupted) throw new Error("Controller was interrupted.");
-  if (COMMAND === "discover") { const base = discoverBase(); return { status: "discovery_complete", mutatesAws: false, accountId: base.identity.Account, region: C.region, cluster: C.cluster, service: C.service, taskDefinitionArn: base.taskArn, executor: executorPlan(base).topology, consumerInventory: databaseConsumerInventory(base), routeFlags: extractRlsRouteFlags(base.taskDefinition) }; }
+  if (COMMAND === "discover") { const base = discoverBase(); return { status: "discovery_complete", mutatesAws: false, accountId: base.identity.Account, region: C.region, cluster: C.cluster, service: C.service, taskDefinitionArn: base.taskArn, executor: executorPlan(base).topology, consumerInventory: databaseConsumerInventory(base) }; }
   if (COMMAND === "provision" || COMMAND === "verify") return provisionOrVerify(COMMAND);
   if (COMMAND === "cutover") return cutover();
   if (COMMAND === "rollback") return rollback();

@@ -48,7 +48,6 @@ export const getScopedBatchAllocationMapPayload = async (
       ? { status: "ok", allocationMap }
       : { status: "batch_not_found", allocationMap: null };
     recordStagingRlsBatchAllocationMapProof({
-      flagEnabled: true,
       contextClass,
       durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
       resultShape: resultShapeForPayload(payload),
@@ -57,7 +56,6 @@ export const getScopedBatchAllocationMapPayload = async (
     return payload;
   } catch (error) {
     recordStagingRlsBatchAllocationMapProof({
-      flagEnabled: true,
       contextClass,
       durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
       resultShape: "unknown",

@@ -16,7 +16,16 @@ const forbiddenMarkers = ["staging", "prod", "production", "amazonaws.com", "rds
 const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const generatedRoot = path.join(root, "documents/security/rls-program/generated");
 const sqlRoot = path.join(root, "scripts/rls/sql/generated");
-const evidencePath = path.join(generatedRoot, "disposable-certification-result.json");
+export const certificationEvidencePath = (env = process.env) => {
+  const family = String(env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY || "").trim();
+  if (family && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(family)) {
+    throw new FullRlsCertificationSafetyError("Certification family identifier is invalid");
+  }
+  return path.join(
+    generatedRoot,
+    family ? `disposable-certification-result.${family}.json` : "disposable-certification-result.json"
+  );
+};
 const manifestPath = path.join(generatedRoot, "full-rls-implementation-manifest.json");
 const policyPath = path.join(generatedRoot, "policy-inventory-report.json");
 const privilegePath = path.join(generatedRoot, "column-privilege-report.json");
@@ -880,6 +889,7 @@ const runRouteShutdownTests = () => {
 };
 
 export const runCertification = (adminUrl, env = process.env) => {
+  const evidencePath = certificationEvidencePath(env);
   if (env[CONFIRM_ENV] !== CONFIRM_VALUE) throw new FullRlsCertificationSafetyError(`Set ${CONFIRM_ENV}=${CONFIRM_VALUE}`);
   const parsed = assertSafeAdminUrl(adminUrl);
   try { verifyFullRlsPackage(); }

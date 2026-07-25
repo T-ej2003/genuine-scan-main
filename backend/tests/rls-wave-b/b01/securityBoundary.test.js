@@ -39,7 +39,7 @@ assert.match(preAuth, /getB01PreAuthPrisma\(\)/);
 assert.match(runtimeClients, /PREAUTH_DATABASE_URL/);
 assert.match(runtimeClients, /AUTHENTICATED_APP_DATABASE_URL/);
 assert.match(runtimeClients, /env\.NODE_ENV === "test"/);
-assert.match(runtimeClients, /mscqr_\(dev\|staging\|prod\)_/);
+assert.match(runtimeClients, /mscqr_\(dev\|stg\|prd\)_rls_/);
 assert.match(runtimeClients, /B01_RUNTIME_DATABASE_CREDENTIAL_REUSED/);
 assert.match(runtimeClients, /B01_RUNTIME_DATABASE_REUSES_DEFAULT/);
 
@@ -47,8 +47,8 @@ assert.deepEqual(resolveB01RuntimeDatabaseConfiguration({ NODE_ENV: "test" }), {
   preAuthDatabaseUrl: null,
   authenticatedDatabaseUrl: null,
 });
-const stagingPreAuth = "postgresql://mscqr_staging_preauth@db.internal/mscqr";
-const stagingApp = "postgresql://mscqr_staging_app@db.internal/mscqr";
+const stagingPreAuth = "postgresql://mscqr_stg_rls_phase2_preauth@db.internal/mscqr";
+const stagingApp = "postgresql://mscqr_stg_rls_phase2_app@db.internal/mscqr";
 assert.deepEqual(resolveB01RuntimeDatabaseConfiguration({
   NODE_ENV: "production",
   PREAUTH_DATABASE_URL: stagingPreAuth,
@@ -70,7 +70,7 @@ assert.throws(
   () => resolveB01RuntimeDatabaseConfiguration({
     NODE_ENV: "production",
     PREAUTH_DATABASE_URL: stagingPreAuth,
-    AUTHENTICATED_APP_DATABASE_URL: "postgresql://mscqr_prod_app@db.internal/mscqr",
+    AUTHENTICATED_APP_DATABASE_URL: "postgresql://mscqr_prd_rls_phase2_app@db.internal/mscqr",
   }),
   (error) => error.code === "B01_RUNTIME_DATABASE_ENVIRONMENT_MISMATCH"
 );
