@@ -5,6 +5,7 @@ import { z } from "zod";
 import { CustomerVerifyRequest } from "../../middleware/customerVerifyAuth";
 import { getB01PreAuthPrisma } from "../../rls-waves/session-b/b01/runtimeClients";
 import {
+  PublicSignedTokenRejectedError,
   verifyRawQr,
   verifySignedQr,
   type VerifyRawQrRow,
@@ -12,6 +13,7 @@ import {
 import {
   hashToken as hashQrToken,
   isPrinterTestQrId,
+  QrTokenVerificationError,
   verifyQrToken,
 } from "../../services/qrTokenService";
 import { deriveRequestDeviceFingerprint, hashIp, hashToken, normalizeCode } from "./shared";
@@ -96,7 +98,7 @@ export const buildPublicVerificationResponse = (
     showTimelineCard: true,
     showRiskCards: false,
     allowOwnershipClaim: row.ownershipClaimAvailable,
-    allowFraudReport: true,
+    allowFraudReport: row.reportSessionAvailable,
     mobileCameraAssist: true,
   },
   });
@@ -104,6 +106,13 @@ export const buildPublicVerificationResponse = (
 
 const publicFailure = (res: Response, status: number, error: string) =>
   res.status(status).json({ success: false, error });
+
+const isSignedTokenRejection = (error: unknown) => {
+  if (error instanceof QrTokenVerificationError || error instanceof PublicSignedTokenRejectedError) return true;
+  const candidate = error as { message?: unknown; meta?: { message?: unknown } };
+  if (String(candidate?.message || "").trim() === "PUBLIC_SIGNED_TOKEN_INVALID") return true;
+  return /^ERROR:\s+PUBLIC_SIGNED_TOKEN_INVALID(?:\r?\n|$)/.test(String(candidate?.meta?.message || ""));
+};
 
 export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) => {
   const params = paramsSchema.safeParse(req.params || {});
@@ -146,6 +155,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
               firstVerifiedAt: checkedAt,
               latestVerifiedAt: checkedAt,
               ownershipClaimAvailable: false,
+              reportSessionAvailable: false,
               sessionStartToken: null,
             });
           }
@@ -173,8 +183,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
       data: buildPublicVerificationResponse(row, Boolean(req.customer)),
     });
   } catch (error) {
-    const message = String(error instanceof Error ? error.message : error);
-    if (token && /PUBLIC_VERIFICATION_(?:SIGNED_)?INVALID/.test(message)) {
+    if (token && isSignedTokenRejection(error)) {
       return publicFailure(res, 400, "Request could not be verified.");
     }
     return res.status(503).json({

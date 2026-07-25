@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='7e90d508424b3f462e27740cbf77e9e33ca515fe5327b5d412bfa9c06e89840f'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:7e90d508424b3f462e27740cbf77e9e33ca515fe5327b5d412bfa9c06e89840f'
+    AND source_contract_sha256='024813de47671ad2d1590c9e03cd731bcda555157ef96879ef0d2c01d25b5d8d'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:024813de47671ad2d1590c9e03cd731bcda555157ef96879ef0d2c01d25b5d8d'
     AND administrator_role='certification-administrator'
     AND phase='ownership-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'context helpers lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:7e90d508424b3f462e27740cbf77e9e33ca515fe5327b5d412bfa9c06e89840f')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:024813de47671ad2d1590c9e03cd731bcda555157ef96879ef0d2c01d25b5d8d')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -10199,6 +10199,7 @@ DECLARE
   ready boolean;
   same_context boolean;
   claim_available boolean;
+  scan_history_eligible boolean;
   safe_code text;
 BEGIN
   IF p_proof_source NOT IN ('SIGNED_LABEL','MANUAL_CODE_LOOKUP')
@@ -10301,26 +10302,30 @@ BEGIN
 
   safe_code:=CASE WHEN length(qr.code)<=4 THEN repeat('*',length(qr.code))
     ELSE repeat('*',length(qr.code)-4)||right(qr.code,4) END;
-  next_scan_count:=coalesce(qr."scanCount",0)+1;
-  INSERT INTO public."QrScanLog"(
-    id,code,"qrCodeId","licenseeId","batchId",status,"scannedAt","isFirstScan","scanCount",
-    "customerUserId","ownershipId","ownershipMatchMethod","isTrustedOwnerContext",
-    "ipAddress","userAgent",device,latitude,longitude,accuracy,
-    "locationName","locationCountry","locationRegion","locationCity"
-  ) VALUES (
-    scan_id,qr.code,qr.id,qr."licenseeId",qr."batchId",qr.status,p_checked_at,
-    classification='FIRST_SCAN',next_scan_count,NULL,NULL,NULL,false,
-    p_actor_ip_hash,NULL,p_actor_device_hash,NULL,NULL,NULL,NULL,NULL,NULL,NULL
-  );
-  UPDATE public."QRCode" SET
-    "scanCount"=next_scan_count,"scannedAt"=p_checked_at,
-    "lastScanIp"=p_actor_ip_hash,"lastScanDevice"=p_actor_device_hash,"lastScanUserAgent"=NULL,
-    "signedFirstSeenAt"=CASE WHEN p_proof_source='SIGNED_LABEL' THEN coalesce("signedFirstSeenAt",p_checked_at) ELSE "signedFirstSeenAt" END,
-    "lastSignedVerificationAt"=CASE WHEN p_proof_source='SIGNED_LABEL' AND classification<>'SUSPICIOUS_DUPLICATE' THEN p_checked_at ELSE "lastSignedVerificationAt" END,
-    "lastSignedVerificationIpHash"=CASE WHEN p_proof_source='SIGNED_LABEL' AND classification<>'SUSPICIOUS_DUPLICATE' THEN p_actor_ip_hash ELSE "lastSignedVerificationIpHash" END,
-    "lastSignedVerificationDeviceHash"=CASE WHEN p_proof_source='SIGNED_LABEL' AND classification<>'SUSPICIOUS_DUPLICATE' THEN p_actor_device_hash ELSE "lastSignedVerificationDeviceHash" END,
-    "updatedAt"=transaction_timestamp()
-  WHERE id=qr.id;
+  scan_history_eligible:=classification IN ('FIRST_SCAN','LEGIT_REPEAT','SUSPICIOUS_DUPLICATE');
+  next_scan_count:=coalesce(qr."scanCount",0);
+  IF scan_history_eligible THEN
+    next_scan_count:=next_scan_count+1;
+    INSERT INTO public."QrScanLog"(
+      id,code,"qrCodeId","licenseeId","batchId",status,"scannedAt","isFirstScan","scanCount",
+      "customerUserId","ownershipId","ownershipMatchMethod","isTrustedOwnerContext",
+      "ipAddress","userAgent",device,latitude,longitude,accuracy,
+      "locationName","locationCountry","locationRegion","locationCity"
+    ) VALUES (
+      scan_id,qr.code,qr.id,qr."licenseeId",qr."batchId",qr.status,p_checked_at,
+      classification='FIRST_SCAN',next_scan_count,NULL,NULL,NULL,false,
+      p_actor_ip_hash,NULL,p_actor_device_hash,NULL,NULL,NULL,NULL,NULL,NULL,NULL
+    );
+    UPDATE public."QRCode" SET
+      "scanCount"=next_scan_count,"scannedAt"=p_checked_at,
+      "lastScanIp"=p_actor_ip_hash,"lastScanDevice"=p_actor_device_hash,"lastScanUserAgent"=NULL,
+      "signedFirstSeenAt"=CASE WHEN p_proof_source='SIGNED_LABEL' THEN coalesce("signedFirstSeenAt",p_checked_at) ELSE "signedFirstSeenAt" END,
+      "lastSignedVerificationAt"=CASE WHEN p_proof_source='SIGNED_LABEL' AND classification<>'SUSPICIOUS_DUPLICATE' THEN p_checked_at ELSE "lastSignedVerificationAt" END,
+      "lastSignedVerificationIpHash"=CASE WHEN p_proof_source='SIGNED_LABEL' AND classification<>'SUSPICIOUS_DUPLICATE' THEN p_actor_ip_hash ELSE "lastSignedVerificationIpHash" END,
+      "lastSignedVerificationDeviceHash"=CASE WHEN p_proof_source='SIGNED_LABEL' AND classification<>'SUSPICIOUS_DUPLICATE' THEN p_actor_device_hash ELSE "lastSignedVerificationDeviceHash" END,
+      "updatedAt"=transaction_timestamp()
+    WHERE id=qr.id;
+  END IF;
   INSERT INTO public."VerificationDecision"(
     id,"decisionVersion","qrCodeId",code,"licenseeId","batchId","proofSource","proofTier",
     outcome,classification,"reasonCodes","riskBand","replacementStatus","degradationMode",
@@ -10343,10 +10348,11 @@ BEGIN
     "lifecycleSnapshot",metadata,"createdAt"
   ) VALUES (
     evidence_id,decision_id,
-    jsonb_build_object('totalScans',next_scan_count,'firstScan',classification='FIRST_SCAN',
-      'firstVerifiedAt',coalesce(first_at,p_checked_at),'latestVerifiedAt',p_checked_at),
+    jsonb_build_object('totalScans',next_scan_count,'firstScan',scan_history_eligible AND classification='FIRST_SCAN',
+      'firstVerifiedAt',CASE WHEN scan_history_eligible THEN coalesce(first_at,p_checked_at) ELSE first_at END,
+      'latestVerifiedAt',CASE WHEN scan_history_eligible THEN p_checked_at ELSE qr."scannedAt" END),
     jsonb_build_object('claimAvailable',ready AND qr.status<>'BLOCKED'),
-    jsonb_build_object('contextChanged',previous_scan.id IS NOT NULL AND NOT same_context),
+    jsonb_build_object('contextChanged',scan_history_eligible AND previous_scan.id IS NOT NULL AND NOT same_context),
     NULL,
     jsonb_build_object('qrStatus',qr.status,'batchLifecycle',batch."lifecycleState",
       'customerVerifiableAt',qr."customerVerifiableAt",'replacementStatus',replacement_status),
@@ -10360,8 +10366,10 @@ BEGIN
         'brandSupportEmail',brand."supportEmail",'brandSupportPhone',brand."supportPhone",
         'manufacturerName',manufacturer.name,'manufacturerWebsite',
           CASE WHEN manufacturer.website ~ '^https?://' THEN manufacturer.website ELSE NULL END,
-        'printedAt',coalesce(qr."printedAt",batch."printedAt"),'firstVerifiedAt',coalesce(first_at,p_checked_at),
-        'latestVerifiedAt',p_checked_at,'ownershipClaimAvailable',ready AND qr.status<>'BLOCKED',
+        'printedAt',coalesce(qr."printedAt",batch."printedAt"),
+        'firstVerifiedAt',CASE WHEN scan_history_eligible THEN coalesce(first_at,p_checked_at) ELSE first_at END,
+        'latestVerifiedAt',CASE WHEN scan_history_eligible THEN p_checked_at ELSE qr."scannedAt" END,
+        'ownershipClaimAvailable',ready AND qr.status<>'BLOCKED',
         'proofSource',p_proof_source)
     ),
     p_checked_at
@@ -10398,7 +10406,9 @@ BEGIN
     brand."supportEmail",brand."supportPhone",manufacturer.name,
     CASE WHEN manufacturer.website ~ '^https?://' THEN manufacturer.website ELSE NULL END,
     coalesce(qr."printedAt",batch."printedAt"),
-    coalesce(first_at,p_checked_at),p_checked_at,claim_available,NULL::text;
+    CASE WHEN scan_history_eligible THEN coalesce(first_at,p_checked_at) ELSE first_at END,
+    CASE WHEN scan_history_eligible THEN p_checked_at ELSE qr."scannedAt" END,
+    claim_available,NULL::text;
 END
 $$;
 
@@ -10432,6 +10442,9 @@ BEGIN
   );
   SELECT q.id INTO qr_id FROM public."QRCode" q WHERE q.code=p_requested_code;
   IF qr_id IS NULL THEN
+    -- Bounded PostgreSQL jitter reduces the unknown-code timing oracle without
+    -- holding a QR row lock or allowing caller-controlled delay.
+    PERFORM pg_sleep(0.015 + random()*0.010);
     RETURN QUERY SELECT 'NOT_FOUND','verification.not_found','TRY_AGAIN',
       CASE WHEN length(p_requested_code)<=4 THEN repeat('*',length(p_requested_code))
         ELSE repeat('*',length(p_requested_code)-4)||right(p_requested_code,4) END,
@@ -10794,7 +10807,7 @@ CREATE OR REPLACE FUNCTION app_public.claim_customer_ownership(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
 DECLARE customer record; session_row record;
-  qr record; batch_state text; ownership record;
+  qr record; batch_state text; ownership record; claim_available boolean;
   ownership_id text:=gen_random_uuid()::text; action text; result text;
 BEGIN
   SELECT NULL::text AS "customerUserId",NULL::text AS "customerEmail" INTO customer;
@@ -10815,13 +10828,23 @@ BEGIN
   PERFORM app_public.public_verify_bind(
     'public-verification-ownership-claim',p_request_id,NULL,NULL,NULL,p_session_id,NULL
   );
-  SELECT s.id,s."customerUserId",s."qrCodeId" INTO session_row FROM public."CustomerVerificationSession" s
+  SELECT s.id,s."customerUserId",s."qrCodeId",s."verificationDecisionId"
+  INTO session_row FROM public."CustomerVerificationSession" s
   WHERE s.id=p_session_id AND s."proofBindingTokenHash"=p_session_proof_hash
     AND s."proofBindingExpiresAt">p_checked_at AND s."expiresAt">p_checked_at;
   IF session_row.id IS NULL OR
      (session_row."customerUserId" IS NOT NULL
        AND session_row."customerUserId" IS DISTINCT FROM customer."customerUserId") THEN
     RAISE EXCEPTION 'PUBLIC_OWNERSHIP_SESSION_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.public_verification_decision_id',session_row."verificationDecisionId",true);
+  SELECT coalesce((e.metadata#>>'{presentationSnapshot,ownershipClaimAvailable}')::boolean,false)
+  INTO claim_available
+  FROM public."VerificationEvidenceSnapshot" e
+  WHERE e."verificationDecisionId"=session_row."verificationDecisionId"
+  ORDER BY e."createdAt" DESC,e.id DESC LIMIT 1;
+  IF NOT coalesce(claim_available,false) THEN
+    RAISE EXCEPTION 'PUBLIC_OWNERSHIP_NOT_READY' USING ERRCODE='55000';
   END IF;
   PERFORM set_config('app.public_verification_qr_id',session_row."qrCodeId",true);
   SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."issuanceMode",q."customerVerifiableAt"

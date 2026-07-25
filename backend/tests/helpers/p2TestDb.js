@@ -57,6 +57,12 @@ const buildUrlForRole = (databaseUrl, role) => {
   return parsed.toString();
 };
 
+const bootstrapUser = (adminUrl) => {
+  const adminUser = decodeURIComponent(new URL(adminUrl).username);
+  return String(process.env.P2_TEST_DB_BOOTSTRAP_USER
+    || (adminUser === "certification-administrator" ? "mscqr_p2_test" : adminUser)).trim();
+};
+
 const buildP2DatabaseUrlFromParts = () => {
   const protocol = String(process.env.P2_TEST_DB_PROTOCOL || "postgresql").trim();
   const user = String(process.env.P2_TEST_DB_USER || "").trim();
@@ -101,10 +107,7 @@ const cleanupGeneratedRlsRoles = ({ adminUrl, createdDatabaseName }) => {
 
 const dropDatabase = ({ adminUrl, createdDatabaseName }) => {
   if (!adminUrl || !createdDatabaseName) return;
-  const bootstrapUrl = buildUrlForRole(
-    adminUrl,
-    String(process.env.P2_TEST_DB_BOOTSTRAP_USER || "mscqr_p2_test").trim()
-  );
+  const bootstrapUrl = buildUrlForRole(adminUrl, bootstrapUser(adminUrl));
   runPsql(bootstrapUrl, `DROP DATABASE IF EXISTS ${quoteIdent(createdDatabaseName)} WITH (FORCE)`);
 };
 
@@ -156,10 +159,7 @@ const runGeneratedRlsSchemaSetup = (databaseInfo) => {
     administratorUrl,
     runtimeUrl: buildUrlForRole(administratorUrl, "mscqr_rls_cert_app"),
     preauthUrl: buildUrlForRole(administratorUrl, "mscqr_rls_cert_preauth"),
-    seedUrl: buildUrlForRole(
-      administratorUrl,
-      String(process.env.P2_TEST_DB_BOOTSTRAP_USER || "mscqr_p2_test").trim()
-    ),
+    seedUrl: buildUrlForRole(administratorUrl, bootstrapUser(administratorUrl)),
   };
 };
 

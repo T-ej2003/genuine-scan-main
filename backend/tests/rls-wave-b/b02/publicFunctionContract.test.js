@@ -101,7 +101,14 @@ test("B02 public projection validator rejects extra fields and more than one row
     verifyRawQr({ $queryRaw: async () => [valid, valid] }, input),
     /more than one row/
   );
-  assert.deepEqual(await verifyRawQr({ $queryRaw: async () => [valid] }, input), valid);
+  const reportable = await verifyRawQr({ $queryRaw: async () => [valid] }, input);
+  assert.equal(reportable.reportSessionAvailable, true);
+  assert.match(reportable.sessionStartToken, /^[A-Za-z0-9_-]{43}$/);
+  const nonReportable = await verifyRawQr({
+    $queryRaw: async () => [{ ...valid, result: "NOT_FOUND" }],
+  }, input);
+  assert.equal(nonReportable.reportSessionAvailable, false);
+  assert.equal(nonReportable.sessionStartToken, null);
   let requestedCode;
   await verifyRawQr({
     $queryRaw: async (_strings, ...values) => {

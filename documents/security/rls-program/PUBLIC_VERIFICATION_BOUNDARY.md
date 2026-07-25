@@ -67,7 +67,9 @@ when `NODE_ENV=test` and the B02 boundary flag is disabled.
 2. validates signed claims when present;
 3. derives tenant, batch, manufacturer, replacement, and lifecycle state;
 4. classifies the scan from committed scan history and server-derived hashes;
-5. inserts scan, decision, evidence snapshot, audit, and security-outbox rows;
+5. inserts consumer scan history only for `FIRST_SCAN`, `LEGIT_REPEAT`, or
+   `SUSPICIOUS_DUPLICATE`, while every resolved denial still records its
+   decision, evidence snapshot, audit, and security-outbox evidence;
 6. returns an explicit public projection.
 
 The row lock ensures concurrent first scans produce one `FIRST_SCAN`. A
@@ -91,6 +93,9 @@ QR/printing evidence. Missing-batch, failed, voided, unreleased, obsolete, or
 blocked inventory cannot become an authentic result through browser input.
 `LEGIT_REPEAT` additionally requires both server-derived IP and device
 purpose hashes to match; one caller-influenced signal is insufficient.
+Blocked, replaced, recalled, failed, voided, and not-ready outcomes never
+increment `QRCode.scanCount` or create `QrScanLog` history, so a label's first
+eligible post-release scan remains `FIRST_SCAN`.
 
 ## Public projection and privacy
 
@@ -121,10 +126,19 @@ exception, and legacy-bearer telemetry replace public codes, customer session
 IDs, credential IDs, and query strings with stable route templates before
 logging.
 
+Unknown manual-code lookups receive 15–25 ms of database-side random padding
+after bounded input validation and before the generic not-found response. The
+padding is not constant-time, does not apply to signed-token verification, and
+occurs before any QR row lock or verification evidence mutation.
+
 ## Ownership, concern, email, and support
 
 - Ownership claims resolve QR scope from the verification proof; supplied
   customer, tenant, batch, or QR database IDs are never authority.
+- Report-session eligibility is independent of ownership eligibility.
+  Reportable authentic, review, blocked, and not-ready results receive the
+  same short-lived QR-bound session-start proof; PostgreSQL separately denies
+  ownership when the evidence snapshot says the label is not claimable.
 - Transfer creation/cancellation requires the current database customer;
   acceptance consumes one exact hashed transfer token. Competing pending
   transfers are cancelled atomically.

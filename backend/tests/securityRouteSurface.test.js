@@ -124,11 +124,6 @@ const licenseeAdmin = {
   });
   mockModule("services/incidentEmailService.js", { sendIncidentEmail: async () => ({ delivered: false }) });
   mockModule("services/qrService.js", { getQRStats: async () => ({ total: 0 }) });
-  mockModule("services/qrAllocationService.js", {
-    allocateQrRange: async () => [],
-    getNextLicenseeQrNumber: async () => 1,
-    lockLicenseeAllocation: async (_id, fn) => fn(),
-  });
   mockModule("services/qrTokenService.js", {
     getQrTokenExpiryDate: () => new Date(),
     hashToken: () => "hash",

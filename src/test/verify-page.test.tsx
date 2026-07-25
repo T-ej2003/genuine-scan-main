@@ -110,6 +110,13 @@ const buildVerifyPayload = (overrides: Record<string, unknown> = {}) => ({
     canClaim: true,
     matchMethod: null,
   },
+  verifyUxPolicy: {
+    showTimelineCard: true,
+    showRiskCards: false,
+    allowOwnershipClaim: true,
+    allowFraudReport: true,
+    mobileCameraAssist: true,
+  },
   reasons: ["First successful customer verification recorded."],
   ...overrides,
 });
@@ -502,7 +509,27 @@ describe("Verify page", () => {
         authState: "VERIFIED",
         intakeCompleted: true,
         revealed: true,
-        verification: buildVerifyPayload({ decisionId: undefined }),
+        verification: buildVerifyPayload({
+          decisionId: undefined,
+          isAuthentic: false,
+          publicStatus: "not_ready",
+          status: "not_ready",
+          ownershipStatus: {
+            isClaimed: false,
+            claimedAt: null,
+            isOwnedByRequester: false,
+            isClaimedByAnother: false,
+            canClaim: false,
+            matchMethod: null,
+          },
+          verifyUxPolicy: {
+            showTimelineCard: true,
+            showRiskCards: false,
+            allowOwnershipClaim: false,
+            allowFraudReport: true,
+            mobileCameraAssist: true,
+          },
+        }),
         intake: {
           purchaseChannel: "offline",
           sourceCategory: "retail_store",
@@ -524,6 +551,8 @@ describe("Verify page", () => {
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
+    expect(await screen.findByRole("button", { name: "Report a concern" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save verification" })).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Report a concern" }));
     expect(await screen.findByRole("heading", { name: "Report a concern" })).toBeInTheDocument();
     expect(screen.getByLabelText("What do you want to report?")).toBeInTheDocument();

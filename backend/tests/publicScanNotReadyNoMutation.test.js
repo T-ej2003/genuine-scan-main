@@ -136,6 +136,7 @@ mockModule("rls-waves/session-b/b02/publicBoundaryRepository.js", {
     firstVerifiedAt: null,
     latestVerifiedAt: null,
     ownershipClaimAvailable: false,
+    reportSessionAvailable: true,
     sessionStartToken: null,
   }),
   verifyRawQr: async () => null,

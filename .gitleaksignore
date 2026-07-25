@@ -27,3 +27,13 @@ ff8617a52108982a2a8e2d02eeee23b1322494dc:databasefiles/key1.pem:private-key:1
 8ad088b6406107050d9470cfb038d931d8d2cd7f:documents/ops/evidence/aws-regional-cleanup-capetown-20260603T195128Z/01-ec2-instances.json:generic-api-key:371
 8ad088b6406107050d9470cfb038d931d8d2cd7f:documents/ops/evidence/aws-regional-cleanup-mumbai-20260603T195128Z/01-ec2-instances.json:generic-api-key:207
 8ad088b6406107050d9470cfb038d931d8d2cd7f:documents/ops/evidence/aws-regional-cleanup-mumbai-20260603T195128Z/01-ec2-instances.json:generic-api-key:373
+# Reviewed RF7 false positives from fixed test identifiers, security prose, function names, and generated symbol inventory.
+backend/tests/rls-wave-b/b03/repositoryFunctions.test.js:generic-api-key:49
+backend/tests/rls-wave-b/b01/invitationPostgres18.test.js:generic-api-key:76
+documents/security/rls-program/MANUFACTURER_BOOTSTRAP_REVIEW.md:generic-api-key:65
+documents/security/rls-program/public-read-contract.json:generic-api-key:285
+scripts/rls/generate-clean-room-rls-sql.mjs:generic-api-key:2122
+scripts/rls/lib/program-inventory.mjs:generic-api-key:2067
+documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:12168
+documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:14516
+documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:14522

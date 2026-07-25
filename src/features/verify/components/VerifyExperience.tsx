@@ -1536,7 +1536,7 @@ export default function VerifyExperience() {
   const brandName = displayResult?.licensee?.brandName || displayResult?.licensee?.name || displaySessionSummary?.brandName || "Brand";
   const showQuickCheck = !displayResult || (challengeRequired && !challengeCompleted && !authReady);
   const canClaimGarment = Boolean(displayResult?.ownershipStatus?.canClaim && authReady);
-  const canReportConcern = Boolean(displayResult?.verifyUxPolicy?.allowFraudReport ?? true);
+  const canReportConcern = Boolean(displayResult?.verifyUxPolicy?.allowFraudReport);
   const publicView = buildPublicVerificationView({
     payload: displayResult,
     session: displaySessionSummary,

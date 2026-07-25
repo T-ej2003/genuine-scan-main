@@ -79,7 +79,7 @@ async function main() {
     INSERT INTO public."Batch"(id,name,"licenseeId","manufacturerId","startCode","endCode","totalCodes",
       "lifecycleState","printedAt","updatedAt")
       VALUES('${ids.batch}','Public Batch','${ids.licensee}','${ids.manufacturer}',
-        'PUBLICCODE01','PUBLICCODE01',1,'RELEASED',now(),now());
+        'PUBLICCODE01','PUBLICCODE01',1,'DRAFT',now(),now());
     INSERT INTO public."QRCode"(id,code,"displayCode","licenseeId","batchId",status,
       "issuanceMode","customerVerifiableAt","tokenNonce","tokenHash","tokenIssuedAt",
       "tokenExpiresAt","replayEpoch","printedAt","updatedAt")
@@ -101,6 +101,56 @@ async function main() {
     '${hash("ip")}','${hash("device")}','${hash("start")}',NULL
   )`);
 
+  const notReady = json(preauth, verifySql(
+    "PUBLICCODE01", "not-ready", "ip-not-ready", "device-not-ready", "session-not-ready",
+  ));
+  assert.equal(notReady.result, "NOT_READY");
+  assert.equal(Number(psql(admin, `SELECT count(*) FROM public."QrScanLog" WHERE "qrCodeId"='${ids.qr}'`)), 0);
+  assert.equal(Number(psql(admin, `SELECT "scanCount" FROM public."QRCode" WHERE id='${ids.qr}'`)), 0);
+  assert.equal(Number(psql(admin, `SELECT count(*) FROM public."AuditLog"
+    WHERE action='PUBLIC_VERIFICATION_RECORDED' AND details->>'classification'='NOT_READY_FOR_CUSTOMER_USE'`)), 1);
+  assert.equal(Number(psql(admin, `SELECT count(*) FROM public."SecurityEventOutbox"
+    WHERE "eventType"='PUBLIC_VERIFICATION_DECISION'
+      AND payload->>'classification'='NOT_READY_FOR_CUSTOMER_USE'`)), 1);
+  const notReadySession = json(preauth, `SELECT row_to_json(s) FROM app_public.start_verification_session(
+    '${hash("session-not-ready")}','MANUAL_CODE',NULL,now()::timestamp,
+    'not-ready-session-start','${hash("proof-not-ready")}'
+  ) s`);
+  assert.equal(notReadySession.entryMethod, "MANUAL_CODE");
+  denied(preauth, `SELECT app_public.claim_customer_ownership(
+    NULL,'${notReadySession.sessionId}','${hash("proof-not-ready")}',
+    '${hash("not-ready-device")}','${hash("not-ready-ip")}',NULL,false,
+    now()::timestamp,'not-ready-claim'
+  )`, /PUBLIC_OWNERSHIP_NOT_READY/);
+  denied(preauth, `SELECT app_public.submit_public_incident(
+    '${notReadySession.sessionId}','${hash("tampered-report-proof")}','counterfeit_suspected',
+    'The unreleased label is being offered to a customer.',NULL,false,'[]'::jsonb,
+    now()::timestamp,'not-ready-incident-tampered','${hash("not-ready-incident-ip")}',
+    '${hash("not-ready-incident-device")}','${hash("not-ready-incident-tampered")}'
+  )`);
+  denied(preauth, `SELECT app_public.submit_public_incident(
+    '60000000-0000-4000-8000-000000000699','${hash("proof-not-ready")}','counterfeit_suspected',
+    'The unreleased label is being offered to a customer.',NULL,false,'[]'::jsonb,
+    now()::timestamp,'not-ready-incident-other-session','${hash("not-ready-incident-ip")}',
+    '${hash("not-ready-incident-device")}','${hash("not-ready-incident-other-session")}'
+  )`);
+  const notReadyIncident = json(preauth, `SELECT row_to_json(i) FROM app_public.submit_public_incident(
+    '${notReadySession.sessionId}','${hash("proof-not-ready")}','counterfeit_suspected',
+    'The unreleased label is being offered to a customer.',NULL,false,'[]'::jsonb,
+    now()::timestamp,'not-ready-incident','${hash("not-ready-incident-ip")}',
+    '${hash("not-ready-incident-device")}','${hash("not-ready-incident-idempotency")}'
+  ) i`);
+  assert.equal(notReadyIncident.accepted, true);
+  psql(admin, `UPDATE public."CustomerVerificationSession"
+    SET "proofBindingExpiresAt"=now()-interval '1 second' WHERE id='${notReadySession.sessionId}'`);
+  denied(preauth, `SELECT app_public.submit_public_incident(
+    '${notReadySession.sessionId}','${hash("proof-not-ready")}','counterfeit_suspected',
+    'The unreleased label is being offered to a customer.',NULL,false,'[]'::jsonb,
+    now()::timestamp,'not-ready-incident-expired','${hash("not-ready-incident-ip")}',
+    '${hash("not-ready-incident-device")}','${hash("not-ready-incident-expired")}'
+  )`);
+
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='RELEASED' WHERE id='${ids.batch}'`);
   const first = json(preauth, verifySql("PUBLICCODE01", "first", "ip-a", "device-a", "session-a"));
   assert.equal(first.result, "AUTHENTIC");
   assert.equal(first.messageKey, "verification.first_scan");
@@ -117,8 +167,42 @@ async function main() {
   assert.equal(oneSignalOnly.result, "REVIEW");
   const suspicious = json(preauth, verifySql("PUBLICCODE01", "changed-context", "ip-b", "device-b", "session-c"));
   assert.equal(suspicious.result, "REVIEW");
+  const scanCountBeforeBlocked = Number(psql(admin, `SELECT "scanCount" FROM public."QRCode" WHERE id='${ids.qr}'`));
+  const scanRowsBeforeBlocked = Number(psql(admin, `SELECT count(*) FROM public."QrScanLog" WHERE "qrCodeId"='${ids.qr}'`));
+  psql(admin, `UPDATE public."QRCode" SET status='BLOCKED' WHERE id='${ids.qr}'`);
+  const blocked = json(preauth, verifySql(
+    "PUBLICCODE01", "blocked", "ip-blocked", "device-blocked", "session-blocked",
+  ));
+  assert.equal(blocked.result, "BLOCKED");
+  assert.equal(Number(psql(admin, `SELECT "scanCount" FROM public."QRCode" WHERE id='${ids.qr}'`)), scanCountBeforeBlocked);
+  assert.equal(Number(psql(admin, `SELECT count(*) FROM public."QrScanLog" WHERE "qrCodeId"='${ids.qr}'`)), scanRowsBeforeBlocked);
+  psql(admin, `UPDATE public."QRCode" SET status='PRINTED' WHERE id='${ids.qr}';
+    INSERT INTO public."ReplacementChain"(id,status,"originalQrCodeId","replacementQrCodeId","createdAt")
+    VALUES('60000000-0000-4000-8000-000000000601','ACTIVE','${ids.qr}',
+      '60000000-0000-4000-8000-000000000602',now())`);
+  const replaced = json(preauth, verifySql(
+    "PUBLICCODE01", "replaced", "ip-replaced", "device-replaced", "session-replaced",
+  ));
+  assert.equal(replaced.result, "BLOCKED");
+  assert.equal(Number(psql(admin, `SELECT "scanCount" FROM public."QRCode" WHERE id='${ids.qr}'`)), scanCountBeforeBlocked);
+  assert.equal(Number(psql(admin, `SELECT count(*) FROM public."QrScanLog" WHERE "qrCodeId"='${ids.qr}'`)), scanRowsBeforeBlocked);
+  psql(admin, `DELETE FROM public."ReplacementChain" WHERE id='60000000-0000-4000-8000-000000000601'`);
+  const evidenceBeforeUnknown = Number(psql(admin, `SELECT
+    (SELECT count(*) FROM public."VerificationDecision")
+    +(SELECT count(*) FROM public."VerificationEvidenceSnapshot")
+    +(SELECT count(*) FROM public."AuditLog")
+    +(SELECT count(*) FROM public."SecurityEventOutbox")`));
+  const unknownStartedAt = Date.now();
   const unknown = json(preauth, verifySql("UNKNOWNCODE01", "unknown", "ip-c", "device-c", "session-d"));
+  const unknownElapsedMs = Date.now() - unknownStartedAt;
   assert.equal(unknown.result, "NOT_FOUND");
+  assert(unknownElapsedMs >= 10 && unknownElapsedMs < 250,
+    `unknown-code padding must remain bounded; observed ${unknownElapsedMs}ms`);
+  assert.equal(Number(psql(admin, `SELECT
+    (SELECT count(*) FROM public."VerificationDecision")
+    +(SELECT count(*) FROM public."VerificationEvidenceSnapshot")
+    +(SELECT count(*) FROM public."AuditLog")
+    +(SELECT count(*) FROM public."SecurityEventOutbox")`)), evidenceBeforeUnknown);
   psql(admin, `UPDATE public."QRCode" SET "batchId"=NULL WHERE id='${ids.qr}'`);
   assert.equal(json(preauth, verifySql(
     "PUBLICCODE01", "missing-batch", "ip-c", "device-c", "session-missing-batch",
@@ -200,9 +284,9 @@ async function main() {
     '${hash("incident-idempotency")}'
   ) i`);
   assert.equal(incident.accepted, true);
-  assert.equal(Number(psql(admin, `SELECT count(*) FROM public."Incident" WHERE "qrCodeId"='${ids.qr}'`)), 1);
+  assert.equal(Number(psql(admin, `SELECT count(*) FROM public."Incident" WHERE "qrCodeId"='${ids.qr}'`)), 2);
   assert.equal(Number(psql(admin, `SELECT count(*) FROM public."SecurityEventOutbox"
-    WHERE "eventType"='PUBLIC_VERIFICATION_CONCERN'`)), 1);
+    WHERE "eventType"='PUBLIC_VERIFICATION_CONCERN'`)), 2);
   const support = json(preauth, `SELECT row_to_json(s) FROM app_public.submit_public_support(
     'Public Customer','customer@example.invalid','product_concern','Concern about this label',
     'The label condition needs support review.','PUBLICCODE01',NULL,'/support',NULL,

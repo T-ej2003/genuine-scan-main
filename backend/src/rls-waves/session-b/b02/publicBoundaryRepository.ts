@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 
 export type B02PublicFunctionClient = Pick<Prisma.TransactionClient, "$queryRaw">;
 
-export type VerifyRawQrRow = {
+type VerifyRawQrBoundaryRow = {
   result: string;
   messageKey: string;
   nextAction: string;
@@ -21,7 +21,17 @@ export type VerifyRawQrRow = {
   sessionStartToken: string | null;
 };
 
+export type VerifyRawQrRow = VerifyRawQrBoundaryRow & { reportSessionAvailable: boolean };
+type VerifySignedQrBoundaryRow = VerifyRawQrBoundaryRow & { verificationMethod: string };
 export type VerifySignedQrRow = VerifyRawQrRow & { verificationMethod: string };
+export class PublicSignedTokenRejectedError extends Error {
+  readonly code = "PUBLIC_SIGNED_TOKEN_INVALID";
+
+  constructor() {
+    super("Signed QR token could not be verified");
+    this.name = "PublicSignedTokenRejectedError";
+  }
+}
 export type RecordQrVerificationRow = { decisionKey: string; recorded: boolean };
 export type StartVerificationSessionRow = {
   sessionId: string;
@@ -222,6 +232,16 @@ const proof = () => {
   return { raw, hash: createHash("sha256").update(raw).digest("hex") };
 };
 
+const REPORT_SESSION_RESULTS = new Set(["AUTHENTIC", "AUTHENTIC_REPEAT", "REVIEW", "BLOCKED", "NOT_READY"]);
+const withSessionPolicy = <T extends VerifyRawQrBoundaryRow>(row: T, rawToken: string) => {
+  const reportSessionAvailable = REPORT_SESSION_RESULTS.has(row.result);
+  return {
+    ...row,
+    reportSessionAvailable,
+    sessionStartToken: row.ownershipClaimAvailable || reportSessionAvailable ? rawToken : null,
+  };
+};
+
 export const issueCustomerAuthSession = async (
   db: B02PublicFunctionClient,
   input: {
@@ -307,7 +327,7 @@ export const verifyRawQr = async (
   const actorIpHash = optionalDigest(input.actorIpHash, "actor IP digest");
   const actorDeviceHash = optionalDigest(input.actorDeviceHash, "actor device digest");
   const sessionStart = proof();
-  const row = exactOne(await db.$queryRaw<VerifyRawQrRow[]>`
+  const row = exactOne(await db.$queryRaw<VerifyRawQrBoundaryRow[]>`
     SELECT * FROM app_public.verify_raw_qr(
       ${requestedCode}::text,
       ${checkedAt}::timestamp without time zone,
@@ -317,7 +337,7 @@ export const verifyRawQr = async (
       ${sessionStart.hash}::text
     )
   `, "app_public.verify_raw_qr", verifyRawProjection);
-  return row ? { ...row, sessionStartToken: row.ownershipClaimAvailable ? sessionStart.raw : null } : null;
+  return row ? withSessionPolicy(row, sessionStart.raw) : null;
 };
 
 export const verifySignedQr = async (
@@ -355,20 +375,20 @@ export const verifySignedQr = async (
   const expiresAt = date(input.expiresAt, "signed QR expiry time");
   const checkedAt = date(input.checkedAt, "verification time");
   if (issuedAt.getTime() > checkedAt.getTime() || checkedAt.getTime() >= expiresAt.getTime()) {
-    throw new Error("signed QR time window is invalid");
+    throw new PublicSignedTokenRejectedError();
   }
   const validatedRequestId = requestId(input.requestId);
   const actorIpHash = optionalDigest(input.actorIpHash, "actor IP digest");
   const actorDeviceHash = optionalDigest(input.actorDeviceHash, "actor device digest");
   const sessionStart = proof();
-  const row = exactOne(await db.$queryRaw<VerifySignedQrRow[]>`
+  const row = exactOne(await db.$queryRaw<VerifySignedQrBoundaryRow[]>`
     SELECT * FROM app_public.verify_signed_qr(
       ${tokenDigest}, ${qrId}, ${licenseeId}, ${batchId}, ${manufacturerId}, ${nonce}, ${replayEpoch},
       ${keyVersion}, ${issuedAt}, ${expiresAt}, ${checkedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash},
       ${sessionStart.hash}
     )
   `, "app_public.verify_signed_qr", [...verifyRawProjection, ["verificationMethod", "string"]]);
-  return row ? { ...row, sessionStartToken: row.ownershipClaimAvailable ? sessionStart.raw : null } : null;
+  return row ? withSessionPolicy(row, sessionStart.raw) : null;
 };
 
 export const recordQrVerification = async (

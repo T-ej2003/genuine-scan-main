@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
 const path = require("node:path");
 
@@ -22,3 +23,4 @@ assert.match(handler, /sessionStartToken/);
 assert.match(handler, /copyableCodeCaveat/);
 
 console.log("public verification API projection contract passed");
+execFileSync(process.execPath, [path.join(__dirname, "publicSignedTokenErrorMapping.test.js")], { stdio: "inherit" });

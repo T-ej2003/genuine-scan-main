@@ -92,6 +92,7 @@ const fakePrisma = {
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
 mockModule("rls-waves/session-b/b01/runtimeClients.js", { getB01PreAuthPrisma: () => ({}) });
 mockModule("rls-waves/session-b/b02/publicBoundaryRepository.js", {
+  PublicSignedTokenRejectedError: class PublicSignedTokenRejectedError extends Error {},
   verifySignedQr: async () => { throw missingOwnershipError; },
   verifyRawQr: async () => null,
 });
