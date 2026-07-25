@@ -132,6 +132,41 @@ AS $$
    WHERE id=approval_id AND status='APPROVED' AND "executedAt" IS NULL
 $$;
 
+CREATE OR REPLACE FUNCTION app_rls.c03_list_tenant_feature_flags(target_licensee_id text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE scope record;
+BEGIN
+  IF current_setting('app.purpose', true) IS DISTINCT FROM 'governance-feature-flag-list'
+     OR current_setting('app.c03_role', true) NOT IN ('SUPER_ADMIN', 'PLATFORM_SUPER_ADMIN')
+     OR current_setting('app.c03_assurance', true) IS DISTINCT FROM 'ADMIN_MFA' THEN
+    RAISE EXCEPTION 'C03_GOVERNANCE_ACTOR_DENIED' USING ERRCODE = '42501';
+  END IF;
+  PERFORM app_rls.c03_bind_operation('governance-feature-flag-list', target_licensee_id);
+  SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(
+    target_licensee_id,
+    current_setting('app.c03_role', true),
+    NULLIF(current_setting('app.c03_actor_organization_id', true), ''),
+    NULLIF(current_setting('app.c03_actor_licensee_id', true), '')
+  );
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'C03_GOVERNANCE_ACTOR_DENIED' USING ERRCODE = '42501';
+  END IF;
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', f.id,
+      'licenseeId', f."licenseeId",
+      'key', f.key,
+      'enabled', f.enabled,
+      'updatedAt', f."updatedAt"
+    ) ORDER BY f.key, f.id)
+      FROM public."TenantFeatureFlag" f
+     WHERE f."licenseeId" = scope.licensee_id
+  ), '[]'::jsonb);
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION app_rls.c03_upsert_tenant_feature_flag(key text, enabled boolean, config jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
@@ -336,6 +371,7 @@ REVOKE ALL ON FUNCTION app_rls.c03_complete_governance_command(text,jsonb) FROM 
 REVOKE ALL ON FUNCTION app_rls.c03_governance_audit(text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_require_governance_approval(text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_mark_governance_approval_executed(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_list_tenant_feature_flags(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_upsert_tenant_feature_flag(text,boolean,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_get_or_create_retention_policy() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_run_retention_lifecycle(text,text) FROM PUBLIC;

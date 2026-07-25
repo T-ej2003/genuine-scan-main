@@ -15,11 +15,11 @@ Staging and production have not been activated by this evidence revision.
 - Starting commit: `def002eb922b4e4b3350412a2803b969cbff709d`
 - Branch: `rls-full-integration`
 - Generated source contract:
-  `ff8a4a6506d0b4786a7908b0f138b75ee26e2332909a476fa93af848f03a5bb6`
+  `68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc`
 - Generated package checksum:
-  `aae47bc45fedbd9110026b2c645db4a12e079d31b858693a701e863d75017c21`
+  `2a72417d23d08c5ea296e7d914b24f869adb64ad53e2c100341d7538b6d1119d`
 - Deterministic generated-tree checksum:
-  `5651baa31514f4dee169e388aaaad35ecbf41789f76432a7fe62dd050d6d16e0`
+  `061af08772dd717364c797e611c1c141762b170b5621937caaf2f2d3c722b57c`
 
 ## Removed compatibility authority
 
@@ -132,6 +132,13 @@ Focused runs no longer overwrite the full certification result.
   exact capability functions. C03 audit projections strip session capability
   material before the shared audit writer, while retaining it only for the
   database call that verifies authority.
+- C03 incident and governance paths now bind through the reviewed authenticated
+  actor wrapper, narrow platform requests to database-validated resource scope,
+  queue protected audit evidence through the durable B03 boundary, and read
+  tenant feature flags through an exact five-column capability projection.
+- The root development tree now resolves `minimatch@10.2.5`,
+  `brace-expansion@5.0.8`, and `js-yaml@4.3.0`; the backend resolves
+  `tar@7.5.22`. Production audits and OSV Scanner 2.4.0 report no findings.
 - RLS generation repeated byte-identically and full package verification:
   passed.
 - Restricted-owner projection contract: 20 active sources passed; one

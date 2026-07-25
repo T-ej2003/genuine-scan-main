@@ -3,7 +3,7 @@
   "environment": "local-disposable-only",
   "deploymentModel": "clean-room-blue-green",
   "postgresqlMajor": 18,
-  "sourceContractSha256": "ff8a4a6506d0b4786a7908b0f138b75ee26e2332909a476fa93af848f03a5bb6",
+  "sourceContractSha256": "68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc",
   "tablesExpected": 79,
   "forceRlsTargetsExpected": 77,
   "tablesCertified": 77,
@@ -358,7 +358,7 @@
   "columnPrivilegeCertification": true,
   "exactCatalogTamperCertification": true,
   "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "aae47bc45fedbd9110026b2c645db4a12e079d31b858693a701e863d75017c21",
+  "packageChecksumsSha256": "2a72417d23d08c5ea296e7d914b24f869adb64ad53e2c100341d7538b6d1119d",
   "status": "clean-room-full-table-enforcement-certified-workflows-pending",
   "b01Certification": {
     "predecessorReplayRejected": true,

@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 
-type GovernanceDb = Pick<Prisma.TransactionClient, "$queryRaw" | "tenantFeatureFlag">;
+type GovernanceDb = Pick<Prisma.TransactionClient, "$queryRaw">;
 type JsonRow = { result: Prisma.JsonValue };
 
 const json = (value: unknown) => JSON.stringify(value ?? {});
@@ -16,18 +16,13 @@ const requiredObject = <T>(rows: JsonRow[], operation: string): T => {
 export const listTenantFeatureFlagsInTransaction = (
   tx: GovernanceDb,
   licenseeId: string
-) =>
-  tx.tenantFeatureFlag.findMany({
-    where: { licenseeId },
-    orderBy: [{ key: "asc" }, { id: "asc" }],
-    select: {
-      id: true,
-      licenseeId: true,
-      key: true,
-      enabled: true,
-      updatedAt: true,
-    },
-  });
+) => tx.$queryRaw<JsonRow[]>`
+  SELECT app_rls.c03_list_tenant_feature_flags(${licenseeId}) AS result
+`.then((rows) => {
+  const result = rows[0]?.result;
+  if (!Array.isArray(result)) throw new Error("list tenant feature flags returned an invalid database result");
+  return result;
+});
 
 export const upsertTenantFeatureFlagInTransaction = async <T>(
   tx: GovernanceDb,

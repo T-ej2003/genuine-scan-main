@@ -1,7 +1,9 @@
 const assert = require("assert");
+const fs = require("fs");
 const path = require("path");
 
 const distRoot = path.resolve(__dirname, "../../../dist");
+const repoRoot = path.resolve(__dirname, "../../../..");
 const mockModule = (relativePath, exportsValue) => {
   const filename = require.resolve(path.join(distRoot, relativePath));
   require.cache[filename] = { id: filename, filename, loaded: true, exports: exportsValue };
@@ -33,6 +35,7 @@ mockModule("config/database.js", { __esModule: true, default: { $transaction: as
 
 const {
   C03AccessError,
+  c03AccessErrorFromDatabase,
   c03CanonicalDbContext,
   withC03ActorTransaction,
   withC03ResourceTransaction,
@@ -59,6 +62,14 @@ const boundary = (overrides = {}) => ({
 });
 
 const run = async () => {
+  const auditService = fs.readFileSync(path.join(repoRoot, "backend/src/services/auditService.ts"), "utf8");
+  const transactionalAudit = auditService.slice(
+    auditService.indexOf("export const createAuditLogInTransaction"),
+    auditService.indexOf("export const createAuditLog =", auditService.indexOf("export const createAuditLogInTransaction"))
+  );
+  assert.match(transactionalAudit, /queueAuditLogOutbox\(payload, undefined, tx/);
+  assert.doesNotMatch(transactionalAudit, /INSERT INTO public\."AuditLog"|SecurityEventOutbox|appendForensicChainFromAuditLog/);
+
   queryResult = [actorRow()];
   const context = await withC03ActorTransaction(boundary(), async (_db, verified) => verified);
   assert.equal(context.userId, ids.actor);
@@ -74,8 +85,57 @@ const run = async () => {
     requestId: ids.request,
     purpose: "compliance-pack-start",
   });
-  assert.match(lastQuery, /app_auth\.require_authenticated_session/);
+  assert.match(lastQuery, /app_rls\.c03_require_authenticated_actor/);
   assert.doesNotMatch(lastQuery, /install_actor_context|c03_revalidate_actor_scope/);
+
+  assert.deepEqual(c03CanonicalDbContext({
+    ...context,
+    role: "PLATFORM_SUPER_ADMIN",
+    organizationId: ids.org,
+    licenseeId: ids.licensee,
+  }), {
+    userId: ids.actor,
+    role: "PLATFORM_SUPER_ADMIN",
+    organizationId: null,
+    licenseeId: null,
+    manufacturerId: null,
+    authAssurance: "mfa-verified",
+    requestId: ids.request,
+    purpose: "compliance-pack-start",
+  });
+  const incidentDenied = c03AccessErrorFromDatabase({
+    code: "P2010",
+    meta: { code: "42501", message: "ERROR: C03_INCIDENT_DENIED" },
+  });
+  assert(incidentDenied instanceof C03AccessError);
+  assert.equal(incidentDenied.statusCode, 404);
+  assert.equal(incidentDenied.message, "Incident not found");
+  assert.equal(c03AccessErrorFromDatabase({
+    code: "P2010",
+    meta: { code: "42501", message: "ERROR: C03_UNREVIEWED_DENIAL" },
+  }), null);
+
+  queryResults = [
+    [actorRow({ role: "SUPER_ADMIN", organizationId: null, licenseeId: null })],
+    [{
+      userId: ids.actor,
+      role: "SUPER_ADMIN",
+      organizationId: ids.org,
+      licenseeId: ids.licensee,
+    }],
+  ];
+  const platformResourceContext = await withC03ResourceTransaction({
+    ...boundary({
+      role: undefined,
+      licenseeId: undefined,
+      purpose: "compliance-pack-download",
+      allowedRoles: ["SUPER_ADMIN"],
+    }),
+    resourceId: ids.resource,
+    resourceType: "compliancePackJob",
+  }, async (_db, verified) => verified);
+  assert.equal(platformResourceContext.organizationId, ids.org);
+  assert.equal(platformResourceContext.licenseeId, ids.licensee);
 
   await assert.rejects(
     () => withC03ActorTransaction(boundary({ databaseSessionCapability: "forged" }), async () => null),

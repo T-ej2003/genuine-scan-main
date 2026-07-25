@@ -3,7 +3,7 @@ import { Prisma, UserRole } from "@prisma/client";
 import prisma from "../../../config/database";
 import { CanonicalAssurance, CanonicalDbContext } from "../../../lib/canonicalDbContext";
 
-export const C03_ACTOR_SCOPE_FUNCTION = "app_auth.require_authenticated_session";
+export const C03_ACTOR_SCOPE_FUNCTION = "app_rls.c03_require_authenticated_actor";
 export const C03_PLATFORM_SCOPE_FUNCTION = C03_ACTOR_SCOPE_FUNCTION;
 
 export const C03_RESOURCE_SCOPE_FUNCTIONS = {
@@ -22,6 +22,17 @@ export class C03AccessError extends Error {
     super(message);
   }
 }
+
+const c03DatabaseAccessErrors = {
+  C03_INCIDENT_DENIED: ["Incident not found", 404],
+} as const;
+
+export const c03AccessErrorFromDatabase = (error: any): C03AccessError | null => {
+  if (error?.code !== "P2010" || error?.meta?.code !== "42501") return null;
+  const match = /^ERROR:\s+(C03_[A-Z0-9_]+)(?:\r?\n|$)/.exec(String(error?.meta?.message || ""));
+  const mapped = match?.[1] && c03DatabaseAccessErrors[match[1] as keyof typeof c03DatabaseAccessErrors];
+  return mapped ? new C03AccessError(mapped[0], mapped[1]) : null;
+};
 
 type C03CapabilityBoundary = {
   databaseSessionCapability: string;
@@ -48,8 +59,8 @@ export type C03VerifiedDbContext = CanonicalDbContext & {
 export const c03CanonicalDbContext = (context: CanonicalDbContext): CanonicalDbContext => ({
   userId: context.userId,
   role: context.role,
-  organizationId: context.organizationId ?? null,
-  licenseeId: context.licenseeId ?? null,
+  organizationId: platformRoles.has(context.role as UserRole) ? null : context.organizationId ?? null,
+  licenseeId: platformRoles.has(context.role as UserRole) ? null : context.licenseeId ?? null,
   manufacturerId: context.manufacturerId ?? null,
   authAssurance: context.authAssurance,
   requestId: context.requestId,
@@ -101,13 +112,13 @@ const verifyCapability = async (
 
   const rows = await tx.$queryRaw<VerifiedActorRow[]>`
     SELECT
-      actor."sessionId",
-      actor."userId",
+      actor.session_id AS "sessionId",
+      actor.user_id AS "userId",
       actor.role,
-      actor."organizationId",
-      actor."licenseeId",
+      actor.organization_id AS "organizationId",
+      actor.licensee_id AS "licenseeId",
       actor.assurance
-    FROM app_auth.require_authenticated_session(${capability}, ${purpose}, ${requestId}) AS actor
+    FROM app_rls.c03_require_authenticated_actor(${capability}, ${purpose}, ${requestId}) AS actor
   `;
   if (rows.length !== 1) throw new C03AccessError("Authenticated database session is no longer valid", 401);
   const actor = rows[0];
@@ -162,7 +173,9 @@ const withCapabilityTransaction = <T>(
 ) => prisma.$transaction(async (tx) => {
   const verified = await verifyCapability(tx, boundary);
   return callback(tx, narrow ? narrow(verified) : verified);
-}, { isolationLevel });
+}, { isolationLevel }).catch((error) => {
+  throw c03AccessErrorFromDatabase(error) || error;
+});
 
 export const withC03ActorTransaction = <T>(
   boundary: C03ActorBoundary,
@@ -196,10 +209,16 @@ export const withC03ResourceTransaction = <T>(
       const scope = rows[0];
       if (
         rows.length !== 1 || scope.userId !== context.userId || scope.role !== context.role ||
-        scope.organizationId !== context.organizationId || scope.licenseeId !== context.licenseeId
+        (!platformRoles.has(context.role as UserRole) &&
+          (scope.organizationId !== context.organizationId || scope.licenseeId !== context.licenseeId))
       ) {
         throw new C03AccessError("Access denied to this compliance job");
       }
+      return callback(tx, {
+        ...context,
+        organizationId: scope.organizationId,
+        licenseeId: scope.licenseeId,
+      });
     }
     if (boundary.resourceType === "sensitiveActionApproval") {
       const rows = await tx.$queryRaw<VerifiedResourceScopeRow[]>`

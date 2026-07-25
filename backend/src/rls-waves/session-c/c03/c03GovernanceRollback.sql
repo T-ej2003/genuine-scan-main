@@ -3,6 +3,7 @@ DROP FUNCTION IF EXISTS app_rls.c03_generate_compliance_report(timestamptz,times
 DROP FUNCTION IF EXISTS app_rls.c03_run_retention_lifecycle(text,text);
 DROP FUNCTION IF EXISTS app_rls.c03_get_or_create_retention_policy();
 DROP FUNCTION IF EXISTS app_rls.c03_upsert_tenant_feature_flag(text,boolean,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_list_tenant_feature_flags(text);
 DROP FUNCTION IF EXISTS app_rls.c03_validate_compliance_result(jsonb);
 DROP FUNCTION IF EXISTS app_rls.c03_compliance_job_projection(text);
 DROP FUNCTION IF EXISTS app_rls.c03_mark_governance_approval_executed(text);

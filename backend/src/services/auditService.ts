@@ -1,6 +1,5 @@
 import prisma from "../config/database";
 import { Prisma } from "@prisma/client";
-import { randomUUID } from "node:crypto";
 import { createTraceEventFromAuditLog } from "./traceEventService";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import { queueSecurityEvent } from "./siemOutboxService";
@@ -25,8 +24,6 @@ export interface AuditLogInput {
 }
 
 export type TransactionalAuditLogInput = Omit<AuditLogInput, "userId" | "orgId" | "licenseeId">;
-
-type TransactionalAuditDb = Pick<Prisma.TransactionClient, "$executeRaw" | "$queryRaw" | "forensicEventChain">;
 
 type Listener = (log: any) => void;
 
@@ -81,7 +78,7 @@ const resolveAuditPayload = async (data: AuditLogInput) => {
 };
 
 export const createAuditLogInTransaction = async (
-  tx: TransactionalAuditDb,
+  tx: Prisma.TransactionClient,
   inputContext: CanonicalDbContext,
   data: TransactionalAuditLogInput
 ) => {
@@ -93,12 +90,10 @@ export const createAuditLogInTransaction = async (
   const storeRawIp = ["1", "true", "yes", "on"].includes(
     String(process.env.AUDIT_LOG_STORE_RAW_IP || "").trim().toLowerCase()
   );
-  const id = randomUUID();
   const [{ createdAt }] = await tx.$queryRaw<Array<{ createdAt: Date }>>`
     SELECT transaction_timestamp() AS "createdAt"
   `;
-  const log = {
-    id,
+  const payload = {
     userId: context.userId,
     orgId: context.organizationId || null,
     licenseeId: context.licenseeId || null,
@@ -111,30 +106,15 @@ export const createAuditLogInTransaction = async (
     userAgent: normalizeUserAgent(data.userAgent) || null,
     createdAt,
   };
-  await tx.$executeRaw`
-    INSERT INTO public."AuditLog"
-      ("id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details", "ipAddress", "ipHash", "userAgent")
-    VALUES
-      (${log.id}, ${log.userId}, ${log.orgId}, ${log.licenseeId}, ${log.action}, ${log.entityType},
-       ${log.entityId}, ${JSON.stringify(log.details)}::jsonb, ${log.ipAddress}, ${log.ipHash}, ${log.userAgent})
-  `;
-  await appendForensicChainFromAuditLog(log, tx);
-  await tx.$executeRaw`
-    INSERT INTO public."SecurityEventOutbox" ("id", "eventType", "payload", "updatedAt")
-    VALUES (${randomUUID()}, 'AUDIT_LOG', ${JSON.stringify({
-      id: log.id,
-      action: log.action,
-      entityType: log.entityType,
-      entityId: log.entityId,
-      userId: log.userId,
-      orgId: log.orgId,
-      licenseeId: log.licenseeId,
-      details: log.details,
-      createdAt: log.createdAt.toISOString(),
-    })}::jsonb, transaction_timestamp())
-  `;
-
-  return log;
+  const outboxId = await queueAuditLogOutbox(payload, undefined, tx, {
+    requestId: context.requestId,
+    organizationId: context.organizationId,
+    licenseeId: context.licenseeId,
+    manufacturerId: context.manufacturerId,
+    initiatingUserId: context.userId,
+    initiatingActorRoleSnapshot: context.role,
+  });
+  return { ...payload, id: outboxId };
 };
 
 export const createAuditLog = async (data: AuditLogInput) => {

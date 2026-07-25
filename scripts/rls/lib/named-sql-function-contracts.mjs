@@ -406,7 +406,7 @@ const c03GovernanceSecurity = Object.freeze({
   ],
   ownerPolicies: [
     ...c03Security.ownerPolicies,
-    ["TenantFeatureFlag", "SELECT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
+    ["TenantFeatureFlag", "SELECT", `${c03SessionBinding} AND current_setting('app.c03_operation',true)='governance-feature-flag-list' AND "licenseeId"=current_setting('app.c03_licensee_id',true)`],
     ["TenantFeatureFlag", "INSERT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true) AND "updatedByUserId"=current_setting('app.user_id',true)`],
     ["TenantFeatureFlag", "UPDATE", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
     ["EvidenceRetentionPolicy", "SELECT", `${c03SessionBinding} AND "licenseeId"=current_setting('app.licensee_id',true)`],
@@ -1671,6 +1671,11 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["PolicyRule","SELECT"],["PolicyRule","UPDATE"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"]], context: "Locks one capability-visible policy rule, rejects arbitrary fields, and applies one request-bound idempotent patch.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts:updatePolicyRuleInTransaction"], inputAuthority: "capability-derived actor and licensee; rule ID selects only a row in that scope", outputColumns: ["policy rule projection"], disposableProbes: ["c03-policy-postgres18"],
   },
   {
+    id: "c03-list-feature-flags", schema: "app_rls", name: "c03_list_tenant_feature_flags", signature: "text", returnType: "jsonb",
+    identityArguments: "target_licensee_id text", definitionLocation: c03GovernanceSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03GovernanceSecurity,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["TenantFeatureFlag","SELECT"]], context: "Returns the explicit feature-flag administration projection only after the live capability-bound platform actor is revalidated for the selected active licensee.", canonicalWorkflowIds: ["workflow-internal-backend-src-services-governance-service-ts-list-tenant-feature-flags"], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts:listTenantFeatureFlagsInTransaction"], inputAuthority: "licensee ID is a selector; database rows and the authenticated capability establish authority", outputColumns: ["id","licenseeId","key","enabled","updatedAt"], disposableProbes: ["c03-governance-postgres18"],
+  },
+  {
     id: "c03-upsert-feature-flag", schema: "app_rls", name: "c03_upsert_tenant_feature_flag", signature: "text,boolean,jsonb", returnType: "jsonb",
     identityArguments: "key text, enabled boolean, config jsonb", definitionLocation: c03GovernanceSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03GovernanceSecurity,
     tableCommands: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["TenantFeatureFlag","INSERT"],["TenantFeatureFlag","UPDATE"],["SensitiveActionApproval","SELECT"],["SensitiveActionApproval","UPDATE"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]], context: "Consumes a separate approved maker-checker request before one bounded, idempotent feature-flag upsert and its atomic evidence.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts:upsertTenantFeatureFlagInTransaction"], inputAuthority: "capability-derived platform actor and approved payload", outputColumns: ["tenant feature flag projection"], disposableProbes: ["c03-governance-postgres18"],
@@ -1774,6 +1779,18 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     id:"c03-link-ir-alert",schema:"app_rls",name:"c03_link_ir_alert_incident",signature:"text,text,text,text,text",returnType:"jsonb",identityArguments:"incident_authorization_id text, alert_id text, incident_id text, reason text, idempotency_key text",
     definitionLocation:c03IncidentSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:c03IncidentSecurity,
     tableCommands:[["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","SELECT"],["PolicyAlert","UPDATE"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"]],context:"Links one same-tenant alert to the selected incident under step-up assurance and deterministic replay.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts:linkPolicyAlertToIncidentInTransaction"],inputAuthority:"capability-derived incident tenant; IDs cannot establish scope",outputColumns:["policy alert projection"],disposableProbes:["c03-incident-postgres18"],
+  },
+  {
+    id: "c03-require-authenticated-actor", schema: "app_rls", name: "c03_require_authenticated_actor",
+    signature: "text,text,text", returnType: "TABLE(session_id text, user_id text, role text, organization_id text, licensee_id text, assurance text)",
+    identityArguments: "p_capability text, p_purpose text, p_request_id text",
+    definitionLocation: c03Source, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03Security,
+    tableCommands: [["RefreshToken","SELECT"],["User","SELECT"]],
+    context: "Verifies the opaque authenticated-session capability and installs only its database-derived C03 actor context for the operation transaction.",
+    canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:verifyCapability"],
+    inputAuthority: "opaque authenticated-session capability; purpose and request ID are attribution only",
+    outputColumns: ["session_id","user_id","role","organization_id","licensee_id","assurance"],
+    disposableProbes: ["c03-authenticated-boundaries-postgres18"],
   },
   {
     id: "c03-revalidate-compliance-pack-job-actor", schema: "app_rls", name: "c03_revalidate_compliance_pack_job_actor_scope",

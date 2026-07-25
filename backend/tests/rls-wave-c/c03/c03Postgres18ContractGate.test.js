@@ -21,6 +21,7 @@ const requiredFunctions = {
   c03_update_policy_rule: "policy_rule_id text, patch jsonb",
   c03_list_ir_alerts: "incident_authorization_id text, incident_id text, licensee_id text, filters jsonb, row_limit integer, row_offset integer",
   c03_link_ir_alert_incident: "incident_authorization_id text, alert_id text, incident_id text, reason text, idempotency_key text",
+  c03_list_tenant_feature_flags: "target_licensee_id text",
   c03_upsert_tenant_feature_flag: "key text, enabled boolean, config jsonb",
   c03_get_or_create_retention_policy: "",
   c03_update_retention_policy: "patch jsonb",

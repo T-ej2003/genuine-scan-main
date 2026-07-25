@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='ff8a4a6506d0b4786a7908b0f138b75ee26e2332909a476fa93af848f03a5bb6'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:ff8a4a6506d0b4786a7908b0f138b75ee26e2332909a476fa93af848f03a5bb6'
+    AND source_contract_sha256='68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc'
     AND administrator_role='certification-administrator'
     AND phase='ownership-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'context helpers lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:ff8a4a6506d0b4786a7908b0f138b75ee26e2332909a476fa93af848f03a5bb6')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -5560,6 +5560,41 @@ AS $$
    WHERE id=approval_id AND status='APPROVED' AND "executedAt" IS NULL
 $$;
 
+CREATE OR REPLACE FUNCTION app_rls.c03_list_tenant_feature_flags(target_licensee_id text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $$
+DECLARE scope record;
+BEGIN
+  IF current_setting('app.purpose', true) IS DISTINCT FROM 'governance-feature-flag-list'
+     OR current_setting('app.c03_role', true) NOT IN ('SUPER_ADMIN', 'PLATFORM_SUPER_ADMIN')
+     OR current_setting('app.c03_assurance', true) IS DISTINCT FROM 'ADMIN_MFA' THEN
+    RAISE EXCEPTION 'C03_GOVERNANCE_ACTOR_DENIED' USING ERRCODE = '42501';
+  END IF;
+  PERFORM app_rls.c03_bind_operation('governance-feature-flag-list', target_licensee_id);
+  SELECT * INTO scope FROM app_rls.c03_assert_live_licensee_scope(
+    target_licensee_id,
+    current_setting('app.c03_role', true),
+    NULLIF(current_setting('app.c03_actor_organization_id', true), ''),
+    NULLIF(current_setting('app.c03_actor_licensee_id', true), '')
+  );
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'C03_GOVERNANCE_ACTOR_DENIED' USING ERRCODE = '42501';
+  END IF;
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', f.id,
+      'licenseeId', f."licenseeId",
+      'key', f.key,
+      'enabled', f.enabled,
+      'updatedAt', f."updatedAt"
+    ) ORDER BY f.key, f.id)
+      FROM public."TenantFeatureFlag" f
+     WHERE f."licenseeId" = scope.licensee_id
+  ), '[]'::jsonb);
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION app_rls.c03_upsert_tenant_feature_flag(key text, enabled boolean, config jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
@@ -5764,6 +5799,7 @@ REVOKE ALL ON FUNCTION app_rls.c03_complete_governance_command(text,jsonb) FROM 
 REVOKE ALL ON FUNCTION app_rls.c03_governance_audit(text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_require_governance_approval(text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_mark_governance_approval_executed(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_list_tenant_feature_flags(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_upsert_tenant_feature_flag(text,boolean,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_get_or_create_retention_policy() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_run_retention_lifecycle(text,text) FROM PUBLIC;
@@ -5992,9 +6028,11 @@ GRANT EXECUTE ON FUNCTION app_rls.c03_list_ir_alerts(text,text,text,jsonb,intege
 GRANT EXECUTE ON FUNCTION app_rls.c03_list_platform_policy_rules(text,boolean,integer,integer) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_list_policy_rules(text,boolean,integer,integer) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_list_sensitive_action_approvals(text,integer,integer) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_list_tenant_feature_flags(text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_patch_incident(text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_record_incident_event(text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_reject_sensitive_action_approval(text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.c03_require_authenticated_actor(text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_revalidate_compliance_pack_job_actor_scope(text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_run_retention_lifecycle(text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.c03_start_compliance_pack_job(text,text,text,text,text,timestamp with time zone,timestamp with time zone) TO "mscqr_rls_cert_app";
