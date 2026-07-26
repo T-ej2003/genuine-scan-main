@@ -1618,7 +1618,6 @@ const exactRuleIdForSource = ({ sourceFile, functionName, table, command }) => {
   return ruleIds[0];
 };
 const internalSourceRuleIds = [
-  exactRuleIdForSource({ sourceFile: "backend/src/services/auditService.ts", functionName: "createAuditLogInTransaction", table: "AuditLog", command: "INSERT" }),
   exactRuleIdForSource({ sourceFile: "backend/src/controllers/auditController.ts", functionName: "getLogs", table: "AuditLog", command: "SELECT" }),
   exactRuleIdForSource({ sourceFile: "backend/src/services/analyticsService.ts", functionName: "getRiskAnalytics", table: "PolicyRule", command: "SELECT" }),
   exactRuleIdForSource({ sourceFile: "backend/src/services/traceEventService.ts", functionName: "getTraceTimeline", table: "TraceEvent", command: "SELECT" }),

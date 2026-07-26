@@ -72,12 +72,10 @@ const platformClaims = (overrides = {}) => ({
   mfaVerifiedAt: new Date(),
   ...overrides,
 });
-const capabilities = {
-  [ids.adminA]: "A".repeat(43),
-  [ids.manufacturerA]: "B".repeat(43),
-  [ids.platformA]: "C".repeat(43),
-  [ids.orgAdminA]: "D".repeat(43),
-};
+const capability = (value) => createHash("sha256").update(`dashboard-snapshot:${value}`).digest("base64url").slice(0, 43);
+const capabilities = Object.fromEntries(
+  [ids.adminA, ids.manufacturerA, ids.platformA, ids.orgAdminA].map((userId) => [userId, capability(userId)])
+);
 const capabilityFor = (user) => capabilities[user.userId] || capabilities[user.role?.includes("MANUFACTURER") ? ids.manufacturerA : ids.adminA];
 const request = (user, requestId, query = {}, originalUrl = "/api/dashboard/stats") => ({
   user,

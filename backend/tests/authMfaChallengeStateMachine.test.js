@@ -75,6 +75,7 @@ let failCompletionAuditWrite = false;
 let webAuthnChallengeConsumed = false;
 let webAuthnCounter = 0;
 let advisoryLockCalls = 0;
+let currentStepUpAuditWritten = false;
 let transactionTail = Promise.resolve();
 
 const prismaMock = {
@@ -180,6 +181,7 @@ const prismaMock = {
       ].includes(data.payload?.action)) {
         throw new Error("AUTH_COMPLETION_AUDIT_WRITE_FAILED");
       }
+      if (data.payload?.action === "AUTH_MFA_STEP_UP_SUCCESS") currentStepUpAuditWritten = true;
       auditEvents.push(data.payload);
       return { id: `audit-${auditEvents.length}`, ...data };
     },
@@ -192,6 +194,9 @@ const prismaMock = {
       return { id: row.id };
     },
     updateMany: async ({ where, data }) => {
+      if (where.id === "current-step-up-session" && data.revokedAt && !currentStepUpAuditWritten) {
+        throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
+      }
       let count = 0;
       for (const row of refreshTokens) {
         if (where.id && row.id !== where.id) continue;
@@ -673,6 +678,24 @@ mockModule("rls-waves/session-b/b01/sessionCredentialRepository.js", {
   }),
 });
 mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
+  loadAuthenticatedActor: async (db) => {
+    const user = await db.user.findUnique({ where: { id: "admin-1" } });
+    return {
+      ...user,
+      licenseeId: null,
+      orgId: null,
+      emailVerifiedAt: new Date(),
+      pendingEmail: null,
+      pendingEmailRequestedAt: null,
+      disabledAt: null,
+      createdAt: new Date(),
+      licenseeRecordId: null,
+      licenseeName: null,
+      licenseePrefix: null,
+      licenseeBrandName: null,
+      licenseeOrgId: null,
+    };
+  },
   loadAuthenticatedPasswordActor: (db) => db.user.findUnique({ where: { id: "admin-1" } }),
   requireRecentMfaSession: async () => ({ verifiedAt: new Date() }),
 });
@@ -696,6 +719,7 @@ mockModule("services/auditLogOutboxService.js", {
     ].includes(payload?.action)) {
       throw new Error("AUTH_COMPLETION_AUDIT_WRITE_FAILED");
     }
+    if (payload?.action === "AUTH_MFA_STEP_UP_SUCCESS") currentStepUpAuditWritten = true;
     auditEvents.push(payload);
     return `audit-${auditEvents.length}`;
   },
@@ -972,7 +996,10 @@ const run = async () => {
     method: "backup_code",
     code: controllerBeginResponse.body.data.backupCodes[0],
   }), successfulLoginResponse);
-  assert.strictEqual(successfulLoginResponse.statusCode, 200);
+  assert.strictEqual(successfulLoginResponse.statusCode, 200, JSON.stringify({
+    body: successfulLoginResponse.body,
+    loggerEvents,
+  }));
   assert(challenges[0].consumedAt, "successful retry must consume the same MFA challenge");
   assert.strictEqual(backupCodeRows.filter((row) => row.usedAt).length, 1, "successful retry must consume one backup code");
   assert.strictEqual(refreshTokens.length, 1, "successful retry must create one refresh token");
@@ -1003,6 +1030,7 @@ const run = async () => {
     revokedReason: null,
   });
   const stepUpRefreshCount = refreshTokens.length;
+  currentStepUpAuditWritten = false;
   failCompletionAuditWrite = true;
   const failedStepUpResponse = controllerResponse();
   await adminMfaStepUpController(controllerRequest("ACTIVE", {
@@ -1015,6 +1043,7 @@ const run = async () => {
   assert.strictEqual(refreshTokens.length, stepUpRefreshCount, "step-up audit failure must roll back refresh creation");
   assert.strictEqual(refreshTokens.find((row) => row.id === "current-step-up-session").revokedAt, null, "step-up audit failure must preserve the current session");
   failCompletionAuditWrite = false;
+  currentStepUpAuditWritten = false;
   const successfulStepUpResponse = controllerResponse();
   await adminMfaStepUpController(controllerRequest("ACTIVE", {
     code: controllerBeginResponse.body.data.backupCodes[2],

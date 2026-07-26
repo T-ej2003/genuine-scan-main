@@ -53,6 +53,12 @@ test("three routes use exact repository reads without legacy context or direct P
   assert.match(routes, /get\("\/users"[\s\S]*?requireTenantDirectoryReader/);
 });
 
+test("directory pagination binds PostgreSQL integer arguments", () => {
+  const repository = read("backend/src/rls-waves/session-a/tenantDirectoryRepository.ts");
+  assert.match(repository, /\$\{input\.limit\}::integer/);
+  assert.match(repository, /\$\{input\.offset\}::integer/);
+});
+
 test("generated package exposes exact functions and QRRange read policy only", () => {
   const helpers = read("scripts/rls/sql/generated/20-context-helpers.sql");
   const grants = read("scripts/rls/sql/generated/21-runtime-grants.sql");

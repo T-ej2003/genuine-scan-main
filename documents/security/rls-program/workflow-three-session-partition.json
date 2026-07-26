@@ -14,7 +14,6 @@
       ],
       "sessionBExclusiveProductionFiles": [
         "backend/src/controllers/accountController.ts",
-        "backend/src/controllers/authAdminSecurityController.ts",
         "backend/src/controllers/authController.ts",
         "backend/src/controllers/authSessionController.ts",
         "backend/src/controllers/notificationController.ts",
@@ -45,6 +44,7 @@
         "backend/src/middleware/customerVerifyAuth.ts",
         "backend/src/middleware/supportIssueUpload.ts",
         "backend/src/rls-waves/session-b/b01/actorRevalidationRepository.ts",
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts",
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
         "backend/src/rls-waves/session-b/b01/invitationRepository.ts",
         "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
@@ -55,6 +55,7 @@
         "backend/src/routes/modules/authRoutes.ts",
         "backend/src/routes/publicRoutes.ts",
         "backend/src/services/analyticsRollupService.ts",
+        "backend/src/services/attentionQueueService.ts",
         "backend/src/services/auditLogOutboxService.ts",
         "backend/src/services/auth/authBootstrapRepository.ts",
         "backend/src/services/auth/authClaimsRlsContext.ts",
@@ -110,7 +111,6 @@
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
         "backend/src/rls-waves/session-c/c03/c03RestrictedDatabase.ts",
-        "backend/src/services/attentionQueueService.ts",
         "backend/src/services/auditCsvExportService.ts",
         "backend/src/services/auditLogQueryService.ts",
         "backend/src/services/auditService.ts",
@@ -139,9 +139,9 @@
         "scripts/aws/**staging**",
         "documents/security/rls-program/STAGING_FULL_RLS_*"
       ],
-      "workflowCount": 90,
+      "workflowCount": 88,
       "workflowFamilyCount": 5,
-      "productionFileCount": 40,
+      "productionFileCount": 41,
       "existingTestFileCount": 0
     },
     {
@@ -184,10 +184,10 @@
       ],
       "waveLocalResultManifest": "documents/security/rls-program/waves/session-b-auth-public-workers-result.json",
       "originalBranchPoint": "061b3134ba89db84e0564b893e920a2601c14452",
-      "workflowCount": 174,
+      "workflowCount": 161,
       "workflowFamilyCount": 3,
-      "productionFileCount": 79,
-      "existingTestFileCount": 47
+      "productionFileCount": 80,
+      "existingTestFileCount": 46
     },
     {
       "id": "session-c",
@@ -229,9 +229,9 @@
       ],
       "waveLocalResultManifest": "documents/security/rls-program/waves/session-c-admin-governance-operator-result.json",
       "requiredBaseAncestor": "33cbe7ff019efefad242f654f0aa96c44c5b963c",
-      "workflowCount": 74,
+      "workflowCount": 72,
       "workflowFamilyCount": 4,
-      "productionFileCount": 30,
+      "productionFileCount": 29,
       "existingTestFileCount": 21
     }
   ],
@@ -395,32 +395,6 @@
       "canonicalSourceFiles": [
         "backend/src/controllers/auditController.ts",
         "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-http-backend-src-controllers-auth-admin-security-controller-ts-begin-admin-web-authn-setup-controller",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "http:beginAdminWebAuthnSetupController",
-      "executionSurface": "http",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/controllers/authAdminSecurityController.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-http-backend-src-controllers-auth-admin-security-controller-ts-complete-admin-mfa-challenge-controller",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "http:completeAdminMfaChallengeController",
-      "executionSurface": "http",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/controllers/authAdminSecurityController.ts"
       ]
     },
     {
@@ -720,19 +694,6 @@
       ]
     },
     {
-      "workflowId": "workflow-http-backend-src-controllers-qr-controller-ts-rename-batch",
-      "sessionId": "session-a",
-      "waveId": "a-03-batch-qr-lifecycle",
-      "assignmentRuleId": "a03-batch-qr-root",
-      "corroboratingRuleIds": [],
-      "entryPoint": "http:renameBatch",
-      "executionSurface": "http",
-      "contract": "Batch, QR, range, allocation, scan and lifecycle operations through tenant-bound transactions and database-enforced state transitions.",
-      "canonicalSourceFiles": [
-        "backend/src/controllers/qrController.ts"
-      ]
-    },
-    {
       "workflowId": "workflow-http-backend-src-controllers-qr-request-controller-ts-create-qr-allocation-request",
       "sessionId": "session-a",
       "waveId": "a-03-batch-qr-lifecycle",
@@ -917,19 +878,6 @@
       ]
     },
     {
-      "workflowId": "workflow-http-backend-src-controllers-user-controller-ts-get-manufacturers",
-      "sessionId": "session-a",
-      "waveId": "a-01-tenant-manufacturer-platform-reads",
-      "assignmentRuleId": "a01-licensee-user-read-root",
-      "corroboratingRuleIds": [],
-      "entryPoint": "http:getManufacturers",
-      "executionSurface": "http",
-      "contract": "Database-revalidated tenant, manufacturer and bounded platform reads, including dashboards and analytics; filters only narrow trusted scope.",
-      "canonicalSourceFiles": [
-        "backend/src/controllers/userController.ts"
-      ]
-    },
-    {
       "workflowId": "workflow-http-backend-src-controllers-user-controller-ts-get-users",
       "sessionId": "session-a",
       "waveId": "a-01-tenant-manufacturer-platform-reads",
@@ -1082,14 +1030,15 @@
     },
     {
       "workflowId": "workflow-http-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached",
-      "sessionId": "session-c",
-      "waveId": "c-02-audit-fraud-trace-alerts",
-      "assignmentRuleId": "c02-audit-fraud-trace-root",
+      "sessionId": "session-b",
+      "waveId": "b-03-workers-scheduled-outbox-delivery",
+      "assignmentRuleId": "b03-worker-schedule-delivery-contract",
       "corroboratingRuleIds": [],
       "entryPoint": "http:getAttentionQueueSnapshotUncached",
       "executionSurface": "http",
-      "contract": "Audit, fraud, trace, alert and export paths with exact projections, attribution, immutable history and bounded scope.",
+      "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
       "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/services/attentionQueueService.ts"
       ]
     },
@@ -1130,6 +1079,253 @@
       "contract": "Printing, printer trust, reissue, recovery, sample verification and release lifecycles without weakening existing behavior.",
       "canonicalSourceFiles": [
         "backend/src/printing/registry/printerProfileService.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-begin-admin-totp-enrollment",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:beginAdminTotpEnrollment",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-complete-admin-mfa-challenge-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:completeAdminMfaChallengeBoundary",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-complete-admin-totp-enrollment",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:completeAdminTotpEnrollment",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-complete-admin-web-authn-authentication-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:completeAdminWebAuthnAuthenticationBoundary",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-complete-admin-web-authn-registration-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:completeAdminWebAuthnRegistrationBoundary",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-consume-admin-mfa-verifier",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:consumeAdminMfaVerifier",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-create-admin-mfa-challenge-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:createAdminMfaChallengeBoundary",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-create-admin-web-authn-challenge-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:createAdminWebAuthnChallengeBoundary",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-delete-admin-web-authn-credential-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:deleteAdminWebAuthnCredentialBoundary",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-disable-admin-mfa-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:disableAdminMfaBoundary",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-load-admin-mfa-challenge-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:loadAdminMfaChallengeBoundary",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-load-admin-mfa-state",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:loadAdminMfaState",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-load-admin-mfa-verifiers",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:loadAdminMfaVerifiers",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-load-admin-totp-enrollment",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:loadAdminTotpEnrollment",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-load-admin-web-authn-challenge-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:loadAdminWebAuthnChallengeBoundary",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-load-admin-web-authn-credentials",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:loadAdminWebAuthnCredentials",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-record-admin-mfa-challenge-failure",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:recordAdminMfaChallengeFailure",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-replace-admin-backup-codes",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:replaceAdminBackupCodes",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/adminMfaRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-authenticated-security-repository-ts-load-authenticated-manufacturer-scope",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:loadAuthenticatedManufacturerScope",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts"
       ]
     },
     {
@@ -2528,19 +2724,6 @@
       ]
     },
     {
-      "workflowId": "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
-      "sessionId": "session-c",
-      "waveId": "c-02-audit-fraud-trace-alerts",
-      "assignmentRuleId": "c02-audit-fraud-trace-root",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:createAuditLogInTransaction",
-      "executionSurface": "internal",
-      "contract": "Audit, fraud, trace, alert and export paths with exact projections, attribution, immutable history and bounded scope.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auditService.ts"
-      ]
-    },
-    {
       "workflowId": "workflow-internal-backend-src-services-audit-service-ts-get-audit-logs",
       "sessionId": "session-c",
       "waveId": "c-02-audit-fraud-trace-alerts",
@@ -2564,32 +2747,6 @@
       "contract": "Audit, fraud, trace, alert and export paths with exact projections, attribution, immutable history and bounded scope.",
       "canonicalSourceFiles": [
         "backend/src/services/auditService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-auth-email-service-ts-get-primary-superadmin-email",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:getPrimarySuperadminEmail",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/authEmailService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-load-active-session-state",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:loadActiveSessionState",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/authService.ts"
       ]
     },
     {
@@ -2730,175 +2887,6 @@
       ]
     },
     {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-begin-totp-mfa-enrollment",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:beginTotpMfaEnrollment",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-complete-stable-mfa-login-challenge",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:completeStableMfaLoginChallenge",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-confirm-totp-mfa-enrollment",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:confirmTotpMfaEnrollment",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-create-stable-mfa-login-challenge",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:createStableMfaLoginChallenge",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-get-admin-mfa-adapter-status",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:getAdminMfaAdapterStatus",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-rotate",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:rotate",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-mfa-code-with-client",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:verifyMfaCodeWithClient",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-totp-against-legacy-credential",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:verifyTotpAgainstLegacyCredential",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-totp-against-new-factor",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:verifyTotpAgainstNewFactor",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-service-ts-complete-admin-mfa-challenge",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:completeAdminMfaChallenge",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-service-ts-consume-backup-code",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:consumeBackupCode",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-service-ts-create-admin-mfa-challenge",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:createAdminMfaChallenge",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-mfa-service-ts-disable-admin-mfa",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:disableAdminMfa",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaService.ts"
-      ]
-    },
-    {
       "workflowId": "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset",
       "sessionId": "session-b",
       "waveId": "b-01-auth-preauth-session-account-security",
@@ -3022,175 +3010,6 @@
       "canonicalSourceFiles": [
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
         "backend/src/services/auth/sessionRiskService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-begin-web-authn-factor-authentication",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:beginWebAuthnFactorAuthentication",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnMfaProvider.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-begin-web-authn-factor-registration",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:beginWebAuthnFactorRegistration",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnMfaProvider.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-complete-web-authn-factor-authentication",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:completeWebAuthnFactorAuthentication",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnMfaProvider.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-complete-web-authn-factor-registration",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:completeWebAuthnFactorRegistration",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnMfaProvider.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-consume-challenge",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:consumeChallenge",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnMfaProvider.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-load-challenge-by-ticket",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:loadChallengeByTicket",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnMfaProvider.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-service-ts-begin-admin-web-authn-challenge",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:beginAdminWebAuthnChallenge",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-service-ts-complete-admin-web-authn-challenge",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:completeAdminWebAuthnChallenge",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-service-ts-complete-admin-web-authn-registration",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:completeAdminWebAuthnRegistration",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-service-ts-consume-challenge",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:consumeChallenge",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-service-ts-delete-admin-web-authn-credential",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:deleteAdminWebAuthnCredential",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-service-ts-list-admin-web-authn-credentials",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:listAdminWebAuthnCredentials",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-auth-webauthn-service-ts-load-challenge-by-ticket",
-      "sessionId": "session-b",
-      "waveId": "b-01-auth-preauth-session-account-security",
-      "assignmentRuleId": "b01-auth-preauth-account-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:loadChallengeByTicket",
-      "executionSurface": "internal",
-      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/webauthnService.ts"
       ]
     },
     {
@@ -3645,19 +3464,6 @@
       ]
     },
     {
-      "workflowId": "workflow-internal-backend-src-services-incident-email-service-ts-get-primary-superadmin-email",
-      "sessionId": "session-b",
-      "waveId": "b-03-workers-scheduled-outbox-delivery",
-      "assignmentRuleId": "b03-worker-schedule-delivery-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:getPrimarySuperadminEmail",
-      "executionSurface": "internal",
-      "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
-      "canonicalSourceFiles": [
-        "backend/src/services/incidentEmailService.ts"
-      ]
-    },
-    {
       "workflowId": "workflow-internal-backend-src-services-incident-email-service-ts-get-superadmin-alert-emails",
       "sessionId": "session-b",
       "waveId": "b-03-workers-scheduled-outbox-delivery",
@@ -3668,19 +3474,6 @@
       "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
       "canonicalSourceFiles": [
         "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
-        "backend/src/services/incidentEmailService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-incident-email-service-ts-resolve-actor-user",
-      "sessionId": "session-b",
-      "waveId": "b-03-workers-scheduled-outbox-delivery",
-      "assignmentRuleId": "b03-worker-schedule-delivery-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:resolveActorUser",
-      "executionSurface": "internal",
-      "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
-      "canonicalSourceFiles": [
         "backend/src/services/incidentEmailService.ts"
       ]
     },
@@ -3881,19 +3674,6 @@
       ]
     },
     {
-      "workflowId": "workflow-internal-backend-src-services-manufacturer-scope-service-ts-resolve-manufacturer-session-scope",
-      "sessionId": "session-a",
-      "waveId": "a-01-tenant-manufacturer-platform-reads",
-      "assignmentRuleId": "a01-tenant-read-service-root",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:resolveManufacturerSessionScope",
-      "executionSurface": "internal",
-      "contract": "Database-revalidated tenant, manufacturer and bounded platform reads, including dashboards and analytics; filters only narrow trusted scope.",
-      "canonicalSourceFiles": [
-        "backend/src/services/manufacturerScopeService.ts"
-      ]
-    },
-    {
       "workflowId": "workflow-internal-backend-src-services-manufacturer-scope-service-ts-upsert-manufacturer-licensee-link",
       "sessionId": "session-c",
       "waveId": "c-01-administration-general-mutations",
@@ -3945,19 +3725,6 @@
       "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
       "canonicalSourceFiles": [
         "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
-        "backend/src/services/notificationService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-notification-service-ts-list-notifications-for-user-uncached",
-      "sessionId": "session-b",
-      "waveId": "b-03-workers-scheduled-outbox-delivery",
-      "assignmentRuleId": "b03-worker-schedule-delivery-contract",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:listNotificationsForUserUncached",
-      "executionSurface": "internal",
-      "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
-      "canonicalSourceFiles": [
         "backend/src/services/notificationService.ts"
       ]
     },
@@ -4229,6 +3996,19 @@
       "contract": "Printing, printer trust, reissue, recovery, sample verification and release lifecycles without weakening existing behavior.",
       "canonicalSourceFiles": [
         "backend/src/services/printReservationService.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-print-sample-scan-service-ts-record-print-job-sample-scan",
+      "sessionId": "session-a",
+      "waveId": "a-04-printing-reissue-recovery-release",
+      "assignmentRuleId": "a04-printing-release-root",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:recordPrintJobSampleScan",
+      "executionSurface": "internal",
+      "contract": "Printing, printer trust, reissue, recovery, sample verification and release lifecycles without weakening existing behavior.",
+      "canonicalSourceFiles": [
+        "backend/src/services/printSampleScanService.ts"
       ]
     },
     {
@@ -4863,33 +4643,33 @@
     ]
   },
   "validationSummary": {
-    "authoritativeWorkflowCount": 338,
-    "assignmentCount": 338,
-    "uniqueAssignmentCount": 338,
+    "authoritativeWorkflowCount": 321,
+    "assignmentCount": 321,
+    "uniqueAssignmentCount": 321,
     "missingWorkflowIds": [],
     "duplicateWorkflowIds": [],
     "unknownWorkflowIds": [],
     "genericCatchAllAssignments": [],
     "sessionCounts": {
-      "session-a": 90,
-      "session-b": 174,
-      "session-c": 74
+      "session-a": 88,
+      "session-b": 161,
+      "session-c": 72
     },
     "waveCounts": {
-      "a-01-tenant-manufacturer-platform-reads": 12,
-      "a-03-batch-qr-lifecycle": 26,
-      "a-04-printing-reissue-recovery-release": 46,
+      "a-01-tenant-manufacturer-platform-reads": 10,
+      "a-03-batch-qr-lifecycle": 25,
+      "a-04-printing-reissue-recovery-release": 47,
       "a-08-runtime-idempotency-telemetry": 5,
       "a-09-system-integration-owner": 1,
-      "b-01-auth-preauth-session-account-security": 57,
+      "b-01-auth-preauth-session-account-security": 46,
       "b-02-public-proof-support-intake": 99,
-      "b-03-workers-scheduled-outbox-delivery": 18,
+      "b-03-workers-scheduled-outbox-delivery": 16,
       "c-01-administration-general-mutations": 12,
-      "c-02-audit-fraud-trace-alerts": 17,
+      "c-02-audit-fraud-trace-alerts": 15,
       "c-03-governance-policies-incidents-compliance": 45,
       "c-04-operator-recovery-startup-migration-cli": 0
     },
-    "sessionBWorkflowSetSha256": "900aca6e10ae73acdabaa5000c9ff5b62841f743c020910fdc444daeb147ba59",
+    "sessionBWorkflowSetSha256": "0958f262478bf77b7f4064c4eefb31b6e99e54c37d8e60c011ee96908212ce66",
     "sessionBWorkflowOwnershipPreserved": true,
     "sharedReferencedProductionFiles": [
       "backend/src/controllers/incidentController.ts",

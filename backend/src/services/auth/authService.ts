@@ -27,6 +27,7 @@ import {
   loadRefreshSessionState,
   type RefreshSessionState,
 } from "../../rls-waves/session-b/b01/sessionCredentialRepository";
+import { loadAuthenticatedActor } from "../../rls-waves/session-b/b01/authenticatedSecurityRepository";
 import { getB01PreAuthPrisma } from "../../rls-waves/session-b/b01/runtimeClients";
 import { createAuthenticatedSessionCapability } from "./authenticatedSessionCapabilityService";
 
@@ -146,8 +147,28 @@ const loadActiveSessionState = async (
   input: { userId: string; authAssurance: AuthAssuranceLevel } & SessionScopeInput,
   db: AuthDbClient
 ) => {
-  const user = await db.user.findUnique({ where: { id: input.userId }, select: authSessionUserSelect });
-  if (!user) throw new Error("User not found");
+  const actor = await loadAuthenticatedActor(db);
+  if (actor.id !== input.userId) throw new Error("User not found");
+  const user: AuthSessionUser = {
+    id: actor.id,
+    email: actor.email,
+    name: actor.name,
+    role: actor.role,
+    licenseeId: actor.licenseeId,
+    orgId: actor.orgId,
+    emailVerifiedAt: actor.emailVerifiedAt,
+    deletedAt: actor.deletedAt,
+    disabledAt: actor.disabledAt,
+    isActive: actor.isActive,
+    status: actor.status,
+    licensee: actor.licenseeRecordId ? {
+      id: actor.licenseeRecordId,
+      name: actor.licenseeName || "",
+      prefix: actor.licenseePrefix || "",
+      brandName: actor.licenseeBrandName,
+      orgId: actor.licenseeOrgId || actor.orgId || "",
+    } : null,
+  };
   if (isDisabledUser(user)) throw new Error("Account is disabled");
 
   const mfaRequired = isAdminMfaRequiredRole(user.role);

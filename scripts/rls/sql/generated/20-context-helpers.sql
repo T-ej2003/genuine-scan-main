@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc'
+    AND source_contract_sha256='baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85'
     AND administrator_role='certification-administrator'
     AND phase='ownership-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'context helpers lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -1375,11 +1375,11 @@ BEGIN
   SELECT usr.id,usr.email,usr.name,usr.role,usr."orgId",usr."licenseeId",usr.status,usr."isActive",usr."disabledAt",usr."deletedAt",usr."emailVerifiedAt" INTO u FROM public."User" usr WHERE usr.id=t."userId" AND usr."isActive" AND usr."status"::text='ACTIVE' AND usr."disabledAt" IS NULL AND usr."deletedAt" IS NULL;
   IF NOT FOUND THEN RAISE EXCEPTION 'B01_REFRESH_BEARER_DENIED' USING ERRCODE='42501'; END IF;
   SELECT coalesce(bool_or(x.enabled),false),max(x."lastUsedAt"),coalesce(array_agg(DISTINCT x.method) FILTER (WHERE x.enabled),'{}'::text[]) INTO mfa_enabled,mfa_last,methods FROM (
-    SELECT "isEnabled" AS enabled,"lastUsedAt",'TOTP'::text AS method FROM public."AdminMfaCredential" WHERE "userId"=u.id
-    UNION ALL SELECT TRUE,"lastUsedAt",'WEBAUTHN' FROM public."AdminWebAuthnCredential" WHERE "userId"=u.id
-    UNION ALL SELECT TRUE,"lastUsedAt",type FROM public."UserMfaFactor" WHERE "userId"=u.id AND "disabledAt" IS NULL AND type IN ('TOTP','WEBAUTHN')
+    SELECT amc."isEnabled" AS enabled,amc."lastUsedAt",'TOTP'::text AS method FROM public."AdminMfaCredential" amc WHERE amc."userId"=u.id
+    UNION ALL SELECT TRUE,awc."lastUsedAt",'WEBAUTHN' FROM public."AdminWebAuthnCredential" awc WHERE awc."userId"=u.id
+    UNION ALL SELECT TRUE,umf."lastUsedAt",umf.type FROM public."UserMfaFactor" umf WHERE umf."userId"=u.id AND umf."disabledAt" IS NULL AND umf.type IN ('TOTP','WEBAUTHN')
   ) x;
-  IF EXISTS (SELECT 1 FROM public."UserBackupCode" WHERE "userId"=u.id AND "usedAt" IS NULL) AND 'TOTP'=ANY(methods) THEN methods:=array_append(methods,'BACKUP_CODE'); END IF;
+  IF EXISTS (SELECT 1 FROM public."UserBackupCode" ubc WHERE ubc."userId"=u.id AND ubc."usedAt" IS NULL) AND 'TOTP'=ANY(methods) THEN methods:=array_append(methods,'BACKUP_CODE'); END IF;
   IF u.role::text IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN
     SELECT l.id,l.name,l.prefix,l."brandName",l."orgId",ml."isPrimary",ml."updatedAt" INTO selected FROM public."ManufacturerLicenseeLink" ml JOIN public."Licensee" l ON l.id=ml."licenseeId" JOIN public."Organization" o ON o.id=l."orgId"
       WHERE ml."manufacturerId"=u.id AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive" AND (p_requested_licensee_id IS NULL OR l.id=p_requested_licensee_id) ORDER BY ml."isPrimary" DESC,ml."createdAt",ml."licenseeId" LIMIT 1;
@@ -1390,7 +1390,16 @@ BEGIN
     RETURN QUERY SELECT u.id,u.email,u.name,u.role::text,u."licenseeId",u."orgId",u."emailVerifiedAt",selected.id,selected."orgId",to_char(selected."updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),selected.id,selected.name,selected.prefix,selected."brandName",selected."orgId",links,TRUE,mfa_enabled,mfa_enabled,mfa_last,methods,CASE WHEN 'WEBAUTHN'=ANY(methods) THEN 'WEBAUTHN' WHEN 'TOTP'=ANY(methods) THEN 'TOTP' ELSE NULL END;
   ELSE
     IF p_requested_licensee_id IS NOT NULL OR p_requested_scope_version IS NOT NULL THEN RAISE EXCEPTION 'B01_SCOPE_SWITCH_ROLE_DENIED' USING ERRCODE='42501'; END IF;
-    RETURN QUERY SELECT u.id,u.email,u.name,u.role::text,u."licenseeId",u."orgId",u."emailVerifiedAt",u."licenseeId",u."orgId",NULL,NULL,NULL,NULL,NULL,NULL,'[]'::jsonb,(u.role::text IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','ORG_ADMIN')),mfa_enabled,mfa_enabled,mfa_last,methods,CASE WHEN 'WEBAUTHN'=ANY(methods) THEN 'WEBAUTHN' WHEN 'TOTP'=ANY(methods) THEN 'TOTP' ELSE NULL END;
+    IF u.role::text IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN
+      SELECT l.id,l.name,l.prefix,l."brandName",l."orgId" INTO selected
+      FROM public."Licensee" l JOIN public."Organization" o ON o.id=l."orgId"
+      WHERE l.id=u."licenseeId" AND l."orgId" IS NOT DISTINCT FROM u."orgId"
+        AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive";
+      IF NOT FOUND THEN RAISE EXCEPTION 'B01_REFRESH_BEARER_DENIED' USING ERRCODE='42501'; END IF;
+      RETURN QUERY SELECT u.id,u.email,u.name,u.role::text,u."licenseeId",u."orgId",u."emailVerifiedAt",selected.id,selected."orgId",NULL,selected.id,selected.name,selected.prefix,selected."brandName",selected."orgId",'[]'::jsonb,TRUE,mfa_enabled,mfa_enabled,mfa_last,methods,CASE WHEN 'WEBAUTHN'=ANY(methods) THEN 'WEBAUTHN' WHEN 'TOTP'=ANY(methods) THEN 'TOTP' ELSE NULL END;
+    ELSE
+      RETURN QUERY SELECT u.id,u.email,u.name,u.role::text,u."licenseeId",u."orgId",u."emailVerifiedAt",u."licenseeId",u."orgId",NULL,NULL,NULL,NULL,NULL,NULL,'[]'::jsonb,(u.role::text IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')),mfa_enabled,mfa_enabled,mfa_last,methods,CASE WHEN 'WEBAUTHN'=ANY(methods) THEN 'WEBAUTHN' WHEN 'TOTP'=ANY(methods) THEN 'TOTP' ELSE NULL END;
+    END IF;
   END IF;
 END
 $fn$;
@@ -1884,12 +1893,27 @@ CREATE OR REPLACE FUNCTION app_auth.issue_authenticated_session_capability(
   p_expires_at timestamp without time zone
 ) RETURNS TABLE("id" text,"expiresAt" timestamp without time zone)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE session_row record; capability_hash text;
+DECLARE session_row record; capability_hash text; authenticated_actor_id text; authenticated_issue boolean;
+  prior_session_hash text; prior_session_id text; prior_refresh_hash text;
+  prior_operation text; prior_verified text;
 BEGIN
   IF p_refresh_token_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
      OR p_refresh_token_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$'
      OR p_capability !~ '^[A-Za-z0-9_-]{43}$' OR p_assurance NOT IN ('PASSWORD','ADMIN_MFA')
      OR p_expires_at IS NULL THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
+  authenticated_issue := current_setting('app.auth_session_verified',true)='1';
+  IF authenticated_issue THEN
+    prior_session_hash := current_setting('app.auth_session_hash',true);
+    prior_session_id := current_setting('app.auth_session_id',true);
+    prior_refresh_hash := current_setting('app.auth_session_refresh_hash',true);
+    prior_operation := current_setting('app.auth_session_operation',true);
+    prior_verified := current_setting('app.auth_session_verified',true);
+    SELECT "userId" INTO authenticated_actor_id FROM app_rls.b01_authenticated_actor(
+      current_setting('app.user_id',true),
+      current_setting('app.auth_session_id',true),
+      current_setting('app.request_id',true)
+    );
+  END IF;
   -- Reuse the reviewed B01 bearer binder before the first protected read.
   -- The identifier stays a selector; the existing refresh bearer hash is the
   -- only pre-auth proof that can make that selector visible.
@@ -1908,11 +1932,12 @@ BEGIN
      AND rt."tokenHash"=p_refresh_token_hash
      AND rt."revokedAt" IS NULL
      AND rt."expiresAt">clock_timestamp()
-  RETURNING rt.id,rt."expiresAt",rt."mfaVerifiedAt",rt."sessionCapabilityHash" INTO session_row;
+  RETURNING rt.id,rt."userId",rt."expiresAt",rt."mfaVerifiedAt",rt."sessionCapabilityHash" INTO session_row;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED_SESSION' USING ERRCODE='42501';
   END IF;
   IF session_row."sessionCapabilityHash" IS NOT NULL
+     OR (authenticated_issue AND session_row."userId" IS DISTINCT FROM authenticated_actor_id)
      OR p_expires_at<=clock_timestamp() OR p_expires_at>session_row."expiresAt"
      OR (p_assurance='ADMIN_MFA') IS DISTINCT FROM (session_row."mfaVerifiedAt" IS NOT NULL) THEN
     RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED_LIFECYCLE' USING ERRCODE='42501';
@@ -1923,6 +1948,13 @@ BEGIN
     "sessionCapabilityRevokedAt"=NULL,"sessionCapabilityRevokedReason"=NULL
     WHERE rt.id=session_row.id AND rt."sessionCapabilityHash" IS NULL;
   IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED_SESSION' USING ERRCODE='42501'; END IF;
+  IF authenticated_issue THEN
+    PERFORM set_config('app.auth_session_hash',prior_session_hash,true),
+            set_config('app.auth_session_id',prior_session_id,true),
+            set_config('app.auth_session_refresh_hash',coalesce(prior_refresh_hash,''),true),
+            set_config('app.auth_session_operation',prior_operation,true),
+            set_config('app.auth_session_verified',prior_verified,true);
+  END IF;
   RETURN QUERY SELECT session_row.id::text,session_row."expiresAt";
 END
 $fn$;
@@ -2037,6 +2069,7 @@ REVOKE ALL ON FUNCTION app_auth.revoke_all_authenticated_session_capabilities(te
 
 GRANT USAGE ON SCHEMA app_auth TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_auth.issue_authenticated_session_capability(text,text,text,text,timestamp without time zone) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_auth.issue_authenticated_session_capability(text,text,text,text,timestamp without time zone) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_auth.require_authenticated_session(text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_auth.revoke_all_authenticated_session_capabilities(text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_auth.revoke_authenticated_session_capability(text,text,text,text) TO "mscqr_rls_cert_app";
@@ -2405,11 +2438,22 @@ CREATE OR REPLACE FUNCTION app_rls.create_refresh_token(
 ) RETURNS TABLE("id" text,"expiresAt" timestamp without time zone)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE token_id text := gen_random_uuid()::text; actor record;
+        authenticated_call boolean := current_setting('app.auth_session_verified',true)='1';
 BEGIN
-  IF p_user_id IS DISTINCT FROM current_setting('app.b01_preauth_user_id',true)
-     OR p_token_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$' OR p_expires_at<=p_created_at
+  IF p_token_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$' OR p_expires_at<=p_created_at
      OR p_expires_at>p_created_at+interval '31 days' THEN RAISE EXCEPTION 'AUTH_LOGIN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
-  PERFORM set_config('app.auth_closure_operation','login-session-create',true),set_config('app.auth_closure_user_id',p_user_id,true),
+  IF authenticated_call THEN
+    SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+      current_setting('app.user_id',true),current_setting('app.auth_session_id',true),current_setting('app.request_id',true)
+    );
+    IF p_user_id IS DISTINCT FROM actor."userId"
+       OR p_organization_id IS DISTINCT FROM nullif(current_setting('app.organization_id',true),'')
+    THEN RAISE EXCEPTION 'AUTH_LOGIN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  ELSIF p_user_id IS DISTINCT FROM current_setting('app.b01_preauth_user_id',true) THEN
+    RAISE EXCEPTION 'AUTH_LOGIN_SESSION_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.auth_closure_operation',CASE WHEN authenticated_call THEN 'authenticated-session-create' ELSE 'login-session-create' END,true),
+          set_config('app.auth_closure_user_id',p_user_id,true),
           set_config('app.auth_closure_organization_id',coalesce(p_organization_id,''),true),set_config('app.auth_closure_token_id',token_id,true),
           set_config('app.auth_closure_token_hash',p_token_hash,true);
   SELECT u.id,u.role::text AS role,u."orgId",u."licenseeId" INTO actor FROM public."User" u WHERE u.id=p_user_id AND u."isActive"
@@ -3420,6 +3464,7 @@ GRANT EXECUTE ON FUNCTION app_rls.complete_admin_webauthn_registration(text,text
 GRANT EXECUTE ON FUNCTION app_rls.consume_admin_mfa_verifier(text,text,text[],text[],timestamp without time zone) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.create_admin_mfa_challenge(text,text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.create_admin_webauthn_challenge(text,text,text,text,text,text,text,timestamp without time zone,timestamp without time zone) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.create_refresh_token(text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.delete_admin_webauthn_credential(text,timestamp without time zone) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.disable_admin_mfa(timestamp without time zone,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.find_refresh_token_by_id(text,text) TO "mscqr_rls_cert_app";
@@ -12794,11 +12839,11 @@ BEGIN
     ORDER BY "createdAt" DESC,id DESC
     LIMIT p_limit OFFSET CASE WHEN p_cursor_created_at IS NULL THEN p_offset ELSE 0 END
   )
-  SELECT coalesce(jsonb_agg(to_jsonb(page) ORDER BY "createdAt" DESC,id DESC),'[]'::jsonb)
-    INTO rows_json FROM page;
-  SELECT count(*)::integer INTO total_count FROM visible
-    WHERE (NOT p_unread_only OR "readAt" IS NULL);
-  SELECT count(*)::integer INTO unread_count FROM visible WHERE "readAt" IS NULL;
+  SELECT
+    (SELECT coalesce(jsonb_agg(to_jsonb(page) ORDER BY "createdAt" DESC,id DESC),'[]'::jsonb) FROM page),
+    (SELECT count(*)::integer FROM visible WHERE (NOT p_unread_only OR "readAt" IS NULL)),
+    (SELECT count(*)::integer FROM visible WHERE "readAt" IS NULL)
+  INTO rows_json,total_count,unread_count;
   RETURN QUERY SELECT rows_json,
     CASE WHEN p_cursor_created_at IS NULL THEN total_count ELSE NULL END,
     unread_count;
@@ -12857,6 +12902,117 @@ BEGIN
   WHERE n."userId"=actor.user_id AND n.channel='WEB' AND n."readAt" IS NULL;
   GET DIAGNOSTICS changed=ROW_COUNT;
   RETURN QUERY SELECT changed;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_attention_queue_projection(
+  p_licensee_id text,p_since timestamp without time zone,p_request_id text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE incidents jsonb;
+DECLARE alerts jsonb;
+DECLARE tickets jsonb;
+DECLARE audits jsonb;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF p_since IS NULL
+     OR p_since < clock_timestamp()-interval '25 hours'
+     OR p_since > clock_timestamp()+interval '1 minute'
+     OR (p_licensee_id IS NOT NULL AND p_licensee_id !~ '^[0-9a-fA-F-]{36}$') THEN
+    RAISE EXCEPTION 'B03_ATTENTION_QUEUE_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF actor.role IN ('LICENSEE_ADMIN','MANUFACTURER_ADMIN') AND p_licensee_id IS NULL THEN
+    RAISE EXCEPTION 'B03_ATTENTION_QUEUE_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM app_rls.b03_assert_requested_scope(
+    p_licensee_id,
+    CASE WHEN actor.role='LICENSEE_ADMIN' THEN actor.organization_id ELSE NULL END
+  );
+  PERFORM set_config('app.b03_operation','attention-read',true);
+
+  WITH visible AS MATERIALIZED (
+    SELECT i.id,i."qrCodeValue",i.severity::text AS severity,i.status::text AS status,i."createdAt"
+    FROM public."Incident" i
+    WHERE i.status::text=ANY(ARRAY[
+      'NEW','TRIAGED','TRIAGE','INVESTIGATING','CONTAINMENT','ERADICATION',
+      'RECOVERY','AWAITING_CUSTOMER','AWAITING_LICENSEE','REOPENED'
+    ])
+      AND (p_licensee_id IS NULL OR i."licenseeId"=p_licensee_id)
+      AND (actor.role<>'MANUFACTURER_ADMIN' OR
+        EXISTS (
+          SELECT 1 FROM public."QRCode" q JOIN public."Batch" b ON b.id=q."batchId"
+          WHERE q.id=i."qrCodeId" AND b."manufacturerId"=actor.user_id
+        ) OR EXISTS (
+          SELECT 1 FROM public."QrScanLog" s JOIN public."Batch" b ON b.id=s."batchId"
+          WHERE s.id=i."scanEventId" AND b."manufacturerId"=actor.user_id
+        )
+      )
+  )
+  SELECT jsonb_build_object(
+    'count',count(*)::integer,
+    'latest',(SELECT jsonb_build_object(
+      'id',v.id,'qrCodeValue',v."qrCodeValue",'severity',v.severity,
+      'status',v.status,'createdAt',v."createdAt"
+    ) FROM visible v ORDER BY v."createdAt" DESC,v.id DESC LIMIT 1)
+  ) INTO incidents FROM visible;
+
+  WITH visible AS MATERIALIZED (
+    SELECT a.id,a."alertType"::text AS "alertType",a.severity::text AS severity,
+      a.message,a."createdAt"
+    FROM public."PolicyAlert" a
+    WHERE a."acknowledgedAt" IS NULL
+      AND (p_licensee_id IS NULL OR a."licenseeId"=p_licensee_id)
+      AND (actor.role<>'MANUFACTURER_ADMIN' OR a."manufacturerId"=actor.user_id)
+  )
+  SELECT jsonb_build_object(
+    'count',count(*)::integer,
+    'latest',(SELECT jsonb_build_object(
+      'id',v.id,'alertType',v."alertType",'severity',v.severity,
+      'message',v.message,'createdAt',v."createdAt"
+    ) FROM visible v ORDER BY v."createdAt" DESC,v.id DESC LIMIT 1)
+  ) INTO alerts FROM visible;
+
+  WITH visible AS MATERIALIZED (
+    SELECT t.id,t."referenceCode",t.status::text AS status,t.priority::text AS priority,t."updatedAt"
+    FROM public."SupportTicket" t
+    WHERE actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+      AND t.status::text=ANY(ARRAY['OPEN','IN_PROGRESS','WAITING_CUSTOMER'])
+      AND (p_licensee_id IS NULL OR t."licenseeId"=p_licensee_id)
+  )
+  SELECT jsonb_build_object(
+    'count',count(*)::integer,
+    'latest',(SELECT jsonb_build_object(
+      'id',v.id,'referenceCode',v."referenceCode",'status',v.status,
+      'priority',v.priority,'updatedAt',v."updatedAt"
+    ) FROM visible v ORDER BY v."updatedAt" DESC,v.id DESC LIMIT 1)
+  ) INTO tickets FROM visible;
+
+  WITH visible AS MATERIALIZED (
+    SELECT a.id,a.action,a."entityType",a."entityId",a."createdAt"
+    FROM public."AuditLog" a
+    WHERE a."createdAt">=p_since
+      AND (
+        (actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+          AND (p_licensee_id IS NULL OR a."licenseeId"=p_licensee_id))
+        OR (actor.role='LICENSEE_ADMIN' AND a."licenseeId"=actor.licensee_id)
+        OR (actor.role='MANUFACTURER_ADMIN' AND a."userId"=actor.user_id)
+      )
+  )
+  SELECT jsonb_build_object(
+    'count',count(*)::integer,
+    'latest',(SELECT jsonb_build_object(
+      'id',v.id,'action',v.action,'entityType',v."entityType",
+      'entityId',v."entityId",'createdAt',v."createdAt"
+    ) FROM visible v ORDER BY v."createdAt" DESC,v.id DESC LIMIT 1)
+  ) INTO audits FROM visible;
+
+  RETURN jsonb_build_object(
+    'incidents',incidents,'policyAlerts',alerts,
+    'supportTickets',tickets,'auditEvents',audits
+  );
 END
 $fn$;
 
@@ -13050,9 +13206,11 @@ REVOKE ALL ON FUNCTION app_rls.b03_mark_notification_emailed(text,timestamp with
 REVOKE ALL ON FUNCTION app_rls.b03_list_notifications_for_user(text,integer,integer,boolean,timestamp without time zone,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_mark_notification_read(text,text,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_mark_all_notifications_read(text,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_attention_queue_projection(text,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_resolve_incident_notification_scope(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_claim_incident_email_delivery(text,text,text,text,text,text,text,text,text,text,text,text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_complete_incident_email_delivery(text,text,text,text,text,text,text,timestamp without time zone) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_rls.b03_attention_queue_projection(text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_claim_incident_email_delivery(text,text,text,text,text,text,text,text,text,text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_complete_incident_email_delivery(text,text,text,text,text,text,text,timestamp without time zone) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_create_role_notifications(text,text,text,text,text,text,text,jsonb,text[],text) TO "mscqr_rls_cert_app";

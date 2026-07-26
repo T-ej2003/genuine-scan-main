@@ -53,13 +53,13 @@ test("session ownership is exhaustive and editable production and test files nev
   assert.equal(sessionA.coordinationBaseCommit, partition.coordinationBaseCommit);
   assert.equal(sessionB.coordinationBaseCommit, partition.coordinationBaseCommit);
   assert.equal(sessionC.coordinationBaseCommit, partition.coordinationBaseCommit);
-  assert.equal(sessionA.workflowIds.length, 176);
-  assert.equal(sessionB.workflowIds.length, 181);
-  assert.equal(sessionC.workflowIds.length, 44);
-  assert.equal(sessionA.productionFileCount, 61);
-  assert.equal(sessionB.productionFileCount, 77);
-  assert.equal(sessionC.productionFileCount, 28);
-  assert.equal(sessionB.existingTestFileCount, 47);
+  assert.equal(sessionA.workflowIds.length, 88);
+  assert.equal(sessionB.workflowIds.length, 161);
+  assert.equal(sessionC.workflowIds.length, 72);
+  assert.equal(sessionA.productionFileCount, 41);
+  assert.equal(sessionB.productionFileCount, 80);
+  assert.equal(sessionC.productionFileCount, 29);
+  assert.equal(sessionB.existingTestFileCount, 46);
   assert.equal(sessionC.existingTestFileCount, 21);
   assert.equal(new Set([...sessionA.workflowIds, ...sessionB.workflowIds, ...sessionC.workflowIds]).size, EXPECTED_WORKFLOW_COUNT);
   assert.deepEqual(sessionA.productionFiles.filter((file) => sessionB.productionFiles.includes(file)), []);
@@ -67,11 +67,11 @@ test("session ownership is exhaustive and editable production and test files nev
   assert.deepEqual(sessionB.productionFiles.filter((file) => sessionC.productionFiles.includes(file)), []);
   assert.deepEqual(sessionB.existingTestFiles.filter((file) => sessionC.existingTestFiles.includes(file)), []);
   assert.deepEqual(partition.fileOwnership.sessionAOwnedSharedFiles, [
-    "backend/src/services/replacementChainService.ts",
+    "backend/src/controllers/licenseeController.ts",
     "backend/src/routes/index.ts",
   ]);
   assert.deepEqual(partition.fileOwnership.sessionAAdditionalProductionFiles, ["backend/src/lib/canonicalDbContext.ts"]);
-  assert.deepEqual(partition.fileOwnership.sessionBOwnedSharedFiles, []);
+  assert.deepEqual(partition.fileOwnership.sessionBOwnedSharedFiles, ["backend/src/middleware/auth.ts"]);
   assert.deepEqual(partition.fileOwnership.sessionCOwnedSharedFiles, [
     "backend/src/controllers/incidentController.ts",
     "backend/src/controllers/tracePolicyController.ts",
@@ -98,7 +98,7 @@ test("Session B is isolated from global generation, certification and staging st
   for (const file of sessionB.integrationOwnerOnlyFiles) assert.ok(sessionA.productionFiles.includes(file) || sessionC.productionFiles.includes(file));
   for (const file of sessionB.existingTestFiles) assert.ok(fs.existsSync(path.join(repoRoot, file)), file);
   assert.equal(partition.validationSummary.sessionBWorkflowOwnershipPreserved, true);
-  assert.equal(partition.validationSummary.sessionBWorkflowSetSha256, "078751379c2b3cb9addc46318901bb9af6ccdc56b56748d7d305c84a785ae18f");
+  assert.equal(partition.validationSummary.sessionBWorkflowSetSha256, "0958f262478bf77b7f4064c4eefb31b6e99e54c37d8e60c011ee96908212ce66");
 });
 
 test("Session C owns exact administration, governance and operator families and remains isolated", () => {
@@ -110,7 +110,7 @@ test("Session C owns exact administration, governance and operator families and 
     "c-03-governance-policies-incidents-compliance",
     "c-04-operator-recovery-startup-migration-cli",
   ]);
-  assert.deepEqual(sessionC.workflowFamilies.map((family) => family.workflowIds.length), [1, 18, 25, 0]);
+  assert.deepEqual(sessionC.workflowFamilies.map((family) => family.workflowIds.length), [12, 15, 45, 0]);
   for (const requiredBoundary of [
     "documents/security/rls-program/generated/**",
     "scripts/rls/generate-*.mjs",

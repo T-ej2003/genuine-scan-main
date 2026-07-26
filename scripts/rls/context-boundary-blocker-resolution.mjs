@@ -19,7 +19,6 @@ import {
 const reviewPath = path.join(programDir, "CONTEXT_BOUNDARY_BLOCKER_RESOLUTION_REVIEW.md");
 
 const ids = {
-  analytics: "workflow-internal-backend-src-services-analytics-rollup-service-ts-get-checkpoint-date",
   auditLogs: "workflow-internal-backend-src-services-audit-service-ts-get-audit-logs",
   auditOrg: "workflow-internal-backend-src-services-audit-service-ts-resolve-org-id",
   compliance: "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs",
@@ -36,7 +35,7 @@ const ids = {
   replacement: "workflow-internal-backend-src-services-replacement-chain-service-ts-resolve-replacement-status",
   verifyQrcode: "workflow-http-backend-src-controllers-verify-verification-handlers-ts-verify-qrcode",
   fraudSnapshot: "workflow-http-backend-src-controllers-verify-verify-fraud-snapshot-ts-build-fraud-verification-snapshot",
-  supportPublic: "workflow-http-backend-src-controllers-support-controller-ts-track-support-ticket-public",
+  supportPublic: "workflow-internal-backend-src-rls-waves-session-b-b02-public-boundary-repository-ts-track-support-status",
   telemetry: "workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary",
   policyAlerts: "workflow-http-backend-src-controllers-trace-policy-controller-ts-get-policy-alerts-controller",
   irAlerts: "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts",
@@ -49,7 +48,6 @@ const ids = {
 };
 
 const familyIds = {
-  analytics: "family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f",
   audit: "family-simple-tenant-scoped-reads-auditservice-964272fbb7",
   compliance: "family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f",
   dashboard: "family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887",
@@ -97,7 +95,6 @@ const split = (parentFamilyId, semanticKey, reason, evidence, actorClasses, scop
 });
 
 const workflowReviews = new Map([
-  [ids.analytics, { systemBoundaryId: "system-boundary-analytics-rollup-worker", tenantScopeRule: "Allowlisted platform SystemCheckpoint key under the analytics worker lease; no tenant or human scope exists.", reclassifiedFrom: familyIds.analytics }],
   [ids.localClaim, { systemBoundaryId: "system-boundary-local-agent-device-claim", tenantScopeRule: "Exact verified PrinterRegistration, signed device identity, registration-owned printer IDs and registration.userId manufacturer binding.", reclassifiedFrom: familyIds.localClaim }],
   [ids.auditLogs, { blockers: [blockers.dead], split: split(familyIds.audit, "unregistered-audit-reader", "Separate an unregistered legacy reader from the live audit-write organization resolver.", ["Repository search finds no production caller for getAuditLogs."], ["licensee-admin", "operator", "platform-admin"], "No approved scope because the function has no registered root.", "internal", "AuditLog legacy read helper", "Read-only list/count with cursor pagination; no command root is registered.") }],
   [ids.auditOrg, { blockers: [blockers.sharedMutation], split: split(familyIds.audit, "audit-write-org-resolution", "Separate the organization lookup inherited by audit writes from the unregistered audit reader.", ["resolveOrgId is private and is called by resolveAuditPayload for createAuditLog and createAuditLogSafely."], ["authenticated-user", "worker", "scheduled-job"], "Organization is derived from explicit orgId or Licensee.orgId inside the owning audit-write boundary.", "internal", "Licensee lookup inherited by AuditLog write roots", "SELECT prerequisite inside mixed audit mutation roots.", { category: "incident/governance workflows", risk: "high" }) }],

@@ -79,6 +79,11 @@ export const WORKFLOW_DELEGATIONS = Object.freeze([
     reason: "The registered notification or incident-email workflow owns the operation; B03 supplies its exact authenticated SQL capability.",
   })),
   {
+    delegated: { executionSurface: "worker", sourceFile: "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts", function: "readAttentionQueueProjection" },
+    canonical: { executionSurface: "http", sourceFile: "backend/src/services/attentionQueueService.ts", function: "getAttentionQueueSnapshotUncached" },
+    reason: "The synchronous dashboard service owns attention-queue reads; B03 supplies its exact authenticated SQL projection.",
+  },
+  {
     delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c02/riskAnalyticsRepository.ts", function: "readRiskAnalyticsSnapshot" },
     canonical: { executionSurface: "internal", sourceFile: "backend/src/services/analyticsService.ts", function: "getRiskAnalytics" },
     reason: "The analytics service owns the registered risk workflow; the repository supplies its exact SQL snapshot.",

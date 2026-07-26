@@ -94,28 +94,6 @@
       "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
     },
     {
-      "path": "backend/src/services/attentionQueueService.ts",
-      "model": "incident",
-      "methods": [
-        "count",
-        "findFirst"
-      ],
-      "reason": "Attention queue uses scoped dashboard/service inputs before aggregation.",
-      "cannotWidenAccess": "Attention queue uses scoped dashboard/service inputs before aggregation. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
-      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
-    },
-    {
-      "path": "backend/src/services/attentionQueueService.ts",
-      "model": "auditLog",
-      "methods": [
-        "count",
-        "findFirst"
-      ],
-      "reason": "Attention queue uses scoped dashboard/service inputs before aggregation.",
-      "cannotWidenAccess": "Attention queue uses scoped dashboard/service inputs before aggregation. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
-      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
-    },
-    {
       "path": "backend/src/services/auditService.ts",
       "model": "licensee",
       "methods": [
@@ -134,17 +112,6 @@
       ],
       "reason": "Audit reads receive scoped filters from controllers.",
       "cannotWidenAccess": "Audit reads receive scoped filters from controllers. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
-      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
-    },
-    {
-      "path": "backend/src/services/auth/authService.ts",
-      "model": "user",
-      "methods": [
-        "findUnique",
-        "update"
-      ],
-      "reason": "Authentication must look up and update users by credentials/session identifiers.",
-      "cannotWidenAccess": "Authentication must look up and update users by credentials/session identifiers. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
       "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
     },
     {

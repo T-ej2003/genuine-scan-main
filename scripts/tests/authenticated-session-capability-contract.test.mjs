@@ -22,6 +22,8 @@ test("authenticated session capability is a database-verified, hash-only boundar
   assert.match(source, /set_config\('app\.user_id','',true\)/);
   assert.match(source, /p_refresh_token_hash !~ '\^\(\[0-9a-f\]\{12\}:\)\?\[a-f0-9\]\{64\}\$'/);
   assert.match(source, /rt\."tokenHash"=p_refresh_token_hash/);
+  assert.match(source, /authenticated_issue AND session_row\."userId" IS DISTINCT FROM authenticated_actor_id/);
+  assert.match(source, /set_config\('app\.auth_session_hash',prior_session_hash,true\)/);
   assert.match(source, /s\."sessionCapabilityHash"=current_setting\('app\.auth_session_hash',true\)/);
   assert.match(source, /s\."revokedAt" IS NULL/);
   assert.match(source, /FOR SHARE OF s/);
@@ -42,7 +44,9 @@ test("authenticated runtime execution is exact and excludes generic context inst
   assert.doesNotMatch(allowlist, /install_actor_context/);
   assert.match(generator, /authenticatedSessionAppSignatures/);
   assert.doesNotMatch(generatedContext, /GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app_rls TO/);
+  assert.deepEqual(namedFunctionContractFor("app_auth.issue_authenticated_session_capability").security.runtimeExecuteGrantees, ["preauth", "app"]);
   assert.match(generatedContext, /GRANT EXECUTE ON FUNCTION app_auth\.issue_authenticated_session_capability\(text,text,text,text,timestamp without time zone\) TO "mscqr_rls_cert_preauth"/);
+  assert.match(generatedContext, /GRANT EXECUTE ON FUNCTION app_auth\.issue_authenticated_session_capability\(text,text,text,text,timestamp without time zone\) TO "mscqr_rls_cert_app"/);
   assert.match(generatedContext, /GRANT EXECUTE ON FUNCTION app_auth\.require_authenticated_session\(text,text,text\) TO "mscqr_rls_cert_app"/);
   assert.match(generatedContext, /GRANT EXECUTE ON FUNCTION app_auth\.revoke_authenticated_session_capability\(text,text,text,text\) TO "mscqr_rls_cert_app"/);
   assert.match(generatedContext, /GRANT EXECUTE ON FUNCTION app_auth\.revoke_all_authenticated_session_capabilities\(text,text,text\) TO "mscqr_rls_cert_app"/);

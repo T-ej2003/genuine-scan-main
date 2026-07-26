@@ -11849,6 +11849,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -11882,6 +11883,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -11908,6 +11910,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -11932,6 +11935,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -11956,6 +11960,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -11993,6 +11998,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12027,6 +12033,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12052,6 +12059,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12072,12 +12080,17 @@
       "columns": [
         "id",
         "qrCodeId",
+        "qrCodeValue",
         "scanEventId",
-        "licenseeId"
+        "licenseeId",
+        "severity",
+        "status",
+        "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12102,6 +12115,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12121,11 +12135,129 @@
       "command": "SELECT",
       "columns": [
         "id",
+        "licenseeId",
         "manufacturerId"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
+        "b03-claim-incident-email",
+        "b03-complete-incident-email",
+        "b03-create-role-notifications",
+        "b03-create-user-notification",
+        "b03-list-notifications",
+        "b03-mark-all-notifications-read",
+        "b03-mark-notification-emailed",
+        "b03-mark-notification-read",
+        "b03-primary-superadmin-email",
+        "b03-resolve-incident-email-actor",
+        "b03-resolve-incident-notification-scope",
+        "b03-superadmin-alert-emails"
+      ]
+    },
+    {
+      "table": "QrScanLog",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "batchId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-attention-queue",
+        "b03-claim-incident-email",
+        "b03-complete-incident-email",
+        "b03-create-role-notifications",
+        "b03-create-user-notification",
+        "b03-list-notifications",
+        "b03-mark-all-notifications-read",
+        "b03-mark-notification-emailed",
+        "b03-mark-notification-read",
+        "b03-primary-superadmin-email",
+        "b03-resolve-incident-email-actor",
+        "b03-resolve-incident-notification-scope",
+        "b03-superadmin-alert-emails"
+      ]
+    },
+    {
+      "table": "PolicyAlert",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "alertType",
+        "severity",
+        "message",
+        "manufacturerId",
+        "acknowledgedAt",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-attention-queue",
+        "b03-claim-incident-email",
+        "b03-complete-incident-email",
+        "b03-create-role-notifications",
+        "b03-create-user-notification",
+        "b03-list-notifications",
+        "b03-mark-all-notifications-read",
+        "b03-mark-notification-emailed",
+        "b03-mark-notification-read",
+        "b03-primary-superadmin-email",
+        "b03-resolve-incident-email-actor",
+        "b03-resolve-incident-notification-scope",
+        "b03-superadmin-alert-emails"
+      ]
+    },
+    {
+      "table": "SupportTicket",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "referenceCode",
+        "status",
+        "priority",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-attention-queue",
+        "b03-claim-incident-email",
+        "b03-complete-incident-email",
+        "b03-create-role-notifications",
+        "b03-create-user-notification",
+        "b03-list-notifications",
+        "b03-mark-all-notifications-read",
+        "b03-mark-notification-emailed",
+        "b03-mark-notification-read",
+        "b03-primary-superadmin-email",
+        "b03-resolve-incident-email-actor",
+        "b03-resolve-incident-notification-scope",
+        "b03-superadmin-alert-emails"
+      ]
+    },
+    {
+      "table": "AuditLog",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "licenseeId",
+        "action",
+        "entityType",
+        "entityId",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12159,6 +12291,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12192,6 +12325,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12218,6 +12352,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12246,6 +12381,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12276,6 +12412,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12307,6 +12444,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12336,6 +12474,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
@@ -12361,6 +12500,7 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",

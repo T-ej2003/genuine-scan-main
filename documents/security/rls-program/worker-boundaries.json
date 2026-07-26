@@ -406,10 +406,14 @@
         "command-incident-handoff-select-56e28c0be62e",
         "command-incident-select-56e28c0be62e",
         "command-licensee-select-56e28c0be62e",
+        "command-manufacturer-licensee-link-select-56e28c0be62e",
         "command-organization-select-56e28c0be62e",
         "command-refresh-token-select-56e28c0be62e",
+        "command-scheduled-job-credential-select-0b81b64aa57d",
         "command-scheduled-job-credential-select-56e28c0be62e",
+        "command-scheduled-job-credential-update-0b81b64aa57d",
         "command-scheduled-job-credential-update-56e28c0be62e",
+        "command-sensitive-action-approval-select-56e28c0be62e",
         "command-user-select-56e28c0be62e"
       ],
       "auditEventRequirement": {

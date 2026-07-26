@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "workflowCount": 23,
+  "workflowCount": 24,
   "groups": {
     "account and security mutations": [
       {
@@ -88,6 +88,16 @@
           "command-action-idempotency-key-insert-e8b066967a4b",
           "command-action-idempotency-key-select-e8b066967a4b",
           "command-request-access-insert-e8b066967a4b"
+        ]
+      },
+      {
+        "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b02-public-boundary-repository-ts-track-support-status",
+        "familyId": "family-contract-public-fn-track-support-status",
+        "boundaryClass": "account and security mutations",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-incident-handoff-select-2b72e030edbe",
+          "command-support-ticket-select-2b72e030edbe"
         ]
       }
     ],
@@ -330,10 +340,14 @@
           "command-incident-handoff-select-56e28c0be62e",
           "command-incident-select-56e28c0be62e",
           "command-licensee-select-56e28c0be62e",
+          "command-manufacturer-licensee-link-select-56e28c0be62e",
           "command-organization-select-56e28c0be62e",
           "command-refresh-token-select-56e28c0be62e",
+          "command-scheduled-job-credential-select-0b81b64aa57d",
           "command-scheduled-job-credential-select-56e28c0be62e",
+          "command-scheduled-job-credential-update-0b81b64aa57d",
           "command-scheduled-job-credential-update-56e28c0be62e",
+          "command-sensitive-action-approval-select-56e28c0be62e",
           "command-user-select-56e28c0be62e"
         ]
       },
@@ -503,6 +517,18 @@
       ]
     },
     {
+      "familyId": "family-contract-public-fn-track-support-status",
+      "boundaryClass": "account and security mutations",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-internal-backend-src-rls-waves-session-b-b02-public-boundary-repository-ts-track-support-status"
+      ],
+      "sourceCommandRuleIds": [
+        "command-incident-handoff-select-2b72e030edbe",
+        "command-support-ticket-select-2b72e030edbe"
+      ]
+    },
+    {
       "familyId": "family-contract-preauth-fn-consume-email-verification",
       "boundaryClass": "pre-auth function-backed workflows",
       "implementationStatus": "contract-ready",
@@ -637,10 +663,14 @@
         "command-incident-handoff-select-56e28c0be62e",
         "command-incident-select-56e28c0be62e",
         "command-licensee-select-56e28c0be62e",
+        "command-manufacturer-licensee-link-select-56e28c0be62e",
         "command-organization-select-56e28c0be62e",
         "command-refresh-token-select-56e28c0be62e",
+        "command-scheduled-job-credential-select-0b81b64aa57d",
         "command-scheduled-job-credential-select-56e28c0be62e",
+        "command-scheduled-job-credential-update-0b81b64aa57d",
         "command-scheduled-job-credential-update-56e28c0be62e",
+        "command-sensitive-action-approval-select-56e28c0be62e",
         "command-user-select-56e28c0be62e"
       ]
     },

@@ -65,6 +65,11 @@ test("login challenge and risk policies are exact and actor-bound", () => {
     assert.doesNotMatch(policy, /app\.b01_preauth_user_id|USING\s*\(\s*true\s*\)|WITH CHECK\s*\(\s*true\s*\)/);
   }
   assert.match(source, /p_user_id IS DISTINCT FROM current_setting\('app\.b01_preauth_user_id',true\)/);
+  assert.deepEqual(
+    namedFunctionContractFor("app_rls.create_refresh_token")?.security.runtimeExecuteGrantees,
+    ["preauth", "app"]
+  );
+  assert.match(source, /authenticated-session-create/);
   assert.match(source, /app_rls\.b01_authenticated_actor/);
   assert.match(source, /revoke_all_refresh_tokens[\s\S]*?DECLARE actor record; changed integer;/);
   assert.doesNotMatch(source, /;\s*RETURNING "riskScore","riskLevel",reasons INTO challenge/);

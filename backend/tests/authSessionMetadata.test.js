@@ -28,6 +28,20 @@ mockModule("config/database.js", {
   default: prismaMock,
 });
 
+mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
+  loadAuthenticatedActor: async () => ({
+    ...prismaUser,
+    pendingEmail: null,
+    pendingEmailRequestedAt: null,
+    createdAt: new Date("2026-03-01T00:00:00.000Z"),
+    licenseeRecordId: prismaUser?.licensee?.id || null,
+    licenseeName: prismaUser?.licensee?.name || null,
+    licenseePrefix: prismaUser?.licensee?.prefix || null,
+    licenseeBrandName: prismaUser?.licensee?.brandName || null,
+    licenseeOrgId: prismaUser?.licensee?.orgId || null,
+  }),
+});
+
 mockModule("services/auth/passwordService.js", {
   verifyPassword: async () => true,
   hashPassword: async () => "hashed",

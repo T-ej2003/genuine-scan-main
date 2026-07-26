@@ -83,10 +83,11 @@ const platformClaims = (overrides = {}) => ({
   mfaVerifiedAt: new Date(),
   ...overrides,
 });
+const capability = (value) => createHash("sha256").update(`batch-operational:${value}`).digest("base64url").slice(0, 43);
 const capabilities = {
-  tenant: "E".repeat(43),
-  manufacturer: "F".repeat(43),
-  platform: "G".repeat(43),
+  tenant: capability("tenant"),
+  manufacturer: capability("manufacturer"),
+  platform: capability("platform"),
 };
 const capabilityFor = (user) => user.role === "PLATFORM_SUPER_ADMIN"
   ? capabilities.platform

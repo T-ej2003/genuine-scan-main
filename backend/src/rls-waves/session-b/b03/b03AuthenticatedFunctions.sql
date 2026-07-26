@@ -393,11 +393,11 @@ BEGIN
     ORDER BY "createdAt" DESC,id DESC
     LIMIT p_limit OFFSET CASE WHEN p_cursor_created_at IS NULL THEN p_offset ELSE 0 END
   )
-  SELECT coalesce(jsonb_agg(to_jsonb(page) ORDER BY "createdAt" DESC,id DESC),'[]'::jsonb)
-    INTO rows_json FROM page;
-  SELECT count(*)::integer INTO total_count FROM visible
-    WHERE (NOT p_unread_only OR "readAt" IS NULL);
-  SELECT count(*)::integer INTO unread_count FROM visible WHERE "readAt" IS NULL;
+  SELECT
+    (SELECT coalesce(jsonb_agg(to_jsonb(page) ORDER BY "createdAt" DESC,id DESC),'[]'::jsonb) FROM page),
+    (SELECT count(*)::integer FROM visible WHERE (NOT p_unread_only OR "readAt" IS NULL)),
+    (SELECT count(*)::integer FROM visible WHERE "readAt" IS NULL)
+  INTO rows_json,total_count,unread_count;
   RETURN QUERY SELECT rows_json,
     CASE WHEN p_cursor_created_at IS NULL THEN total_count ELSE NULL END,
     unread_count;
@@ -456,6 +456,117 @@ BEGIN
   WHERE n."userId"=actor.user_id AND n.channel='WEB' AND n."readAt" IS NULL;
   GET DIAGNOSTICS changed=ROW_COUNT;
   RETURN QUERY SELECT changed;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_attention_queue_projection(
+  p_licensee_id text,p_since timestamp without time zone,p_request_id text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE incidents jsonb;
+DECLARE alerts jsonb;
+DECLARE tickets jsonb;
+DECLARE audits jsonb;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF p_since IS NULL
+     OR p_since < clock_timestamp()-interval '25 hours'
+     OR p_since > clock_timestamp()+interval '1 minute'
+     OR (p_licensee_id IS NOT NULL AND p_licensee_id !~ '^[0-9a-fA-F-]{36}$') THEN
+    RAISE EXCEPTION 'B03_ATTENTION_QUEUE_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF actor.role IN ('LICENSEE_ADMIN','MANUFACTURER_ADMIN') AND p_licensee_id IS NULL THEN
+    RAISE EXCEPTION 'B03_ATTENTION_QUEUE_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM app_rls.b03_assert_requested_scope(
+    p_licensee_id,
+    CASE WHEN actor.role='LICENSEE_ADMIN' THEN actor.organization_id ELSE NULL END
+  );
+  PERFORM set_config('app.b03_operation','attention-read',true);
+
+  WITH visible AS MATERIALIZED (
+    SELECT i.id,i."qrCodeValue",i.severity::text AS severity,i.status::text AS status,i."createdAt"
+    FROM public."Incident" i
+    WHERE i.status::text=ANY(ARRAY[
+      'NEW','TRIAGED','TRIAGE','INVESTIGATING','CONTAINMENT','ERADICATION',
+      'RECOVERY','AWAITING_CUSTOMER','AWAITING_LICENSEE','REOPENED'
+    ])
+      AND (p_licensee_id IS NULL OR i."licenseeId"=p_licensee_id)
+      AND (actor.role<>'MANUFACTURER_ADMIN' OR
+        EXISTS (
+          SELECT 1 FROM public."QRCode" q JOIN public."Batch" b ON b.id=q."batchId"
+          WHERE q.id=i."qrCodeId" AND b."manufacturerId"=actor.user_id
+        ) OR EXISTS (
+          SELECT 1 FROM public."QrScanLog" s JOIN public."Batch" b ON b.id=s."batchId"
+          WHERE s.id=i."scanEventId" AND b."manufacturerId"=actor.user_id
+        )
+      )
+  )
+  SELECT jsonb_build_object(
+    'count',count(*)::integer,
+    'latest',(SELECT jsonb_build_object(
+      'id',v.id,'qrCodeValue',v."qrCodeValue",'severity',v.severity,
+      'status',v.status,'createdAt',v."createdAt"
+    ) FROM visible v ORDER BY v."createdAt" DESC,v.id DESC LIMIT 1)
+  ) INTO incidents FROM visible;
+
+  WITH visible AS MATERIALIZED (
+    SELECT a.id,a."alertType"::text AS "alertType",a.severity::text AS severity,
+      a.message,a."createdAt"
+    FROM public."PolicyAlert" a
+    WHERE a."acknowledgedAt" IS NULL
+      AND (p_licensee_id IS NULL OR a."licenseeId"=p_licensee_id)
+      AND (actor.role<>'MANUFACTURER_ADMIN' OR a."manufacturerId"=actor.user_id)
+  )
+  SELECT jsonb_build_object(
+    'count',count(*)::integer,
+    'latest',(SELECT jsonb_build_object(
+      'id',v.id,'alertType',v."alertType",'severity',v.severity,
+      'message',v.message,'createdAt',v."createdAt"
+    ) FROM visible v ORDER BY v."createdAt" DESC,v.id DESC LIMIT 1)
+  ) INTO alerts FROM visible;
+
+  WITH visible AS MATERIALIZED (
+    SELECT t.id,t."referenceCode",t.status::text AS status,t.priority::text AS priority,t."updatedAt"
+    FROM public."SupportTicket" t
+    WHERE actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+      AND t.status::text=ANY(ARRAY['OPEN','IN_PROGRESS','WAITING_CUSTOMER'])
+      AND (p_licensee_id IS NULL OR t."licenseeId"=p_licensee_id)
+  )
+  SELECT jsonb_build_object(
+    'count',count(*)::integer,
+    'latest',(SELECT jsonb_build_object(
+      'id',v.id,'referenceCode',v."referenceCode",'status',v.status,
+      'priority',v.priority,'updatedAt',v."updatedAt"
+    ) FROM visible v ORDER BY v."updatedAt" DESC,v.id DESC LIMIT 1)
+  ) INTO tickets FROM visible;
+
+  WITH visible AS MATERIALIZED (
+    SELECT a.id,a.action,a."entityType",a."entityId",a."createdAt"
+    FROM public."AuditLog" a
+    WHERE a."createdAt">=p_since
+      AND (
+        (actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+          AND (p_licensee_id IS NULL OR a."licenseeId"=p_licensee_id))
+        OR (actor.role='LICENSEE_ADMIN' AND a."licenseeId"=actor.licensee_id)
+        OR (actor.role='MANUFACTURER_ADMIN' AND a."userId"=actor.user_id)
+      )
+  )
+  SELECT jsonb_build_object(
+    'count',count(*)::integer,
+    'latest',(SELECT jsonb_build_object(
+      'id',v.id,'action',v.action,'entityType',v."entityType",
+      'entityId',v."entityId",'createdAt',v."createdAt"
+    ) FROM visible v ORDER BY v."createdAt" DESC,v.id DESC LIMIT 1)
+  ) INTO audits FROM visible;
+
+  RETURN jsonb_build_object(
+    'incidents',incidents,'policyAlerts',alerts,
+    'supportTickets',tickets,'auditEvents',audits
+  );
 END
 $fn$;
 
@@ -649,6 +760,7 @@ REVOKE ALL ON FUNCTION app_rls.b03_mark_notification_emailed(text,timestamp with
 REVOKE ALL ON FUNCTION app_rls.b03_list_notifications_for_user(text,integer,integer,boolean,timestamp without time zone,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_mark_notification_read(text,text,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_mark_all_notifications_read(text,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_attention_queue_projection(text,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_resolve_incident_notification_scope(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_claim_incident_email_delivery(text,text,text,text,text,text,text,text,text,text,text,text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_complete_incident_email_delivery(text,text,text,text,text,text,text,timestamp without time zone) FROM PUBLIC;

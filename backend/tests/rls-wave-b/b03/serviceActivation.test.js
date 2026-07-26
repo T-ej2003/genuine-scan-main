@@ -6,10 +6,9 @@ const repoRoot = path.resolve(__dirname, "../../../..");
 const source = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 
 const analytics = source("backend/src/services/analyticsRollupService.ts");
-assert.match(analytics, /WHERE "key" = \$\{key\} FOR UPDATE/);
-assert.match(analytics, /alreadyInTransaction \? Promise\.all\(writes\) : prisma\.\$transaction\(writes\)/);
-assert.match(analytics, /setCheckpointDate\(db, INVENTORY_CHECKPOINT_KEY, now\)/);
-assert.match(analytics, /setCheckpointDate\(db, SCAN_HOURLY_CHECKPOINT_KEY, now\)/);
+assert.match(analytics, /app_rls\.refresh_inventory_status_rollups/);
+assert.match(analytics, /app_rls\.refresh_scan_metrics_hourly_rollups/);
+assert.doesNotMatch(analytics, /prisma\.(?:inventoryStatusRollup|scanMetricsHourlyRollup|systemCheckpoint)\./);
 
 const audit = source("backend/src/services/auditLogOutboxService.ts");
 assert.match(audit, /consumeAuditLogOutbox\(tx/);
@@ -33,7 +32,12 @@ const notification = source("backend/src/services/notificationService.ts");
 assert.match(notification, /createRoleNotificationsThroughBoundary/);
 assert.match(notification, /createUserNotificationThroughBoundary/);
 assert.match(notification, /resolveIncidentNotificationScope/);
-assert.match(notification, /b03AuthenticatedFunctionsEnabled\(\)\s*\? await listNotificationsForUserUncached/);
+assert.match(notification, /listNotificationsForUserThroughBoundary/);
+assert.match(notification, /requireB03AuthenticatedFunctionBoundary/);
+
+const attention = source("backend/src/services/attentionQueueService.ts");
+assert.match(attention, /readAttentionQueueProjection/);
+assert.doesNotMatch(attention, /prisma\.(?:incident|policyAlert|supportTicket|auditLog)\./);
 
 const main = async () => {
   const previous = process.env.MSCQR_RLS_B03_AUTHENTICATED_FUNCTIONS_ENABLED;

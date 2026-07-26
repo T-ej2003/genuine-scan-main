@@ -4,6 +4,8 @@ import {
   installCanonicalDbContext,
   type CanonicalAssurance,
   type CanonicalDbContext,
+  type CanonicalTransactionClient,
+  validateCanonicalDbContext,
 } from "../../../lib/canonicalDbContext";
 import type { AuthenticatedSessionClaims } from "../../../types";
 import { revalidateAuthenticatedActor } from "./actorRevalidationRepository";
@@ -71,7 +73,8 @@ export const withDatabaseAuthenticatedSession = <T>(
   claims: AuthenticatedSessionClaims,
   input: { capability: string; requestId: string; purpose: string },
   callback: (tx: Prisma.TransactionClient, context: CanonicalDbContext) => Promise<T>,
-  runner: Pick<ReturnType<typeof getB01AuthenticatedPrisma>, "$transaction"> = getB01AuthenticatedPrisma()
+  runner: Pick<ReturnType<typeof getB01AuthenticatedPrisma>, "$transaction"> = getB01AuthenticatedPrisma(),
+  options?: { isolationLevel?: Prisma.TransactionIsolationLevel; maxWait?: number; timeout?: number }
 ): Promise<T> => {
   const expectedUserId = required(claims.userId, "an actor user ID");
   const capability = required(input.capability, "a database session capability");
@@ -103,5 +106,40 @@ export const withDatabaseAuthenticatedSession = <T>(
       purpose,
     };
     return callback(tx, context);
-  });
+  }, options);
 };
+
+const platformRoles = new Set(["SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"]);
+
+export const withDatabaseAuthenticatedSelection = <T>(
+  claims: AuthenticatedSessionClaims,
+  input: {
+    capability: string;
+    requestId: string;
+    purpose: string;
+    context: CanonicalDbContext;
+  },
+  callback: (tx: CanonicalTransactionClient, context: CanonicalDbContext) => Promise<T>,
+  runner: Pick<ReturnType<typeof getB01AuthenticatedPrisma>, "$transaction"> = getB01AuthenticatedPrisma(),
+  options?: { isolationLevel?: Prisma.TransactionIsolationLevel; maxWait?: number; timeout?: number }
+) => withDatabaseAuthenticatedSession(claims, input, async (tx, verified) => {
+  const selected = validateCanonicalDbContext(input.context);
+  const isPlatform = platformRoles.has(verified.role);
+  if (
+    selected.userId !== verified.userId ||
+    selected.role !== verified.role ||
+    selected.organizationId !== verified.organizationId ||
+    selected.manufacturerId !== verified.manufacturerId ||
+    selected.authAssurance !== verified.authAssurance ||
+    selected.requestId !== verified.requestId ||
+    selected.purpose !== verified.purpose ||
+    (!isPlatform && selected.licenseeId !== verified.licenseeId)
+  ) {
+    throw new CanonicalAuthDenial();
+  }
+  const context = await installCanonicalDbContext(tx, {
+    ...verified,
+    licenseeId: isPlatform ? selected.licenseeId : verified.licenseeId,
+  });
+  return callback(tx as CanonicalTransactionClient, context);
+}, runner, options);

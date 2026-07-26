@@ -130,7 +130,7 @@
       "reviewGroup": "A",
       "physicalOwnerRole": "identity-table-owner",
       "forceRlsTarget": true,
-      "terminalBoundary": "actor-key",
+      "terminalBoundary": "approved-special-boundary",
       "dependencyLayer": 0
     },
     {
@@ -246,7 +246,7 @@
     {
       "id": "table-incident-communication",
       "prismaModel": "IncidentCommunication",
-      "primaryCategory": "append-only-audit",
+      "primaryCategory": "parent-inherited",
       "reviewGroup": "E",
       "physicalOwnerRole": "identity-table-owner",
       "forceRlsTarget": true,
@@ -1530,8 +1530,8 @@
       "dependencyEdges": 15,
       "blockingDecisions": [],
       "ownershipConfidence": {
-        "high": 19,
-        "medium": 4,
+        "high": 18,
+        "medium": 5,
         "low": 0
       }
     },

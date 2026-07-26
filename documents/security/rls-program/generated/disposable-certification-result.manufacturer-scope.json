@@ -10,9 +10,26 @@
   "generatedPoliciesCertified": 343,
   "columnPrivilegeCellsCertified": 60,
   "workflowCertificationStatus": "pending-application-path-certification",
-  "workflowsApplicationPathCertified": 0,
-  "applicationPathCertifiedWorkflowIds": [],
-  "applicationPathResults": [],
+  "workflowsApplicationPathCertified": 1,
+  "applicationPathCertifiedWorkflowIds": [
+    "workflow-internal-backend-src-rls-waves-session-b-b01-authenticated-security-repository-ts-load-authenticated-manufacturer-scope"
+  ],
+  "applicationPathResults": [
+    {
+      "familyId": "manufacturer-scope",
+      "workflowIds": [
+        "workflow-internal-backend-src-rls-waves-session-b-b01-authenticated-security-repository-ts-load-authenticated-manufacturer-scope"
+      ],
+      "registeredRoots": [
+        "POST /auth/login",
+        "POST /auth/refresh",
+        "GET /auth/me"
+      ],
+      "status": "application-path-certified",
+      "postgresqlMajor": 18,
+      "testFile": "backend/tests/rls-wave-b/b01/authenticationClosurePostgres18.test.js"
+    }
+  ],
   "b01PreAuthCertification": {
     "status": "application-path-certified",
     "postgresqlMajor": 18,
@@ -313,10 +330,6 @@
   },
   "c03Certification": null,
   "printingLifecycleCertification": null,
-  "publicVerificationCertification": {
-    "status": "application-path-certified",
-    "postgresqlMajor": 18,
-    "testFile": "backend/tests/rls-wave-b/b02/publicVerificationPostgres18.test.js"
-  },
+  "publicVerificationCertification": null,
   "disposableCertificationFixtureRows": 78
 }

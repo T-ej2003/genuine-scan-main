@@ -2,35 +2,35 @@
 
 This is the compact human review of `command-semantics.json`. It defines architecture only: no SQL, grants, roles, RLS state, or runtime behavior are changed.
 
-Rules: 1351; workflows mapped: 338/338.
+Rules: 1394; workflows mapped: 321/321.
 
 ## Review groups
 
 | Group | Tables | Rules | SELECT | INSERT | UPDATE | DELETE |
 |---|---:|---:|---:|---:|---:|---:|
-| A | 23 | 431 | 259 | 35 | 107 | 30 |
-| B | 3 | 202 | 187 | 6 | 4 | 5 |
-| C | 15 | 232 | 151 | 21 | 43 | 17 |
-| D | 13 | 138 | 68 | 18 | 38 | 14 |
-| E | 18 | 227 | 104 | 80 | 25 | 18 |
-| F | 7 | 121 | 28 | 66 | 19 | 8 |
+| A | 23 | 462 | 301 | 34 | 96 | 31 |
+| B | 3 | 210 | 195 | 6 | 4 | 5 |
+| C | 15 | 235 | 155 | 21 | 42 | 17 |
+| D | 13 | 141 | 70 | 19 | 38 | 14 |
+| E | 18 | 226 | 103 | 80 | 25 | 18 |
+| F | 7 | 120 | 28 | 65 | 19 | 8 |
 | G | 0 | 0 | 0 | 0 | 0 | 0 |
 
 ## Actor classes
 
 | Value | Rules |
 |---|---:|
-| anonymous | 95 |
-| authenticated-user | 526 |
+| anonymous | 91 |
+| authenticated-user | 578 |
 | manufacturer | 228 |
-| operator | 228 |
+| operator | 223 |
 | checker | 6 |
-| licensee-admin | 364 |
-| platform-admin | 469 |
+| licensee-admin | 348 |
+| platform-admin | 453 |
 | restricted-read | 16 |
-| pre-auth-runtime | 95 |
+| pre-auth-runtime | 91 |
 | worker | 6 |
-| scheduled-job | 19 |
+| scheduled-job | 21 |
 | migration | 0 |
 | operator-admin | 1 |
 | break-glass | 0 |
@@ -39,12 +39,12 @@ Rules: 1351; workflows mapped: 338/338.
 
 | Value | Rules |
 |---|---:|
-| none | 172 |
-| password-verified | 799 |
-| mfa-bootstrap | 5 |
-| mfa-verified | 305 |
+| none | 168 |
+| password-verified | 846 |
+| mfa-bootstrap | 0 |
+| mfa-verified | 308 |
 | step-up-verified | 25 |
-| system-verified | 41 |
+| system-verified | 43 |
 | operator-approved | 4 |
 | dual-approved-break-glass | 0 |
 
@@ -52,21 +52,21 @@ Rules: 1351; workflows mapped: 338/338.
 
 | Value | Rules |
 |---|---:|
-| SELECT | 797 |
-| INSERT | 226 |
-| UPDATE | 236 |
-| DELETE | 92 |
+| SELECT | 852 |
+| INSERT | 225 |
+| UPDATE | 224 |
+| DELETE | 93 |
 
 ## Boundary and deletion summary
 
-Named-function rules: 956.
-Restricted-worker rules: 25.
+Named-function rules: 1047.
+Restricted-worker rules: 27.
 Approval-gated rules: 8.
 
 | Hard-delete classification | Rules |
 |---|---:|
-| actor self-delete | 8 |
-| not-applicable | 1259 |
+| actor self-delete | 9 |
+| not-applicable | 1301 |
 | operator-approved | 1 |
 | prohibited | 77 |
 | retention delete | 1 |

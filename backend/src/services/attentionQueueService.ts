@@ -1,15 +1,12 @@
 import {
-  IncidentStatus,
   Prisma,
-  PrintJobStatus,
-  PrintPipelineState,
-  SupportTicketStatus,
   UserRole,
 } from "@prisma/client";
 
-import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
+import { readAttentionQueueProjection } from "../rls-waves/session-b/b03/repositoryFunctions";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "./manufacturerScopeService";
 import { listNotificationsForUser } from "./notificationService";
 import { getOrComputeVersionedCache } from "./versionedCacheService";
@@ -39,34 +36,6 @@ export type AttentionQueueSnapshot = {
   };
   items: AttentionQueueItem[];
 };
-
-const OPEN_INCIDENT_STATUSES = [
-  IncidentStatus.NEW,
-  IncidentStatus.TRIAGED,
-  IncidentStatus.TRIAGE,
-  IncidentStatus.INVESTIGATING,
-  IncidentStatus.CONTAINMENT,
-  IncidentStatus.ERADICATION,
-  IncidentStatus.RECOVERY,
-  IncidentStatus.AWAITING_CUSTOMER,
-  IncidentStatus.AWAITING_LICENSEE,
-  IncidentStatus.REOPENED,
-];
-
-const ACTIVE_PRINT_STATUSES = [PrintJobStatus.PENDING, PrintJobStatus.SENT];
-const ACTIVE_PRINT_PIPELINE_STATES = [
-  PrintPipelineState.QUEUED,
-  PrintPipelineState.PREFLIGHT_OK,
-  PrintPipelineState.SENT_TO_PRINTER,
-  PrintPipelineState.PRINTER_ACKNOWLEDGED,
-  PrintPipelineState.NEEDS_OPERATOR_ACTION,
-];
-
-const OPEN_SUPPORT_STATUSES = [
-  SupportTicketStatus.OPEN,
-  SupportTicketStatus.IN_PROGRESS,
-  SupportTicketStatus.WAITING_CUSTOMER,
-];
 
 const isPlatformRole = (role: UserRole) => role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
 const isLicenseeAdminRole = (role: UserRole) => role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN;
@@ -112,99 +81,6 @@ const humanizeEnum = (value?: string | null) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ") || "Unknown";
 
-const buildIncidentWhere = (req: AuthRequest): Prisma.IncidentWhereInput => {
-  const role = req.user?.role;
-  const scopedLicenseeId = getEffectiveLicenseeId(req);
-  const where: Prisma.IncidentWhereInput = { status: { in: OPEN_INCIDENT_STATUSES } };
-
-  if (!role || isPlatformRole(role)) {
-    if (scopedLicenseeId) where.licenseeId = scopedLicenseeId;
-    return where;
-  }
-
-  if (isManufacturerRole(role)) {
-    where.OR = [
-      { qrCode: { batch: { manufacturerId: req.user?.userId } } },
-      { scanEvent: { batch: { manufacturerId: req.user?.userId } } },
-    ];
-    return where;
-  }
-
-  if (isLicenseeAdminRole(role) && scopedLicenseeId) where.licenseeId = scopedLicenseeId;
-  return where;
-};
-
-const buildPolicyAlertWhere = (req: AuthRequest): Prisma.PolicyAlertWhereInput => {
-  const role = req.user?.role;
-  const scopedLicenseeId = getEffectiveLicenseeId(req);
-  const where: Prisma.PolicyAlertWhereInput = { acknowledgedAt: null };
-
-  if (!role || isPlatformRole(role)) {
-    if (scopedLicenseeId) where.licenseeId = scopedLicenseeId;
-    return where;
-  }
-
-  if (isManufacturerRole(role)) {
-    where.manufacturerId = req.user?.userId;
-    return where;
-  }
-
-  if (isLicenseeAdminRole(role) && scopedLicenseeId) where.licenseeId = scopedLicenseeId;
-  return where;
-};
-
-const buildPrintJobWhere = (req: AuthRequest): Prisma.PrintJobWhereInput => {
-  const role = req.user?.role;
-  const scopedLicenseeId = getEffectiveLicenseeId(req);
-  const where: Prisma.PrintJobWhereInput = {
-    OR: [{ status: { in: ACTIVE_PRINT_STATUSES } }, { pipelineState: { in: ACTIVE_PRINT_PIPELINE_STATES } }],
-  };
-
-  if (!role || isPlatformRole(role)) {
-    if (scopedLicenseeId) where.batch = { licenseeId: scopedLicenseeId };
-    return where;
-  }
-
-  if (isManufacturerRole(role)) {
-    where.manufacturerId = req.user?.userId;
-    return where;
-  }
-
-  if (isLicenseeAdminRole(role) && scopedLicenseeId) where.batch = { licenseeId: scopedLicenseeId };
-  return where;
-};
-
-const buildSupportTicketWhere = (req: AuthRequest): Prisma.SupportTicketWhereInput => {
-  const role = req.user?.role;
-  const scopedLicenseeId = getEffectiveLicenseeId(req);
-  const where: Prisma.SupportTicketWhereInput = { status: { in: OPEN_SUPPORT_STATUSES } };
-
-  if (!role || !isPlatformRole(role)) {
-    return { ...where, id: "__no_support_ticket_scope__" };
-  }
-
-  if (!role || isPlatformRole(role)) {
-    if (scopedLicenseeId) where.licenseeId = scopedLicenseeId;
-    return where;
-  }
-  return where;
-};
-
-const buildAuditWhere = (req: AuthRequest, since: Date): Prisma.AuditLogWhereInput => {
-  const role = req.user?.role;
-  const scopedLicenseeId = getEffectiveLicenseeId(req);
-  const where: Prisma.AuditLogWhereInput = { createdAt: { gte: since } };
-
-  if (!role || isPlatformRole(role)) {
-    if (scopedLicenseeId) where.licenseeId = scopedLicenseeId;
-    return where;
-  }
-
-  if (isManufacturerRole(role)) where.userId = req.user?.userId;
-  if (isLicenseeAdminRole(role) && scopedLicenseeId) where.licenseeId = scopedLicenseeId;
-  return where;
-};
-
 const firstIso = (value?: Date | string | null) => {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
@@ -242,12 +118,15 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
     limit: 5,
     offset: 0,
     unreadOnly: true,
+    databaseBoundary: b03BoundaryForRequest(req, "notification-list"),
   });
 
-  const incidentWhere = buildIncidentWhere(req);
-  const policyAlertWhere = buildPolicyAlertWhere(req);
-  const supportTicketWhere = buildSupportTicketWhere(req);
-  const auditWhere = buildAuditWhere(req, since);
+  const attentionBoundary = b03BoundaryForRequest(req, "attention-queue");
+  const attentionPromise = attentionBoundary.run((db) => readAttentionQueueProjection(db, {
+    licenseeId: getEffectiveLicenseeId(req),
+    since,
+    requestId: attentionBoundary.requestId,
+  }));
   const printingAttentionPromise = readPrintingProjection({
     capability: String(req.databaseSessionCapability || ""),
     requestId: String((req as AuthRequest & { requestId?: string }).requestId || ""),
@@ -258,44 +137,18 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
 
   const [
     notifications,
-    incidentCount,
-    policyAlertCount,
+    attention,
     printingAttention,
-    supportTicketCount,
-    auditEvents24h,
-    latestIncident,
-    latestPolicyAlert,
-    latestSupportTicket,
-    latestAuditEvent,
   ] = await Promise.all([
     notificationPromise,
-    prisma.incident.count({ where: incidentWhere }),
-    prisma.policyAlert.count({ where: policyAlertWhere }),
+    attentionPromise,
     printingAttentionPromise,
-    prisma.supportTicket.count({ where: supportTicketWhere }),
-    prisma.auditLog.count({ where: auditWhere }),
-    prisma.incident.findFirst({
-      where: incidentWhere,
-      orderBy: { createdAt: "desc" },
-      select: { id: true, qrCodeValue: true, severity: true, status: true, createdAt: true },
-    }),
-    prisma.policyAlert.findFirst({
-      where: policyAlertWhere,
-      orderBy: { createdAt: "desc" },
-      select: { id: true, alertType: true, severity: true, message: true, createdAt: true },
-    }),
-    prisma.supportTicket.findFirst({
-      where: supportTicketWhere,
-      orderBy: { updatedAt: "desc" },
-      select: { id: true, referenceCode: true, status: true, priority: true, updatedAt: true },
-    }),
-    prisma.auditLog.findFirst({
-      where: auditWhere,
-      orderBy: { createdAt: "desc" },
-      select: { id: true, action: true, entityType: true, entityId: true, createdAt: true },
-    }),
   ]);
 
+  const { count: incidentCount, latest: latestIncident } = attention.incidents;
+  const { count: policyAlertCount, latest: latestPolicyAlert } = attention.policyAlerts;
+  const { count: supportTicketCount, latest: latestSupportTicket } = attention.supportTickets;
+  const { count: auditEvents24h, latest: latestAuditEvent } = attention.auditEvents;
   const printJobCount = Number(printingAttention?.count || 0);
   const latestPrintJob = printingAttention?.latest || null;
   const items: AttentionQueueItem[] = [];
@@ -320,7 +173,7 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
       body: `${humanizeEnum(latestIncident.severity)} severity signal for label ${latestIncident.qrCodeValue || "under review"}.`,
       tone: latestIncident.severity === "CRITICAL" || latestIncident.severity === "HIGH" ? "blocked" : "review",
       route: canOpenIncidentRoute ? `/incident-response?incidentId=${encodeURIComponent(latestIncident.id)}` : "/scan-activity",
-      createdAt: latestIncident.createdAt.toISOString(),
+      createdAt: firstIso(latestIncident.createdAt),
       count: incidentCount,
     });
   }
@@ -332,7 +185,7 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
       body: latestPolicyAlert.message || `${humanizeEnum(latestPolicyAlert.alertType)} requires operator review.`,
       tone: latestPolicyAlert.severity === "CRITICAL" || latestPolicyAlert.severity === "HIGH" ? "blocked" : "review",
       route: canOpenIncidentRoute ? "/incident-response" : "/scan-activity",
-      createdAt: latestPolicyAlert.createdAt.toISOString(),
+      createdAt: firstIso(latestPolicyAlert.createdAt),
       count: policyAlertCount,
     });
   }
@@ -356,7 +209,7 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
       body: `${latestSupportTicket.referenceCode} is ${humanizeEnum(latestSupportTicket.status)} with ${humanizeEnum(latestSupportTicket.priority)} priority.`,
       tone: "support",
       route: `/support?ticketId=${encodeURIComponent(latestSupportTicket.id)}`,
-      createdAt: latestSupportTicket.updatedAt.toISOString(),
+      createdAt: firstIso(latestSupportTicket.updatedAt),
       count: supportTicketCount,
     });
   }
@@ -368,7 +221,7 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
       body: `${humanizeEnum(latestAuditEvent.action)} on ${humanizeEnum(latestAuditEvent.entityType)}${latestAuditEvent.entityId ? ` ${latestAuditEvent.entityId}` : ""}.`,
       tone: "audit",
       route: "/audit-history",
-      createdAt: latestAuditEvent.createdAt.toISOString(),
+      createdAt: firstIso(latestAuditEvent.createdAt),
       count: auditEvents24h,
     });
   }

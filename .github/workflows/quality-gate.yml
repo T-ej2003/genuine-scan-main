@@ -58,15 +58,24 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18.4
         env:
-          POSTGRES_DB: mscqr_e2e
+          POSTGRES_DB: mscqr_e2e_admin_test
           POSTGRES_USER: postgres
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d mscqr_e2e"
+          --health-cmd "pg_isready -U postgres -d mscqr_e2e_admin_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -142,13 +151,15 @@ jobs:
             printf '%s=%s\n' "$name" "$joined" >> "$GITHUB_ENV"
           }
 
+          write_backup_codes E2E_SUPERADMIN_MFA_BACKUP_CODES
+          write_backup_codes E2E_LICENSEE_ADMIN_MFA_BACKUP_CODES
           write_backup_codes E2E_MANUFACTURER_MFA_BACKUP_CODES
 
           E2E_DB_PROTOCOL=postgresql
           E2E_DB_USER=postgres
           E2E_DB_HOST=127.0.0.1
           E2E_DB_PORT=5432
-          E2E_DB_NAME=mscqr_e2e
+          E2E_DB_NAME=mscqr_e2e_admin_test
 
           {
             echo "NODE_ENV=test"
@@ -158,7 +169,10 @@ jobs:
             echo "E2E_DB_HOST=${E2E_DB_HOST}"
             echo "E2E_DB_PORT=${E2E_DB_PORT}"
             echo "E2E_DB_NAME=${E2E_DB_NAME}"
-            echo "DATABASE_URL=${E2E_DB_PROTOCOL}://${E2E_DB_USER}@${E2E_DB_HOST}:${E2E_DB_PORT}/${E2E_DB_NAME}?schema=public"
+            echo "P2_TEST_DATABASE_REQUIRED=true"
+            echo "P2_TEST_DATABASE_ADMIN_URL=${E2E_DB_PROTOCOL}://${E2E_DB_USER}@${E2E_DB_HOST}:${E2E_DB_PORT}/${E2E_DB_NAME}"
+            echo "REDIS_URL=redis://127.0.0.1:6379/0"
+            echo "REDIS_TLS=false"
             echo "COOKIE_SECURE=false"
             echo "AUTH_LEGACY_TOKEN_RESPONSE_ENABLED=false"
             echo "RUN_BACKGROUND_WORKERS=false"
@@ -192,7 +206,7 @@ jobs:
       - name: Build and seed enterprise E2E backend
         run: |
           npm --prefix backend run build
-          npm --prefix backend exec -- prisma db push --skip-generate --schema backend/prisma/schema.prisma
+          node scripts/enterprise-e2e-db.mjs prepare
           npm --prefix backend run test:e2e:seed
 
       - name: Install Playwright browsers
@@ -210,6 +224,10 @@ jobs:
           E2E_EXPOSE_CUSTOMER_OTP: "true"
           E2E_START_BACKEND: "true"
         run: npm run verify:ci:frontend:e2e
+
+      - name: Clean disposable enterprise E2E database
+        if: always()
+        run: node scripts/enterprise-e2e-db.mjs cleanup
 
   backend:
     runs-on: ubuntu-latest

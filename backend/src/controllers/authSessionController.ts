@@ -248,12 +248,6 @@ export const passwordStepUpController = async (req: Request, res: Response) => {
           requestedLicenseeId: context.licenseeId,
           requestedScopeVersion: claims.scopeVersion,
         }, tx);
-        await revokeRefreshTokenById({
-          sessionId: currentSessionId,
-          userId: context.userId,
-          reason: "STEP_UP_REPLACED",
-          now,
-        }, tx);
         await queueAuditLogOutbox({
           userId: context.userId,
           action: "AUTH_STEP_UP_PASSWORD_SUCCESS",
@@ -263,6 +257,12 @@ export const passwordStepUpController = async (req: Request, res: Response) => {
           ipHash: ipHash || undefined,
           userAgent: userAgent || undefined,
         } as any, undefined, tx, auditAuthority(requestId, context));
+        await revokeRefreshTokenById({
+          sessionId: currentSessionId,
+          userId: context.userId,
+          reason: "STEP_UP_REPLACED",
+          now,
+        }, tx);
         return { kind: "success" as const, session };
       }
     );
@@ -320,12 +320,6 @@ export const adminMfaStepUpController = async (req: Request, res: Response) => {
         requestedLicenseeId: claims.licenseeId,
         requestedScopeVersion: claims.scopeVersion,
       }, tx);
-      await revokeRefreshTokenById({
-        sessionId: currentSessionId,
-        userId: context.userId,
-        reason: "STEP_UP_REPLACED",
-        now,
-      }, tx);
       await queueAuditLogOutbox({
         userId: context.userId,
         action: "AUTH_MFA_STEP_UP_SUCCESS",
@@ -335,6 +329,12 @@ export const adminMfaStepUpController = async (req: Request, res: Response) => {
         ipHash,
         userAgent,
       }, undefined, tx, auditAuthority(requestId, context));
+      await revokeRefreshTokenById({
+        sessionId: currentSessionId,
+        userId: context.userId,
+        reason: "STEP_UP_REPLACED",
+        now,
+      }, tx);
       return nextSession;
       },
       { requestId, purpose: "admin-mfa-step-up-proof" }

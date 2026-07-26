@@ -31,6 +31,10 @@ import {
   buildFraudResponseBoundary,
   respondToFraudReportInTransaction,
 } from "../rls-waves/session-c/c02/auditTraceRepository";
+import {
+  isCanonicalAuthDenial,
+  withDatabaseAuthenticatedSelection,
+} from "../rls-waves/session-b/b01/canonicalAuthContext";
 
 const fraudResponseSchema = z.object({
   status: z.enum(["REVIEWED", "RESOLVED", "DISMISSED"]).default("REVIEWED"),
@@ -89,10 +93,16 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
     const filters = { ...parsed.data, limit: parsed.data.limit ?? 50, offset: parsed.data.offset ?? 0 };
     const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "");
     const boundary = buildAuditLogBoundary(req.user, filters, requestId);
-    const result = await withCanonicalDbContext(
-      prisma,
-      boundary.context,
+    const result = await withDatabaseAuthenticatedSelection(
+      req.user,
+      {
+        capability: String(req.databaseSessionCapability || ""),
+        requestId,
+        purpose: boundary.context.purpose,
+        context: boundary.context,
+      },
       (tx) => queryAuditLogs(tx, filters, boundary),
+      prisma,
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
     );
 
@@ -106,6 +116,9 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (err) {
+    if (isCanonicalAuthDenial(err)) {
+      return res.status(401).json({ success: false, error: "Authenticated session is no longer valid" });
+    }
     if (err instanceof AuditLogQueryAccessError) {
       return res.status(err.statusCode).json({ success: false, error: err.message });
     }

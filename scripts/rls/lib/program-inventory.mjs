@@ -54,9 +54,9 @@ const CATEGORY_MODELS = Object.freeze({
   "tenant-root": ["Organization"],
   "tenant-owned": ["Licensee", "ManufacturerLicenseeLink", "QRRange", "Batch", "InventoryStatusRollup", "QRCode", "QrAllocationRequest", "PolicyAlert", "TenantFeatureFlag", "EvidenceRetentionPolicy"],
   "actor-owned": ["PrinterRegistration", "Notification"],
-  "parent-inherited": ["PrintJob", "PrintSession", "PrinterAgentSession", "PrintJobChunk", "PrintItem", "PrinterProfile", "PrinterProfileSnapshot", "PrintReissueRequest", "PrinterAttestation", "Ownership", "OwnershipTransfer", "ReplacementChain", "IncidentHandoff", "SupportTicket", "SupportTicketMessage"],
+  "parent-inherited": ["PrintJob", "PrintSession", "PrinterAgentSession", "PrintJobChunk", "PrintItem", "PrinterProfile", "PrinterProfileSnapshot", "PrintReissueRequest", "PrinterAttestation", "Ownership", "OwnershipTransfer", "ReplacementChain", "IncidentCommunication", "IncidentHandoff", "SupportTicket", "SupportTicketMessage"],
   "security-sensitive": ["User", "Printer", "VerificationDecision", "VerificationEvidenceSnapshot", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerAuthSession", "CustomerTrustIntake", "Invite", "PasswordReset", "EmailVerificationToken", "RefreshToken", "ScheduledJobCredential", "AdminMfaCredential", "AdminWebAuthnCredential", "UserMfaFactor", "UserBackupCode", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal", "SensitiveActionApproval", "SecurityPolicy", "PolicyRule", "Incident", "RequestAccess", "SupportIssueReport"],
-  "append-only-audit": ["PrintItemEvent", "PrintAuditEvent", "QrScanLog", "AuditLog", "AllocationEvent", "TraceEvent", "IncidentEvent", "IncidentCommunication", "IncidentEvidence", "ForensicEventChain", "RouteTransitionMetric"],
+  "append-only-audit": ["PrintItemEvent", "PrintAuditEvent", "QrScanLog", "AuditLog", "AllocationEvent", "TraceEvent", "IncidentEvent", "IncidentEvidence", "ForensicEventChain", "RouteTransitionMetric"],
   "platform-reference": [],
   "operational-system": ["ScanMetricsHourlyRollup", "AuditLogOutbox", "SystemCheckpoint", "SecurityEventOutbox", "CompliancePackJob", "EvidenceRetentionJob", "IncidentEvidenceFingerprint", "ActionIdempotencyKey", "DegradationEvent"],
   "migration-only": ["PrintRenderToken", "BatchPrintPackToken"],
@@ -876,6 +876,7 @@ const routeEvidenceFor = (functionName) => {
 };
 
 const TRACE_TIMELINE_WORKFLOW_ID = "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline";
+const RISK_ANALYTICS_FUNCTION_SIGNATURE = "app_rls.risk_analytics_snapshot(text,text,text,text,text,integer,integer,timestamp without time zone)";
 const DASHBOARD_SNAPSHOT_WORKFLOW_ID_SET = new Set(DASHBOARD_SNAPSHOT_WORKFLOW_IDS);
 const BATCH_OPERATIONAL_READ_WORKFLOW_ID_SET = new Set(BATCH_OPERATIONAL_READ_WORKFLOW_IDS);
 const DASHBOARD_SNAPSHOT_COLUMNS = {
@@ -954,6 +955,7 @@ const commandActorsFor = (workflow, table, routeEvidence) => {
   if (workflow.id === RISK_ANALYTICS_WORKFLOW_ID) return ["licensee-admin", "platform-admin"];
   if (DASHBOARD_SNAPSHOT_WORKFLOW_ID_SET.has(workflow.id)) return ["licensee-admin", "manufacturer", "platform-admin"];
   if (BATCH_OPERATIONAL_READ_WORKFLOW_ID_SET.has(workflow.id)) return ["licensee-admin", "manufacturer", "platform-admin"];
+  if (workflow.manufacturerBootstrapBoundaryId) return ["manufacturer"];
   if (workflow.authorizationBoundaryType === "operator-break-glass") return ["break-glass"];
   if (workflow.authorizationBoundaryType === "pre-auth-security-function") return ["anonymous", "pre-auth-runtime"];
   if (workflow.executionSurface === "worker") return ["worker"];
@@ -1173,7 +1175,11 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
         : `New row preserves ${scopeRuleFor(table, actors)} Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.`,
     requiresNamedFunction,
     namedFunctionClass: requiresNamedFunction ? (dashboardSnapshot ? "exact-dashboard-snapshot-function" : batchOperationalRead ? "exact-batch-operational-read-function" : dedicatedPlatformProjection ? `exact-${workflow.platformReadExecutionBoundary}` : preAuthFunction ? "narrow-pre-auth-security-definer" : rawEvidence ? "exact-reviewed-query-function" : "authenticated-security-repository-function") : "none",
-    ...(batchOperationalRead ? { namedFunctionSignatures: BATCH_OPERATIONAL_FUNCTION_SIGNATURES_BY_WORKFLOW.get(workflow.id) } : {}),
+    ...(workflow.id === RISK_ANALYTICS_WORKFLOW_ID
+      ? { namedFunctionSignatures: [RISK_ANALYTICS_FUNCTION_SIGNATURE] }
+      : batchOperationalRead
+        ? { namedFunctionSignatures: BATCH_OPERATIONAL_FUNCTION_SIGNATURES_BY_WORKFLOW.get(workflow.id) }
+        : {}),
     requiresRestrictedWorkerBoundary: workerBoundary,
     requiresAuditEvent: publicReadContract || manufacturerBootstrap || policyAlertActorCeiling || workflow.approvedReadAttribution === true || command !== "SELECT" || actors.some((actor) => ["platform-admin", "operator", "operator-admin", "break-glass"].includes(actor)),
     requiresApproval,
@@ -1276,6 +1282,9 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
       rule.requiresNamedFunction = true;
       rule.namedFunctionClass = definition.suffix === "scheduled" ? "exact-scheduled-capability-function" : "exact-operator-capability-function";
       rule.authorizationBoundary = definition.suffix === "scheduled" ? "restricted-worker" : "named-function";
+      rule.supportingWorkflowIds = definition.suffix === "scheduled"
+        ? ["workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"]
+        : [];
       if (definition.suffix === "scheduled") rule.workerBoundaryId = "worker-boundary-scheduled-compliance-packs";
       rules.push(rule);
     }
@@ -1308,14 +1317,14 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
     {
       id: "sql-profile-risk-analytics-licensee-admin", workflowId: RISK_ANALYTICS_WORKFLOW_ID, route: "GET /api/analytics/risk-scores",
       routes: ["GET /api/analytics/risk-scores"],
-      functionSignature: "app_rls.risk_analytics_snapshot(text,text,text,text,text,integer,integer,timestamp without time zone)",
+      functionSignature: RISK_ANALYTICS_FUNCTION_SIGNATURE,
       actorClass: "licensee-admin", roleValues: ["LICENSEE_ADMIN", "ORG_ADMIN"], minimumAssurance: "password-verified", purposeCodes: ["tenant-risk-analytics"],
       scopeType: "canonical-licensee-organization", status: "named-function-candidate", commandRuleIds: ruleIdsFor(RISK_ANALYTICS_WORKFLOW_ID),
     },
     {
       id: "sql-profile-risk-analytics-platform-admin", workflowId: RISK_ANALYTICS_WORKFLOW_ID, route: "GET /api/analytics/risk-scores",
       routes: ["GET /api/analytics/risk-scores"],
-      functionSignature: "app_rls.risk_analytics_snapshot(text,text,text,text,text,integer,integer,timestamp without time zone)",
+      functionSignature: RISK_ANALYTICS_FUNCTION_SIGNATURE,
       actorClass: "platform-admin", roleValues: ["SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"], minimumAssurance: "mfa-verified", purposeCodes: ["tenant-risk-analytics"],
       scopeType: "database-validated-selected-licensee-organization", status: "named-function-candidate", commandRuleIds: ruleIdsFor(RISK_ANALYTICS_WORKFLOW_ID),
     },
@@ -1445,9 +1454,6 @@ const PREAUTH_WORKFLOW_BOUNDARIES = Object.freeze({
   "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview": ["invitation/setup-link lookup", "exact-security-definer-function", "preauth-fn-lookup-invitation", "none"],
   "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite": ["invitation/setup-link consumption", "exact-security-definer-function", "preauth-fn-consume-invitation", "none"],
   "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification": ["email-verification consumption", "exact-security-definer-function", "preauth-fn-consume-email-verification", "none"],
-  "workflow-internal-backend-src-services-auth-auth-service-ts-login-with-password": ["not actually pre-auth and must move behind canonical actor context", "ordinary-authenticated-context", null, "password-verified"],
-  "workflow-internal-backend-src-services-auth-mfa-adapter-ts-create-stable-mfa-login-challenge": ["not actually pre-auth and must move behind canonical actor context", "ordinary-authenticated-context", null, "mfa-bootstrap"],
-  "workflow-internal-backend-src-services-auth-mfa-adapter-ts-complete-stable-mfa-login-challenge": ["not actually pre-auth and must move behind canonical actor context", "ordinary-authenticated-context", null, "mfa-bootstrap"],
 });
 
 const arg = (name, type, nullable = false) => ({ name, type, nullable });
@@ -1884,7 +1890,7 @@ export const buildObjectOwnershipManifest = (tableManifest, identityManifest, pr
   const tableOwner = "identity-table-owner";
   const authOwner = "identity-auth-function-owner";
   const rules = [
-    ownershipRule("ownership-tables", "tables", tableOwner, "identity-migration", perObjectTransfer, "Every Prisma table has relowner=environment table owner; all 75 FORCE targets and both migration-only tables are included.", safeRollback),
+    ownershipRule("ownership-tables", "tables", tableOwner, "identity-migration", perObjectTransfer, "Every Prisma table has relowner=environment table owner; all 77 FORCE targets and both migration-only tables are included.", safeRollback),
     ownershipRule("ownership-table-owned-sequences", "table-owned-sequences", tableOwner, "identity-migration", perObjectTransfer, "Every identity/serial sequence linked through pg_depend has the same owner as its owning table.", safeRollback),
     ownershipRule("ownership-standalone-sequences", "standalone-sequences", tableOwner, "identity-migration", perObjectTransfer, "Every non-extension application sequence has the table owner; no orphan migration-owned sequence remains.", safeRollback),
     ownershipRule("ownership-indexes", "indexes", "owning-table-owner", "identity-migration", "Index ownership follows its owning table and is normalized by the table transfer.", "Every application index resolves to a table whose relowner is the table owner.", safeRollback),
@@ -2203,8 +2209,7 @@ export const buildOperatorProgramme = () => {
 };
 
 const MANUFACTURER_BOOTSTRAP_WORKFLOW_IDS = [
-  "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-licensee-links",
-  "workflow-internal-backend-src-services-manufacturer-scope-service-ts-resolve-manufacturer-session-scope",
+  "workflow-internal-backend-src-rls-waves-session-b-b01-authenticated-security-repository-ts-load-authenticated-manufacturer-scope",
 ];
 
 const applyManufacturerBootstrapAuthority = (workflowManifest) => {
@@ -2228,33 +2233,32 @@ const applyManufacturerBootstrapAuthority = (workflowManifest) => {
     workflow.expectedAllowedScenarios = boundary.allowScenarios;
     workflow.expectedDeniedScenarios = boundary.denyScenarios;
     workflow.unresolvedDecisions = workflow.unresolvedDecisions.filter((id) => id !== boundary.decisionId);
-    if (workflowId.endsWith("resolve-manufacturer-session-scope")) {
-      workflow.contextBoundaryBlockers = [{
-        code: "manufacturer-bootstrap-postgresql-certification-pending",
-        reason: "The transaction-client-only runtime boundary is implemented and focused application tests pass; final generated-role and FORCE RLS PostgreSQL certification remains pending.",
-        remediation: "Certify the implemented actor-context repository through the final generated package on disposable PostgreSQL.",
-      }];
-      workflow.contextBoundaryFamilySplit = {
-        parentFamilyId: "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
-        semanticKey: "manufacturer-session-scope-hydration",
-        reason: "Separate canonical manufacturer session-scope hydration from richer invitation link projections.",
-        evidence: ["Authentication and session callers supply their transaction client; the helper has no global Prisma fallback or claim-carried membership authority."],
-        routeRoots: ["Authentication and session callers supply their transaction client; the helper has no global Prisma fallback or claim-carried membership authority."],
-        actorClasses: ["manufacturer"],
-        scopeModel: "Database-verified manufacturer User.id is actor authority; eligible link rows are the bounded result, and licensee/organization context is installed only after server verification selects one link.",
-        executionSurface: "internal",
-        protectedTableBoundary: "ManufacturerLicenseeLink plus active Licensee and Organization actor-bound projection",
-        commandSemantics: "Password-verified actor-only SELECT with explicit projection, maximum 100 eligible links, deterministic ordering and same-transaction attribution; no blank tenant wildcard.",
-      };
-    } else {
-      workflow.contextBoundaryBlockers = [{
-        code: "incompatible-shared-auth-roots",
-        reason: "The boundary approves the authentication/bootstrap slice, but the helper remains shared with invitation mutation roots that have different actor, assurance and transaction ownership.",
-        remediation: "Separate the invitation mutation lookup from the actor-bootstrap repository before runtime implementation.",
-      }];
-      workflow.contextBoundaryFamilySplit.scopeModel = "Only the verified manufacturer actor bootstrap may use this boundary; invitation creation/link mutation requires its own admin transaction and cannot borrow manufacturer context.";
-      workflow.contextBoundaryFamilySplit.commandSemantics = "Actor-bootstrap SELECT is approved; the shared invitation mutation caller remains blocked until separated.";
-    }
+    workflow.contextBoundaryBlockers = [];
+    workflow.contextBoundaryStatus = "implemented";
+    workflow.currentCompatibilityStatus = "compatible";
+    workflow.implementationStatus = "complete";
+    workflow.implementationFamilyId = "family-split-authenticatedsecurityrep-manufacturer-session-scope-hydration-e038879b07";
+    workflow.postgresqlCertificationStatus = "pending";
+    workflow.implementationFiles = [
+      "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+      "backend/src/rls-waves/session-b/b01/b01AuthenticationClosureFunctions.sql",
+      "backend/src/services/manufacturerScopeService.ts",
+    ];
+    workflow.testFiles = ["backend/tests/manufacturerSessionScope.test.js", "backend/tests/rls-wave-b/b01/authenticationClosurePostgres18.test.js"];
+    workflow.canonicalContextKeys = ["app.user_id", "app.role", "app.organization_id", "app.licensee_id", "app.manufacturer_id", "app.auth_assurance", "app.request_id", "app.purpose"];
+    workflow.sameTransactionGuarantee = true;
+    workflow.contextBoundaryFamilySplit = {
+      parentFamilyId: "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
+      semanticKey: "manufacturer-session-scope-hydration",
+      reason: "Canonical manufacturer session scope is resolved by one exact capability-bound database projection.",
+      evidence: ["Authentication and session callers supply their transaction client; the repository has no global Prisma fallback or claim-carried membership authority."],
+      routeRoots: ["Authentication and session callers supply their transaction client; the repository has no global Prisma fallback or claim-carried membership authority."],
+      actorClasses: ["manufacturer"],
+      scopeModel: "Database-verified manufacturer User.id is actor authority; eligible link rows are the bounded result, and licensee/organization context is installed only after server verification selects one link.",
+      executionSurface: "internal",
+      protectedTableBoundary: "ManufacturerLicenseeLink plus active Licensee and Organization actor-bound projection",
+      commandSemantics: "Exact authenticated function with explicit projection, maximum 100 eligible links, deterministic ordering and same-transaction attribution; no blank tenant wildcard.",
+    };
   }
   return boundary;
 };
@@ -2800,7 +2804,10 @@ export const buildWorkflowManifest = () => {
       && !previous.has(id)
       && previous.has(legacyModuleId);
     const old = previous.get(id) || (inheritedLegacyModule ? previous.get(legacyModuleId) : {}) || {};
-    const boundary = old.authorizationBoundaryType || boundaryFor(path.join(repoRoot, canonical.sourceFile), canonical.function, canonical.executionSurface);
+    const authenticatedEmailChange = id === "workflow-internal-backend-src-services-auth-email-verification-service-ts-request-email-change-verification";
+    const boundary = authenticatedEmailChange
+      ? "authenticated-context"
+      : old.authorizationBoundaryType || boundaryFor(path.join(repoRoot, canonical.sourceFile), canonical.function, canonical.executionSurface);
     const tableCommands = [...new Set(accesses.flatMap((access) => expandCommands([access.command]).map((command) => `${access.tableId}:${command}`)))].sort().map((value) => { const index = value.lastIndexOf(":"); return { tableId: value.slice(0, index), commands: [value.slice(index + 1)] }; });
     const mergedCommands = [...new Map(tableCommands.map((item) => [item.tableId, { tableId: item.tableId, commands: tableCommands.filter((candidate) => candidate.tableId === item.tableId).flatMap((candidate) => candidate.commands).sort() }])).values()];
     const preAuth = boundary === "pre-auth-security-function";
@@ -2812,8 +2819,8 @@ export const buildWorkflowManifest = () => {
       name: inheritedLegacyModule ? displayName(canonical.function) : old.name || displayName(canonical.function),
       entryPoint: inheritedLegacyModule ? `${canonical.executionSurface}:${canonical.function}` : old.entryPoint || `${canonical.executionSurface}:${canonical.function}`,
       executionSurface: canonical.executionSurface,
-      authenticationStage: old.authenticationStage || (preAuth ? "pre-authentication" : background || ["cli", "startup"].includes(canonical.executionSurface) ? "system" : "authenticated"),
-      actorClasses: old.actorClasses || (background ? ["system-job"] : preAuth ? ["anonymous-or-partially-authenticated"] : canonical.executionSurface === "cli" ? ["operator"] : ["authenticated-user"]),
+      authenticationStage: authenticatedEmailChange ? "authenticated" : old.authenticationStage || (preAuth ? "pre-authentication" : background || ["cli", "startup"].includes(canonical.executionSurface) ? "system" : "authenticated"),
+      actorClasses: authenticatedEmailChange ? ["authenticated-user"] : old.actorClasses || (background ? ["system-job"] : preAuth ? ["anonymous-or-partially-authenticated"] : canonical.executionSurface === "cli" ? ["operator"] : ["authenticated-user"]),
       canonicalSourceFiles: old.contextBoundaryStatus === "implemented" && !delegated
         ? old.canonicalSourceFiles
         : [...new Set([canonical.sourceFile, ...accesses.map((access) => access.sourceFile)])].sort(),
@@ -3060,7 +3067,7 @@ export const validateManufacturerBootstrapBoundary = (boundary, workflowManifest
     const columns = new Set(table.schemaEvidence.fields.map((field) => field.name));
     for (const column of entry.columns) assert(columns.has(column), `manufacturer bootstrap references unknown ${entry.tableId}.${column}`);
   }
-  assert.deepEqual(boundary.identityProofChain.intendedRoleCeiling, ["MANUFACTURER", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"], "manufacturer bootstrap grants licensee or platform role visibility");
+  assert.deepEqual(boundary.identityProofChain.intendedRoleCeiling, ["MANUFACTURER_ADMIN"], "manufacturer bootstrap grants deprecated, licensee or platform role visibility");
   assert.match(boundary.identityProofChain.verificationPoint, /password verifies|valid signed token/i, "manufacturer bootstrap runs before actor verification");
   assert.match(boundary.identityProofChain.authoritativeManufacturerUserId, /User\.id/, "manufacturer identity is not database verified");
   assert.match(boundary.identityProofChain.authoritativeRelationship, /manufacturerId equals the verified User\.id/, "manufacturer relationship is not actor-bound");
@@ -3099,14 +3106,14 @@ export const validateManufacturerBootstrapBoundary = (boundary, workflowManifest
   assert.equal(boundary.scopeSwitchRules.queryOrBodyAuthority, false, "manufacturer scope switch trusts query/body authority");
   assert(boundary.auditRequirements.required && boundary.auditRequirements.sameTransactionAsMembershipReadOrSwitch && boundary.auditRequirements.membershipListLogged === false && boundary.auditRequirements.failureResponseLeaksMembership === false, "manufacturer bootstrap audit leaks membership or is not atomic");
 
-  assert.equal(boundary.implementationForm.type, "actor-context-repository", "manufacturer bootstrap uses the wrong implementation form");
+  assert.equal(boundary.implementationForm.type, "exact-authenticated-capability", "manufacturer bootstrap uses the wrong implementation form");
   assert.equal(boundary.implementationForm.actorIdentityVerifiedBeforeRead, true, "manufacturer bootstrap occurs before actor verification without an approved function");
   assert.equal(boundary.implementationForm.transactionClientOnly, true, "manufacturer bootstrap permits a global database client");
   assert.equal(boundary.implementationForm.globalPrismaAllowed, false, "manufacturer bootstrap permits global Prisma");
-  assert.equal(boundary.implementationForm.namedFunctionRequired, false, "manufacturer bootstrap is unnecessarily pre-auth");
+  assert.equal(boundary.implementationForm.namedFunctionRequired, true, "manufacturer bootstrap lacks its exact capability function");
   assert.equal(boundary.implementationForm.genericPreAuthFunctionAllowed, false, "manufacturer bootstrap permits a generic pre-auth function");
-  assert.equal(boundary.namedFunctionContract, null, "manufacturer bootstrap defines a generic pre-auth function");
-  assert.equal(boundary.implementationStatus, "architecture-resolved-runtime-pending", "manufacturer bootstrap is falsely implemented");
+  assert.equal(boundary.namedFunctionContract?.signature, "app_rls.load_authenticated_manufacturer_scope(text,text,text,text,boolean)", "manufacturer bootstrap named function drifted");
+  assert.equal(boundary.implementationStatus, "runtime-and-postgresql-certified", "manufacturer bootstrap certification status drifted");
   assert(boundary.postgresqlCertificationRequirements?.length >= 6, "manufacturer bootstrap lacks PostgreSQL certification requirements");
 
   const failures = ["noUserMatch", "duplicateNormalizedUsers", "disabledUser", "wrongRole", "noActiveRelationship", "multipleInconsistentRelationships", "requestedForeignLicensee", "revokedRelationship", "disabledTenant", "userRelationshipTenantMismatch", "unsupportedAssurance", "staleSession", "missingRequestId", "blankScope", "invitationNotFullyConsumed"];
@@ -3119,12 +3126,12 @@ export const validateManufacturerBootstrapBoundary = (boundary, workflowManifest
     assert.equal(workflow.manufacturerBootstrapBoundaryId, boundary.id, `${workflowId} lacks manufacturer bootstrap boundary ID`);
     assert.equal(workflow.authorizationBoundaryType, "authenticated-context", `${workflowId} remains pre-auth or unresolved`);
     assert(!workflow.unresolvedDecisions.includes(boundary.decisionId), `${workflowId} retains the resolved manufacturer bootstrap decision`);
-    assert.notEqual(workflow.contextBoundaryStatus, "implemented", `${workflowId} is falsely context implemented`);
+    assert.equal(workflow.contextBoundaryStatus, "implemented", `${workflowId} is not context implemented`);
     for (const ruleId of workflow.commandRuleIds) {
       const rule = commandManifest.rules.find((item) => item.id === ruleId);
       assert.equal(rule?.manufacturerBootstrapBoundaryId, boundary.id, `${ruleId} lacks manufacturer bootstrap boundary ID`);
       assert.equal(rule.minimumAssurance, "password-verified", `${ruleId} has unsupported manufacturer bootstrap assurance`);
-      assert.equal(rule.requiresNamedFunction, false, `${ruleId} incorrectly requires a pre-auth function`);
+      assert.equal(rule.requiresNamedFunction, true, `${ruleId} bypasses the exact authenticated function`);
       assert.equal(rule.requiresAuditEvent, true, `${ruleId} lacks manufacturer bootstrap read attribution`);
     }
   }

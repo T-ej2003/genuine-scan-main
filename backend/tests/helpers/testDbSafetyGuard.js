@@ -54,7 +54,7 @@ const assertSafeTestDatabaseUrl = (databaseUrl, options = {}) => {
 
   if (
     (host.includes("mscqr") || username.includes("mscqr")) &&
-    !["mscqr_p2_test", "mscqr_integration_test", "mscqr_ci_test"].some((prefix) => databaseName.startsWith(prefix))
+    !["mscqr_p2_test", "mscqr_integration_test", "mscqr_ci_test", "mscqr_full_rls_cert_"].some((prefix) => databaseName.startsWith(prefix))
   ) {
     throw new Error("Refusing MSCQR-named database host/user outside the approved disposable test database naming pattern.");
   }

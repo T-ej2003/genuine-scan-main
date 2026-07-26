@@ -5,7 +5,6 @@ import process from "node:process";
 
 const require = createRequire(import.meta.url);
 const {
-  cleanupGeneratedRlsRoles,
   dropP2TestDatabase,
   request,
   resolveP2TestDatabase,
@@ -345,10 +344,7 @@ const main = async () => {
 
     if (prisma?.$disconnect) await prisma.$disconnect().catch(() => undefined);
     if (preauthPrisma?.$disconnect) await preauthPrisma.$disconnect().catch(() => undefined);
-    if (databaseInfo?.createdDatabaseName) {
-      dropP2TestDatabase(databaseInfo);
-      if (databaseInfo.packageBootstrapStarted) cleanupGeneratedRlsRoles(databaseInfo);
-    }
+    if (databaseInfo?.createdDatabaseName) dropP2TestDatabase(databaseInfo);
     if (stopFailure) throw stopFailure;
   }
 };

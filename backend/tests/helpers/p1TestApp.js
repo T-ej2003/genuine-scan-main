@@ -96,14 +96,14 @@ const state = {
     makeUserRecord({
       id: ids.manufacturerA,
       email: "p1-manufacturer-a@mscqr.example",
-      role: UserRole.MANUFACTURER,
+      role: UserRole.MANUFACTURER_ADMIN,
       licenseeId: ids.licenseeA,
       orgId: ids.orgA,
     }),
     makeUserRecord({
       id: ids.manufacturerB,
       email: "p1-manufacturer-b@mscqr.example",
-      role: UserRole.MANUFACTURER,
+      role: UserRole.MANUFACTURER_ADMIN,
       licenseeId: ids.licenseeB,
       orgId: ids.orgB,
     }),
@@ -418,11 +418,91 @@ const fakePrisma = {
 };
 
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
+const capabilityFor = (userId) => createHash("sha256").update(`p1-capability:${userId}`).digest("base64url");
+const sessionFor = (userId) => `p1-session-${userId}`;
+class CanonicalAuthDenial extends Error {
+  constructor() {
+    super("AUTHENTICATED_SESSION_DENIED");
+    this.name = "CanonicalAuthDenial";
+  }
+}
+const canonicalActor = (claims, capability) => {
+  const user = state.users.find((entry) => entry.id === claims.userId);
+  if (!user || claims.sessionId !== sessionFor(user.id) || capability !== capabilityFor(user.id)) {
+    throw new CanonicalAuthDenial();
+  }
+  return {
+    user,
+    context: {
+      userId: user.id,
+      role: user.role,
+      organizationId: user.orgId,
+      licenseeId: user.licenseeId,
+      manufacturerId: user.role === UserRole.MANUFACTURER_ADMIN ? user.id : null,
+      authAssurance: user.role === UserRole.MANUFACTURER_ADMIN ? "password-verified" : "mfa-verified",
+    },
+  };
+};
+const withCanonicalActor = (claims, capability, callback) => {
+  const { user, context } = canonicalActor(claims, capability);
+  const tx = Object.create(fakePrisma);
+  tx.__p1Actor = user;
+  return callback(tx, context);
+};
+mockModule("rls-waves/session-b/b01/canonicalAuthContext.js", {
+  CanonicalAuthDenial,
+  isCanonicalAuthDenial: (error) => error instanceof CanonicalAuthDenial,
+  withCanonicalAuthClaims: (claims, _input, callback) =>
+    withCanonicalActor(claims, capabilityFor(claims.userId), callback),
+  withDatabaseAuthenticatedSession: (claims, input, callback) =>
+    withCanonicalActor(claims, input.capability, callback),
+  withDatabaseAuthenticatedSelection: (claims, input, callback) =>
+    withCanonicalActor(claims, input.capability, (tx, context) =>
+      callback(tx, { ...context, licenseeId: input.context.licenseeId, requestId: input.requestId, purpose: input.purpose })
+    ),
+});
+const authenticatedSecurityRepository = require(path.join(distRoot, "rls-waves/session-b/b01/authenticatedSecurityRepository.js"));
+mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
+  ...authenticatedSecurityRepository,
+  loadAuthenticatedActor: async (db) => db.__p1Actor,
+  loadAuthenticatedManufacturerScope: async (input, db) => {
+    const user = db.__p1Actor;
+    const linkedLicensees = state.manufacturerLinks
+      .filter((link) => link.manufacturerId === user?.id)
+      .map((link) => {
+        const licensee = state.licensees.find((entry) => entry.id === link.licenseeId);
+        return { ...licensee, isPrimary: Boolean(link.isPrimary), scopeVersion: "p1-scope" };
+      });
+    const selectedLicensee = linkedLicensees.find((row) => row.id === (input.requestedLicenseeId || user?.licenseeId)) || null;
+    return { manufacturerId: user?.id || "", linkedLicensees, selectedLicensee };
+  },
+});
 mockModule("services/auditService.js", {
   createAuditLog: async () => ({ id: "p1-audit", createdAt: nowIso() }),
   createAuditLogSafely: async () => ({ log: { id: "p1-audit", createdAt: nowIso() }, persisted: true, queued: false, outboxId: null }),
 });
-mockModule("services/auth/cookieTokenProtectionService.js", { openCookieToken: () => null, sealCookieToken: (value) => value });
+mockModule("services/auth/cookieTokenProtectionService.js", {
+  openCookieToken: (value, purpose) => purpose === "auth.database-session" ? value : null,
+  sealCookieToken: (value) => value,
+});
+const mfaService = require(path.join(distRoot, "services/auth/mfaService.js"));
+mockModule("services/auth/mfaService.js", {
+  ...mfaService,
+  getAdminMfaStatus: async () => ({
+    enrolled: true,
+    enabled: true,
+    totpEnabled: true,
+    hasWebAuthn: false,
+    methods: ["TOTP"],
+    preferredMethod: "TOTP",
+    verifiedAt: now(),
+    lastUsedAt: now(),
+    backupCodesRemaining: 0,
+    createdAt: now(),
+    updatedAt: now(),
+    webauthnCredentials: [],
+  }),
+});
 mockModule("services/auth/authEmailService.js", { sendAuthEmail: async () => ({ delivered: false, transport: "p1-test" }) });
 mockModule("services/locationService.js", { reverseGeocode: async () => null });
 mockModule("services/policyEngineService.js", {
@@ -588,21 +668,25 @@ mockModule("services/sensitiveActionApprovalService.js", {
 const { createBackendApp } = require("../../dist/app");
 const { signAccessToken } = require("../../dist/services/auth/tokenService");
 
+const tokenCapabilities = new Map();
 const tokenFor = (userId) => {
   const user = state.users.find((entry) => entry.id === userId);
   assert(user, `Missing P1 user ${userId}`);
-  return signAccessToken({
+  const token = signAccessToken({
     userId: user.id,
     email: user.email,
     role: user.role,
     licenseeId: user.licenseeId,
     orgId: user.orgId,
-    linkedLicenseeIds: user.role === UserRole.MANUFACTURER ? [user.licenseeId].filter(Boolean) : [],
+    linkedLicenseeIds: user.role === UserRole.MANUFACTURER_ADMIN ? [user.licenseeId].filter(Boolean) : [],
     authenticatedAt: nowIso(),
     mfaVerifiedAt: nowIso(),
-    authAssurance: user.role === UserRole.MANUFACTURER ? "PASSWORD" : "ADMIN_MFA",
+    authAssurance: user.role === UserRole.MANUFACTURER_ADMIN ? "PASSWORD" : "ADMIN_MFA",
     sessionStage: "ACTIVE",
+    sessionId: sessionFor(user.id),
   });
+  tokenCapabilities.set(token, capabilityFor(user.id));
+  return token;
 };
 
 const tokens = {
@@ -630,6 +714,9 @@ const withServer = async (fn) => {
 const request = async (baseUrl, method, routePath, token, body, extraHeaders = {}) => {
   const headers = { ...extraHeaders };
   if (token) headers.authorization = `Bearer ${token}`;
+  if (tokenCapabilities.has(token) && !headers["x-database-session-capability"]) {
+    headers["x-database-session-capability"] = tokenCapabilities.get(token);
+  }
   if (body !== undefined && !(body instanceof FormData)) headers["content-type"] = "application/json";
   const response = await fetch(`${baseUrl}${routePath}`, {
     method,

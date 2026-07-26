@@ -63,6 +63,13 @@ const resolve = (result, input = {}) => resolveManufacturerSessionScope(
     source.slice(source.indexOf("export const resolveManufacturerSessionScope"), source.indexOf("export const upsertManufacturerLicenseeLink")),
     /manufacturerLicenseeLink\.findMany/
   );
+  const authService = fs.readFileSync(path.join(__dirname, "../src/services/auth/authService.ts"), "utf8");
+  const activeSession = authService.slice(
+    authService.indexOf("const loadActiveSessionState"),
+    authService.indexOf("type ActiveSessionState")
+  );
+  assert.match(activeSession, /loadAuthenticatedActor\(db\)/);
+  assert.doesNotMatch(activeSession, /db\.user\./);
   console.log("manufacturer session scope boundary tests passed");
 })().catch((error) => {
   console.error(error);

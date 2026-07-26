@@ -9,48 +9,8 @@
     "backend/src/controllers/printerAgentJobController.ts",
     "backend/src/routes/index.ts"
   ],
-  "boundaryCount": 2,
+  "boundaryCount": 1,
   "boundaries": [
-    {
-      "id": "system-boundary-analytics-rollup-worker",
-      "classification": "worker-boundary",
-      "familyCategory": "worker/scheduled workflows",
-      "riskLevel": "low",
-      "actorClasses": [
-        "worker"
-      ],
-      "familyRuntimeIdentity": "identity-worker",
-      "requiredAssurance": [
-        "durable-worker-identity"
-      ],
-      "executionSurfaces": [
-        "worker",
-        "startup"
-      ],
-      "workflowIds": [
-        "workflow-internal-backend-src-services-analytics-rollup-service-ts-get-checkpoint-date"
-      ],
-      "registeredRoots": [
-        "backend/src/worker.ts -> startAnalyticsRollupWorker",
-        "backend/src/index.ts -> startAnalyticsRollupWorker compatibility root"
-      ],
-      "credentialRuntimeIdentity": "The approved target is identity-worker; the compatibility app-process root and the full rollup command set must be removed or separately approved before activation.",
-      "authoritativeScopeSource": "An allowlisted SystemCheckpoint key under the analytics distributed lease; the checkpoint is platform operational state and has no tenant or human actor scope.",
-      "humanActorContextExists": false,
-      "ordinaryAuthenticatedContextAllowed": false,
-      "implementationStatus": "contract-only",
-      "activationBlockers": [
-        "The full analytics rollup root also performs high-risk cross-tenant reads and writes that are outside this bounded read review.",
-        "The compatibility backend app-process root does not prove the dedicated worker credential.",
-        "Durable checkpoint, lease, idempotency and same-transaction command behavior are not yet certified."
-      ],
-      "requiredTests": [
-        "Dedicated worker runtime identity and compatibility-root denial",
-        "Exact checkpoint-key allowlist and no generic cross-tenant read",
-        "Lease ownership, idempotent retry and checkpoint ordering",
-        "No human role, tenant wildcard or platform-admin context"
-      ]
-    },
     {
       "id": "system-boundary-local-agent-device-claim",
       "classification": "device-authenticated-internal-system-path",

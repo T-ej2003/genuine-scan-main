@@ -99,6 +99,13 @@ assert.ok(
 assert.match(canonical, /required\(claims\.sessionId/);
 assert.match(canonical, /getB01AuthenticatedPrisma\(\)\.\$transaction/);
 assert.doesNotMatch(canonical, /claims\.role|authAssurance:\s*claims/);
+assert.match(canonical, /withDatabaseAuthenticatedSelection/);
+assert.ok(
+  canonical.indexOf("validateCanonicalDbContext(input.context)") <
+    canonical.lastIndexOf("await installCanonicalDbContext"),
+  "bounded selections must be checked after capability verification and before context installation"
+);
+assert.match(canonical, /!isPlatform && selected\.licenseeId !== verified\.licenseeId/);
 
 assert.ok(account.indexOf("requireRecentSensitiveSession") < account.indexOf('authAssurance: "step-up-verified"'));
 assert.ok(account.indexOf("proveAuthenticatedPasswordStepUp") < account.lastIndexOf('authAssurance: "step-up-verified"'));

@@ -20,4 +20,15 @@ for (const relative of ["prisma/seed.ts","scripts/seed-enterprise-e2e.ts","scrip
   assert.match(source,/prohibit/i,`${relative} must fail closed`);
   assert(!source.includes("PrismaClient"),`${relative} must refuse before constructing a database client`);
 }
+
+const enterpriseFixture=read("tests/fixtures/seedEnterpriseE2E.ts");
+assert(enterpriseFixture.includes("assertSafeTestDatabaseUrl(seedDatabaseUrl)"));
+assert(enterpriseFixture.includes("E2E_SEED_DATABASE_URL"));
+assert(enterpriseFixture.includes("UserRole.MANUFACTURER_ADMIN"));
+assert(!enterpriseFixture.includes("process.env.DATABASE_URL"));
+
+const qualityGate=read("../.github/workflows/quality-gate.yml");
+assert(qualityGate.includes("image: postgres:18.4"));
+assert(qualityGate.includes("node scripts/enterprise-e2e-db.mjs prepare"));
+assert(qualityGate.includes("node scripts/enterprise-e2e-db.mjs cleanup"));
 console.log("operator and CLI shared-boundary tests passed");

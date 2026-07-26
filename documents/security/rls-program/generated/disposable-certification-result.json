@@ -3,15 +3,16 @@
   "environment": "local-disposable-only",
   "deploymentModel": "clean-room-blue-green",
   "postgresqlMajor": 18,
-  "sourceContractSha256": "68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc",
+  "sourceContractSha256": "baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85",
   "tablesExpected": 79,
   "forceRlsTargetsExpected": 77,
   "tablesCertified": 77,
-  "generatedPoliciesCertified": 339,
+  "generatedPoliciesCertified": 343,
   "columnPrivilegeCellsCertified": 60,
   "workflowCertificationStatus": "pending-application-path-certification",
-  "workflowsApplicationPathCertified": 10,
+  "workflowsApplicationPathCertified": 11,
   "applicationPathCertifiedWorkflowIds": [
+    "workflow-internal-backend-src-rls-waves-session-b-b01-authenticated-security-repository-ts-load-authenticated-manufacturer-scope",
     "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
     "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
     "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
@@ -24,6 +25,20 @@
     "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries"
   ],
   "applicationPathResults": [
+    {
+      "familyId": "manufacturer-scope",
+      "workflowIds": [
+        "workflow-internal-backend-src-rls-waves-session-b-b01-authenticated-security-repository-ts-load-authenticated-manufacturer-scope"
+      ],
+      "registeredRoots": [
+        "POST /auth/login",
+        "POST /auth/refresh",
+        "GET /auth/me"
+      ],
+      "status": "application-path-certified",
+      "postgresqlMajor": 18,
+      "testFile": "backend/tests/rls-wave-b/b01/authenticationClosurePostgres18.test.js"
+    },
     {
       "familyId": "risk-analytics",
       "workflowIds": [
@@ -358,7 +373,7 @@
   "columnPrivilegeCertification": true,
   "exactCatalogTamperCertification": true,
   "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "2a72417d23d08c5ea296e7d914b24f869adb64ad53e2c100341d7538b6d1119d",
+  "packageChecksumsSha256": "1dc94c24dab8b9a40b8f98c435b199f9cd6f28769ecff9b37f3fef0e19556dce",
   "status": "clean-room-full-table-enforcement-certified-workflows-pending",
   "b01Certification": {
     "predecessorReplayRejected": true,

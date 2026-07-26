@@ -7,6 +7,7 @@ const {
   createRoleNotifications,
   getPrimarySuperadminEmail,
   getSuperadminAlertEmails,
+  readAttentionQueueProjection,
   resolveIncidentNotificationScope,
 } = require("../../../dist/rls-waves/session-b/b03/repositoryFunctions");
 
@@ -127,6 +128,22 @@ const main = async () => {
     manufacturerOrganizationId: null,
   }], scopeCalls), "incident-1");
   assert.match(scopeCalls[0].sql, /app_rls\.b03_resolve_incident_notification_scope\(/);
+
+  const attentionCalls = [];
+  const attention = await readAttentionQueueProjection(client([{
+    result: {
+      incidents: { count: 1, latest: null },
+      policyAlerts: { count: 0, latest: null },
+      supportTickets: { count: 0, latest: null },
+      auditEvents: { count: 2, latest: null },
+    },
+  }], attentionCalls), {
+    licenseeId: "11111111-1111-4111-8111-111111111111",
+    since: new Date("2026-07-25T00:00:00.000Z"),
+    requestId: "174d1fe7-f82e-42a7-829a-ddb8ecf329cb",
+  });
+  assert.equal(attention.auditEvents.count, 2);
+  assert.match(attentionCalls[0].sql, /app_rls\.b03_attention_queue_projection\(/);
 
   console.log("B03 repository function unit tests passed");
 };

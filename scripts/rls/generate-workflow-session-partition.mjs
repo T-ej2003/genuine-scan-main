@@ -13,9 +13,9 @@ const coordinationBaseCommit = "33cbe7ff019efefad242f654f0aa96c44c5b963c";
 // RF7 integration-owner handoff: exact B01/B02/B03 repositories are mapped to
 // their registered application owners and unreachable pre-RF6 public paths
 // are removed from the production inventory.
-// RF7 restores the active public support-ticket tracker under Session B's
-// exact pre-auth capability; this hash is the reviewed 174-workflow handoff.
-const originalSessionBWorkflowSetSha256 = "900aca6e10ae73acdabaa5000c9ff5b62841f743c020910fdc444daeb147ba59";
+// The final integration handoff maps the active support tracker and
+// manufacturer scope to their exact Session B capability repositories.
+const originalSessionBWorkflowSetSha256 = "0958f262478bf77b7f4064c4eefb31b6e99e54c37d8e60c011ee96908212ce66";
 const workflowSetSha256 = (ids) => crypto.createHash("sha256").update(`${[...ids].sort().join("\n")}\n`).digest("hex");
 
 const waves = [
@@ -198,7 +198,6 @@ const sessionBExistingTestFiles = [
   "backend/tests/qrScanRefreshDedup.test.js",
   "backend/tests/qrTokenKeyNormalization.test.js",
   "backend/tests/qrTokenSigningProfile.test.js",
-  "backend/tests/rlsAuthBootstrapP2.test.js",
   "backend/tests/scanSecurity.test.js",
   "backend/tests/scannerProbeRejection.test.js",
   "backend/tests/sensitiveAuthMiddleware.test.js",

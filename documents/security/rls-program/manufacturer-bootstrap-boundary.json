@@ -19,8 +19,7 @@
   "decisionId": "decision-context-manufacturer-bootstrap",
   "boundaryType": "post-password-actor-bootstrap",
   "supportingWorkflows": [
-    "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-licensee-links",
-    "workflow-internal-backend-src-services-manufacturer-scope-service-ts-resolve-manufacturer-session-scope"
+    "workflow-internal-backend-src-rls-waves-session-b-b01-authenticated-security-repository-ts-load-authenticated-manufacturer-scope"
   ],
   "registeredRoots": [
     "POST /auth/login -> loginWithPassword -> password verification -> manufacturer bootstrap",
@@ -94,9 +93,7 @@
     "authoritativeRelationship": "ManufacturerLicenseeLink where manufacturerId equals the verified User.id and licenseeId joins one active Licensee whose Organization is active.",
     "activeRelationshipRule": "The link row must exist; User must be ACTIVE/isActive with no disabledAt/deletedAt; Licensee must be active with no suspendedAt; Organization must be active. ManufacturerLicenseeLink has no expiry or revocation fields, so link deletion is the current revocation operation and temporal membership is not implied.",
     "intendedRoleCeiling": [
-      "MANUFACTURER",
-      "MANUFACTURER_ADMIN",
-      "MANUFACTURER_USER"
+      "MANUFACTURER_ADMIN"
     ],
     "organizationLicenseeScope": "licenseeId and organizationId come only from the verified link -> Licensee.orgId relationship. User.licenseeId and User.orgId are legacy consistency hints, never scope authority.",
     "manufacturerSpecificIdentifier": "User.id",
@@ -339,7 +336,7 @@
     "noUserMatch": "AUTHENTICATION_FAILED; identical external response to duplicate normalized user and invalid password.",
     "duplicateNormalizedUsers": "AUTHENTICATION_FAILED; no actor context or membership read.",
     "disabledUser": "AUTHENTICATION_FAILED before actor bootstrap; do not expose membership state.",
-    "wrongRole": "AUTHENTICATION_FAILED; only the three manufacturer roles are accepted.",
+    "wrongRole": "AUTHENTICATION_FAILED; only MANUFACTURER_ADMIN is accepted.",
     "noActiveRelationship": "MANUFACTURER_MEMBERSHIP_REQUIRED after password verification; issue no active session or tenant context and return no membership identifiers.",
     "multipleInconsistentRelationships": "MANUFACTURER_MEMBERSHIP_AMBIGUOUS; install no tenant context.",
     "requestedForeignLicensee": "MANUFACTURER_SCOPE_DENIED with no foreign membership detail.",
@@ -353,17 +350,23 @@
     "invitationNotFullyConsumed": "AUTHENTICATION_FAILED while User is INVITED, lacks passwordHash/emailVerifiedAt, or is inactive. Invite fields are not read by bootstrap and are not post-activation authority."
   },
   "implementationForm": {
-    "type": "actor-context-repository",
+    "type": "exact-authenticated-capability",
     "actorIdentityVerifiedBeforeRead": true,
     "transactionClientOnly": true,
     "globalPrismaAllowed": false,
     "explicitProjectionRequired": true,
-    "namedFunctionRequired": false,
+    "namedFunctionRequired": true,
     "genericPreAuthFunctionAllowed": false,
     "protectedReadsAfterActorContext": true,
-    "implementationStatus": "contract-approved-runtime-pending"
+    "implementationStatus": "runtime-and-postgresql-certified"
   },
-  "namedFunctionContract": null,
+  "namedFunctionContract": {
+    "signature": "app_rls.load_authenticated_manufacturer_scope(text,text,text,text,boolean)",
+    "runtimeRole": "identity-authenticated-app",
+    "ownerRole": "identity-auth-function-owner",
+    "publicExecutionDenied": true,
+    "callerTenantAuthorityAccepted": false
+  },
   "allowScenarios": [
     "One password-verified active manufacturer reads only its own eligible memberships with actor-only transaction context and server request attribution.",
     "A requested licensee narrows scope only after exact membership and scopeVersion verification.",
@@ -376,7 +379,7 @@
     "Secret-bearing, platform-admin, unrelated-user, full-tenant or broad-audit fields enter the projection.",
     "Bootstrap executes before actor verification or scope switching occurs without mfa-verified assurance, request attribution, a fresh transaction and audit."
   ],
-  "implementationStatus": "architecture-resolved-runtime-pending",
+  "implementationStatus": "runtime-and-postgresql-certified",
   "postgresqlCertificationRequirements": [
     "Actor-only context can select ManufacturerLicenseeLink rows only where manufacturerId equals verified app.manufacturer_id.",
     "Empty, forged, foreign and caller-selected tenant context is denied and never becomes a wildcard.",

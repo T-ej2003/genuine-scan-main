@@ -15,11 +15,11 @@ Staging and production have not been activated by this evidence revision.
 - Starting commit: `def002eb922b4e4b3350412a2803b969cbff709d`
 - Branch: `rls-full-integration`
 - Generated source contract:
-  `68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc`
+  `baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85`
 - Generated package checksum:
-  `2a72417d23d08c5ea296e7d914b24f869adb64ad53e2c100341d7538b6d1119d`
+  `1dc94c24dab8b9a40b8f98c435b199f9cd6f28769ecff9b37f3fef0e19556dce`
 - Deterministic generated-tree checksum:
-  `061af08772dd717364c797e611c1c141762b170b5621937caaf2f2d3c722b57c`
+  `8cc3f128e7eac5c3cbf2445ad303cbaf81a69c7e2a65c785589d4b0a528d33bc`
 
 ## Removed compatibility authority
 
@@ -90,9 +90,9 @@ The generated package verifies:
 
 - 79 inventoried tables;
 - 77 FORCE-RLS targets;
-- 339 policies;
+- 343 policies;
 - 60 column-privilege cells;
-- 338 registered workflow call paths;
+- 321 registered workflow call paths;
 - 27 checksums;
 - zero PUBLIC execution and exact runtime grants under the certification
   contract.
@@ -102,6 +102,7 @@ ownership, roles, grants, policies, application-path probes, catalog-tamper
 denials, failure injection, rollback, and zero database/role residue.
 Focused evidence is retained separately for:
 
+- `manufacturer-scope`;
 - `c03-authenticated-boundaries`;
 - `printing-lifecycle`;
 - `public-verification`;
@@ -141,6 +142,9 @@ Focused runs no longer overwrite the full certification result.
   `tar@7.5.22`. Production audits and OSV Scanner 2.4.0 report no findings.
 - RLS generation repeated byte-identically and full package verification:
   passed.
+- Full and focused PostgreSQL 18.4 application-path fixtures use namespaced
+  session credentials and clean their own rows, so sequential certification
+  families cannot alter later aggregate or uniqueness proofs.
 - Restricted-owner projection contract: 20 active sources passed; one
   fail-closed inactive exclusion.
 - Staging/production executor, IAM, broker, receipt, and Terraform contracts:

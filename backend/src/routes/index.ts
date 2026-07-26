@@ -111,7 +111,6 @@ import {
 } from "../controllers/qrRequestController";
 import { getScanLogs, getBatchSummary, getQrTrackingAnalyticsController } from "../controllers/qrLogController";
 import {
-  getTraceTimelineController,
   getBatchSlaAnalyticsController,
   getRiskAnalyticsController,
   getPolicyConfigController,
@@ -120,6 +119,7 @@ import {
   acknowledgePolicyAlertController,
   exportBatchAuditPackageController,
 } from "../controllers/tracePolicyController";
+import { getTraceTimelineController } from "../controllers/traceTimelineController";
 
 import {
   createUser,

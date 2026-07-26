@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
+const { createHash } = require("node:crypto");
 
 const enabled = process.env.MSCQR_B01_AUTH_CLOSURE_POSTGRES18_TEST === "true";
 const confirmed = process.env.MSCQR_B01_AUTH_CLOSURE_POSTGRES18_CONFIRM === "MSCQR_RUN_LOCAL_B01_AUTH_CLOSURE_POSTGRES18_TEST";
@@ -8,8 +9,8 @@ const ids = {
   licenseeA: "10000000-0000-4000-8000-000000000201", licenseeB: "10000000-0000-4000-8000-000000000202",
   userA: "10000000-0000-4000-8000-000000000301", userB: "10000000-0000-4000-8000-000000000302",
 };
-const hash = (character) => character.repeat(64);
-const capabilities = { primary: "A".repeat(43), rollback: "B".repeat(43), mfa: "C".repeat(43) };
+const hash = (value) => createHash("sha256").update(`b01-auth-closure:${value}`).digest("hex");
+const capabilities = { primary: "A".repeat(43), rollback: "B".repeat(43), mfa: "C".repeat(43), replacement: "D".repeat(43) };
 
 const connection = (raw) => {
   const parsed = new URL(String(raw || ""));
@@ -85,15 +86,52 @@ async function main() {
     SELECT id FROM app_rls.find_refresh_token_by_id('${primaryId}','${ids.userA}');
     COMMIT;`);
   assert.deepEqual(me.slice(-4), [ids.userA, "1", ids.userA, primaryId]);
+  const replacementId = last(app, `BEGIN;
+    SELECT "userId" FROM app_auth.require_authenticated_session('${capabilities.primary}','admin-mfa-step-up-proof','auth-session-replacement');
+    SELECT id FROM app_rls.create_refresh_token('${ids.userA}','${ids.orgA}','${hash("6")}',(transaction_timestamp()+interval '1 day')::timestamp,NULL,'focused-postgres18-step-up',transaction_timestamp()::timestamp,transaction_timestamp()::timestamp,transaction_timestamp()::timestamp);
+    COMMIT;`);
+  assert.match(replacementId, /^[0-9a-f-]{36}$/i);
+  assert.equal(last(app, `BEGIN;
+    SELECT "userId" FROM app_auth.require_authenticated_session('${capabilities.primary}','admin-mfa-step-up-proof','auth-session-replacement-issue');
+    SELECT id FROM app_auth.issue_authenticated_session_capability('${replacementId}','${hash("6")}','${capabilities.replacement}','ADMIN_MFA',(transaction_timestamp()+interval '1 hour')::timestamp);
+    SELECT (current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_session_id',true)='${primaryId}')::text;
+    COMMIT;`), "true");
+  assert.equal(last(app, `BEGIN; SELECT "userId" FROM app_auth.require_authenticated_session('${capabilities.replacement}','auth-me','replacement-capability'); ROLLBACK`), ids.userA);
+  denied(app, `BEGIN;
+    SELECT "userId" FROM app_auth.require_authenticated_session('${capabilities.primary}','admin-mfa-step-up-proof','auth-session-cross-actor');
+    SELECT id FROM app_rls.create_refresh_token('${ids.userB}','${ids.orgB}','${hash("7")}',(transaction_timestamp()+interval '1 day')::timestamp,NULL,NULL,transaction_timestamp()::timestamp,transaction_timestamp()::timestamp,transaction_timestamp()::timestamp);
+    COMMIT;`, /AUTH_LOGIN_SESSION_DENIED/);
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."RefreshToken" WHERE id='${replacementId}' AND "userId"='${ids.userA}' AND "orgId"='${ids.orgA}'`), "1");
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."RefreshToken" WHERE "userId"='${ids.userB}'`), "0");
+  const foreignId = "10000000-0000-4000-8000-000000000399";
+  psql(bootstrap, `INSERT INTO public."RefreshToken" (id,"orgId","userId","tokenHash","expiresAt","authenticatedAt","mfaVerifiedAt")
+    VALUES ('${foreignId}','${ids.orgB}','${ids.userB}','${hash("8")}',now()+interval '1 day',now(),now())`);
+  denied(app, `BEGIN;
+    SELECT "userId" FROM app_auth.require_authenticated_session('${capabilities.replacement}','admin-mfa-step-up-proof','auth-session-cross-issue');
+    SELECT id FROM app_auth.issue_authenticated_session_capability('${foreignId}','${hash("8")}','${"E".repeat(43)}','ADMIN_MFA',(transaction_timestamp()+interval '1 hour')::timestamp);
+    COMMIT;`, /AUTH_SESSION_CAPABILITY_DENIED_LIFECYCLE/);
+  assert.equal(last(bootstrap, `SELECT ("sessionCapabilityHash" IS NULL)::text FROM public."RefreshToken" WHERE id='${foreignId}'`), "true");
   assert.equal(last(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','auth-me','tenant-mismatch'); SELECT count(*) FROM app_rls.revalidate_authenticated_actor('${ids.userA}','${primaryId}','${ids.licenseeB}','${ids.orgB}',transaction_timestamp()::timestamp,'tenant-mismatch'); ROLLBACK`), "0");
   denied(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','auth-me','actor-mismatch'); SELECT * FROM app_rls.revalidate_authenticated_actor('${ids.userB}','${primaryId}','${ids.licenseeB}','${ids.orgB}',transaction_timestamp()::timestamp,'actor-mismatch'); ROLLBACK`);
 
   psql(bootstrap, `UPDATE public."Licensee" SET "suspendedAt"=now() WHERE id='${ids.licenseeA}'`);
   assert.equal(last(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','auth-me','stale-licensee'); SELECT count(*) FROM app_rls.revalidate_authenticated_actor('${ids.userA}','${primaryId}','${ids.licenseeA}','${ids.orgA}',transaction_timestamp()::timestamp,'stale-licensee'); ROLLBACK`), "0");
   psql(bootstrap, `UPDATE public."Licensee" SET "suspendedAt"=NULL WHERE id='${ids.licenseeA}'; UPDATE public."User" SET role='MANUFACTURER' WHERE id='${ids.userA}'; INSERT INTO public."ManufacturerLicenseeLink" ("manufacturerId","licenseeId","isPrimary","updatedAt") VALUES ('${ids.userA}','${ids.licenseeA}',true,now())`);
+  denied(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','manufacturer-bootstrap','manufacturer-legacy'); SELECT app_rls.load_authenticated_manufacturer_scope(NULL,NULL,NULL,'manufacturer-bootstrap',false); ROLLBACK`, /MANUFACTURER_SCOPE_DENIED/);
+  psql(bootstrap, `UPDATE public."User" SET role='MANUFACTURER_ADMIN' WHERE id='${ids.userA}'`);
   assert.equal(last(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','auth-me','manufacturer-live'); SELECT count(*) FROM app_rls.revalidate_authenticated_actor('${ids.userA}','${primaryId}','${ids.licenseeA}','${ids.orgA}',transaction_timestamp()::timestamp,'manufacturer-live'); ROLLBACK`), "1");
+  const linkVersion = last(bootstrap, `SELECT to_char("updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.userA}' AND "licenseeId"='${ids.licenseeA}'`);
+  const manufacturerScope = JSON.parse(last(app, `BEGIN;
+    SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','manufacturer-bootstrap','manufacturer-scope-live');
+    SELECT app_rls.load_authenticated_manufacturer_scope('${ids.licenseeA}','${ids.orgA}','${linkVersion}','manufacturer-bootstrap',true)::text;
+    COMMIT;`));
+  assert.equal(manufacturerScope.manufacturerId, ids.userA);
+  assert.equal(manufacturerScope.selectedLicensee.id, ids.licenseeA);
+  assert.deepEqual(manufacturerScope.linkedLicensees.map((item) => item.id), [ids.licenseeA]);
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuditLogOutbox" WHERE "requestId"='manufacturer-scope-live' AND payload->>'action'='MANUFACTURER_BOOTSTRAP_READ'`), "1");
   psql(bootstrap, `DELETE FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.userA}' AND "licenseeId"='${ids.licenseeA}'`);
   assert.equal(last(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','auth-me','manufacturer-stale'); SELECT count(*) FROM app_rls.revalidate_authenticated_actor('${ids.userA}','${primaryId}','${ids.licenseeA}','${ids.orgA}',transaction_timestamp()::timestamp,'manufacturer-stale'); ROLLBACK`), "0");
+  denied(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','manufacturer-bootstrap','manufacturer-scope-stale'); SELECT app_rls.load_authenticated_manufacturer_scope(NULL,NULL,NULL,'manufacturer-bootstrap',false); ROLLBACK`, /MANUFACTURER_MEMBERSHIP_REQUIRED/);
   psql(bootstrap, `UPDATE public."User" SET role='LICENSEE_ADMIN' WHERE id='${ids.userA}'`);
 
   psql(bootstrap, `UPDATE public."User" SET "isActive"=false,status='DISABLED' WHERE id='${ids.userA}'`);
@@ -126,13 +164,25 @@ async function main() {
     'riskPolicies',(SELECT count(*) FROM pg_policies WHERE schemaname='public' AND tablename='AuthSessionRiskSignal' AND policyname='b01_auth_closure_authsessionrisksignal_insert' AND cmd='INSERT'),
     'mfaPolicies',(SELECT count(*) FROM pg_policies WHERE schemaname='public' AND tablename='MfaLoginChallenge' AND policyname='b01_auth_closure_mfaloginchallenge_insert' AND cmd='INSERT'),
     'webAuthnPolicies',(SELECT count(*) FROM pg_policies WHERE schemaname='public' AND tablename='AuthWebAuthnChallenge' AND policyname LIKE 'b01_auth_closure%'),
-    'publicExecute',(SELECT count(*) FROM information_schema.routine_privileges WHERE specific_schema='app_rls' AND grantee='PUBLIC' AND routine_name IN ('create_refresh_token','load_recent_auth_session_risk_inputs','record_auth_session_risk_signal','revalidate_authenticated_actor','load_authenticated_actor','find_refresh_token_by_id','revoke_refresh_token_by_id','require_recent_mfa_session')),
+    'publicExecute',(SELECT count(*) FROM information_schema.routine_privileges WHERE specific_schema='app_rls' AND grantee='PUBLIC' AND routine_name IN ('create_refresh_token','load_recent_auth_session_risk_inputs','record_auth_session_risk_signal','revalidate_authenticated_actor','load_authenticated_actor','load_authenticated_manufacturer_scope','find_refresh_token_by_id','revoke_refresh_token_by_id','require_recent_mfa_session')),
     'ownerSafe',(SELECT count(*) FROM pg_roles WHERE rolname='mscqr_rls_cert_auth_owner' AND NOT rolcanlogin AND NOT rolbypassrls),
     'ownerTables',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_roles r ON r.oid=c.relowner WHERE n.nspname='public' AND r.rolname='mscqr_rls_cert_auth_owner')
   )::text`);
-  assert.deepEqual(JSON.parse(catalog), { force: 3, riskPolicies: 1, mfaPolicies: 1, webAuthnPolicies: 0, publicExecute: 0, ownerSafe: 1, ownerTables: 0 });
-  assert.equal(last(bootstrap, `SELECT count(*) FROM information_schema.routine_privileges WHERE specific_schema='app_rls' AND privilege_type='EXECUTE' AND ((grantee='mscqr_rls_cert_preauth' AND routine_name IN ('create_refresh_token','load_recent_auth_session_risk_inputs','record_auth_session_risk_signal')) OR (grantee='mscqr_rls_cert_app' AND routine_name IN ('revalidate_authenticated_actor','load_authenticated_actor','find_refresh_token_by_id','revoke_refresh_token_by_id','require_recent_mfa_session')))`), "8");
-  console.log("B01 authentication closure PostgreSQL 18 proof passed");
+  assert.deepEqual(JSON.parse(catalog), { force: 3, riskPolicies: 1, mfaPolicies: 1, webAuthnPolicies: 3, publicExecute: 0, ownerSafe: 1, ownerTables: 0 });
+  assert.equal(last(bootstrap, `SELECT count(*) FROM information_schema.routine_privileges WHERE privilege_type='EXECUTE' AND ((specific_schema='app_rls' AND ((grantee='mscqr_rls_cert_preauth' AND routine_name IN ('create_refresh_token','load_recent_auth_session_risk_inputs','record_auth_session_risk_signal')) OR (grantee='mscqr_rls_cert_app' AND routine_name IN ('create_refresh_token','revalidate_authenticated_actor','load_authenticated_actor','load_authenticated_manufacturer_scope','find_refresh_token_by_id','revoke_refresh_token_by_id','require_recent_mfa_session')))) OR (specific_schema='app_auth' AND grantee='mscqr_rls_cert_app' AND routine_name='issue_authenticated_session_capability'))`), "11");
+  psql(bootstrap, `
+    DELETE FROM public."AuditLogOutbox" WHERE payload->>'userId' IN ('${ids.userA}','${ids.userB}');
+    DELETE FROM public."AuthWebAuthnChallenge" WHERE "userId" IN ('${ids.userA}','${ids.userB}');
+    DELETE FROM public."MfaLoginChallenge" WHERE "userId" IN ('${ids.userA}','${ids.userB}');
+    DELETE FROM public."AuthSessionRiskSignal" WHERE "userId" IN ('${ids.userA}','${ids.userB}');
+    DELETE FROM public."RefreshToken" WHERE "userId" IN ('${ids.userA}','${ids.userB}');
+    DELETE FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId" IN ('${ids.userA}','${ids.userB}');
+    DELETE FROM public."User" WHERE id IN ('${ids.userA}','${ids.userB}');
+    DELETE FROM public."Licensee" WHERE id IN ('${ids.licenseeA}','${ids.licenseeB}');
+    DELETE FROM public."Organization" WHERE id IN ('${ids.orgA}','${ids.orgB}');
+  `);
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."Organization" WHERE id IN ('${ids.orgA}','${ids.orgB}')`), "0");
+  console.log("B01 authentication closure PostgreSQL 18 application-path proof passed");
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

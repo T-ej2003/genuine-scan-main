@@ -138,7 +138,7 @@
       "creationIdentity": "identity-migration",
       "transferMechanism": "After zero-based Prisma migration, the brokered administrator transaction temporarily gives identity-migration SET-only access to one target NOLOGIN owner, SET ROLEs to the migration owner, performs explicit fully qualified ALTER OWNER statements, and revokes the edge before success. REASSIGN OWNED is forbidden.",
       "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
-      "postTransferVerification": "Every Prisma table has relowner=environment table owner; all 75 FORCE targets and both migration-only tables are included.",
+      "postTransferVerification": "Every Prisma table has relowner=environment table owner; all 77 FORCE targets and both migration-only tables are included.",
       "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",

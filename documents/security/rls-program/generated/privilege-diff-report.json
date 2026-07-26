@@ -5233,8 +5233,12 @@
       "columns": [
         "id",
         "qrCodeId",
+        "qrCodeValue",
         "scanEventId",
-        "licenseeId"
+        "licenseeId",
+        "severity",
+        "status",
+        "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner"
@@ -5254,7 +5258,64 @@
       "command": "SELECT",
       "columns": [
         "id",
+        "licenseeId",
         "manufacturerId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "QrScanLog",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "batchId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "PolicyAlert",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "alertType",
+        "severity",
+        "message",
+        "manufacturerId",
+        "acknowledgedAt",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "SupportTicket",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "referenceCode",
+        "status",
+        "priority",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "AuditLog",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "licenseeId",
+        "action",
+        "entityType",
+        "entityId",
+        "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner"

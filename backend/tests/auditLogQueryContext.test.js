@@ -50,22 +50,24 @@ const fakeRunner = () => {
         events.push("context");
         calls.contextValues.push(values);
         contextInstalled = true;
-      } else if (/INSERT INTO public\."AuditLog"/.test(sql)) {
-        events.push("audit-attribution");
-        calls.create.push({ values });
-      } else {
-        events.push("audit-outbox");
       }
       return 1;
     },
-    $queryRaw: async (strings, ...values) => {
+    $queryRaw: async (query, ...values) => {
       requireContext();
-      if (/transaction_timestamp/.test(strings.join("?"))) {
+      const sql = Array.isArray(query) ? query.join("?") : query.sql;
+      const queryValues = Array.isArray(query) ? values : query.values;
+      if (/transaction_timestamp/.test(sql)) {
         events.push("audit-clock");
         return [{ createdAt: new Date("2026-07-16T10:00:01.000Z") }];
       }
+      if (/app_rls\.enqueue_audit_log_outbox/.test(sql)) {
+        events.push("audit-outbox");
+        calls.create.push({ values: queryValues });
+        return [{ id: "audit-outbox-a" }];
+      }
       events.push("platform-details");
-      calls.details.push({ strings, values });
+      calls.details.push({ strings: query, values: queryValues });
       return [{ id: "audit-a", ipAddress: "192.0.2.1", userAgent: "Test Browser", userId: ids.tenantAdmin, userName: "Tenant Admin" }];
     },
     auditLog: {
@@ -124,7 +126,7 @@ const fakeRunner = () => {
   };
 };
 
-const read = async (user, input, requestId = "request-a") => {
+const read = async (user, input, requestId = "00000000-0000-4000-8000-0000000000a1") => {
   const fake = fakeRunner();
   const boundary = buildAuditLogBoundary(user, input, requestId);
   let serialized = false;
@@ -158,7 +160,6 @@ const denied = (user, input, message, requestId = "request-denied") => {
     "audit-count",
     "user-enrichment",
     "audit-clock",
-    "audit-attribution",
     "audit-outbox",
     "transaction-end",
   ]);
@@ -175,7 +176,7 @@ const denied = (user, input, message, requestId = "request-denied") => {
   assert.deepStrictEqual(tenant.fake.calls.users[0].select, { id: true, name: true });
   assert.doesNotMatch(JSON.stringify(tenant.result), /token-secret|cookie-secret|signing-secret/);
   assert.match(JSON.stringify(tenant.result), /retained/);
-  assert.strictEqual(JSON.parse(tenant.fake.calls.create[0].values[7]).requestId, "request-a");
+  assert.strictEqual(tenant.fake.calls.create[0].values[3], "00000000-0000-4000-8000-0000000000a1");
 
   const manufacturer = await read(
     actor({ userId: ids.manufacturer, role: UserRole.MANUFACTURER, linkedLicenseeIds: [ids.tenant] }),
@@ -199,7 +200,7 @@ const denied = (user, input, message, requestId = "request-denied") => {
   );
   assert.strictEqual(platform.fake.calls.contextValues[0][7], "platform-audit-log-read");
   assert.strictEqual(platform.result.logs[0].ipAddress, "192.0.2.1");
-  assert.strictEqual(JSON.parse(platform.fake.calls.create[0].values[7]).purpose, "review incident IR-42");
+  assert.strictEqual(JSON.parse(platform.fake.calls.create[0].values[0]).details.purpose, "review incident IR-42");
   assert.strictEqual(platform.fake.calls.details.length, 1);
   assert.strictEqual(platform.fake.calls.users.length, 0, "platform name/network projection must stay behind the exact function");
   assert.strictEqual(platform.fake.calls.find[0].select.ipAddress, undefined);
@@ -244,7 +245,8 @@ const denied = (user, input, message, requestId = "request-denied") => {
   assert(!serviceSource.includes('from "../config/database"'), "query service must not import the global Prisma client");
   const controllerBody = controllerSource.match(/export const getLogs[\s\S]*?export const exportLogsCsv/)?.[0] || "";
   assert(!/prisma\.(?:auditLog|user)\./.test(controllerBody), "controller must not execute protected global-client queries");
-  assert.match(controllerBody, /withCanonicalDbContext\(\s*prisma,\s*boundary\.context/);
+  assert.match(controllerBody, /withDatabaseAuthenticatedSelection\(/);
+  assert.match(controllerBody, /capability:\s*String\(req\.databaseSessionCapability/);
   assert.match(controllerBody, /TransactionIsolationLevel\.RepeatableRead/);
   assert.match(routeSource, /"\/logs",[\s\S]{0,250}requireAuditViewer,[\s\S]{0,100}requireRecentAdminMfa,/);
 

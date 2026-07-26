@@ -179,7 +179,7 @@ async function main() {
   const prismaModule = require("../../../dist/config/database");
   const prisma = prismaModule.default || prismaModule;
   const auditController = require("../../../dist/controllers/auditController");
-  const traceController = require("../../../dist/controllers/tracePolicyController");
+  const traceController = require("../../../dist/controllers/traceTimelineController");
 
   const platform = actor("PLATFORM_SUPER_ADMIN", ids.platform, null, null);
   const tenantAdmin = actor("LICENSEE_ADMIN", ids.tenantAdmin, ids.licenseeA, ids.orgA);

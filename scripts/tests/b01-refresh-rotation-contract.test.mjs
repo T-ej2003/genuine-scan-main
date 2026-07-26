@@ -17,7 +17,13 @@ test("B01 production refresh functions use the reviewed owner-and-bearer FORCE-R
   assert(contracts.every((contract) => contract.security.publicExecute === "revoked"));
   assert(contracts.every((contract) => contract.security.runtimeExecuteGrantees.join(",") === "preauth"));
   assert(contracts.every((contract) => contract.canonicalWorkflowIds.includes("workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session")));
-  assert.match(source, /SELECT rt\.\* INTO t FROM public\."RefreshToken" rt WHERE rt\."tokenHash"=ANY\(p_hashes\) FOR UPDATE/);
+  assert.match(source, /SELECT rt\.id,rt\."userId",rt\."orgId",rt\."revokedAt",rt\."replacedByTokenHash",rt\."expiresAt",\s+rt\."authenticatedAt",rt\."mfaVerifiedAt",rt\."rotationRequestId"\s+INTO t FROM public\."RefreshToken" rt WHERE rt\."tokenHash"=ANY\(p_hashes\) FOR UPDATE/);
+  assert.match(source, /FROM public\."AdminMfaCredential" amc WHERE amc\."userId"=u\.id/);
+  assert.match(source, /FROM public\."AdminWebAuthnCredential" awc WHERE awc\."userId"=u\.id/);
+  assert.match(source, /FROM public\."UserMfaFactor" umf WHERE umf\."userId"=u\.id/);
+  assert.match(source, /FROM public\."UserBackupCode" ubc WHERE ubc\."userId"=u\.id/);
+  assert.doesNotMatch(source, /FROM public\."(?:AdminMfaCredential|AdminWebAuthnCredential|UserMfaFactor|UserBackupCode)" WHERE "userId"=/);
+  assert.match(source, /IF u\.role::text IN \('LICENSEE_ADMIN','ORG_ADMIN'\) THEN[\s\S]*selected\.id,selected\."orgId",NULL,selected\.id,selected\.name,selected\.prefix/);
   assert.match(source, /"rotationRequestId"=p_request_id,"rotationClaimedAt"=coalesce/);
   assert.match(source, /"replacedByTokenHash"=p_token_hash,"rotationCompletedAt"=p_rotated_at/);
   assert.match(source, /revoke_refresh_token_scope\([^)]*p_request_id text\)/);

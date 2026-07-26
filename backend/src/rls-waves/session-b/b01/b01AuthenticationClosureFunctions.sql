@@ -352,11 +352,22 @@ CREATE OR REPLACE FUNCTION app_rls.create_refresh_token(
 ) RETURNS TABLE("id" text,"expiresAt" timestamp without time zone)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE token_id text := gen_random_uuid()::text; actor record;
+        authenticated_call boolean := current_setting('app.auth_session_verified',true)='1';
 BEGIN
-  IF p_user_id IS DISTINCT FROM current_setting('app.b01_preauth_user_id',true)
-     OR p_token_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$' OR p_expires_at<=p_created_at
+  IF p_token_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$' OR p_expires_at<=p_created_at
      OR p_expires_at>p_created_at+interval '31 days' THEN RAISE EXCEPTION 'AUTH_LOGIN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
-  PERFORM set_config('app.auth_closure_operation','login-session-create',true),set_config('app.auth_closure_user_id',p_user_id,true),
+  IF authenticated_call THEN
+    SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
+      current_setting('app.user_id',true),current_setting('app.auth_session_id',true),current_setting('app.request_id',true)
+    );
+    IF p_user_id IS DISTINCT FROM actor."userId"
+       OR p_organization_id IS DISTINCT FROM nullif(current_setting('app.organization_id',true),'')
+    THEN RAISE EXCEPTION 'AUTH_LOGIN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  ELSIF p_user_id IS DISTINCT FROM current_setting('app.b01_preauth_user_id',true) THEN
+    RAISE EXCEPTION 'AUTH_LOGIN_SESSION_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.auth_closure_operation',CASE WHEN authenticated_call THEN 'authenticated-session-create' ELSE 'login-session-create' END,true),
+          set_config('app.auth_closure_user_id',p_user_id,true),
           set_config('app.auth_closure_organization_id',coalesce(p_organization_id,''),true),set_config('app.auth_closure_token_id',token_id,true),
           set_config('app.auth_closure_token_hash',p_token_hash,true);
   SELECT u.id,u.role::text AS role,u."orgId",u."licenseeId" INTO actor FROM public."User" u WHERE u.id=p_user_id AND u."isActive"

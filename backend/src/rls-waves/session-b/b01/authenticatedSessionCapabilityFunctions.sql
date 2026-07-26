@@ -40,12 +40,27 @@ CREATE OR REPLACE FUNCTION app_auth.issue_authenticated_session_capability(
   p_expires_at timestamp without time zone
 ) RETURNS TABLE("id" text,"expiresAt" timestamp without time zone)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE session_row record; capability_hash text;
+DECLARE session_row record; capability_hash text; authenticated_actor_id text; authenticated_issue boolean;
+  prior_session_hash text; prior_session_id text; prior_refresh_hash text;
+  prior_operation text; prior_verified text;
 BEGIN
   IF p_refresh_token_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
      OR p_refresh_token_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$'
      OR p_capability !~ '^[A-Za-z0-9_-]{43}$' OR p_assurance NOT IN ('PASSWORD','ADMIN_MFA')
      OR p_expires_at IS NULL THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
+  authenticated_issue := current_setting('app.auth_session_verified',true)='1';
+  IF authenticated_issue THEN
+    prior_session_hash := current_setting('app.auth_session_hash',true);
+    prior_session_id := current_setting('app.auth_session_id',true);
+    prior_refresh_hash := current_setting('app.auth_session_refresh_hash',true);
+    prior_operation := current_setting('app.auth_session_operation',true);
+    prior_verified := current_setting('app.auth_session_verified',true);
+    SELECT "userId" INTO authenticated_actor_id FROM app_rls.b01_authenticated_actor(
+      current_setting('app.user_id',true),
+      current_setting('app.auth_session_id',true),
+      current_setting('app.request_id',true)
+    );
+  END IF;
   -- Reuse the reviewed B01 bearer binder before the first protected read.
   -- The identifier stays a selector; the existing refresh bearer hash is the
   -- only pre-auth proof that can make that selector visible.
@@ -64,11 +79,12 @@ BEGIN
      AND rt."tokenHash"=p_refresh_token_hash
      AND rt."revokedAt" IS NULL
      AND rt."expiresAt">clock_timestamp()
-  RETURNING rt.id,rt."expiresAt",rt."mfaVerifiedAt",rt."sessionCapabilityHash" INTO session_row;
+  RETURNING rt.id,rt."userId",rt."expiresAt",rt."mfaVerifiedAt",rt."sessionCapabilityHash" INTO session_row;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED_SESSION' USING ERRCODE='42501';
   END IF;
   IF session_row."sessionCapabilityHash" IS NOT NULL
+     OR (authenticated_issue AND session_row."userId" IS DISTINCT FROM authenticated_actor_id)
      OR p_expires_at<=clock_timestamp() OR p_expires_at>session_row."expiresAt"
      OR (p_assurance='ADMIN_MFA') IS DISTINCT FROM (session_row."mfaVerifiedAt" IS NOT NULL) THEN
     RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED_LIFECYCLE' USING ERRCODE='42501';
@@ -79,6 +95,13 @@ BEGIN
     "sessionCapabilityRevokedAt"=NULL,"sessionCapabilityRevokedReason"=NULL
     WHERE rt.id=session_row.id AND rt."sessionCapabilityHash" IS NULL;
   IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED_SESSION' USING ERRCODE='42501'; END IF;
+  IF authenticated_issue THEN
+    PERFORM set_config('app.auth_session_hash',prior_session_hash,true),
+            set_config('app.auth_session_id',prior_session_id,true),
+            set_config('app.auth_session_refresh_hash',coalesce(prior_refresh_hash,''),true),
+            set_config('app.auth_session_operation',prior_operation,true),
+            set_config('app.auth_session_verified',prior_verified,true);
+  END IF;
   RETURN QUERY SELECT session_row.id::text,session_row."expiresAt";
 END
 $fn$;

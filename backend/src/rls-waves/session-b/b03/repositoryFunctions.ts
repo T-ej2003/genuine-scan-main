@@ -101,6 +101,21 @@ export type B03NotificationDeliveryRow = {
   sideEffectRequired: boolean;
 };
 
+export type B03AttentionQueueProjection = {
+  incidents: { count: number; latest: {
+    id: string; qrCodeValue: string; severity: string; status: string; createdAt: string;
+  } | null };
+  policyAlerts: { count: number; latest: {
+    id: string; alertType: string; severity: string; message: string; createdAt: string;
+  } | null };
+  supportTickets: { count: number; latest: {
+    id: string; referenceCode: string; status: string; priority: string; updatedAt: string;
+  } | null };
+  auditEvents: { count: number; latest: {
+    id: string; action: string; entityType: string; entityId: string | null; createdAt: string;
+  } | null };
+};
+
 export type B03IncidentEmailDeliveryInput = {
   incidentId: string;
   licenseeId?: string | null;
@@ -552,9 +567,10 @@ export const listNotificationsForUser = async (
 }>>(Prisma.sql`
   SELECT result."notifications", result."total", result."unread"
   FROM app_rls.b03_list_notifications_for_user(
-    ${id(input.userId, "userId")}, ${limit},
-    ${integer(input.offset, "offset", 0, 1_000_000)}, ${Boolean(input.unreadOnly)},
-    ${cursor.createdAt}, ${cursor.id}, ${authenticatedRequestId(input.requestId)}
+    ${id(input.userId, "userId")}::text, ${limit}::integer,
+    ${integer(input.offset, "offset", 0, 1_000_000)}::integer, ${Boolean(input.unreadOnly)}::boolean,
+    ${cursor.createdAt}::timestamp without time zone, ${cursor.id}::text,
+    ${authenticatedRequestId(input.requestId)}::text
   ) AS result
   `), "app_rls.b03_list_notifications_for_user");
   if (!Array.isArray(row.notifications) || row.notifications.length > limit) {
@@ -564,6 +580,30 @@ export const listNotificationsForUser = async (
   integer(row.unread, "unread", 0, 1_000_000_000);
   json(row.notifications);
   return row;
+};
+
+export const readAttentionQueueProjection = async (
+  db: B03FunctionClient,
+  input: { licenseeId?: string | null; since: Date; requestId: string }
+) => {
+  const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
+    SELECT app_rls.b03_attention_queue_projection(
+      ${optional(input.licenseeId, "licenseeId")}::text,
+      ${timestamp(input.since, "since")}::timestamp without time zone,
+      ${authenticatedRequestId(input.requestId)}::text
+    ) AS result
+  `), "app_rls.b03_attention_queue_projection");
+  if (!row.result || typeof row.result !== "object" || Array.isArray(row.result)) {
+    throw new Error("app_rls.b03_attention_queue_projection returned an invalid projection");
+  }
+  for (const key of ["incidents", "policyAlerts", "supportTickets", "auditEvents"] as const) {
+    const section = row.result[key];
+    if (!section || typeof section !== "object" || Array.isArray(section)) {
+      throw new Error("app_rls.b03_attention_queue_projection returned an invalid section");
+    }
+    integer(section.count, `${key} count`, 0, 1_000_000_000);
+  }
+  return row.result as unknown as B03AttentionQueueProjection;
 };
 
 export const markNotificationRead = async (

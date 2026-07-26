@@ -7,6 +7,7 @@ import { EXPECTED_WORKFLOW_COUNT } from "./workflow-inventory-baseline.mjs";
 const registryRepoRoot = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 
 export const RISK_ANALYTICS_WORKFLOW_ID = "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics";
+export const MANUFACTURER_SCOPE_WORKFLOW_ID = "workflow-internal-backend-src-rls-waves-session-b-b01-authenticated-security-repository-ts-load-authenticated-manufacturer-scope";
 export const DASHBOARD_SNAPSHOT_WORKFLOW_IDS = [
   "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
   "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
@@ -22,6 +23,22 @@ export const BATCH_OPERATIONAL_READ_WORKFLOW_IDS = [
 ];
 
 export const applicationPathCertificationFamilies = [
+  {
+    id: "manufacturer-scope",
+    workflowIds: [MANUFACTURER_SCOPE_WORKFLOW_ID],
+    registeredRoots: ["POST /auth/login", "POST /auth/refresh", "GET /auth/me"],
+    testFile: "backend/tests/rls-wave-b/b01/authenticationClosurePostgres18.test.js",
+    runtimeRole: "identity-authenticated-app",
+    positiveActors: ["manufacturer"],
+    deniedCases: ["deprecated-role", "missing-membership", "stale-membership", "foreign-scope"],
+    enable: ["MSCQR_B01_AUTH_CLOSURE_POSTGRES18_TEST", "true"],
+    confirm: ["MSCQR_B01_AUTH_CLOSURE_POSTGRES18_CONFIRM", "MSCQR_RUN_LOCAL_B01_AUTH_CLOSURE_POSTGRES18_TEST"],
+    connections: {
+      MSCQR_B01_AUTH_CLOSURE_BOOTSTRAP_URL: "bootstrap",
+      MSCQR_B01_AUTH_CLOSURE_PREAUTH_URL: "preauth",
+      MSCQR_B01_AUTH_CLOSURE_APP_URL: "app",
+    },
+  },
   {
     id: "risk-analytics",
     workflowIds: [RISK_ANALYTICS_WORKFLOW_ID],

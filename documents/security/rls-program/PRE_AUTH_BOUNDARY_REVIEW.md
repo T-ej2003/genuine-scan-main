@@ -2,7 +2,7 @@
 
 This review records the seven production SQL boundaries generated from the authoritative named-function contracts, including exact ownership, grants, FORCE-RLS policies, rollback, and PostgreSQL 18 probes.
 
-Selected workflows: 9; exact functions: 7; moved behind actor context: 2; operator-only: 0; retired: 0.
+Selected workflows: 7; exact functions: 7; moved behind actor context: 0; operator-only: 0; retired: 0.
 
 ## Workflow reconciliation
 
@@ -11,8 +11,6 @@ Selected workflows: 9; exact functions: 7; moved behind actor context: 2; operat
 | workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification | email-verification consumption | exact-security-definer-function | preauth-fn-consume-email-verification |
 | workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite | invitation/setup-link consumption | exact-security-definer-function | preauth-fn-consume-invitation |
 | workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview | invitation/setup-link lookup | exact-security-definer-function | preauth-fn-lookup-invitation |
-| workflow-internal-backend-src-services-auth-mfa-adapter-ts-complete-stable-mfa-login-challenge | not actually pre-auth and must move behind canonical actor context | ordinary-authenticated-context | mfa-bootstrap |
-| workflow-internal-backend-src-services-auth-mfa-adapter-ts-create-stable-mfa-login-challenge | not actually pre-auth and must move behind canonical actor context | ordinary-authenticated-context | mfa-bootstrap |
 | workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset | password-reset request | exact-security-definer-function | preauth-fn-request-password-reset |
 | workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token | password-reset completion | exact-security-definer-function | preauth-fn-consume-password-reset |
 | workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user | password-login lookup | exact-security-definer-function | preauth-fn-lookup-password-user |

@@ -26,21 +26,26 @@ test("all Prisma models and production access sites are represented exactly and 
 
 test("raw SQL inventory recognizes table clauses without treating data literals as tables", () => {
   const accesses = scanProductionAccess().accesses.filter((entry) =>
-    entry.sourceFile === "backend/src/services/analyticsService.ts" &&
-    entry.function === "recordRiskAnalyticsRead" &&
-    entry.method === "$executeRaw"
+    entry.sourceFile === "backend/src/services/printReservationService.ts" &&
+    entry.function === "selectReservableQrCodesForPrint" &&
+    entry.method === "$queryRaw"
   );
-  assert.deepEqual(accesses.map((entry) => [entry.prismaModel, entry.command]), [["AuditLog", "INSERT"]]);
+  assert.deepEqual(accesses.map((entry) => [entry.prismaModel, entry.command]).sort(), [
+    ["PrintItem", "SELECT"],
+    ["PrintJob", "SELECT"],
+    ["PrintSession", "SELECT"],
+    ["QRCode", "SELECT"],
+  ]);
 });
 
 test("route authorization evidence is isolated to the exact registered handler", () => {
   const { workflows, commandSemantics } = manifests();
-  const workflow = workflows.workflows.find((item) => item.id === "workflow-http-backend-src-controllers-qr-controller-ts-create-batch");
+  const workflow = workflows.workflows.find((item) => item.id === "workflow-http-backend-src-controllers-trace-policy-controller-ts-get-policy-alerts-controller");
   assert.deepEqual(workflow.commandActorClasses, ["licensee-admin"]);
   for (const ruleId of workflow.commandRuleIds) {
     const rule = commandSemantics.rules.find((item) => item.id === ruleId);
     assert.deepEqual(rule.actorClasses, ["licensee-admin"]);
-    assert(rule.supportingEvidence.some((item) => item.includes("routes/index.ts:") && item.includes("requireLicenseeAdmin")));
+    assert(rule.supportingEvidence.some((item) => item.includes("routes/index.ts:2138") && item.includes("requireAnyAdmin") && item.includes("enforceTenantIsolation")));
     assert(!rule.supportingEvidence.some((item) => item.includes("requirePlatformAdmin")), `${ruleId} inherited an adjacent route guard`);
   }
 });
@@ -57,6 +62,7 @@ test("named dashboard functions preserve both canonical workflows and exact prot
     "Licensee:SELECT",
     "ManufacturerLicenseeLink:SELECT",
     "Organization:SELECT",
+    "RefreshToken:SELECT",
     "User:SELECT",
   ]);
   assert.deepEqual(byFunction("loadInventoryAggregate"), [
@@ -68,6 +74,7 @@ test("named dashboard functions preserve both canonical workflows and exact prot
     "ManufacturerLicenseeLink:SELECT",
     "Organization:SELECT",
     "QRCode:SELECT",
+    "RefreshToken:SELECT",
     "User:SELECT",
   ]);
   assert(rows.every((entry) => entry.method.startsWith("$function:app_rls.dashboard_snapshot_")));
@@ -81,7 +88,7 @@ test("implemented protected workflows use only typed transaction clients", () =>
   assert(result.accesses > 0);
   for (const clientKind of ["global-prisma", "transaction-client", "unknown"]) {
     const candidate = structuredClone(scan);
-    candidate.accesses.find((access) => access.sourceFile === "backend/src/services/dashboardSnapshotService.ts").clientKind = clientKind;
+    candidate.accesses.find((access) => access.sourceFile === "backend/src/services/auditCsvExportService.ts" && !access.method.startsWith("$function:")).clientKind = clientKind;
     assert.throws(() => validateProtectedTransactionClients(workflows, candidate), new RegExp(`${clientKind}.*CanonicalTransactionClient`));
   }
 });
@@ -150,21 +157,23 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   assert.equal(generated.workflowCount, EXPECTED_WORKFLOW_COUNT);
   assert.equal(generated.familyCount, EXPECTED_CONTEXT_FAMILY_COUNT);
   const count = (eligibility) => generated.families.filter((family) => family.automationEligibility === eligibility).reduce((total, family) => total + family.workflowIds.length, 0);
-  assert.equal(count("implemented"), 14);
+  assert.equal(count("implemented"), 15);
   assert.equal(count("contract-only"), EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT);
-  assert.equal(count("blocked"), EXPECTED_WORKFLOW_COUNT - 14 - EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT);
+  assert.equal(count("blocked"), EXPECTED_WORKFLOW_COUNT - 15 - EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT);
   assert.equal(count("auto-implementable"), 0);
-  const mfaDisableWorkflowId = "workflow-internal-backend-src-services-auth-mfa-service-ts-disable-admin-mfa";
+  const mfaDisableWorkflowId = "workflow-internal-backend-src-rls-waves-session-b-b01-admin-mfa-repository-ts-disable-admin-mfa-boundary";
   const mfaDisableFamily = generated.families.find((family) => family.workflowIds.includes(mfaDisableWorkflowId));
   assert(mfaDisableFamily, "complete MFA disablement lacks an exact family");
   assert.deepEqual(mfaDisableFamily.protectedTables, [
     "table-admin-mfa-credential",
     "table-admin-web-authn-credential",
     "table-audit-log-outbox",
+    "table-refresh-token",
+    "table-user",
     "table-user-backup-code",
     "table-user-mfa-factor",
   ]);
-  assert.equal(mfaDisableFamily.workflowIds.length, 1, "MFA disablement is grouped with an incompatible security mutation");
+  assert(mfaDisableFamily.workflowIds.every((workflowId) => workflowId.includes("admin-mfa-repository")), "MFA repository family contains an incompatible workflow");
   assert.equal(new Set(generated.families.flatMap((family) => family.workflowIds)).size, workflows.workflows.length);
   const specialWorkflowIds = new Set([
     ...workflows.workflows.filter((workflow) => workflow.preAuthBoundary?.boundaryMode === "exact-security-definer-function"),
@@ -196,7 +205,7 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
     workflow.postgresqlCertificationStatus = "certified";
   }, /falsely PostgreSQL-certified/);
   const splitFamilies = generated.families.filter((family) => family.parentFamilyId);
-  assert.equal(splitFamilies.length, 10);
+  assert.equal(splitFamilies.length, 9);
   assert.equal(new Set(splitFamilies.flatMap((family) => family.workflowIds)).size, splitFamilies.flatMap((family) => family.workflowIds).length, "split workflows duplicated");
   assert(splitFamilies.every((family) => family.splitReason && family.semanticEvidence.length && family.routeRoots.length), "split evidence missing");
   reject((candidate) => { const family = candidate.families.find((item) => item.parentFamilyId); family.parentFamilyId = family.id; }, /invalid parent lineage|circular parent lineage/);
@@ -234,7 +243,10 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   assert.equal(riskWorkflow.protectedQueryClient, "transaction-client-only");
   const riskUserRule = commandSemantics.rules.find((rule) => rule.tableId === "table-user" && rule.supportingWorkflowIds.includes(riskWorkflowId));
   assert(riskUserRule, "risk analytics User projection command rule");
-  assert.equal(riskUserRule.requiresNamedFunction, false);
+  assert.equal(riskUserRule.requiresNamedFunction, true);
+  assert.deepEqual(riskUserRule.namedFunctionSignatures, [
+    "app_rls.risk_analytics_snapshot(text,text,text,text,text,integer,integer,timestamp without time zone)",
+  ]);
   assert.deepEqual(riskUserRule.actorClasses, ["licensee-admin", "platform-admin"]);
   assert.deepEqual(riskUserRule.minimumAssuranceByActorClass, { "licensee-admin": "password-verified", "platform-admin": "mfa-verified" });
   assert.deepEqual(riskUserRule.allowedColumns, ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"]);
@@ -266,7 +278,7 @@ test("manufacturer bootstrap is actor-bound, minimal, deterministic, and fail cl
   reject((boundary) => { boundary.disabledRevokedBehavior.revokedMembershipAccepted = true; }, /accepts revokedMembershipAccepted/);
   reject((boundary) => { boundary.duplicateHandling.nondeterministicSelectionAllowed = true; }, /duplicate manufacturer memberships do not fail closed/);
   reject((boundary) => { boundary.exactReturnedColumns.push({ name: "passwordHash", source: "User.passwordHash", reason: "unsafe" }); }, /projection is not exact|returns secret/);
-  reject((boundary) => { boundary.identityProofChain.intendedRoleCeiling.push("LICENSEE_ADMIN"); }, /grants licensee or platform role visibility/);
+  reject((boundary) => { boundary.identityProofChain.intendedRoleCeiling.push("LICENSEE_ADMIN"); }, /grants deprecated, licensee or platform role visibility/);
   reject((boundary) => { boundary.exactReturnedColumns[0] = { name: "isPlatformAdmin", source: "request.isPlatformAdmin", reason: "unsafe" }; }, /projection is not exact|returns secret/);
   reject((boundary) => { boundary.scopeSwitchRules.requestIdRequired = false; }, /scope switching lacks request attribution/);
   reject((boundary) => { boundary.scopeSwitchRules.auditRequired = false; }, /scope switching lacks request attribution/);
@@ -384,14 +396,14 @@ test("bounded read-family batch is scoped, evidenced, and fail closed", () => {
   const families = JSON.parse(fs.readFileSync(contextBoundaryFamiliesPath, "utf8"));
   const batch = JSON.parse(fs.readFileSync(contextBoundaryReadBatchPath, "utf8"));
   assert(validateContextBoundaryReadBatch(batch, families, workflows, commandSemantics, tables));
-  assert.equal(batch.selectedFamilies.length, 17);
-  assert.equal(batch.selectionTotals.workflowsConsidered, 27);
-  assert.equal(batch.selectionTotals.reclassifiedFamilies, 2);
-  assert.equal(batch.selectionTotals.splitFamilies, 4);
-  assert.equal(batch.selectionTotals.childFamiliesCreated, 8);
-  assert.equal(batch.selectionTotals.contractOnlyWorkflows, 2);
+  assert.equal(batch.selectedFamilies.length, 16);
+  assert.equal(batch.selectionTotals.workflowsConsidered, 24);
+  assert.equal(batch.selectionTotals.reclassifiedFamilies, 1);
+  assert.equal(batch.selectionTotals.splitFamilies, 3);
+  assert.equal(batch.selectionTotals.childFamiliesCreated, 6);
+  assert.equal(batch.selectionTotals.contractOnlyWorkflows, 1);
   assert.equal(batch.selectionTotals.newlyImplementedWorkflows, 0);
-  assert.equal(batch.selectionTotals.blockedWorkflows, 25);
+  assert.equal(batch.selectionTotals.blockedWorkflows, 23);
 
   const reject = (mutate, pattern) => {
     const candidateBatch = structuredClone(batch);
@@ -461,7 +473,7 @@ test("command semantics mutation guards fail closed", () => {
   rejects((rule) => rule.actorClasses.includes("platform-admin"), (rule) => { rule.minimumAssuranceByActorClass["platform-admin"] = "password-verified"; }, /platform MFA missing/);
   rejects((rule) => rule.actorClasses.length > 1, (rule) => { delete rule.minimumAssuranceByActorClass; }, /actor assurance missing/);
   rejects((rule) => rule.requiresNamedFunction && !rule.requiresRestrictedWorkerBoundary, (rule) => { rule.authorizationBoundary = "ordinary-rls"; }, /named function degraded/);
-  rejects((rule) => rule.requiresRestrictedWorkerBoundary && !rule.requiresNamedFunction, (rule) => { rule.authorizationBoundary = "ordinary-rls"; }, /worker boundary degraded/);
+  rejects((rule) => rule.requiresRestrictedWorkerBoundary, (rule) => { rule.requiresNamedFunction = false; rule.authorizationBoundary = "ordinary-rls"; }, /worker boundary degraded/);
   rejects((rule) => rule.lifecycleColumns.length && rule.authorizationBoundary !== "prohibited", (rule) => { rule.allowedLifecycleStates = []; }, /lifecycle omitted/);
   rejects((rule) => rule.command === "DELETE" && rule.hardDeleteSemantics === "prohibited", (rule, candidate) => { candidate.rules.splice(candidate.rules.indexOf(rule), 1); }, /general hard delete enabled/);
 });
@@ -469,10 +481,10 @@ test("command semantics mutation guards fail closed", () => {
 test("pre-auth workflows reduce to exact functions or actor context", () => {
   const { workflows, commandSemantics, preAuthFunctions, identities, tables, decisions } = manifests();
   const selected = workflows.workflows.filter((workflow) => workflow.preAuthBoundary);
-  assert.equal(selected.length, preAuthFunctions.functions.length + 3);
+  assert.equal(selected.length, preAuthFunctions.functions.length);
   assert.equal(preAuthFunctions.functions.length, 7);
   assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "exact-security-definer-function").length, preAuthFunctions.functions.length);
-  assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context").length, 3);
+  assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context").length, 0);
   assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "operator-only").length, 0);
   assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "retired").length, 0);
   assert(validatePreAuthFunctions(preAuthFunctions, workflows, commandSemantics, identities, tables));
@@ -497,7 +509,13 @@ test("pre-auth function mutation guards fail closed", () => {
   rejects((candidate) => { candidate.preAuthFunctions.functions.find((fn) => fn.id === "preauth-fn-consume-invitation").roleCeiling = "any stored invite role"; }, /platform-role ceiling/);
   rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-pre-auth-app").directTablePrivileges = ["SELECT public.User"]; }, /direct table privileges/);
   rejects((candidate) => { delete candidate.workflows.workflows.find((workflow) => workflow.authorizationBoundaryType === "pre-auth-security-function").preAuthBoundary; }, /pre-auth workflow lacks a boundary/);
-  rejects((candidate) => { candidate.workflows.workflows.find((workflow) => workflow.preAuthBoundary?.boundaryMode === "ordinary-authenticated-context").runtimeIdentities = ["identity-pre-auth-app"]; }, /moved workflow retains pre-auth access/);
+  rejects((candidate) => {
+    const workflow = candidate.workflows.workflows.find((item) => item.preAuthBoundary?.boundaryMode === "exact-security-definer-function");
+    workflow.authorizationBoundaryType = "authenticated-context";
+    workflow.preAuthBoundary.boundaryMode = "ordinary-authenticated-context";
+    workflow.actorClasses = ["authenticated-user"];
+    workflow.runtimeIdentities = ["identity-pre-auth-app"];
+  }, /moved workflow retains pre-auth access/);
   rejects((candidate) => { candidate.preAuthFunctions.functions.find((fn) => fn.secretColumnExposures.length).secretColumnExposures[0].justification = ""; }, /secret without justification/);
 });
 
@@ -614,7 +632,8 @@ test("tests do not inflate production totals and repeated technical calls remain
   const keys = workflows.map((workflow) => `${workflow.executionSurface}:${workflow.canonicalSourceFiles.join(",")}:${workflow.entryPoint}`);
   assert.equal(new Set(keys).size, keys.length, "duplicate canonical workflows exist");
   assert(workflows.some((workflow) => workflow.supportingEvidence.length > workflow.tablesTouched.length), "technical call sites were not deduplicated");
-  for (const model of ["PrintReissueRequest", "OwnershipTransfer", "AuthWebAuthnChallenge", "VerificationDecision", "CustomerTrustCredential"]) assert(accesses.some((access) => access.prismaModel === model), `${model} barrel/alias access was not detected`);
+  for (const model of ["OwnershipTransfer", "AuthWebAuthnChallenge", "VerificationDecision", "CustomerTrustCredential"]) assert(accesses.some((access) => access.prismaModel === model), `${model} barrel/alias access was not detected`);
+  assert(!accesses.some((access) => access.prismaModel === "PrintReissueRequest"), "PrintReissueRequest direct runtime access returned after exact printing-boundary migration");
 });
 
 test("unregistered or legacy classifications require import and registration evidence", () => {

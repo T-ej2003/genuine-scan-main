@@ -82,8 +82,9 @@ const bootstrapUser = (adminUrl) => {
 };
 
 const ensureCertificationAdministrator = (adminUrl) => {
-  if (psqlScalar(adminUrl, `SELECT count(*) FROM pg_roles WHERE rolname='${certificationAdministrator}'`) === "1") return false;
-  runPsqlSourceFile(adminUrl, certificationAdministratorSql);
+  const bootstrapUrl = buildUrlForRole(adminUrl, bootstrapUser(adminUrl));
+  if (psqlScalar(bootstrapUrl, `SELECT count(*) FROM pg_roles WHERE rolname='${certificationAdministrator}'`) === "1") return false;
+  runPsqlSourceFile(bootstrapUrl, certificationAdministratorSql);
   return true;
 };
 
@@ -125,7 +126,9 @@ const resolveDatabase = () => {
     runPsql(adminUrl, `CREATE DATABASE ${quoteIdent(databaseName)} OWNER ${quotedCertificationAdministrator} TEMPLATE template0`);
     return { databaseUrl, createdDatabaseName: databaseName, adminUrl, createdCertificationAdministrator };
   } catch (error) {
-    if (createdCertificationAdministrator) runPsql(adminUrl, `DROP ROLE ${quotedCertificationAdministrator}`);
+    if (createdCertificationAdministrator) {
+      runPsql(buildUrlForRole(adminUrl, bootstrapUser(adminUrl)), `DROP ROLE ${quotedCertificationAdministrator}`);
+    }
     throw error;
   }
 };
@@ -142,13 +145,17 @@ const dropDatabase = ({ adminUrl, createdDatabaseName }) => {
 
 const cleanupCertificationAdministrator = ({ adminUrl, createdCertificationAdministrator }) => {
   if (adminUrl && createdCertificationAdministrator) {
-    runPsql(adminUrl, `DROP ROLE ${quotedCertificationAdministrator}`);
+    runPsql(buildUrlForRole(adminUrl, bootstrapUser(adminUrl)), `DROP ROLE ${quotedCertificationAdministrator}`);
   }
 };
 
 const dropP2TestDatabase = (databaseInfo) => {
   dropDatabase(databaseInfo);
-  cleanupCertificationAdministrator(databaseInfo);
+  try {
+    if (databaseInfo.packageBootstrapStarted) cleanupGeneratedRlsRoles(databaseInfo);
+  } finally {
+    cleanupCertificationAdministrator(databaseInfo);
+  }
 };
 
 const hasMigrationHistory = () => {
@@ -278,14 +285,7 @@ const withP2TestApp = async (callback) => {
     if (runtimePrisma?.$disconnect) await runtimePrisma.$disconnect().catch(() => {});
     if (seedPrisma?.$disconnect) await seedPrisma.$disconnect().catch(() => {});
     if (preauthPrisma?.$disconnect) await preauthPrisma.$disconnect().catch(() => {});
-    if (databaseInfo?.createdDatabaseName) {
-      dropDatabase(databaseInfo);
-      try {
-        if (databaseInfo.packageBootstrapStarted) cleanupGeneratedRlsRoles(databaseInfo);
-      } finally {
-        cleanupCertificationAdministrator(databaseInfo);
-      }
-    }
+    if (databaseInfo?.createdDatabaseName) dropP2TestDatabase(databaseInfo);
   }
 };
 

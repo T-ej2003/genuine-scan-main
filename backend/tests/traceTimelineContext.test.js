@@ -174,11 +174,12 @@ const denied = (user, input, message, requestId = "request-denied") => {
 
   const root = path.resolve(__dirname, "..");
   const serviceSource = fs.readFileSync(path.join(root, "src/services/traceEventService.ts"), "utf8");
-  const controllerSource = fs.readFileSync(path.join(root, "src/controllers/tracePolicyController.ts"), "utf8");
+  const controllerSource = fs.readFileSync(path.join(root, "src/controllers/traceTimelineController.ts"), "utf8");
   const timelineBody = serviceSource.match(/export const getTraceTimeline[\s\S]*?\n};/)?.[0] || "";
-  const controllerBody = controllerSource.match(/export const getTraceTimelineController[\s\S]*?export const getBatchSlaAnalyticsController/)?.[0] || "";
+  const controllerBody = controllerSource;
   assert(!/prisma\.traceEvent\./.test(timelineBody), "timeline query must use only its transaction client");
-  assert.match(controllerBody, /withCanonicalDbContext\(/);
+  assert.match(controllerBody, /withDatabaseAuthenticatedSelection\(/);
+  assert.match(controllerBody, /capability:\s*String\(req\.databaseSessionCapability/);
   assert.match(controllerBody, /TransactionIsolationLevel\.RepeatableRead/);
 
   console.log("trace timeline context tests passed");

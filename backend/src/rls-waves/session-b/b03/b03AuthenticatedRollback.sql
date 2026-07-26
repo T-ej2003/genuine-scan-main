@@ -2,6 +2,7 @@ REVOKE ALL ON FUNCTION app_rls.b03_complete_incident_email_delivery(text,text,te
 REVOKE ALL ON FUNCTION app_rls.b03_claim_incident_email_delivery(text,text,text,text,text,text,text,text,text,text,text,text,text,text) FROM {{APP_ROLE}};
 REVOKE ALL ON FUNCTION app_rls.b03_resolve_incident_notification_scope(text) FROM {{APP_ROLE}};
 REVOKE ALL ON FUNCTION app_rls.b03_mark_all_notifications_read(text,timestamp without time zone,text) FROM {{APP_ROLE}};
+REVOKE ALL ON FUNCTION app_rls.b03_attention_queue_projection(text,timestamp without time zone,text) FROM {{APP_ROLE}};
 REVOKE ALL ON FUNCTION app_rls.b03_mark_notification_read(text,text,timestamp without time zone,text) FROM {{APP_ROLE}};
 REVOKE ALL ON FUNCTION app_rls.b03_list_notifications_for_user(text,integer,integer,boolean,timestamp without time zone,text,text) FROM {{APP_ROLE}};
 REVOKE ALL ON FUNCTION app_rls.b03_mark_notification_emailed(text,timestamp without time zone,text) FROM {{APP_ROLE}};
@@ -14,6 +15,7 @@ DROP FUNCTION IF EXISTS app_rls.b03_complete_incident_email_delivery(text,text,t
 DROP FUNCTION IF EXISTS app_rls.b03_claim_incident_email_delivery(text,text,text,text,text,text,text,text,text,text,text,text,text,text);
 DROP FUNCTION IF EXISTS app_rls.b03_resolve_incident_notification_scope(text);
 DROP FUNCTION IF EXISTS app_rls.b03_mark_all_notifications_read(text,timestamp without time zone,text);
+DROP FUNCTION IF EXISTS app_rls.b03_attention_queue_projection(text,timestamp without time zone,text);
 DROP FUNCTION IF EXISTS app_rls.b03_mark_notification_read(text,text,timestamp without time zone,text);
 DROP FUNCTION IF EXISTS app_rls.b03_list_notifications_for_user(text,integer,integer,boolean,timestamp without time zone,text,text);
 DROP FUNCTION IF EXISTS app_rls.b03_mark_notification_emailed(text,timestamp without time zone,text);

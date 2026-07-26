@@ -220,9 +220,9 @@ for (const entry of essentialAllowlist.workflows) assert(workflowIds.has(entry.w
 assert.deepEqual(essentialAllowlist.protectedRouteGate.enabledRoutes, shutdown.enabledProtectedRoutes, "launch allowlist and shutdown middleware manifest drifted");
 assert.equal(essentialAllowlist.certification.enabledWorkflowCount, essentialAllowlist.workflows.filter((entry) => entry.launchDisposition === "enabled").length, "enabled workflow certification count drifted");
 assert(!essentialAllowlist.workflows.some((entry) => entry.launchDisposition === "enabled" && entry.currentRuntimeStatus.includes("pending")), "pending workflow is launch-enabled");
-assert.equal(generatedRls.tables.length, 77, "generated RLS manifest lost a table");
-assert.equal(generatedRls.tables.filter((entry) => entry.rls === "ENABLE AND FORCE").length, 75, "generated RLS manifest must FORCE 75 tables");
-assert.equal(generatedRls.tables.filter((entry) => entry.rls.startsWith("not-applicable")).length, 2, "generated RLS migration-only count drifted");
+assert.equal(generatedRls.tables.length, tables.tables.length, "generated RLS manifest lost a table");
+assert.equal(generatedRls.tables.filter((entry) => entry.rls === "ENABLE AND FORCE").length, tables.tables.filter((entry) => entry.forceRlsTarget).length, "generated RLS manifest FORCE target count drifted");
+assert.equal(generatedRls.tables.filter((entry) => entry.rls.startsWith("not-applicable")).length, tables.tables.filter((entry) => !entry.forceRlsTarget).length, "generated RLS migration-only count drifted");
 validateGeneratedPackage({ manifest: generatedRls, policies: generatedPolicies, privileges: generatedPrivileges, commandSemantics });
 assert(generatedRls.tables.every((entry) => entry.policyFamily && entry.disposition && Array.isArray(entry.policySlices) && Array.isArray(entry.columnGrants)), "generated table lacks exact RLS disposition");
 assert(!generatedRls.blockedDirectProfiles.some((entry) => entry.status !== "direct-policy-blocked"), "blocked SQL actor slice became implemented");

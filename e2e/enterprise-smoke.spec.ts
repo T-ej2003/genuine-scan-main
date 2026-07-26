@@ -13,6 +13,10 @@ const env = {
     .split(",")
     .map((code) => code.trim())
     .filter(Boolean),
+  licenseeMfaBackupCodes: String(process.env.E2E_LICENSEE_ADMIN_MFA_BACKUP_CODES || "")
+    .split(",").map((code) => code.trim()).filter(Boolean),
+  superAdminMfaBackupCodes: String(process.env.E2E_SUPERADMIN_MFA_BACKUP_CODES || "")
+    .split(",").map((code) => code.trim()).filter(Boolean),
   licenseeBatchQuery: String(process.env.E2E_LICENSEE_BATCH_QUERY || "").trim(),
   assignManufacturerName: String(process.env.E2E_ASSIGN_MANUFACTURER_NAME || "").trim(),
   assignQuantity: String(process.env.E2E_ASSIGN_QUANTITY || "1").trim(),
@@ -142,7 +146,7 @@ const completeMfaWithBackupCode = async (page: Page, backupCode: string) => {
   }, backupCode);
 
   if (!result.success || result.sessionStage !== "ACTIVE") {
-    throw new Error(`Manufacturer MFA backup-code completion failed: HTTP ${result.status} ${result.error || "unknown error"}`);
+    throw new Error(`MFA backup-code completion failed: HTTP ${result.status} ${result.error || "unknown error"}`);
   }
 };
 
@@ -153,8 +157,16 @@ const login = async (page: Page, email: string, password: string, options: { mfa
   await page.getByRole("button", { name: /^sign in$/i }).click();
 
   if (options.mfaBackupCode) {
-    const backupTab = page.getByRole("button", { name: /^backup code$/i });
-    await expect(backupTab).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("button", { name: /^backup code$/i })).toBeVisible({ timeout: 15_000 });
+    const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
+    if (await stepUpDialog.isVisible()) {
+      await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
+      await page.locator("#step-up-mfa-backup-code").fill(options.mfaBackupCode);
+      await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
+      await expect(stepUpDialog).toBeHidden({ timeout: 15_000 });
+      await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
+      return;
+    }
     await completeMfaWithBackupCode(page, options.mfaBackupCode);
     await goto(page, "/dashboard");
     return;
@@ -342,16 +354,19 @@ test.describe.serial("Enterprise smoke flows", () => {
     await expect(page.locator("main")).toBeVisible();
   });
 
-  test("licensee admin can allocate quantity from the batch workspace", async ({ page }) => {
+  test("licensee admin can allocate quantity from the batch workspace", async ({ page }, testInfo) => {
     requireEnterpriseEnv(
       ["E2E_LICENSEE_ADMIN_EMAIL", env.licenseeAdminEmail],
       ["E2E_LICENSEE_ADMIN_PASSWORD", env.licenseeAdminPassword],
+      ["E2E_LICENSEE_ADMIN_MFA_BACKUP_CODES", env.licenseeMfaBackupCodes.join(",")],
       ["E2E_LICENSEE_BATCH_QUERY", env.licenseeBatchQuery],
       ["E2E_ASSIGN_MANUFACTURER_NAME", env.assignManufacturerName],
       ["E2E_ASSIGN_QUANTITY", env.assignQuantity]
     );
 
-    await login(page, env.licenseeAdminEmail, env.licenseeAdminPassword);
+    await login(page, env.licenseeAdminEmail, env.licenseeAdminPassword, {
+      mfaBackupCode: backupCodeForRetry(env.licenseeMfaBackupCodes, testInfo),
+    });
     await goto(page, "/batches");
 
     await expect(page.getByTestId("batches-search-input")).toBeVisible({ timeout: 30_000 });
@@ -454,17 +469,20 @@ test.describe.serial("Enterprise smoke flows", () => {
     expect(capturedSupportTicketReference).not.toBe("");
   });
 
-  test("super admin can move the follow-up ticket and add a support note", async ({ page }) => {
+  test("super admin can move the follow-up ticket and add a support note", async ({ page }, testInfo) => {
     requireEnterpriseEnv(
       ["E2E_SUPERADMIN_EMAIL", env.superAdminEmail],
-      ["E2E_SUPERADMIN_PASSWORD", env.superAdminPassword]
+      ["E2E_SUPERADMIN_PASSWORD", env.superAdminPassword],
+      ["E2E_SUPERADMIN_MFA_BACKUP_CODES", env.superAdminMfaBackupCodes.join(",")]
     );
     requireEnterpriseCondition(
       Boolean(capturedSupportTicketReference),
       "Public verify flow did not capture a support reference."
     );
 
-    await login(page, env.superAdminEmail, env.superAdminPassword);
+    await login(page, env.superAdminEmail, env.superAdminPassword, {
+      mfaBackupCode: backupCodeForRetry(env.superAdminMfaBackupCodes, testInfo),
+    });
     await goto(page, "/support");
 
     await page.getByTestId("support-search-input").fill(capturedSupportTicketReference);

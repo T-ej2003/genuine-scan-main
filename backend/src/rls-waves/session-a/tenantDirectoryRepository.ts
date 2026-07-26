@@ -85,8 +85,8 @@ export const readUserDirectory = async (input: {
       ${input.requestedLicenseeId || null},
       ${input.includeInactive},
       ${input.roleFilter || null},
-      ${input.limit},
-      ${input.offset}
+      ${input.limit}::integer,
+      ${input.offset}::integer
     )
   `;
   if (rows.length !== 1 || !Array.isArray(rows[0].payload)) {

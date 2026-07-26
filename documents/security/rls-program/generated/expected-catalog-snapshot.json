@@ -1,19 +1,19 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc",
+  "sourceContractSha256": "baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
-      "sha256": "b6da206b299670d121f5140cc37ece8a066ca06145b3354bbab2ac186267823a"
+      "sha256": "ff36a3bce025fe381f5b30379e275dd5077fe32af9b37f67748b5a9ea1ef7cf4"
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "666b1e9fe403a4b36392f25fe347e075d08b8d2e3f27dae1af0878b8997951af"
+      "sha256": "4ab67ba9192d82476d4947f72a313c138e138dea35bbd45f43c700ef4083262e"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "5cf89a501ea7a9276db000afb57e94bf8e8012954bdf20f35e1d453c0cf54e46"
+      "sha256": "f0ebeea28dabfb9d23248cba62fe304d1b7773da6dbdb0bdec3e23af653e7583"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -21,19 +21,19 @@
     },
     {
       "path": "documents/security/rls-program/object-ownership-chain.json",
-      "sha256": "12e662a9f640b2b5d8224bf9e7c42566baae32c9b02918bfbd7e1698779c2d1d"
+      "sha256": "11dd203aec40efc8e5eb656cc0da1d2bea36c181cb57f41df79b99b8d76cc294"
     },
     {
       "path": "documents/security/rls-program/essential-workflow-allowlist.json",
-      "sha256": "7581520a85f1b1ff1d88e501cce60bf6e314a1e1cb0fb5bfe1ac5c5667232259"
+      "sha256": "7f9b60873150fe5459dc25bced0c54c94cc6911316d0f59a02774d11c646cd9a"
     },
     {
       "path": "documents/security/rls-program/context-boundary-families.json",
-      "sha256": "f7ded964856c3eab5830d9fc25c2e51640d00d3b54df6c8b44952ad2df7bce2e"
+      "sha256": "7f93474253736f8a75320993f546a89c3e73e4420a5bbee951abc1f76a3e8f79"
     },
     {
       "path": "documents/security/rls-program/workflow-three-session-partition.json",
-      "sha256": "2315f36dea5175f5866e90d3f831c2ff474ca4568335da7966baa87eea633693"
+      "sha256": "028491dbc0a13320db75184172ead9285a36e479974a467200ae11008bfe1d21"
     },
     {
       "path": "backend/prisma/schema.prisma",
@@ -45,7 +45,7 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "62d2c2ab6bee765784167d3d0220c5936ebfa53be21f042e0d35c775401b3091"
+      "sha256": "9756d113df619e693ad0fc821e4e22cba2667aa5c49010b5a2cfc10599190351"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
@@ -61,7 +61,7 @@
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
-      "sha256": "88b0a270687da51277964db441ac035aac6b695d00dd19749d9a7e59036518c5"
+      "sha256": "136f9f514c921681cbf3c3aaeceb53ada4b176c5809d788f226ee887f71098c7"
     },
     {
       "path": "scripts/rls/lib/table-inventory-baseline.mjs",
@@ -69,11 +69,11 @@
     },
     {
       "path": "scripts/rls/lib/application-path-certifications.mjs",
-      "sha256": "bc0d4e5a4c6013f1f3e02f7eab050336c79bc074df39b16b25d120a7c0be6b55"
+      "sha256": "8a202c915125a7879a0fd0da2cc17fd6fa26ff150ac1c1448ff774e8d610a33a"
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "1a3a3a0b980545438ab354641b9718f28079c25888b0f7d9d3b3795833c8ab2d"
+      "sha256": "a007556c22d1007b8d7c01f3a5c474dbd4bfc55842160ce41f0c08294575b986"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -145,7 +145,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
-      "sha256": "c0c356be8c95330cac0d60d3c8831fd36c1118f6c5e9f7fc749119690a83667e"
+      "sha256": "397ee0206b9956882dc034167054d502bf080738b168023cffc3e4d4b65b475e"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
@@ -153,7 +153,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
-      "sha256": "10fa005f6aa5dfbf4ab2e619baa3cac16f89e4fb89dd903c54dff9f5388d8b91"
+      "sha256": "a4d676b2ce8a705c80cc1e3bd6979ee68e5944f7a780a01f51db4745017d6795"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
@@ -192,16 +192,20 @@
       "sha256": "c8e614df73b97baad766204b07a7f94aac5ffec3ebbfbdf73d39ce80620c2bb8"
     },
     {
+      "path": "backend/tests/rls-wave-b/b01/authenticationClosurePostgres18.test.js",
+      "sha256": "5f95373ae8ddbd3592f0c6625f210129cc38c707f9d681e2bf8e620cfeb0ae50"
+    },
+    {
       "path": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
       "sha256": "104e03f160c37e3e9e126a5754b6c634d16f3d75587da2870e31e22bda8dee98"
     },
     {
       "path": "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js",
-      "sha256": "37fb6030271fdbe36960afbad2041326d958b68fd73c1938798f8ef732c229b2"
+      "sha256": "5186ddecc7cb5b98342b99fe2226b29b2ab09b362d2767a5fe299d73c02f9563"
     },
     {
       "path": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
-      "sha256": "b1ca20876e6579b75a1a428813adad95b7e0933794945d97cb809c2b1181d660"
+      "sha256": "4d5cdebc7b46be135b25b1decbb46f169d1d7b0329401ea6db0b15b0fc719c62"
     }
   ],
   "forceRls": [
@@ -1954,6 +1958,29 @@
     {
       "tableId": "table-audit-log",
       "table": "AuditLog",
+      "policyName": "b03_authenticated_auditlog_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' AND ((current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (current_setting('app.b03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))) OR (current_setting('app.b03_actor_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.b03_actor_licensee_id',true)) OR (current_setting('app.b03_actor_role',true)='MANUFACTURER_ADMIN' AND \"userId\"=current_setting('app.b03_actor_id',true)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:AuditLog:SELECT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
       "policyName": "b03_outbox_auditlog_insert",
       "command": "INSERT",
       "actors": [
@@ -1994,7 +2021,6 @@
         "command-audit-log-insert-ba667bcc5353",
         "command-audit-log-insert-bbebad8a8023",
         "command-audit-log-insert-bdf8789ff300",
-        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-insert-c39576e741aa",
         "command-audit-log-insert-c63bbcb4a31f",
         "command-audit-log-insert-d3b8edb9415a",
@@ -2002,6 +2028,7 @@
         "command-audit-log-insert-e3ba477495b1",
         "command-audit-log-insert-ed54399dbe78",
         "command-audit-log-insert-f64d10600903",
+        "command-audit-log-insert-f6a24dac1201",
         "command-audit-log-insert-fa2a9b7b5a34",
         "command-audit-log-insert-fd67b51664e2"
       ],
@@ -2323,7 +2350,6 @@
       "projectedColumns": [],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-policy-rule-select-509547f03abe",
         "command-trace-event-select-f571cd9ea8dd"
@@ -2331,7 +2357,6 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
-        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline"
       ],
       "actors": [
@@ -2522,7 +2547,7 @@
         "authentication-release-boundary"
       ],
       "scopeType": "security-definer-owner-and-capability-or-live-login-subject",
-      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_closure_user_id',true)<>'' AND current_setting('app.auth_closure_user_id',true)=current_setting('app.b01_preauth_user_id',true)) AND current_setting('app.auth_closure_operation',true) IN ('login-mfa-challenge','login-session-create') AND payload->>'userId'=current_setting('app.auth_closure_user_id',true) AND payload->>'action' IN ('AUTH_MFA_CHALLENGE_ISSUED','AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA')) OR ((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session.\"userId\"=current_setting('app.auth_closure_user_id',true) AND auth_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND auth_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND auth_session.\"sessionCapabilityRevokedAt\" IS NULL AND auth_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND auth_session.\"revokedAt\" IS NULL AND auth_session.\"expiresAt\">clock_timestamp())) AND ((current_setting('app.auth_closure_operation',true) IN ('profile-update','password-change','mfa-enrollment-complete','mfa-disable','mfa-challenge-create','mfa-challenge-fail','mfa-challenge-complete','mfa-webauthn-registration-complete','mfa-webauthn-delete') AND payload->>'action' IN ('AUTH_PROFILE_UPDATED','AUTH_PASSWORD_CHANGED','AUTH_MFA_ENROLLED','AUTH_MFA_REPLACED','AUTH_MFA_DISABLED','AUTH_MFA_CHALLENGE_ISSUED','AUTH_MFA_CHALLENGE_EXPIRED','AUTH_MFA_FAILURE','AUTH_MFA_TOO_MANY_ATTEMPTS','AUTH_MFA_BACKUP_CODE_USED','AUTH_MFA_SUCCESS','AUTH_WEBAUTHN_ENROLLED','AUTH_WEBAUTHN_CREDENTIAL_REMOVED')) OR (current_setting('app.auth_closure_operation',true)='manufacturer-scope-read' AND payload->>'action' IN ('MANUFACTURER_BOOTSTRAP_READ','MANUFACTURER_SCOPE_SWITCH'))) AND payload->>'userId'=current_setting('app.auth_closure_user_id',true))",
+      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_closure_user_id',true)<>'' AND current_setting('app.auth_closure_user_id',true)=current_setting('app.b01_preauth_user_id',true)) AND current_setting('app.auth_closure_operation',true) IN ('login-mfa-challenge','login-session-create') AND payload->>'userId'=current_setting('app.auth_closure_user_id',true) AND payload->>'action' IN ('AUTH_MFA_CHALLENGE_ISSUED','AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA')) OR ((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session.\"userId\"=current_setting('app.auth_closure_user_id',true) AND auth_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND auth_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND auth_session.\"sessionCapabilityRevokedAt\" IS NULL AND auth_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND auth_session.\"revokedAt\" IS NULL AND auth_session.\"expiresAt\">clock_timestamp())) AND (((current_setting('app.auth_closure_operation',true) IN ('profile-update','password-change','mfa-enrollment-complete','mfa-disable','mfa-challenge-create','mfa-challenge-fail','mfa-challenge-complete','mfa-webauthn-registration-complete','mfa-webauthn-delete') AND payload->>'action' IN ('AUTH_PROFILE_UPDATED','AUTH_PASSWORD_CHANGED','AUTH_MFA_ENROLLED','AUTH_MFA_REPLACED','AUTH_MFA_DISABLED','AUTH_MFA_CHALLENGE_ISSUED','AUTH_MFA_CHALLENGE_EXPIRED','AUTH_MFA_FAILURE','AUTH_MFA_TOO_MANY_ATTEMPTS','AUTH_MFA_BACKUP_CODE_USED','AUTH_MFA_SUCCESS','AUTH_WEBAUTHN_ENROLLED','AUTH_WEBAUTHN_CREDENTIAL_REMOVED')) OR (current_setting('app.auth_closure_operation',true)='authenticated-session-create' AND payload->>'action' IN ('AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA'))) OR (current_setting('app.auth_closure_operation',true)='manufacturer-scope-read' AND payload->>'action' IN ('MANUFACTURER_BOOTSTRAP_READ','MANUFACTURER_SCOPE_SWITCH'))) AND payload->>'userId'=current_setting('app.auth_closure_user_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b01-change-authenticated-password:AuditLogOutbox:INSERT",
@@ -2585,25 +2610,25 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)",
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-outbox-insert-0b4b95c51d1e",
         "command-audit-log-outbox-insert-0c52b3004f35",
         "command-audit-log-outbox-insert-0cc304290ce4",
         "command-audit-log-outbox-insert-0ff7267155fe",
-        "command-audit-log-outbox-insert-2d0779382f94",
         "command-audit-log-outbox-insert-3863a1acd7c2",
+        "command-audit-log-outbox-insert-3b7fc95881bd",
         "command-audit-log-outbox-insert-4108c6f60dce",
         "command-audit-log-outbox-insert-56e28c0be62e",
-        "command-audit-log-outbox-insert-62fc51366420",
+        "command-audit-log-outbox-insert-5aaba9954791",
         "command-audit-log-outbox-insert-65b85bc0759d",
-        "command-audit-log-outbox-insert-88bea5f1af06",
+        "command-audit-log-outbox-insert-68c5f389dce0",
+        "command-audit-log-outbox-insert-88695ab116b2",
+        "command-audit-log-outbox-insert-89f99e29294a",
+        "command-audit-log-outbox-insert-8ea38105e5f3",
         "command-audit-log-outbox-insert-93fe5e2f9580",
         "command-audit-log-outbox-insert-963323294162",
-        "command-audit-log-outbox-insert-986a6bc31b69",
-        "command-audit-log-outbox-insert-c4febf718039",
-        "command-audit-log-outbox-insert-ce5627f3ff70",
+        "command-audit-log-outbox-insert-d2bcb4b36609",
         "command-audit-log-outbox-insert-e1561aa306f2",
         "command-audit-log-outbox-insert-e45d5f48ae3c",
-        "command-audit-log-outbox-insert-f3dffb308a5e"
+        "command-audit-log-outbox-insert-fc428e90e21a"
       ],
       "workflowId": null,
       "route": "B03 durable outbox exact SQL boundary",
@@ -2699,25 +2724,25 @@
       "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND payload->'details'->>'systemIdentity'='identity-scheduled-job' AND payload->>'licenseeId'=current_setting('app.scheduled_licensee_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-outbox-insert-0b4b95c51d1e",
         "command-audit-log-outbox-insert-0c52b3004f35",
         "command-audit-log-outbox-insert-0cc304290ce4",
         "command-audit-log-outbox-insert-0ff7267155fe",
-        "command-audit-log-outbox-insert-2d0779382f94",
         "command-audit-log-outbox-insert-3863a1acd7c2",
+        "command-audit-log-outbox-insert-3b7fc95881bd",
         "command-audit-log-outbox-insert-4108c6f60dce",
         "command-audit-log-outbox-insert-56e28c0be62e",
-        "command-audit-log-outbox-insert-62fc51366420",
+        "command-audit-log-outbox-insert-5aaba9954791",
         "command-audit-log-outbox-insert-65b85bc0759d",
-        "command-audit-log-outbox-insert-88bea5f1af06",
+        "command-audit-log-outbox-insert-68c5f389dce0",
+        "command-audit-log-outbox-insert-88695ab116b2",
+        "command-audit-log-outbox-insert-89f99e29294a",
+        "command-audit-log-outbox-insert-8ea38105e5f3",
         "command-audit-log-outbox-insert-93fe5e2f9580",
         "command-audit-log-outbox-insert-963323294162",
-        "command-audit-log-outbox-insert-986a6bc31b69",
-        "command-audit-log-outbox-insert-c4febf718039",
-        "command-audit-log-outbox-insert-ce5627f3ff70",
+        "command-audit-log-outbox-insert-d2bcb4b36609",
         "command-audit-log-outbox-insert-e1561aa306f2",
         "command-audit-log-outbox-insert-e45d5f48ae3c",
-        "command-audit-log-outbox-insert-f3dffb308a5e"
+        "command-audit-log-outbox-insert-fc428e90e21a"
       ],
       "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
       "route": "scheduled compliance exact SQL boundary",
@@ -2934,9 +2959,10 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='incident-scope-read'",
+      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='incident-scope-read') OR (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' AND ((current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (current_setting('app.b03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))) OR (current_setting('app.b03_actor_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.b03_actor_licensee_id',true)) OR (current_setting('app.b03_actor_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=current_setting('app.b03_licensee_id',true))) AND (current_setting('app.b03_actor_role',true)<>'MANUFACTURER_ADMIN' OR \"manufacturerId\"=current_setting('app.b03_actor_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:Batch:SELECT",
         "contract:b03-resolve-incident-notification-scope:Batch:SELECT"
       ],
       "workflowId": null,
@@ -4122,9 +4148,10 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_incident_id',true) OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))",
+      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_incident_id',true) OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))) OR (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' AND ((current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (current_setting('app.b03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))) OR (current_setting('app.b03_actor_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.b03_actor_licensee_id',true)) OR (current_setting('app.b03_actor_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=current_setting('app.b03_licensee_id',true))))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:Incident:SELECT",
         "contract:b03-claim-incident-email:Incident:SELECT",
         "contract:b03-complete-incident-email:Incident:SELECT",
         "contract:b03-create-role-notifications:Incident:SELECT",
@@ -4996,6 +5023,7 @@
       "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR id=current_setting('app.b03_actor_licensee_id',true) OR id=current_setting('app.b03_licensee_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:Licensee:SELECT",
         "contract:b03-create-role-notifications:Licensee:SELECT",
         "contract:b03-create-user-notification:Licensee:SELECT"
       ],
@@ -5230,7 +5258,6 @@
       "projectedColumns": [],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-policy-rule-select-509547f03abe",
         "command-trace-event-select-f571cd9ea8dd"
@@ -5238,7 +5265,6 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
-        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline"
       ],
       "actors": [
@@ -5484,12 +5510,15 @@
         "command-licensee-select-65b85bc0759d",
         "command-licensee-select-6abf3ac2a400",
         "command-licensee-select-6eee5a614bdd",
+        "command-licensee-select-70594dbe9cf8",
+        "command-licensee-select-7691bd31cd81",
         "command-licensee-select-77a1dff5a8de",
         "command-licensee-select-7b25663aacba",
         "command-licensee-select-7c30e2368afb",
         "command-licensee-select-808a0114622f",
         "command-licensee-select-80b33bbd591a",
         "command-licensee-select-879433841e62",
+        "command-licensee-select-89f99e29294a",
         "command-licensee-select-8e479b46b7db",
         "command-licensee-select-92ebfd6a1d0d",
         "command-licensee-select-93fe5e2f9580",
@@ -5639,6 +5668,7 @@
       "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (\"manufacturerId\"=current_setting('app.b03_actor_id',true) OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:ManufacturerLicenseeLink:SELECT",
         "contract:b03-claim-incident-email:ManufacturerLicenseeLink:SELECT",
         "contract:b03-create-role-notifications:ManufacturerLicenseeLink:SELECT",
         "contract:b03-create-user-notification:ManufacturerLicenseeLink:SELECT",
@@ -5842,7 +5872,6 @@
       "projectedColumns": [],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-policy-rule-select-509547f03abe",
         "command-trace-event-select-f571cd9ea8dd"
@@ -5850,7 +5879,6 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
-        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline"
       ],
       "actors": [
@@ -6217,6 +6245,7 @@
       "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR id=current_setting('app.b03_actor_org_id',true) OR id=current_setting('app.b03_organization_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:Organization:SELECT",
         "contract:b03-create-role-notifications:Organization:SELECT",
         "contract:b03-create-user-notification:Organization:SELECT"
       ],
@@ -6398,7 +6427,6 @@
       "projectedColumns": [],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-policy-rule-select-509547f03abe",
         "command-trace-event-select-f571cd9ea8dd"
@@ -6406,7 +6434,6 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
-        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline"
       ],
       "actors": [
@@ -6625,11 +6652,14 @@
         "command-organization-select-65b85bc0759d",
         "command-organization-select-6abf3ac2a400",
         "command-organization-select-6eee5a614bdd",
+        "command-organization-select-70594dbe9cf8",
+        "command-organization-select-7691bd31cd81",
         "command-organization-select-77a1dff5a8de",
         "command-organization-select-7b25663aacba",
         "command-organization-select-7c30e2368afb",
         "command-organization-select-80b33bbd591a",
         "command-organization-select-879433841e62",
+        "command-organization-select-89f99e29294a",
         "command-organization-select-8e479b46b7db",
         "command-organization-select-92ebfd6a1d0d",
         "command-organization-select-93fe5e2f9580",
@@ -6914,6 +6944,29 @@
       ],
       "workflowId": null,
       "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-policy-alert",
+      "table": "PolicyAlert",
+      "policyName": "b03_authenticated_policyalert_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' AND ((current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (current_setting('app.b03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))) OR (current_setting('app.b03_actor_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.b03_actor_licensee_id',true)) OR (current_setting('app.b03_actor_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=current_setting('app.b03_licensee_id',true))) AND (current_setting('app.b03_actor_role',true)<>'MANUFACTURER_ADMIN' OR \"manufacturerId\"=current_setting('app.b03_actor_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:PolicyAlert:SELECT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -7967,9 +8020,10 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='incident-scope-read'",
+      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='incident-scope-read') OR (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' AND (current_setting('app.b03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.b03_licensee_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:QRCode:SELECT",
         "contract:b03-resolve-incident-notification-scope:QRCode:SELECT"
       ],
       "workflowId": null,
@@ -8447,6 +8501,29 @@
     {
       "tableId": "table-qr-scan-log",
       "table": "QrScanLog",
+      "policyName": "b03_authenticated_qrscanlog_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' AND ((current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (current_setting('app.b03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))) OR (current_setting('app.b03_actor_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.b03_actor_licensee_id',true)) OR (current_setting('app.b03_actor_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=current_setting('app.b03_licensee_id',true)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:QrScanLog:SELECT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-qr-scan-log",
+      "table": "QrScanLog",
       "policyName": "c03_capability_qrscanlog_select",
       "command": "SELECT",
       "actors": [
@@ -8578,7 +8655,7 @@
         "authentication-release-boundary"
       ],
       "scopeType": "security-definer-owner-and-capability-or-live-login-subject",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_closure_user_id',true)<>'' AND current_setting('app.auth_closure_user_id',true)=current_setting('app.b01_preauth_user_id',true)) AND current_setting('app.auth_closure_operation',true)='login-session-create' AND id=current_setting('app.auth_closure_token_id',true) AND \"userId\"=current_setting('app.auth_closure_user_id',true) AND \"tokenHash\"=current_setting('app.auth_closure_token_hash',true) AND coalesce(\"orgId\",'')=current_setting('app.auth_closure_organization_id',true)",
+      "scopePredicate": "(((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_closure_user_id',true)<>'' AND current_setting('app.auth_closure_user_id',true)=current_setting('app.b01_preauth_user_id',true)) AND current_setting('app.auth_closure_operation',true)='login-session-create') OR ((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session.\"userId\"=current_setting('app.auth_closure_user_id',true) AND auth_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND auth_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND auth_session.\"sessionCapabilityRevokedAt\" IS NULL AND auth_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND auth_session.\"revokedAt\" IS NULL AND auth_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.auth_closure_operation',true)='authenticated-session-create')) AND id=current_setting('app.auth_closure_token_id',true) AND \"userId\"=current_setting('app.auth_closure_user_id',true) AND \"tokenHash\"=current_setting('app.auth_closure_token_hash',true) AND coalesce(\"orgId\",'')=current_setting('app.auth_closure_organization_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b01-create-login-refresh-token:RefreshToken:INSERT"
@@ -8810,6 +8887,7 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND id=current_setting('app.auth_session_id',true) AND \"userId\"=current_setting('app.user_id',true) AND \"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND \"sessionCapabilityHashVersion\"='sha256-v1'",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:RefreshToken:SELECT",
         "contract:b03-claim-incident-email:RefreshToken:SELECT",
         "contract:b03-complete-incident-email:RefreshToken:SELECT",
         "contract:b03-create-role-notifications:RefreshToken:SELECT",
@@ -9274,7 +9352,6 @@
         "command-security-event-outbox-insert-a198ed0c9e59",
         "command-security-event-outbox-insert-afc0d86a7423",
         "command-security-event-outbox-insert-bbebad8a8023",
-        "command-security-event-outbox-insert-c32d179b670c",
         "command-security-event-outbox-insert-c39576e741aa",
         "command-security-event-outbox-insert-ce4cb92a27ec",
         "command-security-event-outbox-insert-d3b8edb9415a",
@@ -9733,6 +9810,29 @@
       ],
       "workflowId": null,
       "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-ticket",
+      "table": "SupportTicket",
+      "policyName": "b03_authenticated_supportticket_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' AND current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (current_setting('app.b03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:SupportTicket:SELECT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -10225,6 +10325,7 @@
       "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-attention-queue:User:SELECT",
         "contract:b03-claim-incident-email:User:SELECT",
         "contract:b03-complete-incident-email:User:SELECT",
         "contract:b03-create-role-notifications:User:SELECT",
@@ -10476,7 +10577,6 @@
       "projectedColumns": [],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-policy-rule-select-509547f03abe",
         "command-trace-event-select-f571cd9ea8dd"
@@ -10484,7 +10584,6 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
-        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline"
       ],
       "actors": [
@@ -11073,55 +11172,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc"
+      "marker": "mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc"
+      "marker": "mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc"
+      "marker": "mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc"
+      "marker": "mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc"
+      "marker": "mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc"
+      "marker": "mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc"
+      "marker": "mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc"
+      "marker": "mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc"
+      "marker": "mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85"
     }
   ]
 }
