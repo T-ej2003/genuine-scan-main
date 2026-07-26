@@ -397,6 +397,44 @@ const fakePrisma = {
   $disconnect: async () => undefined,
   $queryRaw: async (query, ...parameters) => {
     const values = Array.isArray(query?.values) ? query.values : parameters;
+    const sql = Array.isArray(query?.strings) ? query.strings.join("?") : String(query || "");
+    if (sql.includes("app_public.verify_signed_qr")) {
+      const [tokenDigest, qrId, licenseeId, batchId, manufacturerId, nonce, replayEpoch] = values;
+      const qrCode = state.qrCodes.find((entry) => entry.id === qrId);
+      if (!qrCode) return [];
+      if (
+        qrCode.tokenHash !== tokenDigest
+        || qrCode.licenseeId !== licenseeId
+        || qrCode.batchId !== batchId
+        || qrCode.batch?.manufacturer?.id !== manufacturerId
+        || qrCode.tokenNonce !== nonce
+        || Number(qrCode.replayEpoch || 1) !== Number(replayEpoch)
+      ) {
+        throw new Error("PUBLIC_SIGNED_TOKEN_INVALID");
+      }
+      const review = state.scan.duplicateRisk?.classification === "SUSPICIOUS_DUPLICATE";
+      const first = Number(qrCode.scanCount || 0) === 0;
+      qrCode.scanCount = Number(qrCode.scanCount || 0) + 1;
+      qrCode.scannedAt = now();
+      return [{
+        result: review ? "REVIEW" : first ? "AUTHENTIC" : "AUTHENTIC_REPEAT",
+        messageKey: review ? "verification.changed_context" : first ? "verification.first_scan" : "verification.repeat",
+        nextAction: review ? "REPORT_CONCERN" : "NONE",
+        maskedCode: qrCode.code,
+        brandName: qrCode.licensee?.name || null,
+        brandWebsite: null,
+        brandSupportEmail: null,
+        brandSupportPhone: null,
+        manufacturerName: qrCode.batch?.manufacturer?.name || null,
+        manufacturerWebsite: null,
+        printedAt: qrCode.printedAt || null,
+        firstVerifiedAt: qrCode.scannedAt,
+        latestVerifiedAt: qrCode.scannedAt,
+        ownershipClaimAvailable: !review,
+        sessionStartToken: values[14] || null,
+        verificationMethod: "SIGNED_LABEL",
+      }];
+    }
     const referenceCode = values[0];
     if (typeof referenceCode !== "string" || !referenceCode.startsWith("P1SUP")) return [];
     const ticket = state.supportTickets.find((row) => row.referenceCode === referenceCode);
