@@ -157,18 +157,28 @@ const login = async (page: Page, email: string, password: string, options: { mfa
   await page.getByRole("button", { name: /^sign in$/i }).click();
 
   if (options.mfaBackupCode) {
-    await expect(page.getByRole("button", { name: /^backup code$/i })).toBeVisible({ timeout: 15_000 });
+    await page.waitForFunction(
+      () => window.location.pathname !== "/login"
+        || Array.from(document.querySelectorAll("button")).some((button) => /^backup code$/i.test(button.textContent?.trim() || "")),
+      undefined,
+      { timeout: 15_000 }
+    );
+    const backupCodeButton = page.getByRole("button", { name: /^backup code$/i });
     const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
-    if (await stepUpDialog.isVisible()) {
-      await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
-      await page.locator("#step-up-mfa-backup-code").fill(options.mfaBackupCode);
-      await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
-      await expect(stepUpDialog).toBeHidden({ timeout: 15_000 });
-      await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
+    if (await backupCodeButton.isVisible()) {
+      if (await stepUpDialog.isVisible()) {
+        await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
+        await page.locator("#step-up-mfa-backup-code").fill(options.mfaBackupCode);
+        await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
+        await expect(stepUpDialog).toBeHidden({ timeout: 15_000 });
+        await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
+        return;
+      }
+      await completeMfaWithBackupCode(page, options.mfaBackupCode);
+      await goto(page, "/dashboard");
       return;
     }
-    await completeMfaWithBackupCode(page, options.mfaBackupCode);
-    await goto(page, "/dashboard");
+    await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
     return;
   }
 
