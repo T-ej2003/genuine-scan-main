@@ -163,6 +163,10 @@ const login = async (page: Page, email: string, password: string, options: { mfa
       undefined,
       { timeout: 15_000 }
     );
+    if (new URL(page.url()).pathname !== "/login") {
+      await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
+      return;
+    }
     const backupCodeButton = page.getByRole("button", { name: /^backup code$/i });
     const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
     if (await backupCodeButton.isVisible()) {
