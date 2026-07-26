@@ -43,3 +43,7 @@ scripts/rls/lib/program-inventory.mjs:generic-api-key:2067
 documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:12168
 documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:14516
 documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:14522
+7df2e5ae07987e509ca74b715b9a51305726b2bf:scripts/rls/generate-clean-room-rls-sql.mjs:generic-api-key:1597
+62b73a98b6e0f960e0d326df9addd310324c9740:backend/tests/rls-wave-b/b03/repositoryFunctions.test.js:generic-api-key:49
+8b58ece86aa96e9f11a79623e3cd385b14889957:documents/security/rls-program/public-read-contract.json:generic-api-key:301
+b5c712f7bdb4a01c1736b8a89dc3664069336018:scripts/rls/lib/program-inventory.mjs:generic-api-key:1498
