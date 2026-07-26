@@ -42,7 +42,7 @@ const tokens = {
   "manufacturer-a-token": {
     userId: "manufacturer-a",
     email: "factory-a@example.com",
-    role: UserRole.MANUFACTURER,
+    role: UserRole.MANUFACTURER_ADMIN,
     licenseeId: "lic-a",
     orgId: "org-a",
     linkedLicenseeIds: ["lic-a"],
@@ -78,7 +78,7 @@ const userRows = {
   "manufacturer-a": {
     id: "manufacturer-a",
     email: "factory-a@example.com",
-    role: UserRole.MANUFACTURER,
+    role: UserRole.MANUFACTURER_ADMIN,
     licenseeId: "lic-a",
     orgId: "org-a",
     isActive: true,
@@ -116,6 +116,57 @@ mockModule("config/database.js", {
   default: databaseMock,
 });
 
+const capabilityFor = (userId) => `p0-capability-${userId}`;
+class CanonicalAuthDenial extends Error {}
+mockModule("rls-waves/session-b/b01/canonicalAuthContext.js", {
+  CanonicalAuthDenial,
+  isCanonicalAuthDenial: (error) => error instanceof CanonicalAuthDenial,
+  withDatabaseAuthenticatedSession: async (claims, input, callback) => {
+    const user = userRows[claims.userId];
+    if (!user || input.capability !== capabilityFor(claims.userId) || user.role !== claims.role) {
+      throw new CanonicalAuthDenial();
+    }
+    const tx = { ...databaseMock, __p0Actor: user };
+    return callback(tx, {
+      userId: user.id,
+      role: user.role,
+      organizationId: user.orgId,
+      licenseeId: user.licenseeId,
+      manufacturerId: user.role === UserRole.MANUFACTURER_ADMIN ? user.id : null,
+      authAssurance: user.role === UserRole.MANUFACTURER_ADMIN ? "password-verified" : "mfa-verified",
+    });
+  },
+});
+const authenticatedSecurityRepository = require(path.join(
+  distRoot,
+  "rls-waves/session-b/b01/authenticatedSecurityRepository.js"
+));
+mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
+  ...authenticatedSecurityRepository,
+  loadAuthenticatedActor: async (db) => db.__p0Actor,
+  loadAuthenticatedManufacturerScope: async (_input, db) => ({
+    manufacturerId: db.__p0Actor.id,
+    linkedLicensees: [{
+      id: "lic-a",
+      name: "Licensee A",
+      prefix: "A",
+      brandName: "A",
+      orgId: "org-a",
+      isPrimary: true,
+      scopeVersion: "p0-scope",
+    }],
+    selectedLicensee: {
+      id: "lic-a",
+      name: "Licensee A",
+      prefix: "A",
+      brandName: "A",
+      orgId: "org-a",
+      isPrimary: true,
+      scopeVersion: "p0-scope",
+    },
+  }),
+});
+
 mockModule("services/auth/tokenService.js", {
   ACCESS_TOKEN_COOKIE: "aq_access",
   verifyAccessToken: (token) => {
@@ -131,7 +182,7 @@ mockModule("services/auth/tokenService.js", {
 });
 
 mockModule("services/auth/cookieTokenProtectionService.js", {
-  openCookieToken: () => null,
+  openCookieToken: (value, purpose) => purpose === "auth.database-session" ? value : null,
 });
 
 mockModule("services/auth/authService.js", {
@@ -204,7 +255,11 @@ const withServer = async (app, fn) => {
 
 const request = async (baseUrl, method, routePath, token, body) => {
   const headers = {};
-  if (token) headers.authorization = `Bearer ${token}`;
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+    const claims = tokens[token];
+    if (claims) headers["x-database-session-capability"] = capabilityFor(claims.userId);
+  }
   if (body) headers["content-type"] = "application/json";
   const response = await fetch(`${baseUrl}${routePath}`, {
     method,
