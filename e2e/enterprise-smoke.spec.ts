@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -143,22 +143,48 @@ const login = async (page: Page, email: string, password: string, options: { mfa
   await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
 };
 
-const selectRadixOption = async (page: Page, triggerTestId: string, optionLabel: string) => {
-  await closeAutoDetectedIssue(page);
-  await page.getByTestId(triggerTestId).click();
-  const option = page
-    .locator('[role="option"]')
-    .filter({ hasText: new RegExp(escapeRegExp(optionLabel), "i") })
-    .first();
-  await expect(option).toBeVisible();
-  await option.click();
-};
-
 const closeAutoDetectedIssue = async (page: Page) => {
   const dialog = page.getByRole("dialog").filter({ hasText: "Auto-detected issue" }).first();
-  if (!(await dialog.isVisible())) return;
+  if (!(await dialog.isVisible())) return false;
   await dialog.getByRole("button", { name: /^cancel$/i }).click();
   await expect(dialog).toBeHidden();
+  return true;
+};
+
+const clickWithAutoDetectedIssueRetry = async (page: Page, target: Locator) => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await closeAutoDetectedIssue(page);
+    try {
+      await target.click({ timeout: 5_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!(await closeAutoDetectedIssue(page))) throw error;
+    }
+  }
+  throw lastError;
+};
+
+const selectRadixOption = async (page: Page, triggerTestId: string, optionLabel: string) => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await closeAutoDetectedIssue(page);
+    try {
+      await page.getByTestId(triggerTestId).click({ timeout: 5_000 });
+      const option = page
+        .locator('[role="option"]')
+        .filter({ hasText: new RegExp(escapeRegExp(optionLabel), "i") })
+        .first();
+      await expect(option).toBeVisible({ timeout: 5_000 });
+      await option.click({ timeout: 5_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!(await closeAutoDetectedIssue(page))) throw error;
+    }
+  }
+  throw lastError;
 };
 
 const closeTransientDialogs = async (page: Page) => {
@@ -350,8 +376,7 @@ test.describe.serial("Enterprise smoke flows", () => {
     await page.getByTestId("batch-workspace-tab-operations").click();
     await selectRadixOption(page, "batch-workspace-manufacturer-select", env.assignManufacturerName);
     await page.getByTestId("batch-workspace-assign-quantity").fill(env.assignQuantity);
-    await closeAutoDetectedIssue(page);
-    await page.getByTestId("batch-workspace-assign-submit").click();
+    await clickWithAutoDetectedIssueRetry(page, page.getByTestId("batch-workspace-assign-submit"));
     await expect(page.getByTestId("batch-workspace-assign-quantity")).toHaveValue("");
   });
 
