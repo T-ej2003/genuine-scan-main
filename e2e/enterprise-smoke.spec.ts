@@ -195,6 +195,7 @@ const login = async (page: Page, email: string, password: string, options: { mfa
 };
 
 const selectRadixOption = async (page: Page, triggerTestId: string, optionLabel: string) => {
+  await closeAutoDetectedIssue(page);
   await page.getByTestId(triggerTestId).click();
   const option = page
     .locator('[role="option"]')
@@ -202,6 +203,13 @@ const selectRadixOption = async (page: Page, triggerTestId: string, optionLabel:
     .first();
   await expect(option).toBeVisible();
   await option.click();
+};
+
+const closeAutoDetectedIssue = async (page: Page) => {
+  const dialog = page.getByRole("dialog").filter({ hasText: "Auto-detected issue" }).first();
+  if (!(await dialog.isVisible())) return;
+  await dialog.getByRole("button", { name: /^cancel$/i }).click();
+  await expect(dialog).toBeHidden();
 };
 
 const closeTransientDialogs = async (page: Page) => {
@@ -393,6 +401,7 @@ test.describe.serial("Enterprise smoke flows", () => {
     await page.getByTestId("batch-workspace-tab-operations").click();
     await selectRadixOption(page, "batch-workspace-manufacturer-select", env.assignManufacturerName);
     await page.getByTestId("batch-workspace-assign-quantity").fill(env.assignQuantity);
+    await closeAutoDetectedIssue(page);
     await page.getByTestId("batch-workspace-assign-submit").click();
     await expect(page.getByTestId("batch-workspace-assign-quantity")).toHaveValue("");
   });
