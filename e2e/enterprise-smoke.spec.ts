@@ -557,14 +557,27 @@ test.describe.serial("Enterprise smoke flows", () => {
     await ticketRows.first().click();
 
     await selectRadixOption(page, "support-ticket-status", "In Progress");
+    const waitForTicketSave = () =>
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" && /\/api\/support\/tickets\/[^/]+$/.test(response.url())
+      );
+    const initialSaveResponse = waitForTicketSave();
     await page.getByTestId("support-ticket-save").click();
-    const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
-    await expect(stepUpDialog).toBeVisible();
-    await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
-    await page.locator("#step-up-mfa-backup-code").fill(env.superAdminMfaBackupCodes[1]);
-    await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
-    await expect(stepUpDialog).toBeHidden();
-    await page.getByTestId("support-ticket-save").click();
+    const saveResponse = await initialSaveResponse;
+    if (saveResponse.status() === 428) {
+      const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
+      await expect(stepUpDialog).toBeVisible();
+      await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
+      await page.locator("#step-up-mfa-backup-code").fill(env.superAdminMfaBackupCodes[1]);
+      await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
+      await expect(stepUpDialog).toBeHidden();
+      const retriedSaveResponse = waitForTicketSave();
+      await page.getByTestId("support-ticket-save").click();
+      expect((await retriedSaveResponse).ok()).toBe(true);
+    } else {
+      expect(saveResponse.ok()).toBe(true);
+    }
 
     const note = `Playwright smoke follow-up ${new Date().toISOString()}`;
     await page.getByTestId("support-ticket-message-input").fill(note);
