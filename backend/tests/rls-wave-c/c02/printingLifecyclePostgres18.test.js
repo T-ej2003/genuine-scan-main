@@ -142,7 +142,7 @@ async function main() {
       VALUES('${ids.foreignPrinter}','Other Manufacturer Printer','NETWORK_DIRECT','ZPL','127.0.0.2',9100,'${ids.orgA}','${ids.licenseeA}','${ids.outsider}','${ids.outsider}',true,false,now());
     INSERT INTO public."PrinterAttestation"(id,"printerRegistrationId","signedPayloadHash","heartbeatNonce","attestedAt","expiresAt","signatureValid","trustValid",metadata)
       VALUES('50000000-0000-4000-8000-000000000802','${ids.registration}','${hash("fixture-attestation")}','fixture_attestation_nonce',now(),now()+interval '10 minutes',true,true,
-        '{"connected":true,"selectedPrinterId":"${ids.printer}"}');
+        '{"connected":true,"selectedPrinterId":"printing-native","printers":[{"printerId":"printing-native","printerName":"Printing Local Agent"}]}');
     INSERT INTO public."RefreshToken"(id,"orgId","userId","tokenHash","expiresAt","authenticatedAt","mfaVerifiedAt") VALUES
       ('${ids.makerRefresh}','${ids.orgA}','${ids.maker}','${hash("maker-refresh")}',now()+interval '1 day',now(),now()),
       ('${ids.checkerRefresh}','${ids.orgA}','${ids.checker}','${hash("checker-refresh")}',now()+interval '1 day',now(),now()),
@@ -173,6 +173,12 @@ async function main() {
   assert.deepEqual(Object.keys(readiness.printableItems[0]).sort(), [
     "batchId", "code", "displayCode", "id", "licenseeId", "replayEpoch", "status",
   ]);
+  const relinked = json(app, `SELECT app_rls.printing_printer_administration(
+    '${caps.maker}','printing-printer-admin','${requestId()}','RELINK','${ids.printer}',
+    '{"printerRegistrationId":"${ids.registration}","nativePrinterId":"printing-native","agentId":"printing-agent","deviceFingerprint":"printing-device"}'::jsonb
+  )`);
+  assert.equal(relinked.printerRegistrationId, ids.registration);
+  assert.equal(relinked.nativePrinterId, "printing-native");
   const idempotencyStart = json(app, `SELECT app_rls.printing_idempotency(
     '${caps.maker}','printing-idempotency','${requestId()}','BEGIN','PRINT_JOB_CREATE',
     '${idempotencyKeyHash}','${idempotencyRequestHash}',NULL,'{}'::jsonb

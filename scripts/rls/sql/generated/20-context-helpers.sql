@@ -8384,6 +8384,11 @@ BEGIN
         "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
         "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
 	  ELSIF p_operation='RELINK' THEN
+	    PERFORM set_config(
+	      'app.printing_registration_id',
+	      coalesce(nullif(p_payload->>'printerRegistrationId',''),''),
+	      true
+	    );
 	    IF NOT EXISTS (
       SELECT 1 FROM public."PrinterRegistration" pr
       WHERE pr.id=nullif(p_payload->>'printerRegistrationId','')

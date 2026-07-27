@@ -90,7 +90,7 @@ The generated package verifies:
 
 - 79 inventoried tables;
 - 77 FORCE-RLS targets;
-- 343 policies;
+- 347 policies;
 - 60 column-privilege cells;
 - 321 registered workflow call paths;
 - 27 checksums;
@@ -149,6 +149,9 @@ Focused runs no longer overwrite the full certification result.
 - Full and focused PostgreSQL 18.4 application-path fixtures use namespaced
   session credentials and clean their own rows, so sequential certification
   families cannot alter later aggregate or uniqueness proofs.
+- Printer relink now installs the exact registration row selector before its
+  attestation check; the focused RF5 proof exercises the restricted owner while
+  direct runtime table access remains denied.
 - Restricted-owner projection contract: 20 active sources passed; one
   fail-closed inactive exclusion.
 - Staging/production executor, IAM, broker, receipt, and Terraform contracts:
