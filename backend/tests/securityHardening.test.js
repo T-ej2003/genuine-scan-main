@@ -5,7 +5,7 @@ const {
   buildPublicIpRateLimitKey,
 } = require("../dist/middleware/publicRateLimit");
 const { sanitizeUnknownInput } = require("../dist/middleware/requestSanitizer");
-const { hashIp } = require("../dist/utils/security");
+const { hashIp, hashToken, hmacSha256Hex } = require("../dist/utils/security");
 
 const request = {
   ip: "198.51.100.42",
@@ -61,6 +61,23 @@ assert.strictEqual(
   hashIp("203.0.113.77"),
   hashIp("::ffff:203.0.113.77"),
   "IP hash canonicalization should treat IPv4 and mapped IPv6 addresses as the same client"
+);
+
+const opaqueSessionProof = "session-proof-with-256-bits-of-server-generated-entropy";
+assert.strictEqual(
+  hashToken(opaqueSessionProof),
+  hashToken(opaqueSessionProof),
+  "opaque token fingerprints must be deterministic for indexed lookup"
+);
+assert.notStrictEqual(
+  hashToken(opaqueSessionProof),
+  hashToken(`${opaqueSessionProof}-other`),
+  "different opaque tokens must not share a fingerprint"
+);
+assert.notStrictEqual(
+  hmacSha256Hex("operational-metadata", "fingerprint-key-a"),
+  hmacSha256Hex("operational-metadata", "fingerprint-key-b"),
+  "operational fingerprints must remain bound to their secret key"
 );
 
 const sanitized = sanitizeUnknownInput(

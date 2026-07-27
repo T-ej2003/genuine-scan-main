@@ -819,20 +819,20 @@ const main = async () => {
       requestId: "consume-disabled-target",
     })).length, 0);
 
-    const preexistingPasswordRaw = "preexisting-password-invitation";
+    const preexistingInviteToken = "preexisting-password-invitation";
     const preexistingPasswordPrepared = await prepare(
       platformContext("prepare-preexisting-password"),
       ids.platformSession,
-      defaultPrepareInput("preexisting-password@example.test", hashToken(preexistingPasswordRaw))
+      defaultPrepareInput("preexisting-password@example.test", hashToken(preexistingInviteToken))
     );
     const preexistingPasswordHash = "$argon2id$preexisting-password-must-not-change";
     await admin.$executeRaw`
       UPDATE b01_invite_wave.invite_user SET password_hash=${preexistingPasswordHash}
       WHERE id=${preexistingPasswordPrepared[0].userId}
     `;
-    assert.equal((await lookup(buildTokenHashCandidates(preexistingPasswordRaw))).length, 0);
+    assert.equal((await lookup(buildTokenHashCandidates(preexistingInviteToken))).length, 0);
     assert.equal((await consume({
-      hashes: buildTokenHashCandidates(preexistingPasswordRaw),
+      hashes: buildTokenHashCandidates(preexistingInviteToken),
       passwordHash,
       requestId: "consume-preexisting-password",
     })).length, 0);

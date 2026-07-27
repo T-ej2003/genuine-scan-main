@@ -1784,6 +1784,7 @@ router.post("/print-gateway/ipp/fail", printLifecycleRouteLimiter, failGatewayIp
 
 protectedMutationRouter.post(
   "/manufacturer/print-jobs",
+  printMutationPreAuthRouteLimiter,
   authenticate,
   requireManufacturer,
   requireRecentSensitiveAuth,
@@ -1805,6 +1806,7 @@ protectedReadRouter.get(
 );
 protectedMutationRouter.post(
   "/manufacturer/printers",
+  printMutationPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
   requireRecentSensitiveAuth,
@@ -1817,6 +1819,7 @@ protectedMutationRouter.post(
 );
 protectedMutationRouter.patch(
   "/manufacturer/printers/:id",
+  printMutationPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
   requireRecentSensitiveAuth,
@@ -1829,6 +1832,7 @@ protectedMutationRouter.patch(
 );
 protectedMutationRouter.delete(
   "/manufacturer/printers/:id",
+  printMutationPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
   requireRecentSensitiveAuth,
@@ -1852,6 +1856,7 @@ protectedMutationRouter.post(
 );
 protectedMutationRouter.post(
   "/manufacturer/printers/:id/test",
+  printMutationPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
   requireRecentSensitiveAuth,
@@ -1864,6 +1869,7 @@ protectedMutationRouter.post(
 );
 protectedMutationRouter.post(
   "/manufacturer/printers/:id/test-label",
+  printMutationPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
   requireRecentSensitiveAuth,
@@ -1876,6 +1882,7 @@ protectedMutationRouter.post(
 );
 protectedMutationRouter.post(
   "/manufacturer/printers/:id/discover",
+  printMutationPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
   requireRecentSensitiveAuth,
@@ -2039,6 +2046,7 @@ protectedReadRouter.get(
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/direct-print/tokens",
+  printMutationPreAuthRouteLimiter,
   authenticate,
   requireManufacturer,
   requireRecentSensitiveAuth,
@@ -2084,6 +2092,7 @@ protectedMutationRouter.post(
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/confirm",
+  printMutationPreAuthRouteLimiter,
   authenticate,
   requireManufacturer,
   requireRecentSensitiveAuth,
@@ -2417,6 +2426,7 @@ export {
   verifyClaimActorLimiter,
   gatewayJobRouteLimiter,
   printLifecycleRouteLimiter,
+  printMutationPreAuthRouteLimiter,
   gatewayJobIpLimiter,
   gatewayJobActorLimiter,
   printMutationRouteLimiter,

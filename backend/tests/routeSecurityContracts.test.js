@@ -161,6 +161,14 @@ assert(!authSecurityControllerSource.includes("console.error"), "auth security c
   '"/incidents", incidentReadPreAuthRouteLimiter, authenticate, requireAnyAdmin,',
   '"/ir/incidents", irReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
   '"/account/profile", accountMutationPreAuthRouteLimiter, authenticate, accountMutationRouteLimiter,',
+  '"/manufacturer/print-jobs", printMutationPreAuthRouteLimiter, authenticate, requireManufacturer,',
+  '"/manufacturer/printers", printMutationPreAuthRouteLimiter, authenticate, requireOpsUser,',
+  '"/manufacturer/printers/:id", printMutationPreAuthRouteLimiter, authenticate, requireOpsUser,',
+  '"/manufacturer/printers/:id/test", printMutationPreAuthRouteLimiter, authenticate, requireOpsUser,',
+  '"/manufacturer/printers/:id/test-label", printMutationPreAuthRouteLimiter, authenticate, requireOpsUser,',
+  '"/manufacturer/printers/:id/discover", printMutationPreAuthRouteLimiter, authenticate, requireOpsUser,',
+  '"/manufacturer/print-jobs/:id/direct-print/tokens", printMutationPreAuthRouteLimiter, authenticate, requireManufacturer,',
+  '"/manufacturer/print-jobs/:id/confirm", printMutationPreAuthRouteLimiter, authenticate, requireManufacturer,',
   '"/manufacturer/print-jobs/:id/sample-scan", printMutationPreAuthRouteLimiter, authenticate, requireManufacturer,',
 ].forEach((pattern) => {
   assert(routesSource.includes(pattern), `main route contract missing: ${pattern}`);

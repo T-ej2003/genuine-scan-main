@@ -30,6 +30,7 @@ const {
   gatewayJobIpLimiter,
   gatewayJobActorLimiter,
   printLifecycleRouteLimiter,
+  printMutationPreAuthRouteLimiter,
   printMutationRouteLimiter,
   printMutationIpLimiter,
   printMutationActorLimiter,
@@ -176,6 +177,13 @@ printMutationApp.post(
   (_req, res) => res.status(200).json({ success: true })
 );
 
+const printMutationPreAuthApp = express();
+printMutationPreAuthApp.post(
+  "/manufacturer/printers/:id/test",
+  printMutationPreAuthRouteLimiter,
+  (_req, res) => res.status(200).json({ success: true })
+);
+
 const auditReadApp = express();
 auditReadApp.get("/audit/logs", auditLogsReadPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
 
@@ -252,6 +260,19 @@ verifySessionMutationApp.post("/verify/session/abc/intake", verifySessionMutatio
     body: { printerId: "printer-1" },
     allowed: 40,
     description: "manufacturer print mutation",
+  });
+
+  await assertRateLimitAfter({
+    app: printMutationPreAuthApp,
+    path: "/manufacturer/printers/printer-a/test",
+    allowed: 40,
+    description: "manufacturer print mutation pre-auth route family",
+  });
+  await assertAllowedFor({
+    app: printMutationPreAuthApp,
+    path: "/manufacturer/printers/printer-b/test",
+    count: 1,
+    description: "unrelated printer mutation resource",
   });
 
   await assertRateLimitAfter({
