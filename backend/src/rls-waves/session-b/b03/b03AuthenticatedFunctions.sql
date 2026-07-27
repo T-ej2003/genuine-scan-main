@@ -762,6 +762,7 @@ BEGIN
   SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
   IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
      OR current_setting('app.purpose',true) NOT IN ('support-ticket-read','support-ticket-update')
+     OR p_licensee_id IS NULL
      OR p_limit NOT BETWEEN 1 AND 200 OR p_offset NOT BETWEEN 0 AND 2000
      OR (p_licensee_id IS NOT NULL AND p_licensee_id !~ '^[0-9a-fA-F-]{36}$')
      OR (p_status IS NOT NULL AND p_status NOT IN ('OPEN','IN_PROGRESS','WAITING_CUSTOMER','RESOLVED','CLOSED'))

@@ -116,6 +116,9 @@ Focused runs no longer overwrite the full certification result.
 - Frontend typecheck, 61 test files / 241 tests, and production build: passed.
 - Disposable P2 PostgreSQL 18.4 release-readiness and system integration:
   passed.
+- Platform support-ticket reads now require an explicit licensee selector inside
+  the SQL capability; the P2 proof denies unscoped reads and excludes another
+  tenant from a valid scoped result.
 - The P2 harness installs the exact generated package through the canonical
   certification administrator, then removes its database and temporary roles.
 - Prisma migration replay and drift checks include the schema-declared

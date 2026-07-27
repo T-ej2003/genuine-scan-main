@@ -120,7 +120,8 @@ const assertNoCrossTenantLeak = (response, forbiddenMarker, label) => {
     const supportAsAdmin = await request("GET", `/api/support/tickets?licenseeId=${ids.licenseeA}`, null, {
       headers: authHeader(tokens.superAdmin),
     });
-    assertDenied(supportAsAdmin, "platform support tickets before the bounded support-read family is activated");
+    assert.strictEqual(supportAsAdmin.status, 200, supportAsAdmin.text);
+    assert.match(supportAsAdmin.text, /P2 Support A/);
     assertNoCrossTenantLeak(supportAsAdmin, "P2 Support B", "platform scoped support ticket denial");
     assertSafeResponse(supportAsAdmin, "platform support tickets");
 

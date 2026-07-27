@@ -373,7 +373,7 @@
   "columnPrivilegeCertification": true,
   "exactCatalogTamperCertification": true,
   "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "80913190bc31d4a66ef71b1e98564519a055ab19c22285004680422d5a408701",
+  "packageChecksumsSha256": "bb964cb60437745762e3c79adcf64de0bfaf3e9757830c79d57d206fcdc61626",
   "status": "clean-room-full-table-enforcement-certified-workflows-pending",
   "b01Certification": {
     "predecessorReplayRejected": true,
