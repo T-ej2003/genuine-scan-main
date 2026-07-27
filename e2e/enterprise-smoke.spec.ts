@@ -317,16 +317,41 @@ const refreshE2EPrinterHeartbeat = async (page: Page) => {
       return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
     };
 
-    const heartbeat = await fetch("/api/manufacturer/printer-agent/heartbeat", {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "content-type": "application/json",
-        "x-csrf-token": readCookie("aq_csrf"),
-      },
-      body: JSON.stringify(payload),
-    });
-    const heartbeatBody = await heartbeat.json().catch(() => null);
+    const heartbeatRequest = () =>
+      fetch("/api/manufacturer/printer-agent/heartbeat", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": readCookie("aq_csrf"),
+          "x-idempotency-key": crypto.randomUUID(),
+        },
+        body: JSON.stringify(payload),
+      });
+    let heartbeat = await heartbeatRequest();
+    let heartbeatBody = await heartbeat.json().catch(() => null);
+    if (heartbeat.status === 401) {
+      const refreshed = await fetch("/api/auth/refresh", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": readCookie("aq_csrf"),
+          "x-idempotency-key": crypto.randomUUID(),
+        },
+        body: "{}",
+      });
+      if (!refreshed.ok) {
+        return {
+          ok: false,
+          phase: "auth-refresh",
+          status: refreshed.status,
+          body: await refreshed.json().catch(() => null),
+        };
+      }
+      heartbeat = await heartbeatRequest();
+      heartbeatBody = await heartbeat.json().catch(() => null);
+    }
     if (!heartbeat.ok || !heartbeatBody?.success) {
       return {
         ok: false,
