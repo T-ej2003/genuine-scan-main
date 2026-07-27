@@ -463,8 +463,10 @@ test.describe.serial("Enterprise smoke flows", () => {
     await expect(page.getByTestId("create-print-job-dialog")).toBeVisible();
     await page.getByTestId("print-job-quantity-input").fill(env.printQuantity);
     const readiness = await refreshE2EPrinterHeartbeat(page);
-    await clickWithAutoDetectedIssueRetry(page, page.getByRole("button", { name: /refresh printers/i }));
     const printerProfile = page.getByTestId("print-job-printer-profile");
+    if (!(await printerProfile.isVisible().catch(() => false))) {
+      await clickWithAutoDetectedIssueRetry(page, page.getByRole("button", { name: /refresh printers/i }));
+    }
     await expect(printerProfile).toBeVisible({ timeout: 30_000 });
     await selectRadixOption(page, "print-job-printer-profile", env.printerProfileName);
     const printDialog = page.getByTestId("create-print-job-dialog");
