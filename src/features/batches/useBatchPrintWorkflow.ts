@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 
 import apiClient from "@/lib/api-client";
 import { clearActivePrintSession, updateActivePrintSession } from "@/lib/active-print-session";
@@ -11,12 +10,10 @@ import {
   type LocalPrinterAgentSnapshot,
 } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
-import { queryKeys } from "@/lib/query-keys";
-import { clearRequestCoordinator } from "@/lib/api/request-coordinator";
 import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
 import {
-  loadManufacturerPrinterRuntimeSnapshot,
+  refreshManufacturerPrinterRuntimeSnapshot,
   useManufacturerPrinterRuntime,
   usePrintJobs,
   type ManufacturerPrinterRuntime,
@@ -79,7 +76,6 @@ export function useBatchPrintWorkflow({
   getAvailableInventory,
   onBatchesChanged,
 }: UseBatchPrintWorkflowParams) {
-  const queryClient = useQueryClient();
   const [printOpen, setPrintOpen] = useState(false);
   const [printBatch, setPrintBatch] = useState<BatchRow | null>(null);
   const [printing, setPrinting] = useState(false);
@@ -425,12 +421,7 @@ export function useBatchPrintWorkflow({
     if (!isManufacturer) return;
     if (options.force) {
       try {
-        const runtimeKey = queryKeys.printing.runtime(true);
-        await queryClient.cancelQueries({ queryKey: runtimeKey });
-        clearRequestCoordinator(["registered-printers:include-inactive", "printer-agent-status"]);
-        const snapshot = await loadManufacturerPrinterRuntimeSnapshot(true, { force: true });
-        queryClient.setQueryData(runtimeKey, snapshot);
-        applyPrinterRuntimeSnapshot(snapshot);
+        applyPrinterRuntimeSnapshot(await refreshManufacturerPrinterRuntimeSnapshot());
       } catch {
         if (printerReady) return;
         setRegisteredPrinters([]);

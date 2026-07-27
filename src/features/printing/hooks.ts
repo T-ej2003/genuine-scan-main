@@ -3,7 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import apiClient from "@/lib/api-client";
 import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
+import { clearRequestCoordinator } from "@/lib/api/request-coordinator";
 import { pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
+import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/lib/query-keys";
 import { chooseStablePrinterSelection, type LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
 
@@ -172,6 +174,15 @@ export async function loadManufacturerPrinterRuntimeSnapshot(
       : [],
     preferredPrinterId,
   };
+}
+
+export async function refreshManufacturerPrinterRuntimeSnapshot(): Promise<ManufacturerPrinterRuntime> {
+  const key = queryKeys.printing.runtime(true);
+  await queryClient.cancelQueries({ queryKey: key });
+  clearRequestCoordinator(["registered-printers:include-inactive", "printer-agent-status"]);
+  const snapshot = await loadManufacturerPrinterRuntimeSnapshot(true, { force: true });
+  queryClient.setQueryData(key, snapshot);
+  return snapshot;
 }
 
 export function useManufacturerPrinterRuntime(includeInactive = true, enabled = true) {
