@@ -2,7 +2,7 @@ import React from "react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 
 import ReleaseReadiness from "@/pages/ReleaseReadiness";
 import apiClient from "@/lib/api-client";

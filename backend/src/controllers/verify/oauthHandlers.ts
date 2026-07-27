@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { createAuditLogSafely } from "../../services/auditService";
 import { setCustomerVerifySessionCookie } from "../../services/customerVerifyCookieService";
+import { registerCustomerVerifyDatabaseSession } from "../../services/customerVerifyDatabaseSessionService";
 import { issueCustomerVerifySession } from "../../services/customerVerifyAuthService";
 import {
   buildCustomerOAuthAuthorizationUrl,
@@ -124,6 +125,7 @@ export const exchangeCustomerOAuth = async (req: Request, res: Response) => {
       authProvider: session.identity.authProvider,
       displayName: session.identity.displayName || null,
     });
+    await registerCustomerVerifyDatabaseSession(sessionToken, session.identity);
     setCustomerVerifySessionCookie(res, sessionToken);
 
     await createAuditLogSafely({

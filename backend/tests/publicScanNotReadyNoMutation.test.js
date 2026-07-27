@@ -118,6 +118,29 @@ const fakePrisma = {
 };
 
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
+mockModule("rls-waves/session-b/b01/runtimeClients.js", { getB01PreAuthPrisma: () => ({}) });
+mockModule("rls-waves/session-b/b02/publicBoundaryRepository.js", {
+  verifySignedQr: async () => ({
+    result: "NOT_READY",
+    messageKey: "verification.not_ready",
+    nextAction: "WAIT_FOR_RELEASE",
+    verificationMethod: "SIGNED_LABEL",
+    maskedCode: "MSC…0002",
+    brandName: licensee.brandName,
+    brandWebsite: licensee.website,
+    brandSupportEmail: licensee.supportEmail,
+    brandSupportPhone: licensee.supportPhone,
+    manufacturerName: batch.manufacturer.name,
+    manufacturerWebsite: batch.manufacturer.website,
+    printedAt: null,
+    firstVerifiedAt: null,
+    latestVerifiedAt: null,
+    ownershipClaimAvailable: false,
+    reportSessionAvailable: true,
+    sessionStartToken: null,
+  }),
+  verifyRawQr: async () => null,
+});
 mockModule("services/locationService.js", { reverseGeocode: async () => null });
 mockModule("services/governanceService.js", {
   resolveVerifyUxPolicy: async () => verifyUxPolicy,

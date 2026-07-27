@@ -1,7 +1,7 @@
 import { Response } from "express";
 
 import { AuthRequest } from "../middleware/auth";
-import { getPrintJobOperationalView } from "../services/networkDirectPrintService";
+import { readPrintingProjection } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { canUserReceivePrintJobEvent, onPrintJobRealtimeEvent } from "../services/printJobRealtimeService";
 import { writeSseRealtimeEnvelope } from "../utils/realtime";
 
@@ -11,12 +11,12 @@ export const printJobEvents = async (req: AuthRequest, res: Response) => {
     const printJobId = String(req.params.id || "").trim();
     if (!printJobId) return res.status(400).json({ success: false, error: "Invalid print job id" });
 
-    const scope = {
-      role: req.user.role,
-      userId: req.user.userId,
-      licenseeId: req.user.licenseeId || null,
-    };
-    const initial = await getPrintJobOperationalView({ jobId: printJobId, scope });
+    const initial = await readPrintingProjection({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: String((req as AuthRequest & { requestId?: string }).requestId || ""),
+      operation: "JOB",
+      subjectId: printJobId,
+    });
     if (!initial) return res.status(404).json({ success: false, error: "Print job not found" });
 
     res.setHeader("Content-Type", "text/event-stream");

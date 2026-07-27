@@ -1,9 +1,11 @@
 import { Request, Response } from "express";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import prisma from "../config/database";
 import {
   ACCESS_TOKEN_COOKIE,
+  AUTHENTICATED_SESSION_CAPABILITY_COOKIE,
   CSRF_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
   getAccessTokenTtlMinutes,
@@ -19,7 +21,6 @@ import {
   isAdminMfaRequiredRole,
 } from "../services/auth/authService";
 import { getAdminMfaStatus } from "../services/auth/mfaService";
-import { findRefreshTokenByRaw } from "../services/auth/refreshTokenService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import type { AuthenticatedSessionClaims } from "../types";
@@ -83,10 +84,23 @@ export const mfaCodeSchema = z.object({
   code: z.string().trim().min(6).max(32),
 }).strict();
 
+const manufacturerScopeSelectionShape = {
+  licenseeId: z.string().uuid().optional(),
+  scopeVersion: z.string().datetime({ offset: true }).optional(),
+};
+
+export const mfaSessionCodeSchema = z.object({
+  code: z.string().trim().min(6).max(32),
+  ...manufacturerScopeSelectionShape,
+}).strict();
+
+export const refreshSessionSchema = z.object(manufacturerScopeSelectionShape).strict();
+
 export const mfaChallengeCompleteSchema = z.object({
   ticket: z.string().trim().min(10),
   method: z.enum(["totp", "backup_code"]).optional(),
   code: z.string().trim().min(6).max(32),
+  ...manufacturerScopeSelectionShape,
 }).strict();
 
 export const webAuthnRegistrationCompleteSchema = z.object({
@@ -109,6 +123,7 @@ export const webAuthnRegistrationCompleteSchema = z.object({
 
 export const webAuthnChallengeCompleteSchema = z.object({
   ticket: z.string().trim().min(10),
+  ...manufacturerScopeSelectionShape,
   credential: z.object({
     id: z.string().trim().min(8),
     rawId: z.string().trim().min(8),
@@ -214,6 +229,7 @@ export type CookieBackedAuthResponse = {
   refreshTokenExpiresAt: Date | null;
   user: any;
   auth: any;
+  databaseSessionCapability?: string | null;
 };
 
 export const authResponseData = (session: CookieBackedAuthResponse) => ({
@@ -229,6 +245,7 @@ export const getRefreshTokenFromRequest = (req: Request) => {
 export const clearAuthCookies = (res: Response) => {
   res.clearCookie(ACCESS_TOKEN_COOKIE, authCookieOptions());
   res.clearCookie(REFRESH_TOKEN_COOKIE, authCookieOptions());
+  res.clearCookie(AUTHENTICATED_SESSION_CAPABILITY_COOKIE, authCookieOptions());
   res.clearCookie(CSRF_TOKEN_COOKIE, csrfCookieOptions());
 };
 
@@ -251,6 +268,15 @@ export const setAuthCookies = (res: Response, session: CookieBackedAuthResponse)
     res.clearCookie(REFRESH_TOKEN_COOKIE, authCookieOptions());
   }
 
+  if (session.databaseSessionCapability) {
+    res.cookie(AUTHENTICATED_SESSION_CAPABILITY_COOKIE, sealCookieToken(session.databaseSessionCapability, "auth.database-session"), {
+      ...authCookieOptions(),
+      maxAge: accessTtlMs,
+    });
+  } else {
+    res.clearCookie(AUTHENTICATED_SESSION_CAPABILITY_COOKIE, authCookieOptions());
+  }
+
   res.cookie(CSRF_TOKEN_COOKIE, csrfToken, {
     ...csrfCookieOptions(),
     maxAge: session.refreshToken ? refreshTtlMs : accessTtlMs,
@@ -259,14 +285,18 @@ export const setAuthCookies = (res: Response, session: CookieBackedAuthResponse)
 
 export const getAuthClaims = (req: Request) => ((req as any).user || null) as AuthenticatedSessionClaims | null;
 
+export const getRequestId = (req: Request) =>
+  String((req as Request & { requestId?: string }).requestId || req.get("x-request-id") || "").trim();
+
 export const buildAuthState = async (
   claims: AuthenticatedSessionClaims,
   userRole: string,
   userId: string,
-  currentSession?: { id: string; expiresAt: Date } | null
+  currentSession: { id: string; expiresAt: Date } | null | undefined,
+  db: Prisma.TransactionClient
 ) => {
   const mfaRequired = isAdminMfaRequiredRole(userRole as any);
-  const mfaStatus = mfaRequired ? await getAdminMfaStatus(userId).catch(() => null) : null;
+  const mfaStatus = mfaRequired ? await getAdminMfaStatus(userId, db) : null;
   const stepUpMethod = getSensitiveActionStepUpMethod(userRole as any);
   const adminFreshEnough = (() => {
     if (!mfaRequired || claims.sessionStage !== "ACTIVE") return false;
@@ -295,11 +325,6 @@ export const buildAuthState = async (
     sessionId: currentSession?.id || claims.sessionId || null,
     sessionExpiresAt: currentSession?.expiresAt?.toISOString?.() || null,
   };
-};
-
-export const getCurrentRefreshSession = async (req: Request) => {
-  const currentRefresh = getRefreshTokenFromRequest(req);
-  return currentRefresh ? await findRefreshTokenByRaw(currentRefresh).catch(() => null) : null;
 };
 
 export const ensureCsrfCookie = (req: Request, res: Response) => {

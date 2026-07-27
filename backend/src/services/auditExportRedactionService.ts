@@ -25,6 +25,20 @@ const escapeCsv = (val: unknown) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
+const sensitiveDetailKey = /(?:password|token|secret|credential|authorization|cookie|private.?key|mfa|otp|hash|session|api.?key|signing)/i;
+
+export const redactAuditDetails = (value: unknown, depth = 0): unknown => {
+  if (depth > 8) return "[REDACTED]";
+  if (Array.isArray(value)) return value.map((item) => redactAuditDetails(item, depth + 1));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+      key,
+      sensitiveDetailKey.test(key) ? "[REDACTED]" : redactAuditDetails(item, depth + 1),
+    ])
+  );
+};
+
 export const emptyAuditCsv = (isSuper: boolean) => `${auditCsvHeaders(isSuper).join(",")}\n`;
 
 export const buildAuditLogsCsv = (
@@ -67,7 +81,7 @@ export const buildAuditLogsCsv = (
             baseRow[4],
             escapeCsv(log.licenseeId),
             escapeCsv(log.ipAddress),
-            escapeCsv(log.details ? JSON.stringify(log.details) : ""),
+            escapeCsv(log.details ? JSON.stringify(redactAuditDetails(log.details)) : ""),
           ]
         : baseRow
       ).join(",")

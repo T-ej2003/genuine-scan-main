@@ -14,10 +14,13 @@ import {
   listScanLogsForReporting,
 } from "./scanLogReportingService";
 import { listLatestDecisionByBatchIds, listLatestDecisionByQrCodeIds, type InternalLatestDecision } from "./verificationDecisionReadService";
+import { readInventoryProjection } from "../rls-waves/session-c/c01/qrSystemRepository";
 
 export type TrackingAnalyticsScopeMode = "inventory" | "activity";
 
 export type TrackingAnalyticsFilters = {
+  databaseSessionCapability: string;
+  requestId: string;
   licenseeId?: string;
   manufacturerId?: string;
   batchQuery?: string;
@@ -180,36 +183,6 @@ const buildLogWhereObject = (filters: TrackingAnalyticsFilters): Prisma.QrScanLo
         }
       : {}),
     ...(batchFilter ? { batch: batchFilter } : {}),
-  };
-};
-
-const buildInventoryQrWhere = (filters: TrackingAnalyticsFilters): Prisma.QRCodeWhereInput => {
-  const batchQuery = String(filters.batchQuery || "").trim();
-  const batchCondition =
-    filters.manufacturerId || batchQuery
-      ? {
-          batch: {
-            is: {
-              ...(filters.manufacturerId ? { manufacturerId: filters.manufacturerId } : {}),
-              ...(batchQuery
-                ? {
-                    OR: [
-                      { id: { contains: batchQuery, mode: INSENSITIVE } },
-                      { name: { contains: batchQuery, mode: INSENSITIVE } },
-                    ],
-                  }
-                : {}),
-            },
-          },
-        }
-      : {};
-
-  return {
-    ...(filters.licenseeId ? { licenseeId: filters.licenseeId } : {}),
-    ...(filters.code ? { code: { contains: filters.code, mode: INSENSITIVE } } : {}),
-    ...(filters.status ? { status: filters.status } : {}),
-    ...batchCondition,
-    batchId: { not: null },
   };
 };
 
@@ -400,68 +373,52 @@ const loadLogs = async (filters: TrackingAnalyticsFilters) => {
 };
 
 const buildInventoryAnalytics = async (filters: TrackingAnalyticsFilters) => {
-  const qrWhere = buildInventoryQrWhere(filters);
-  const [grouped, eventMetrics] = await Promise.all([
-    prisma.qRCode.groupBy({
-      by: ["batchId", "status"],
-      where: qrWhere,
-      _count: { _all: true },
+  type Projection = {
+    batchId:string; name:string; licenseeId:string; manufacturerId:string|null;
+    startCode:string; endCode:string; totalCodes:number; createdAt:string; status?:string; count?:number;
+  };
+  type InventoryAggregate = {
+    totals: TrackingAnalyticsTotals;
+    trend: TrackingAnalyticsTrendPoint[];
+  };
+  const [projection, eventMetrics] = await Promise.all([
+    readInventoryProjection<Projection,InventoryAggregate>({
+      capability:filters.databaseSessionCapability,requestId:filters.requestId,
+      licenseeId:filters.licenseeId,manufacturerId:filters.manufacturerId,
+      batchQuery:filters.batchQuery,codeQuery:filters.code,status:filters.status,
+      limit:filters.limit,offset:filters.offset,
     }),
     loadEventMetrics(filters),
   ]);
 
-  const batchIds = Array.from(new Set(grouped.map((row) => row.batchId).filter(Boolean))) as string[];
-  const batches = batchIds.length
-    ? await prisma.batch.findMany({
-        where: { id: { in: batchIds } },
-        select: {
-          id: true,
-          name: true,
-          licenseeId: true,
-          startCode: true,
-          endCode: true,
-          totalCodes: true,
-          createdAt: true,
-        },
-        orderBy: { createdAt: "desc" },
-      })
-    : [];
-
   const groupedMap = new Map<string, Record<string, number>>();
-  for (const row of grouped) {
+  const batches = new Map<string,Projection>();
+  for (const row of projection.rows) {
     if (!row.batchId) continue;
     const current = groupedMap.get(row.batchId) || {};
-    current[row.status] = row._count?._all || 0;
+    if (row.status) current[row.status] = Number(row.count || 0);
     groupedMap.set(row.batchId, current);
+    batches.set(row.batchId,row);
   }
 
-  const batchRows: TrackingAnalyticsBatchRow[] = batches.map((batch) => {
-    const counts = groupedMap.get(batch.id) || {};
+  const batchRows: TrackingAnalyticsBatchRow[] = [...batches.values()].map((batch) => {
+    const counts = groupedMap.get(batch.batchId) || {};
     const scopeCodeCount = Object.values(counts).reduce((acc, value) => acc + Number(value || 0), 0);
     return {
       ...batch,
-      createdAt: batch.createdAt.toISOString(),
+      id:batch.batchId,
+      createdAt: new Date(batch.createdAt).toISOString(),
       batchInventoryTotal: batch.totalCodes,
       scopeCodeCount,
-      scanEventCount: eventMetrics.batchEventCountMap.get(batch.id) || 0,
+      scanEventCount: eventMetrics.batchEventCountMap.get(batch.batchId) || 0,
       counts,
     };
   });
 
-  const totals = buildTotalsFromRows(batchRows);
+  const totals = projection.aggregate?.totals || emptyTotals();
   const byDay = new Map<string, TrackingAnalyticsTrendPoint>();
-  for (const row of batchRows) {
-    const label = row.createdAt ? new Date(row.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "Unknown";
-    const current =
-      byDay.get(label) ||
-      ({ label, total: 0, dormant: 0, allocated: 0, printed: 0, redeemed: 0, blocked: 0, scanEvents: 0 } satisfies TrackingAnalyticsTrendPoint);
-    current.total += row.scopeCodeCount;
-    current.dormant += countDormantInventory(row.counts);
-    current.allocated += countAllocatedInventory(row.counts);
-    current.printed += countPrintedInventory(row.counts);
-    current.redeemed += countRedeemedInventory(row.counts);
-    current.blocked += countBlockedInventory(row.counts);
-    byDay.set(label, current);
+  for (const row of projection.aggregate?.trend || []) {
+    byDay.set(row.label, { ...row, scanEvents: 0 });
   }
 
   for (const [label, scanEvents] of eventMetrics.trendMap.entries()) {
@@ -480,7 +437,7 @@ const buildInventoryAnalytics = async (filters: TrackingAnalyticsFilters) => {
     quantities: {
       distinctCodes: totals.total,
       scanEvents: eventMetrics.quantities.scanEvents,
-      matchedBatches: batchRows.length,
+      matchedBatches: projection.total,
     },
     eventSummary: eventMetrics.summary,
   };

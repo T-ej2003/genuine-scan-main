@@ -5,23 +5,13 @@ import type { Socket } from "net";
 import packageJson from "../package.json";
 import { createBackendApp } from "./app";
 import prisma from "./config/database";
-import {
-  disconnectRlsReadPrisma,
-  initializeRlsReadPrisma,
-  validateRlsReadDatabaseConfiguration,
-} from "./config/rlsReadDatabase";
 import { logger } from "./utils/logger";
 import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
 import { startAuditLogOutboxWorker, stopAuditLogOutboxWorker } from "./services/auditLogOutboxService";
 import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./services/compliancePackService";
-import {
-  startLegacyQrRiskReportScheduler,
-  stopLegacyQrRiskReportScheduler,
-} from "./services/legacyQrRiskReportJobService";
 import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
 import { startPrintConfirmationReconciler } from "./services/printConfirmationReconciler";
-import { startAnalyticsRollupWorker } from "./services/analyticsRollupService";
 import { attachPrinterAgentSessionWebSocket } from "./services/printerAgentSessionSocket";
 import { releaseMetadata } from "./observability/release";
 import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
@@ -73,13 +63,6 @@ if (!hasAnyConfiguredSecret("JWT_SECRET_CURRENT", "JWT_SECRET")) {
 }
 if (missingRequiredEnv.length > 0) {
   logger.error(`Missing required environment variables: ${missingRequiredEnv.join(", ")}`);
-  process.exit(1);
-}
-
-try {
-  validateRlsReadDatabaseConfiguration();
-} catch (error) {
-  logger.error(error instanceof Error ? error.message : "RLS read database configuration is invalid");
   process.exit(1);
 }
 
@@ -304,7 +287,6 @@ if (sentryEnabled) {
 let server: ReturnType<typeof app.listen> | null = null;
 let shuttingDown = false;
 let stopPrintConfirmationReconcilerWorker: (() => void) | null = null;
-let stopAnalyticsRollupWorker: (() => void) | null = null;
 let activeHttpRequests = 0;
 const openHttpSockets = new Set<Socket>();
 
@@ -359,7 +341,6 @@ const closeHttpServer = async () => {
 };
 
 const startServer = async () => {
-  await initializeRlsReadPrisma();
   const bootstrapResult = await bootstrapConfiguredSuperAdmin();
   if (bootstrapResult.status === "blocked") {
     logger.error("Refusing to start because super admin bootstrap is enabled but not safe to run", {
@@ -416,7 +397,6 @@ const startServer = async () => {
       startAuditLogOutboxWorker();
       startSecurityEventOutboxWorker();
       startCompliancePackScheduler();
-      startLegacyQrRiskReportScheduler();
       void resumePendingNetworkDirectJobs().catch((error) => {
         logger.error("Failed to resume pending network-direct jobs", { error: error?.message || error });
       });
@@ -424,7 +404,6 @@ const startServer = async () => {
         logger.error("Failed to resume pending network IPP jobs", { error: error?.message || error });
       });
       stopPrintConfirmationReconcilerWorker = startPrintConfirmationReconciler();
-      stopAnalyticsRollupWorker = startAnalyticsRollupWorker();
     } else {
       logger.info("Background workers disabled for this HTTP process");
     }
@@ -457,14 +436,10 @@ const shutdown = async (signal: string) => {
     stopSecurityEventOutboxWorker();
     stopAuditLogOutboxWorker();
     stopCompliancePackScheduler();
-    stopLegacyQrRiskReportScheduler();
     stopPrintConfirmationReconcilerWorker?.();
     stopPrintConfirmationReconcilerWorker = null;
-    stopAnalyticsRollupWorker?.();
-    stopAnalyticsRollupWorker = null;
     await closeHttpServer();
     await closeRedisConnections();
-    await disconnectRlsReadPrisma();
     await prisma.$disconnect();
     await flushBackendMonitoring();
     clearTimeout(forceExit);

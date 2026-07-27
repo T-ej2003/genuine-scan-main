@@ -36,7 +36,7 @@ mockModule("services/auth/tokenService.js", {
 mockModule("services/manufacturerScopeService.js", {
   isManufacturerRole: (role) =>
     role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER,
-  listManufacturerLinkedLicenseeIds: async () => [],
+  resolveManufacturerSessionScope: async () => ({ selectedLicensee: null, linkedLicensees: [], linkedLicenseeIds: [] }),
 });
 
 mockModule("services/auth/authService.js", {
@@ -62,11 +62,31 @@ mockModule("services/auth/authService.js", {
   getPasswordReauthWindowMinutes: () => 30,
 });
 
-const { requireRecentSensitiveAuth } = require("../dist/middleware/auth");
+class RecentMfaDenial extends Error {}
+mockModule("controllers/authControllerShared.js", {
+  clearAuthCookies: (res) => { res.cleared = true; },
+});
+mockModule("rls-waves/session-b/b01/canonicalAuthContext.js", {
+  isCanonicalAuthDenial: () => false,
+  withCanonicalAuthClaims: (claims, _input, callback) => callback({}, {
+    authAssurance: claims.databaseMfaFresh ? "mfa-verified" : "password-verified",
+  }),
+  withDatabaseAuthenticatedSession: (claims, _input, callback) => callback({}, {
+    authAssurance: claims.databaseMfaFresh ? "mfa-verified" : "password-verified",
+  }),
+});
+mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
+  isRecentMfaDenial: (error) => error instanceof RecentMfaDenial,
+  loadAuthenticatedActor: async () => ({}),
+  RecentMfaDenial,
+  requireRecentMfaSession: async () => ({ verifiedAt: new Date() }),
+});
 
-const runMiddleware = (user) =>
+const { requireRecentAdminMfaForSetup, requireRecentSensitiveAuth } = require("../dist/middleware/auth");
+
+const runMiddleware = (user, middleware = requireRecentSensitiveAuth) =>
   new Promise((resolve) => {
-    const req = { user };
+    const req = { user, requestId: "request-1", databaseSessionCapability: "test-capability", get: () => null };
     const res = {
       statusCode: 200,
       body: null,
@@ -81,7 +101,7 @@ const runMiddleware = (user) =>
       },
     };
 
-    requireRecentSensitiveAuth(req, res, () => resolve({ next: true, statusCode: 200, payload: null }));
+    middleware(req, res, () => resolve({ next: true, statusCode: 200, payload: null }));
   });
 
 const run = async () => {
@@ -90,6 +110,8 @@ const run = async () => {
     role: UserRole.MANUFACTURER,
     sessionStage: "ACTIVE",
     authenticatedAt: new Date(Date.now() - 45 * 60_000).toISOString(),
+    mfaVerifiedAt: new Date().toISOString(),
+    databaseMfaFresh: false,
   });
 
   assert.strictEqual(manufacturerBlocked.next, false);
@@ -102,7 +124,8 @@ const run = async () => {
     role: UserRole.MANUFACTURER,
     sessionStage: "ACTIVE",
     authenticatedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
-    mfaVerifiedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    mfaVerifiedAt: new Date(Date.now() - 45 * 60_000).toISOString(),
+    databaseMfaFresh: true,
   });
 
   assert.strictEqual(manufacturerAllowed.next, true);
@@ -112,12 +135,39 @@ const run = async () => {
     role: UserRole.SUPER_ADMIN,
     sessionStage: "ACTIVE",
     authenticatedAt: new Date().toISOString(),
-    mfaVerifiedAt: new Date(Date.now() - 45 * 60_000).toISOString(),
+    mfaVerifiedAt: new Date().toISOString(),
+    databaseMfaFresh: false,
   });
 
   assert.strictEqual(adminBlocked.next, false);
   assert.strictEqual(adminBlocked.statusCode, 428);
   assert.strictEqual(adminBlocked.payload.data.stepUpMethod, "ADMIN_MFA");
+
+  const bootstrapSetupAllowed = await runMiddleware({
+    userId: "admin-1",
+    role: UserRole.SUPER_ADMIN,
+    sessionStage: "MFA_BOOTSTRAP",
+  }, requireRecentAdminMfaForSetup);
+  assert.strictEqual(bootstrapSetupAllowed.next, true, "MFA bootstrap must remain able to perform true first enrollment");
+
+  const staleActiveReplacementBlocked = await runMiddleware({
+    userId: "admin-1",
+    role: UserRole.SUPER_ADMIN,
+    sessionStage: "ACTIVE",
+    mfaVerifiedAt: new Date().toISOString(),
+    databaseMfaFresh: false,
+  }, requireRecentAdminMfaForSetup);
+  assert.strictEqual(staleActiveReplacementBlocked.next, false);
+  assert.strictEqual(staleActiveReplacementBlocked.statusCode, 428);
+
+  const recentActiveReplacementAllowed = await runMiddleware({
+    userId: "admin-1",
+    role: UserRole.SUPER_ADMIN,
+    sessionStage: "ACTIVE",
+    mfaVerifiedAt: new Date(Date.now() - 45 * 60_000).toISOString(),
+    databaseMfaFresh: true,
+  }, requireRecentAdminMfaForSetup);
+  assert.strictEqual(recentActiveReplacementAllowed.next, true, "recent admin MFA must allow active-session replacement");
 
   console.log("sensitive auth middleware tests passed");
 };

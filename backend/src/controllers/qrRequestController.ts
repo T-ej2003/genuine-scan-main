@@ -4,21 +4,14 @@ import { NotificationAudience, NotificationChannel, QrAllocationRequestStatus, U
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { createAuditLog } from "../services/auditService";
-import { allocateQrRange, getNextLicenseeQrNumber, lockLicenseeAllocation } from "../services/qrAllocationService";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
-
-const parsePositiveIntEnv = (name: string, fallback: number) => {
-  const raw = Number(String(process.env[name] || "").trim());
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
-};
-
-const ALLOCATION_TX_TIMEOUT_MS = parsePositiveIntEnv("ALLOCATION_TX_TIMEOUT_MS", 120000);
-const ALLOCATION_TX_MAX_WAIT_MS = parsePositiveIntEnv("ALLOCATION_TX_MAX_WAIT_MS", 15000);
+import { approveAllocationRequest } from "../rls-waves/session-c/c01/qrSystemRepository";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 
 const createRequestSchema = z
   .object({
     licenseeId: z.string().uuid().optional(),
-    quantity: z.number().int().positive().max(5_000_000),
+    quantity: z.number().int().positive().max(200_000),
     batchName: z.string().trim().min(2).max(120),
     note: z.string().trim().max(500).optional(),
   })
@@ -99,6 +92,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
 
     await Promise.all([
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
         type: "qr_request_created",
         title: "New QR inventory request",
@@ -114,6 +108,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
         channels: [NotificationChannel.WEB],
       }),
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.LICENSEE_ADMIN,
         licenseeId,
         type: "qr_request_created",
@@ -203,85 +198,27 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid request id" });
     }
     const id = paramsParsed.data.id;
-    const requestRow = await prisma.qrAllocationRequest.findUnique({
-      where: { id },
-      include: { licensee: { select: { id: true, prefix: true } } },
+    const result = await approveAllocationRequest<{
+      request: {
+        id: string;
+        licenseeId: string;
+        requestedByUserId: string;
+        quantity: number;
+        batchName: string | null;
+        status: QrAllocationRequestStatus;
+      };
+    }>({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: String((req as AuthRequest & { requestId?: string }).requestId || req.get("x-request-id") || "").trim(),
+      allocationRequestId: id,
+      decisionNote: parsed.data.decisionNote,
     });
-    if (!requestRow) return res.status(404).json({ success: false, error: "Request not found" });
-    if (requestRow.status !== QrAllocationRequestStatus.PENDING) {
-      return res.status(409).json({ success: false, error: "Request already processed" });
-    }
-
-    // Backward compatibility: derive quantity for old range-based rows.
-    const quantityRequested =
-      requestRow.quantity && requestRow.quantity > 0
-        ? requestRow.quantity
-        : requestRow.startNumber && requestRow.endNumber
-          ? requestRow.endNumber - requestRow.startNumber + 1
-          : null;
-    if (!quantityRequested || quantityRequested <= 0) {
-      return res.status(400).json({ success: false, error: "Request quantity is missing or invalid." });
-    }
-
-    const result = await prisma.$transaction(
-      async (tx) => {
-        await lockLicenseeAllocation(tx, requestRow.licenseeId);
-        const startNumber = await getNextLicenseeQrNumber(tx, requestRow.licenseeId);
-        const endNumber = startNumber + quantityRequested - 1;
-
-        const alloc = await allocateQrRange({
-          licenseeId: requestRow.licenseeId,
-          startNumber,
-          endNumber,
-          createdByUserId: auth.userId,
-          source: "REQUEST_APPROVAL",
-          requestId: requestRow.id,
-          createReceivedBatch: true,
-          receivedBatchName: requestRow.batchName || null,
-          tx,
-        });
-
-        const updated = await tx.qrAllocationRequest.update({
-          where: { id: requestRow.id },
-          data: {
-            status: QrAllocationRequestStatus.APPROVED,
-            approvedByUserId: auth.userId,
-            approvedAt: new Date(),
-            decisionNote: parsed.data.decisionNote?.trim() || null,
-            startNumber,
-            endNumber,
-            quantity: quantityRequested,
-          },
-        });
-
-        return { alloc, updated, startNumber, endNumber };
-      },
-      {
-        maxWait: ALLOCATION_TX_MAX_WAIT_MS,
-        timeout: ALLOCATION_TX_TIMEOUT_MS,
-      }
-    );
-
-    await createAuditLog({
-      userId: auth.userId,
-      licenseeId: requestRow.licenseeId,
-      action: "APPROVE_QR_ALLOCATION_REQUEST",
-      entityType: "QrAllocationRequest",
-      entityId: requestRow.id,
-      details: {
-        startNumber: result.startNumber,
-        endNumber: result.endNumber,
-        quantity: quantityRequested,
-        batchName: requestRow.batchName || null,
-        rangeId: result.alloc.range.id,
-        receivedBatchId: result.alloc.receivedBatch?.id || null,
-        receivedBatchName: result.alloc.receivedBatch?.name || null,
-      },
-      ipAddress: req.ip,
-    });
+    const requestRow = result.request;
+    const quantityRequested = requestRow.quantity;
 
     await Promise.all([
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
         type: "qr_request_approved",
         title: "QR request approved",
@@ -297,6 +234,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
         channels: [NotificationChannel.WEB],
       }),
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.LICENSEE_ADMIN,
         licenseeId: requestRow.licenseeId,
         type: "qr_request_approved",
@@ -313,6 +251,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
         channels: [NotificationChannel.WEB],
       }),
       createUserNotification({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         userId: requestRow.requestedByUserId,
         licenseeId: requestRow.licenseeId,
         type: "qr_request_approved",
@@ -330,7 +269,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
       }),
     ]);
 
-    return res.json({ success: true, data: result.updated });
+    return res.json({ success: true, data: requestRow });
   } catch (e: any) {
     console.error("approveQrAllocationRequest error:", e);
     const msg = e?.message || "Bad request";
@@ -387,6 +326,7 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
 
     await Promise.all([
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
         type: "qr_request_rejected",
         title: "QR request rejected",
@@ -401,6 +341,7 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
         channels: [NotificationChannel.WEB],
       }),
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.LICENSEE_ADMIN,
         licenseeId: requestRow.licenseeId,
         type: "qr_request_rejected",
@@ -416,6 +357,7 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
         channels: [NotificationChannel.WEB],
       }),
       createUserNotification({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         userId: requestRow.requestedByUserId,
         licenseeId: requestRow.licenseeId,
         type: "qr_request_rejected",

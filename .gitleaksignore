@@ -27,3 +27,26 @@ ff8617a52108982a2a8e2d02eeee23b1322494dc:databasefiles/key1.pem:private-key:1
 8ad088b6406107050d9470cfb038d931d8d2cd7f:documents/ops/evidence/aws-regional-cleanup-capetown-20260603T195128Z/01-ec2-instances.json:generic-api-key:371
 8ad088b6406107050d9470cfb038d931d8d2cd7f:documents/ops/evidence/aws-regional-cleanup-mumbai-20260603T195128Z/01-ec2-instances.json:generic-api-key:207
 8ad088b6406107050d9470cfb038d931d8d2cd7f:documents/ops/evidence/aws-regional-cleanup-mumbai-20260603T195128Z/01-ec2-instances.json:generic-api-key:373
+# Reviewed RF7 false positives from fixed test/operational identifiers, security prose, function names, and generated symbol inventory.
+scripts/rls/generate-clean-room-rls-sql.mjs:generic-api-key:2121
+documents/security/rls-program/public-read-contract.json:generic-api-key:287
+scripts/rls/lib/program-inventory.mjs:generic-api-key:2073
+8a967ae598fb2c82ed83447b826508bc89c79314:scratch/staging-database-role-credentials-20260714T105656Z/cutover-result.json:generic-api-key:5
+52d79688c485e08c6b18af4be2101871361b1e88:documents/ops/evidence/printer-websocket-recovery-20260626/waf-printer-websocket-allow.json:generic-api-key:180
+52d79688c485e08c6b18af4be2101871361b1e88:documents/ops/evidence/waf-printer-websocket-allow-20260626.json:generic-api-key:180
+backend/tests/rls-wave-b/b03/repositoryFunctions.test.js:generic-api-key:50
+backend/tests/rls-wave-b/b01/invitationPostgres18.test.js:generic-api-key:76
+documents/security/rls-program/MANUFACTURER_BOOTSTRAP_REVIEW.md:generic-api-key:65
+documents/security/rls-program/public-read-contract.json:generic-api-key:285
+scripts/rls/generate-clean-room-rls-sql.mjs:generic-api-key:2122
+scripts/rls/lib/program-inventory.mjs:generic-api-key:2067
+documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:12168
+documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:14516
+documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:14522
+documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:12599
+documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:14945
+documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api-key:14951
+7df2e5ae07987e509ca74b715b9a51305726b2bf:scripts/rls/generate-clean-room-rls-sql.mjs:generic-api-key:1597
+62b73a98b6e0f960e0d326df9addd310324c9740:backend/tests/rls-wave-b/b03/repositoryFunctions.test.js:generic-api-key:49
+8b58ece86aa96e9f11a79623e3cd385b14889957:documents/security/rls-program/public-read-contract.json:generic-api-key:301
+b5c712f7bdb4a01c1736b8a89dc3664069336018:scripts/rls/lib/program-inventory.mjs:generic-api-key:1498

@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { BadgeCheck, Fingerprint, ShieldCheck, Sparkles } from "lucide-react";
 
 import { BrandLockup } from "@/components/brand/BrandLockup";

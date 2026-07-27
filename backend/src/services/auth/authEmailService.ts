@@ -1,6 +1,4 @@
-import prisma from "../../config/database";
 import { createAuditLog } from "../auditService";
-import { UserRole } from "@prisma/client";
 import {
   __resetMailTransporterForTests,
   getConfiguredMailFrom,
@@ -14,22 +12,6 @@ import { normalizeEmailAddress } from "../../utils/email";
 
 const normalizeEmail = (value: unknown) => {
   return normalizeEmailAddress(value);
-};
-
-const getPrimarySuperadminEmail = async () => {
-  const fromEnv = getPreferredSuperadminEmailFromEnv();
-  if (fromEnv) return fromEnv;
-
-  const primary = await prisma.user.findFirst({
-    where: {
-      role: { in: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN] },
-      isActive: true,
-      deletedAt: null,
-    },
-    orderBy: { createdAt: "asc" },
-    select: { email: true },
-  });
-  return normalizeEmail(primary?.email);
 };
 
 export const sendAuthEmail = async (input: {
@@ -70,7 +52,9 @@ export const sendAuthEmail = async (input: {
   const usedFrom = configuredFrom || smtpUserEmail || null;
   const actorEmail = normalizeEmail(input.actorEmail);
   const replyToMode = input.replyToMode || "system";
-  const primarySuperadminEmail = replyToMode === "system" && !actorEmail ? await getPrimarySuperadminEmail() : null;
+  const primarySuperadminEmail = replyToMode === "system" && !actorEmail
+    ? getPreferredSuperadminEmailFromEnv()
+    : null;
   const replyTo = replyToMode === "actor" ? actorEmail : actorEmail || primarySuperadminEmail || configuredFrom || null;
 
   const delivery = await sendMailSafely({

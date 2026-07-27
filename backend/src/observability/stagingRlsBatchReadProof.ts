@@ -13,7 +13,6 @@ export type StagingRlsBatchReadFailureCategory =
   | "unexpected_error";
 
 type StagingRlsBatchReadProofInput = {
-  flagEnabled: boolean;
   contextClass: StagingRlsBatchReadContextClass;
   durationMs: number;
   rowCount: number;
@@ -45,7 +44,6 @@ export const categorizeStagingRlsBatchReadFailure = (error: unknown): StagingRls
 export const buildStagingRlsBatchReadProofEvent = (input: StagingRlsBatchReadProofInput) => ({
   metric: "staging_rls_batches_read",
   route: STAGING_RLS_BATCHES_READ_ROUTE,
-  flagEnabled: input.flagEnabled,
   contextClass: input.contextClass,
   durationMs: roundDuration(input.durationMs),
   rowCount: Math.max(0, Math.trunc(Number(input.rowCount) || 0)),

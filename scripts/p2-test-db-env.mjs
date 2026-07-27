@@ -1,5 +1,5 @@
 const protocol = "postgresql";
-const user = "mscqr_p2_test";
+const user = "certification-administrator";
 const host = "127.0.0.1";
 const port = "55432";
 const database = "mscqr_p2_admin_test";

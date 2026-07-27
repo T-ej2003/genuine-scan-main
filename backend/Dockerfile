@@ -46,13 +46,16 @@ ENV RELEASE_GIT_SHA=${RELEASE_GIT_SHA}
 ENV RUN_DB_MIGRATIONS_ON_START=false
 LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA}
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && apt-get install -y --no-install-recommends openssl ca-certificates postgresql-client \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --chown=node:node backend/package*.json ./
 COPY --chown=node:node backend/prisma ./prisma
 COPY --chown=node:node backend/prisma.config.ts ./prisma.config.ts
 COPY --chown=node:node backend/scripts ./scripts
+COPY --chown=node:node documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql ./documents/security/
+COPY --chown=node:node documents/security/mscqr_staging_rls_shared_batch_phase_rollback_2026-07-15.sql ./documents/security/
+COPY --chown=node:node documents/security/mscqr_staging_rls_shared_batch_phase_verify_2026-07-15.sql ./documents/security/
 # Runtime only needs the connector release manifest plus latest-release assets.
 # Historical installers stay out of /app to reduce image size and avoid stale
 # connector downloads while WebSocket production printing requires 2026.6.25+.
@@ -67,3 +70,10 @@ EXPOSE 4000
 USER node
 
 CMD ["/usr/local/bin/start-runtime.sh"]
+
+FROM runtime AS rls-executor
+
+COPY --chown=node:node scripts/rls/sql/generated ./scripts/rls/sql/generated
+COPY --chown=node:node documents/security/rls-program/generated ./documents/security/rls-program/generated
+
+CMD ["node", "scripts/staging-full-rls-green-executor.mjs"]

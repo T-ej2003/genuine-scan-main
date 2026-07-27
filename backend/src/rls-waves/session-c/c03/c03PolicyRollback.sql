@@ -1,0 +1,10 @@
+DROP FUNCTION IF EXISTS app_rls.c03_update_policy_rule(text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_create_policy_rule(jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_list_platform_policy_rules(text,boolean,integer,integer);
+DROP FUNCTION IF EXISTS app_rls.c03_list_policy_rules(text,boolean,integer,integer);
+DROP FUNCTION IF EXISTS app_rls.c03_complete_policy_command(text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_policy_replay(text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_policy_context_valid();
+DROP FUNCTION IF EXISTS app_rls.c03_session_valid();
+DROP FUNCTION IF EXISTS app_rls.c03_require_platform_policy_actor(text);
+DROP FUNCTION IF EXISTS app_rls.c03_require_policy_actor(text,text);

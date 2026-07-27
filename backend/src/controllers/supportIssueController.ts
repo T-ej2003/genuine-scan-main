@@ -13,6 +13,7 @@ import { sendSupportIssueReply, toDeliveryStatus } from "../services/supportInta
 import { resolveSupportIssueUploadPath, supportIssueUploadsDirectory } from "../middleware/supportIssueUpload";
 import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 
 const toInt = (value: unknown, fallback: number, min: number, max: number) => {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -144,7 +145,8 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
       ipAddress: req.ip,
     });
 
-    await createRoleNotifications({
+      await createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
       audience: NotificationAudience.SUPER_ADMIN,
       type: "support_issue_reported",
       title: "New support issue reported",
@@ -324,6 +326,7 @@ export const respondToSupportIssueReport = async (req: AuthRequest, res: Respons
 
       await Promise.allSettled([
         createUserNotification({
+          databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
           userId: existing.reporterUserId,
           title: notificationTitle,
           body: notificationBody,
@@ -334,6 +337,7 @@ export const respondToSupportIssueReport = async (req: AuthRequest, res: Respons
           channel: NotificationChannel.WEB,
         }),
         createUserNotification({
+          databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
           userId: existing.reporterUserId,
           title: notificationTitle,
           body: notificationBody,

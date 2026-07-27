@@ -158,7 +158,7 @@ const run = async () => {
   assert(canConfigurePrinterNetworkEndpoint("SUPER_ADMIN"), "super admin may configure printer host/port");
   assert(canConfigurePrinterNetworkEndpoint("PLATFORM_SUPER_ADMIN"), "platform admin may configure printer host/port");
   assert(canConfigurePrinterNetworkEndpoint("LICENSEE_ADMIN"), "licensee admin may configure printer host/port");
-  assert(canConfigurePrinterNetworkEndpoint("ORG_ADMIN"), "org admin may configure printer host/port");
+  assert(!canConfigurePrinterNetworkEndpoint("ORG_ADMIN"), "deprecated org admin must not configure printer host/port");
   assert(!canConfigurePrinterNetworkEndpoint("MANUFACTURER"), "manufacturer must not configure printer host/port");
   assert(!canConfigurePrinterNetworkEndpoint("MANUFACTURER_ADMIN"), "manufacturer admin must not configure printer host/port");
   assert(!canConfigurePrinterNetworkEndpoint("MANUFACTURER_USER"), "manufacturer user must not configure printer host/port");

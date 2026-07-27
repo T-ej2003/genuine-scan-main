@@ -1,25 +1,33 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "crypto";
-import { AuthRiskLevel } from "@prisma/client";
+import { AuthRiskLevel, Prisma } from "@prisma/client";
 
 import prisma from "../../config/database";
-import { buildTokenHashCandidates, hashToken, matchesHashedToken, randomOpaqueToken } from "../../utils/security";
+import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
 import { logger } from "../../utils/logger";
-import { createAuditLogSafely, type AuditLogInput } from "../auditService";
 import { buildAdminMfaChallengeExpiry, buildAdminMfaChallengeTtlAuditDetails } from "./authDurationConfig";
+import { revokeAllUserRefreshTokens } from "./refreshTokenService";
 import {
   beginTotpMfaEnrollment,
   completeStableMfaLoginChallenge,
   confirmTotpMfaEnrollment,
   createStableMfaLoginChallenge,
   getAdminMfaAdapterStatus,
+  lockMfaState,
+  MfaAdapterError,
   rotateMfaBackupCodesWithAdapter,
   verifyMfaCodeWithAdapter,
+  type MfaEnrollmentMode,
 } from "./mfaAdapter";
+import {
+  createAdminMfaChallengeBoundary,
+  disableAdminMfaBoundary,
+} from "../../rls-waves/session-b/b01/adminMfaRepository";
 
 const TOTP_STEP_SECONDS = 30;
 const TOTP_DIGITS = 6;
 const DEFAULT_TOTP_WINDOW = 1;
-type LoginMfaDbClient = NonNullable<Parameters<typeof getAdminMfaAdapterStatus>[1]>;
+type LoginMfaDbClient = NonNullable<Parameters<typeof getAdminMfaAdapterStatus>[1]>
+  & Pick<Prisma.TransactionClient, "authMfaChallenge">;
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = Number(String(process.env[key] || "").trim());
@@ -184,25 +192,26 @@ const sessionBindingCandidates = (sessionId?: string | null) => {
   return normalized ? buildTokenHashCandidates(sessionBindingValue(normalized)) : [];
 };
 
-const auditMfaEvent = async (input: {
-  userId?: string | null;
-  action: string;
-  entityId?: string | null;
-  details?: Record<string, unknown>;
-  ipHash?: string | null;
-  userAgent?: string | null;
-}) => {
-  const event: AuditLogInput = {
-    userId: input.userId || undefined,
-    action: input.action,
-    entityType: "AuthMfaChallenge",
-    entityId: input.entityId || undefined,
-    details: input.details || {},
-    ipHash: input.ipHash || undefined,
-    userAgent: input.userAgent || undefined,
-  };
-  await createAuditLogSafely(event).catch(() => undefined);
-};
+const mfaAuditOutboxRecord = (input: {
+    userId?: string | null;
+    action: string;
+    entityId?: string | null;
+    details?: Record<string, unknown>;
+    ipHash?: string | null;
+    userAgent?: string | null;
+  }) => ({
+  data: {
+    payload: {
+      ...(input.userId ? { userId: input.userId } : {}),
+      action: input.action,
+      entityType: "AuthMfaChallenge",
+      ...(input.entityId ? { entityId: input.entityId } : {}),
+      details: (input.details || {}) as Prisma.InputJsonObject,
+      ...(input.ipHash ? { ipHash: input.ipHash } : {}),
+      ...(input.userAgent ? { userAgent: input.userAgent } : {}),
+    } as Prisma.InputJsonObject,
+  },
+});
 
 const normalizeRiskLevel = (level?: AuthRiskLevel | string | null): AuthRiskLevel => {
   const value = String(level || "").toUpperCase();
@@ -216,25 +225,34 @@ export const getAdminMfaStatus = async (userId: string, db: LoginMfaDbClient = p
   return getAdminMfaAdapterStatus(userId, db);
 };
 
-export const beginAdminMfaSetup = async (params: { userId: string; email: string }) => {
-  return beginTotpMfaEnrollment(params);
+export const beginAdminMfaSetup = async (params: {
+  userId: string;
+  email: string;
+  mode: MfaEnrollmentMode;
+}, db?: Prisma.TransactionClient) => {
+  return beginTotpMfaEnrollment(params, db);
 };
 
-export const confirmAdminMfaSetup = async (params: { userId: string; code: string }) => {
-  return confirmTotpMfaEnrollment(params);
+export const confirmAdminMfaSetup = async (params: {
+  userId: string;
+  code: string;
+  mode: MfaEnrollmentMode;
+  audit?: { ipHash: string | null; userAgent: string | null };
+}, db?: Prisma.TransactionClient) => {
+  return confirmTotpMfaEnrollment(params, db);
 };
 
-export const disableAdminMfa = async (userId: string) => {
-  await prisma.adminMfaCredential.updateMany({
-    where: { userId },
-    data: {
-      isEnabled: false,
-      verifiedAt: null,
-      lastUsedAt: null,
-    },
+export const disableAdminMfa = async (
+  userId: string,
+  db?: Prisma.TransactionClient,
+  audit?: { ipHash: string | null; userAgent: string | null }
+): Promise<{ enabled: false }> => {
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  return disableAdminMfaBoundary(db, {
+    disabledAt: new Date(),
+    ipHash: audit?.ipHash || null,
+    userAgent: audit?.userAgent || null,
   });
-
-  return { enabled: false };
 };
 
 export const createAdminMfaChallenge = async (params: {
@@ -260,58 +278,29 @@ export const createAdminMfaChallenge = async (params: {
   const bindingHash = sessionBindingHash(params.sessionId);
   const purpose = String(params.purpose || "admin_login").trim() || "admin_login";
   const maxAttempts = Math.max(1, Math.min(10, params.maxAttempts || getMaxChallengeAttempts()));
-
-  if (params.supersedeOpen !== false) {
-    await prisma.authMfaChallenge.updateMany({
-      where: {
-        userId: params.userId,
-        purpose,
-        ...(bindingHash ? { sessionBindingHash: bindingHash } : {}),
-        consumedAt: null,
-        supersededAt: null,
-        expiresAt: { gt: now },
-      },
-      data: { supersededAt: now },
-    });
-  }
-
-  const challenge = await prisma.authMfaChallenge.create({
-    data: {
-      userId: params.userId,
-      ticketHash,
-      sessionBindingHash: bindingHash,
-      purpose,
-      riskScore: Math.max(0, Math.min(100, Math.round(params.riskScore || 0))),
-      riskLevel: normalizeRiskLevel(params.riskLevel),
-      reasons: Array.isArray(params.reasons) ? params.reasons.slice(0, 12) : [],
-      createdIpHash: params.ipHash || null,
-      createdUserAgentHash: params.userAgent ? hashToken(params.userAgent) : null,
-      attempts: 0,
-      maxAttempts,
-      expiresAt,
-    },
+  if (!bindingHash) throw new Error("MFA_CHALLENGE_SESSION_REQUIRED");
+  const riskScore = Math.max(0, Math.min(100, Math.round(params.riskScore || 0)));
+  const riskLevel = normalizeRiskLevel(params.riskLevel);
+  const challenge = await createAdminMfaChallengeBoundary(db, {
+    kind: "SESSION",
+    ticketHash,
+    sessionBindingHash: bindingHash,
+    purpose,
+    riskScore,
+    riskLevel,
+    reasons: Array.isArray(params.reasons) ? params.reasons.slice(0, 12) : [],
+    ipHash: params.ipHash || null,
+    userAgentHash: params.userAgent ? hashToken(params.userAgent) : null,
+    maxAttempts,
+    createdAt: now,
+    expiresAt,
   });
   const ttlDetails = buildAdminMfaChallengeTtlAuditDetails(ttlConfig, now, expiresAt);
 
   logger.info("auth_mfa_challenge_issued", {
-    challengeId: challenge.id,
+    challengeId: challenge.challengeId,
     purpose,
     ...ttlDetails,
-  });
-
-  await auditMfaEvent({
-    userId: params.userId,
-    action: "AUTH_MFA_CHALLENGE_ISSUED",
-    entityId: challenge.id,
-    details: {
-      purpose,
-      riskScore: challenge.riskScore,
-      riskLevel: challenge.riskLevel,
-      ...ttlDetails,
-      sessionBound: Boolean(bindingHash),
-    },
-    ipHash: params.ipHash,
-    userAgent: params.userAgent,
   });
 
   return {
@@ -320,30 +309,18 @@ export const createAdminMfaChallenge = async (params: {
   };
 };
 
-const consumeBackupCode = async (userId: string, codesHash: string[], provided: string) => {
-  const index = codesHash.findIndex((entry) => {
-    return matchesHashedToken(String(provided || "").trim().toUpperCase(), entry);
-  });
-  if (index < 0) return false;
-
-  const updated = [...codesHash];
-  updated.splice(index, 1);
-  await prisma.adminMfaCredential.update({
-    where: { userId },
-    data: {
-      backupCodesHash: updated,
-      lastUsedAt: new Date(),
-    },
-  });
-  return true;
+export const verifyAdminMfaCode = async (
+  params: { userId: string; code: string },
+  db?: Prisma.TransactionClient
+) => {
+  return verifyMfaCodeWithAdapter(params, db);
 };
 
-export const verifyAdminMfaCode = async (params: { userId: string; code: string }) => {
-  return verifyMfaCodeWithAdapter(params);
-};
-
-export const rotateAdminMfaBackupCodes = async (params: { userId: string; code: string }) => {
-  return rotateMfaBackupCodesWithAdapter(params);
+export const rotateAdminMfaBackupCodes = async (
+  params: { userId: string; code: string },
+  db?: Prisma.TransactionClient
+) => {
+  return rotateMfaBackupCodesWithAdapter(params, db);
 };
 
 export const completeAdminMfaChallenge = async (params: {
@@ -354,168 +331,13 @@ export const completeAdminMfaChallenge = async (params: {
   code: string;
   ipHash?: string | null;
   userAgent?: string | null;
-}) => {
-  try {
-    return await completeStableMfaLoginChallenge(params);
-  } catch (error) {
-    if (error instanceof Error && error.message !== "MFA_CHALLENGE_NOT_FOUND") throw error;
-  }
-
-  const ticketHashCandidates = buildTokenHashCandidates(String(params.ticket || "").trim());
-  const now = new Date();
-
-  const challenge = await prisma.authMfaChallenge.findFirst({
-    where: {
-      ticketHash: { in: ticketHashCandidates },
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          licenseeId: true,
-          orgId: true,
-          isActive: true,
-          status: true,
-          deletedAt: true,
-          disabledAt: true,
-        },
-      },
-    },
-  });
-
-  if (!challenge) throw new Error("MFA_CHALLENGE_NOT_FOUND");
-  if (challenge.userId !== params.userId) throw new Error("MFA_CHALLENGE_FORBIDDEN");
-
-  if (challenge.sessionBindingHash) {
-    const bindingCandidates = sessionBindingCandidates(params.sessionId);
-    if (!bindingCandidates.length || !bindingCandidates.includes(challenge.sessionBindingHash)) {
-      throw new Error("MFA_CHALLENGE_NOT_FOUND");
-    }
-  } else if (challenge.purpose === "admin_login") {
-    throw new Error("MFA_CHALLENGE_NOT_FOUND");
-  }
-
-  if (challenge.supersededAt || challenge.consumedAt) {
-    throw new Error("MFA_CHALLENGE_NOT_FOUND");
-  }
-
-  if (challenge.expiresAt.getTime() <= now.getTime()) {
-    await auditMfaEvent({
-      userId: challenge.userId,
-      action: "AUTH_MFA_CHALLENGE_EXPIRED",
-      entityId: challenge.id,
-      details: { purpose: challenge.purpose, expiresAt: challenge.expiresAt.toISOString() },
-      ipHash: params.ipHash,
-      userAgent: params.userAgent,
-    });
-    throw new Error("MFA_CHALLENGE_NOT_FOUND");
-  }
-
-  if (challenge.attempts >= challenge.maxAttempts) {
-    await auditMfaEvent({
-      userId: challenge.userId,
-      action: "AUTH_MFA_TOO_MANY_ATTEMPTS",
-      entityId: challenge.id,
-      details: { purpose: challenge.purpose, attempts: challenge.attempts, maxAttempts: challenge.maxAttempts },
-      ipHash: params.ipHash,
-      userAgent: params.userAgent,
-    });
-    throw new Error("MFA_TOO_MANY_ATTEMPTS");
-  }
-
-  const normalizedCode = String(params.code || "").trim();
-  const requestedMethod = params.method || null;
-  const totpShapeOk = /^\d{6}$/.test(normalizedCode.replace(/\s+/g, ""));
-  const backupShapeOk = /^[A-Za-z0-9]{4,8}-[A-Za-z0-9]{4,8}$/.test(normalizedCode);
-  const codeShapeOk =
-    requestedMethod === "totp"
-      ? totpShapeOk
-      : requestedMethod === "backup_code"
-        ? backupShapeOk
-        : totpShapeOk || backupShapeOk;
-  if (!codeShapeOk) {
-    const nextAttempts = challenge.attempts + 1;
-    await prisma.authMfaChallenge.updateMany({
-      where: { id: challenge.id, consumedAt: null, supersededAt: null },
-      data: { attempts: { increment: 1 } },
-    });
-    await auditMfaEvent({
-      userId: challenge.userId,
-      action: nextAttempts >= challenge.maxAttempts ? "AUTH_MFA_TOO_MANY_ATTEMPTS" : "AUTH_MFA_FAILURE",
-      entityId: challenge.id,
-      details: { purpose: challenge.purpose, reason: "INVALID_CODE_SHAPE", attempts: nextAttempts, maxAttempts: challenge.maxAttempts },
-      ipHash: params.ipHash,
-      userAgent: params.userAgent,
-    });
-    throw new Error(nextAttempts >= challenge.maxAttempts ? "MFA_TOO_MANY_ATTEMPTS" : "INVALID_MFA_CODE");
-  }
-
-  let verification: Awaited<ReturnType<typeof verifyAdminMfaCode>>;
-  try {
-    verification = await verifyAdminMfaCode({
-      userId: challenge.userId,
-      code: normalizedCode,
-    });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error || "");
-    if (message === "INVALID_MFA_CODE") {
-      const nextAttempts = challenge.attempts + 1;
-      await prisma.authMfaChallenge.updateMany({
-        where: { id: challenge.id, consumedAt: null, supersededAt: null },
-        data: { attempts: { increment: 1 } },
-      });
-      await auditMfaEvent({
-        userId: challenge.userId,
-        action: nextAttempts >= challenge.maxAttempts ? "AUTH_MFA_TOO_MANY_ATTEMPTS" : "AUTH_MFA_FAILURE",
-        entityId: challenge.id,
-        details: { purpose: challenge.purpose, attempts: nextAttempts, maxAttempts: challenge.maxAttempts },
-        ipHash: params.ipHash,
-        userAgent: params.userAgent,
-      });
-      throw new Error(nextAttempts >= challenge.maxAttempts ? "MFA_TOO_MANY_ATTEMPTS" : "INVALID_MFA_CODE");
-    }
-    throw error;
-  }
-
-  const consumed = await prisma.authMfaChallenge.updateMany({
-    where: {
-      id: challenge.id,
-      consumedAt: null,
-      supersededAt: null,
-      expiresAt: { gt: now },
-    },
-    data: {
-      consumedAt: now,
-      createdIpHash: params.ipHash || challenge.createdIpHash || null,
-      createdUserAgentHash: params.userAgent ? hashToken(params.userAgent) : challenge.createdUserAgentHash,
-    },
-  });
-
-  if (consumed.count !== 1) {
-    throw new Error("MFA_CHALLENGE_NOT_FOUND");
-  }
-
-  await auditMfaEvent({
-    userId: challenge.userId,
-    action: verification.method === "BACKUP_CODE" ? "AUTH_MFA_BACKUP_CODE_USED" : "AUTH_MFA_SUCCESS",
-    entityId: challenge.id,
-    details: {
-      purpose: challenge.purpose,
-      method: verification.method,
-      riskScore: challenge.riskScore,
-      riskLevel: challenge.riskLevel,
-    },
-    ipHash: params.ipHash,
-    userAgent: params.userAgent,
-  });
-
-  return {
-    userId: challenge.userId,
-    riskScore: challenge.riskScore,
-    riskLevel: challenge.riskLevel,
-    reasons: challenge.reasons,
-    method: verification.method,
-  };
+}, db?: Prisma.TransactionClient): Promise<{
+  userId: string;
+  riskScore: number;
+  riskLevel: AuthRiskLevel;
+  reasons: string[];
+  method: "TOTP" | "BACKUP_CODE";
+}> => {
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  return completeStableMfaLoginChallenge(params, db);
 };

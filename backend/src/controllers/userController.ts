@@ -5,17 +5,24 @@ import { z } from "zod";
 import { Prisma, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { createAuditLog } from "../services/auditService";
 import { hashPassword } from "../services/auth/passwordService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
+import { hashIp, normalizeUserAgent } from "../utils/security";
 import {
   MANUFACTURER_ROLES,
   isManufacturerRole,
   isPlatformRole,
   normalizeLinkedLicensees,
-  upsertManufacturerLicenseeLink,
 } from "../services/manufacturerScopeService";
 import { buildScopedUserWhere, resolveRequestedLicenseeScope } from "../services/accessControlService";
+import {
+  AdministrationAccessError,
+  createUser as createUserBoundary,
+  deleteUser as deleteUserBoundary,
+  restoreManufacturer as restoreManufacturerBoundary,
+  updateUser as updateUserBoundary,
+} from "../rls-waves/session-c/c01/administrationRepository";
+import { isTenantDirectoryDenied, readUserDirectory } from "../rls-waves/session-a/tenantDirectoryRepository";
 
 const normalizedEmailSchema = z
   .string()
@@ -31,10 +38,7 @@ const createUserSchema = z.object({
   name: z.string().min(2),
   role: z.enum([
     "LICENSEE_ADMIN",
-    "ORG_ADMIN",
-    "MANUFACTURER",
     "MANUFACTURER_ADMIN",
-    "MANUFACTURER_USER",
   ]),
   licenseeId: z.string().uuid().optional(),
   location: z.string().trim().max(200).optional(),
@@ -69,19 +73,6 @@ const parsePagination = (query: Record<string, unknown>, defaults?: { limit?: nu
 
 /* ===================== HELPERS ===================== */
 
-const canonicalizeRole = (role: UserRole): UserRole => {
-  if (role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN) return UserRole.SUPER_ADMIN;
-  if (role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN) return UserRole.LICENSEE_ADMIN;
-  if (
-    role === UserRole.MANUFACTURER ||
-    role === UserRole.MANUFACTURER_ADMIN ||
-    role === UserRole.MANUFACTURER_USER
-  ) {
-    return UserRole.MANUFACTURER;
-  }
-  return role;
-};
-
 const ensureAuth = (req: AuthRequest) => {
   const role = req.user?.role;
   const userId = req.user?.userId;
@@ -94,14 +85,30 @@ const isPlatform = (role: UserRole) => isPlatformRole(role);
 const isScopeError = (error: unknown) =>
   error instanceof Error && /access denied|no licensee association/i.test(error.message);
 
+const administrationRequestId = (req: AuthRequest) =>
+  String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
+
+const administrationErrorResponse = (error: unknown) => {
+  if (error instanceof AdministrationAccessError) {
+    return { status: error.statusCode, error: error.message };
+  }
+  const message = String((error as any)?.meta?.message || (error as any)?.message || "");
+  if (/SESSION_C_USER_NOT_FOUND/.test(message)) return { status: 404, error: "User not found" };
+  if (/SESSION_C_LICENSEE_NOT_FOUND/.test(message)) return { status: 404, error: "Licensee not found" };
+  if (/SESSION_C_FOREIGN_SCOPE/.test(message)) return { status: 403, error: "Access denied to this tenant" };
+  if (/SESSION_C_(DISABLED_OR_STALE_ACTOR|STALE_PLATFORM_SCOPE|WRONG_ROLE|INVALID_CONTEXT)/.test(message)) {
+    return { status: 403, error: "Administration authority is stale or invalid." };
+  }
+  if (/SESSION_C_ASSIGNED_BATCHES/.test(message)) {
+    return { status: 409, error: "This manufacturer still has assigned batches. Reassign or close them before unlinking." };
+  }
+  if (/SESSION_C_DUPLICATE_USER/.test(message)) return { status: 409, error: "Email already exists" };
+  if (/SESSION_C_STALE_STATE/.test(message)) return { status: 409, error: "The account changed; refresh and retry." };
+  return null;
+};
+
 const getRequestedLicenseeId = (req: AuthRequest) =>
   String(req.body?.licenseeId || req.query?.licenseeId || req.params?.licenseeId || "").trim() || null;
-
-const resolveActorLicenseeId = async (req: AuthRequest) => {
-  if (!req.user) return null;
-  const scope = await resolveRequestedLicenseeScope(req.user, getRequestedLicenseeId(req));
-  return scope.scopeLicenseeId || scope.accessibleLicenseeIds?.[0] || req.user.licenseeId || null;
-};
 
 const serializeScopedUser = (row: {
   id: string;
@@ -158,67 +165,6 @@ const serializeScopedUser = (row: {
   };
 };
 
-const assertManufacturerTarget = async (req: AuthRequest, id: string, includeInactive = true) => {
-  if (!req.user) return { ok: false as const, status: 401, error: "Not authenticated" };
-  const target = await prisma.user.findFirst({
-    where: await buildScopedUserWhere(req.user, {
-      base: { id },
-      requestedLicenseeId: getRequestedLicenseeId(req),
-      manufacturerOnly: true,
-      includeInactive,
-    }),
-    select: {
-      id: true,
-      role: true,
-      licenseeId: true,
-      email: true,
-      name: true,
-      isActive: true,
-      deletedAt: true,
-      createdAt: true,
-      orgId: true,
-      location: true,
-      website: true,
-      manufacturerLicenseeLinks: {
-        include: {
-          licensee: {
-            select: {
-              id: true,
-              name: true,
-              prefix: true,
-              brandName: true,
-              orgId: true,
-            },
-          },
-        },
-        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-      },
-    },
-  });
-
-  if (!target) return { ok: false as const, status: 404, error: "User not found" };
-  if (!isManufacturerRole(target.role)) {
-    return { ok: false as const, status: 400, error: "Target must be a manufacturer user" };
-  }
-
-  return { ok: true as const, target };
-};
-
-const targetHasLicenseeLink = (
-  target: {
-    licenseeId: string | null;
-    manufacturerLicenseeLinks: Array<{ licenseeId: string }>;
-  },
-  licenseeId: string | null | undefined
-) => {
-  const normalized = String(licenseeId || "").trim();
-  if (!normalized) return false;
-  return (
-    target.licenseeId === normalized ||
-    target.manufacturerLicenseeLinks.some((row) => row.licenseeId === normalized)
-  );
-};
-
 /* ===================== CREATE USER ===================== */
 
 export const createUser = async (req: AuthRequest, res: Response) => {
@@ -234,99 +180,36 @@ export const createUser = async (req: AuthRequest, res: Response) => {
     const email = parsed.data.email;
     const name = parsed.data.name.trim();
     const password = parsed.data.password.trim();
-    const role = canonicalizeRole(parsed.data.role as UserRole);
+    const role = parsed.data.role as UserRole;
 
-    let effectiveLicenseeId: string | null = null;
-
-    if (isPlatform(auth.role)) {
-      effectiveLicenseeId = parsed.data.licenseeId || null;
-      if (!effectiveLicenseeId) {
-        return res.status(400).json({ success: false, error: "licenseeId is required for super admin createUser" });
-      }
-    } else {
-      const actorLicenseeId = await resolveActorLicenseeId(req);
-      if (!actorLicenseeId) {
-        return res.status(403).json({ success: false, error: "No licensee association found" });
-      }
-      effectiveLicenseeId = actorLicenseeId;
-
-      // non-super cannot create licensee users
-      if (!isManufacturerRole(role)) {
-        return res.status(403).json({ success: false, error: "Only super users can create licensee users" });
-      }
+    const requestedLicenseeId = parsed.data.licenseeId || null;
+    const effectiveLicenseeId = isPlatform(auth.role)
+      ? requestedLicenseeId
+      : String(req.user?.licenseeId || "").trim() || null;
+    if (!isPlatform(auth.role) && role !== UserRole.MANUFACTURER_ADMIN) {
+      return res.status(403).json({ success: false, error: "Only super users can create licensee users" });
     }
 
     if (!effectiveLicenseeId) {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
-    const lic = await prisma.licensee.findUnique({ where: { id: effectiveLicenseeId }, select: { id: true, orgId: true } });
-    if (!lic) return res.status(404).json({ success: false, error: "Licensee not found" });
-    if (!lic.orgId) return res.status(500).json({ success: false, error: "Licensee org not configured" });
-
     const passwordHash = await hashPassword(password);
-
-    const licenseeId = effectiveLicenseeId || undefined;
-    const created = await prisma.$transaction(async (tx) => {
-      const row = await tx.user.create({
-        data: {
-          email,
-          passwordHash,
-          emailVerifiedAt: new Date(),
-          name,
-          role,
-          licenseeId,
-          orgId: lic.orgId,
-          isActive: true,
-          deletedAt: null,
-          location: parsed.data.location?.trim() ? parsed.data.location.trim() : null,
-          website: parsed.data.website?.trim() ? parsed.data.website.trim() : null,
-        },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          licenseeId: true,
-          isActive: true,
-          deletedAt: true,
-          createdAt: true,
-          location: true,
-          website: true,
-          licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
-          manufacturerLicenseeLinks: {
-            include: {
-              licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
-            },
-          },
-        },
-      });
-      if (isManufacturerRole(role) && licenseeId) {
-        await upsertManufacturerLicenseeLink(tx, {
-          manufacturerId: row.id,
-          licenseeId,
-          makePrimary: true,
-        });
-        row.manufacturerLicenseeLinks = await tx.manufacturerLicenseeLink.findMany({
-          where: { manufacturerId: row.id },
-          include: {
-            licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
-          },
-        });
+    const createdResult = await createUserBoundary<any>(
+      String(req.databaseSessionCapability || ""),
+      administrationRequestId(req),
+      {
+        email, passwordHash, name, role, licenseeId: effectiveLicenseeId,
+        location: parsed.data.location?.trim() || null,
+        website: parsed.data.website?.trim() || null,
+        audit: { ipHash: hashIp(req.ip), userAgent: normalizeUserAgent(req.get("user-agent")) },
       }
-      return row;
-    });
+    );
+    const created = createdResult.user;
 
-    await createAuditLog({
-      userId: auth.userId,
-      action: "CREATE_USER",
-      entityType: "User",
-      entityId: created.id,
-      details: { email, name, role, licenseeId },
-      ipAddress: req.ip,
-    });
-
-    return res.status(201).json({ success: true, data: serializeScopedUser(created, licenseeId || null) });
+    return res.status(201).json({ success: true, data: serializeScopedUser(created, effectiveLicenseeId) });
   } catch (e: any) {
+    const mapped = administrationErrorResponse(e);
+    if (mapped) return res.status(mapped.status).json({ success: false, error: mapped.error });
     if (isScopeError(e)) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
@@ -348,59 +231,33 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
 
     const queryLicenseeId = (req.query.licenseeId as string | undefined) || undefined;
     const includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
-    const rawRoleFilter = String(req.query.role || "").trim() as UserRole;
-    const roleFilter = Object.values(UserRole).includes(rawRoleFilter) ? rawRoleFilter : undefined;
+    const rawRoleFilter = String(req.query.role || "").trim();
+    const roleFilter = rawRoleFilter === "MANUFACTURER"
+      ? UserRole.MANUFACTURER_ADMIN
+      : Object.values(UserRole).includes(rawRoleFilter as UserRole)
+        ? rawRoleFilter as UserRole
+        : undefined;
     const { limit, offset } = parsePagination(req.query as Record<string, unknown>);
 
-    const baseWhere: Prisma.UserWhereInput = {};
-    if (roleFilter && isManufacturerRole(roleFilter)) {
-      baseWhere.role = { in: MANUFACTURER_ROLES };
-    } else if (roleFilter) {
-      baseWhere.role = roleFilter;
-    }
-    const where = await buildScopedUserWhere(req.user!, {
-      base: baseWhere,
+    const { users, total } = await readUserDirectory({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: administrationRequestId(req),
       requestedLicenseeId: queryLicenseeId,
       includeInactive,
+      roleFilter,
+      limit,
+      offset,
     });
-    const resolvedScope = await resolveRequestedLicenseeScope(req.user!, queryLicenseeId);
-    const effectiveLicenseeId = resolvedScope.scopeLicenseeId || queryLicenseeId || undefined;
-
-    const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          licenseeId: true,
-          isActive: true,
-          deletedAt: true,
-          createdAt: true,
-          location: true,
-          website: true,
-          licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
-          manufacturerLicenseeLinks: {
-            include: {
-              licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
-            },
-            orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.user.count({ where }),
-    ]);
 
     return res.json({
       success: true,
-      data: users.map((row) => serializeScopedUser(row, effectiveLicenseeId || null)),
+      data: users,
       meta: { total, limit, offset },
     });
   } catch (e) {
+    if (isTenantDirectoryDenied(e)) {
+      return res.status(404).json({ success: false, error: "Users not found" });
+    }
     if (isScopeError(e)) {
       return res.status(404).json({ success: false, error: "Users not found" });
     }
@@ -420,50 +277,23 @@ export const getManufacturers = async (req: AuthRequest, res: Response) => {
     const licenseeId = (req.query.licenseeId as string | undefined) || undefined;
     const { limit, offset } = parsePagination(req.query as Record<string, unknown>);
 
-    const where = await buildScopedUserWhere(req.user!, {
+    const { users: manufacturers, total } = await readUserDirectory({
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: administrationRequestId(req),
       requestedLicenseeId: licenseeId,
-      manufacturerOnly: true,
       includeInactive,
+      roleFilter: UserRole.MANUFACTURER_ADMIN,
+      limit,
+      offset,
     });
-    const resolvedScope = await resolveRequestedLicenseeScope(req.user!, licenseeId);
-    const effectiveLicenseeId = resolvedScope.scopeLicenseeId || licenseeId || null;
-
-    const [manufacturers, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          licenseeId: true,
-          isActive: true,
-          deletedAt: true,
-          createdAt: true,
-          location: true,
-          website: true,
-          licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
-          manufacturerLicenseeLinks: {
-            include: {
-              licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
-            },
-            orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-          },
-        },
-        orderBy: { name: "asc" },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.user.count({ where }),
-    ]);
 
     return res.json({
       success: true,
-      data: manufacturers.map((row) => serializeScopedUser(row, effectiveLicenseeId)),
+      data: manufacturers,
       meta: { total, limit, offset },
     });
   } catch (e) {
-    if (isScopeError(e)) {
+    if (isTenantDirectoryDenied(e) || isScopeError(e)) {
       return res.status(404).json({ success: false, error: "Manufacturers not found" });
     }
     console.error("getManufacturers error:", e);
@@ -488,18 +318,6 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
     }
     const targetId = paramsParsed.data.id;
-    const t = await assertManufacturerTarget(req, targetId);
-    if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
-
-    const actorLicenseeId = await resolveActorLicenseeId(req);
-    if (!isPlatform(auth.role)) {
-      if (!actorLicenseeId) {
-        return res.status(403).json({ success: false, error: "No licensee association found" });
-      }
-      if (!targetHasLicenseeLink(t.target, actorLicenseeId)) {
-        return res.status(403).json({ success: false, error: "Access denied to this tenant" });
-      }
-    }
 
     const data: any = { ...parsed.data };
 
@@ -512,71 +330,23 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       delete data.password;
     }
 
-    // keep deletedAt consistent with isActive
-    if (typeof data.isActive === "boolean") {
-      data.deletedAt = data.isActive ? null : new Date();
-    }
-
     // normalize email
     if (data.email) data.email = String(data.email).trim().toLowerCase();
 
-    const updated = await prisma.$transaction(async (tx) => {
-      let nextLicenseeId = t.target.licenseeId;
-      if (isPlatform(auth.role) && data.licenseeId) {
-        const nextLicensee = await tx.licensee.findUnique({
-          where: { id: data.licenseeId },
-          select: { id: true, orgId: true },
-        });
-        if (!nextLicensee) {
-          throw new Error("Licensee not found");
-        }
-        await upsertManufacturerLicenseeLink(tx, {
-          manufacturerId: targetId,
-          licenseeId: nextLicensee.id,
-          makePrimary: true,
-        });
-        data.orgId = nextLicensee.orgId;
-        nextLicenseeId = nextLicensee.id;
-      }
-
-      const row = await tx.user.update({
-        where: { id: targetId },
-        data,
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          licenseeId: true,
-          isActive: true,
-          deletedAt: true,
-          createdAt: true,
-          location: true,
-          website: true,
-          licensee: { select: { id: true, name: true, prefix: true, brandName: true } },
-          manufacturerLicenseeLinks: {
-            include: {
-              licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
-            },
-            orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-          },
-        },
-      });
-
-      return serializeScopedUser(row, actorLicenseeId || nextLicenseeId || null);
+    const targetLicenseeId = String(
+      (isPlatform(auth.role) ? data.licenseeId : req.user?.licenseeId) || ""
+    ).trim() || null;
+    const result = await updateUserBoundary<any>(String(req.databaseSessionCapability || ""), administrationRequestId(req), {
+      id: targetId, patch: data,
+      requestedLicenseeId: targetLicenseeId,
+      audit: { changed: Object.keys(parsed.data), ipHash: hashIp(req.ip), userAgent: normalizeUserAgent(req.get("user-agent")) },
     });
-
-    await createAuditLog({
-      userId: auth.userId,
-      action: "UPDATE_USER",
-      entityType: "User",
-      entityId: updated.id,
-      details: { changed: Object.keys(parsed.data) },
-      ipAddress: req.ip,
-    });
+    const updated = serializeScopedUser(result.user, result.scopedLicenseeId || result.licenseeId);
 
     return res.json({ success: true, data: updated });
   } catch (e: any) {
+    const mapped = administrationErrorResponse(e);
+    if (mapped) return res.status(mapped.status).json({ success: false, error: mapped.error });
     if (isScopeError(e)) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
@@ -606,121 +376,20 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
 
     const targetId = paramsParsed.data.id;
     const hard = queryParsed.data.hard === "true";
-
-    const t = await assertManufacturerTarget(req, targetId);
-    if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
-
-    const actorLicenseeId = await resolveActorLicenseeId(req);
-    if (!isPlatform(auth.role)) {
-      if (!actorLicenseeId || !targetHasLicenseeLink(t.target, actorLicenseeId)) {
-        return res.status(403).json({ success: false, error: "Access denied to this tenant" });
-      }
+    if (hard && !isPlatform(auth.role)) {
+      return res.status(403).json({ success: false, error: "Only super admin can hard delete" });
     }
-
-    if (hard) {
-      if (!isPlatform(auth.role)) {
-        return res.status(403).json({ success: false, error: "Only super admin can hard delete" });
-      }
-
-      const tx = await prisma.$transaction(async (pr) => {
-        const unassigned = await pr.batch.updateMany({
-          where: { manufacturerId: targetId },
-          data: { manufacturerId: null },
-        });
-
-        await pr.user.delete({ where: { id: targetId } });
-
-        return { unassignedBatches: unassigned.count };
-      });
-
-      await createAuditLog({
-        userId: auth.userId,
-        action: "HARD_DELETE_MANUFACTURER",
-        entityType: "User",
-        entityId: targetId,
-        details: { email: t.target.email, name: t.target.name, ...tx },
-        ipAddress: req.ip,
-      });
-
-      return res.json({ success: true, data: { deletedId: targetId, hard: true, ...tx } });
-    }
-
-    if (!isPlatform(auth.role) && actorLicenseeId) {
-      const scopedBatchCount = await prisma.batch.count({
-        where: { manufacturerId: targetId, licenseeId: actorLicenseeId },
-      });
-      if (scopedBatchCount > 0) {
-        return res.status(409).json({
-          success: false,
-          error: "This manufacturer still has batches assigned under your licensee. Reassign or close those batches before unlinking.",
-        });
-      }
-
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.manufacturerLicenseeLink.delete({
-          where: {
-            manufacturerId_licenseeId: {
-              manufacturerId: targetId,
-              licenseeId: actorLicenseeId,
-            },
-          },
-        });
-
-        const remainingLinks = await tx.manufacturerLicenseeLink.findMany({
-          where: { manufacturerId: targetId },
-          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-        });
-
-        if (remainingLinks.length === 0) {
-          await tx.user.update({
-            where: { id: targetId },
-            data: { isActive: false, deletedAt: new Date(), licenseeId: null },
-          });
-        } else if (!remainingLinks.some((row) => row.isPrimary)) {
-          await upsertManufacturerLicenseeLink(tx, {
-            manufacturerId: targetId,
-            licenseeId: remainingLinks[0].licenseeId,
-            makePrimary: true,
-          });
-          await tx.user.update({
-            where: { id: targetId },
-            data: { licenseeId: remainingLinks[0].licenseeId },
-          });
-        }
-
-        return { deletedId: targetId, hard: false, unlinkedLicenseeId: actorLicenseeId };
-      });
-
-      await createAuditLog({
-        userId: auth.userId,
-        licenseeId: actorLicenseeId,
-        action: "UNLINK_MANUFACTURER_FROM_LICENSEE",
-        entityType: "User",
-        entityId: targetId,
-        details: { email: t.target.email, name: t.target.name, licenseeId: actorLicenseeId },
-        ipAddress: req.ip,
-      });
-
-      return res.json({ success: true, data: updated });
-    }
-
-    const updated = await prisma.user.update({
-      where: { id: targetId },
-      data: { isActive: false, deletedAt: new Date() },
-      select: { id: true, isActive: true, deletedAt: true },
+    const targetLicenseeId = String(req.user?.licenseeId || "").trim() || null;
+    const result = await deleteUserBoundary<any>(String(req.databaseSessionCapability || ""), administrationRequestId(req), {
+      id: targetId, hard, licenseeId: targetLicenseeId,
+      audit: { ipHash: hashIp(req.ip), userAgent: normalizeUserAgent(req.get("user-agent")) },
     });
+    const deleted = result.response;
 
-    await createAuditLog({
-      userId: auth.userId,
-      action: "SOFT_DELETE_MANUFACTURER",
-      entityType: "User",
-      entityId: targetId,
-      details: { email: t.target.email, name: t.target.name },
-      ipAddress: req.ip,
-    });
-
-    return res.json({ success: true, data: { deletedId: targetId, hard: false, ...updated } });
+    return res.json({ success: true, data: deleted });
   } catch (e) {
+    const mapped = administrationErrorResponse(e);
+    if (mapped) return res.status(mapped.status).json({ success: false, error: mapped.error });
     if (isScopeError(e)) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
@@ -746,58 +415,17 @@ export const restoreManufacturer = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
     }
     const targetId = paramsParsed.data.id;
-    const t = await assertManufacturerTarget(req, targetId);
-    if (!t.ok) return res.status(t.status).json({ success: false, error: t.error });
-
-    const actorLicenseeId = await resolveActorLicenseeId(req);
-    if (!isPlatform(auth.role)) {
-      if (!actorLicenseeId) {
-        return res.status(403).json({ success: false, error: "No licensee association found" });
-      }
-
-      const updated = await prisma.$transaction(async (tx) => {
-        await upsertManufacturerLicenseeLink(tx, {
-          manufacturerId: targetId,
-          licenseeId: actorLicenseeId,
-          makePrimary: !t.target.licenseeId,
-        });
-        return tx.user.update({
-          where: { id: targetId },
-          data: { isActive: true, deletedAt: null, licenseeId: t.target.licenseeId || actorLicenseeId },
-          select: { id: true, isActive: true, deletedAt: true },
-        });
-      });
-
-      await createAuditLog({
-        userId: auth.userId,
-        licenseeId: actorLicenseeId,
-        action: "RESTORE_MANUFACTURER_LINK",
-        entityType: "User",
-        entityId: targetId,
-        details: { email: t.target.email, name: t.target.name, licenseeId: actorLicenseeId },
-        ipAddress: req.ip,
-      });
-
-      return res.json({ success: true, data: updated });
-    }
-
-    const updated = await prisma.user.update({
-      where: { id: targetId },
-      data: { isActive: true, deletedAt: null },
-      select: { id: true, isActive: true, deletedAt: true },
+    const targetLicenseeId = String(req.user?.licenseeId || "").trim() || null;
+    const result = await restoreManufacturerBoundary<any>(String(req.databaseSessionCapability || ""), administrationRequestId(req), {
+      id: targetId, licenseeId: targetLicenseeId,
+      audit: { ipHash: hashIp(req.ip), userAgent: normalizeUserAgent(req.get("user-agent")) },
     });
+    const restored = result.response;
 
-    await createAuditLog({
-      userId: auth.userId,
-      action: "RESTORE_MANUFACTURER",
-      entityType: "User",
-      entityId: targetId,
-      details: { email: t.target.email, name: t.target.name },
-      ipAddress: req.ip,
-    });
-
-    return res.json({ success: true, data: updated });
+    return res.json({ success: true, data: restored });
   } catch (e) {
+    const mapped = administrationErrorResponse(e);
+    if (mapped) return res.status(mapped.status).json({ success: false, error: mapped.error });
     if (isScopeError(e)) {
       return res.status(404).json({ success: false, error: "User not found" });
     }

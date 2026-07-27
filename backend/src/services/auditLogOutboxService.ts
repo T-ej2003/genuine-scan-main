@@ -1,9 +1,19 @@
-import { AuditLogOutboxStatus } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { createHash, randomUUID } from "crypto";
 
-import prisma from "../config/database";
+import {
+  B03AuditEnqueueInput,
+  b03PayloadDigest,
+  claimAuditLogOutboxSlice,
+  consumeAuditLogOutbox,
+  enqueueAuditLogOutbox,
+  failAuditLogOutbox,
+} from "../rls-waves/session-b/b03/repositoryFunctions";
+import {
+  withB03AuditWorkerContext,
+} from "../rls-waves/session-b/b03/systemContext";
 import { withDistributedLease } from "./distributedLeaseService";
 
-const getStore = () => (prisma as any).auditLogOutbox;
 const parseBool = (value: unknown, fallback = false) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (["1", "true", "yes", "on"].includes(normalized)) return true;
@@ -24,74 +34,79 @@ const parseIntEnv = (key: string, fallback: number, min: number, max: number) =>
   return Math.max(min, Math.min(max, Math.floor(raw)));
 };
 
-export const queueAuditLogOutbox = async (payload: Record<string, unknown>, error?: unknown) => {
-  const store = getStore();
-  if (!store?.create) return null;
+export const queueAuditLogOutbox = async (
+  payload: Record<string, unknown>,
+  error?: unknown,
+  db?: Pick<Prisma.TransactionClient, "auditLogOutbox"> & Partial<Pick<Prisma.TransactionClient, "$queryRaw">>,
+  authority?: Omit<B03AuditEnqueueInput, "payload" | "payloadDigest" | "idempotencyKey" | "expiresAt" | "initialErrorCode">
+) => {
+  if (!db?.$queryRaw || !authority) {
+    throw new Error("B03 audit enqueue requires an attributed transaction and durable authority");
+  }
+  const payloadDigest = b03PayloadDigest(payload);
+  const idempotencyKey = createHash("sha256")
+    // SHA-256 is intentional here: this fixed workflow/request/payload tuple is
+    // an outbox idempotency key, never a password or credential verifier.
+    // codeql[js/insufficient-password-hash]
+    .update(`AUDIT_LOG_RECOVERY:${authority.requestId}:${payloadDigest}`)
+    .digest("hex");
+  const row = await enqueueAuditLogOutbox(db as any, {
+    ...authority,
+    payload,
+    payloadDigest,
+    idempotencyKey,
+    expiresAt: new Date(Date.now() + 86_400_000),
+    initialErrorCode: error ? "AUDIT_PERSISTENCE_FAILED" : null,
+  });
+  return row.id;
+};
 
-  try {
-    const row = await store.create({
-      data: {
-        payload,
-        status: AuditLogOutboxStatus.QUEUED,
-        lastError: error instanceof Error ? error.message : error ? String(error) : null,
-      },
-    });
-    return String(row.id || "");
-  } catch (queueError) {
-    console.warn("audit outbox enqueue skipped:", queueError);
-    return null;
+const flushAuditLogOutboxThroughB03Boundary = async () => {
+  const batchSize = parseIntEnv("AUDIT_OUTBOX_BATCH_SIZE", 25, 1, 250);
+  const claimRequestId = randomUUID();
+  const claims = await withB03AuditWorkerContext(
+    { jobId: `audit-outbox-claim:${claimRequestId}`, requestId: claimRequestId },
+    (tx) => claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize })
+  );
+
+  for (const claim of claims) {
+    if (isShutdownStarted()) return;
+    const attemptedAt = new Date();
+    const context = {
+      jobId: claim.id,
+      requestId: claim.requestId,
+      organizationId: claim.organizationId,
+      licenseeId: claim.licenseeId,
+      manufacturerId: claim.manufacturerId,
+      initiatingUserId: claim.initiatingUserId,
+    };
+    try {
+      if (claim.expiresAt.getTime() <= attemptedAt.getTime()) {
+        throw new Error("AUDIT_OUTBOX_EXPIRED");
+      }
+      await withB03AuditWorkerContext(context, (tx) => consumeAuditLogOutbox(tx, {
+        jobId: claim.id,
+        payloadDigest: claim.payloadDigest,
+        attemptedAt,
+      }));
+    } catch (error) {
+      const errorCode = error instanceof Error && /^[A-Z0-9_]{1,128}$/.test(error.message)
+        ? error.message
+        : "AUDIT_OUTBOX_DELIVERY_FAILED";
+      await withB03AuditWorkerContext(context, (tx) => failAuditLogOutbox(tx, {
+        jobId: claim.id,
+        payloadDigest: claim.payloadDigest,
+        attemptedAt,
+        attempt: claim.attempt,
+        errorCode,
+      }));
+    }
   }
 };
 
 export const flushAuditLogOutbox = async () => {
   if (isShutdownStarted()) return;
-  const store = getStore();
-  if (!store?.findMany || !store?.update) return;
-
-  const batchSize = parseIntEnv("AUDIT_OUTBOX_BATCH_SIZE", 25, 1, 250);
-  const now = new Date();
-  const rows = await store.findMany({
-    where: {
-      status: { in: [AuditLogOutboxStatus.QUEUED, AuditLogOutboxStatus.FAILED] },
-      nextAttemptAt: { lte: now },
-    },
-    orderBy: [{ createdAt: "asc" }],
-    take: batchSize,
-  });
-
-  if (!rows.length) return;
-  if (isShutdownStarted()) return;
-
-  const { createAuditLog } = await import("./auditService");
-
-  for (const row of rows) {
-    if (isShutdownStarted()) return;
-    try {
-      const log = await createAuditLog((row.payload || {}) as any);
-      await store.update({
-        where: { id: row.id },
-        data: {
-          status: AuditLogOutboxStatus.SENT,
-          flushedAuditLogId: String(log?.id || "") || null,
-          attempts: { increment: 1 },
-          lastError: null,
-          nextAttemptAt: new Date(),
-        },
-      });
-    } catch (error) {
-      const attempts = Number(row.attempts || 0) + 1;
-      const retryDelaySec = Math.min(300, Math.max(10, 2 ** attempts));
-      await store.update({
-        where: { id: row.id },
-        data: {
-          status: AuditLogOutboxStatus.FAILED,
-          attempts,
-          lastError: error instanceof Error ? error.message : String(error),
-          nextAttemptAt: new Date(Date.now() + retryDelaySec * 1000),
-        },
-      });
-    }
-  }
+  return flushAuditLogOutboxThroughB03Boundary();
 };
 
 let started = false;
@@ -100,8 +115,7 @@ let timer: NodeJS.Timeout | null = null;
 
 export const startAuditLogOutboxWorker = () => {
   if (auditOutboxWorkerDisabled()) return;
-  const store = getStore();
-  if (started || !store?.findMany || !store?.update) return;
+  if (started) return;
 
   started = true;
   stopping = false;

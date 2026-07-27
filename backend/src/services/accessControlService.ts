@@ -2,7 +2,6 @@ import { Response, NextFunction } from "express";
 import { Prisma, UserRole, UserStatus } from "@prisma/client";
 
 import prisma from "../config/database";
-import { RlsReadTransactionClient } from "../config/rlsReadDatabase";
 import { AuthRequest } from "../middleware/auth";
 import {
   MANUFACTURER_ROLES,
@@ -320,7 +319,7 @@ export const findScopedBatch = async (
   user: NonNullable<AuthRequest["user"]>,
   id: string,
   args: Prisma.BatchFindFirstArgs = {},
-  opts?: { db?: RlsReadTransactionClient }
+  opts?: { db?: Prisma.TransactionClient }
 ) =>
   (opts?.db || prisma).batch.findFirst({
     ...args,
@@ -328,20 +327,6 @@ export const findScopedBatch = async (
       base: { id },
       manufacturerField: "manufacturerId",
       db: opts?.db,
-      ...(args.where ? { base: { ...(args.where as unknown as MutableWhere), id } } : {}),
-    }),
-  });
-
-export const findScopedQrCode = async (
-  user: NonNullable<AuthRequest["user"]>,
-  id: string,
-  args: Prisma.QRCodeFindFirstArgs = {}
-) =>
-  prisma.qRCode.findFirst({
-    ...args,
-    where: await buildScopedWhere(user, {
-      base: { id },
-      relationManufacturerField: "batch",
       ...(args.where ? { base: { ...(args.where as unknown as MutableWhere), id } } : {}),
     }),
   });

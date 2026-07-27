@@ -1,4 +1,4 @@
-import { Link, type LinkProps } from "react-router-dom";
+import { Link, type LinkProps } from "react-router";
 
 import { MscqrLogo } from "@/components/brand/MscqrLogo";
 import { cn } from "@/lib/utils";

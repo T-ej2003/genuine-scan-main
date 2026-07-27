@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import Verify from "@/pages/Verify";
@@ -110,6 +110,13 @@ const buildVerifyPayload = (overrides: Record<string, unknown> = {}) => ({
     canClaim: true,
     matchMethod: null,
   },
+  verifyUxPolicy: {
+    showTimelineCard: true,
+    showRiskCards: false,
+    allowOwnershipClaim: true,
+    allowFraudReport: true,
+    mobileCameraAssist: true,
+  },
   reasons: ["First successful customer verification recorded."],
   ...overrides,
 });
@@ -203,8 +210,9 @@ describe("Verify page", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("location-probe")).toHaveTextContent(`/verify/${CODE}?session=${SESSION_ID}&t=signed-token`);
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(`/verify/${CODE}?session=${SESSION_ID}`);
     });
+    expect(screen.getByTestId("location-probe")).not.toHaveTextContent("signed-token");
   });
 
   it("shows a calm quick-check state when the session is not yet revealed", async () => {
@@ -497,10 +505,31 @@ describe("Verify page", () => {
       success: true,
       data: buildSession({
         decisionId: undefined,
+        sessionProofToken: "session-proof-1",
         authState: "VERIFIED",
         intakeCompleted: true,
         revealed: true,
-        verification: buildVerifyPayload({ decisionId: undefined }),
+        verification: buildVerifyPayload({
+          decisionId: undefined,
+          isAuthentic: false,
+          publicStatus: "not_ready",
+          status: "not_ready",
+          ownershipStatus: {
+            isClaimed: false,
+            claimedAt: null,
+            isOwnedByRequester: false,
+            isClaimedByAnother: false,
+            canClaim: false,
+            matchMethod: null,
+          },
+          verifyUxPolicy: {
+            showTimelineCard: true,
+            showRiskCards: false,
+            allowOwnershipClaim: false,
+            allowFraudReport: true,
+            mobileCameraAssist: true,
+          },
+        }),
         intake: {
           purchaseChannel: "offline",
           sourceCategory: "retail_store",
@@ -522,6 +551,8 @@ describe("Verify page", () => {
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
+    expect(await screen.findByRole("button", { name: "Report a concern" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save verification" })).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Report a concern" }));
     expect(await screen.findByRole("heading", { name: "Report a concern" })).toBeInTheDocument();
     expect(screen.getByLabelText("What do you want to report?")).toBeInTheDocument();
@@ -530,13 +561,14 @@ describe("Verify page", () => {
     await waitFor(() => {
       expect(vi.mocked(apiClient.reportFraud)).toHaveBeenCalledWith(
         expect.objectContaining({
-          code: CODE,
           sessionId: SESSION_ID,
-        })
+        }),
+        "session-proof-1"
       );
     });
     const payload = vi.mocked(apiClient.reportFraud).mock.calls[0]?.[0] as Record<string, unknown>;
     expect(payload).not.toHaveProperty("decisionId");
+    expect(payload).not.toHaveProperty("code");
   });
 
   it("lets a signed-in customer complete a replay review check and refresh the session", async () => {

@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { AlertTriangle, ArrowRight, ClipboardCheck, History, QrCode, ScanLine, ShieldCheck } from "lucide-react";
 
 import { PublicShell } from "@/components/public/PublicShell";

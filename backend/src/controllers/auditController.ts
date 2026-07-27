@@ -1,8 +1,8 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
-import { createAuditLog, getAuditLogs, onAuditLog } from "../services/auditService";
+import { onAuditLog } from "../services/auditService";
 import prisma from "../config/database";
-import { UserRole } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import {
@@ -13,6 +13,28 @@ import {
   isAuditManufacturerUser,
   isAuditSuperUser,
 } from "../services/auditExportRedactionService";
+import { AuditCsvExportAccessError, readAuditCsvExport } from "../services/auditCsvExportService";
+import { withCanonicalDbContext } from "../lib/canonicalDbContext";
+import {
+  buildFraudReportBoundary,
+  FraudReportAccessError,
+  FraudReportStatus,
+  queryFraudReports,
+} from "../services/fraudReportQueryService";
+import {
+  AuditLogQueryAccessError,
+  buildAuditLogBoundary,
+  queryAuditLogs,
+} from "../services/auditLogQueryService";
+import {
+  AuditTraceAccessError,
+  buildFraudResponseBoundary,
+  respondToFraudReportInTransaction,
+} from "../rls-waves/session-c/c02/auditTraceRepository";
+import {
+  isCanonicalAuthDenial,
+  withDatabaseAuthenticatedSelection,
+} from "../rls-waves/session-b/b01/canonicalAuthContext";
 
 const fraudResponseSchema = z.object({
   status: z.enum(["REVIEWED", "RESOLVED", "DISMISSED"]).default("REVIEWED"),
@@ -24,14 +46,20 @@ const fraudReportIdParamSchema = z.object({
   id: z.string().uuid("Invalid fraud report id"),
 }).strict();
 
-const auditLogQuerySchema = z.object({
+export const auditLogQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional(),
   offset: z.coerce.number().int().min(0).max(20_000).optional(),
   cursor: z.string().trim().max(512).optional(),
   entityType: z.string().trim().max(120).optional(),
   entityId: z.string().trim().max(160).optional(),
   action: z.string().trim().max(160).optional(),
+  userId: z.string().uuid().optional(),
   licenseeId: z.string().uuid().optional(),
+  organizationId: z.string().uuid().optional(),
+  manufacturerId: z.string().uuid().optional(),
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional(),
+  purpose: z.string().trim().min(1).max(240).optional(),
 }).strict();
 
 const auditExportQuerySchema = z.object({
@@ -40,17 +68,16 @@ const auditExportQuerySchema = z.object({
   entityId: z.string().trim().max(160).optional(),
   action: z.string().trim().max(160).optional(),
   licenseeId: z.string().uuid().optional(),
+  purpose: z.string().trim().min(1).max(240).optional(),
 }).strict();
 
-const defaultFraudReply = (status: "REVIEWED" | "RESOLVED" | "DISMISSED", code: string) => {
-  if (status === "RESOLVED") {
-    return `Thanks for reporting code ${code}. Our security team reviewed it and completed corrective action.`;
-  }
-  if (status === "DISMISSED") {
-    return `Thanks for reporting code ${code}. We reviewed the case and found no actionable fraud signal from current evidence.`;
-  }
-  return `Thanks for reporting code ${code}. Our security team has started investigating your report.`;
-};
+const fraudReportQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  offset: z.coerce.number().int().min(0).max(20_000).optional(),
+  licenseeId: z.string().uuid().trim(),
+  purpose: z.string().trim().min(1).max(240),
+  status: z.string().trim().max(32).optional(),
+}).strict();
 
 export const getLogs = async (req: AuthRequest, res: Response) => {
   try {
@@ -63,78 +90,38 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
     }
 
-    const limit = parsed.data.limit ?? 50;
-    const offset = parsed.data.offset ?? 0;
-    const cursor = parsed.data.cursor;
-    const entityType = parsed.data.entityType;
-    const entityId = parsed.data.entityId;
-    const action = parsed.data.action;
-
-    const isSuper = isAuditSuperUser(req.user.role);
-    const isManufacturer = isAuditManufacturerUser(req.user.role);
-    const licenseeId = isSuper ? parsed.data.licenseeId : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
-
-    let userIds: string[] | undefined;
-    if (isManufacturer) {
-      userIds = [req.user.userId];
-    } else if (!isSuper && licenseeId) {
-      const users = await prisma.user.findMany({
-        where: {
-          OR: [{ licenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId } } }],
-        },
-        select: { id: true },
-      });
-      userIds = users.map((u) => u.id);
-    }
-
-    if (
-      req.user.role !== UserRole.SUPER_ADMIN &&
-      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
-      action &&
-      hiddenActionsForNonSuper.includes(action)
-    ) {
-      return res.json({ success: true, data: { logs: [], total: 0, limit, offset } });
-    }
-
-    const result = await getAuditLogs({
-      entityType,
-      entityId,
-      action,
-      excludeActions:
-        isSuper ? undefined : hiddenActionsForNonSuper,
-      licenseeId,
-      userIds,
-      limit,
-      offset,
-      cursor,
-    });
-
-    const userIdsForMap = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean))) as string[];
-    let userMap = new Map<string, { id: string; name: string; email: string }>();
-    if (userIdsForMap.length > 0) {
-      const users = await prisma.user.findMany({
-        where: { id: { in: userIdsForMap } },
-        select: { id: true, name: true, email: true },
-      });
-      userMap = new Map(users.map((u) => [u.id, u]));
-    }
-
-    const enriched = result.logs.map((l) => ({
-      ...l,
-      user: l.userId ? userMap.get(l.userId) || null : null,
-    }));
+    const filters = { ...parsed.data, limit: parsed.data.limit ?? 50, offset: parsed.data.offset ?? 0 };
+    const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "");
+    const boundary = buildAuditLogBoundary(req.user, filters, requestId);
+    const result = await withDatabaseAuthenticatedSelection(
+      req.user,
+      {
+        capability: String(req.databaseSessionCapability || ""),
+        requestId,
+        purpose: boundary.context.purpose,
+        context: boundary.context,
+      },
+      (tx) => queryAuditLogs(tx, filters, boundary),
+      prisma,
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+    );
 
     return res.json({
       success: true,
       data: {
         ...result,
-        logs: enriched,
-        limit,
-        offset: cursor ? 0 : offset,
-        cursor: cursor || null,
+        limit: filters.limit,
+        offset: filters.cursor ? 0 : filters.offset,
+        cursor: filters.cursor || null,
       },
     });
   } catch (err) {
+    if (isCanonicalAuthDenial(err)) {
+      return res.status(401).json({ success: false, error: "Authenticated session is no longer valid" });
+    }
+    if (err instanceof AuditLogQueryAccessError) {
+      return res.status(err.statusCode).json({ success: false, error: err.message });
+    }
     console.error("Audit logs error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -152,64 +139,35 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
     }
 
     const limit = parsed.data.limit ?? 5000;
-    const entityType = parsed.data.entityType;
-    const entityId = parsed.data.entityId;
-    const action = parsed.data.action;
-
     const isSuper = isAuditSuperUser(req.user.role);
-    const isManufacturer = isAuditManufacturerUser(req.user.role);
-    const licenseeId = isSuper ? parsed.data.licenseeId : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
-
-    let userIds: string[] | undefined;
-    if (isManufacturer) {
-      userIds = [req.user.userId];
-    } else if (!isSuper && licenseeId) {
-      const users = await prisma.user.findMany({
-        where: {
-          OR: [{ licenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId } } }],
-        },
-        select: { id: true },
-      });
-      userIds = users.map((u) => u.id);
-    }
 
     if (
       req.user.role !== UserRole.SUPER_ADMIN &&
       req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
-      action &&
-      hiddenActionsForNonSuper.includes(action)
+      parsed.data.action &&
+      hiddenActionsForNonSuper.includes(parsed.data.action)
     ) {
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
       return res.status(200).send(emptyAuditCsv(isSuper));
     }
 
-    const result = await getAuditLogs({
-      entityType,
-      entityId,
-      action,
-      excludeActions:
-        isSuper ? undefined : hiddenActionsForNonSuper,
-      licenseeId,
-      userIds,
-      limit,
-      offset: 0,
+    const result = await readAuditCsvExport({
+      user: req.user,
+      requestId: String((req as AuthRequest & { requestId?: string }).requestId || req.get("x-request-id") || "").trim(),
+      filters: {
+        ...parsed.data,
+        limit,
+      },
     });
-
-    const userIdsForMap = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean))) as string[];
-    let userMap = new Map<string, { id: string; name: string; email: string }>();
-    if (userIdsForMap.length > 0) {
-      const users = await prisma.user.findMany({
-        where: { id: { in: userIdsForMap } },
-        select: { id: true, name: true, email: true },
-      });
-      userMap = new Map(users.map((u) => [u.id, u]));
-    }
 
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
-    return res.status(200).send(buildAuditLogsCsv(result.logs, userMap, isSuper));
+    return res.status(200).send(buildAuditLogsCsv(result.logs, result.userMap, result.isSuper));
   } catch (err) {
+    if (err instanceof AuditCsvExportAccessError) {
+      return res.status(err.statusCode).json({ success: false, error: err.message });
+    }
     console.error("Audit logs export error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -273,96 +231,27 @@ export const getFraudReports = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const limit = Math.min(Number(req.query.limit) || 100, 500);
-    const offset = Number(req.query.offset) || 0;
-    const licenseeId = (req.query.licenseeId as string | undefined) || undefined;
-    const statusFilterRaw = String(req.query.status || "ALL").toUpperCase();
-    const statusFilter = ["ALL", "OPEN", "REVIEWED", "RESOLVED", "DISMISSED"].includes(statusFilterRaw)
-      ? statusFilterRaw
-      : "ALL";
-
-    const where: any = { action: "CUSTOMER_FRAUD_REPORT" };
-    if (licenseeId) where.licenseeId = licenseeId;
-
-    const reportLogs = await prisma.auditLog.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: limit,
-      skip: offset,
-    });
-
-    if (reportLogs.length === 0) {
-      return res.json({
-        success: true,
-        data: { reports: [], total: 0, limit, offset },
-      });
-    }
-
-    const reportIds = reportLogs.map((l) => l.id);
-    const responseLogs = await prisma.auditLog.findMany({
-      where: {
-        action: "CUSTOMER_FRAUD_REPORT_RESPONSE",
-        OR: reportIds.map((id) => ({ details: { path: ["reportId"], equals: id } })),
-      },
-      orderBy: { createdAt: "desc" },
-    });
-
-    const latestResponseByReportId = new Map<string, any>();
-    for (const log of responseLogs) {
-      const details = coerceAuditDetails(log.details);
-      const reportId = String(details.reportId || "");
-      if (!reportId || latestResponseByReportId.has(reportId)) continue;
-      latestResponseByReportId.set(reportId, log);
-    }
-
-    const reports = reportLogs
-      .map((reportLog) => {
-        const reportDetails = coerceAuditDetails(reportLog.details);
-        const responseLog = latestResponseByReportId.get(reportLog.id);
-        const responseDetails = coerceAuditDetails(responseLog?.details);
-        const status = String(responseDetails.status || "OPEN").toUpperCase();
-
-        return {
-          id: reportLog.id,
-          createdAt: reportLog.createdAt,
-          licenseeId: reportLog.licenseeId || null,
-          report: {
-            code: reportDetails.code || null,
-            reason: reportDetails.reason || null,
-            notes: reportDetails.notes || null,
-            contactEmail: reportDetails.contactEmail || null,
-            observedStatus: reportDetails.observedStatus || null,
-            observedOutcome: reportDetails.observedOutcome || null,
-            pageUrl: reportDetails.pageUrl || null,
-            userAgent: reportDetails.userAgent || null,
-            ipAddress: reportLog.ipAddress || null,
-          },
-          status,
-          response: responseLog
-            ? {
-                id: responseLog.id,
-                createdAt: responseLog.createdAt,
-                message: responseDetails.message || null,
-                notifyCustomer: Boolean(responseDetails.notifyCustomer),
-                recipientEmail: responseDetails.recipientEmail || null,
-                delivery: responseDetails.delivery || null,
-                actorUserId: responseLog.userId || null,
-              }
-            : null,
-        };
-      })
-      .filter((r) => (statusFilter === "ALL" ? true : r.status === statusFilter));
-
-    return res.json({
-      success: true,
-      data: {
-        reports,
-        total: reports.length,
-        limit,
-        offset,
-      },
-    });
+    const parsed = fraudReportQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    const statusRaw = String(parsed.data.status || "ALL").toUpperCase();
+    const status = (["ALL", "OPEN", "REVIEWED", "RESOLVED", "DISMISSED"].includes(statusRaw) ? statusRaw : "ALL") as FraudReportStatus;
+    const query = {
+      licenseeId: parsed.data.licenseeId,
+      purpose: parsed.data.purpose,
+      status,
+      limit: parsed.data.limit ?? 100,
+      offset: parsed.data.offset ?? 0,
+    };
+    const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "");
+    const context = buildFraudReportBoundary(req.user, query, requestId);
+    const data = await withCanonicalDbContext(prisma, context, (tx, installedContext) =>
+      queryFraudReports(tx, query, installedContext)
+    );
+    return res.json({ success: true, data });
   } catch (err) {
+    if (err instanceof FraudReportAccessError) {
+      return res.status(err.statusCode).json({ success: false, error: err.message });
+    }
     console.error("getFraudReports error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -391,69 +280,32 @@ export const respondToFraudReport = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const reportLog = await prisma.auditLog.findFirst({
-      where: { id: reportId, action: "CUSTOMER_FRAUD_REPORT" },
-    });
-    if (!reportLog) {
+    const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
+    const context = buildFraudResponseBoundary(req.user, requestId);
+    const result = await withCanonicalDbContext(
+      prisma,
+      context,
+      (tx) => respondToFraudReportInTransaction(tx, {
+        reportId,
+        status: parsed.data.status,
+        message: parsed.data.message?.trim() || null,
+        notifyCustomer: parsed.data.notifyCustomer !== false,
+      }),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
+
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    if (err instanceof AuditTraceAccessError) {
+      return res.status(err.statusCode).json({ success: false, error: err.message });
+    }
+    const databaseMessage = String((err as any)?.meta?.message || (err as any)?.message || "");
+    if (/SESSION_C_FRAUD_REPORT_NOT_FOUND/.test(databaseMessage)) {
       return res.status(404).json({ success: false, error: "Fraud report not found" });
     }
-
-    const reportDetails = coerceAuditDetails(reportLog.details);
-    const normalizedCode = String(reportDetails.code || reportLog.entityId || "UNKNOWN");
-    const recipientEmail =
-      reportDetails.contactEmail && typeof reportDetails.contactEmail === "string"
-        ? String(reportDetails.contactEmail).trim()
-        : "";
-
-    const status = parsed.data.status;
-    const message = parsed.data.message?.trim() || defaultFraudReply(status, normalizedCode);
-    const notifyCustomer = parsed.data.notifyCustomer !== false;
-
-    // Automated reply dispatch is simulated by default for local/dev.
-    // This keeps the workflow operational even without SMTP credentials.
-    const delivery = {
-      attempted: notifyCustomer,
-      delivered: notifyCustomer && Boolean(recipientEmail),
-      transport: notifyCustomer ? "simulated" : "none",
-      recipientEmail: notifyCustomer ? recipientEmail || null : null,
-      reason:
-        notifyCustomer && !recipientEmail
-          ? "Customer did not provide a contact email in the report."
-          : null,
-      deliveredAt: notifyCustomer && recipientEmail ? new Date().toISOString() : null,
-    };
-
-    const responseLog = await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: reportLog.licenseeId || undefined,
-      action: "CUSTOMER_FRAUD_REPORT_RESPONSE",
-      entityType: "FraudReport",
-      entityId: reportLog.id,
-      ipAddress: req.ip,
-      details: {
-        reportId: reportLog.id,
-        status,
-        message,
-        notifyCustomer,
-        recipientEmail: recipientEmail || null,
-        delivery,
-        sourceCode: normalizedCode,
-        respondedAt: new Date().toISOString(),
-      },
-    });
-
-    return res.json({
-      success: true,
-      data: {
-        responseId: responseLog.id,
-        reportId: reportLog.id,
-        status,
-        message,
-        notifyCustomer,
-        delivery,
-      },
-    });
-  } catch (err) {
+    if (/SESSION_C_(DISABLED_OR_STALE_ACTOR|INVALID_CONTEXT|WRONG_ROLE)/.test(databaseMessage)) {
+      return res.status(403).json({ success: false, error: "Fraud-response authority is stale or invalid" });
+    }
     console.error("respondToFraudReport error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }

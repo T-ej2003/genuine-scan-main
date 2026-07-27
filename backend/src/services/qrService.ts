@@ -1,9 +1,7 @@
 import { randomBytes } from "crypto";
 import { QRStatus, Prisma } from "@prisma/client";
 import prisma from "../config/database";
-import { randomNonce } from "./qrTokenService";
 import { reverseGeocode } from "./locationService";
-import { summarizeQrStatusCounts } from "./qrStatusMetrics";
 import { guardPublicIntegrityFallback } from "../utils/publicIntegrityGuard";
 import { normalizeClientIp } from "../utils/ipAddress";
 
@@ -108,67 +106,6 @@ export const buildVerifyUrl = (code: string): string => {
     "http://localhost:8080";
   const normalized = base.replace(/\/+$/, "");
   return `${normalized}/verify/${encodeURIComponent(code)}`;
-};
-
-export const generateQRCodesForRange = async (
-  licenseeId: string,
-  prefix: string,
-  startNumber: number,
-  endNumber: number
-): Promise<number> => {
-  const codes: Prisma.QRCodeCreateManyInput[] = [];
-
-  for (let i = startNumber; i <= endNumber; i++) {
-    codes.push({
-      code: generatePublicQRCode(),
-      displayCode: generateQRCode(prefix, i),
-      licenseeId,
-      status: QRStatus.DORMANT,
-      tokenNonce: randomNonce(),
-    });
-  }
-
-  const batchSize = 1000;
-  let created = 0;
-
-  for (let i = 0; i < codes.length; i += batchSize) {
-    const chunk = codes.slice(i, i + batchSize);
-    const result = await prisma.qRCode.createMany({ data: chunk, skipDuplicates: true });
-    created += result.count;
-  }
-
-  return created;
-};
-
-export const activateQRCodes = async (licenseeId: string, codes: string[]): Promise<number> => {
-  const result = await prisma.qRCode.updateMany({
-    where: {
-      code: { in: codes },
-      licenseeId,
-      status: QRStatus.DORMANT,
-    },
-    data: { status: QRStatus.ACTIVE },
-  });
-  return result.count;
-};
-
-export const allocateQRCodesToBatch = async (
-  batchId: string,
-  licenseeId: string,
-  startCode: string,
-  endCode: string
-): Promise<number> => {
-  const result = await prisma.qRCode.updateMany({
-    where: {
-      licenseeId,
-      displayCode: { gte: startCode, lte: endCode },
-      status: { in: [QRStatus.DORMANT, QRStatus.ACTIVE] },
-      batchId: null,
-    },
-    data: { status: QRStatus.ALLOCATED, batchId },
-  });
-
-  return result.count;
 };
 
 export const markBatchAsPrinted = async (batchId: string, manufacturerId: string): Promise<number> => {
@@ -350,81 +287,5 @@ export const recordScan = async (
     qrCode: updated.qr,
     isFirstScan: updated.effectiveFirstScan,
     scanRecorded: updated.scanRecorded,
-  };
-};
-
-export const getQRStats = async (licenseeId?: string) => {
-  const where = licenseeId ? { licenseeId } : {};
-  const rollups = await prisma.inventoryStatusRollup.aggregate({
-    where,
-    _sum: {
-      totalCodes: true,
-      dormant: true,
-      active: true,
-      activated: true,
-      allocated: true,
-      printed: true,
-      redeemed: true,
-      blocked: true,
-      scanned: true,
-    },
-  });
-
-  const hasRollupData = Object.values(rollups._sum || {}).some((value) => Number(value || 0) > 0);
-
-  let total = 0;
-  let byStatus: Record<string, number> = {};
-
-  if (hasRollupData) {
-    const unbatchedStats = await prisma.qRCode.groupBy({
-      by: ["status"],
-      where: {
-        ...where,
-        batchId: null,
-      },
-      _count: true,
-    });
-
-    const unbatchedTotal = await prisma.qRCode.count({
-      where: {
-        ...where,
-        batchId: null,
-      },
-    });
-
-    byStatus = {
-      DORMANT: Number(rollups._sum?.dormant || 0),
-      ACTIVE: Number(rollups._sum?.active || 0),
-      ACTIVATED: Number(rollups._sum?.activated || 0),
-      ALLOCATED: Number(rollups._sum?.allocated || 0),
-      PRINTED: Number(rollups._sum?.printed || 0),
-      REDEEMED: Number(rollups._sum?.redeemed || 0),
-      BLOCKED: Number(rollups._sum?.blocked || 0),
-      SCANNED: Number(rollups._sum?.scanned || 0),
-    };
-
-    for (const stat of unbatchedStats) {
-      byStatus[stat.status] = Number(byStatus[stat.status] || 0) + Number(stat._count || 0);
-    }
-
-    total = Number(rollups._sum?.totalCodes || 0) + unbatchedTotal;
-  } else {
-    const stats = await prisma.qRCode.groupBy({
-      by: ["status"],
-      where,
-      _count: true,
-    });
-
-    total = await prisma.qRCode.count({ where });
-    byStatus = stats.reduce((acc, s) => {
-      acc[s.status] = s._count;
-      return acc;
-    }, {} as Record<string, number>);
-  }
-
-  return {
-    total,
-    byStatus,
-    ...summarizeQrStatusCounts(byStatus),
   };
 };

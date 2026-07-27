@@ -1,0 +1,619 @@
+{
+  "schemaVersion": 2,
+  "decisionBasis": "decision-runtime-role-split",
+  "environments": {
+    "development": "mscqr_dev_*",
+    "staging": "mscqr_staging_*",
+    "production": "mscqr_prod_*"
+  },
+  "prohibitions": [
+    "No runtime, migration, operator, or ephemeral break-glass identity may be SUPERUSER or BYPASSRLS.",
+    "No LOGIN identity may own protected tables, policies, schemas, or SECURITY DEFINER functions.",
+    "No runtime role may have membership in, or a SET ROLE path to, owner or auth_owner.",
+    "Application, pre-authentication, worker, scheduled, migration, and operator credentials are distinct by environment."
+  ],
+  "identities": [
+    {
+      "id": "identity-authenticated-app",
+      "logicalIdentity": "authenticated application",
+      "roleSuffix": "app",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_app",
+        "staging": "mscqr_staging_app",
+        "production": "mscqr_prod_app"
+      },
+      "purpose": "Authenticated HTTP operations using transaction-local actor context.",
+      "loginExpectation": "LOGIN",
+      "allowedSchemas": [
+        "public",
+        "app_rls"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "EXECUTE_AUTHENTICATED_HELPERS"
+      ],
+      "tablePrivilegeMode": "command-specific grants generated from reviewed workflows",
+      "securityDefinerExecution": "approved authenticated helper signatures only",
+      "mayExecuteSecurityDefinerFunctions": true,
+      "ownershipExpectations": "Owns no objects.",
+      "mayOwnProtectedTables": false,
+      "mayCreateObjects": false,
+      "maySetRole": false,
+      "mayUseBypassRls": false,
+      "superuser": false,
+      "credentialSource": "dedicated-authenticated-app-secret-per-environment",
+      "standingCredential": true,
+      "rotationExpectation": "Managed rotation per environment and immediate rotation on suspected exposure; never shared with another logical identity.",
+      "auditRequirements": [
+        "Record actor, tenant, command, assurance, policy version, result, and request ID without secrets or row payloads."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [
+        "decision-policy-command-semantics"
+      ],
+      "mayOwnProtectedObjects": false,
+      "ownerRoleMemberships": [],
+      "objectOwnershipDecision": "decision-object-ownership-chain",
+      "protectedObjectOwnershipAllowed": false
+    },
+    {
+      "id": "identity-restricted-read",
+      "logicalIdentity": "restricted read",
+      "roleSuffix": "rls_read",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_rls_read",
+        "staging": "mscqr_staging_rls_read",
+        "production": "mscqr_prod_rls_read"
+      },
+      "purpose": "Read-only RLS projections and canary validation.",
+      "loginExpectation": "LOGIN",
+      "allowedSchemas": [
+        "public",
+        "app_rls"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "SELECT",
+        "EXECUTE_CONTEXT_HELPERS"
+      ],
+      "tablePrivilegeMode": "SELECT only on explicitly approved tables",
+      "securityDefinerExecution": "pure transaction-context helpers only",
+      "mayExecuteSecurityDefinerFunctions": false,
+      "ownershipExpectations": "Owns no objects.",
+      "mayOwnProtectedTables": false,
+      "mayCreateObjects": false,
+      "maySetRole": false,
+      "mayUseBypassRls": false,
+      "superuser": false,
+      "credentialSource": "dedicated-restricted-read-secret-per-environment",
+      "standingCredential": true,
+      "rotationExpectation": "Managed rotation per environment; independent of application and validation-operator credentials.",
+      "auditRequirements": [
+        "Record route, actor, tenant, policy revision, validation purpose, and denial class."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [],
+      "mayOwnProtectedObjects": false,
+      "ownerRoleMemberships": [],
+      "objectOwnershipDecision": "decision-object-ownership-chain",
+      "protectedObjectOwnershipAllowed": false
+    },
+    {
+      "id": "identity-pre-auth-app",
+      "logicalIdentity": "pre-authentication function executor",
+      "roleSuffix": "preauth",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_preauth",
+        "staging": "mscqr_staging_preauth",
+        "production": "mscqr_prod_preauth"
+      },
+      "purpose": "Execute exact named app_auth functions before actor context exists.",
+      "loginExpectation": "LOGIN",
+      "allowedSchemas": [
+        "app_auth"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "EXECUTE"
+      ],
+      "tablePrivilegeMode": "none",
+      "securityDefinerExecution": "explicit app_auth function signatures only; no generic query function",
+      "mayExecuteSecurityDefinerFunctions": true,
+      "ownershipExpectations": "Owns no objects and is never a member of auth_owner.",
+      "mayOwnProtectedTables": false,
+      "mayCreateObjects": false,
+      "maySetRole": false,
+      "mayUseBypassRls": false,
+      "superuser": false,
+      "credentialSource": "dedicated-preauth-secret-per-environment",
+      "standingCredential": true,
+      "rotationExpectation": "Managed rotation per environment; never shared with authenticated application, worker, or migration.",
+      "auditRequirements": [
+        "Record exact function signature, generic outcome, request ID, replay/rate-limit decision; never record supplied credentials or tokens."
+      ],
+      "resolvedDecisions": [
+        "decision-pre-auth-boundary",
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [],
+      "approvedFunctionIds": [
+        "preauth-fn-consume-email-verification",
+        "preauth-fn-consume-invitation",
+        "preauth-fn-consume-password-reset",
+        "preauth-fn-lookup-invitation",
+        "preauth-fn-lookup-password-user",
+        "preauth-fn-record-password-failure",
+        "preauth-fn-request-password-reset"
+      ],
+      "directTablePrivileges": [],
+      "publicSchemaCreate": false,
+      "restrictedReadHelperAccess": false,
+      "mayOwnProtectedObjects": false,
+      "ownerRoleMemberships": [],
+      "objectOwnershipDecision": "decision-object-ownership-chain",
+      "protectedObjectOwnershipAllowed": false
+    },
+    {
+      "id": "identity-worker",
+      "logicalIdentity": "worker",
+      "roleSuffix": "worker",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_worker",
+        "staging": "mscqr_staging_worker",
+        "production": "mscqr_prod_worker"
+      },
+      "purpose": "Process asynchronous jobs using verified durable job and tenant scope.",
+      "loginExpectation": "LOGIN",
+      "allowedSchemas": [
+        "public",
+        "app_rls"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "EXECUTE_WORKER_HELPERS"
+      ],
+      "tablePrivilegeMode": "command-specific grants generated from reviewed worker workflows",
+      "securityDefinerExecution": "explicitly approved worker function signatures only",
+      "mayExecuteSecurityDefinerFunctions": true,
+      "ownershipExpectations": "Owns no objects and has no platform-global bypass authority.",
+      "mayOwnProtectedTables": false,
+      "mayCreateObjects": false,
+      "maySetRole": false,
+      "mayUseBypassRls": false,
+      "superuser": false,
+      "credentialSource": "dedicated-worker-secret-per-environment",
+      "standingCredential": true,
+      "rotationExpectation": "Managed rotation per environment; distinct from scheduled and interactive runtime credentials.",
+      "auditRequirements": [
+        "Record job ID/type, durably verified tenant, authorization version, attempts, result, and idempotency key."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split",
+        "decision-worker-identity-model"
+      ],
+      "unresolvedDecisions": [],
+      "approvedWorkerBoundaryIds": [
+        "worker-boundary-audit-outbox-delivery",
+        "worker-boundary-siem-outbox-delivery"
+      ],
+      "requiredTransactionContextKeys": [
+        "app.system_identity",
+        "app.job_id",
+        "app.job_type",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.initiating_user_id",
+        "app.request_id",
+        "app.auth_assurance"
+      ],
+      "directPreAuthFunctionExecution": false,
+      "publicSchemaCreate": false,
+      "mayOwnProtectedObjects": false,
+      "ownerRoleMemberships": [],
+      "objectOwnershipDecision": "decision-object-ownership-chain",
+      "protectedObjectOwnershipAllowed": false
+    },
+    {
+      "id": "identity-scheduled-job",
+      "logicalIdentity": "scheduled job",
+      "roleSuffix": "scheduled",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_scheduled",
+        "staging": "mscqr_staging_scheduled",
+        "production": "mscqr_prod_scheduled"
+      },
+      "purpose": "Run scheduled maintenance separately from interactive worker execution.",
+      "loginExpectation": "LOGIN",
+      "allowedSchemas": [
+        "public",
+        "app_rls"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "EXECUTE_SCHEDULED_HELPERS"
+      ],
+      "tablePrivilegeMode": "command-specific grants generated from reviewed scheduled workflows",
+      "securityDefinerExecution": "explicitly approved scheduled function signatures only",
+      "mayExecuteSecurityDefinerFunctions": true,
+      "ownershipExpectations": "Owns no objects and is distinct from worker.",
+      "mayOwnProtectedTables": false,
+      "mayCreateObjects": false,
+      "maySetRole": false,
+      "mayUseBypassRls": false,
+      "superuser": false,
+      "credentialSource": "dedicated-scheduled-secret-per-environment",
+      "standingCredential": true,
+      "rotationExpectation": "Managed rotation per environment; distinct from worker and application credentials.",
+      "auditRequirements": [
+        "Record schedule revision, durably verified tenant/job scope, counts, failures, retries, and idempotency evidence."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split",
+        "decision-worker-identity-model"
+      ],
+      "unresolvedDecisions": [],
+      "approvedWorkerBoundaryIds": [
+        "worker-boundary-scheduled-compliance-packs"
+      ],
+      "requiredTransactionContextKeys": [
+        "app.system_identity",
+        "app.job_id",
+        "app.job_type",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.initiating_user_id",
+        "app.request_id",
+        "app.auth_assurance"
+      ],
+      "directPreAuthFunctionExecution": false,
+      "publicSchemaCreate": false,
+      "mayOwnProtectedObjects": false,
+      "ownerRoleMemberships": [],
+      "objectOwnershipDecision": "decision-object-ownership-chain",
+      "protectedObjectOwnershipAllowed": false
+    },
+    {
+      "id": "identity-migration",
+      "logicalIdentity": "migration",
+      "roleSuffix": "migration",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_migration",
+        "staging": "mscqr_staging_migration",
+        "production": "mscqr_prod_migration"
+      },
+      "purpose": "Run reviewed schema deployment only.",
+      "loginExpectation": "LOGIN",
+      "allowedSchemas": [
+        "public",
+        "app_rls",
+        "app_auth"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "CREATE",
+        "ALTER",
+        "DROP",
+        "OWNERSHIP_TRANSFER"
+      ],
+      "tablePrivilegeMode": "reviewed deployment DDL only",
+      "securityDefinerExecution": "none",
+      "mayExecuteSecurityDefinerFunctions": false,
+      "ownershipExpectations": "May create objects only through the approved deployment process and must transfer protected objects to owner or auth_owner before completion.",
+      "mayOwnProtectedTables": false,
+      "mayCreateObjects": true,
+      "maySetRole": false,
+      "mayUseBypassRls": false,
+      "superuser": false,
+      "credentialSource": "dedicated-deployment-secret-per-environment",
+      "standingCredential": true,
+      "rotationExpectation": "Deployment-only retrieval with managed rotation; unavailable to application, worker, scheduled, and operator execution.",
+      "auditRequirements": [
+        "Record migration checksum, release identity, start/end, target, ownership transfers, and catalog postconditions."
+      ],
+      "resolvedDecisions": [
+        "decision-object-ownership-chain",
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [],
+      "mayOwnProtectedObjects": false,
+      "ownerRoleMemberships": [],
+      "objectOwnershipDecision": "decision-object-ownership-chain",
+      "protectedObjectOwnershipAllowed": false,
+      "enduringObjectOwnershipAllowed": false,
+      "temporaryOwnerMembershipRecommended": false,
+      "migrationCompletionRequiresCatalogVerification": true,
+      "ownerMembershipResidueAllowed": false
+    },
+    {
+      "id": "identity-table-owner",
+      "logicalIdentity": "table owner",
+      "roleSuffix": "owner",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_owner",
+        "staging": "mscqr_staging_owner",
+        "production": "mscqr_prod_owner"
+      },
+      "purpose": "Own protected tables and policies without providing an execution identity.",
+      "loginExpectation": "NOLOGIN",
+      "allowedSchemas": [
+        "app_rls",
+        "public"
+      ],
+      "allowedCommands": [
+        "OWNERSHIP"
+      ],
+      "tablePrivilegeMode": "owns protected tables and policies",
+      "securityDefinerExecution": "none",
+      "mayExecuteSecurityDefinerFunctions": false,
+      "ownershipExpectations": "Owns protected tables and policies; no runtime membership or SET ROLE path is permitted.",
+      "mayOwnProtectedTables": true,
+      "mayCreateObjects": false,
+      "maySetRole": false,
+      "mayUseBypassRls": false,
+      "superuser": false,
+      "credentialSource": "none-nologin",
+      "standingCredential": false,
+      "rotationExpectation": "Not applicable; NOLOGIN role has no credential.",
+      "auditRequirements": [
+        "Catalog tests prove NOLOGIN, NOSUPERUSER, NOBYPASSRLS, exact ownership, and absence of membership or SET ROLE reachability."
+      ],
+      "resolvedDecisions": [
+        "decision-object-ownership-chain",
+        "decision-runtime-role-split",
+        "decision-worker-identity-model"
+      ],
+      "unresolvedDecisions": [],
+      "approvedWorkerFunctionIds": [
+        "worker-fn-claim-compliance-pack-slice",
+        "worker-fn-consume-audit-outbox"
+      ],
+      "mayOwnProtectedObjects": true,
+      "ownerRoleMemberships": [],
+      "objectOwnershipDecision": "decision-object-ownership-chain",
+      "roleAttributes": {
+        "login": false,
+        "superuser": false,
+        "createDatabase": false,
+        "createRole": false,
+        "replication": false,
+        "bypassRls": false,
+        "inherit": false
+      },
+      "ownedObjectClasses": [
+        "tables",
+        "sequences",
+        "public/app_rls schemas",
+        "indexes/constraints/policies/triggers through tables",
+        "application types/views/materialized views",
+        "approved app_rls SECURITY INVOKER functions"
+      ]
+    },
+    {
+      "id": "identity-auth-function-owner",
+      "logicalIdentity": "authentication-function owner",
+      "roleSuffix": "auth_owner",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_auth_owner",
+        "staging": "mscqr_staging_auth_owner",
+        "production": "mscqr_prod_auth_owner"
+      },
+      "purpose": "Own only the approved app_auth schema and exact authentication functions.",
+      "loginExpectation": "NOLOGIN",
+      "allowedSchemas": [
+        "app_auth",
+        "pg_catalog"
+      ],
+      "allowedCommands": [
+        "OWNERSHIP",
+        "REQUIRED_COLUMN_PRIVILEGES"
+      ],
+      "tablePrivilegeMode": "exact required column privileges only; owns no application table",
+      "securityDefinerExecution": "owns exact approved app_auth functions but is not an execution identity",
+      "mayExecuteSecurityDefinerFunctions": false,
+      "ownershipExpectations": "Owns app_auth and approved functions only; owns no application tables.",
+      "mayOwnProtectedTables": false,
+      "mayCreateObjects": false,
+      "maySetRole": false,
+      "mayUseBypassRls": false,
+      "superuser": false,
+      "credentialSource": "none-nologin",
+      "standingCredential": false,
+      "rotationExpectation": "Not applicable; NOLOGIN role has no credential.",
+      "auditRequirements": [
+        "Catalog tests prove exact ownership, fixed search_path, column grants, PUBLIC revoke, and no membership reachability."
+      ],
+      "resolvedDecisions": [
+        "decision-object-ownership-chain",
+        "decision-pre-auth-boundary",
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [],
+      "approvedFunctionIds": [
+        "preauth-fn-consume-email-verification",
+        "preauth-fn-consume-invitation",
+        "preauth-fn-consume-password-reset",
+        "preauth-fn-lookup-invitation",
+        "preauth-fn-lookup-password-user",
+        "preauth-fn-record-password-failure",
+        "preauth-fn-request-password-reset"
+      ],
+      "mayOwnProtectedObjects": true,
+      "ownerRoleMemberships": [],
+      "objectOwnershipDecision": "decision-object-ownership-chain",
+      "roleAttributes": {
+        "login": false,
+        "superuser": false,
+        "createDatabase": false,
+        "createRole": false,
+        "replication": false,
+        "bypassRls": false,
+        "inherit": false
+      },
+      "ownedObjectClasses": [
+        "app_auth schema",
+        "exact approved pre-auth functions"
+      ]
+    },
+    {
+      "id": "identity-operator",
+      "logicalIdentity": "operator administrator",
+      "roleSuffix": "operator",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_operator",
+        "staging": "mscqr_staging_operator",
+        "production": "mscqr_prod_operator"
+      },
+      "purpose": "Standing restricted administrative login for exact broker commands and named procedures only.",
+      "loginExpectation": "LOGIN",
+      "allowedSchemas": [
+        "app_ops"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "EXECUTE_EXACT_OPERATOR_BOUNDARIES"
+      ],
+      "tablePrivilegeMode": "no direct table privileges; exact procedure/command execution only",
+      "securityDefinerExecution": "approved operator function signatures only when broker-authorized",
+      "mayExecuteSecurityDefinerFunctions": true,
+      "ownershipExpectations": "Owns no object and has no owner-role membership.",
+      "mayOwnProtectedTables": false,
+      "mayCreateObjects": false,
+      "maySetRole": false,
+      "mayUseBypassRls": false,
+      "superuser": false,
+      "credentialSource": "dedicated-managed-operator-credential-per-environment-with-individual-attribution",
+      "standingCredential": true,
+      "rotationExpectation": "Managed rotation at least every 90 days and immediate rotation on compromise or personnel change; command approvals remain short-lived.",
+      "auditRequirements": [
+        "Capture approval, operator, exact command allowlist, checksum, target guard, start/end, result, and immutable transcript."
+      ],
+      "resolvedDecisions": [
+        "decision-operator-administration",
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [],
+      "mayOwnProtectedObjects": false,
+      "ownerRoleMemberships": [],
+      "objectOwnershipDecision": "decision-object-ownership-chain",
+      "protectedObjectOwnershipAllowed": false,
+      "approvedOperatorBoundaryIds": [
+        "operator-boundary-catalog-verification",
+        "operator-boundary-health-readiness",
+        "operator-boundary-failed-job-summary",
+        "operator-boundary-tenant-incident-summary",
+        "operator-boundary-print-diagnostic",
+        "operator-boundary-deployment-preflight",
+        "operator-boundary-migration-broker",
+        "operator-boundary-credential-rotation",
+        "operator-boundary-account-setup-link-reissue",
+        "operator-boundary-locked-account-recovery",
+        "operator-boundary-operator-mfa-repair",
+        "operator-boundary-session-revocation",
+        "operator-boundary-tenant-security-recovery",
+        "operator-boundary-contain-user",
+        "operator-boundary-contain-tenant",
+        "operator-boundary-contain-qr-batch",
+        "operator-boundary-contain-job-type",
+        "operator-boundary-contain-credential",
+        "operator-boundary-retention-redaction",
+        "operator-boundary-job-recovery",
+        "operator-boundary-staging-rls-fixture",
+        "operator-boundary-rls-readiness",
+        "operator-boundary-rls-activation",
+        "operator-boundary-rls-rollback"
+      ],
+      "directTablePrivileges": [],
+      "unrestrictedSqlAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false
+    },
+    {
+      "id": "identity-production-break-glass",
+      "logicalIdentity": "production break-glass",
+      "roleSuffix": "breakglass_<incident>_<nonce>",
+      "environmentRoleNames": {
+        "development": "not-applicable-production-only",
+        "staging": "not-applicable-production-only",
+        "production": "mscqr_prod_breakglass_<incident>_<nonce>"
+      },
+      "purpose": "Ephemeral production incident identity or temporary narrowly scoped grant; never a standing reusable role with permanent credentials.",
+      "loginExpectation": "EPHEMERAL_LOGIN",
+      "allowedSchemas": [
+        "incident-approved-only"
+      ],
+      "allowedCommands": [
+        "INCIDENT_COMMAND_ALLOWLIST_ONLY"
+      ],
+      "tablePrivilegeMode": "temporary narrowly scoped grants only",
+      "securityDefinerExecution": "incident-approved exact function signatures only",
+      "mayExecuteSecurityDefinerFunctions": true,
+      "ownershipExpectations": "Owns no objects and receives no owner membership.",
+      "mayOwnProtectedTables": false,
+      "mayCreateObjects": false,
+      "maySetRole": false,
+      "mayUseBypassRls": false,
+      "superuser": false,
+      "credentialSource": "ephemeral-production-broker-issued-after-dual-approval-and-strong-mfa",
+      "standingCredential": false,
+      "rotationExpectation": "Single incident use; hard expiry and automatic revocation on completion, expiry, approval withdrawal, or broker failure.",
+      "approvalRequirements": [
+        "dual approval",
+        "strong MFA",
+        "incident or ticket",
+        "explicit expiry",
+        "command allowlist",
+        "immutable audit transcript",
+        "automatic revocation"
+      ],
+      "auditRequirements": [
+        "Immutable session transcript records incident/ticket, approvers, MFA assurance, exact scope, expiry, commands, rows affected, result, and revocation."
+      ],
+      "resolvedDecisions": [
+        "decision-operator-administration",
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [],
+      "mayOwnProtectedObjects": false,
+      "ownerRoleMemberships": [],
+      "objectOwnershipDecision": "decision-object-ownership-chain",
+      "protectedObjectOwnershipAllowed": false,
+      "approvedOperatorBoundaryIds": [
+        "operator-boundary-breakglass-mfa-repair",
+        "operator-boundary-breakglass-issuance"
+      ],
+      "maximumLifetimeMinutes": 30,
+      "individuallyAttributable": true,
+      "sharedCredential": false,
+      "automaticRevocation": true,
+      "unrestrictedSqlAllowed": false,
+      "directTablePrivileges": [],
+      "applicationImpersonationAllowed": false
+    }
+  ]
+}

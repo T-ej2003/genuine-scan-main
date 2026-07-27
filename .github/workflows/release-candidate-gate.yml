@@ -6,6 +6,7 @@ on:
       - main
   push:
     branches:
+      - main
       - codex/merge-main-ours-test2
       - release-candidate/**
   workflow_dispatch:

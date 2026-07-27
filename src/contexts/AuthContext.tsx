@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "react-router";
 
 import { shouldBootstrapCurrentUser } from "@/contexts/auth-bootstrap";
 import apiClient from "@/lib/api-client";

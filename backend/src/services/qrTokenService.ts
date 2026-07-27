@@ -27,6 +27,15 @@ export const PRINTER_TEST_QR_ID_PREFIX = "printer-test:";
 
 export type QrSigningMode = "ed25519" | "hmac";
 export type QrSigningProvider = "env" | "kms-bridge";
+export class QrTokenVerificationError extends Error {
+  readonly code = "QR_TOKEN_INVALID";
+
+  constructor() {
+    super("QR token could not be verified");
+    this.name = "QrTokenVerificationError";
+  }
+}
+
 export type QrSigningMetadata = {
   mode: QrSigningMode;
   keyVersion: string;
@@ -107,12 +116,12 @@ const fromBase64Url = (input: string) => {
 
 const decodeBase64UrlStrict = (input: string) => {
   if (!/^[A-Za-z0-9_-]+$/.test(input)) {
-    throw new Error("Invalid token encoding");
+    throw new QrTokenVerificationError();
   }
   const buf = fromBase64Url(input);
   // Reject non-canonical variants so mutated tokens cannot decode to the same bytes.
   if (toBase64Url(buf) !== input) {
-    throw new Error("Invalid token encoding");
+    throw new QrTokenVerificationError();
   }
   return buf;
 };
@@ -507,20 +516,25 @@ export const validateQrSigningConfiguration = () => {
     return getQrSigningProfile();
   }
 
-  getQrSigningHmacSecretSet().current.value;
+  void getQrSigningHmacSecretSet().current.value;
   return getQrSigningProfile();
 };
 
 export const verifyQrToken = (token: string): { payload: QrTokenPayload; signing: QrSigningMetadata } => {
   const tokenStr = String(token || "").trim();
   const parts = tokenStr.split(".");
-  if (parts.length !== 2) throw new Error("Invalid token format");
+  if (parts.length !== 2) throw new QrTokenVerificationError();
   const [payloadPart, sigPart] = parts;
-  if (!payloadPart || !sigPart) throw new Error("Invalid token format");
+  if (!payloadPart || !sigPart) throw new QrTokenVerificationError();
 
   const payloadBuf = decodeBase64UrlStrict(payloadPart);
   const payloadJson = payloadBuf.toString("utf8");
-  const payload = JSON.parse(payloadJson) as QrTokenPayload;
+  let payload: QrTokenPayload;
+  try {
+    payload = JSON.parse(payloadJson) as QrTokenPayload;
+  } catch {
+    throw new QrTokenVerificationError();
+  }
 
   const payloadHash = createHash("sha256").update(payloadBuf).digest();
 
@@ -533,7 +547,7 @@ export const verifyQrToken = (token: string): { payload: QrTokenPayload; signing
       payload,
       payloadKeyVersion: String(payload.kid || "").trim() || null,
     });
-    if (!verification?.valid) throw new Error("Signature verification failed");
+    if (!verification?.valid) throw new QrTokenVerificationError();
     return {
       payload,
       signing: {
@@ -549,7 +563,7 @@ export const verifyQrToken = (token: string): { payload: QrTokenPayload; signing
   if (mode === "ed25519") {
     const { publicKey } = getEd25519Keys();
     const ok = cryptoVerify(null, payloadHash, publicKey, decodeBase64UrlStrict(sigPart));
-    if (!ok) throw new Error("Signature verification failed");
+    if (!ok) throw new QrTokenVerificationError();
     return {
       payload,
       signing: {
@@ -570,7 +584,7 @@ export const verifyQrToken = (token: string): { payload: QrTokenPayload; signing
       }
     }
     if (!valid) {
-      throw new Error("Signature verification failed");
+      throw new QrTokenVerificationError();
     }
     return {
       payload,

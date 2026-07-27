@@ -6,7 +6,10 @@ const path = require("path");
 const { P2TestDbSkip, withP2TestApp } = require("./helpers/p2TestDb");
 const { issueBearerTokens, seedP2Fixtures } = require("./helpers/p2SeedFactories");
 
-const authHeader = (token) => ({ authorization: `Bearer ${token}` });
+const authHeader = (token) => ({
+  authorization: `Bearer ${token.accessToken}`,
+  "x-database-session-capability": token.databaseCapability,
+});
 
 const readCapturedEmails = (captureDir) => {
   const file = path.join(captureDir, "emails.jsonl");
@@ -34,9 +37,9 @@ const assertSafe = (response, label) => {
   process.env.PUBLIC_SUPPORT_IP_MAX = "1000";
   process.env.PUBLIC_SUPPORT_ACTOR_MAX = "1000";
 
-  await withP2TestApp(async ({ request, prisma }) => {
+  await withP2TestApp(async ({ request, prisma, preauthPrisma }) => {
     await seedP2Fixtures(prisma);
-    const tokens = await issueBearerTokens();
+    const tokens = await issueBearerTokens(preauthPrisma);
 
     const emptyAdminList = await request("GET", "/api/support/request-access?limit=60", null, {
       headers: authHeader(tokens.superAdmin),

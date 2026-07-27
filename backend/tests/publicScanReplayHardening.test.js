@@ -145,6 +145,30 @@ const fakePrisma = {
 };
 
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
+mockModule("rls-waves/session-b/b01/runtimeClients.js", { getB01PreAuthPrisma: () => ({}) });
+mockModule("rls-waves/session-b/b02/publicBoundaryRepository.js", {
+  verifySignedQr: async () => ({
+    result: currentDeviceFingerprint === "device-fingerprint-1" ? "AUTHENTIC_REPEAT" : "REVIEW",
+    messageKey: currentDeviceFingerprint === "device-fingerprint-1"
+      ? "verification.repeat"
+      : "verification.changed_context",
+    nextAction: currentDeviceFingerprint === "device-fingerprint-1" ? "NONE" : "REVIEW",
+    verificationMethod: "SIGNED_LABEL",
+    maskedCode: "MSC…0009",
+    brandName: licensee.brandName,
+    brandWebsite: licensee.website,
+    brandSupportEmail: licensee.supportEmail,
+    brandSupportPhone: licensee.supportPhone,
+    manufacturerName: batch.manufacturer.name,
+    manufacturerWebsite: batch.manufacturer.website,
+    printedAt: batch.printedAt,
+    firstVerifiedAt: new Date("2026-04-05T09:00:00.000Z"),
+    latestVerifiedAt: new Date("2026-04-05T09:04:00.000Z"),
+    ownershipClaimAvailable: true,
+    sessionStartToken: null,
+  }),
+  verifyRawQr: async () => null,
+});
 mockModule("services/locationService.js", { reverseGeocode: async () => null });
 mockModule("services/auditService.js", {
   createAuditLog: async () => ({ id: "audit-1" }),

@@ -1,25 +1,43 @@
 import { Request, Response, NextFunction } from "express";
-import prisma from "../config/database";
-import { AuthenticatedSessionClaims, JWTPayload } from "../types";
+import { randomUUID } from "crypto";
+import { AuthenticatedSessionClaims } from "../types";
 import { UserRole } from "@prisma/client";
-import { ACCESS_TOKEN_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
+import { ACCESS_TOKEN_COOKIE, AUTHENTICATED_SESSION_CAPABILITY_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
 import { openCookieToken } from "../services/auth/cookieTokenProtectionService";
-import { isManufacturerRole, listManufacturerLinkedLicenseeIds } from "../services/manufacturerScopeService";
+import {
+  isLicenseeAdminRole,
+  isManufacturerRole,
+  isPlatformRole,
+  resolveManufacturerSessionScope,
+} from "../services/manufacturerScopeService";
 import { isDisabledUserRecord } from "../services/accessControlService";
 import { readCookie } from "../utils/cookies";
-// rls-prototype-approved-import: verified signed claims establish hydration context.
-import { withRlsPrototypeTransaction } from "../lib/rlsTransactionContextPrototype";
 import {
   getAdminStepUpWindowMinutes,
   getPasswordReauthWindowMinutes,
   getSensitiveActionStepUpMethod,
   isAdminMfaRequiredRole,
 } from "../services/auth/authService";
+import { clearAuthCookies } from "../controllers/authControllerShared";
+import {
+  isCanonicalAuthDenial,
+  withCanonicalAuthClaims,
+  withDatabaseAuthenticatedSession,
+} from "../rls-waves/session-b/b01/canonicalAuthContext";
+import {
+  loadAuthenticatedActor,
+  isRecentMfaDenial,
+  RecentMfaDenial,
+  requireRecentMfaSession,
+} from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
 
 export interface AuthRequest extends Request {
   user?: AuthenticatedSessionClaims;
   authMode?: "bearer" | "cookie";
+  databaseSessionCapability?: string | null;
 }
+
+export const DATABASE_SESSION_CAPABILITY_HEADER = "x-database-session-capability";
 
 const getBearerToken = (req: Request) => {
   const authHeader = req.headers.authorization;
@@ -32,67 +50,116 @@ const getCookieAccessToken = (req: Request) => {
   return token ? openCookieToken(token, "auth.access") : null;
 };
 
-async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promise<AuthenticatedSessionClaims> {
-  if (!payload?.userId || !payload?.role) return payload;
+export const getDatabaseSessionCapability = (req: Request, bearer: string | null) => {
+  const headerToken = bearer ? String(req.get(DATABASE_SESSION_CAPABILITY_HEADER) || "").trim() : "";
+  const token = headerToken || readCookie(req, AUTHENTICATED_SESSION_CAPABILITY_COOKIE) || "";
+  return token ? openCookieToken(token, "auth.database-session") : null;
+};
 
-  const { user: u, linkedLicenseeIds } = await withRlsPrototypeTransaction(
-    prisma,
-    {
-      userId: payload.userId,
-      role: payload.role,
-      licenseeId: payload.licenseeId,
-      manufacturerId: isManufacturerRole(payload.role) ? payload.userId : null,
-      organizationId: payload.orgId,
-      // Hydration only needs actor-self visibility. Never elevate from a stale claim.
-      isPlatformAdmin: false,
-    },
-    async (tx) => {
-      const user = await tx.user.findUnique({
-        where: { id: payload.userId },
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          licenseeId: true,
-          orgId: true,
-          isActive: true,
-          status: true,
-          deletedAt: true,
-          disabledAt: true,
-        },
-      });
-      const linkedIds = user && isManufacturerRole(user.role)
-        ? await listManufacturerLinkedLicenseeIds(payload.userId, tx).catch(() => [])
-        : [];
-      return { user, linkedLicenseeIds: linkedIds };
+const requestIdFor = (req: Request) =>
+  String((req as Request & { requestId?: string }).requestId || req.get("x-request-id") || randomUUID());
+
+export async function hydrateTenantIfNeeded(
+  payload: AuthenticatedSessionClaims,
+  databaseSessionCapability: string | null,
+  requestId: string = randomUUID()
+): Promise<AuthenticatedSessionClaims> {
+  if (!payload?.userId || !payload?.role) return payload;
+  if (!databaseSessionCapability) throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
+
+  const { user: u, manufacturerScope, canonicalAssurance } = await withDatabaseAuthenticatedSession(
+    payload,
+    { capability: databaseSessionCapability, requestId, purpose: "auth-session-hydration" },
+    async (tx, context) => {
+      const user = await loadAuthenticatedActor(tx);
+      if (user.id !== context.userId || user.role !== context.role) throw new Error("Authenticated actor changed");
+      const scope = user && isManufacturerRole(user.role)
+        ? await resolveManufacturerSessionScope({
+            manufacturerId: user.id,
+            legacyLicenseeId: user.licenseeId,
+            legacyOrgId: user.orgId,
+            requestedLicenseeId: context.licenseeId,
+            requestedOrgId: context.organizationId,
+            requestedScopeVersion: payload.scopeVersion,
+          }, tx)
+        : null;
+      return {
+        user,
+        manufacturerScope: scope,
+        canonicalAssurance: context.authAssurance,
+      };
     }
   );
 
   if (!u || isDisabledUserRecord(u)) {
     throw new Error("Account is disabled");
   }
+  const hydratedPayload: AuthenticatedSessionClaims = {
+    ...payload,
+    sessionStage:
+      payload.sessionStage === "MFA_BOOTSTRAP" && canonicalAssurance === "password-verified"
+        ? "MFA_BOOTSTRAP"
+        : "ACTIVE",
+    authAssurance:
+      canonicalAssurance === "mfa-verified" || canonicalAssurance === "step-up-verified"
+        ? "ADMIN_MFA"
+        : "PASSWORD",
+  };
 
-  const effectiveRole = u.role || payload.role;
-  const effectiveLinkedLicenseeIds = isManufacturerRole(effectiveRole)
-    ? linkedLicenseeIds
-    : Array.isArray(payload.linkedLicenseeIds)
-      ? payload.linkedLicenseeIds
-      : [];
+  const effectiveRole = u.role;
+  const databaseLicenseeId = String(u.licenseeId || "").trim() || null;
+  const databaseOrgId = String(u.orgId || "").trim() || null;
+  const tokenLicenseeId = String(payload.licenseeId || "").trim() || null;
+  const tokenOrgId = String(payload.orgId || "").trim() || null;
+
+  if (isPlatformRole(effectiveRole)) {
+    return { ...hydratedPayload, email: u.email || payload.email, role: effectiveRole, licenseeId: null, orgId: null, scopeVersion: null, linkedLicenseeIds: [] };
+  }
+
+  if (isLicenseeAdminRole(effectiveRole)) {
+    if (!databaseLicenseeId || !databaseOrgId) throw new Error("Account tenant scope is unavailable");
+    if ((tokenLicenseeId && tokenLicenseeId !== databaseLicenseeId) || (tokenOrgId && tokenOrgId !== databaseOrgId)) {
+      throw new Error("Account tenant scope changed");
+    }
+    return {
+      ...hydratedPayload,
+      email: u.email || payload.email,
+      role: effectiveRole,
+      licenseeId: databaseLicenseeId,
+      orgId: databaseOrgId,
+      scopeVersion: null,
+      linkedLicenseeIds: [],
+    };
+  }
+
+  if (isManufacturerRole(effectiveRole)) {
+    const selected = manufacturerScope?.selectedLicensee || null;
+    return {
+      ...hydratedPayload,
+      email: u.email || payload.email,
+      role: effectiveRole,
+      licenseeId: selected?.id || null,
+      orgId: selected?.orgId || null,
+      scopeVersion: selected?.scopeVersion || null,
+      linkedLicenseeIds: manufacturerScope?.linkedLicenseeIds || [],
+    };
+  }
 
   return {
-    ...payload,
+    ...hydratedPayload,
     email: u.email || payload.email,
     role: effectiveRole,
-    licenseeId: u?.licenseeId ?? payload.licenseeId ?? effectiveLinkedLicenseeIds?.[0] ?? null,
-    orgId: u?.orgId ?? payload.orgId ?? null,
-    linkedLicenseeIds: effectiveLinkedLicenseeIds.length ? effectiveLinkedLicenseeIds : payload.linkedLicenseeIds ?? null,
+    licenseeId: databaseLicenseeId,
+    orgId: databaseOrgId,
+    scopeVersion: null,
+    linkedLicenseeIds: [],
   };
 }
 
-const parseAnySessionToken = async (token: string): Promise<AuthenticatedSessionClaims> => {
+const parseAnySessionToken = async (token: string, capability: string | null, requestId: string): Promise<AuthenticatedSessionClaims> => {
   try {
     const decoded = verifyAccessToken(token);
-    return hydrateTenantIfNeeded(decoded);
+    return hydrateTenantIfNeeded(decoded, capability, requestId);
   } catch {
     const decoded = verifyMfaBootstrapToken(token);
     return hydrateTenantIfNeeded({
@@ -101,13 +168,14 @@ const parseAnySessionToken = async (token: string): Promise<AuthenticatedSession
       role: decoded.role,
       licenseeId: decoded.licenseeId ?? null,
       orgId: decoded.orgId ?? null,
+      scopeVersion: decoded.scopeVersion ?? null,
       linkedLicenseeIds: decoded.linkedLicenseeIds ?? null,
       sessionStage: "MFA_BOOTSTRAP",
       authAssurance: "PASSWORD",
       authenticatedAt: null,
       mfaVerifiedAt: null,
       sessionId: decoded.sessionId,
-    });
+    }, capability, requestId);
   }
 };
 
@@ -124,7 +192,8 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
 
   try {
     const decoded = verifyAccessToken(token);
-    req.user = await hydrateTenantIfNeeded(decoded);
+    req.databaseSessionCapability = getDatabaseSessionCapability(req, bearer);
+    req.user = await hydrateTenantIfNeeded(decoded, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
     return next();
   } catch {
@@ -139,7 +208,8 @@ export const authenticateAnySession = async (req: AuthRequest, res: Response, ne
   if (!token) return res.status(401).json({ success: false, error: "No token provided" });
 
   try {
-    req.user = await parseAnySessionToken(token);
+    req.databaseSessionCapability = getDatabaseSessionCapability(req, bearer);
+    req.user = await parseAnySessionToken(token, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
     return next();
   } catch {
@@ -155,7 +225,8 @@ export const optionalAuth = async (req: AuthRequest, _res: Response, next: NextF
 
   try {
     const decoded = verifyAccessToken(token);
-    req.user = await hydrateTenantIfNeeded(decoded);
+    req.databaseSessionCapability = getDatabaseSessionCapability(req, bearer);
+    req.user = await hydrateTenantIfNeeded(decoded, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
   } catch {
     // ignore
@@ -179,7 +250,8 @@ export const authenticateSSE = async (req: AuthRequest, res: Response, next: Nex
 
   try {
     const decoded = verifyAccessToken(token);
-    req.user = await hydrateTenantIfNeeded(decoded);
+    req.databaseSessionCapability = getDatabaseSessionCapability(req, headerToken || queryToken || null);
+    req.user = await hydrateTenantIfNeeded(decoded, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = queryToken ? "bearer" : headerToken ? "bearer" : "cookie";
     return next();
   } catch {
@@ -204,7 +276,7 @@ const stepUpRequired = (
     },
   });
 
-export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: NextFunction) => {
+export const requireRecentAdminMfa = async (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) {
     return res.status(401).json({ success: false, error: "Authentication required" });
   }
@@ -220,24 +292,45 @@ export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: Nex
     });
   }
 
-  const verifiedAt = req.user.mfaVerifiedAt ? new Date(req.user.mfaVerifiedAt) : null;
-  if (!verifiedAt || Number.isNaN(verifiedAt.getTime())) {
-    return stepUpRequired(res, {
-      message: "MFA verification is required before continuing.",
-      method: "ADMIN_MFA",
-    });
-  }
-
-  const maxAgeMs = getAdminStepUpWindowMinutes() * 60_000;
-  if (Date.now() - verifiedAt.getTime() > maxAgeMs) {
-    return stepUpRequired(res, {
-      message: "Your MFA verification is no longer fresh enough for this action. Confirm your authenticator code to continue.",
-      method: "ADMIN_MFA",
-    });
+  const maxAgeMinutes = getAdminStepUpWindowMinutes();
+  try {
+    await withDatabaseAuthenticatedSession(
+      req.user,
+      {
+        capability: String(req.databaseSessionCapability || ""),
+        requestId: requestIdFor(req),
+        purpose: "auth-recent-admin-mfa",
+      },
+      (tx, context) => {
+        if (context.authAssurance !== "mfa-verified" && context.authAssurance !== "step-up-verified") {
+          throw new RecentMfaDenial();
+        }
+        return requireRecentMfaSession({
+          sessionId: req.user!.sessionId || "",
+          checkedAt: new Date(),
+          maxAgeMinutes,
+        }, tx);
+      }
+    );
+  } catch (error) {
+    if (isCanonicalAuthDenial(error)) {
+      clearAuthCookies(res);
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
+    if (isRecentMfaDenial(error)) {
+      return stepUpRequired(res, {
+        message: "Your MFA verification is no longer fresh enough for this action. Confirm your authenticator code to continue.",
+        method: "ADMIN_MFA",
+      });
+    }
+    return next(error);
   }
 
   return next();
 };
+
+export const requireRecentAdminMfaForSetup = (req: AuthRequest, res: Response, next: NextFunction) =>
+  req.user?.sessionStage === "MFA_BOOTSTRAP" ? next() : requireRecentAdminMfa(req, res, next);
 
 export const requireRecentSensitiveAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) {

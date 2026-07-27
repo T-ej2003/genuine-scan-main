@@ -90,6 +90,12 @@ const fakePrisma = {
 };
 
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
+mockModule("rls-waves/session-b/b01/runtimeClients.js", { getB01PreAuthPrisma: () => ({}) });
+mockModule("rls-waves/session-b/b02/publicBoundaryRepository.js", {
+  PublicSignedTokenRejectedError: class PublicSignedTokenRejectedError extends Error {},
+  verifySignedQr: async () => { throw missingOwnershipError; },
+  verifyRawQr: async () => null,
+});
 mockModule("services/auditService.js", {
   createAuditLog: async () => ({ id: "audit-1" }),
   createAuditLogSafely: async () => ({ log: { id: "audit-1" }, persisted: true, queued: false, outboxId: null }),
@@ -220,7 +226,7 @@ const res = {
   assert.strictEqual(res.statusCode, 503, "production public scan should fail closed when ownership storage is unavailable");
   assert.strictEqual(res.body?.success, false, "strict degraded response should be unsuccessful");
   assert.strictEqual(res.body?.degraded, true, "strict degraded response should be marked degraded");
-  assert.strictEqual(res.body?.code, "PUBLIC_OWNERSHIP_UNAVAILABLE", "strict degraded response should expose the degraded code");
+  assert.strictEqual(res.body?.code, "PUBLIC_VERIFICATION_UNAVAILABLE", "strict degraded response should expose the stable boundary code");
 
   console.log("public scan strict fail-closed test passed");
 })().catch((error) => {

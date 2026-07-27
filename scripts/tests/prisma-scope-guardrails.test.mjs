@@ -8,6 +8,12 @@ import test from "node:test";
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const scanner = path.join(repoRoot, "scripts/check-prisma-scope-guardrails.mjs");
 
+test("Prisma scope scanner validates registered canonical transaction paths", () => {
+  const result = spawnSync(process.execPath, [scanner], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Prisma scope guardrails passed/);
+});
+
 test("Prisma scope scanner catches unsafe protected model access", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "scope-guardrail-"));
   const sample = path.join(tmp, "unsafe.ts");
@@ -58,8 +64,12 @@ test("Prisma scope scanner rejects broad or undocumented allowlist entries", () 
   }
 });
 
-test("auth bootstrap exception permits only User.findMany", () => {
+test("auth bootstrap uses the exact pre-auth repository without a Prisma exception", () => {
   const allowlist = JSON.parse(fs.readFileSync(path.join(repoRoot, "scripts/security-scope-allowlist.json"), "utf8"));
   const entry = allowlist.allowedFindings.find(({ path: file }) => file === "backend/src/services/auth/authBootstrapRepository.ts");
-  assert.deepEqual(entry && { model: entry.model, methods: entry.methods }, { model: "user", methods: ["findMany"] });
+  assert.equal(entry, undefined);
+  assert.match(
+    fs.readFileSync(path.join(repoRoot, "backend/src/services/auth/authBootstrapRepository.ts"), "utf8"),
+    /from "\.\.\/\.\.\/rls-waves\/session-b\/b01\/preAuthRepository"/
+  );
 });

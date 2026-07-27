@@ -1,27 +1,32 @@
-const { normalizeCode } = require("../dist/controllers/verify/shared");
-const fs = require("fs");
-const path = require("path");
+const assert = require("node:assert/strict");
+const { readFileSync } = require("node:fs");
+const path = require("node:path");
 
-const assert = (condition, message) => {
-  if (!condition) throw new Error(message);
-};
+const repository = readFileSync(path.join(__dirname,
+  "../src/rls-waves/session-b/b02/publicBoundaryRepository.ts"), "utf8");
+const sql = readFileSync(path.join(__dirname,
+  "../src/rls-waves/session-b/b02/publicVerificationFunctions.sql"), "utf8");
 
-const run = () => {
-  const publicCode = "c_AbCdEf123_-Exact";
-  assert(normalizeCode(` ${publicCode} `) === publicCode, "verify lookup code should trim only");
-  assert(normalizeCode("MSCQR-WIFI-DEMO-001-000010") === "MSCQR-WIFI-DEMO-001-000010", "display-like strings must not be shortened");
-  assert(normalizeCode("c_lower") !== "C_LOWER", "verify lookup must not uppercase public codes");
-  assert(normalizeCode("TBD0000000030") === "TBD0000000030", "TBD-looking values must not be remapped during public lookup");
+assert.match(repository, /SELECT \* FROM app_public\.verify_raw_qr/);
+assert.match(sql, /FROM public\."QRCode" q WHERE q\.code=p_requested_code/);
+const rawFunction = sql.slice(sql.indexOf("CREATE OR REPLACE FUNCTION app_public.verify_raw_qr"),
+  sql.indexOf("CREATE OR REPLACE FUNCTION app_public.verify_signed_qr"));
+const signedFunction = sql.slice(sql.indexOf("CREATE OR REPLACE FUNCTION app_public.verify_signed_qr"),
+  sql.indexOf("CREATE OR REPLACE FUNCTION app_public.record_qr_verification"));
+assert.doesNotMatch(rawFunction, /displayCode|serialNumber|labelSerial/);
+assert.match(sql, /p_requested_code<>btrim\(p_requested_code\)/);
+assert.doesNotMatch(sql, /lower\(p_requested_code\)|upper\(p_requested_code\)/);
+assert.match(rawFunction, /IF qr_id IS NULL THEN[\s\S]*pg_sleep\(0\.015 \+ random\(\)\*0\.010\)/);
+assert.doesNotMatch(signedFunction, /pg_sleep/);
+assert(
+  signedFunction.indexOf("set_config('app.public_verification_batch_id'") <
+    signedFunction.indexOf('FROM public."Batch" b WHERE b.id=qr."batchId"')
+);
+assert(rawFunction.indexOf("length(p_requested_code)>128") < rawFunction.indexOf("pg_sleep("));
 
-  const verifyHandlerSource = fs.readFileSync(path.join(__dirname, "../src/controllers/verify/verificationHandlers.ts"), "utf8");
-  const lookupBlock = verifyHandlerSource.slice(
-    verifyHandlerSource.indexOf("qrCode = await prisma.qRCode.findUnique"),
-    verifyHandlerSource.indexOf("if (!qrCode)")
-  );
-  assert(/where:\s*\{\s*code:\s*normalizedCode\s*\}/.test(lookupBlock), "public verify route must look up QRCode.code exactly");
-  assert(!/displayCode|serialNumber|labelSerial|humanSerial/.test(lookupBlock), "public verify route must not look up display or human serial fields");
+const executeFunction = sql.slice(sql.indexOf("CREATE OR REPLACE FUNCTION app_public.public_verify_execute"),
+  sql.indexOf("CREATE OR REPLACE FUNCTION app_public.verify_raw_qr"));
+assert.match(executeFunction, /scan_history_eligible:=classification IN \('FIRST_SCAN','LEGIT_REPEAT','SUSPICIOUS_DUPLICATE'\)/);
+assert.match(executeFunction, /IF scan_history_eligible THEN[\s\S]*INSERT INTO public\."QrScanLog"[\s\S]*UPDATE public\."QRCode"/);
 
-  console.log("public verify exact lookup tests passed");
-};
-
-run();
+console.log("public verification exact immutable-code lookup contract passed");

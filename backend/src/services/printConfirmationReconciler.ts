@@ -1,19 +1,14 @@
-import { PrintItemState, PrintJobStatus, PrintPipelineState, PrintSessionStatus } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 
-import prisma from "../config/database";
 import { logger } from "../utils/logger";
+import { reconcilePrintingLifecycle } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { resumePendingNetworkDirectJobs } from "./networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./networkIppPrintService";
-import { failStopPrintSession } from "./printLifecycleService";
 import { withDistributedLease } from "./distributedLeaseService";
 
 const RECONCILE_INTERVAL_MS = Math.max(
   5_000,
   Math.min(5 * 60_000, Number(process.env.PRINT_CONFIRMATION_RECONCILE_INTERVAL_MS || 15_000) || 15_000)
-);
-const ISSUED_WITHOUT_ACK_TIMEOUT_MS = Math.max(
-  10_000,
-  Math.min(30 * 60_000, Number(process.env.PRINT_ISSUED_WITHOUT_ACK_TIMEOUT_MS || 5 * 60_000) || 5 * 60_000)
 );
 let shutdownRequested = false;
 
@@ -35,117 +30,16 @@ const isShutdownStarted = () => {
 
 export const reconcileExpiredAcknowledgedItems = async () => {
   if (isShutdownStarted()) return;
-  const now = new Date();
-  const issuedAckCutoff = new Date(now.getTime() - ISSUED_WITHOUT_ACK_TIMEOUT_MS);
-  const expiredItems = await prisma.printItem.findMany({
-    where: {
-      OR: [
-        {
-          state: PrintItemState.AGENT_ACKED,
-          confirmationDeadlineAt: {
-            lte: now,
-          },
-        },
-        {
-          state: PrintItemState.ISSUED,
-          agentAckedAt: null,
-          OR: [
-            {
-              confirmationDeadlineAt: {
-                lte: now,
-              },
-            },
-            {
-              confirmationDeadlineAt: null,
-              issuedAt: {
-                lte: issuedAckCutoff,
-              },
-            },
-          ],
-        },
-      ],
-      printSession: {
-        is: {
-          status: PrintSessionStatus.ACTIVE,
-          printJob: {
-            status: {
-              in: [PrintJobStatus.PENDING, PrintJobStatus.SENT],
-            },
-          },
-        },
-      },
-    },
-    select: {
-      id: true,
-      code: true,
-      state: true,
-      issuedAt: true,
-      confirmationDeadlineAt: true,
-      printSessionId: true,
-      printSession: {
-        select: {
-          id: true,
-          printJob: {
-            select: {
-              id: true,
-              batchId: true,
-              manufacturerId: true,
-              batch: {
-                select: {
-                  licenseeId: true,
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-    orderBy: [{ confirmationDeadlineAt: "asc" }, { issueSequence: "asc" }],
-    take: 50,
+  await reconcilePrintingLifecycle({
+    operation: "EXPIRE_CONFIRMATIONS",
+    requestId: randomUUID(),
+    limit: 50,
   });
-
-  if (isShutdownStarted()) return;
-
-  const seenSessions = new Set<string>();
-  for (const item of expiredItems) {
-    if (isShutdownStarted()) return;
-    if (seenSessions.has(item.printSessionId)) continue;
-    seenSessions.add(item.printSessionId);
-
-    try {
-      await failStopPrintSession({
-        printSessionId: item.printSessionId,
-        printJobId: item.printSession.printJob.id,
-        batchId: item.printSession.printJob.batchId,
-        licenseeId: item.printSession.printJob.batch.licenseeId || null,
-        actorUserId: item.printSession.printJob.manufacturerId,
-        reason:
-          item.state === PrintItemState.ISSUED
-            ? `Printer agent did not acknowledge issued label ${item.code} before the deadline.`
-            : `Printer confirmation deadline expired for ${item.code}.`,
-        printItemId: item.id,
-        metadata: {
-          reconciliation: true,
-          source: "print_confirmation_reconciler",
-          itemState: item.state,
-          issuedAt: item.issuedAt?.toISOString?.() || null,
-          confirmationDeadlineAt: item.confirmationDeadlineAt?.toISOString?.() || null,
-        },
-      });
-      await prisma.printJob.update({
-        where: { id: item.printSession.printJob.id },
-        data: {
-          pipelineState: PrintPipelineState.NEEDS_OPERATOR_ACTION,
-        },
-      });
-    } catch (error: any) {
-      logger.error("Failed to reconcile expired acknowledged print item", {
-        printItemId: item.id,
-        printSessionId: item.printSessionId,
-        error: error?.message || error,
-      });
-    }
-  }
+  await reconcilePrintingLifecycle({
+    operation: "RECONCILE_BATCHES",
+    requestId: randomUUID(),
+    limit: 100,
+  });
 };
 
 export const runPrintConfirmationReconciliationCycle = async () => {

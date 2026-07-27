@@ -1,7 +1,6 @@
-import { PrinterTrustStatus } from "@prisma/client";
 import { createHash } from "crypto";
 
-import prisma from "../config/database";
+import { resolvePrintingConnectorIdentity } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import {
   buildPrinterAgentActionPayload,
   getPrinterAgentIssuedAtSkewSeconds,
@@ -9,7 +8,6 @@ import {
   verifyPrinterAgentPayloadSignature,
 } from "./printerAgentSigningService";
 import type { LocalAgentRequestPayload } from "./localAgentAckProtocolService";
-import { getPrinterConnectionStatusForRegistration } from "./printerConnectionService";
 
 const sha256Short = (value: string | null | undefined) =>
   String(value || "").trim() ? createHash("sha256").update(String(value || "").trim()).digest("hex").slice(0, 16) : null;
@@ -34,16 +32,15 @@ export const verifyLocalAgentRequest = async (
     });
   }
 
-  const registration = await prisma.printerRegistration.findFirst({
-    where: {
-      agentId: parsed.agentId,
-      deviceFingerprint: parsed.deviceFingerprint,
-      revokedAt: null,
-    },
-    orderBy: [{ lastSeenAt: "desc" }, { updatedAt: "desc" }],
-  });
+  const identity = await resolvePrintingConnectorIdentity({
+    kind: "LOCAL_AGENT",
+    agentId: parsed.agentId,
+    deviceFingerprint: parsed.deviceFingerprint,
+    printerSelector: parsed.printerId,
+  }).catch(() => null);
+  const registration = identity?.registration || null;
 
-  if (!registration || registration.trustStatus === PrinterTrustStatus.REVOKED) {
+  if (!registration) {
     logLocalAgentTrust("registration_rejected", {
       action,
       registrationFound: Boolean(registration),
@@ -53,7 +50,7 @@ export const verifyLocalAgentRequest = async (
       trusted: false,
       active: false,
       approved: false,
-      rejectReason: registration?.trustStatus === PrinterTrustStatus.REVOKED ? "registration_revoked" : "registration_missing",
+      rejectReason: "registration_missing",
     });
     throw Object.assign(new Error("Printer registration not trusted."), { statusCode: 401 });
   }
@@ -118,25 +115,35 @@ export const verifyLocalAgentRequest = async (
       claimSignatureVerified: true,
       readinessSkipped: true,
     });
-    return registration;
+    return { ...registration, resolvedPrinterId: identity.printer?.id || null };
   }
 
-  const printerStatus = await getPrinterConnectionStatusForRegistration(registration.id);
+  const printerStatus = {
+    ...identity.printer,
+    registrationId: registration.id,
+    agentId: registration.agentId,
+    deviceFingerprint: registration.deviceFingerprint,
+    selectedPrinterId: identity.printer?.id || identity.printer?.nativePrinterId || null,
+    printerId: identity.printer?.id || null,
+    eligibleForPrinting: identity.eligibleForPrinting === true,
+    trusted: true,
+    compatibilityMode: false,
+    stale: false,
+    connected: true,
+    trustStatus: registration.trustStatus,
+    ageSeconds: registration.lastSeenAt
+      ? Math.max(0, Math.floor((Date.now() - new Date(registration.lastSeenAt).getTime()) / 1000))
+      : null,
+    missingFields: [],
+  };
   const activePrinterId = String(printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
   const requestedPrinterId = String(parsed.printerId || "").trim();
-  const requestedBackendPrinter =
-    requestedPrinterId && activePrinterId && requestedPrinterId !== activePrinterId
-      ? await prisma.printer.findFirst({
-          where: {
-            id: requestedPrinterId,
-            printerRegistrationId: registration.id,
-            nativePrinterId: activePrinterId,
-            isActive: true,
-          },
-          select: { id: true },
-        })
-      : null;
-  const selectedPrinterMatch = Boolean(!requestedPrinterId || activePrinterId === requestedPrinterId || requestedBackendPrinter);
+  const selectedPrinterMatch = Boolean(
+    !requestedPrinterId ||
+    activePrinterId === requestedPrinterId ||
+    identity.printer?.id === requestedPrinterId ||
+    identity.printer?.nativePrinterId === requestedPrinterId
+  );
   const readyForThisConnector =
     printerStatus.eligibleForPrinting === true &&
     printerStatus.trusted === true &&
@@ -158,7 +165,7 @@ export const verifyLocalAgentRequest = async (
       heartbeatAgeSeconds: printerStatus.ageSeconds ?? null,
       trusted: printerStatus.trusted === true,
       active: printerStatus.connected === true,
-      approved: Boolean(registration.approvedAt || registration.trustStatus === PrinterTrustStatus.TRUSTED),
+      approved: Boolean(registration.approvedAt || registration.trustStatus === "TRUSTED"),
       selectedPrinterMatch,
       claimSignatureVerified: true,
       rejectReason: "trusted_readiness_mismatch",
@@ -182,11 +189,11 @@ export const verifyLocalAgentRequest = async (
     heartbeatAgeSeconds: printerStatus.ageSeconds ?? null,
     trusted: true,
     active: true,
-    approved: Boolean(registration.approvedAt || registration.trustStatus === PrinterTrustStatus.TRUSTED),
+    approved: Boolean(registration.approvedAt || registration.trustStatus === "TRUSTED"),
     selectedPrinterMatch: true,
     claimSignatureVerified: true,
     rejectReason: null,
   });
 
-  return registration;
+  return { ...registration, resolvedPrinterId: identity.printer?.id || null };
 };

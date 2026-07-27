@@ -17,18 +17,14 @@ export const DATABASE = "mscqr_staging";
 export const ROLES = {
   app: "mscqr_staging_app",
   migrator: "mscqr_staging_migrator",
-  rlsRead: "mscqr_staging_rls_read",
 };
 export const SECRETS = {
   app: "mscqr/staging/database-url/app",
   migrator: "mscqr/staging/database-url/migrator",
-  rlsRead: "mscqr/staging/database-url/rls-read",
 };
-export const RLS_READ_TABLES = ["Organization", "Licensee", "User", "ManufacturerLicenseeLink", "Batch", "InventoryStatusRollup", "QRCode", "PrintJob", "PrintSession", "PrintItem", "PrinterRegistration", "Printer", "PrinterAttestation", "PrinterAgentSession", "PrinterProfile", "PrinterProfileSnapshot"];
 export const DENIALS = {
   app: ["create-role", "create-schema", "alter-table", "set-owner"],
   migrator: ["create-role"],
-  rlsRead: ["insert", "update", "create-table", "outside-graph"],
 };
 const PROBE_SUFFIX = crypto.randomUUID().replaceAll("-", "");
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
@@ -55,7 +51,21 @@ const secretUrl = (raw) => {
     return typeof parsed === "string" ? parsed : parsed.DATABASE_URL || parsed.databaseUrl || parsed.url;
   } catch { return raw; }
 };
+
+export const BLUE_EXECUTOR_MODES = Object.freeze([
+  "probe", "provision", "verify",
+]);
+
+export function assertBlueExecutorModeAllowed(mode = MODE) {
+  if (typeof mode === "string" && mode.startsWith("full-rls-")) {
+    throw new Error("Full-RLS execution is disabled on the blue staging executor; use a separately reviewed green executor.");
+  }
+  if (!BLUE_EXECUTOR_MODES.includes(mode)) throw new Error("Mode is outside the reviewed blue executor set.");
+  return true;
+}
+
 const client = (url) => new PrismaClient({ datasources: { db: { url } }, log: [] });
+
 const password = () => crypto.randomBytes(48).toString("base64url");
 const roleUrl = (adminUrl, username, generatedPassword) => {
   const url = new URL(adminUrl);
@@ -65,13 +75,12 @@ const roleUrl = (adminUrl, username, generatedPassword) => {
   url.searchParams.set("sslmode", "require");
   return url.toString();
 };
-const roleTag = (key) => key === "rlsRead" ? "rls-read" : key;
 const secretTags = (key) => [
   { Key: "Environment", Value: "staging" },
   { Key: "Application", Value: "mscqr" },
   { Key: "Purpose", Value: "database-role-credential" },
   { Key: "ManagedBy", Value: "manual-reviewed-script" },
-  { Key: "Role", Value: roleTag(key) },
+  { Key: "Role", Value: key },
 ];
 
 async function metadata(key) {
@@ -172,10 +181,6 @@ export async function verifyCredentials(urls, { clientFactory = client } = {}) {
         }).catch((error) => { if (!error.verificationRollback) throw error; });
         tests.push({ label: "set-owner-ddl-rollback", result: "passed" });
         tests.push(await expectDenied("create-role", `CREATE ROLE mscqr_forbidden_${PROBE_SUFFIX}`, true));
-      } else {
-        for (const table of RLS_READ_TABLES) await db.$queryRawUnsafe(`SELECT 1 FROM "${table}" LIMIT 1`);
-        tests.push({ label: "complete-16-table-read-graph", result: "passed", tableCount: RLS_READ_TABLES.length });
-        for (const [label, sql, mutating] of [["insert", 'INSERT INTO "User" DEFAULT VALUES', true], ["update", 'UPDATE "User" SET id=id WHERE false', true], ["create-table", `CREATE TABLE mscqr_forbidden_${PROBE_SUFFIX}(id integer)`, true], ["outside-graph", 'SELECT 1 FROM "AuditLog" LIMIT 1', false]]) tests.push(await expectDenied(label, sql, mutating));
       }
       results.push({ role: ROLES[key], identity: "passed", permissionTests: tests });
     } finally { await db.$disconnect(); }
@@ -194,10 +199,6 @@ export function assertCompleteVerification(results) {
     for (const label of DENIALS[key]) if (!labels.has(label) || result.permissionTests.find((test) => test.label === label)?.result !== "permission-denied") throw new Error(`Missing expected denial ${key}/${label}.`);
     if (key === "app" && !labels.has("required-crud-rollback")) throw new Error("App CRUD proof is incomplete.");
     if (key === "migrator" && !labels.has("set-owner-ddl-rollback")) throw new Error("Migrator owner-role proof is incomplete.");
-    if (key === "rlsRead") {
-      const graph = result.permissionTests.find((test) => test.label === "complete-16-table-read-graph");
-      if (graph?.tableCount !== RLS_READ_TABLES.length) throw new Error("RLS-read graph proof is incomplete.");
-    }
   }
   if (byRole.size !== Object.keys(ROLES).length) throw new Error("Permission matrix contains unexpected or duplicate roles.");
   return true;
@@ -211,11 +212,6 @@ export async function databaseInvariants(admin) {
   const value = rows[0] || {};
   if (value.database_name !== DATABASE || Number(value.rls_enabled_count) !== 0 || Number(value.force_rls_count) !== 0 || Number(value.policy_count) !== 0) throw new Error("Database/RLS invariants failed.");
   return { databaseName: value.database_name, rlsEnabledCount: 0, forceRlsCount: 0, policyCount: 0 };
-}
-
-export function assertRouteFlagsFalse(env = process.env) {
-  for (const name of ["MSCQR_STAGING_RLS_BATCHES_READ_ENABLED", "MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED", "MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED"]) if (env[name] !== "false") throw new Error(`${name} must remain explicitly false.`);
-  return true;
 }
 
 async function createPlaceholder(key) {
@@ -275,17 +271,21 @@ async function compensate(admin, provisionMode, previousUrls, pending, before) {
     if (firstTime) {
       await ensureAllPlaceholders();
       const retryState = await Promise.all(Object.keys(ROLES).map(async (key) => isPlaceholder(key, await metadata(key))));
-      if (!retryState.every(Boolean)) throw new Error("First-time compensation did not reach the three-placeholder retry state.");
+      if (!retryState.every(Boolean)) throw new Error("First-time compensation did not reach the two-placeholder retry state.");
     }
     return recoveryRequired ? "operator_recovery_required" : "restored";
   } catch { recoveryRequired = true; return "operator_recovery_required"; }
   finally { compensating = false; }
 }
 
-export async function executeExecutor() {
-  if (!process.env.DATABASE_URL) throw new Error("Admin DATABASE_URL is unavailable inside the VPC executor.");
-  const adminUrl = process.env.DATABASE_URL;
-  const admin = client(adminUrl);
+export async function executeExecutor({
+  env = process.env,
+  clientFactory = client,
+} = {}) {
+  assertBlueExecutorModeAllowed(MODE);
+  if (!env.DATABASE_URL) throw new Error("Admin DATABASE_URL is unavailable inside the VPC executor.");
+  const adminUrl = env.DATABASE_URL;
+  const admin = clientFactory(adminUrl);
   const before = {};
   const previousUrls = {};
   const pending = {};
@@ -302,10 +302,9 @@ export async function executeExecutor() {
     if (provisionMode === "rotation" && Object.values(before).some((item) => !item.currentVersionId)) throw Object.assign(new Error("Rotation requires one captured AWSCURRENT version for every target secret."), { code: "MISSING_CURRENT_VERSION" });
     safe({ status: MODE === "probe" ? "probe_passed" : "executor_started", mechanism: "disposable-ecs-admin-task", database: DATABASE, databaseUser: "mscqr_staging_admin", mode: provisionMode, secretMetadata: Object.fromEntries(Object.entries(before).map(([key, item]) => [key, { exists: item.exists, currentVersionId: item.currentVersionId, versionIds: item.versionIds }])) });
     if (MODE === "probe") return;
-    assertRouteFlagsFalse();
     const invariants = await databaseInvariants(admin);
     if (MODE === "verify") {
-      if (provisionMode !== "rotation") throw new Error("Verify requires three provisioned AWSCURRENT credential secrets.");
+      if (provisionMode !== "rotation") throw new Error("Verify requires two provisioned AWSCURRENT credential secrets.");
       const currentUrls = {};
       for (const key of Object.keys(ROLES)) {
         currentUrls[key] = await currentUrl(key, before[key]);
@@ -315,7 +314,7 @@ export async function executeExecutor() {
       const verification = await verifyCredentials(currentUrls);
       interruptionCheckpoint();
       assertCompleteVerification(verification);
-      safe({ status: "verification_complete", phase: "complete", invariants, routeFlags: "all-false", verification });
+      safe({ status: "verification_complete", phase: "complete", invariants, verification });
       return;
     }
     if (MODE !== "provision") throw new Error("Executor mode must be probe, provision, or verify.");
@@ -364,7 +363,14 @@ export async function executeExecutor() {
   } catch (error) {
     let rollbackResult = "not_required";
     if (MODE === "provision" && !compensating && ["normalize-placeholders", "password-transaction", "pending-versions", "role-verification", "promote-versions"].includes(phase)) rollbackResult = await compensate(admin, provisionMode, previousUrls, pending, before);
-    safe({ status: "blocked", phase, failureClassification: error.code || error.name || "EXECUTOR_FAILURE", rollbackResult, recoveryRequired: rollbackResult === "operator_recovery_required" });
+    safe({
+      status: "blocked",
+      phase,
+      failureClassification: error.code || error.name || "EXECUTOR_FAILURE",
+      ...(error.safeReason ? { failureReason: error.safeReason } : {}),
+      rollbackResult,
+      recoveryRequired: rollbackResult === "operator_recovery_required",
+    });
     process.exitCode = 2;
   } finally { await admin.$disconnect(); }
 }

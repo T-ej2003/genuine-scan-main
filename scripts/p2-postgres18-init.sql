@@ -1,0 +1,7 @@
+CREATE ROLE "certification-administrator"
+  LOGIN
+  NOSUPERUSER
+  CREATEDB
+  CREATEROLE
+  NOINHERIT
+  NOBYPASSRLS;

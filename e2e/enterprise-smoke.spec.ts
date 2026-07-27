@@ -1,6 +1,13 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import printerAgentSigningService from "../backend/dist/services/printerAgentSigningService.js";
+
+const {
+  buildPrinterAgentHeartbeatPayload,
+  signPrinterAgentPayload,
+} = printerAgentSigningService;
 
 const env = {
   superAdminEmail: String(process.env.E2E_SUPERADMIN_EMAIL || "").trim(),
@@ -13,6 +20,10 @@ const env = {
     .split(",")
     .map((code) => code.trim())
     .filter(Boolean),
+  licenseeMfaBackupCodes: String(process.env.E2E_LICENSEE_ADMIN_MFA_BACKUP_CODES || "")
+    .split(",").map((code) => code.trim()).filter(Boolean),
+  superAdminMfaBackupCodes: String(process.env.E2E_SUPERADMIN_MFA_BACKUP_CODES || "")
+    .split(",").map((code) => code.trim()).filter(Boolean),
   licenseeBatchQuery: String(process.env.E2E_LICENSEE_BATCH_QUERY || "").trim(),
   assignManufacturerName: String(process.env.E2E_ASSIGN_MANUFACTURER_NAME || "").trim(),
   assignQuantity: String(process.env.E2E_ASSIGN_QUANTITY || "1").trim(),
@@ -92,60 +103,6 @@ const goto = async (page: Page, path: string) => {
 const backupCodeForRetry = (codes: string[], testInfo: TestInfo) =>
   codes[Math.min(testInfo.retry, Math.max(codes.length - 1, 0))] || "";
 
-const completeMfaWithBackupCode = async (page: Page, backupCode: string) => {
-  const result = await page.evaluate(async (code) => {
-    const readCookie = (name: string) => {
-      const prefix = `${name}=`;
-      return document.cookie
-        .split(";")
-        .map((part) => part.trim())
-        .find((part) => part.startsWith(prefix))
-        ?.slice(prefix.length) || "";
-    };
-    const csrf = decodeURIComponent(readCookie("aq_csrf"));
-    const headers = {
-      "content-type": "application/json",
-      "x-csrf-token": csrf,
-      "x-idempotency-key": crypto.randomUUID(),
-    };
-    const beginResponse = await fetch("/api/auth/mfa/challenge/begin", {
-      method: "POST",
-      credentials: "include",
-      headers,
-    });
-    const beginPayload = await beginResponse.json().catch(() => null);
-    if (!beginResponse.ok || !beginPayload?.success || !beginPayload?.data?.ticket) {
-      return {
-        success: false,
-        status: beginResponse.status,
-        error: beginPayload?.error || "Could not start MFA challenge.",
-      };
-    }
-
-    const completeResponse = await fetch("/api/auth/mfa/challenge/complete", {
-      method: "POST",
-      credentials: "include",
-      headers: { ...headers, "x-idempotency-key": crypto.randomUUID() },
-      body: JSON.stringify({
-        ticket: beginPayload.data.ticket,
-        method: "backup_code",
-        code,
-      }),
-    });
-    const completePayload = await completeResponse.json().catch(() => null);
-    return {
-      success: Boolean(completeResponse.ok && completePayload?.success && completePayload?.data?.user),
-      status: completeResponse.status,
-      error: completePayload?.error || null,
-      sessionStage: completePayload?.data?.auth?.sessionStage || null,
-    };
-  }, backupCode);
-
-  if (!result.success || result.sessionStage !== "ACTIVE") {
-    throw new Error(`Manufacturer MFA backup-code completion failed: HTTP ${result.status} ${result.error || "unknown error"}`);
-  }
-};
-
 const login = async (page: Page, email: string, password: string, options: { mfaBackupCode?: string } = {}) => {
   await goto(page, "/login");
   await page.locator("#email").fill(email);
@@ -153,10 +110,35 @@ const login = async (page: Page, email: string, password: string, options: { mfa
   await page.getByRole("button", { name: /^sign in$/i }).click();
 
   if (options.mfaBackupCode) {
-    const backupTab = page.getByRole("button", { name: /^backup code$/i });
-    await expect(backupTab).toBeVisible({ timeout: 15_000 });
-    await completeMfaWithBackupCode(page, options.mfaBackupCode);
-    await goto(page, "/dashboard");
+    await page.waitForFunction(
+      () => window.location.pathname !== "/login"
+        || Array.from(document.querySelectorAll("button")).some((button) => /^backup code$/i.test(button.textContent?.trim() || "")),
+      undefined,
+      { timeout: 15_000 }
+    );
+    if (new URL(page.url()).pathname !== "/login") {
+      await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
+      return;
+    }
+    const backupCodeButton = page.getByRole("button", { name: /^backup code$/i });
+    const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
+    if (await backupCodeButton.isVisible()) {
+      if (await stepUpDialog.isVisible()) {
+        await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
+        await page.locator("#step-up-mfa-backup-code").fill(options.mfaBackupCode);
+        await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
+        await expect(stepUpDialog).toBeHidden({ timeout: 15_000 });
+        await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
+        return;
+      }
+      await backupCodeButton.click();
+      await page.locator("#mfa-backup-code").fill(options.mfaBackupCode);
+      await page.getByRole("button", { name: /^open secure session$/i }).click();
+      await expect(page).toHaveURL(/\/dashboard$/, { timeout: 20_000 });
+      await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
+      return;
+    }
+    await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
     return;
   }
 
@@ -168,14 +150,54 @@ const login = async (page: Page, email: string, password: string, options: { mfa
   await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
 };
 
+const closeAutoDetectedIssue = async (page: Page) => {
+  const dialog = page.getByRole("dialog").filter({ hasText: "Auto-detected issue" }).first();
+  if (!(await dialog.isVisible())) return false;
+  await dialog.getByRole("button", { name: /^cancel$/i }).click();
+  await expect(dialog).toBeHidden();
+  return true;
+};
+
+const clickWithAutoDetectedIssueRetry = async (page: Page, target: Locator) => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await closeAutoDetectedIssue(page);
+    try {
+      await target.click({ timeout: 5_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (await closeAutoDetectedIssue(page)) continue;
+      const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
+      if (!(await stepUpDialog.isVisible())) throw error;
+      await stepUpDialog.getByRole("button", { name: /^cancel$/i }).click();
+    }
+  }
+  throw lastError;
+};
+
 const selectRadixOption = async (page: Page, triggerTestId: string, optionLabel: string) => {
-  await page.getByTestId(triggerTestId).click();
-  const option = page
-    .locator('[role="option"]')
-    .filter({ hasText: new RegExp(escapeRegExp(optionLabel), "i") })
-    .first();
-  await expect(option).toBeVisible();
-  await option.click();
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await closeAutoDetectedIssue(page);
+    try {
+      await page.getByTestId(triggerTestId).click({ timeout: 5_000 });
+      const option = page
+        .locator('[role="option"]')
+        .filter({ hasText: new RegExp(escapeRegExp(optionLabel), "i") })
+        .first();
+      await expect(option).toBeVisible({ timeout: 5_000 });
+      await option.click({ timeout: 5_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (await closeAutoDetectedIssue(page)) continue;
+      const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
+      if (!(await stepUpDialog.isVisible())) throw error;
+      await stepUpDialog.getByRole("button", { name: /^cancel$/i }).click();
+    }
+  }
+  throw lastError;
 };
 
 const closeTransientDialogs = async (page: Page) => {
@@ -183,45 +205,73 @@ const closeTransientDialogs = async (page: Page) => {
   await expect(page.locator('[role="dialog"]')).toHaveCount(0, { timeout: 5_000 }).catch(() => undefined);
 };
 
-const buildE2EPrinterPayload = () => ({
-  connected: true,
-  printerName: env.printerProfileName || "E2E Local Agent Printer",
-  printerId: "e2e-local-printer",
-  selectedPrinterId: "e2e-local-printer",
-  selectedPrinterName: env.printerProfileName || "E2E Local Agent Printer",
-  deviceName: "E2E Print Workstation",
-  agentVersion: "e2e-ci",
-  protocolVersion: E2E_LOCAL_AGENT_PROTOCOL_VERSION,
-  buildVersion: E2E_LOCAL_AGENT_BUILD_VERSION,
-  transportDiagnosticsVersion: E2E_TRANSPORT_DIAGNOSTICS_VERSION,
-  capabilities: E2E_LOCAL_AGENT_CAPABILITIES,
-  agentId: "e2e-agent",
-  deviceFingerprint: "e2e-device-fingerprint",
-  printers: [
-    {
+const e2ePrinterKeys = generateKeyPairSync("ed25519");
+const e2ePrinterIdentity = {
+  agentId: `e2e-agent-${randomUUID()}`,
+  deviceFingerprint: `e2e-device-${randomUUID()}`,
+  publicKeyPem: e2ePrinterKeys.publicKey.export({ type: "spki", format: "pem" }).toString(),
+  privateKeyPem: e2ePrinterKeys.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+};
+
+const buildE2EPrinterPayload = () => {
+  const heartbeatNonce = `e2e-heartbeat-${randomUUID()}`;
+  const heartbeatIssuedAt = new Date().toISOString();
+  const heartbeatSignature = signPrinterAgentPayload(
+    e2ePrinterIdentity.privateKeyPem,
+    buildPrinterAgentHeartbeatPayload({
+      userId: "manufacturer-browser-heartbeat",
+      agentId: e2ePrinterIdentity.agentId,
+      deviceFingerprint: e2ePrinterIdentity.deviceFingerprint,
       printerId: "e2e-local-printer",
-      printerName: env.printerProfileName || "E2E Local Agent Printer",
-      model: "E2E Driver Queue",
-      connection: "LOCAL_AGENT",
-      online: true,
-      isDefault: true,
-      commandLanguage: "PDF",
+      connected: true,
+      heartbeatNonce,
+      heartbeatIssuedAt,
+    })
+  );
+  return {
+    connected: true,
+    printerName: env.printerProfileName || "E2E Local Agent Printer",
+    printerId: "e2e-local-printer",
+    selectedPrinterId: "e2e-local-printer",
+    selectedPrinterName: env.printerProfileName || "E2E Local Agent Printer",
+    deviceName: "E2E Print Workstation",
+    agentVersion: "e2e-ci",
+    protocolVersion: E2E_LOCAL_AGENT_PROTOCOL_VERSION,
+    buildVersion: E2E_LOCAL_AGENT_BUILD_VERSION,
+    transportDiagnosticsVersion: E2E_TRANSPORT_DIAGNOSTICS_VERSION,
+    capabilities: E2E_LOCAL_AGENT_CAPABILITIES,
+    agentId: e2ePrinterIdentity.agentId,
+    deviceFingerprint: e2ePrinterIdentity.deviceFingerprint,
+    publicKeyPem: e2ePrinterIdentity.publicKeyPem,
+    heartbeatNonce,
+    heartbeatIssuedAt,
+    heartbeatSignature,
+    printers: [
+      {
+        printerId: "e2e-local-printer",
+        printerName: env.printerProfileName || "E2E Local Agent Printer",
+        model: "E2E Driver Queue",
+        connection: "LOCAL_AGENT",
+        online: true,
+        isDefault: true,
+        commandLanguage: "ZPL",
+        protocols: ["DRIVER_QUEUE"],
+        languages: ["ZPL"],
+        mediaSizes: ["50x30mm"],
+        dpi: 203,
+      },
+    ],
+    capabilitySummary: {
+      transports: ["LOCAL_AGENT"],
       protocols: ["DRIVER_QUEUE"],
-      languages: ["PDF"],
+      languages: ["ZPL"],
+      supportsRaster: true,
+      supportsPdf: true,
+      dpiOptions: [203],
       mediaSizes: ["50x30mm"],
-      dpi: 203,
     },
-  ],
-  capabilitySummary: {
-    transports: ["LOCAL_AGENT"],
-    protocols: ["DRIVER_QUEUE"],
-    languages: ["PDF"],
-    supportsRaster: true,
-    supportsPdf: true,
-    dpiOptions: [203],
-    mediaSizes: ["50x30mm"],
-  },
-});
+  };
+};
 
 const installLocalPrintAgentMock = async (page: Page) => {
   const printerPayload = buildE2EPrinterPayload();
@@ -267,16 +317,41 @@ const refreshE2EPrinterHeartbeat = async (page: Page) => {
       return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
     };
 
-    const heartbeat = await fetch("/api/manufacturer/printer-agent/heartbeat", {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "content-type": "application/json",
-        "x-csrf-token": readCookie("aq_csrf"),
-      },
-      body: JSON.stringify(payload),
-    });
-    const heartbeatBody = await heartbeat.json().catch(() => null);
+    const heartbeatRequest = () =>
+      fetch("/api/manufacturer/printer-agent/heartbeat", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": readCookie("aq_csrf"),
+          "x-idempotency-key": crypto.randomUUID(),
+        },
+        body: JSON.stringify(payload),
+      });
+    let heartbeat = await heartbeatRequest();
+    let heartbeatBody = await heartbeat.json().catch(() => null);
+    if (heartbeat.status === 401) {
+      const refreshed = await fetch("/api/auth/refresh", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": readCookie("aq_csrf"),
+          "x-idempotency-key": crypto.randomUUID(),
+        },
+        body: "{}",
+      });
+      if (!refreshed.ok) {
+        return {
+          ok: false,
+          phase: "auth-refresh",
+          status: refreshed.status,
+          body: await refreshed.json().catch(() => null),
+        };
+      }
+      heartbeat = await heartbeatRequest();
+      heartbeatBody = await heartbeat.json().catch(() => null);
+    }
     if (!heartbeat.ok || !heartbeatBody?.success) {
       return {
         ok: false,
@@ -342,16 +417,20 @@ test.describe.serial("Enterprise smoke flows", () => {
     await expect(page.locator("main")).toBeVisible();
   });
 
-  test("licensee admin can allocate quantity from the batch workspace", async ({ page }) => {
+  test("licensee admin can allocate quantity from the batch workspace", async ({ page }, testInfo) => {
     requireEnterpriseEnv(
       ["E2E_LICENSEE_ADMIN_EMAIL", env.licenseeAdminEmail],
       ["E2E_LICENSEE_ADMIN_PASSWORD", env.licenseeAdminPassword],
+      ["E2E_LICENSEE_ADMIN_MFA_BACKUP_CODES", env.licenseeMfaBackupCodes.join(",")],
       ["E2E_LICENSEE_BATCH_QUERY", env.licenseeBatchQuery],
       ["E2E_ASSIGN_MANUFACTURER_NAME", env.assignManufacturerName],
       ["E2E_ASSIGN_QUANTITY", env.assignQuantity]
     );
+    requireEnterpriseCondition(env.licenseeMfaBackupCodes.length >= 2, "Licensee assignment requires two backup codes.");
 
-    await login(page, env.licenseeAdminEmail, env.licenseeAdminPassword);
+    await login(page, env.licenseeAdminEmail, env.licenseeAdminPassword, {
+      mfaBackupCode: backupCodeForRetry(env.licenseeMfaBackupCodes, testInfo),
+    });
     await goto(page, "/batches");
 
     await expect(page.getByTestId("batches-search-input")).toBeVisible({ timeout: 30_000 });
@@ -361,11 +440,23 @@ test.describe.serial("Enterprise smoke flows", () => {
     await openButtons.first().click();
 
     await expect(page.getByTestId("batch-workspace-dialog")).toBeVisible();
-    await page.getByTestId("batch-workspace-tab-operations").click();
+    await clickWithAutoDetectedIssueRetry(page, page.getByTestId("batch-workspace-tab-operations"));
     await selectRadixOption(page, "batch-workspace-manufacturer-select", env.assignManufacturerName);
-    await page.getByTestId("batch-workspace-assign-quantity").fill(env.assignQuantity);
-    await page.getByTestId("batch-workspace-assign-submit").click();
-    await expect(page.getByTestId("batch-workspace-assign-quantity")).toHaveValue("");
+    const quantityInput = page.getByTestId("batch-workspace-assign-quantity");
+    await quantityInput.fill(env.assignQuantity);
+    await clickWithAutoDetectedIssueRetry(page, page.getByTestId("batch-workspace-assign-submit"));
+    const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
+    await expect
+      .poll(async () => (await stepUpDialog.isVisible()) || (await quantityInput.inputValue()) === "")
+      .toBe(true);
+    if (await stepUpDialog.isVisible()) {
+      await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
+      await page.locator("#step-up-mfa-backup-code").fill(env.licenseeMfaBackupCodes[1]);
+      await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
+      await expect(stepUpDialog).toBeHidden();
+      await clickWithAutoDetectedIssueRetry(page, page.getByTestId("batch-workspace-assign-submit"));
+    }
+    await expect(quantityInput).toHaveValue("");
   });
 
   test("manufacturer can start a print job from the controlled print dialog", async ({ page }, testInfo) => {
@@ -396,19 +487,31 @@ test.describe.serial("Enterprise smoke flows", () => {
 
     await expect(page.getByTestId("create-print-job-dialog")).toBeVisible();
     await page.getByTestId("print-job-quantity-input").fill(env.printQuantity);
-    await expect(page.getByTestId("print-job-printer-profile")).toBeVisible({ timeout: 30_000 });
-    await selectRadixOption(page, "print-job-printer-profile", env.printerProfileName);
     const readiness = await refreshE2EPrinterHeartbeat(page);
+    const printerProfile = page.getByTestId("print-job-printer-profile");
+    if (!(await printerProfile.isVisible().catch(() => false))) {
+      await clickWithAutoDetectedIssueRetry(page, page.getByRole("button", { name: /refresh printers/i }));
+    }
+    await expect(printerProfile).toBeVisible({ timeout: 30_000 });
+    await selectRadixOption(page, "print-job-printer-profile", env.printerProfileName);
     const printDialog = page.getByTestId("create-print-job-dialog");
     const startButton = page.getByTestId("print-job-start-button");
     if (readiness.productionReady) {
       await expect(printDialog).toContainText(/Printer ready/, { timeout: 30_000 });
+      const relinkButton = page.getByRole("button", { name: /relink saved printer/i });
+      if (await relinkButton.isVisible().catch(() => false)) {
+        await relinkButton.click();
+        await expect(relinkButton).toBeHidden({ timeout: 30_000 });
+      }
       await expect(startButton).toBeEnabled({ timeout: 30_000 });
       await startButton.click();
 
-      await expect(printDialog).toContainText(
-        /Current print job|Preparing secure payload|Printed confirmation pending|Print did not start|Recent print jobs/
-      );
+      await expect(printDialog).toBeHidden({ timeout: 30_000 });
+      await expect(
+        page.getByRole("heading", {
+          name: /Printing in progress|Print did not start|Print needs attention|Print completed/,
+        })
+      ).toBeVisible({ timeout: 30_000 });
       return;
     }
 
@@ -454,17 +557,21 @@ test.describe.serial("Enterprise smoke flows", () => {
     expect(capturedSupportTicketReference).not.toBe("");
   });
 
-  test("super admin can move the follow-up ticket and add a support note", async ({ page }) => {
+  test("super admin can move the follow-up ticket and add a support note", async ({ page }, testInfo) => {
     requireEnterpriseEnv(
       ["E2E_SUPERADMIN_EMAIL", env.superAdminEmail],
-      ["E2E_SUPERADMIN_PASSWORD", env.superAdminPassword]
+      ["E2E_SUPERADMIN_PASSWORD", env.superAdminPassword],
+      ["E2E_SUPERADMIN_MFA_BACKUP_CODES", env.superAdminMfaBackupCodes.join(",")]
     );
     requireEnterpriseCondition(
       Boolean(capturedSupportTicketReference),
       "Public verify flow did not capture a support reference."
     );
+    requireEnterpriseCondition(env.superAdminMfaBackupCodes.length >= 2, "Support updates require two backup codes.");
 
-    await login(page, env.superAdminEmail, env.superAdminPassword);
+    await login(page, env.superAdminEmail, env.superAdminPassword, {
+      mfaBackupCode: backupCodeForRetry(env.superAdminMfaBackupCodes, testInfo),
+    });
     await goto(page, "/support");
 
     await page.getByTestId("support-search-input").fill(capturedSupportTicketReference);
@@ -475,11 +582,32 @@ test.describe.serial("Enterprise smoke flows", () => {
     await ticketRows.first().click();
 
     await selectRadixOption(page, "support-ticket-status", "In Progress");
+    const waitForTicketSave = () =>
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" && /\/api\/support\/tickets\/[^/]+$/.test(response.url())
+      );
+    const initialSaveResponse = waitForTicketSave();
     await page.getByTestId("support-ticket-save").click();
+    const saveResponse = await initialSaveResponse;
+    if (saveResponse.status() === 428) {
+      const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
+      await expect(stepUpDialog).toBeVisible();
+      await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
+      await page.locator("#step-up-mfa-backup-code").fill(env.superAdminMfaBackupCodes[1]);
+      await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
+      await expect(stepUpDialog).toBeHidden();
+      const retriedSaveResponse = waitForTicketSave();
+      await page.getByTestId("support-ticket-save").click();
+      expect((await retriedSaveResponse).ok()).toBe(true);
+    } else {
+      expect(saveResponse.ok()).toBe(true);
+    }
 
     const note = `Playwright smoke follow-up ${new Date().toISOString()}`;
     await page.getByTestId("support-ticket-message-input").fill(note);
     await page.getByTestId("support-ticket-message-submit").click();
-    await expect(page.locator("main")).toContainText(note);
+    await expect(page.getByTestId("support-ticket-message-input")).toHaveValue("");
+    await expect(page.getByText(note, { exact: true })).toBeVisible();
   });
 });

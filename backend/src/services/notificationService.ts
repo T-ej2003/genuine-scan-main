@@ -4,17 +4,23 @@ import {
   UserRole,
 } from "@prisma/client";
 
-import prisma from "../config/database";
+import {
+  B03AuthenticatedFunctionBoundary,
+  createRoleNotifications as createRoleNotificationsThroughBoundary,
+  createUserNotification as createUserNotificationThroughBoundary,
+  listNotificationsForUser as listNotificationsForUserThroughBoundary,
+  markAllNotificationsRead as markAllNotificationsReadThroughBoundary,
+  markNotificationEmailed,
+  markNotificationRead as markNotificationReadThroughBoundary,
+  requireB03AuthenticatedFunctionBoundary,
+  resolveIncidentNotificationScope,
+} from "../rls-waves/session-b/b03/repositoryFunctions";
 import { sendIncidentEmail } from "./incidentEmailService";
 import { sendAuthEmail } from "./auth/authEmailService";
-import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
-import {
-  canAudienceReceiveNotificationType,
-  hiddenNotificationTypesForRole,
-} from "./notificationVisibility";
+import { canAudienceReceiveNotificationType } from "./notificationVisibility";
 import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
-import { bumpCacheNamespaceVersion, getOrComputeVersionedCache } from "./versionedCacheService";
-import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
+import { bumpCacheNamespaceVersion } from "./versionedCacheService";
+import { encodeDateCursor } from "../utils/cursorPagination";
 
 export type NotificationRealtimeEvent = {
   type: "created" | "read" | "read_all";
@@ -132,45 +138,6 @@ const emitNotificationEvent = (event: NotificationRealtimeEvent) => {
   }).catch(() => undefined);
 };
 
-const normalizeRole = (role: UserRole): NotificationAudience => {
-  if (role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN) return NotificationAudience.SUPER_ADMIN;
-  if (role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN) return NotificationAudience.LICENSEE_ADMIN;
-  return NotificationAudience.MANUFACTURER;
-};
-
-const normalizeLicenseeScope = (licenseeId?: string | null, licenseeIds?: string[] | null) =>
-  Array.from(
-    new Set(
-      [licenseeId || null, ...(Array.isArray(licenseeIds) ? licenseeIds : [])]
-        .map((value) => String(value || "").trim())
-        .filter(Boolean)
-    )
-  );
-
-const buildLicenseeBroadcastScope = (licenseeId?: string | null, licenseeIds?: string[] | null) => {
-  const scopedLicenseeIds = normalizeLicenseeScope(licenseeId, licenseeIds);
-  if (!scopedLicenseeIds.length) return null;
-  return {
-    OR: [
-      scopedLicenseeIds.length === 1 ? { licenseeId: scopedLicenseeIds[0] } : { licenseeId: { in: scopedLicenseeIds } },
-      { licenseeId: null },
-    ],
-  };
-};
-
-const roleFilter = (audience: NotificationAudience) => {
-  if (audience === NotificationAudience.SUPER_ADMIN) {
-    return { in: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN] as UserRole[] };
-  }
-  if (audience === NotificationAudience.LICENSEE_ADMIN) {
-    return { in: [UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN] as UserRole[] };
-  }
-  if (audience === NotificationAudience.MANUFACTURER) {
-    return { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] as UserRole[] };
-  }
-  return undefined;
-};
-
 export const createRoleNotifications = async (params: {
   audience: NotificationAudience;
   title: string;
@@ -181,6 +148,7 @@ export const createRoleNotifications = async (params: {
   incidentId?: string | null;
   data?: any;
   channels?: NotificationChannel[];
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
   if (!canAudienceReceiveNotificationType(params.audience, params.type)) {
     return [] as any[];
@@ -188,79 +156,27 @@ export const createRoleNotifications = async (params: {
 
   const channels = params.channels && params.channels.length > 0 ? params.channels : [NotificationChannel.WEB];
 
-  const userWhere: any = {
-    isActive: true,
-    deletedAt: null,
-  };
-  const roleWhere = roleFilter(params.audience);
-  if (roleWhere) userWhere.role = roleWhere;
-  if (params.licenseeId) {
-    if (params.audience === NotificationAudience.MANUFACTURER) {
-      userWhere.OR = [
-        { licenseeId: params.licenseeId },
-        { manufacturerLicenseeLinks: { some: { licenseeId: params.licenseeId } } },
-      ];
-    } else {
-      userWhere.licenseeId = params.licenseeId;
-    }
-  }
-  if (params.orgId) userWhere.orgId = params.orgId;
-
-  const users = await prisma.user.findMany({
-    where: userWhere,
-    select: {
-      id: true,
-      email: true,
-      role: true,
-      licenseeId: true,
-      orgId: true,
-    },
-  });
-
-  try {
-    if (!users.length && params.audience !== NotificationAudience.ALL) {
-      return [] as any[];
-    }
-
-    const created: any[] = [];
-
-    const targetedUserIds = users.map((u) => u.id);
+  const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+  const rows = await boundary.run((db) => createRoleNotificationsThroughBoundary(db, {
+      audience: params.audience,
+      title: params.title,
+      body: params.body,
+      notificationType: params.type,
+      licenseeId: params.licenseeId,
+      organizationId: params.orgId,
+      incidentId: params.incidentId,
+      data: params.data,
+      channels,
+      requestId: boundary.requestId,
+    }));
+    const created = Array.from(new Map(rows.map((row) => [row.channel, row.writeResult])).values());
+    const deliveryRows = rows.filter((row) => row.sideEffectRequired);
+    const users = Array.from(new Map(
+      deliveryRows.filter((row) => row.userId).map((row) => [row.userId!, row])
+    ).values());
 
     for (const channel of channels) {
-      if (users.length > 0) {
-        const rows = await prisma.notification.createMany({
-          data: users.map((user) => ({
-            userId: user.id,
-            orgId: params.orgId || user.orgId || null,
-            licenseeId: params.licenseeId || user.licenseeId || null,
-            incidentId: params.incidentId || null,
-            audience: params.audience,
-            channel,
-            type: params.type,
-            title: params.title,
-            body: params.body,
-            data: params.data || null,
-          })),
-        });
-        created.push(rows);
-      } else {
-        const row = await prisma.notification.create({
-          data: {
-            userId: null,
-            orgId: params.orgId || null,
-            licenseeId: params.licenseeId || null,
-            incidentId: params.incidentId || null,
-            audience: params.audience,
-            channel,
-            type: params.type,
-            title: params.title,
-            body: params.body,
-            data: params.data || null,
-          },
-        });
-        created.push(row);
-      }
-
+      if (!deliveryRows.some((row) => row.channel === channel)) continue;
       if (channel === NotificationChannel.WEB) {
         emitNotificationEvent({
           type: "created",
@@ -269,66 +185,50 @@ export const createRoleNotifications = async (params: {
           licenseeId: params.licenseeId || null,
           orgId: params.orgId || null,
           incidentId: params.incidentId || null,
-          userIds: targetedUserIds.length > 0 ? targetedUserIds : undefined,
+          userIds: users.length ? users.map((user) => user.userId!) : undefined,
         });
       }
-
-      if (channel === NotificationChannel.EMAIL && users.length > 0 && params.incidentId) {
+      if (channel === NotificationChannel.EMAIL && params.incidentId) {
         for (const user of users) {
+          if (!user.userEmail) continue;
           await sendIncidentEmail({
             incidentId: params.incidentId,
-            licenseeId: params.licenseeId || user.licenseeId || null,
-            toAddress: user.email,
+            licenseeId: params.licenseeId || user.userLicenseeId,
+            toAddress: user.userEmail,
             subject: params.title,
             text: `${params.body}\n\nNotification type: ${params.type}`,
             senderMode: "system",
             template: `notify_${params.type}`,
+            databaseBoundary: boundary,
           });
         }
-      } else if (channel === NotificationChannel.EMAIL && users.length > 0) {
-        await Promise.allSettled(
-          users.map((user) =>
-            sendAuthEmail({
-              toAddress: user.email,
-              subject: params.title,
-              text: `${params.body}\n\nNotification type: ${params.type}\nGenerated at: ${new Date().toISOString()}`,
-              template: `notify_${params.type}`,
-              licenseeId: params.licenseeId || user.licenseeId || null,
-              orgId: params.orgId || user.orgId || null,
-            })
-          )
-        );
+      } else if (channel === NotificationChannel.EMAIL) {
+        await Promise.allSettled(users.filter((user) => user.userEmail).map((user) => sendAuthEmail({
+          toAddress: user.userEmail!,
+          subject: params.title,
+          text: `${params.body}\n\nNotification type: ${params.type}\nGenerated at: ${new Date().toISOString()}`,
+          template: `notify_${params.type}`,
+          licenseeId: params.licenseeId || user.userLicenseeId,
+          orgId: params.orgId || user.userOrganizationId,
+        })));
       }
     }
 
-    if (channels.includes(NotificationChannel.WEB) && users.length > 0) {
-      await Promise.allSettled(
-        users.map((user) =>
-          sendRealtimeAlertEmailForNotification({
-            toAddress: user.email,
-            role: user.role,
-            title: params.title,
-            body: params.body,
-            type: params.type,
-            licenseeId: params.licenseeId || user.licenseeId || null,
-            orgId: params.orgId || user.orgId || null,
-            data: params.data || null,
-          })
-        )
-      );
+    if (channels.includes(NotificationChannel.WEB)) {
+      await Promise.allSettled(users.filter((user) => user.userEmail && user.userRole).map((user) =>
+        sendRealtimeAlertEmailForNotification({
+          toAddress: user.userEmail!,
+          role: user.userRole as UserRole,
+          title: params.title,
+          body: params.body,
+          type: params.type,
+          licenseeId: params.licenseeId || user.userLicenseeId,
+          orgId: params.orgId || user.userOrganizationId,
+          data: params.data,
+        })
+      ));
     }
-
-    return created;
-  } catch (error) {
-    if (isPrismaMissingTableError(error, ["notification"])) {
-      warnStorageUnavailableOnce(
-        "notification-create",
-        "[notification] Notification table is unavailable. Skipping notification persistence."
-      );
-      return [] as any[];
-    }
-    throw error;
-  }
+  return created;
 };
 
 export const createUserNotification = async (params: {
@@ -341,30 +241,25 @@ export const createUserNotification = async (params: {
   incidentId?: string | null;
   data?: any;
   channel?: NotificationChannel;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
   const channel = params.channel || NotificationChannel.WEB;
 
-  try {
-    const created = await prisma.notification.create({
-      data: {
-        userId: params.userId,
-        orgId: params.orgId || null,
-        licenseeId: params.licenseeId || null,
-        incidentId: params.incidentId || null,
-        audience: NotificationAudience.ALL,
-        channel,
-        type: params.type,
-        title: params.title,
-        body: params.body,
-        data: params.data || null,
-      },
-    });
-
-    const user = await prisma.user.findUnique({
-      where: { id: params.userId },
-      select: { email: true, role: true, licenseeId: true, orgId: true },
-    });
-
+  const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+    const row = await boundary.run((db) => createUserNotificationThroughBoundary(db, {
+      userId: params.userId,
+      title: params.title,
+      body: params.body,
+      notificationType: params.type,
+      licenseeId: params.licenseeId,
+      organizationId: params.orgId,
+      incidentId: params.incidentId,
+      data: params.data,
+      channel,
+      requestId: boundary.requestId,
+    }));
+    const created = row.notification as any;
+    if (!row.sideEffectRequired) return created;
     if (channel === NotificationChannel.WEB) {
       emitNotificationEvent({
         type: "created",
@@ -374,65 +269,45 @@ export const createUserNotification = async (params: {
         orgId: params.orgId || null,
         incidentId: params.incidentId || null,
         userIds: [params.userId],
-        notificationId: created.id,
+        notificationId: row.notificationId,
       });
-
-      try {
-        if (user) {
-          const delivery = await sendRealtimeAlertEmailForNotification({
-            toAddress: user.email,
-            role: user.role,
-            title: params.title,
-            body: params.body,
-            type: params.type,
-            licenseeId: params.licenseeId || user.licenseeId || null,
-            orgId: params.orgId || user.orgId || null,
-            data: params.data || null,
-          });
-          if (delivery.delivered) {
-            await prisma.notification.update({
-              where: { id: created.id },
-              data: { emailedAt: new Date() },
-            });
-          }
-        }
-      } catch (emailError) {
-        console.error("createUserNotification realtime email error:", emailError);
-      }
-    }
-
-    if (channel === NotificationChannel.EMAIL && user?.email) {
-      try {
-        const delivery = await sendAuthEmail({
-          toAddress: user.email,
-          subject: params.title,
-          text: `${params.body}\n\nNotification type: ${params.type}\nGenerated at: ${new Date().toISOString()}`,
-          template: `notify_${params.type}`,
-          licenseeId: params.licenseeId || user.licenseeId || null,
-          orgId: params.orgId || user.orgId || null,
+      if (row.userEmail && row.userRole) {
+        const delivery = await sendRealtimeAlertEmailForNotification({
+          toAddress: row.userEmail,
+          role: row.userRole as UserRole,
+          title: params.title,
+          body: params.body,
+          type: params.type,
+          licenseeId: params.licenseeId || row.userLicenseeId,
+          orgId: params.orgId || row.userOrganizationId,
+          data: params.data,
         });
         if (delivery.delivered) {
-          await prisma.notification.update({
-            where: { id: created.id },
-            data: { emailedAt: new Date() },
-          });
+          await boundary.run((db) => markNotificationEmailed(db, {
+            notificationId: row.notificationId,
+            emailedAt: new Date(),
+            requestId: boundary.requestId,
+          }));
         }
-      } catch (emailError) {
-        console.error("createUserNotification email delivery error:", emailError);
+      }
+    } else if (row.userEmail) {
+      const delivery = await sendAuthEmail({
+        toAddress: row.userEmail,
+        subject: params.title,
+        text: `${params.body}\n\nNotification type: ${params.type}\nGenerated at: ${new Date().toISOString()}`,
+        template: `notify_${params.type}`,
+        licenseeId: params.licenseeId || row.userLicenseeId,
+        orgId: params.orgId || row.userOrganizationId,
+      });
+      if (delivery.delivered) {
+        await boundary.run((db) => markNotificationEmailed(db, {
+          notificationId: row.notificationId,
+          emailedAt: new Date(),
+          requestId: boundary.requestId,
+        }));
       }
     }
-
-    return created;
-  } catch (error) {
-    if (isPrismaMissingTableError(error, ["notification"])) {
-      warnStorageUnavailableOnce(
-        "notification-create-user",
-        "[notification] Notification table is unavailable. Skipping direct user notification."
-      );
-      return null;
-    }
-    throw error;
-  }
+  return created;
 };
 
 export const notifyIncidentLifecycle = async (params: {
@@ -443,37 +318,16 @@ export const notifyIncidentLifecycle = async (params: {
   body: string;
   type: string;
   data?: any;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
   let manufacturerOrgId = params.manufacturerOrgId || null;
   if (!manufacturerOrgId && params.incidentId) {
-    const incidentScope = await prisma.incident.findUnique({
-      where: { id: params.incidentId },
-      select: {
-        qrCode: {
-          select: {
-            batch: {
-              select: {
-                manufacturer: { select: { orgId: true } },
-              },
-            },
-          },
-        },
-        scanEvent: {
-          select: {
-            batch: {
-              select: {
-                manufacturer: { select: { orgId: true } },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    manufacturerOrgId =
-      incidentScope?.qrCode?.batch?.manufacturer?.orgId ||
-      incidentScope?.scanEvent?.batch?.manufacturer?.orgId ||
-      null;
+    const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+    const incidentScope = await boundary.run((db) => resolveIncidentNotificationScope(db, params.incidentId));
+    if (params.licenseeId && incidentScope.licenseeId !== params.licenseeId) {
+      throw new Error("B03 incident notification scope changed");
+    }
+    manufacturerOrgId = incidentScope.manufacturerOrganizationId;
   }
 
   const targets: Array<{ audience: NotificationAudience; licenseeId?: string | null; orgId?: string | null; channels?: NotificationChannel[] }> = [
@@ -507,6 +361,7 @@ export const notifyIncidentLifecycle = async (params: {
       incidentId: params.incidentId,
       data: params.data,
       channels: target.channels || [NotificationChannel.WEB],
+      databaseBoundary: params.databaseBoundary,
     });
   }
 };
@@ -521,90 +376,18 @@ const listNotificationsForUserUncached = async (params: {
   offset: number;
   unreadOnly?: boolean;
   cursor?: string | null;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
-  const audience = normalizeRole(params.role);
-  const hiddenTypes = hiddenNotificationTypesForRole(params.role);
-
-  const scopedBroadcast: any = {
-    userId: null,
-    channel: NotificationChannel.WEB,
-    audience: { in: [NotificationAudience.ALL, audience] },
-  };
-
-  if (params.role !== UserRole.SUPER_ADMIN && params.role !== UserRole.PLATFORM_SUPER_ADMIN) {
-    const tenantFilters: any[] = [];
-    const licenseeScope = buildLicenseeBroadcastScope(params.licenseeId, params.licenseeIds);
-    if (licenseeScope) {
-      tenantFilters.push(licenseeScope);
-    } else if (audience === NotificationAudience.MANUFACTURER) {
-      tenantFilters.push({ licenseeId: null });
-    } else {
-      tenantFilters.push({ licenseeId: null });
-    }
-
-    if (audience === NotificationAudience.MANUFACTURER) {
-      if (params.orgId) {
-        tenantFilters.push({ OR: [{ orgId: params.orgId }, { orgId: null }] });
-      } else {
-        tenantFilters.push({ orgId: null });
-      }
-    }
-
-    if (tenantFilters.length) scopedBroadcast.AND = tenantFilters;
-  }
-
-  const scopedOr: any[] = [{ userId: params.userId, channel: NotificationChannel.WEB }, scopedBroadcast];
-
-  const where: any = {
-    OR: scopedOr,
-  };
-  if (hiddenTypes.length > 0) {
-    where.type = { notIn: hiddenTypes };
-  }
-
-  if (params.unreadOnly) {
-    where.readAt = null;
-  }
-
-  const cursorWhere = buildDateCursorWhere({
-    cursor: params.cursor,
-    createdAtField: "createdAt",
-    idField: "id",
-  });
-  if (cursorWhere) {
-    where.AND = [...(Array.isArray(where.AND) ? where.AND : []), cursorWhere];
-  }
-
-  try {
-    const [notifications, total] = await Promise.all([
-      prisma.notification.findMany({
-        where,
-        orderBy: [{ createdAt: "desc" }],
-        take: params.limit,
-        skip: params.cursor ? 0 : params.offset,
-      }),
-      params.cursor ? Promise.resolve<number | null>(null) : prisma.notification.count({ where }),
-    ]);
-
-    const unread = await prisma.notification.count({
-      where: {
-        OR: scopedOr,
-        readAt: null,
-        ...(hiddenTypes.length > 0 ? { type: { notIn: hiddenTypes } } : {}),
-      },
-    });
-
-    return { notifications, total, unread };
-  } catch (error) {
-    if (isPrismaMissingTableError(error, ["notification"])) {
-      warnStorageUnavailableOnce(
-        "notification-list",
-        "[notification] Notification table is unavailable. Returning empty notification list."
-      );
-      return { notifications: [], total: 0, unread: 0 };
-    }
-    throw error;
-  }
+  const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+  const result = await boundary.run((db) => listNotificationsForUserThroughBoundary(db, {
+      userId: params.userId,
+      limit: params.limit,
+      offset: params.offset,
+      unreadOnly: Boolean(params.unreadOnly),
+      cursor: params.cursor,
+      requestId: boundary.requestId,
+    }));
+  return { notifications: result.notifications as any[], total: result.total, unread: result.unread };
 };
 
 export const listNotificationsForUser = async (params: {
@@ -617,6 +400,7 @@ export const listNotificationsForUser = async (params: {
   offset: number;
   unreadOnly?: boolean;
   cursor?: string | null;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
   const scopeKey = [
     params.userId,
@@ -630,9 +414,7 @@ export const listNotificationsForUser = async (params: {
     params.cursor || "offset",
   ].join(":");
 
-  const payload = await getOrComputeVersionedCache(NOTIFICATION_CACHE_NAMESPACE, scopeKey, NOTIFICATION_CACHE_TTL_SEC, () =>
-    listNotificationsForUserUncached(params)
-  );
+  const payload = await listNotificationsForUserUncached(params);
 
   const nextCursor =
     payload.notifications.length === params.limit
@@ -652,80 +434,26 @@ export const markNotificationRead = async (params: {
   licenseeId?: string | null;
   licenseeIds?: string[] | null;
   orgId?: string | null;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
-  const audience = normalizeRole(params.role);
-  const hiddenTypes = hiddenNotificationTypesForRole(params.role);
-  try {
-    const sharedScope: any = {
-      userId: null,
-      channel: NotificationChannel.WEB,
-      audience: { in: [NotificationAudience.ALL, audience] },
-    };
-    if (params.role !== UserRole.SUPER_ADMIN && params.role !== UserRole.PLATFORM_SUPER_ADMIN) {
-      const tenantFilters: any[] = [];
-      const licenseeScope = buildLicenseeBroadcastScope(params.licenseeId, params.licenseeIds);
-      if (licenseeScope) {
-        tenantFilters.push(licenseeScope);
-      } else if (audience === NotificationAudience.MANUFACTURER) {
-        tenantFilters.push({ licenseeId: null });
-      } else {
-        tenantFilters.push({ licenseeId: null });
-      }
-      if (audience === NotificationAudience.MANUFACTURER) {
-        if (params.orgId) {
-          tenantFilters.push({ OR: [{ orgId: params.orgId }, { orgId: null }] });
-        } else {
-          tenantFilters.push({ orgId: null });
-        }
-      }
-      if (tenantFilters.length) sharedScope.AND = tenantFilters;
+  const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+  const result = await boundary.run((db) => markNotificationReadThroughBoundary(db, {
+      notificationId: params.notificationId,
+      userId: params.userId,
+      readAt: new Date(),
+      requestId: boundary.requestId,
+    }));
+    const notification = result.notification as any;
+    if (notification) {
+      emitNotificationEvent({
+        type: "read",
+        audience: NotificationAudience.ALL,
+        licenseeId: params.licenseeId || null,
+        userIds: [params.userId],
+        notificationId: String(notification.id || params.notificationId),
+      });
     }
-
-    const existing = await prisma.notification.findFirst({
-      where: {
-        id: params.notificationId,
-        ...(hiddenTypes.length > 0 ? { type: { notIn: hiddenTypes } } : {}),
-        OR: [
-          { userId: params.userId, channel: NotificationChannel.WEB },
-          sharedScope,
-        ],
-      },
-    });
-
-    if (!existing) return null;
-    if (existing.userId !== params.userId) {
-      return {
-        ...existing,
-        readAt: existing.readAt || new Date(),
-      };
-    }
-
-    const updated = await prisma.notification.update({
-      where: { id: existing.id },
-      data: {
-        readAt: existing.readAt || new Date(),
-      },
-    });
-
-    emitNotificationEvent({
-      type: "read",
-      audience: NotificationAudience.ALL,
-      licenseeId: params.licenseeId || null,
-      userIds: [params.userId],
-      notificationId: updated.id,
-    });
-
-    return updated;
-  } catch (error) {
-    if (isPrismaMissingTableError(error, ["notification"])) {
-      warnStorageUnavailableOnce(
-        "notification-read",
-        "[notification] Notification table is unavailable. Mark-read request skipped."
-      );
-      return null;
-    }
-    throw error;
-  }
+  return notification;
 };
 
 export const markAllNotificationsRead = async (params: {
@@ -734,40 +462,19 @@ export const markAllNotificationsRead = async (params: {
   licenseeId?: string | null;
   licenseeIds?: string[] | null;
   orgId?: string | null;
+  databaseBoundary: B03AuthenticatedFunctionBoundary;
 }) => {
-  const hiddenTypes = hiddenNotificationTypesForRole(params.role);
-
-  const where: any = {
-    userId: params.userId,
-    channel: NotificationChannel.WEB,
-    readAt: null,
-  };
-  if (hiddenTypes.length > 0) {
-    where.type = { notIn: hiddenTypes };
-  }
-
-  try {
-    const result = await prisma.notification.updateMany({
-      where,
-      data: { readAt: new Date() },
-    });
-
+  const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+  const result = await boundary.run((db) => markAllNotificationsReadThroughBoundary(db, {
+      userId: params.userId,
+      readAt: new Date(),
+      requestId: boundary.requestId,
+    }));
     emitNotificationEvent({
       type: "read_all",
       audience: NotificationAudience.ALL,
       licenseeId: params.licenseeId || null,
       userIds: [params.userId],
     });
-
-    return result.count;
-  } catch (error) {
-    if (isPrismaMissingTableError(error, ["notification"])) {
-      warnStorageUnavailableOnce(
-        "notification-read-all",
-        "[notification] Notification table is unavailable. Mark-all-read request skipped."
-      );
-      return 0;
-    }
-    throw error;
-  }
+  return result.count;
 };

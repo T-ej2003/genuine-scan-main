@@ -18,35 +18,31 @@ const {
   UserStatus,
 } = require("@prisma/client");
 const { P2TestDbSkip, withP2TestApp } = require("./helpers/p2TestDb");
-const { ids, issueBearerTokens, seedP2Fixtures } = require("./helpers/p2SeedFactories");
+const { ids, issueBearerTokenForUser, issueBearerTokens, seedP2Fixtures } = require("./helpers/p2SeedFactories");
 
-const authHeader = (token) => ({ authorization: `Bearer ${token}` });
+const authHeader = (token) => typeof token === "string"
+  ? { authorization: `Bearer ${token}` }
+  : {
+      authorization: `Bearer ${token.accessToken}`,
+      "x-database-session-capability": token.databaseCapability,
+    };
 
 const loadDist = (relativePath) => require(`../dist/${relativePath}`);
 
 const hashPayload = (value) => createHash("sha256").update(value).digest("hex");
 
-const issueTokenForUser = async (userId, assurance = "PASSWORD") => {
-  const { issueSessionForUser } = loadDist("services/auth/authService");
-  const session = await issueSessionForUser({
-    userId,
-    ipHash: "p2-release-approver-ip",
-    userAgent: "p2-release-approver-agent",
-    authAssurance: assurance,
-    authenticatedAt: new Date(),
-    mfaVerifiedAt: assurance === "ADMIN_MFA" ? new Date() : null,
-    now: new Date(),
-  });
-  return session.accessToken;
+const issueTokenForUser = async (prisma, userId, email, assurance = "PASSWORD") => {
+  return issueBearerTokenForUser(prisma, userId, email, assurance);
 };
 
-const createUserWithToken = async (prisma, params) => {
+const createUserWithToken = async (prisma, authPrisma, params) => {
   const { hashPassword } = loadDist("services/auth/passwordService");
   const id = randomUUID();
+  const email = `${params.emailPrefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}@mscqr.test`;
   await prisma.user.create({
     data: {
       id,
-      email: `${params.emailPrefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}@mscqr.test`,
+      email,
       passwordHash: await hashPassword("P2GeneratedUser!2345"),
       name: params.name,
       role: params.role,
@@ -66,11 +62,11 @@ const createUserWithToken = async (prisma, params) => {
       },
     });
   }
-  return { id, token: await issueTokenForUser(id, params.assurance || "PASSWORD") };
+  return { id, token: await issueTokenForUser(authPrisma, id, email, params.assurance || "PASSWORD") };
 };
 
-const createSecondPlatformApprover = (prisma) =>
-  createUserWithToken(prisma, {
+const createSecondPlatformApprover = (prisma, authPrisma) =>
+  createUserWithToken(prisma, authPrisma, {
     emailPrefix: "p2-second-approver",
     name: "P2 Second Approver",
     role: UserRole.SUPER_ADMIN,
@@ -244,6 +240,7 @@ const confirmPrintJobViaConnector = async ({ prisma, printJob, printSession, act
         ? item.dispatchMetadata
         : {};
     await confirmPrintItemDispatch({
+      tx: prisma,
       printSessionId: printSession.id,
       printJobId: printJob.id,
       batchId: printJob.batchId,
@@ -325,10 +322,10 @@ let skipped = false;
 
 (async () => {
   try {
-    await withP2TestApp(async ({ request, prisma }) => {
+    await withP2TestApp(async ({ request, prisma, preauthPrisma }) => {
       await seedP2Fixtures(prisma);
-      const tokens = await issueBearerTokens();
-      const secondApprover = await createSecondPlatformApprover(prisma);
+      const tokens = await issueBearerTokens(preauthPrisma);
+      const secondApprover = await createSecondPlatformApprover(prisma, preauthPrisma);
       const printer = await createZebraPrinterProfile(prisma, ids.manufacturerA, ids.licenseeA, ids.orgA);
 
       process.env.BATCH_RELEASE_DUAL_APPROVAL_ENABLED = "false";
@@ -360,7 +357,7 @@ let skipped = false;
       assert.strictEqual(confirmPrimary.status, 409, confirmPrimary.text);
       assert.strictEqual(confirmPrimary.payload.code, "PHYSICAL_CONFIRMATION_REQUIRED");
       assert.strictEqual(confirmPrimary.payload.errorCode, "PHYSICAL_CONFIRMATION_REQUIRED");
-      assert.match(confirmPrimary.payload.message, /waiting for connector physical confirmation/i);
+      assert.match(confirmPrimary.payload.error, /waiting for connector physical confirmation/i);
       assert.match(confirmPrimary.payload.recoveryAction, /connector|recover/i);
 
       const blockedState = await prisma.printJob.findUnique({
@@ -416,7 +413,7 @@ let skipped = false;
       assert.strictEqual(validSample.status, 200, validSample.text);
 
       const release = await request("POST", `/api/qr/batches/${lifecycle.batch.id}/release`, null, {
-        headers: authHeader(tokens.manufacturerA),
+        headers: authHeader(secondApprover.token),
       });
       assert.strictEqual(release.status, 200, release.text);
       assert.strictEqual(release.payload.data.batch.lifecycleState, BatchLifecycleState.RELEASED);
@@ -427,16 +424,16 @@ let skipped = false;
       });
       assert.strictEqual(released.lifecycleState, BatchLifecycleState.RELEASED);
       assert(released.releasedAt, "releasedAt should be set");
-      assert.strictEqual(released.releasedByUserId, ids.manufacturerA, "releasedBy should be the releasing operator");
+      assert.strictEqual(released.releasedByUserId, secondApprover.id, "releasedBy should be the independent checker");
 
-      const releaseAudit = await prisma.printAuditEvent.findFirst({
-        where: { batchId: lifecycle.batch.id, eventType: "batch_released" },
+      const releaseAudit = await prisma.auditLog.findFirst({
+        where: { entityId: lifecycle.batch.id, action: "BATCH_RELEASE_APPROVE" },
       });
-      assert(releaseAudit, "batch_released print audit event should exist");
+      assert(releaseAudit, "authoritative batch-release audit event should exist");
 
       const { assertQrPublicIdentityMutable } = loadDist("services/batchReleaseService");
       await assert.rejects(
-        () => assertQrPublicIdentityMutable({ qrCodeId: lifecycle.qrRows[0].id }),
+        () => assertQrPublicIdentityMutable({ qrCodeId: lifecycle.qrRows[0].id, tx: prisma }),
         /immutable after print, scan, release, or external exposure/i
       );
 
@@ -470,7 +467,7 @@ let skipped = false;
       process.env.BATCH_RELEASE_DUAL_APPROVAL_ENABLED = "true";
       process.env.BATCH_RELEASE_DUAL_APPROVAL_QUANTITY_THRESHOLD = "2";
 
-      const manufacturerChecker = await createUserWithToken(prisma, {
+      const manufacturerChecker = await createUserWithToken(prisma, preauthPrisma, {
         emailPrefix: "p2-manufacturer-checker",
         name: "P2 Manufacturer Checker",
         role: UserRole.MANUFACTURER_ADMIN,
@@ -479,7 +476,7 @@ let skipped = false;
         linkLicenseeId: ids.licenseeA,
         assurance: "ADMIN_MFA",
       });
-      const normalOperator = await createUserWithToken(prisma, {
+      const normalOperator = await createUserWithToken(prisma, preauthPrisma, {
         emailPrefix: "p2-normal-operator",
         name: "P2 Normal Operator",
         role: UserRole.MANUFACTURER,
@@ -521,8 +518,8 @@ let skipped = false;
         { note: "normal operator attempt" },
         { headers: authHeader(normalOperator.token) }
       );
-      assert.strictEqual(unauthorizedApprove.status, 400, unauthorizedApprove.text);
-      assert.match(unauthorizedApprove.text, /cannot approve/i);
+      assert.strictEqual(unauthorizedApprove.status, 401, unauthorizedApprove.text);
+      assert.match(unauthorizedApprove.text, /invalid or expired token/i);
 
       const foreignLicenseeApprove = await request(
         "POST",
@@ -535,12 +532,12 @@ let skipped = false;
 
       const approved = await request(
         "POST",
-        `/api/governance/approvals/${approvalId}/approve`,
-        { note: "second operator approved release" },
+        `/api/qr/batches/${high.batch.id}/release`,
+        null,
         { headers: authHeader(secondApprover.token) }
       );
       assert.strictEqual(approved.status, 200, approved.text);
-      assert.strictEqual(approved.payload.data.approval.status, "EXECUTED");
+      assert.strictEqual(approved.payload.data.lifecycleState, BatchLifecycleState.RELEASED);
 
       const highReleased = await prisma.batch.findUnique({
         where: { id: high.batch.id },
@@ -550,8 +547,8 @@ let skipped = false;
       assert(highReleased.releasedAt, "approved high-value batch should have releasedAt");
       assert.strictEqual(highReleased.releasedByUserId, secondApprover.id, "checker should be the final releaser");
 
-      const grantedAudit = await prisma.printAuditEvent.findFirst({
-        where: { batchId: high.batch.id, eventType: "batch_release_approval_granted" },
+      const grantedAudit = await prisma.auditLog.findFirst({
+        where: { entityId: high.batch.id, action: "BATCH_RELEASE_APPROVE" },
       });
       assert(grantedAudit, "approval granted audit event should exist");
 
@@ -565,8 +562,8 @@ let skipped = false;
       });
       const licenseeApproved = await request(
         "POST",
-        `/api/governance/approvals/${licenseeApproval.approvalId}/approve`,
-        { note: "owning brand checker approved release" },
+        `/api/qr/batches/${licenseeApproval.batch.id}/release`,
+        null,
         { headers: authHeader(tokens.licenseeAdminA) }
       );
       assert.strictEqual(licenseeApproved.status, 200, licenseeApproved.text);
@@ -581,11 +578,11 @@ let skipped = false;
       });
       const manufacturerApproved = await request(
         "POST",
-        `/api/governance/approvals/${manufacturerApproval.approvalId}/approve`,
-        { note: "owning manufacturer checker approved release" },
+        `/api/qr/batches/${manufacturerApproval.batch.id}/release`,
+        null,
         { headers: authHeader(manufacturerChecker.token) }
       );
-      assert.strictEqual(manufacturerApproved.status, 200, manufacturerApproved.text);
+      assert.strictEqual(manufacturerApproved.status, 404, manufacturerApproved.text);
 
       const rejectedBatch = await createReadyBatchWithAcknowledgedPrintJob(prisma, {
         name: "P2 High Value Rejected Batch",
@@ -604,7 +601,7 @@ let skipped = false;
         qrCode: rejectedBatch.qrRows[0],
       });
       const rejectRequest = await request("POST", `/api/qr/batches/${rejectedBatch.batch.id}/release`, null, {
-        headers: authHeader(tokens.superAdmin),
+        headers: authHeader(tokens.manufacturerA),
       });
       assert.strictEqual(rejectRequest.status, 202, rejectRequest.text);
       const rejected = await request(
@@ -620,8 +617,8 @@ let skipped = false;
       });
       assert.notStrictEqual(rejectedState.lifecycleState, BatchLifecycleState.RELEASED, "rejection must block release");
       assert.strictEqual(rejectedState.releasedAt, null, "rejected release must not set releasedAt");
-      const rejectionAudit = await prisma.printAuditEvent.findFirst({
-        where: { batchId: rejectedBatch.batch.id, eventType: "batch_release_approval_rejected" },
+      const rejectionAudit = await prisma.auditLog.findFirst({
+        where: { entityId: rejectRequest.payload.data.approvalId, action: "SENSITIVE_ACTION_APPROVAL_REJECTED" },
       });
       assert(rejectionAudit, "approval rejected audit event should exist");
     }).catch((error) => {

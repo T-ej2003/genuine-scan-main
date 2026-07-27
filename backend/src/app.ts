@@ -7,12 +7,6 @@ import { releaseMetadata } from "./observability/release";
 import { captureBackendException } from "./observability/sentry";
 import { getLatencySummary, recordRequestMetric } from "./observability/requestMetrics";
 import { classifyStagingRlsBatchReadContext } from "./observability/stagingRlsBatchReadProof";
-import { classifyStagingRlsManufacturerPrintersReadContext } from "./observability/stagingRlsManufacturerPrintersReadProof";
-import {
-  isStagingRlsBatchAllocationMapEnabled,
-  isStagingRlsBatchesReadEnabled,
-  isStagingRlsManufacturerPrintersReadEnabled,
-} from "./lib/stagingRlsBatchReadContext";
 import { sanitizeRequestInput } from "./middleware/requestSanitizer";
 import {
   createPublicActorRateLimiter,
@@ -23,6 +17,7 @@ import {
 import { buildReadyPayload } from "./controllers/healthController";
 import { isRedisConfigured } from "./services/redisService";
 import { logger } from "./utils/logger";
+import { sanitizeRequestTelemetryPath } from "./utils/requestTelemetryPath";
 
 const parseBool = (value: unknown, fallback = false) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -41,20 +36,21 @@ type RequestClaimsSnapshot = {
 };
 
 const getErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error || "Unknown error"));
-const stagingRlsBatchReadTelemetryPaths = new Set(["/api/qr/batches", "/api/qr/batches/"]);
-const isStagingRlsBatchReadTelemetryRoute = (method: string, pathName: string) =>
-  method === "GET" && stagingRlsBatchReadTelemetryPaths.has(pathName);
-const STAGING_RLS_BATCH_ALLOCATION_MAP_TELEMETRY_PATH = "/api/qr/batches/:id/allocation-map";
-const stagingRlsBatchAllocationMapTelemetryPattern = /^\/api\/qr\/batches\/[^/]+\/allocation-map\/?$/;
-const isStagingRlsBatchAllocationMapTelemetryRoute = (method: string, pathName: string) =>
-  method === "GET" && stagingRlsBatchAllocationMapTelemetryPattern.test(pathName);
-const stagingRlsManufacturerPrintersReadTelemetryPaths = new Set([
+const capabilityReadTelemetryPaths = new Set(["/api/qr/batches", "/api/qr/batches/"]);
+const isCapabilityBatchReadRoute = (method: string, pathName: string) =>
+  method === "GET" && capabilityReadTelemetryPaths.has(pathName);
+const BATCH_ALLOCATION_MAP_TELEMETRY_PATH = "/api/qr/batches/:id/allocation-map";
+const batchAllocationMapTelemetryPattern = /^\/api\/qr\/batches\/[^/]+\/allocation-map\/?$/;
+const isBatchAllocationMapRoute = (method: string, pathName: string) =>
+  method === "GET" && batchAllocationMapTelemetryPattern.test(pathName);
+const manufacturerPrintersReadTelemetryPaths = new Set([
   "/api/manufacturer/printers",
   "/api/manufacturer/printers/",
 ]);
-const STAGING_RLS_MANUFACTURER_PRINTERS_READ_TELEMETRY_PATH = "/api/manufacturer/printers";
-const isStagingRlsManufacturerPrintersReadTelemetryRoute = (method: string, pathName: string) =>
-  method === "GET" && stagingRlsManufacturerPrintersReadTelemetryPaths.has(pathName);
+const MANUFACTURER_PRINTERS_READ_TELEMETRY_PATH = "/api/manufacturer/printers";
+const UNSUPPORTED_WORKFLOW_DENIAL_TELEMETRY_PATH = "/api/UNRESOLVED_PROTECTED_ROUTE";
+const isManufacturerPrintersReadRoute = (method: string, pathName: string) =>
+  method === "GET" && manufacturerPrintersReadTelemetryPaths.has(pathName);
 
 export const createBackendApp = () => {
   const redisRequired =
@@ -99,6 +95,7 @@ export const createBackendApp = () => {
       allowedHeaders: [
         "Content-Type",
         "Authorization",
+        "X-Database-Session-Capability",
         "X-Device-Fp",
         "X-CSRF-Token",
         "X-Captcha-Token",
@@ -140,28 +137,26 @@ export const createBackendApp = () => {
 
     res.on("finish", () => {
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
-      const pathName = req.originalUrl.split("?")[0] || req.path || "/";
+      const unsupportedWorkflowDenial =
+        (req as express.Request & { unsupportedWorkflowDenial?: boolean }).unsupportedWorkflowDenial === true;
+      const pathName = unsupportedWorkflowDenial
+        ? UNSUPPORTED_WORKFLOW_DENIAL_TELEMETRY_PATH
+        : sanitizeRequestTelemetryPath(req.originalUrl || req.path || "/");
       const claims = (req as express.Request & { user?: RequestClaimsSnapshot }).user || null;
-      const isStagingRlsAllocationMapTelemetry =
-        isStagingRlsBatchAllocationMapTelemetryRoute(req.method, pathName) &&
-        isStagingRlsBatchAllocationMapEnabled();
-      const isStagingRlsManufacturerPrintersTelemetry =
-        isStagingRlsManufacturerPrintersReadTelemetryRoute(req.method, pathName) &&
-        isStagingRlsManufacturerPrintersReadEnabled();
-      const redactStagingRlsBatchActor =
-        (isStagingRlsBatchReadTelemetryRoute(req.method, pathName) && isStagingRlsBatchesReadEnabled()) ||
-        isStagingRlsAllocationMapTelemetry ||
-        isStagingRlsManufacturerPrintersTelemetry;
-      const telemetryPath = isStagingRlsAllocationMapTelemetry
-        ? STAGING_RLS_BATCH_ALLOCATION_MAP_TELEMETRY_PATH
-        : isStagingRlsManufacturerPrintersTelemetry
-          ? STAGING_RLS_MANUFACTURER_PRINTERS_READ_TELEMETRY_PATH
+      const isAllocationMapTelemetry = isBatchAllocationMapRoute(req.method, pathName);
+      const isManufacturerPrintersTelemetry = isManufacturerPrintersReadRoute(req.method, pathName);
+      const redactCapabilityActor =
+        isCapabilityBatchReadRoute(req.method, pathName) ||
+        isAllocationMapTelemetry ||
+        isManufacturerPrintersTelemetry;
+      const telemetryPath = isAllocationMapTelemetry
+        ? BATCH_ALLOCATION_MAP_TELEMETRY_PATH
+        : isManufacturerPrintersTelemetry
+          ? MANUFACTURER_PRINTERS_READ_TELEMETRY_PATH
         : pathName;
       const actorContextClass =
-        redactStagingRlsBatchActor && claims?.role
-          ? isStagingRlsManufacturerPrintersTelemetry
-            ? classifyStagingRlsManufacturerPrintersReadContext({ role: claims.role })
-            : classifyStagingRlsBatchReadContext({ role: claims.role })
+        redactCapabilityActor && claims?.role
+          ? classifyStagingRlsBatchReadContext({ role: claims.role })
           : null;
 
       recordRequestMetric({
@@ -172,6 +167,11 @@ export const createBackendApp = () => {
         durationMs,
       });
 
+      // The shutdown middleware emits its own bounded, identifier-free denial
+      // events. Emitting the generic per-request completion event as well would
+      // reintroduce an unbounded log stream during a denial burst.
+      if (unsupportedWorkflowDenial) return;
+
       const meta = {
         requestId,
         method: req.method,
@@ -180,10 +180,10 @@ export const createBackendApp = () => {
         durationMs: Math.round(durationMs * 10) / 10,
         release: releaseMetadata.release,
         actorContextClass,
-        actorUserId: redactStagingRlsBatchActor ? null : claims?.userId || null,
-        actorRole: redactStagingRlsBatchActor ? null : claims?.role || null,
-        actorLicenseeId: redactStagingRlsBatchActor ? null : claims?.licenseeId || null,
-        actorOrgId: redactStagingRlsBatchActor ? null : claims?.orgId || null,
+        actorUserId: redactCapabilityActor ? null : claims?.userId || null,
+        actorRole: redactCapabilityActor ? null : claims?.role || null,
+        actorLicenseeId: redactCapabilityActor ? null : claims?.licenseeId || null,
+        actorOrgId: redactCapabilityActor ? null : claims?.orgId || null,
         sessionStage: claims?.sessionStage || null,
         authAssurance: claims?.authAssurance || null,
       };
@@ -277,11 +277,10 @@ export const createBackendApp = () => {
 
   app.get("/health/db", publicStatusIpLimiter, publicStatusActorLimiter, async (_req, res) => {
     const payload = await buildReadyPayload();
-    if (payload.dependencies.database.ready && payload.dependencies.rlsReadDatabase.ready) {
+    if (payload.dependencies.database.ready) {
       return res.json({
         status: "ok",
         database: "reachable",
-        rlsReadDatabase: payload.dependencies.rlsReadDatabase.required ? "reachable" : "disabled",
         redis: payload.dependencies.redis.ready || !payload.dependencies.redis.configured ? "ready" : "unreachable",
         objectStorage:
           payload.dependencies.objectStorage.ready || !payload.dependencies.objectStorage.configured ? "ready" : "unreachable",
@@ -291,12 +290,11 @@ export const createBackendApp = () => {
 
     const detail =
       process.env.NODE_ENV === "development"
-        ? payload.dependencies.database.error || payload.dependencies.rlsReadDatabase.error || "Database connectivity failed"
+        ? payload.dependencies.database.error || "Database connectivity failed"
         : "Database connectivity failed";
     return res.status(503).json({
       status: "degraded",
       database: payload.dependencies.database.ready ? "reachable" : "unreachable",
-      rlsReadDatabase: payload.dependencies.rlsReadDatabase.ready ? "ready" : "unreachable",
       error: detail,
       timestamp: new Date().toISOString(),
     });
@@ -347,16 +345,17 @@ export const createBackendApp = () => {
 
   app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const requestId = (req as express.Request & { requestId?: string }).requestId;
+    const safePath = sanitizeRequestTelemetryPath(req.originalUrl || req.path || "/");
     captureBackendException(err, {
       requestId,
       method: req.method,
-      path: req.originalUrl,
+      path: safePath,
       status: 500,
     });
     logger.error("Unhandled error", {
       requestId,
       method: req.method,
-      path: req.originalUrl,
+      path: safePath,
       error: getErrorMessage(err),
     });
     res.status(500).json({

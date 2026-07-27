@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { saveAs } from "file-saver";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { IRIncidentDetailWorkspace } from "@/features/ir/components/IRIncidentDetailWorkspace";

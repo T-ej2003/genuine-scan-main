@@ -8,9 +8,10 @@ const {
   dropP2TestDatabase,
   request,
   resolveP2TestDatabase,
-  runPrismaSchemaSetup,
+  runGeneratedRlsSchemaSetup,
 } = require("../backend/tests/helpers/p2TestDb");
 const { emails, ids, issueBearerTokens, passwords, seedP2Fixtures } = require("../backend/tests/helpers/p2SeedFactories");
+const { PrismaClient } = require("../backend/node_modules/@prisma/client");
 
 const backendPort = Number(process.env.E2E_BACKEND_PORT || process.env.PORT || "4010");
 const frontendPort = Number(process.env.E2E_FRONTEND_PORT || "8081");
@@ -167,7 +168,10 @@ const assertStatus = (response, expected, label) => {
   }
 };
 
-const bearer = (token) => ({ authorization: `Bearer ${token}` });
+const bearer = (token) => ({
+  authorization: `Bearer ${token.accessToken}`,
+  "x-database-session-capability": token.databaseCapability,
+});
 
 const main = async () => {
   const integrationShutdownToken = randomSecret();
@@ -233,18 +237,22 @@ const main = async () => {
   run("npm", ["run", "build"], { env: testEnv });
 
   const databaseInfo = resolveP2TestDatabase();
-  testEnv.DATABASE_URL = databaseInfo.databaseUrl;
-  process.env.DATABASE_URL = databaseInfo.databaseUrl;
-
   let backend = null;
   let worker = null;
   let prisma = null;
+  let preauthPrisma = null;
   try {
-    runPrismaSchemaSetup(databaseInfo.databaseUrl);
-    const databaseModule = require("../backend/dist/config/database");
-    prisma = databaseModule.default || databaseModule;
+    const urls = runGeneratedRlsSchemaSetup(databaseInfo);
+    Object.assign(testEnv, {
+      DATABASE_URL: urls.runtimeUrl,
+      PREAUTH_DATABASE_URL: urls.preauthUrl,
+      AUTHENTICATED_APP_DATABASE_URL: urls.runtimeUrl,
+    });
+    Object.assign(process.env, testEnv);
+    prisma = new PrismaClient({ datasources: { db: { url: urls.seedUrl } } });
+    preauthPrisma = new PrismaClient({ datasources: { db: { url: urls.preauthUrl } } });
     await seedP2Fixtures(prisma);
-    const tokens = await issueBearerTokens();
+    const tokens = await issueBearerTokens(preauthPrisma);
 
     backend = startProcess("npm", ["--prefix", "backend", "start"], testEnv);
     await waitForReady(`${backendBaseUrl}/health/ready`, "backend");
@@ -305,7 +313,7 @@ const main = async () => {
       where: { action: "VERIFY_FAILED", entityId: "MSCQR-INTEGRATION-NOT-FOUND" },
       orderBy: { createdAt: "desc" },
     });
-    if (!audit) throw new Error("invalid public verification did not write VERIFY_FAILED audit log");
+    if (audit) throw new Error("unknown public verification wrote tenant-bound audit evidence");
 
     console.log("integration: running Playwright system tests");
     run("npx", ["playwright", "test", "--config=playwright.system.config.ts", "e2e/system-integration.spec.ts"], {
@@ -335,8 +343,9 @@ const main = async () => {
     }
 
     if (prisma?.$disconnect) await prisma.$disconnect().catch(() => undefined);
-    if (stopFailure) throw stopFailure;
+    if (preauthPrisma?.$disconnect) await preauthPrisma.$disconnect().catch(() => undefined);
     if (databaseInfo?.createdDatabaseName) dropP2TestDatabase(databaseInfo);
+    if (stopFailure) throw stopFailure;
   }
 };
 

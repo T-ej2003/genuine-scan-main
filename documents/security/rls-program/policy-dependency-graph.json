@@ -1,0 +1,1611 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "documents/security/rls-program/tables.json",
+  "direction": "source policy table -> table read by its authorization predicate",
+  "nodes": [
+    {
+      "id": "table-action-idempotency-key",
+      "prismaModel": "ActionIdempotencyKey",
+      "primaryCategory": "operational-system",
+      "reviewGroup": "F",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "approved-system",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-admin-mfa-credential",
+      "prismaModel": "AdminMfaCredential",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-admin-web-authn-credential",
+      "prismaModel": "AdminWebAuthnCredential",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-allocation-event",
+      "prismaModel": "AllocationEvent",
+      "primaryCategory": "append-only-audit",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-audit-log",
+      "prismaModel": "AuditLog",
+      "primaryCategory": "append-only-audit",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-audit-log-outbox",
+      "prismaModel": "AuditLogOutbox",
+      "primaryCategory": "operational-system",
+      "reviewGroup": "F",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "approved-system",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-auth-mfa-challenge",
+      "prismaModel": "AuthMfaChallenge",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-auth-session-risk-signal",
+      "prismaModel": "AuthSessionRiskSignal",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-auth-web-authn-challenge",
+      "prismaModel": "AuthWebAuthnChallenge",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-batch",
+      "prismaModel": "Batch",
+      "primaryCategory": "tenant-owned",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-batch-print-pack-token",
+      "prismaModel": "BatchPrintPackToken",
+      "primaryCategory": "migration-only",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": false,
+      "terminalBoundary": "migration-only",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-compliance-pack-job",
+      "prismaModel": "CompliancePackJob",
+      "primaryCategory": "operational-system",
+      "reviewGroup": "F",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-customer-auth-session",
+      "prismaModel": "CustomerAuthSession",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "approved-special-boundary",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-customer-trust-credential",
+      "prismaModel": "CustomerTrustCredential",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-customer-trust-intake",
+      "prismaModel": "CustomerTrustIntake",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 2
+    },
+    {
+      "id": "table-customer-verification-session",
+      "prismaModel": "CustomerVerificationSession",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-customer-web-authn-challenge",
+      "prismaModel": "CustomerWebAuthnChallenge",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "actor-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-customer-web-authn-credential",
+      "prismaModel": "CustomerWebAuthnCredential",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "actor-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-degradation-event",
+      "prismaModel": "DegradationEvent",
+      "primaryCategory": "operational-system",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-email-verification-token",
+      "prismaModel": "EmailVerificationToken",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-evidence-retention-job",
+      "prismaModel": "EvidenceRetentionJob",
+      "primaryCategory": "operational-system",
+      "reviewGroup": "F",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-evidence-retention-policy",
+      "prismaModel": "EvidenceRetentionPolicy",
+      "primaryCategory": "tenant-owned",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-forensic-event-chain",
+      "prismaModel": "ForensicEventChain",
+      "primaryCategory": "append-only-audit",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-incident",
+      "prismaModel": "Incident",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-incident-communication",
+      "prismaModel": "IncidentCommunication",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-incident-event",
+      "prismaModel": "IncidentEvent",
+      "primaryCategory": "append-only-audit",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-incident-evidence",
+      "prismaModel": "IncidentEvidence",
+      "primaryCategory": "append-only-audit",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-incident-evidence-fingerprint",
+      "prismaModel": "IncidentEvidenceFingerprint",
+      "primaryCategory": "operational-system",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 2
+    },
+    {
+      "id": "table-incident-handoff",
+      "prismaModel": "IncidentHandoff",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-inventory-status-rollup",
+      "prismaModel": "InventoryStatusRollup",
+      "primaryCategory": "tenant-owned",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-invite",
+      "prismaModel": "Invite",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-licensee",
+      "prismaModel": "Licensee",
+      "primaryCategory": "tenant-owned",
+      "reviewGroup": "B",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-manufacturer-licensee-link",
+      "prismaModel": "ManufacturerLicenseeLink",
+      "primaryCategory": "tenant-owned",
+      "reviewGroup": "B",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-mfa-login-challenge",
+      "prismaModel": "MfaLoginChallenge",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-notification",
+      "prismaModel": "Notification",
+      "primaryCategory": "actor-owned",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-organization",
+      "prismaModel": "Organization",
+      "primaryCategory": "tenant-root",
+      "reviewGroup": "B",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-root",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-ownership",
+      "prismaModel": "Ownership",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-ownership-transfer",
+      "prismaModel": "OwnershipTransfer",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 2
+    },
+    {
+      "id": "table-password-reset",
+      "prismaModel": "PasswordReset",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-policy-alert",
+      "prismaModel": "PolicyAlert",
+      "primaryCategory": "tenant-owned",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-policy-rule",
+      "prismaModel": "PolicyRule",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-print-audit-event",
+      "prismaModel": "PrintAuditEvent",
+      "primaryCategory": "append-only-audit",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-print-item",
+      "prismaModel": "PrintItem",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 3
+    },
+    {
+      "id": "table-print-item-event",
+      "prismaModel": "PrintItemEvent",
+      "primaryCategory": "append-only-audit",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 4
+    },
+    {
+      "id": "table-print-job",
+      "prismaModel": "PrintJob",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-print-job-chunk",
+      "prismaModel": "PrintJobChunk",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 2
+    },
+    {
+      "id": "table-print-reissue-request",
+      "prismaModel": "PrintReissueRequest",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 2
+    },
+    {
+      "id": "table-print-render-token",
+      "prismaModel": "PrintRenderToken",
+      "primaryCategory": "migration-only",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": false,
+      "terminalBoundary": "migration-only",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-print-session",
+      "prismaModel": "PrintSession",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 2
+    },
+    {
+      "id": "table-printer",
+      "prismaModel": "Printer",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-printer-agent-session",
+      "prismaModel": "PrinterAgentSession",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-printer-attestation",
+      "prismaModel": "PrinterAttestation",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-printer-profile",
+      "prismaModel": "PrinterProfile",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-printer-profile-snapshot",
+      "prismaModel": "PrinterProfileSnapshot",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 2
+    },
+    {
+      "id": "table-printer-registration",
+      "prismaModel": "PrinterRegistration",
+      "primaryCategory": "actor-owned",
+      "reviewGroup": "D",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-qr-allocation-request",
+      "prismaModel": "QrAllocationRequest",
+      "primaryCategory": "tenant-owned",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-qr-scan-log",
+      "prismaModel": "QrScanLog",
+      "primaryCategory": "append-only-audit",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-qrcode",
+      "prismaModel": "QRCode",
+      "primaryCategory": "tenant-owned",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-qrrange",
+      "prismaModel": "QRRange",
+      "primaryCategory": "tenant-owned",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-refresh-token",
+      "prismaModel": "RefreshToken",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-replacement-chain",
+      "prismaModel": "ReplacementChain",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-request-access",
+      "prismaModel": "RequestAccess",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "approved-special-boundary",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-route-transition-metric",
+      "prismaModel": "RouteTransitionMetric",
+      "primaryCategory": "append-only-audit",
+      "reviewGroup": "F",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-scan-metrics-hourly-rollup",
+      "prismaModel": "ScanMetricsHourlyRollup",
+      "primaryCategory": "operational-system",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-scheduled-job-credential",
+      "prismaModel": "ScheduledJobCredential",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "approved-special-boundary",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-security-event-outbox",
+      "prismaModel": "SecurityEventOutbox",
+      "primaryCategory": "operational-system",
+      "reviewGroup": "F",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "approved-system",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-security-policy",
+      "prismaModel": "SecurityPolicy",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-sensitive-action-approval",
+      "prismaModel": "SensitiveActionApproval",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-support-issue-report",
+      "prismaModel": "SupportIssueReport",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-support-ticket",
+      "prismaModel": "SupportTicket",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-support-ticket-message",
+      "prismaModel": "SupportTicketMessage",
+      "primaryCategory": "parent-inherited",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 2
+    },
+    {
+      "id": "table-system-checkpoint",
+      "prismaModel": "SystemCheckpoint",
+      "primaryCategory": "operational-system",
+      "reviewGroup": "F",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "approved-system",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-tenant-feature-flag",
+      "prismaModel": "TenantFeatureFlag",
+      "primaryCategory": "tenant-owned",
+      "reviewGroup": "E",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-trace-event",
+      "prismaModel": "TraceEvent",
+      "primaryCategory": "append-only-audit",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-user",
+      "prismaModel": "User",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "tenant-key",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-user-backup-code",
+      "prismaModel": "UserBackupCode",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-user-mfa-factor",
+      "prismaModel": "UserMfaFactor",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    },
+    {
+      "id": "table-verification-decision",
+      "prismaModel": "VerificationDecision",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "approved-special-boundary",
+      "dependencyLayer": 0
+    },
+    {
+      "id": "table-verification-evidence-snapshot",
+      "prismaModel": "VerificationEvidenceSnapshot",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "C",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": null,
+      "dependencyLayer": 1
+    }
+  ],
+  "edges": [
+    {
+      "sourceTable": "table-admin-mfa-credential",
+      "dependencyTable": "table-user",
+      "reason": "AdminMfaCredential authorization inherits from User; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "AdminMfaCredential.userId -> User.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "userId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-admin-web-authn-credential",
+      "dependencyTable": "table-user",
+      "reason": "AdminWebAuthnCredential authorization inherits from User; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "AdminWebAuthnCredential.userId -> User.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "userId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-auth-mfa-challenge",
+      "dependencyTable": "table-user",
+      "reason": "AuthMfaChallenge authorization inherits from User; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "AuthMfaChallenge.userId -> User.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "userId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-auth-session-risk-signal",
+      "dependencyTable": "table-user",
+      "reason": "AuthSessionRiskSignal authorization inherits from User; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "AuthSessionRiskSignal.userId -> User.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "userId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-auth-web-authn-challenge",
+      "dependencyTable": "table-user",
+      "reason": "AuthWebAuthnChallenge authorization inherits from User; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "AuthWebAuthnChallenge.userId -> User.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "userId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-customer-trust-credential",
+      "dependencyTable": "table-qrcode",
+      "reason": "CustomerTrustCredential authorization inherits from QRCode; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "CustomerTrustCredential.qrCodeId -> QRCode.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "qrCodeId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-customer-trust-intake",
+      "dependencyTable": "table-customer-verification-session",
+      "reason": "CustomerTrustIntake authorization inherits from CustomerVerificationSession; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "CustomerTrustIntake.sessionId -> CustomerVerificationSession.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "sessionId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-customer-verification-session",
+      "dependencyTable": "table-verification-decision",
+      "reason": "CustomerVerificationSession authorization inherits from VerificationDecision; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "CustomerVerificationSession.verificationDecisionId -> VerificationDecision.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "verificationDecisionId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-degradation-event",
+      "dependencyTable": "table-qrcode",
+      "reason": "DegradationEvent authorization inherits from QRCode; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "DegradationEvent.code -> QRCode.code; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "code"
+        ],
+        "dependencyColumns": [
+          "code"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-email-verification-token",
+      "dependencyTable": "table-user",
+      "reason": "EmailVerificationToken authorization inherits from User; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "EmailVerificationToken.userId -> User.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "userId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-incident-communication",
+      "dependencyTable": "table-incident",
+      "reason": "IncidentCommunication authorization inherits from Incident; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "IncidentCommunication.incidentId -> Incident.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "incidentId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-incident-event",
+      "dependencyTable": "table-incident",
+      "reason": "IncidentEvent authorization inherits from Incident; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "IncidentEvent.incidentId -> Incident.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "incidentId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-incident-evidence",
+      "dependencyTable": "table-incident",
+      "reason": "IncidentEvidence authorization inherits from Incident; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "IncidentEvidence.incidentId -> Incident.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "incidentId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-incident-evidence-fingerprint",
+      "dependencyTable": "table-incident-evidence",
+      "reason": "IncidentEvidenceFingerprint authorization inherits from IncidentEvidence; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "IncidentEvidenceFingerprint.incidentEvidenceId -> IncidentEvidence.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "incidentEvidenceId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-incident-handoff",
+      "dependencyTable": "table-incident",
+      "reason": "IncidentHandoff authorization inherits from Incident; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "IncidentHandoff.incidentId -> Incident.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "incidentId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-invite",
+      "dependencyTable": "table-organization",
+      "reason": "Invite authorization inherits from Organization; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "Invite.orgId -> Organization.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "orgId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-mfa-login-challenge",
+      "dependencyTable": "table-user",
+      "reason": "MfaLoginChallenge authorization inherits from User; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "MfaLoginChallenge.userId -> User.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "userId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-ownership",
+      "dependencyTable": "table-qrcode",
+      "reason": "Ownership authorization inherits from QRCode; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "Ownership.qrCodeId -> QRCode.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "qrCodeId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-ownership-transfer",
+      "dependencyTable": "table-ownership",
+      "reason": "OwnershipTransfer authorization inherits from Ownership; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "OwnershipTransfer.ownershipId -> Ownership.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "ownershipId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-password-reset",
+      "dependencyTable": "table-user",
+      "reason": "PasswordReset authorization inherits from User; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PasswordReset.userId -> User.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "userId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-print-audit-event",
+      "dependencyTable": "table-batch",
+      "reason": "PrintAuditEvent authorization inherits from Batch; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PrintAuditEvent.batchId -> Batch.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "batchId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-print-item",
+      "dependencyTable": "table-print-session",
+      "reason": "PrintItem authorization inherits from PrintSession; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PrintItem.printSessionId -> PrintSession.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "printSessionId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-print-item-event",
+      "dependencyTable": "table-print-item",
+      "reason": "PrintItemEvent authorization inherits from PrintItem; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PrintItemEvent.printItemId -> PrintItem.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "printItemId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-print-job",
+      "dependencyTable": "table-batch",
+      "reason": "PrintJob authorization inherits from Batch; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PrintJob.batchId -> Batch.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "batchId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-print-job-chunk",
+      "dependencyTable": "table-print-job",
+      "reason": "PrintJobChunk authorization inherits from PrintJob; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PrintJobChunk.printJobId -> PrintJob.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "printJobId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-print-reissue-request",
+      "dependencyTable": "table-print-job",
+      "reason": "PrintReissueRequest authorization inherits from PrintJob; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PrintReissueRequest.originalPrintJobId -> PrintJob.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "originalPrintJobId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-print-session",
+      "dependencyTable": "table-print-job",
+      "reason": "PrintSession authorization inherits from PrintJob; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PrintSession.printJobId -> PrintJob.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "printJobId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-printer-agent-session",
+      "dependencyTable": "table-printer-registration",
+      "reason": "PrinterAgentSession authorization inherits from PrinterRegistration; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PrinterAgentSession.registrationId -> PrinterRegistration.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "registrationId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-printer-attestation",
+      "dependencyTable": "table-printer-registration",
+      "reason": "PrinterAttestation authorization inherits from PrinterRegistration; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PrinterAttestation.printerRegistrationId -> PrinterRegistration.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "printerRegistrationId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-printer-profile",
+      "dependencyTable": "table-printer",
+      "reason": "PrinterProfile authorization inherits from Printer; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PrinterProfile.printerId -> Printer.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "printerId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-printer-profile-snapshot",
+      "dependencyTable": "table-printer-profile",
+      "reason": "PrinterProfileSnapshot authorization inherits from PrinterProfile; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "PrinterProfileSnapshot.printerProfileId -> PrinterProfile.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "printerProfileId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-refresh-token",
+      "dependencyTable": "table-user",
+      "reason": "RefreshToken authorization inherits from User; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "RefreshToken.userId -> User.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "userId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-replacement-chain",
+      "dependencyTable": "table-qrcode",
+      "reason": "ReplacementChain authorization inherits from QRCode; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "ReplacementChain.originalQrCodeId -> QRCode.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "originalQrCodeId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-support-ticket",
+      "dependencyTable": "table-incident",
+      "reason": "SupportTicket authorization inherits from Incident; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "SupportTicket.incidentId -> Incident.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "incidentId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-support-ticket-message",
+      "dependencyTable": "table-support-ticket",
+      "reason": "SupportTicketMessage authorization inherits from SupportTicket; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "SupportTicketMessage.ticketId -> SupportTicket.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "ticketId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-user-backup-code",
+      "dependencyTable": "table-user",
+      "reason": "UserBackupCode authorization inherits from User; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "UserBackupCode.userId -> User.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "userId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-user-mfa-factor",
+      "dependencyTable": "table-user",
+      "reason": "UserMfaFactor authorization inherits from User; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "UserMfaFactor.userId -> User.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "userId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    },
+    {
+      "sourceTable": "table-verification-evidence-snapshot",
+      "dependencyTable": "table-verification-decision",
+      "reason": "VerificationEvidenceSnapshot authorization inherits from VerificationDecision; no alternative parent is evaluated.",
+      "helperFunctionUsed": "none; direct equality join in the future generated predicate",
+      "dependencyRlsProtected": true,
+      "recursionRisk": "none",
+      "requiredIndexOrJoinKey": "VerificationEvidenceSnapshot.verificationDecisionId -> VerificationDecision.id; referenced key must be unique/indexed and the child key must be indexed before policy certification",
+      "joinKey": {
+        "sourceColumns": [
+          "verificationDecisionId"
+        ],
+        "dependencyColumns": [
+          "id"
+        ]
+      },
+      "plannerSensitiveHiddenDependency": false,
+      "unrestrictedRuntimeOwnedDependency": false
+    }
+  ],
+  "acyclic": true,
+  "selfRecursivePolicies": 0,
+  "plannerSensitiveHiddenDependencies": 0,
+  "unrestrictedRuntimeOwnedDependencies": 0,
+  "reviewGroups": {
+    "A": {
+      "tableCount": 23,
+      "resolvedCount": 23,
+      "unresolvedCount": 0,
+      "dependencyEdges": 15,
+      "blockingDecisions": [],
+      "ownershipConfidence": {
+        "high": 18,
+        "medium": 5,
+        "low": 0
+      }
+    },
+    "B": {
+      "tableCount": 3,
+      "resolvedCount": 3,
+      "unresolvedCount": 0,
+      "dependencyEdges": 0,
+      "blockingDecisions": [],
+      "ownershipConfidence": {
+        "high": 3,
+        "medium": 0,
+        "low": 0
+      }
+    },
+    "C": {
+      "tableCount": 15,
+      "resolvedCount": 15,
+      "unresolvedCount": 0,
+      "dependencyEdges": 5,
+      "blockingDecisions": [],
+      "ownershipConfidence": {
+        "high": 14,
+        "medium": 1,
+        "low": 0
+      }
+    },
+    "D": {
+      "tableCount": 13,
+      "resolvedCount": 13,
+      "unresolvedCount": 0,
+      "dependencyEdges": 11,
+      "blockingDecisions": [],
+      "ownershipConfidence": {
+        "high": 11,
+        "medium": 2,
+        "low": 0
+      }
+    },
+    "E": {
+      "tableCount": 18,
+      "resolvedCount": 18,
+      "unresolvedCount": 0,
+      "dependencyEdges": 7,
+      "blockingDecisions": [],
+      "ownershipConfidence": {
+        "high": 10,
+        "medium": 8,
+        "low": 0
+      }
+    },
+    "F": {
+      "tableCount": 7,
+      "resolvedCount": 7,
+      "unresolvedCount": 0,
+      "dependencyEdges": 0,
+      "blockingDecisions": [],
+      "ownershipConfidence": {
+        "high": 0,
+        "medium": 7,
+        "low": 0
+      }
+    },
+    "G": {
+      "tableCount": 0,
+      "resolvedCount": 0,
+      "unresolvedCount": 0,
+      "dependencyEdges": 0,
+      "blockingDecisions": [],
+      "ownershipConfidence": {
+        "high": 0,
+        "medium": 0,
+        "low": 0
+      }
+    }
+  }
+}

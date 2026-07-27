@@ -3,6 +3,7 @@ const path = require("path");
 const { UserRole } = require("@prisma/client");
 
 const distRoot = path.resolve(__dirname, "../dist");
+process.env.NODE_ENV = "test";
 
 const mockModule = (relativePath, exportsValue) => {
   const resolved = require.resolve(path.join(distRoot, relativePath));
@@ -15,14 +16,30 @@ const mockModule = (relativePath, exportsValue) => {
 };
 
 let prismaUser = null;
+const prismaMock = {
+  $queryRaw: async (_query, ...values) => [{ id: values[0], expiresAt: values[4] }],
+  user: {
+    findUnique: async () => prismaUser,
+  },
+};
 
 mockModule("config/database.js", {
   __esModule: true,
-  default: {
-    user: {
-      findUnique: async () => prismaUser,
-    },
-  },
+  default: prismaMock,
+});
+
+mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
+  loadAuthenticatedActor: async () => ({
+    ...prismaUser,
+    pendingEmail: null,
+    pendingEmailRequestedAt: null,
+    createdAt: new Date("2026-03-01T00:00:00.000Z"),
+    licenseeRecordId: prismaUser?.licensee?.id || null,
+    licenseeName: prismaUser?.licensee?.name || null,
+    licenseePrefix: prismaUser?.licensee?.prefix || null,
+    licenseeBrandName: prismaUser?.licensee?.brandName || null,
+    licenseeOrgId: prismaUser?.licensee?.orgId || null,
+  }),
 });
 
 mockModule("services/auth/passwordService.js", {
@@ -63,8 +80,18 @@ mockModule("services/auth/sessionRiskService.js", {
 });
 
 mockModule("services/manufacturerScopeService.js", {
-  listManufacturerLicenseeLinks: async () => [],
-  normalizeLinkedLicensees: (value) => value,
+  resolveManufacturerSessionScope: async () => {
+    const selectedLicensee = {
+      id: "licensee-1",
+      name: "Licensee",
+      prefix: "AADS",
+      brandName: "MSCQR",
+      orgId: "org-1",
+      isPrimary: true,
+      scopeVersion: "2026-03-01T00:00:00.000Z",
+    };
+    return { selectedLicensee, linkedLicensees: [selectedLicensee], linkedLicenseeIds: [selectedLicensee.id] };
+  },
 });
 
 mockModule("services/auth/emailVerificationService.js", {
@@ -106,7 +133,7 @@ const run = async () => {
     authAssurance: "PASSWORD",
     authenticatedAt: new Date("2026-03-28T10:00:00.000Z"),
     now: new Date("2026-03-28T10:00:00.000Z"),
-  });
+  }, prismaMock);
 
   assert.strictEqual(session.sessionId, "session-1");
   assert.strictEqual(session.auth.sessionId, "session-1");
@@ -132,7 +159,7 @@ const run = async () => {
     authenticatedAt: new Date("2026-03-28T10:00:00.000Z"),
     mfaVerifiedAt: new Date("2026-03-28T10:00:00.000Z"),
     now: new Date("2026-03-28T10:00:00.000Z"),
-  });
+  }, prismaMock);
 
   assert.strictEqual(adminSession.auth.stepUpMethod, "ADMIN_MFA");
 

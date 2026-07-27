@@ -1,0 +1,608 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": [
+    "documents/security/rls-program/workflows.json",
+    "documents/security/rls-program/command-semantics.json",
+    "backend/src/worker.ts"
+  ],
+  "boundaryCount": 3,
+  "contextKeys": [
+    "app.system_identity",
+    "app.job_id",
+    "app.job_type",
+    "app.organization_id",
+    "app.licensee_id",
+    "app.manufacturer_id",
+    "app.initiating_user_id",
+    "app.request_id",
+    "app.auth_assurance"
+  ],
+  "securityInvariants": [
+    "Durable or cryptographically authenticated job evidence is authority; JSON payload scope is not",
+    "Worker and scheduled credentials remain distinct",
+    "Transaction-local system context never impersonates a human or platform administrator",
+    "Every mutation is idempotent, replay-protected, concurrency-protected and auditable",
+    "No generic worker function or platform-wide bypass"
+  ],
+  "boundaries": [
+    {
+      "id": "worker-boundary-audit-outbox-delivery",
+      "workerClass": "actor-derived-job",
+      "runtimeIdentity": "identity-worker",
+      "entrypoint": "backend/src/worker.ts -> startAuditLogOutboxWorker -> flushAuditLogOutbox",
+      "queueOrScheduleSource": "AuditLogOutbox polling started by the registered backend worker script",
+      "producerIdentity": [
+        "identity-authenticated-app",
+        "identity-worker",
+        "identity-scheduled-job"
+      ],
+      "durableJobTableOrPayloadSource": "table-audit-log-outbox; the row ID, immutable canonical payload digest, scope fields, job type, request ID, expiry and idempotency key are authority; payload JSON alone is not",
+      "tenantScopeFields": [
+        "organization_id",
+        "licensee_id"
+      ],
+      "actorFields": [
+        "initiating_user_id",
+        "initiating_actor_role_snapshot",
+        "executing_system_identity"
+      ],
+      "scopeVerificationMethod": "Load the durable row by job ID, verify its canonical payload digest, re-resolve the initiating actor and tenant relationship, and reject any payload/row mismatch before installing context.",
+      "authorizationRevalidationRules": [
+        "Initiating actor still exists",
+        "Tenant relationship still exists",
+        "Required audit action remains allowlisted",
+        "Caller-controlled platform-admin flags are ignored"
+      ],
+      "tablesRead": [
+        "table-audit-log-outbox"
+      ],
+      "tablesWritten": [
+        "table-audit-log-outbox",
+        "table-audit-log"
+      ],
+      "tableCommands": [
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "SELECT",
+            "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT"
+          ],
+          "authority": "worker-fn-consume-audit-outbox"
+        }
+      ],
+      "idempotencyStrategy": {
+        "keySource": "durable idempotency_key derived from the original audit request/correlation and canonical payload digest",
+        "uniquenessBoundary": "job_type + tenant scope + idempotency_key",
+        "conflictBehavior": "reject same key with a different digest",
+        "replayResult": "return the existing flushedAuditLogId without inserting another audit event",
+        "conflictingPayloadDenied": true
+      },
+      "replayProtection": "One durable row, immutable digest, maximum age, row lock and QUEUED/FAILED-to-SENT compare-and-set; SENT is terminal.",
+      "retryPolicy": {
+        "maxAttempts": 10,
+        "backoffSeconds": "bounded exponential 10..300",
+        "duplicateSideEffectsAllowed": false,
+        "retryableStates": [
+          "QUEUED",
+          "FAILED"
+        ]
+      },
+      "deadLetterBehavior": "After maxAttempts, retain the row as terminal FAILED/dead-letter evidence, stop automatic delivery, and require an audited operator requeue with a new execution claim.",
+      "concurrencyControl": {
+        "type": "row-lock-plus-compare-and-set",
+        "databaseEnforced": true,
+        "rule": "Lock one row and transition only the expected status; the distributed lease is an optimization, not authority."
+      },
+      "leaseOrLockSemantics": "Global poller lease plus per-row FOR UPDATE/CAS; lease expiry cannot permit duplicate AuditLog insertion.",
+      "maximumJobAgeSeconds": 86400,
+      "cancellationSemantics": "Shutdown stops claiming new rows; an in-transaction row completes or rolls back. Terminal SENT rows cannot be cancelled.",
+      "acceptedJobTypes": [
+        "AUDIT_LOG_RECOVERY"
+      ],
+      "namedFunctionRequirement": {
+        "required": true,
+        "functionId": "worker-fn-consume-audit-outbox",
+        "sqlSchema": "app_rls",
+        "sqlFunctionName": "consume_audit_log_outbox",
+        "arguments": [
+          {
+            "name": "job_id",
+            "type": "text"
+          },
+          {
+            "name": "payload_digest",
+            "type": "text"
+          },
+          {
+            "name": "attempted_at",
+            "type": "timestamp without time zone"
+          }
+        ],
+        "genericQueryInputsAllowed": false,
+        "reason": "Audit insertion and durable one-time completion must be atomic and column-narrow.",
+        "ownerIdentity": "identity-table-owner",
+        "securityMode": "INVOKER",
+        "fixedSearchPath": "pg_catalog",
+        "publicExecutionDenied": true,
+        "executableRuntimeIdentity": "identity-worker"
+      },
+      "workflowIds": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
+      ],
+      "requiredTransactionContext": {
+        "keys": [
+          "app.system_identity",
+          "app.job_id",
+          "app.job_type",
+          "app.organization_id",
+          "app.licensee_id",
+          "app.manufacturer_id",
+          "app.initiating_user_id",
+          "app.request_id",
+          "app.auth_assurance"
+        ],
+        "transactionLocal": true,
+        "sameTransactionAsProtectedQueries": true,
+        "derivedFromVerifiedServerEvidence": true,
+        "clearsAtTransactionEnd": true,
+        "fixedAssurance": "system-verified",
+        "humanRoleContextAllowed": false,
+        "platformAdminContextAllowed": false
+      },
+      "exactCommandRuleIds": [
+        "command-audit-log-insert-bbebad8a8023",
+        "command-audit-log-outbox-select-bbebad8a8023",
+        "command-audit-log-outbox-update-bbebad8a8023",
+        "command-security-event-outbox-insert-bbebad8a8023"
+      ],
+      "auditEventRequirement": {
+        "required": true,
+        "fields": [
+          "system_identity",
+          "job_id",
+          "job_type",
+          "initiating_user_id_when_present",
+          "tenant_scope",
+          "request_id",
+          "outcome",
+          "retry_attempt"
+        ],
+        "executorAttribution": "identity-worker",
+        "humanActorIsInitiatorOnly": true,
+        "immutable": true
+      },
+      "correlationIdRequirement": "A validated UUID request/correlation ID is mandatory in the durable record and every audit/retry event.",
+      "allowedScenarios": [
+        "An accepted job type with a fresh durable record, verified scope, matching digest/idempotency key and exact runtime identity executes once."
+      ],
+      "deniedScenarios": [
+        "Unknown type, missing or payload-only scope, actor/tenant mismatch, expired job, replay conflict, malformed correlation ID, unexpected command, platform-admin flag or wrong identity is denied."
+      ],
+      "implementationStatus": "contract-resolved; runtime/schema implementation required before activation",
+      "p2TestRequirements": [
+        "verified durable scope and empty/payload-only denial",
+        "idempotent replay and conflicting digest denial",
+        "concurrent single winner",
+        "maximum-age and unknown-type denial",
+        "audit executor/job attribution",
+        "retry/dead-letter/cancellation state machine"
+      ],
+      "assurance": "system-verified",
+      "platformAdminContextAllowed": false,
+      "humanImpersonationAllowed": false,
+      "unknownJobTypesRejected": true,
+      "conflictingReplayPayloadDenied": true,
+      "sideEffectsDeduplicated": true
+    },
+    {
+      "id": "worker-boundary-scheduled-compliance-packs",
+      "workerClass": "scheduled-maintenance-job",
+      "runtimeIdentity": "identity-scheduled-job",
+      "entrypoint": "backend/src/worker.ts -> startCompliancePackScheduler",
+      "queueOrScheduleSource": "UTC hour/minute schedule configured for the registered backend worker process",
+      "producerIdentity": [
+        "identity-scheduled-job"
+      ],
+      "durableJobTableOrPayloadSource": "table-compliance-pack-job plus a durable schedule-run key; each tenant partition is claimed before report generation",
+      "tenantScopeFields": [
+        "licensee_id",
+        "organization_id resolved from licensee_id",
+        "schedule_scope_version"
+      ],
+      "actorFields": [
+        "executing_system_identity; no human actor or platform-admin impersonation"
+      ],
+      "scopeVerificationMethod": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "authorizationRevalidationRules": [
+        "Licensee remains active",
+        "Licensee-to-organization binding matches",
+        "Schedule ID matches the verified durable credential and claimed job",
+        "No platform-user lookup or human impersonation is permitted"
+      ],
+      "tablesRead": [
+        "table-scheduled-job-credential",
+        "table-licensee",
+        "table-organization",
+        "table-compliance-pack-job",
+        "table-action-idempotency-key",
+        "table-incident",
+        "table-incident-handoff",
+        "table-audit-log",
+        "table-evidence-retention-policy"
+      ],
+      "tablesWritten": [
+        "table-compliance-pack-job",
+        "table-action-idempotency-key",
+        "table-audit-log-outbox"
+      ],
+      "tableCommands": [
+        {
+          "tableId": "table-scheduled-job-credential",
+          "commands": [
+            "SELECT",
+            "UPDATE"
+          ],
+          "authority": "worker-fn-claim-compliance-pack-slice"
+        },
+        {
+          "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ],
+          "authority": "worker-fn-claim-compliance-pack-slice"
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ],
+          "authority": "worker-fn-claim-compliance-pack-slice"
+        },
+        {
+          "tableId": "table-compliance-pack-job",
+          "commands": [
+            "SELECT",
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-action-idempotency-key",
+          "commands": [
+            "SELECT",
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-incident",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-incident-handoff",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-evidence-retention-policy",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "INSERT"
+          ]
+        }
+      ],
+      "idempotencyStrategy": {
+        "keySource": "compliance-pack + licensee_id + UTC schedule stamp + report period",
+        "uniquenessBoundary": "job_type + licensee_id + schedule stamp",
+        "conflictBehavior": "reject a different tenant/period/digest for the same key",
+        "replayResult": "return the existing job/result; RELEASED/COMPLETED work is not regenerated",
+        "conflictingPayloadDenied": true
+      },
+      "replayProtection": "Unique schedule-partition key, durable job state, maximum age and RUNNING-to-COMPLETED/FAILED compare-and-set.",
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "backoffSeconds": "bounded exponential 60..900 within maximum job age",
+        "duplicateSideEffectsAllowed": false,
+        "retryableStates": [
+          "FAILED"
+        ]
+      },
+      "deadLetterBehavior": "After maxAttempts or maximum age, retain FAILED job/evidence and require an operator-approved new job ID; never overwrite a completed pack.",
+      "concurrencyControl": {
+        "type": "unique-schedule-key-plus-compare-and-set",
+        "databaseEnforced": true,
+        "rule": "Unique tenant/schedule partition and durable RUNNING claim; process-level lastRunStamp is not authority."
+      },
+      "leaseOrLockSemantics": "One bounded schedule claim (maximum 100 tenant partitions) followed by one tenant transaction at a time; safe cancellation leaves unclaimed partitions for retry.",
+      "maximumJobAgeSeconds": 7200,
+      "cancellationSemantics": "Stop after the current tenant transaction, leave unclaimed partitions retryable, and never publish a partial artifact as COMPLETED.",
+      "acceptedJobTypes": [
+        "SCHEDULED_COMPLIANCE_PACK"
+      ],
+      "namedFunctionRequirement": {
+        "required": true,
+        "functionId": "worker-fn-claim-compliance-pack-slice",
+        "sqlSchema": "app_rls",
+        "sqlFunctionName": "claim_compliance_pack_slice",
+        "arguments": [
+          {
+            "name": "capability",
+            "type": "text"
+          },
+          {
+            "name": "schedule_id",
+            "type": "text"
+          },
+          {
+            "name": "due_at",
+            "type": "timestamp without time zone"
+          },
+          {
+            "name": "batch_size",
+            "type": "integer"
+          }
+        ],
+        "genericQueryInputsAllowed": false,
+        "reason": "A hash-only scheduled capability authorizes one bounded platform-wide tenant claim; every returned report remains tenant-scoped.",
+        "ownerIdentity": "identity-auth-function-owner",
+        "securityMode": "DEFINER",
+        "fixedSearchPath": "pg_catalog,public",
+        "publicExecutionDenied": true,
+        "executableRuntimeIdentity": "identity-scheduled-job"
+      },
+      "workflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "requiredTransactionContext": {
+        "keys": [
+          "app.system_identity",
+          "app.job_id",
+          "app.job_type",
+          "app.organization_id",
+          "app.licensee_id",
+          "app.manufacturer_id",
+          "app.initiating_user_id",
+          "app.request_id",
+          "app.auth_assurance"
+        ],
+        "transactionLocal": true,
+        "sameTransactionAsProtectedQueries": true,
+        "derivedFromVerifiedServerEvidence": true,
+        "clearsAtTransactionEnd": true,
+        "fixedAssurance": "system-verified",
+        "humanRoleContextAllowed": false,
+        "platformAdminContextAllowed": false
+      },
+      "exactCommandRuleIds": [
+        "command-action-idempotency-key-insert-56e28c0be62e",
+        "command-action-idempotency-key-select-56e28c0be62e",
+        "command-action-idempotency-key-update-56e28c0be62e",
+        "command-audit-log-outbox-insert-56e28c0be62e",
+        "command-audit-log-select-56e28c0be62e",
+        "command-compliance-pack-job-insert-56e28c0be62e",
+        "command-compliance-pack-job-select-56e28c0be62e",
+        "command-compliance-pack-job-update-56e28c0be62e",
+        "command-evidence-retention-policy-select-56e28c0be62e",
+        "command-incident-handoff-select-56e28c0be62e",
+        "command-incident-select-56e28c0be62e",
+        "command-licensee-select-56e28c0be62e",
+        "command-manufacturer-licensee-link-select-56e28c0be62e",
+        "command-organization-select-56e28c0be62e",
+        "command-refresh-token-select-56e28c0be62e",
+        "command-scheduled-job-credential-select-0b81b64aa57d",
+        "command-scheduled-job-credential-select-56e28c0be62e",
+        "command-scheduled-job-credential-update-0b81b64aa57d",
+        "command-scheduled-job-credential-update-56e28c0be62e",
+        "command-sensitive-action-approval-select-56e28c0be62e",
+        "command-user-select-56e28c0be62e"
+      ],
+      "auditEventRequirement": {
+        "required": true,
+        "fields": [
+          "system_identity",
+          "job_id",
+          "job_type",
+          "initiating_user_id_when_present",
+          "tenant_scope",
+          "request_id",
+          "outcome",
+          "retry_attempt"
+        ],
+        "executorAttribution": "identity-scheduled-job",
+        "humanActorIsInitiatorOnly": true,
+        "immutable": true
+      },
+      "correlationIdRequirement": "A validated UUID request/correlation ID is mandatory in the durable record and every audit/retry event.",
+      "allowedScenarios": [
+        "An accepted job type with a fresh durable record, verified scope, matching digest/idempotency key and exact runtime identity executes once."
+      ],
+      "deniedScenarios": [
+        "Unknown type, missing or payload-only scope, actor/tenant mismatch, expired job, replay conflict, malformed correlation ID, unexpected command, platform-admin flag or wrong identity is denied."
+      ],
+      "implementationStatus": "implemented; PostgreSQL 18 disposable certification required for each generated package",
+      "p2TestRequirements": [
+        "verified durable scope and empty/payload-only denial",
+        "idempotent replay and conflicting digest denial",
+        "concurrent single winner",
+        "maximum-age and unknown-type denial",
+        "audit executor/job attribution",
+        "retry/dead-letter/cancellation state machine"
+      ],
+      "assurance": "system-verified",
+      "platformAdminContextAllowed": false,
+      "humanImpersonationAllowed": false,
+      "unknownJobTypesRejected": true,
+      "conflictingReplayPayloadDenied": true,
+      "sideEffectsDeduplicated": true
+    },
+    {
+      "id": "worker-boundary-siem-outbox-delivery",
+      "workerClass": "platform-scoped-system-job",
+      "runtimeIdentity": "identity-worker",
+      "entrypoint": "backend/src/worker.ts -> startSecurityEventOutboxWorker -> flushSecurityEventOutbox",
+      "queueOrScheduleSource": "SecurityEventOutbox polling started by the registered backend worker script",
+      "producerIdentity": [
+        "identity-authenticated-app",
+        "identity-worker",
+        "identity-scheduled-job"
+      ],
+      "durableJobTableOrPayloadSource": "table-security-event-outbox; durable row ID, allowlisted event type, immutable payload digest, scope version, request ID, expiry and idempotency key are authority",
+      "tenantScopeFields": [
+        "organization_id when the event is tenant-scoped",
+        "licensee_id when the event is tenant-scoped"
+      ],
+      "actorFields": [
+        "initiating_user_id when present",
+        "executing_system_identity"
+      ],
+      "scopeVerificationMethod": "Load the durable outbox row, validate its allowlisted event type and canonical digest, and resolve any tenant/actor references from authoritative tables; JSON claims never grant authority.",
+      "authorizationRevalidationRules": [
+        "Event type is allowlisted",
+        "Any referenced tenant still exists",
+        "Any actor attribution matches the durable event",
+        "No human role is installed or impersonated"
+      ],
+      "tablesRead": [
+        "table-security-event-outbox"
+      ],
+      "tablesWritten": [
+        "table-security-event-outbox"
+      ],
+      "tableCommands": [
+        {
+          "tableId": "table-security-event-outbox",
+          "commands": [
+            "SELECT",
+            "UPDATE"
+          ]
+        }
+      ],
+      "idempotencyStrategy": {
+        "keySource": "SecurityEventOutbox.id used as the stable external event ID plus immutable payload digest",
+        "uniquenessBoundary": "SIEM sink + outbox row ID",
+        "conflictBehavior": "reject the same row ID with a different digest",
+        "replayResult": "return/retain the existing SENT result; never send a second logical event",
+        "conflictingPayloadDenied": true
+      },
+      "replayProtection": "Stable webhook event ID, immutable digest, expiry, attempt counter and QUEUED/FAILED-to-SENT compare-and-set.",
+      "retryPolicy": {
+        "maxAttempts": 10,
+        "backoffSeconds": "bounded exponential 5..300",
+        "duplicateSideEffectsAllowed": false,
+        "retryableStates": [
+          "QUEUED",
+          "FAILED"
+        ]
+      },
+      "deadLetterBehavior": "After maxAttempts, retain terminal FAILED evidence and require an audited operator requeue; never mutate the original event ID or payload.",
+      "concurrencyControl": {
+        "type": "lease-plus-row-claim",
+        "databaseEnforced": true,
+        "rule": "Use a database compare-and-set claim per row in addition to the distributed poller lease."
+      },
+      "leaseOrLockSemantics": "Global SIEM poller lease plus database row claim; queue delivery or Redis lease alone is insufficient.",
+      "maximumJobAgeSeconds": 86400,
+      "cancellationSemantics": "Shutdown stops new claims; an in-flight external request records a retryable outcome unless SENT was durably committed.",
+      "acceptedJobTypes": [
+        "AUDIT_LOG",
+        "CSP_VIOLATION"
+      ],
+      "namedFunctionRequirement": {
+        "required": false,
+        "functionId": null,
+        "genericQueryInputsAllowed": false,
+        "reason": "Exact table SELECT/UPDATE plus a database CAS claim is sufficient; network delivery cannot be made atomic by a database function.",
+        "ownerIdentity": null,
+        "securityMode": "INVOKER",
+        "fixedSearchPath": "pg_catalog",
+        "publicExecutionDenied": true,
+        "executableRuntimeIdentity": "identity-worker"
+      },
+      "workflowIds": [
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
+      ],
+      "requiredTransactionContext": {
+        "keys": [
+          "app.system_identity",
+          "app.job_id",
+          "app.job_type",
+          "app.organization_id",
+          "app.licensee_id",
+          "app.manufacturer_id",
+          "app.initiating_user_id",
+          "app.request_id",
+          "app.auth_assurance"
+        ],
+        "transactionLocal": true,
+        "sameTransactionAsProtectedQueries": true,
+        "derivedFromVerifiedServerEvidence": true,
+        "clearsAtTransactionEnd": true,
+        "fixedAssurance": "system-verified",
+        "humanRoleContextAllowed": false,
+        "platformAdminContextAllowed": false
+      },
+      "exactCommandRuleIds": [
+        "command-security-event-outbox-select-76e162f16ff9",
+        "command-security-event-outbox-update-76e162f16ff9"
+      ],
+      "auditEventRequirement": {
+        "required": true,
+        "fields": [
+          "system_identity",
+          "job_id",
+          "job_type",
+          "initiating_user_id_when_present",
+          "tenant_scope",
+          "request_id",
+          "outcome",
+          "retry_attempt"
+        ],
+        "executorAttribution": "identity-worker",
+        "humanActorIsInitiatorOnly": true,
+        "immutable": true
+      },
+      "correlationIdRequirement": "A validated UUID request/correlation ID is mandatory in the durable record and every audit/retry event.",
+      "allowedScenarios": [
+        "An accepted job type with a fresh durable record, verified scope, matching digest/idempotency key and exact runtime identity executes once."
+      ],
+      "deniedScenarios": [
+        "Unknown type, missing or payload-only scope, actor/tenant mismatch, expired job, replay conflict, malformed correlation ID, unexpected command, platform-admin flag or wrong identity is denied."
+      ],
+      "implementationStatus": "contract-resolved; runtime/schema implementation required before activation",
+      "p2TestRequirements": [
+        "verified durable scope and empty/payload-only denial",
+        "idempotent replay and conflicting digest denial",
+        "concurrent single winner",
+        "maximum-age and unknown-type denial",
+        "audit executor/job attribution",
+        "retry/dead-letter/cancellation state machine"
+      ],
+      "assurance": "system-verified",
+      "platformAdminContextAllowed": false,
+      "humanImpersonationAllowed": false,
+      "unknownJobTypesRejected": true,
+      "conflictingReplayPayloadDenied": true,
+      "sideEffectsDeduplicated": true
+    }
+  ]
+}

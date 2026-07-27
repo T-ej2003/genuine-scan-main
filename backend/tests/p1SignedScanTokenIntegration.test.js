@@ -6,6 +6,13 @@ const { hashToken, signQrPayload } = require("../dist/services/qrTokenService");
 
 const qr = state.qrCodes.find((entry) => entry.id === "p1-qr-a");
 assert(qr, "P1 signed scan QR fixture missing");
+Object.assign(qr, {
+  id: "10000000-0000-4000-8000-000000000001",
+  licenseeId: "10000000-0000-4000-8000-000000000002",
+  batchId: "10000000-0000-4000-8000-000000000003",
+});
+qr.batch.id = qr.batchId;
+qr.batch.manufacturer.id = "10000000-0000-4000-8000-000000000004";
 
 const buildToken = (overrides = {}) => {
   const token = signQrPayload({
@@ -50,13 +57,11 @@ const assertSafePublicPayload = ({ text }) => {
 };
 
 const assertSafePublicScanFailure = (response) => {
-  assert.strictEqual(response.payload.success, true);
-  assert.strictEqual(response.payload.data.publicStatus, "not_found");
-  assert.strictEqual(response.payload.data.message, "MSCQR could not trust this label proof.");
-  assert.strictEqual(response.payload.data.scanOutcome, undefined, "public scan failures must not expose raw signed-token outcomes");
-  assert.strictEqual(response.payload.data.proofSource, undefined, "public scan failures must not expose proof internals");
+  assert.deepStrictEqual(response.payload, {
+    success: false,
+    error: "Request could not be verified.",
+  });
   assert.doesNotMatch(response.text, /QR token|EXPIRED|INVALID_SIGNATURE|TOKEN_MISMATCH|revoked|mismatched|tampered|signature/i);
-  expectPublicResponseSafe(response.payload);
 };
 
 (async () => {
@@ -103,14 +108,16 @@ const assertSafePublicScanFailure = (response) => {
     assertSafePublicPayload(revoked);
     assertSafePublicScanFailure(revoked);
 
-    const missingQrToken = buildToken({ qr_id: "p1-missing-qr", nonce: "p1-missing-nonce" });
+    const missingQrToken = buildToken({
+      qr_id: "10000000-0000-4000-8000-000000000099",
+      nonce: "p1-missing-nonce",
+    });
     const notFound = await request(baseUrl, "GET", `/api/scan?t=${encodeURIComponent(missingQrToken)}`, null);
     assert.strictEqual(notFound.status, 404, notFound.text);
-    assert.strictEqual(notFound.payload.success, true);
-    assert.strictEqual(notFound.payload.data.publicStatus, "not_found");
-    assert.strictEqual(notFound.payload.data.message, "MSCQR could not find a live record for this code.");
-    assert.strictEqual(notFound.payload.data.classification, undefined, "public not-found scan response must not expose raw classification");
-    expectPublicResponseSafe(notFound.payload);
+    assert.deepStrictEqual(notFound.payload, {
+      success: false,
+      error: "Requested information is unavailable.",
+    });
     assertSafePublicPayload(notFound);
 
     state.scan.deviceFingerprint = "p1-device-b";

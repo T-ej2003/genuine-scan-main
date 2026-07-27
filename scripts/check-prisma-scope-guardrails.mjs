@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { scanProductionAccess, validateProtectedTransactionClients } from "./rls/lib/program-inventory.mjs";
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const allowlistPath = path.join(repoRoot, "scripts/security-scope-allowlist.json");
@@ -102,6 +103,20 @@ const walk = (dir, out = []) => {
 };
 
 const sampleIndex = process.argv.indexOf("--sample");
+const canonicalAccessKeys = new Set();
+if (sampleIndex < 0) {
+  const workflowManifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "documents/security/rls-program/workflows.json"), "utf8"));
+  const accessScan = scanProductionAccess();
+  validateProtectedTransactionClients(workflowManifest, accessScan);
+  const accessById = new Map(accessScan.accesses.map((access) => [access.id, access]));
+  for (const workflow of workflowManifest.workflows.filter((item) => item.contextBoundaryStatus === "implemented" && item.sameTransactionGuarantee === true)) {
+    for (const evidence of workflow.supportingEvidence) {
+      const access = accessById.get(evidence.accessId);
+      const model = access.prismaModel[0].toLowerCase() + access.prismaModel.slice(1);
+      canonicalAccessKeys.add(`${access.sourceFile}:${access.line}:${model}:${access.method}`);
+    }
+  }
+}
 const files =
   sampleIndex >= 0
     ? [path.resolve(process.argv[sampleIndex + 1])]
@@ -121,6 +136,7 @@ for (const file of files) {
     while ((match = riskyCallRe.exec(line))) {
       const [, model, method] = match;
       if (!protectedModels.has(model) || !riskyMethods.has(method)) continue;
+      if (canonicalAccessKeys.has(`${rel}:${lineIdx + 1}:${model}:${method}`)) continue;
       const previous = lines.slice(Math.max(0, lineIdx - 3), lineIdx + 1).join("\n");
       if (safeCommentRe.test(previous)) continue;
       if (centralScopedHelperFiles.has(rel)) continue;

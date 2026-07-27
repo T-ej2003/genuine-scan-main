@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { APP_PATHS } from "@/app/route-metadata";
 import { OperationProgressDialog } from "@/components/feedback/OperationProgressDialog";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -130,8 +130,8 @@ export default function QRRequests() {
   const submitRequest = async () => {
     if (!isLicensee) return;
 
-    if (!quantity || quantity <= 0) {
-      toast({ title: "Invalid quantity", description: "Enter the number of QR labels needed.", variant: "destructive" });
+    if (!quantity || quantity <= 0 || quantity > 200_000) {
+      toast({ title: "Invalid quantity", description: "Enter between 1 and 200,000 QR labels.", variant: "destructive" });
       return;
     }
     if (!batchName.trim() || batchName.trim().length < 2) {
@@ -316,6 +316,8 @@ export default function QRRequests() {
                   <Label>Number of QR labels</Label>
                   <Input
                     type="number"
+                    min={1}
+                    max={200000}
                     value={quantity}
                     onChange={(e) => setQuantity(parseInt(e.target.value || "0", 10))}
                   />

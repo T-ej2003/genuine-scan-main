@@ -1,6 +1,5 @@
-import prisma from "../../config/database";
 import { Prisma, UserRole, UserStatus } from "@prisma/client";
-import { verifyPassword, hashPassword, shouldRehashPassword } from "./passwordService";
+import { hashPassword, shouldRehashPassword, verifyPassword } from "./passwordService";
 import {
   signAccessToken,
   newRefreshToken,
@@ -11,19 +10,26 @@ import {
   createRefreshToken,
   rotateRefreshToken,
   revokeAllUserRefreshTokens,
-  revokePasswordOnlyRefreshTokensForUser,
-  revokeRefreshTokenByRaw,
+  revokeRefreshTokenById,
 } from "./refreshTokenService";
 import { createAuditLog } from "../auditService";
-import { assessAuthSessionRisk } from "./sessionRiskService";
-import { listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../manufacturerScopeService";
+import { queueAuditLogOutbox } from "../auditLogOutboxService";
+import { assessAuthSessionRisk, persistAuthSessionRisk } from "./sessionRiskService";
+import { resolveManufacturerSessionScope } from "../manufacturerScopeService";
 import { isVerifiedAccount } from "./emailVerificationService";
 import { createAdminMfaChallenge, getAdminMfaStatus } from "./mfaService";
-import { randomOpaqueToken } from "../../utils/security";
+import { buildAdminMfaChallengeExpiry } from "./authDurationConfig";
+import { hashToken, randomOpaqueToken } from "../../utils/security";
 import type { AuthAssuranceLevel, AuthSessionStage, StepUpMethod } from "../../types";
-// rls-prototype-approved-import: reviewed auth bootstrap context boundary.
-import { withRlsPrototypeTransaction } from "../../lib/rlsTransactionContextPrototype";
 import { lookupPasswordBootstrapUser, recordPasswordLoginFailure } from "./authBootstrapRepository";
+import {
+  createRefreshMfaChallengeRecord,
+  loadRefreshSessionState,
+  type RefreshSessionState,
+} from "../../rls-waves/session-b/b01/sessionCredentialRepository";
+import { loadAuthenticatedActor } from "../../rls-waves/session-b/b01/authenticatedSecurityRepository";
+import { getB01PreAuthPrisma } from "../../rls-waves/session-b/b01/runtimeClients";
+import { createAuthenticatedSessionCapability } from "./authenticatedSessionCapabilityService";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = String(process.env[key] || "").trim();
@@ -73,7 +79,9 @@ export const buildJwtPayloadForUser = (u: {
   role: UserRole;
   licenseeId: string | null;
   orgId: string | null;
+  scopeVersion?: string | null;
   linkedLicenseeIds?: string[] | null;
+  sessionId: string;
   authAssurance: AuthAssuranceLevel;
   authenticatedAt?: Date | null;
   mfaVerifiedAt?: Date | null;
@@ -83,7 +91,9 @@ export const buildJwtPayloadForUser = (u: {
   role: u.role,
   licenseeId: u.licenseeId,
   orgId: u.orgId,
+  scopeVersion: u.scopeVersion || null,
   linkedLicenseeIds: u.linkedLicenseeIds || null,
+  sessionId: u.sessionId,
   sessionStage: "ACTIVE" as const,
   authAssurance: u.authAssurance,
   authenticatedAt: u.authenticatedAt?.toISOString?.() || null,
@@ -92,11 +102,258 @@ export const buildJwtPayloadForUser = (u: {
 
 type AuthDbClient = Prisma.TransactionClient;
 
-const mapLinkedLicenseesForSession = async (userId: string, db: AuthDbClient = prisma) => {
-  const links = await listManufacturerLicenseeLinks(userId, db).catch(() => []);
-  const linkedLicensees = normalizeLinkedLicensees(links);
-  const linkedLicenseeIds = linkedLicensees.map((row) => row.id);
-  return { linkedLicensees, linkedLicenseeIds };
+export const authSessionUserSelect = Prisma.validator<Prisma.UserSelect>()({
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  licenseeId: true,
+  orgId: true,
+  emailVerifiedAt: true,
+  deletedAt: true,
+  disabledAt: true,
+  isActive: true,
+  status: true,
+  licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
+});
+
+type AuthSessionUser = Prisma.UserGetPayload<{ select: typeof authSessionUserSelect }>;
+type SessionScopeInput = {
+  requestedLicenseeId?: string | null;
+  requestedOrgId?: string | null;
+  requestedScopeVersion?: string | null;
+  requestId?: string | null;
+  purpose?: "manufacturer-bootstrap" | "manufacturer-scope-switch";
+};
+
+const mapLinkedLicenseesForSession = async (
+  user: Pick<AuthSessionUser, "id" | "licenseeId" | "orgId">,
+  input: SessionScopeInput,
+  assurance: "password-verified" | "mfa-verified",
+  db: AuthDbClient
+) => resolveManufacturerSessionScope({
+  manufacturerId: user.id,
+  legacyLicenseeId: user.licenseeId,
+  legacyOrgId: user.orgId,
+  requestedLicenseeId: input.requestedLicenseeId,
+  requestedOrgId: input.requestedOrgId,
+  requestedScopeVersion: input.requestedScopeVersion,
+  audit: input.requestId && input.purpose
+    ? { requestId: input.requestId, purpose: input.purpose, assurance }
+    : undefined,
+}, db);
+
+const loadActiveSessionState = async (
+  input: { userId: string; authAssurance: AuthAssuranceLevel } & SessionScopeInput,
+  db: AuthDbClient
+) => {
+  const actor = await loadAuthenticatedActor(db);
+  if (actor.id !== input.userId) throw new Error("User not found");
+  const user: AuthSessionUser = {
+    id: actor.id,
+    email: actor.email,
+    name: actor.name,
+    role: actor.role,
+    licenseeId: actor.licenseeId,
+    orgId: actor.orgId,
+    emailVerifiedAt: actor.emailVerifiedAt,
+    deletedAt: actor.deletedAt,
+    disabledAt: actor.disabledAt,
+    isActive: actor.isActive,
+    status: actor.status,
+    licensee: actor.licenseeRecordId ? {
+      id: actor.licenseeRecordId,
+      name: actor.licenseeName || "",
+      prefix: actor.licenseePrefix || "",
+      brandName: actor.licenseeBrandName,
+      orgId: actor.licenseeOrgId || actor.orgId || "",
+    } : null,
+  };
+  if (isDisabledUser(user)) throw new Error("Account is disabled");
+
+  const mfaRequired = isAdminMfaRequiredRole(user.role);
+  const mfaStatus = mfaRequired ? await getAdminMfaStatus(user.id, db) : null;
+  if (input.authAssurance === "ADMIN_MFA" && mfaRequired && !mfaStatus?.enabled) {
+    throw new Error("MFA_CURRENT_STATE_REQUIRED");
+  }
+
+  const linkedScope = isManufacturerRole(user.role)
+    ? await mapLinkedLicenseesForSession(
+        user,
+        input,
+        input.authAssurance === "ADMIN_MFA" ? "mfa-verified" : "password-verified",
+        db
+      )
+    : { selectedLicensee: null, linkedLicensees: [], linkedLicenseeIds: [] as string[] };
+  if (isManufacturerRole(user.role) && !linkedScope.selectedLicensee) {
+    throw new Error("SCOPE_SELECTION_REQUIRED");
+  }
+
+  const primaryLicensee = isManufacturerRole(user.role) ? linkedScope.selectedLicensee : user.licensee;
+  return {
+    user,
+    linkedScope,
+    mfaRequired,
+    mfaStatus,
+    primaryLicensee,
+    sessionLicenseeId: primaryLicensee?.id || (isManufacturerRole(user.role) ? null : user.licenseeId),
+    sessionOrgId: primaryLicensee?.orgId || (isManufacturerRole(user.role) ? null : user.orgId),
+    scopeVersion: isManufacturerRole(user.role) ? linkedScope.selectedLicensee?.scopeVersion ?? null : null,
+  };
+};
+
+type ActiveSessionState = Awaited<ReturnType<typeof loadActiveSessionState>>;
+
+const refreshBoundaryState = (row: RefreshSessionState): ActiveSessionState => {
+  const manufacturer = isManufacturerRole(row.role);
+  const linkedLicensees = row.linkedLicensees.map((licensee) => ({ ...licensee }));
+  const selectedLicensee = row.selectedLicenseeId
+    ? linkedLicensees.find((licensee) => licensee.id === row.selectedLicenseeId) || {
+        id: row.selectedLicenseeId,
+        name: row.selectedLicenseeName || "",
+        prefix: row.selectedLicenseePrefix || "",
+        brandName: row.selectedLicenseeBrandName,
+        orgId: row.selectedLicenseeOrganizationId,
+      }
+    : null;
+  const mfaStatus = row.mfaRequired ? {
+    enrolled: row.mfaEnrolled,
+    enabled: row.mfaEnabled,
+    totpEnabled: row.mfaMethods.includes("TOTP"),
+    hasWebAuthn: row.mfaMethods.includes("WEBAUTHN"),
+    methods: row.mfaMethods,
+    preferredMethod: row.mfaPreferredMethod,
+    verifiedAt: null,
+    lastUsedAt: row.mfaLastUsedAt,
+    backupCodesRemaining: row.mfaMethods.includes("BACKUP_CODE") ? 1 : 0,
+    createdAt: null,
+    updatedAt: null,
+    webauthnCredentials: [],
+  } : null;
+  return {
+    user: {
+      id: row.userId,
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      licenseeId: row.legacyLicenseeId,
+      orgId: row.legacyOrganizationId,
+      emailVerifiedAt: row.emailVerifiedAt,
+      deletedAt: null,
+      disabledAt: null,
+      isActive: true,
+      status: UserStatus.ACTIVE,
+      licensee: selectedLicensee,
+    },
+    linkedScope: {
+      selectedLicensee: manufacturer ? selectedLicensee : null,
+      linkedLicensees,
+      linkedLicenseeIds: linkedLicensees.map((licensee) => licensee.id),
+    },
+    mfaRequired: row.mfaRequired,
+    mfaStatus,
+    primaryLicensee: selectedLicensee,
+    sessionLicenseeId: row.sessionLicenseeId,
+    sessionOrgId: row.sessionOrganizationId,
+    scopeVersion: manufacturer ? row.scopeVersion : null,
+  } as ActiveSessionState;
+};
+
+const refreshMfaChallengeIssuer = (
+  tx: Prisma.TransactionClient,
+  input: { tokenId: string; tokenHashCandidates: string[]; requestId: string }
+) => async (params: Parameters<typeof createAdminMfaChallenge>[0]) => {
+  const sessionId = String(params.sessionId || "").trim();
+  if (!sessionId) throw new Error("B01 refresh MFA challenge requires a session binding");
+  const createdAt = new Date();
+  const { expiresAt } = buildAdminMfaChallengeExpiry(createdAt);
+  const ticket = randomOpaqueToken(36);
+  await createRefreshMfaChallengeRecord(tx, {
+    tokenId: input.tokenId,
+    tokenHashCandidates: input.tokenHashCandidates,
+    userId: params.userId,
+    ticketHash: hashToken(ticket),
+    sessionBindingHash: hashToken(`admin-mfa-session:${sessionId}`),
+    riskScore: Math.max(0, Math.min(100, Math.round(params.riskScore || 0))),
+    riskLevel: String(params.riskLevel || "LOW").toUpperCase(),
+    reasons: params.reasons?.length ? params.reasons : ["Admin login requires MFA confirmation."],
+    ipHash: params.ipHash || null,
+    userAgentHash: params.userAgent ? hashToken(params.userAgent) : null,
+    maxAttempts: Math.max(1, Math.min(10, parseIntEnv("AUTH_MFA_CHALLENGE_MAX_ATTEMPTS", 5))),
+    expiresAt,
+    createdAt,
+    requestId: input.requestId,
+  });
+  return { ticket, expiresAt };
+};
+
+const buildActiveSessionResponse = (
+  state: ActiveSessionState,
+  input: {
+    authAssurance: AuthAssuranceLevel;
+    authenticatedAt: Date;
+    mfaVerifiedAt: Date | null;
+  },
+  refresh: { rawToken: string; id: string; expiresAt: Date },
+  databaseSessionCapability?: string | null
+) => {
+  const { user, linkedScope, mfaRequired, mfaStatus, primaryLicensee, sessionLicenseeId, sessionOrgId, scopeVersion } = state;
+  const accessToken = signAccessToken(buildJwtPayloadForUser({
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    licenseeId: sessionLicenseeId,
+    orgId: sessionOrgId,
+    scopeVersion,
+    linkedLicenseeIds: linkedScope.linkedLicenseeIds,
+    sessionId: refresh.id,
+    authAssurance: input.authAssurance,
+    authenticatedAt: input.authenticatedAt,
+    mfaVerifiedAt: input.mfaVerifiedAt,
+  }));
+
+  return {
+    sessionStage: "ACTIVE" as AuthSessionStage,
+    accessToken,
+    refreshToken: refresh.rawToken,
+    refreshTokenExpiresAt: refresh.expiresAt,
+    databaseSessionCapability: databaseSessionCapability || null,
+    sessionId: refresh.id,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      licenseeId: sessionLicenseeId,
+      orgId: sessionOrgId,
+      scopeVersion,
+      licensee: primaryLicensee
+        ? {
+            id: primaryLicensee.id,
+            name: primaryLicensee.name,
+            prefix: primaryLicensee.prefix,
+            brandName: "brandName" in primaryLicensee ? primaryLicensee.brandName ?? null : null,
+            ...(scopeVersion ? { scopeVersion } : {}),
+          }
+        : null,
+      linkedLicensees: linkedScope.linkedLicensees,
+      emailVerifiedAt: user.emailVerifiedAt,
+    },
+    auth: {
+      sessionStage: "ACTIVE" as const,
+      authAssurance: input.authAssurance,
+      mfaRequired,
+      mfaEnrolled: mfaRequired ? Boolean(mfaStatus?.enabled || mfaStatus?.enrolled) : input.authAssurance === "ADMIN_MFA",
+      availableMfaMethods: mfaRequired ? mfaStatus?.methods || [] : [],
+      preferredMfaMethod: mfaRequired ? mfaStatus?.preferredMethod || null : null,
+      authenticatedAt: input.authenticatedAt.toISOString(),
+      mfaVerifiedAt: input.mfaVerifiedAt?.toISOString?.() || null,
+      stepUpRequired: false,
+      stepUpMethod: getSensitiveActionStepUpMethod(user.role),
+      sessionId: refresh.id,
+      sessionExpiresAt: refresh.expiresAt.toISOString(),
+    },
+  };
 };
 
 export const issueSessionForUser = async (input: {
@@ -107,49 +364,17 @@ export const issueSessionForUser = async (input: {
   authenticatedAt?: Date | null;
   mfaVerifiedAt?: Date | null;
   now?: Date;
-}, db: AuthDbClient = prisma) => {
+  preparedState?: ActiveSessionState;
+} & SessionScopeInput, db: AuthDbClient) => {
   const now = input.now || new Date();
   const authAssurance = input.authAssurance || "PASSWORD";
   const authenticatedAt = input.authenticatedAt || now;
   const mfaVerifiedAt = input.mfaVerifiedAt || null;
-
-  const user = await db.user.findUnique({
-    where: { id: input.userId },
-    include: { licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } } },
-  });
-
-  if (!user) throw new Error("User not found");
-  if (isDisabledUser(user)) {
-    throw new Error("Account is disabled");
-  }
-
-  const linkedScope = isManufacturerRole(user.role)
-    ? await mapLinkedLicenseesForSession(user.id, db)
-    : { linkedLicensees: [], linkedLicenseeIds: [] as string[] };
-  const mfaStatus = isAdminMfaRequiredRole(user.role) ? await getAdminMfaStatus(user.id, db).catch(() => null) : null;
-  const primaryLicensee =
-    user.licensee ||
-    linkedScope.linkedLicensees.find((row) => row.isPrimary) ||
-    linkedScope.linkedLicensees[0] ||
-    null;
-
-  const payload = buildJwtPayloadForUser({
-    id: user.id,
-    email: user.email,
-    role: user.role,
-    licenseeId: primaryLicensee?.id || user.licenseeId,
-    orgId: user.orgId || primaryLicensee?.orgId || null,
-    linkedLicenseeIds: linkedScope.linkedLicenseeIds,
-    authAssurance,
-    authenticatedAt,
-    mfaVerifiedAt,
-  });
-
-  const accessToken = signAccessToken(payload);
+  const state = input.preparedState || await loadActiveSessionState({ ...input, authAssurance }, db);
   const refreshToken = newRefreshToken();
   const created = await createRefreshToken({
-    userId: user.id,
-    orgId: user.orgId,
+    userId: state.user.id,
+    orgId: state.sessionOrgId,
     rawToken: refreshToken,
     ipHash: input.ipHash,
     userAgent: input.userAgent,
@@ -157,48 +382,18 @@ export const issueSessionForUser = async (input: {
     mfaVerifiedAt,
     now,
   }, db);
-
-  return {
-    sessionStage: "ACTIVE" as AuthSessionStage,
-    accessToken,
-    refreshToken,
-    refreshTokenExpiresAt: created.expiresAt,
-    sessionId: created.row.id,
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      licenseeId: primaryLicensee?.id || user.licenseeId,
-      orgId: user.orgId || primaryLicensee?.orgId || null,
-      licensee: primaryLicensee
-        ? {
-            id: primaryLicensee.id,
-            name: primaryLicensee.name,
-            prefix: primaryLicensee.prefix,
-            brandName: "brandName" in primaryLicensee ? primaryLicensee.brandName ?? null : null,
-          }
-        : null,
-      linkedLicensees: linkedScope.linkedLicensees,
-      emailVerifiedAt: user.emailVerifiedAt,
-    },
-    auth: {
-      sessionStage: "ACTIVE" as const,
-      authAssurance,
-      mfaRequired: isAdminMfaRequiredRole(user.role),
-      mfaEnrolled: isAdminMfaRequiredRole(user.role)
-        ? Boolean(mfaStatus?.enabled || mfaStatus?.enrolled)
-        : authAssurance === "ADMIN_MFA",
-      availableMfaMethods: isAdminMfaRequiredRole(user.role) ? mfaStatus?.methods || [] : [],
-      preferredMfaMethod: isAdminMfaRequiredRole(user.role) ? mfaStatus?.preferredMethod || null : null,
-      authenticatedAt: authenticatedAt.toISOString(),
-      mfaVerifiedAt: mfaVerifiedAt?.toISOString?.() || null,
-      stepUpRequired: false,
-      stepUpMethod: getSensitiveActionStepUpMethod(user.role),
-      sessionId: created.row.id,
-      sessionExpiresAt: created.expiresAt.toISOString(),
-    },
-  };
+  const authenticatedSession = await createAuthenticatedSessionCapability(db, {
+    refreshTokenId: created.row.id,
+    refreshTokenHash: created.tokenHash,
+    assurance: authAssurance,
+    expiresAt: created.expiresAt,
+    now,
+  });
+  return buildActiveSessionResponse(state, { authAssurance, authenticatedAt, mfaVerifiedAt }, {
+    rawToken: refreshToken,
+    id: created.row.id,
+    expiresAt: created.expiresAt,
+  }, authenticatedSession.rawCapability);
 };
 
 type SessionIssueResult = Awaited<ReturnType<typeof issueSessionForUser>>;
@@ -208,6 +403,7 @@ type BootstrapSessionResult = {
   accessToken: string;
   refreshToken: null;
   refreshTokenExpiresAt: null;
+  databaseSessionCapability: string;
   user: SessionIssueResult["user"];
   auth: {
     sessionStage: "MFA_BOOTSTRAP";
@@ -250,31 +446,40 @@ const buildBootstrapSessionForUser = async (input: {
   riskScore?: number;
   riskLevel?: string | null;
   reasons?: string[];
-}, db: AuthDbClient = prisma) => {
-  const linkedScope = isManufacturerRole(input.user.role)
-    ? await mapLinkedLicenseesForSession(input.user.id, db)
-    : { linkedLicensees: [], linkedLicenseeIds: [] as string[] };
-  const mfaStatus = await getAdminMfaStatus(input.user.id, db).catch(() => null);
-  const primaryLicensee =
-    input.user.licensee ||
-    linkedScope.linkedLicensees.find((row) => row.isPrimary) ||
-    linkedScope.linkedLicensees[0] ||
-    null;
+  requestId?: string | null;
+  requestedLicenseeId?: string | null;
+  requestedScopeVersion?: string | null;
+  sessionId: string;
+  databaseSessionCapability: string;
+  preparedState: ActiveSessionState;
+  challengeIssuer?: (params: Parameters<typeof createAdminMfaChallenge>[0]) => Promise<{
+    ticket: string;
+    expiresAt: Date;
+  }>;
+}, db: AuthDbClient) => {
+  const linkedScope = input.preparedState.linkedScope;
+  const mfaStatus = input.preparedState.mfaStatus;
+  const primaryLicensee = input.preparedState.primaryLicensee;
+  const sessionLicenseeId = primaryLicensee?.id || (isManufacturerRole(input.user.role) ? null : input.user.licenseeId);
+  const sessionOrgId = primaryLicensee?.orgId || (isManufacturerRole(input.user.role) ? null : input.user.orgId);
+  const scopeVersion = isManufacturerRole(input.user.role)
+    ? linkedScope.selectedLicensee?.scopeVersion ?? null
+    : null;
 
-  const bootstrapSessionId = randomOpaqueToken(24);
   const accessToken = signMfaBootstrapToken({
     userId: input.user.id,
     email: input.user.email,
     role: input.user.role,
-    licenseeId: primaryLicensee?.id || input.user.licenseeId,
-    orgId: input.user.orgId || primaryLicensee?.orgId || null,
+    licenseeId: sessionLicenseeId,
+    orgId: sessionOrgId,
+    scopeVersion,
     linkedLicenseeIds: linkedScope.linkedLicenseeIds,
-    sessionId: bootstrapSessionId,
+    sessionId: input.sessionId,
   });
   const mfaChallenge = input.mfaEnrolled
-    ? await createAdminMfaChallenge({
+    ? await (input.challengeIssuer || ((params) => createAdminMfaChallenge(params, db)))({
         userId: input.user.id,
-        sessionId: bootstrapSessionId,
+        sessionId: input.sessionId,
         purpose: "admin_login",
         riskScore: input.riskScore || 0,
         riskLevel: input.riskLevel || "LOW",
@@ -282,7 +487,7 @@ const buildBootstrapSessionForUser = async (input: {
         ipHash: input.ipHash,
         userAgent: input.userAgent,
         supersedeOpen: true,
-      }, db)
+      })
     : null;
 
   return {
@@ -290,19 +495,22 @@ const buildBootstrapSessionForUser = async (input: {
     accessToken,
     refreshToken: null,
     refreshTokenExpiresAt: null,
+    databaseSessionCapability: input.databaseSessionCapability,
     user: {
       id: input.user.id,
       email: input.user.email,
       name: input.user.name,
       role: input.user.role,
-      licenseeId: primaryLicensee?.id || input.user.licenseeId,
-      orgId: input.user.orgId || primaryLicensee?.orgId || null,
+      licenseeId: sessionLicenseeId,
+      orgId: sessionOrgId,
+      scopeVersion,
       licensee: primaryLicensee
         ? {
             id: primaryLicensee.id,
             name: primaryLicensee.name,
             prefix: primaryLicensee.prefix,
             brandName: "brandName" in primaryLicensee ? primaryLicensee.brandName ?? null : null,
+            ...(scopeVersion ? { scopeVersion } : {}),
           }
         : null,
       linkedLicensees: linkedScope.linkedLicensees,
@@ -318,8 +526,9 @@ const buildBootstrapSessionForUser = async (input: {
       authenticatedAt: input.now.toISOString(),
       mfaVerifiedAt: null,
       stepUpRequired: true,
+      scopeSelectionRequired: isManufacturerRole(input.user.role) && !primaryLicensee,
       stepUpMethod: "ADMIN_MFA" as const,
-      sessionId: bootstrapSessionId,
+      sessionId: input.sessionId,
       sessionExpiresAt: new Date(input.now.getTime() + getMfaBootstrapTtlMinutes() * 60 * 1000).toISOString(),
       mfaChallenge: mfaChallenge
         ? {
@@ -331,11 +540,40 @@ const buildBootstrapSessionForUser = async (input: {
   };
 };
 
+const createBootstrapSessionBacking = async (
+  state: ActiveSessionState,
+  input: { ipHash: string | null; userAgent: string | null; now: Date },
+  db: AuthDbClient
+) => {
+  const rawToken = newRefreshToken();
+  const expiresAt = new Date(input.now.getTime() + getMfaBootstrapTtlMinutes() * 60 * 1000);
+  const created = await createRefreshToken({
+    userId: state.user.id,
+    orgId: state.sessionOrgId,
+    rawToken,
+    ipHash: input.ipHash,
+    userAgent: input.userAgent,
+    authenticatedAt: input.now,
+    mfaVerifiedAt: null,
+    now: input.now,
+    expiresAt,
+  }, db);
+  const capability = await createAuthenticatedSessionCapability(db, {
+    refreshTokenId: created.row.id,
+    refreshTokenHash: created.tokenHash,
+    assurance: "PASSWORD",
+    expiresAt,
+    now: input.now,
+  });
+  return { sessionId: created.row.id, databaseSessionCapability: capability.rawCapability };
+};
+
 export const loginWithPassword = async (input: {
   email: string;
   password: string;
   ipHash: string | null;
   userAgent: string | null;
+  requestId: string;
 }): Promise<PasswordLoginResult> => {
   const email = String(input.email || "").trim().toLowerCase();
   const password = String(input.password || "");
@@ -345,29 +583,22 @@ export const loginWithPassword = async (input: {
   const now = new Date();
 
   if (!user) {
-    await createAuditLog({
-      action: "AUTH_LOGIN_FAIL",
-      entityType: "User",
-      entityId: null,
-      details: { reason: "INVALID_CREDENTIALS" },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any);
+    await recordPasswordLoginFailure({
+      normalizedEmail: email,
+      attemptedAt: now,
+      maxAttempts: getMaxLoginAttempts(),
+      lockoutMinutes: getLockoutMinutes(),
+    });
     throw new Error("Invalid email or password");
   }
 
   if (user.lockedUntil && user.lockedUntil.getTime() > now.getTime()) {
-    await createAuditLog({
-      userId: user.id,
-      licenseeId: user.licenseeId || undefined,
-      orgId: user.orgId || undefined,
-      action: "AUTH_LOGIN_LOCKED",
-      entityType: "User",
-      entityId: user.id,
-      details: { lockedUntil: user.lockedUntil },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any);
+    await recordPasswordLoginFailure({
+      normalizedEmail: email,
+      attemptedAt: now,
+      maxAttempts: getMaxLoginAttempts(),
+      lockoutMinutes: getLockoutMinutes(),
+    });
     throw new Error("Account temporarily locked. Try again later.");
   }
 
@@ -392,49 +623,35 @@ export const loginWithPassword = async (input: {
       maxAttempts,
       lockoutMinutes: getLockoutMinutes(),
     });
-    await createAuditLog({
-      action: "AUTH_LOGIN_FAIL",
-      entityType: "User",
-      entityId: null,
-      details: { reason: "INVALID_CREDENTIALS" },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any);
 
     throw new Error("Invalid email or password");
   }
+  const upgradedPasswordHash = shouldRehashPassword(user.passwordHash) ? await hashPassword(password) : null;
 
-  const rlsContext = {
-    userId: user.id,
-    role: user.role,
-    licenseeId: user.licenseeId,
-    manufacturerId: isManufacturerRole(user.role) ? user.id : null,
-    organizationId: user.orgId,
-    isPlatformAdmin: isPlatformSuperAdminRole(user.role),
+  const preAuthPrisma = getB01PreAuthPrisma();
+  const bindPasswordSubject = async (tx: Prisma.TransactionClient) => {
+    const bound = await lookupPasswordBootstrapUser(email, tx);
+    if (!bound || bound.id !== user.id || bound.passwordHash !== user.passwordHash) {
+      throw new Error("AUTH_LOGIN_SUBJECT_CHANGED");
+    }
   };
 
-  const upgradedPasswordHash = shouldRehashPassword(user.passwordHash) ? await hashPassword(password) : null;
-  await withRlsPrototypeTransaction(prisma, rlsContext, (tx) =>
-    tx.user.update({
-      where: { id: user.id },
-      data: {
-        ...(upgradedPasswordHash ? { passwordHash: upgradedPasswordHash } : {}),
-        failedLoginAttempts: 0,
-        lockedUntil: null,
-        lastLoginAt: now,
-      },
-    })
-  );
-
-  const risk = await assessAuthSessionRisk({
-    userId: user.id,
-    role: user.role,
-    ipHash: input.ipHash,
-    userAgent: input.userAgent,
-    failedLoginAttempts: user.failedLoginAttempts || 0,
+  const risk = await preAuthPrisma.$transaction(async (tx) => {
+    await bindPasswordSubject(tx);
+    return assessAuthSessionRisk({
+      userId: user.id,
+      role: user.role,
+      ipHash: input.ipHash,
+      userAgent: input.userAgent,
+      failedLoginAttempts: user.failedLoginAttempts || 0,
+    }, tx);
   });
 
   if (risk.shouldBlock && isPlatformSuperAdminRole(user.role)) {
+    await preAuthPrisma.$transaction(async (tx) => {
+      await bindPasswordSubject(tx);
+      await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId }, risk, tx);
+    });
     await createAuditLog({
       userId: user.id,
       licenseeId: user.licenseeId || undefined,
@@ -453,10 +670,11 @@ export const loginWithPassword = async (input: {
     throw new Error("High-risk login blocked. Try from a trusted network or contact administrator.");
   }
 
-  return withRlsPrototypeTransaction(prisma, rlsContext, async (tx) => {
-    const mfaStatus: { enabled: boolean; lastUsedAt: Date | string | null } = isAdminMfaRequiredRole(user.role)
-      ? await getAdminMfaStatus(user.id, tx).catch(() => ({ enabled: false, lastUsedAt: null }))
-      : { enabled: false, lastUsedAt: null };
+  return preAuthPrisma.$transaction(async (tx) => {
+    await bindPasswordSubject(tx);
+    const preparedState = refreshBoundaryState(risk.actorState as unknown as RefreshSessionState);
+    if (preparedState.user.id !== user.id || preparedState.user.role !== user.role) throw new Error("AUTH_LOGIN_SUBJECT_CHANGED");
+    const mfaStatus = preparedState.mfaStatus || { enabled: false, lastUsedAt: null, methods: [], preferredMethod: null };
 
     if (isAdminMfaRequiredRole(user.role)) {
       const lastUsedAt = mfaStatus?.lastUsedAt ? new Date(mfaStatus.lastUsedAt) : null;
@@ -472,6 +690,7 @@ export const loginWithPassword = async (input: {
 
       if (mfaFreshForLogin) {
         const verifiedAt = (lastUsedAt as Date).getTime() > now.getTime() ? now : (lastUsedAt as Date);
+        await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId, passwordHash: upgradedPasswordHash }, risk, tx);
         const session = await issueSessionForUser({
           userId: user.id,
           ipHash: input.ipHash,
@@ -480,30 +699,21 @@ export const loginWithPassword = async (input: {
           authenticatedAt: now,
           mfaVerifiedAt: verifiedAt,
           now,
+          requestId: input.requestId,
+          purpose: "manufacturer-bootstrap",
+          preparedState,
         }, tx);
-
-        await createAuditLog({
-          userId: user.id,
-          licenseeId: user.licenseeId || undefined,
-          orgId: user.orgId || undefined,
-          action: "AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA",
-          entityType: "User",
-          entityId: user.id,
-          details: {
-            role: user.role,
-            riskScore: risk.score,
-            riskLevel: risk.riskLevel,
-            mfaEnabled: Boolean(mfaStatus.enabled),
-            mfaVerifiedAt: verifiedAt.toISOString(),
-            loginMfaCycleDays: loginCycleDays,
-          },
-          ipHash: input.ipHash || undefined,
-          userAgent: input.userAgent || undefined,
-        } as any);
-
         return session;
       }
 
+      if (!mfaStatus.enabled) {
+        await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId, passwordHash: upgradedPasswordHash }, risk, tx);
+      }
+      const backing = await createBootstrapSessionBacking(preparedState, {
+        ipHash: input.ipHash,
+        userAgent: input.userAgent,
+        now,
+      }, tx);
       const bootstrapSession = await buildBootstrapSessionForUser({
         user,
         ipHash: input.ipHash,
@@ -513,28 +723,31 @@ export const loginWithPassword = async (input: {
         riskScore: risk.score,
         riskLevel: risk.riskLevel,
         reasons: risk.reasons,
-      }, tx);
-
-      await createAuditLog({
-        userId: user.id,
-        licenseeId: user.licenseeId || undefined,
-        orgId: user.orgId || undefined,
-        action: mfaStatus.enabled ? "AUTH_LOGIN_MFA_CHALLENGE_REQUIRED" : "AUTH_LOGIN_MFA_SETUP_REQUIRED",
-        entityType: "User",
-        entityId: user.id,
-        details: {
-          role: user.role,
-          riskScore: risk.score,
-          riskLevel: risk.riskLevel,
-          mfaEnabled: Boolean(mfaStatus.enabled),
+        requestId: input.requestId,
+        ...backing,
+        preparedState,
+        challengeIssuer: async (params) => {
+          const ticket = randomOpaqueToken(36);
+          const { expiresAt } = buildAdminMfaChallengeExpiry(now);
+          await persistAuthSessionRisk({
+            ipHash: input.ipHash,
+            userAgent: input.userAgent,
+            requestId: input.requestId,
+            passwordHash: upgradedPasswordHash,
+            challenge: {
+              ticketHash: hashToken(ticket),
+              sessionBindingHash: hashToken(`admin-mfa-session:${String(params.sessionId || "")}`),
+              expiresAt,
+              maxAttempts: Math.max(1, Math.min(10, parseIntEnv("AUTH_MFA_CHALLENGE_MAX_ATTEMPTS", 5))),
+            },
+          }, risk, tx);
+          return { ticket, expiresAt };
         },
-        ipHash: input.ipHash || undefined,
-        userAgent: input.userAgent || undefined,
-      } as any);
-
+      }, tx);
       return bootstrapSession;
     }
 
+    await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId, passwordHash: upgradedPasswordHash }, risk, tx);
     const session = await issueSessionForUser({
       userId: user.id,
       ipHash: input.ipHash,
@@ -543,25 +756,10 @@ export const loginWithPassword = async (input: {
       authenticatedAt: now,
       mfaVerifiedAt: null,
       now,
+      requestId: input.requestId,
+      purpose: "manufacturer-bootstrap",
+      preparedState,
     }, tx);
-
-    await createAuditLog({
-      userId: user.id,
-      licenseeId: user.licenseeId || undefined,
-      orgId: user.orgId || undefined,
-      action: "AUTH_LOGIN_SUCCESS",
-      entityType: "User",
-      entityId: user.id,
-      details: {
-        role: user.role,
-        riskScore: risk.score,
-        riskLevel: risk.riskLevel,
-        mfaEnabled: false,
-      },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any);
-
     return session;
   });
 };
@@ -570,103 +768,152 @@ export const refreshSession = async (input: {
   rawRefreshToken: string;
   ipHash: string | null;
   userAgent: string | null;
+  requestId: string;
+  requestedLicenseeId?: string | null;
+  requestedScopeVersion?: string | null;
 }): Promise<RefreshSessionResult> => {
-  const rotated = await rotateRefreshToken({
+  type ActiveRefreshPreparation = {
+    kind: "active";
+    state: ActiveSessionState;
+    authAssurance: AuthAssuranceLevel;
+    authenticatedAt: Date;
+    mfaVerifiedAt: Date | null;
+  };
+  type BootstrapRefreshPreparation = {
+    kind: "bootstrap";
+    state: ActiveSessionState;
+    mfaEnrolled: boolean;
+    reasons: string[];
+  };
+
+  const rotated = await rotateRefreshToken<
+    ActiveRefreshPreparation | BootstrapRefreshPreparation,
+    never,
+    string | BootstrapSessionResult
+  >({
     rawToken: input.rawRefreshToken,
     ipHash: input.ipHash,
     userAgent: input.userAgent,
+    requestId: input.requestId,
+    decide: async ({ tx, token, tokenHashCandidates, now }) => {
+      const boundaryState = await loadRefreshSessionState(tx, {
+        tokenId: token.id,
+        tokenHashCandidates,
+        requestedLicenseeId: input.requestedLicenseeId || null,
+        requestedScopeVersion: input.requestedScopeVersion || null,
+        checkedAt: now,
+        requestId: input.requestId,
+      });
+      if (boundaryState.userId !== token.userId) {
+        throw new Error("app_auth.load_refresh_session_state returned a foreign actor");
+      }
+      if (boundaryState.mfaRequired !== isAdminMfaRequiredRole(boundaryState.role)) {
+        throw new Error("app_auth.load_refresh_session_state returned inconsistent MFA policy");
+      }
+      const state = refreshBoundaryState(boundaryState);
+      const user = state.user;
+      const mfaStatus = state.mfaStatus;
+      if (token.mfaVerifiedAt && boundaryState.mfaRequired && !mfaStatus?.enabled) {
+        return { action: "deny", reason: "REVOKED", revokeScope: "all", revokeReason: "MFA_STATE_CHANGED" };
+      }
+
+      if (!token.mfaVerifiedAt && boundaryState.mfaRequired) {
+        return {
+          action: "rotate",
+          value: {
+            kind: "bootstrap",
+            state,
+            mfaEnrolled: Boolean(mfaStatus?.enabled),
+            reasons: ["MFA verification is required before refreshing this session."],
+          },
+          orgId: state.sessionOrgId,
+          authenticatedAt: token.authenticatedAt || now,
+          mfaVerifiedAt: null,
+          expiresAt: new Date(now.getTime() + getMfaBootstrapTtlMinutes() * 60 * 1000),
+        };
+      }
+
+      const authAssurance: AuthAssuranceLevel = token.mfaVerifiedAt ? "ADMIN_MFA" : "PASSWORD";
+      if (isManufacturerRole(user.role) && !state.primaryLicensee) throw new Error("SCOPE_SELECTION_REQUIRED");
+      const authenticatedAt = token.authenticatedAt || now;
+      return {
+        action: "rotate",
+        value: { kind: "active", state, authAssurance, authenticatedAt, mfaVerifiedAt: token.mfaVerifiedAt },
+        orgId: state.sessionOrgId,
+        authenticatedAt,
+        mfaVerifiedAt: token.mfaVerifiedAt,
+      };
+    },
+    afterRotate: async ({ tx, predecessor, successor, now, value }) => {
+      const capability = await createAuthenticatedSessionCapability(tx, {
+        refreshTokenId: successor.id,
+        refreshTokenHash: successor.tokenHash,
+        assurance: predecessor.mfaVerifiedAt ? "ADMIN_MFA" : "PASSWORD",
+        expiresAt: successor.expiresAt,
+        now,
+      });
+      if (value.kind === "bootstrap") {
+        return buildBootstrapSessionForUser({
+          user: value.state.user,
+          ipHash: input.ipHash,
+          userAgent: input.userAgent,
+          now,
+          mfaEnrolled: value.mfaEnrolled,
+          reasons: value.reasons,
+          requestId: input.requestId,
+          requestedLicenseeId: input.requestedLicenseeId,
+          requestedScopeVersion: input.requestedScopeVersion,
+          sessionId: successor.id,
+          databaseSessionCapability: capability.rawCapability,
+          preparedState: value.state,
+          challengeIssuer: refreshMfaChallengeIssuer(tx, {
+            tokenId: successor.id,
+            tokenHashCandidates: [successor.tokenHash],
+            requestId: input.requestId,
+          }),
+        }, tx);
+      }
+      return capability.rawCapability;
+    },
   });
 
   if (!rotated.ok) {
-    if (rotated.reason === "REUSE_DETECTED" && rotated.userId) {
-      await createAuditLog({
-        userId: rotated.userId,
-        action: "AUTH_REFRESH_REUSE_DETECTED",
-        entityType: "RefreshToken",
-        entityId: null,
-        details: { reason: rotated.reason },
-        ipHash: input.ipHash || undefined,
-        userAgent: input.userAgent || undefined,
-      } as any);
-    }
     return { ok: false as const, reason: rotated.reason };
   }
+  if (!rotated.rotated) throw new Error("Refresh rotation returned an unexpected consume decision");
 
-  if (!rotated.mfaVerifiedAt) {
-    const user = await prisma.user.findUnique({
-      where: { id: rotated.userId },
-      include: { licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } } },
-    });
-
-    if (!user) return { ok: false as const, reason: "INVALID" };
-    if (isDisabledUser(user)) return { ok: false as const, reason: "REVOKED" };
-
-    if (isAdminMfaRequiredRole(user.role)) {
-      const now = new Date();
-      const mfaStatus = await getAdminMfaStatus(user.id).catch(() => null);
-      await revokePasswordOnlyRefreshTokensForUser({
-        userId: user.id,
-        reason: "MFA_REQUIRED_AFTER_POLICY_CHANGE",
-        now,
-      });
-
-      const bootstrapSession = await buildBootstrapSessionForUser({
-        user,
-        ipHash: input.ipHash,
-        userAgent: input.userAgent,
-        now,
-        mfaEnrolled: Boolean(mfaStatus?.enabled || mfaStatus?.enrolled),
-        reasons: ["MFA verification is required before refreshing this session."],
-      });
-
-      await createAuditLog({
-        userId: user.id,
-        licenseeId: user.licenseeId || undefined,
-        orgId: user.orgId || undefined,
-        action: mfaStatus?.enabled ? "AUTH_REFRESH_MFA_CHALLENGE_REQUIRED" : "AUTH_REFRESH_MFA_SETUP_REQUIRED",
-        entityType: "User",
-        entityId: user.id,
-        details: {
-          role: user.role,
-          mfaEnabled: Boolean(mfaStatus?.enabled),
-          revokedPasswordOnlyRefreshTokens: true,
-        },
-        ipHash: input.ipHash || undefined,
-        userAgent: input.userAgent || undefined,
-      } as any);
-
-      return { ok: true as const, ...bootstrapSession };
-    }
+  const prepared = rotated.value;
+  if (prepared.kind === "bootstrap") {
+    return { ok: true as const, ...(rotated.rotation as BootstrapSessionResult) };
   }
-
-  const session = await issueSessionForUser({
-    userId: rotated.userId,
-    ipHash: input.ipHash,
-    userAgent: input.userAgent,
-    authAssurance: rotated.mfaVerifiedAt ? "ADMIN_MFA" : "PASSWORD",
-    authenticatedAt: rotated.authenticatedAt,
-    mfaVerifiedAt: rotated.mfaVerifiedAt,
-  });
-
-  return {
-    ok: true as const,
-    ...session,
-    refreshToken: rotated.newRawToken,
-    refreshTokenExpiresAt: rotated.newExpiresAt,
-  };
+  const session = buildActiveSessionResponse(prepared.state, {
+    authAssurance: prepared.authAssurance,
+    authenticatedAt: prepared.authenticatedAt,
+    mfaVerifiedAt: prepared.mfaVerifiedAt,
+  }, {
+    rawToken: rotated.newRawToken,
+    id: rotated.newTokenId,
+    expiresAt: rotated.newExpiresAt,
+  }, rotated.rotation as string);
+  return { ok: true as const, ...session };
 };
 
 export const logoutSession = async (input: {
   userId: string;
-  rawRefreshToken: string | null;
+  sessionId: string;
   ipHash: string | null;
   userAgent: string | null;
-}) => {
-  if (input.rawRefreshToken) {
-    await revokeRefreshTokenByRaw({ rawToken: input.rawRefreshToken, reason: "LOGOUT" });
-  }
-
-  await createAuditLog({
+  requestId: string;
+  organizationId: string | null;
+  licenseeId: string | null;
+  manufacturerId: string | null;
+  actorRole: string;
+  databaseSessionCapability?: string | null;
+}, db: AuthDbClient) => {
+  if (!input.databaseSessionCapability) throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
+  // Queue the audit event while the verified capability remains live. The
+  // following exact revocation boundary invalidates it in the same transaction.
+  await queueAuditLogOutbox({
     userId: input.userId,
     action: "AUTH_LOGOUT",
     entityType: "User",
@@ -674,9 +921,24 @@ export const logoutSession = async (input: {
     details: {},
     ipHash: input.ipHash || undefined,
     userAgent: input.userAgent || undefined,
-  } as any);
+  } as any, undefined, db, {
+    requestId: input.requestId,
+    organizationId: input.organizationId,
+    licenseeId: input.licenseeId,
+    manufacturerId: input.manufacturerId,
+    initiatingUserId: input.userId,
+    initiatingActorRoleSnapshot: input.actorRole,
+  });
+  await revokeRefreshTokenById({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    reason: "LOGOUT",
+  }, db);
 };
 
-export const disableUserSessions = async (input: { userId: string; reason: string }) => {
-  await revokeAllUserRefreshTokens({ userId: input.userId, reason: input.reason });
+export const disableUserSessions = async (
+  input: { userId: string; reason: string },
+  db: AuthDbClient
+) => {
+  await revokeAllUserRefreshTokens({ userId: input.userId, reason: input.reason }, db);
 };

@@ -11,10 +11,12 @@ import {
 } from "../services/customerVerifyCookieService";
 import { hashIp } from "../utils/security";
 import { logger } from "../utils/logger";
+import { sanitizeRequestTelemetryPath } from "../utils/requestTelemetryPath";
 
 export interface CustomerVerifyRequest extends Request {
   customer?: CustomerVerifyIdentity;
   customerAuthSource?: "cookie" | "bearer";
+  customerDatabaseCapability?: string;
 }
 
 const getBearerToken = (req: Request) => {
@@ -42,7 +44,7 @@ const resolveAuthToken = (req: Request): { token: string | null; source: "cookie
 const recordLegacyBearerCompatUsage = (req: Request) => {
   logger.warn("verify_customer_auth_legacy_bearer", {
     metric: "verify_customer_auth_legacy_bearer",
-    path: req.originalUrl.split("?")[0] || req.path || "/",
+    path: sanitizeRequestTelemetryPath(req.originalUrl || req.path || "/"),
     method: req.method,
     ipRef: hashIp(req.ip),
     userAgentRef: hashUserAgent(req.get("user-agent") || ""),
@@ -57,6 +59,7 @@ export const optionalCustomerVerifyAuth = (req: CustomerVerifyRequest, _res: Res
 
   try {
     req.customer = verifyCustomerVerifyToken(token);
+    req.customerDatabaseCapability = token;
     if (source) {
       req.customerAuthSource = source;
       if (source === "bearer") {
@@ -81,6 +84,7 @@ export const requireCustomerVerifyAuth = (req: CustomerVerifyRequest, res: Respo
 
   try {
     req.customer = verifyCustomerVerifyToken(token);
+    req.customerDatabaseCapability = token;
     if (source) {
       req.customerAuthSource = source;
       if (source === "bearer") {

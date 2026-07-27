@@ -1,11 +1,15 @@
 import { Prisma, UserRole } from "@prisma/client";
 
 import prisma from "../config/database";
+import { loadAuthenticatedManufacturerScope } from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
 
 type DbClient = typeof prisma | Prisma.TransactionClient;
 export type ManufacturerScopeReadClient = {
   manufacturerLicenseeLink: Pick<Prisma.TransactionClient["manufacturerLicenseeLink"], "findMany">;
 };
+type ManufacturerScopeBoundaryClient = Pick<Prisma.TransactionClient, "$queryRaw">;
+
+const MAX_ELIGIBLE_MANUFACTURER_LINKS = 100;
 
 export const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
@@ -52,15 +56,48 @@ export const listManufacturerLicenseeLinks = async (
     orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
   });
 
-export const listManufacturerLinkedLicenseeIds = async (
-  manufacturerId: string,
-  db: ManufacturerScopeReadClient = prisma
+export const resolveManufacturerSessionScope = async (
+  input: {
+    manufacturerId: string;
+    legacyLicenseeId?: string | null;
+    legacyOrgId?: string | null;
+    requestedLicenseeId?: string | null;
+    requestedOrgId?: string | null;
+    requestedScopeVersion?: string | null;
+    audit?: {
+      requestId: string;
+      purpose: "manufacturer-bootstrap" | "manufacturer-scope-switch";
+      assurance: "password-verified" | "mfa-verified";
+    };
+  },
+  db: ManufacturerScopeBoundaryClient
 ) => {
-  const rows = await db.manufacturerLicenseeLink.findMany({
-    where: { manufacturerId },
-    select: { licenseeId: true },
-  });
-  return unique(rows.map((row) => row.licenseeId));
+  const scope = await loadAuthenticatedManufacturerScope({
+    requestedLicenseeId: input.requestedLicenseeId,
+    requestedOrgId: input.requestedOrgId,
+    requestedScopeVersion: input.requestedScopeVersion,
+    purpose: input.audit?.purpose || "manufacturer-bootstrap",
+    writeAudit: Boolean(input.audit),
+  }, db);
+  if (scope.manufacturerId !== input.manufacturerId) {
+    throw new Error("MANUFACTURER_SCOPE_DENIED");
+  }
+  if (scope.linkedLicensees.length > MAX_ELIGIBLE_MANUFACTURER_LINKS) {
+    throw new Error("MANUFACTURER_MEMBERSHIP_SET_TOO_LARGE");
+  }
+  const legacyLicenseeId = String(input.legacyLicenseeId || "").trim();
+  const legacyOrgId = String(input.legacyOrgId || "").trim();
+  if (
+    (legacyLicenseeId && !scope.linkedLicensees.some((row) => row.id === legacyLicenseeId))
+    || (legacyOrgId && !scope.linkedLicensees.some((row) => row.orgId === legacyOrgId))
+  ) {
+    throw new Error("MANUFACTURER_MEMBERSHIP_INCONSISTENT");
+  }
+  return {
+    selectedLicensee: scope.selectedLicensee,
+    linkedLicensees: scope.linkedLicensees,
+    linkedLicenseeIds: scope.linkedLicensees.map((row) => row.id),
+  };
 };
 
 export const upsertManufacturerLicenseeLink = async (
@@ -102,6 +139,7 @@ export const normalizeLinkedLicensees = (
   rows: Array<{
     licenseeId: string;
     isPrimary?: boolean | null;
+    updatedAt?: Date | string | null;
     licensee?: {
       id: string;
       name: string;
@@ -120,6 +158,7 @@ export const normalizeLinkedLicensees = (
       brandName: row.licensee!.brandName ?? null,
       orgId: row.licensee!.orgId ?? null,
       isPrimary: Boolean(row.isPrimary),
+      scopeVersion: row.updatedAt ? new Date(row.updatedAt).toISOString() : null,
     }));
 
 export const resolveAccessibleLicenseeIdsForUser = async (
@@ -129,7 +168,7 @@ export const resolveAccessibleLicenseeIdsForUser = async (
     licenseeId?: string | null;
     linkedLicenseeIds?: string[] | null;
   },
-  db: ManufacturerScopeReadClient = prisma
+  _db: ManufacturerScopeReadClient = prisma
 ) => {
   if (isPlatformRole(user.role)) return [] as string[];
   if (isLicenseeAdminRole(user.role)) {
@@ -139,11 +178,7 @@ export const resolveAccessibleLicenseeIdsForUser = async (
     return unique([user.licenseeId || null]);
   }
 
-  const fromPayload = unique([...(user.linkedLicenseeIds || []), user.licenseeId || null]);
-  if (fromPayload.length > 0) return fromPayload;
-
-  const fromDb = await listManufacturerLinkedLicenseeIds(user.userId, db);
-  return unique([...fromDb, user.licenseeId || null]);
+  return unique(user.linkedLicenseeIds || []);
 };
 
 export const assertUserCanAccessLicensee = async (

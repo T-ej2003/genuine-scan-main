@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 
 import ConnectorDownload from "@/pages/ConnectorDownload";
 import apiClient from "@/lib/api-client";

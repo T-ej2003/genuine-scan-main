@@ -13,12 +13,13 @@ const must = (key: string) => {
   return v;
 };
 
-const hashWithVersion = (value: string, version: SecretVersion) => `${version.id}:${hmacSha256Hex(value, version.value)}`;
+const fingerprintWithVersion = (opaqueValue: string, version: SecretVersion) =>
+  `${version.id}:${hmacSha256Hex(opaqueValue, version.value)}`;
 
-const legacyHash = (value: string, legacyKeys: string[]) => {
+const legacyFingerprint = (opaqueValue: string, legacyKeys: string[]) => {
   for (const key of legacyKeys) {
     const secret = String(process.env[key] || "").trim();
-    if (secret) return hmacSha256Hex(value, secret);
+    if (secret) return hmacSha256Hex(opaqueValue, secret);
   }
   return "";
 };
@@ -33,38 +34,42 @@ export const getJwtSecretId = () => getJwtSecretSet().current.id;
 export const getJwtSecretVersions = () => getJwtSecretSet().all;
 
 export const buildHmacHashCandidates = (
-  value: string,
+  opaqueValue: string,
   resolver: () => { current: SecretVersion; previous: SecretVersion | null; all: SecretVersion[] },
   legacyKeys: string[] = []
 ) => {
-  const normalized = String(value || "").trim();
+  const normalized = String(opaqueValue || "").trim();
   if (!normalized) return [];
 
   const versions = resolver();
-  const candidates = versions.all.map((version) => hashWithVersion(normalized, version));
-  const legacy = legacyHash(normalized, legacyKeys);
+  const candidates = versions.all.map((version) => fingerprintWithVersion(normalized, version));
+  const legacy = legacyFingerprint(normalized, legacyKeys);
   if (legacy) candidates.push(legacy);
   return Array.from(new Set(candidates));
 };
 
 export const matchesVersionedHmacHash = (
-  value: string,
+  opaqueValue: string,
   storedHash: string | null | undefined,
   resolver: () => { current: SecretVersion; previous: SecretVersion | null; all: SecretVersion[] },
   legacyKeys: string[] = []
 ) => {
   const normalizedStored = String(storedHash || "").trim();
   if (!normalizedStored) return false;
-  return buildHmacHashCandidates(value, resolver, legacyKeys).includes(normalizedStored);
+  return buildHmacHashCandidates(opaqueValue, resolver, legacyKeys).includes(normalizedStored);
 };
 
-export const hmacSha256Hex = (value: string, secret: string) =>
-  createHmac("sha256", secret).update(value).digest("hex");
+/**
+ * Keyed fingerprint for opaque tokens and operational metadata.
+ * Passwords and MFA backup codes use their dedicated slow-hash services.
+ */
+export const hmacSha256Hex = (message: string, key: string) =>
+  createHmac("sha256", key).update(message).digest("hex");
 
 export const hashIp = (ip: string | null | undefined) => {
   const v = normalizeClientIp(ip);
   if (!v) return null;
-  return hashWithVersion(v, getIpHashSecretSet().current);
+  return fingerprintWithVersion(v, getIpHashSecretSet().current);
 };
 
 export const normalizeUserAgent = (ua: string | null | undefined) => {
@@ -74,10 +79,10 @@ export const normalizeUserAgent = (ua: string | null | undefined) => {
   return v.slice(0, 300);
 };
 
-export const hashToken = (token: string) => {
-  const v = String(token || "").trim();
+export const hashToken = (opaqueToken: string) => {
+  const v = String(opaqueToken || "").trim();
   if (!v) throw new Error("Token is required");
-  return hashWithVersion(v, getTokenHashSecretSet().current);
+  return fingerprintWithVersion(v, getTokenHashSecretSet().current);
 };
 
 export const randomOpaqueToken = (bytes = 32) => randomBytes(bytes).toString("base64url");

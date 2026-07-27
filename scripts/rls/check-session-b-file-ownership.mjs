@@ -1,0 +1,24 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const baseIndex = process.argv.indexOf("--base");
+const base = baseIndex >= 0 ? process.argv[baseIndex + 1] : "";
+const sessionIndex = process.argv.indexOf("--session");
+const session = sessionIndex >= 0 ? process.argv[sessionIndex + 1] : "session-b";
+if (!/^[0-9a-f]{7,40}$/.test(base) || !["session-b", "session-c"].includes(session)) {
+  throw new Error("Usage: node scripts/rls/check-session-b-file-ownership.mjs [--session session-b|session-c] --base <session-start-sha>");
+}
+const contract = JSON.parse(fs.readFileSync(path.join(repoRoot, `documents/security/rls-program/workflow-ownership-${session}.json`), "utf8"));
+const exactAllowed = new Set([...contract.productionFiles, ...contract.existingTestFiles]);
+const pathRuleAllows = (file) => contract.allowedNewPathRules.some((rule) => rule.endsWith("/**") ? file.startsWith(rule.slice(0, -2)) : file === rule);
+const output = execFileSync("git", ["diff", "--name-status", "--find-renames", `${base}...HEAD`], { cwd: repoRoot, encoding: "utf8" }).trim();
+const changedRows = output ? output.split("\n").map((line) => line.split("\t")) : [];
+const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean);
+const prohibitedOperations = changedRows.filter(([status]) => /^[DR]/.test(status));
+const changedFiles = [...new Set([...changedRows.flatMap(([, ...files]) => files), ...untracked])].sort();
+const unauthorizedFiles = changedFiles.filter((file) => !exactAllowed.has(file) && !pathRuleAllows(file));
+if (prohibitedOperations.length || unauthorizedFiles.length) throw new Error(JSON.stringify({ prohibitedOperations, unauthorizedFiles }, null, 2));
+console.log(JSON.stringify({ valid: true, session, base, changedFiles: changedFiles.length, unauthorizedFiles: 0, prohibitedOperations: 0 }));

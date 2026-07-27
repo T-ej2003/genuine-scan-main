@@ -5,7 +5,10 @@ const JSZip = require("jszip");
 const { P2TestDbSkip, withP2TestApp } = require("./helpers/p2TestDb");
 const { emails, ids, issueBearerTokens, passwords, seedP2Fixtures } = require("./helpers/p2SeedFactories");
 
-const authHeader = (token) => ({ authorization: `Bearer ${token}` });
+const authHeader = (token) => ({
+  authorization: `Bearer ${token.accessToken}`,
+  "x-database-session-capability": token.databaseCapability,
+});
 const deniedStatuses = new Set([401, 403, 404, 410, 428]);
 
 const assertDenied = (response, label) => {
@@ -27,9 +30,9 @@ const assertNoCrossTenantLeak = (response, forbiddenMarker, label) => {
 };
 
 (async () => {
-  await withP2TestApp(async ({ baseUrl, request, prisma }) => {
+  await withP2TestApp(async ({ baseUrl, request, prisma, preauthPrisma }) => {
     const fixtures = await seedP2Fixtures(prisma);
-    const tokens = await issueBearerTokens();
+    const tokens = await issueBearerTokens(preauthPrisma);
 
     const loginOk = await request("POST", "/api/auth/login", {
       email: emails.manufacturerA,
@@ -109,10 +112,25 @@ const assertNoCrossTenantLeak = (response, forbiddenMarker, label) => {
     assertDenied(supportAsManufacturer, "manufacturer support tickets");
     assertNoCrossTenantLeak(supportAsManufacturer, "P2 Support B", "manufacturer support tickets");
 
-    const supportAsAdmin = await request("GET", "/api/support/tickets", null, { headers: authHeader(tokens.superAdmin) });
+    const unscopedSupportAsAdmin = await request("GET", "/api/support/tickets", null, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assertDenied(unscopedSupportAsAdmin, "platform support tickets without a licensee selector");
+
+    const platformSupportAsAdmin = await request("GET", "/api/support/tickets?scope=platform", null, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assert.strictEqual(platformSupportAsAdmin.status, 200, platformSupportAsAdmin.text);
+    assert.match(platformSupportAsAdmin.text, /P2 Support A/);
+    assert.match(platformSupportAsAdmin.text, /P2 Support B/);
+    assertSafeResponse(platformSupportAsAdmin, "explicit platform support tickets");
+
+    const supportAsAdmin = await request("GET", `/api/support/tickets?licenseeId=${ids.licenseeA}`, null, {
+      headers: authHeader(tokens.superAdmin),
+    });
     assert.strictEqual(supportAsAdmin.status, 200, supportAsAdmin.text);
     assert.match(supportAsAdmin.text, /P2 Support A/);
-    assert.match(supportAsAdmin.text, /P2 Support B/);
+    assertNoCrossTenantLeak(supportAsAdmin, "P2 Support B", "platform scoped support ticket denial");
     assertSafeResponse(supportAsAdmin, "platform support tickets");
 
     const incidentsA = await request("GET", "/api/incidents", null, { headers: authHeader(tokens.licenseeAdminA) });

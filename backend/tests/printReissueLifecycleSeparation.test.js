@@ -18,20 +18,15 @@ const decideBody = workflowSource.slice(
 );
 const startBody = workflowSource.slice(workflowSource.indexOf("export const startApprovedPrintReissueRequest"));
 
-assert(decideBody.includes('targetApproverRole: "SUPER_ADMIN"'), "licensee approval must forward to super admin");
-assert(decideBody.includes("PRINT_REISSUE_FORWARDED_TO_SUPER_ADMIN"), "licensee forwarding must write audit trail");
-assert(decideBody.includes("print_reissue_forwarded_to_super_admin"), "licensee forwarding must notify super admins");
-assert(decideBody.includes("status: ReissueRequestStatus.APPROVED"), "super-admin approval must transition to APPROVED/ready-to-print");
+assert(decideBody.includes('operation: params.decision === "reject" ? "REJECT" : forward ? "FORWARD" : "APPROVE"'), "licensee approval must use the reviewed forward operation");
+assert(decideBody.includes('current?.targetApproverRole === "LICENSEE_ADMIN"'), "forwarding must follow database-authoritative current state");
 assert(!decideBody.includes("createAuthorizedPrintReissue("), "approval must not create replacement print work");
 assert(!decideBody.includes("replacementPrintJobId: result.replacementPrintJobId"), "approval audit must not depend on replacement job creation");
-assert(decideBody.includes("readyToPrint: true"), "approval audit should record ready-to-print business decision");
+assert(!decideBody.includes("prisma."), "reissue decisions must not mutate protected tables directly");
 
-assert(startBody.includes("isManufacturerRole(params.scope.role)"), "only manufacturer roles should start approved replacement printing");
-assert(startBody.includes("request.requestedByUserId !== params.scope.userId"), "cross-manufacturer print start must be blocked");
-assert(startBody.includes("status === ReissueRequestStatus.EXECUTED"), "print start must be idempotent after execution");
-assert(startBody.includes("status !== ReissueRequestStatus.APPROVED"), "print start must require an approved request");
-assert(startBody.includes("approvedReissueRequestId: request.id"), "print start must materialize work against the approved request");
-assert(startBody.includes("PRINT_REISSUE_PRINT_BLOCKED"), "stale printer print-start failures must be audited");
+assert(startBody.includes('operation: "EXECUTE"'), "approved replacement printing must use the reviewed execute operation");
+assert(startBody.includes("replacementPrintJobId: result.replacementPrintJobId"), "print start must return the database-created replacement job");
+assert(!startBody.includes("prisma."), "print start must not mutate protected tables directly");
 
 assert(controllerSource.includes("PRINTER_ATTESTATION_STALE"), "stale printer response must use a typed safe code");
 assert(controllerSource.includes("Printer verification expired. Refresh printer helper before printing."), "stale printer response must use recovery copy");

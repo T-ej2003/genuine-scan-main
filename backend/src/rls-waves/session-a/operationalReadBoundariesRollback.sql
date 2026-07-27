@@ -1,0 +1,13 @@
+DROP FUNCTION IF EXISTS app_rls.read_user_directory(text,text,text,text,boolean,text,integer,integer);
+DROP FUNCTION IF EXISTS app_rls.read_licensee_directory(text,text,text,text,boolean);
+DROP FUNCTION IF EXISTS app_rls.batch_reservable_qr_summaries(text,text,text,text,text,text,text,text,text[]);
+DROP FUNCTION IF EXISTS app_rls.batch_status_fallback(text,text,text,text,text,text,text,text,text[]);
+DROP FUNCTION IF EXISTS app_rls.batch_unassigned_ranges(text,text,text,text,text,text,text,text,text[]);
+DROP FUNCTION IF EXISTS app_rls.batch_inventory_rollups(text,text,text,text,text,text,text,text,text[]);
+DROP FUNCTION IF EXISTS app_rls.batch_operational_total(text,text,text,text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.batch_operational_rows(text,text,text,text,text,text,text,text,integer,integer);
+DROP FUNCTION IF EXISTS app_rls.batch_operational_scope(text,text,text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.dashboard_snapshot_data(text,text,text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.dashboard_snapshot_scope(text,text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.operational_read_bind_actor(text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.operational_read_session_valid();

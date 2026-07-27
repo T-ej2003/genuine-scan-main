@@ -2,7 +2,6 @@ import { PrintJobStatus, UserRole } from "@prisma/client";
 
 import { AuthRequest } from "../middleware/auth";
 import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
-import { getPrintJobOperationalView } from "./networkDirectPrintService";
 import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
 
 export type PrintJobRealtimeEvent = {
@@ -59,15 +58,6 @@ export const publishPrintJobViewEvent = async (params: {
   type: string;
   reason: string;
 }) => {
-  const view = await getPrintJobOperationalView({
-    jobId: params.printJobId,
-    scope: {
-      role: UserRole.MANUFACTURER,
-      userId: params.manufacturerId,
-      licenseeId: params.licenseeId || null,
-    },
-  }).catch(() => null);
-
   publishPrintJobRealtimeEvent({
     printJobId: params.printJobId,
     manufacturerId: params.manufacturerId,
@@ -76,7 +66,6 @@ export const publishPrintJobViewEvent = async (params: {
     type: params.type,
     reason: params.reason,
     occurredAt: new Date().toISOString(),
-    ...(view ? { view } : {}),
   });
 };
 
@@ -88,9 +77,7 @@ export const canUserReceivePrintJobEvent = (req: AuthRequest, event: PrintJobRea
     return !scopedLicenseeId || scopedLicenseeId === event.licenseeId;
   }
   if (
-    user.role === UserRole.MANUFACTURER ||
-    user.role === UserRole.MANUFACTURER_ADMIN ||
-    user.role === UserRole.MANUFACTURER_USER
+    user.role === UserRole.MANUFACTURER_ADMIN
   ) {
     return user.userId === event.manufacturerId;
   }

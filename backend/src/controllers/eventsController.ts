@@ -1,10 +1,7 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
-import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
 import { onAuditLog } from "../services/auditService";
-import { UserRole } from "@prisma/client";
-import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
-import { getDashboardSnapshot } from "../services/dashboardSnapshotService";
+import { canDeliverDashboardAuditDelta, getDashboardSnapshot } from "../services/dashboardSnapshotService";
 import { writeSseRealtimeEnvelope } from "../utils/realtime";
 
 /**
@@ -40,13 +37,6 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    const scopedLicenseeId = getEffectiveLicenseeId(req);
-    const role = req.user.role;
-    const linkedLicenseeIds =
-      role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER
-        ? await resolveAccessibleLicenseeIdsForUser(req.user)
-        : [];
-
     // Keepalive ping (prevents proxies killing connection)
     const keepAlive = setInterval(() => {
       res.write(": ping\n\n");
@@ -55,18 +45,7 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
     // Listen for audit log emits (in-process)
     const off = onAuditLog(async (log) => {
       try {
-        // Tenant filter
-        if (role !== UserRole.SUPER_ADMIN && role !== UserRole.PLATFORM_SUPER_ADMIN) {
-          if (linkedLicenseeIds.length > 0) {
-            if (!log.licenseeId || !linkedLicenseeIds.includes(log.licenseeId)) return;
-          } else {
-            if (!scopedLicenseeId) return;
-            if (log.licenseeId !== scopedLicenseeId) return;
-          }
-        } else {
-          // super admin can optionally scope via ?licenseeId= (supported by getEffectiveLicenseeId)
-          if (scopedLicenseeId && log.licenseeId !== scopedLicenseeId) return;
-        }
+        if (!await canDeliverDashboardAuditDelta(req, log.licenseeId)) return;
 
         writeSseRealtimeEnvelope(res, {
           channel: "dashboard",

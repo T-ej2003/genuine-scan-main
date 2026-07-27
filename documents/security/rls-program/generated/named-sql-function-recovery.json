@@ -1,0 +1,4232 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": [
+    "git ls-files",
+    "git log --all -S",
+    "named-sql-function-inventory"
+  ],
+  "functions": [
+    {
+      "functionName": "app_auth.claim_refresh_token_rotation",
+      "signature": "text[],timestamp without time zone,text",
+      "callers": [
+        {
+          "functionName": "app_auth.claim_refresh_token_rotation",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "claimRefreshTokenRotation",
+          "line": 139
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8",
+        "7df2e5ae07987e509ca74b715b9a51305726b2bf",
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": true,
+      "definitionChecksum": "dae3bc76ef1421d254964c99e2808f2e03c5bb8c10bedade5f374efeb311fbd4",
+      "returnType": "TABLE(\"disposition\" text,\"tokenId\" text,\"userId\" text,\"role\" text,\"organizationId\" text, \"licenseeId\" text,\"manufacturerId\" text,\"authAssurance\" text,\"expiresAt\" timestamp without time zone, \"authenticatedAt\" timestamp without time zone,\"mfaVerifiedAt\" timestamp without time zone)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.complete_refresh_token_rotation",
+      "signature": "text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text",
+      "callers": [
+        {
+          "functionName": "app_auth.complete_refresh_token_rotation",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "completeRefreshTokenRotation",
+          "line": 567
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8",
+        "7df2e5ae07987e509ca74b715b9a51305726b2bf",
+        "62b73a98b6e0f960e0d326df9addd310324c9740",
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": true,
+      "definitionChecksum": "9cdad774b1184113563d7acbd5baf4519279e26ed6333f27f1b92851edf5f549",
+      "returnType": "TABLE(\"id\" text,\"expiresAt\" timestamp without time zone)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.consume_email_verification_token",
+      "signature": "text[],timestamp without time zone",
+      "callers": [
+        {
+          "functionName": "app_auth.consume_email_verification_token",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "consumeEmailVerificationBoundary",
+          "line": 197
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "originatingCommit": "a2a9efe6872414fd0898492a165f65b17a8f0b45",
+      "historyCommits": [
+        "a2a9efe6872414fd0898492a165f65b17a8f0b45"
+      ],
+      "deployable": true,
+      "definitionChecksum": "912f5fa4a8b16260ab27e19d5c1a6c60cf846918d5de38d8f39784d5e9920c3a",
+      "returnType": "TABLE(\"verified\" boolean,\"purpose\" text,\"userId\" text,\"email\" text)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.consume_invitation_token",
+      "signature": "text[],text,text,timestamp without time zone,text,text,text",
+      "callers": [
+        {
+          "functionName": "app_auth.consume_invitation_token",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "consumeInvitationBoundary",
+          "line": 259
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "originatingCommit": "a2a9efe6872414fd0898492a165f65b17a8f0b45",
+      "historyCommits": [
+        "a2a9efe6872414fd0898492a165f65b17a8f0b45",
+        "62b73a98b6e0f960e0d326df9addd310324c9740"
+      ],
+      "deployable": true,
+      "definitionChecksum": "910f52e9c37193e776807622f9e3c5c6476d6bd2d6f3f805f39c0dc0ada7b799",
+      "returnType": "TABLE(\"inviteId\" text,\"id\" text,\"email\" text,\"name\" text,\"role\" text,\"licenseeId\" text,\"orgId\" text,\"status\" text)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "backend/tests/rls-wave-b/b01/invitationPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.consume_password_reset_token",
+      "signature": "text[],text,timestamp without time zone",
+      "callers": [
+        {
+          "functionName": "app_auth.consume_password_reset_token",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "consumePasswordResetBoundary",
+          "line": 174
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "originatingCommit": "a2a9efe6872414fd0898492a165f65b17a8f0b45",
+      "historyCommits": [
+        "a2a9efe6872414fd0898492a165f65b17a8f0b45"
+      ],
+      "deployable": true,
+      "definitionChecksum": "df2d6ea985358960a71fd12b9af23090045a7fcfdbcd8609939f1a9bf3b59eba",
+      "returnType": "TABLE(\"id\" text,\"email\" text,\"name\" text,\"role\" text,\"licenseeId\" text,\"orgId\" text)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.create_refresh_mfa_challenge",
+      "signature": "text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text",
+      "callers": [
+        {
+          "functionName": "app_auth.create_refresh_mfa_challenge",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "createRefreshMfaChallengeRecord",
+          "line": 352
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8",
+        "7df2e5ae07987e509ca74b715b9a51305726b2bf",
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": true,
+      "definitionChecksum": "797071fc29cbd2e83a0ca2d75da04b7fdc689f153bc4d2d0d8aad31f6dfe93dd",
+      "returnType": "TABLE(\"challengeId\" text,\"created\" boolean)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.issue_authenticated_session_capability",
+      "signature": "text,text,text,text,timestamp without time zone",
+      "callers": [
+        {
+          "functionName": "app_auth.issue_authenticated_session_capability",
+          "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+          "sourceFunction": "createAuthenticatedSessionCapability",
+          "line": 38
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": true,
+      "definitionChecksum": "e57c9539ab7dd519f1d07d1e2df040d57b2348b555645e11aefca29c68f7897f",
+      "returnType": "TABLE(\"id\" text,\"expiresAt\" timestamp without time zone)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.load_refresh_session_state",
+      "signature": "text,text[],text,text,timestamp without time zone,text",
+      "callers": [
+        {
+          "functionName": "app_auth.load_refresh_session_state",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "loadRefreshSessionState",
+          "line": 269
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8",
+        "7df2e5ae07987e509ca74b715b9a51305726b2bf",
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": true,
+      "definitionChecksum": "bcdd0bf9579370921f270fed6ac0816de9797abea32986c24832e3b1dc4d466f",
+      "returnType": "TABLE(\"userId\" text,\"email\" text,\"name\" text,\"role\" text,\"legacyLicenseeId\" text,\"legacyOrganizationId\" text,\"emailVerifiedAt\" timestamp without time zone,\"sessionLicenseeId\" text,\"sessionOrganizationId\" text,\"scopeVersion\" text,\"selectedLicenseeId\" text,\"selectedLicenseeName\" text,\"selectedLicenseePrefix\" text,\"selectedLicenseeBrandName\" text,\"selectedLicenseeOrganizationId\" text,\"linkedLicensees\" jsonb,\"mfaRequired\" boolean,\"mfaEnabled\" boolean,\"mfaEnrolled\" boolean,\"mfaLastUsedAt\" timestamp without time zone,\"mfaMethods\" text[],\"mfaPreferredMethod\" text)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.lookup_invitation_token",
+      "signature": "text[],timestamp without time zone",
+      "callers": [
+        {
+          "functionName": "app_auth.lookup_invitation_token",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "lookupInvitationBoundary",
+          "line": 217
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "originatingCommit": "a2a9efe6872414fd0898492a165f65b17a8f0b45",
+      "historyCommits": [
+        "a2a9efe6872414fd0898492a165f65b17a8f0b45",
+        "62b73a98b6e0f960e0d326df9addd310324c9740"
+      ],
+      "deployable": true,
+      "definitionChecksum": "cb273bae6c8581ecf7cf11860290f163fbb56affb53fd9edf2ad7039684d47a9",
+      "returnType": "TABLE(\"email\" text,\"role\" text,\"expiresAt\" timestamp without time zone,\"licenseeName\" text,\"requiresConnector\" boolean)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "backend/tests/rls-wave-b/b01/invitationPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.lookup_password_user",
+      "signature": "text",
+      "callers": [
+        {
+          "functionName": "app_auth.lookup_password_user",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "lookupPasswordBootstrapUser",
+          "line": 93
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "originatingCommit": "a2a9efe6872414fd0898492a165f65b17a8f0b45",
+      "historyCommits": [
+        "a2a9efe6872414fd0898492a165f65b17a8f0b45",
+        "3fbcf1402d349519b433718f05772b6f8f9f2d92",
+        "57513f93e7d750ea2ba9bd4c1487d66e1d10d7b7",
+        "8fd5d0b625b191085e5beabd0cb5b39c1b593b35",
+        "8294dc9ec86624c00fe2649f954369774a812ff6"
+      ],
+      "deployable": true,
+      "definitionChecksum": "fad2dfd209439c4334d3b20b00404951281f126b636e4c9c10e9d72102c2737b",
+      "returnType": "TABLE( \"id\" text,\"email\" text,\"passwordHash\" text,\"name\" text,\"role\" text,\"licenseeId\" text,\"orgId\" text, \"status\" text,\"isActive\" boolean,\"disabledAt\" timestamp without time zone,\"deletedAt\" timestamp without time zone, \"failedLoginAttempts\" integer,\"lockedUntil\" timestamp without time zone,\"lastLoginAt\" timestamp without time zone, \"emailVerifiedAt\" timestamp without time zone )",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "documents/security/mscqr_staging_rls_candidate_rollback_2026-07-09.sql",
+        "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql",
+        "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql",
+        "documents/security/mscqr_staging_rls_shared_batch_phase_rollback_2026-07-15.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql",
+        "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql",
+        "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.record_password_failure",
+      "signature": "text,timestamp without time zone,integer,integer",
+      "callers": [
+        {
+          "functionName": "app_auth.record_password_failure",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "recordPasswordLoginFailure",
+          "line": 116
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "originatingCommit": "a2a9efe6872414fd0898492a165f65b17a8f0b45",
+      "historyCommits": [
+        "a2a9efe6872414fd0898492a165f65b17a8f0b45",
+        "3fbcf1402d349519b433718f05772b6f8f9f2d92",
+        "57513f93e7d750ea2ba9bd4c1487d66e1d10d7b7",
+        "8fd5d0b625b191085e5beabd0cb5b39c1b593b35",
+        "8294dc9ec86624c00fe2649f954369774a812ff6"
+      ],
+      "deployable": true,
+      "definitionChecksum": "69b78d0341d8f52ec69d05b34d0bdd22136960ddc788117a7a27b9684b7b9f18",
+      "returnType": "TABLE(\"failedLoginAttempts\" integer,\"lockedUntil\" timestamp without time zone)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "documents/security/mscqr_staging_rls_candidate_rollback_2026-07-09.sql",
+        "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql",
+        "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql",
+        "documents/security/mscqr_staging_rls_shared_batch_phase_rollback_2026-07-15.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql",
+        "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql",
+        "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.request_password_reset",
+      "signature": "text,text,timestamp without time zone,timestamp without time zone,text,text",
+      "callers": [
+        {
+          "functionName": "app_auth.request_password_reset",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "requestPasswordResetBoundary",
+          "line": 146
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "originatingCommit": "a2a9efe6872414fd0898492a165f65b17a8f0b45",
+      "historyCommits": [
+        "a2a9efe6872414fd0898492a165f65b17a8f0b45"
+      ],
+      "deployable": true,
+      "definitionChecksum": "474848aa49fbb4cdb194d2bee224e27f303b7ced8ba927fb724f9156db910320",
+      "returnType": "TABLE(\"accepted\" boolean,\"deliveryRequired\" boolean,\"userId\" text,\"email\" text,\"licenseeId\" text,\"orgId\" text,\"expiresAt\" timestamp without time zone)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.require_authenticated_session",
+      "signature": "text,text,text",
+      "callers": [
+        {
+          "functionName": "app_auth.require_authenticated_session",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "verifyCapability",
+          "line": 91
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670",
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": true,
+      "definitionChecksum": "569028daea10b5e678c6651bbd45f5dd086ec431b2727ad73a783e6c4d243bbc",
+      "returnType": "TABLE(\"sessionId\" text,\"userId\" text,\"role\" text,\"organizationId\" text,\"licenseeId\" text,\"assurance\" text)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.revoke_all_authenticated_session_capabilities",
+      "signature": "text,text,text",
+      "callers": [
+        {
+          "functionName": "app_auth.revoke_all_authenticated_session_capabilities",
+          "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+          "sourceFunction": "revokeAuthenticatedSessionsForUser",
+          "line": 69
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670",
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": true,
+      "definitionChecksum": "28fe1fccd3a81b4c139509877e0a90028c3ab18f64638d7ac53367d74f4ce21a",
+      "returnType": "TABLE(\"revokedCount\" integer)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.revoke_authenticated_session_capability",
+      "signature": "text,text,text,text",
+      "callers": [
+        {
+          "functionName": "app_auth.revoke_authenticated_session_capability",
+          "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+          "sourceFunction": "revokeAuthenticatedSessionByRefreshToken",
+          "line": 54
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670",
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": true,
+      "definitionChecksum": "48a88286f63421838f3cfe464a32eaf10b0a716dfdc5dd4a8a26c4a39d16d08a",
+      "returnType": "TABLE(\"revoked\" boolean)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_auth.revoke_refresh_token_scope",
+      "signature": "text,text[],text,text,text,timestamp without time zone,text",
+      "callers": [
+        {
+          "functionName": "app_auth.revoke_refresh_token_scope",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "revokeRefreshTokenRotationScope",
+          "line": 534
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8",
+        "7df2e5ae07987e509ca74b715b9a51305726b2bf",
+        "62b73a98b6e0f960e0d326df9addd310324c9740",
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": true,
+      "definitionChecksum": "27764e842703c2877230ffda86ac0e02e92bf8c40a33a5385c877d2a0da0a342",
+      "returnType": "TABLE(\"revokedCount\" integer)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_claim_incident_email_delivery",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_claim_incident_email_delivery",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimIncidentEmailDelivery",
+          "line": 573
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.b03_complete_incident_email_delivery",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_complete_incident_email_delivery",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "completeIncidentEmailDelivery",
+          "line": 611
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.b03_create_role_notifications",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_create_role_notifications",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "createRoleNotifications",
+          "line": 443
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.b03_create_user_notification",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_create_user_notification",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "createUserNotification",
+          "line": 470
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.b03_list_notifications_for_user",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_list_notifications_for_user",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "listNotificationsForUser",
+          "line": 510
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.b03_mark_all_notifications_read",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_mark_all_notifications_read",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "markAllNotificationsRead",
+          "line": 548
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.b03_mark_notification_emailed",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_mark_notification_emailed",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "markNotificationEmailed",
+          "line": 497
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.b03_mark_notification_read",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_mark_notification_read",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "markNotificationRead",
+          "line": 533
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.b03_primary_superadmin_email",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_primary_superadmin_email",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "getPrimarySuperadminEmail",
+          "line": 405
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.b03_resolve_incident_email_actor",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_resolve_incident_email_actor",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "resolveIncidentEmailActor",
+          "line": 422
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.b03_resolve_incident_notification_scope",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_resolve_incident_notification_scope",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "resolveIncidentNotificationScope",
+          "line": 559
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.b03_superadmin_alert_emails",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.b03_superadmin_alert_emails",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "getSuperadminAlertEmails",
+          "line": 413
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.batch_inventory_rollups",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.batch_inventory_rollups",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "readRollups",
+          "line": 297
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups"
+      ],
+      "classification": "repository contract only",
+      "definitionLocation": null,
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.batch_operational_rows",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.batch_operational_rows",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "getBatchAllocationMap",
+          "line": 553
+        },
+        {
+          "functionName": "app_rls.batch_operational_rows",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "readBatches",
+          "line": 497
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches"
+      ],
+      "classification": "repository contract only",
+      "definitionLocation": null,
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.batch_operational_scope",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.batch_operational_scope",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "getBatchAllocationMap",
+          "line": 543
+        },
+        {
+          "functionName": "app_rls.batch_operational_scope",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "readBatches",
+          "line": 487
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches"
+      ],
+      "classification": "repository contract only",
+      "definitionLocation": null,
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.batch_operational_total",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.batch_operational_total",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "readTotal",
+          "line": 512
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total"
+      ],
+      "classification": "repository contract only",
+      "definitionLocation": null,
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.batch_reservable_qr_summaries",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.batch_reservable_qr_summaries",
+          "sourceFile": "backend/src/services/printReservationService.ts",
+          "sourceFunction": "listReservableQrCodeSummaries",
+          "line": 305
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries"
+      ],
+      "classification": "repository contract only",
+      "definitionLocation": null,
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.batch_status_fallback",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.batch_status_fallback",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "buildCountMaps",
+          "line": 370
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps"
+      ],
+      "classification": "repository contract only",
+      "definitionLocation": null,
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.batch_unassigned_ranges",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.batch_unassigned_ranges",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "readUnassignedRanges",
+          "line": 319
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges"
+      ],
+      "classification": "repository contract only",
+      "definitionLocation": null,
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c02_fraud_report_network_details",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c02_fraud_report_network_details",
+          "sourceFile": "backend/src/services/fraudReportQueryService.ts",
+          "sourceFunction": "queryFraudReports",
+          "line": 88
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c02/auditTrace.sql",
+      "originatingCommit": "cc14d113f577c0e1d44ef07e82793a775482542c",
+      "historyCommits": [
+        "cc14d113f577c0e1d44ef07e82793a775482542c"
+      ],
+      "deployable": true,
+      "definitionChecksum": "2f3ed11dc0262f55b2f5b9e6e9b71263789cea03edb6edc2cfe91ac3d27db339",
+      "returnType": "TABLE(id text, ip_address text)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c02/auditTrace.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c02/auditTrace.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c02_respond_fraud_report",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c02_respond_fraud_report",
+          "sourceFile": "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
+          "sourceFunction": "respondToFraudReportInTransaction",
+          "line": 59
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c02/auditTrace.sql",
+      "originatingCommit": "cc14d113f577c0e1d44ef07e82793a775482542c",
+      "historyCommits": [
+        "cc14d113f577c0e1d44ef07e82793a775482542c"
+      ],
+      "deployable": true,
+      "definitionChecksum": "b1a1aab7e4cf8247d95d15bdab007408cd95ca9bee1ba650364dc1a68ef726cd",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c02/auditTrace.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c02/auditTrace.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_add_incident_evidence",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_add_incident_evidence",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "addIncidentEvidenceInTransaction",
+          "line": 136
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_approve_sensitive_action_approval",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_approve_sensitive_action_approval",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+          "sourceFunction": "approveSensitiveApprovalInTransaction",
+          "line": 56
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_assert_restricted_identity",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_assert_restricted_identity",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03RestrictedDatabase.ts",
+          "sourceFunction": "withRestrictedTransaction",
+          "line": 44
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_build_incident_evidence_audit_snapshot",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_build_incident_evidence_audit_snapshot",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "loadIncidentEvidenceAuditSnapshotInTransaction",
+          "line": 96
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_complete_compliance_pack_job",
+      "signature": "text,text,text,text,jsonb",
+      "callers": [
+        {
+          "functionName": "app_rls.c03_complete_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+          "sourceFunction": "completeCompliancePackJobInTransaction",
+          "line": 50
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
+      "deployable": true,
+      "definitionChecksum": "4d37d58cd59719ab3ac21a935b64f32320c7fed8c09c8615c363f0f3bdad5198",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_complete_compliance_pack_rebuild",
+      "signature": "text,text,text,text,jsonb",
+      "callers": [
+        {
+          "functionName": "app_rls.c03_complete_compliance_pack_rebuild",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+          "sourceFunction": "completeCompliancePackRebuildInTransaction",
+          "line": 128
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
+      "deployable": true,
+      "definitionChecksum": "4b1b2e90e8b9225f82d7322e886c88cae726e2303dc3d8e8a613a224aad2f3ca",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_compute_incident_severity",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_compute_incident_severity",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "computeIncidentSeverityInTransaction",
+          "line": 43
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_compute_incident_spam_signal",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_compute_incident_spam_signal",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "computeIncidentSpamSignalInTransaction",
+          "line": 26
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_create_ir_incident",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_create_ir_incident",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "createIrIncidentInTransaction",
+          "line": 166
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_create_policy_rule",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_create_policy_rule",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "createPolicyRuleInTransaction",
+          "line": 77
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03Policy.sql",
+      "originatingCommit": "d4edf6e4a63e4daf792c82fe06b5c7be1edbb1a9",
+      "historyCommits": [
+        "d4edf6e4a63e4daf792c82fe06b5c7be1edbb1a9",
+        "56bdea3abce51920e1a71e2f4f6c50c7dd2dc296"
+      ],
+      "deployable": true,
+      "definitionChecksum": "c845b2d8a5c054e885a1cab191ccd723e5c7f27702056ddd7e89a5b4cb128851",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03Policy.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03Policy.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_create_public_incident_report",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_create_public_incident_report",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "createPublicIncidentReportInTransaction",
+          "line": 66
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-incident-controller-ts-report-incident"
+      ],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_create_sensitive_action_approval",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_create_sensitive_action_approval",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+          "sourceFunction": "createSensitiveApprovalInTransaction",
+          "line": 24
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_fail_compliance_pack_job",
+      "signature": "text,text,text,text,text",
+      "callers": [
+        {
+          "functionName": "app_rls.c03_fail_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+          "sourceFunction": "failCompliancePackJobInTransaction",
+          "line": 66
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
+      "deployable": true,
+      "definitionChecksum": "31914ccfb59c39b71596d27f3ce6093eb6cdf0268d34c84e95175fff032f63a8",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_generate_compliance_report",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_generate_compliance_report",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "generateComplianceReportInTransaction",
+          "line": 107
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql",
+      "originatingCommit": "fb555a0315ba05133980e8f82a02fa4264433c12",
+      "historyCommits": [
+        "fb555a0315ba05133980e8f82a02fa4264433c12"
+      ],
+      "deployable": true,
+      "definitionChecksum": "3fb051fedd1cb250197eae9eb16af0aaddbfd7a5836ece174709241bd8382610",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_get_compliance_pack_job",
+      "signature": "text,text,text,text",
+      "callers": [
+        {
+          "functionName": "app_rls.c03_get_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+          "sourceFunction": "loadCompliancePackJobInTransaction",
+          "line": 113
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
+      "deployable": true,
+      "definitionChecksum": "74ded71f3fa823f878d2853f4c200395f545814d7097659d06975109ba73a9a2",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_get_incident_detail",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_get_incident_detail",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "getIncidentDetailInTransaction",
+          "line": 96
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_get_incident_evidence_file_by_storage_key",
+      "signature": "text,text,text,text",
+      "callers": [
+        {
+          "functionName": "app_rls.c03_get_incident_evidence_file_by_storage_key",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "loadIncidentEvidenceFileInTransaction",
+          "line": 152
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
+      "deployable": true,
+      "definitionChecksum": "2ce8d7c300b43d7ef6fac7629529cecb57c9b082d6be5248a9ea96da1706c4bd",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_get_ir_incident_detail",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_get_ir_incident_detail",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "getIrIncidentDetailInTransaction",
+          "line": 181
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_get_or_create_retention_policy",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_get_or_create_retention_policy",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "getOrCreateRetentionPolicyInTransaction",
+          "line": 49
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql",
+      "originatingCommit": "fb555a0315ba05133980e8f82a02fa4264433c12",
+      "historyCommits": [
+        "fb555a0315ba05133980e8f82a02fa4264433c12"
+      ],
+      "deployable": true,
+      "definitionChecksum": "157e6cf0057e4ff866f9272a802d143bfce7bcb46ef13c52f459345af8e28e67",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_link_ir_alert_incident",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_link_ir_alert_incident",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "linkPolicyAlertToIncidentInTransaction",
+          "line": 174
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-ir-alert-controller-ts-patch-ir-alert"
+      ],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_list_incidents",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_list_incidents",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "listIncidentsInTransaction",
+          "line": 107
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_list_ir_alerts",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_list_ir_alerts",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "listIncidentPolicyAlertsInTransaction",
+          "line": 139
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts"
+      ],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_list_platform_policy_rules",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_list_platform_policy_rules",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "listPlatformPolicyRulesInTransaction",
+          "line": 48
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03Policy.sql",
+      "originatingCommit": "d4edf6e4a63e4daf792c82fe06b5c7be1edbb1a9",
+      "historyCommits": [
+        "d4edf6e4a63e4daf792c82fe06b5c7be1edbb1a9"
+      ],
+      "deployable": true,
+      "definitionChecksum": "51f1c60024678dcae0ac409c1dce075a0ddc9c4500bcd97444a345642ca7196e",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03Policy.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03Policy.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_list_policy_rules",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_list_policy_rules",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "listPolicyRulesInTransaction",
+          "line": 27
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03Policy.sql",
+      "originatingCommit": "d4edf6e4a63e4daf792c82fe06b5c7be1edbb1a9",
+      "historyCommits": [
+        "d4edf6e4a63e4daf792c82fe06b5c7be1edbb1a9",
+        "56bdea3abce51920e1a71e2f4f6c50c7dd2dc296"
+      ],
+      "deployable": true,
+      "definitionChecksum": "f84e046755b2c6cd4ece809543ffc26b76689c9a2b02d347fd4e5fd2cd9b7b26",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03Policy.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03Policy.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_list_sensitive_action_approvals",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_list_sensitive_action_approvals",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+          "sourceFunction": "listSensitiveApprovalsInTransaction",
+          "line": 34
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_patch_incident",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_patch_incident",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "patchIncidentInTransaction",
+          "line": 123
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_prepare_incident_communication",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_prepare_incident_communication",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "prepareIncidentCommunicationInTransaction",
+          "line": 212
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_record_incident_communication_delivery",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_record_incident_communication_delivery",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "recordIncidentCommunicationDeliveryInTransaction",
+          "line": 229
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_record_incident_event",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_record_incident_event",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "recordIncidentEventInTransaction",
+          "line": 84
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_reject_sensitive_action_approval",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_reject_sensitive_action_approval",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+          "sourceFunction": "rejectSensitiveApprovalInTransaction",
+          "line": 71
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
+      "signature": "text,text,text,text",
+      "callers": [
+        {
+          "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "withC03ResourceTransaction",
+          "line": 175
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670",
+        "d4edf6e4a63e4daf792c82fe06b5c7be1edbb1a9",
+        "3011e341c7233d01c2e1f4147a8b02a452287362"
+      ],
+      "deployable": true,
+      "definitionChecksum": "9b073508368e8aee7cd8277d0affd99e1cd1e8aa495390f428ca15644e575b18",
+      "returnType": "TABLE(user_id text,role text,organization_id text,licensee_id text)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "backend/src/rls-waves/session-c/c03/c03Boundary.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "backend/src/rls-waves/session-c/c03/c03Boundary.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_review_incident_customer_trust",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_review_incident_customer_trust",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "reviewIncidentCustomerTrustInTransaction",
+          "line": 196
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_run_retention_lifecycle",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_run_retention_lifecycle",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "runRetentionLifecycleInTransaction",
+          "line": 82
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql",
+      "originatingCommit": "fb555a0315ba05133980e8f82a02fa4264433c12",
+      "historyCommits": [
+        "fb555a0315ba05133980e8f82a02fa4264433c12"
+      ],
+      "deployable": true,
+      "definitionChecksum": "2056219f1b21b03bd1e14ad6b642724ece409bc02713e9d35520f34534a0549d",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_start_compliance_pack_job",
+      "signature": "text,text,text,text,text,timestamp with time zone,timestamp with time zone",
+      "callers": [
+        {
+          "functionName": "app_rls.c03_start_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+          "sourceFunction": "startCompliancePackJobInTransaction",
+          "line": 29
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
+      "deployable": true,
+      "definitionChecksum": "c0b23fbf5247c263d404488f7c4147b6b451d92e48b66cb87572db7de4739deb",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_update_policy_rule",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_update_policy_rule",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "updatePolicyRuleInTransaction",
+          "line": 89
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03Policy.sql",
+      "originatingCommit": "d4edf6e4a63e4daf792c82fe06b5c7be1edbb1a9",
+      "historyCommits": [
+        "d4edf6e4a63e4daf792c82fe06b5c7be1edbb1a9",
+        "56bdea3abce51920e1a71e2f4f6c50c7dd2dc296"
+      ],
+      "deployable": true,
+      "definitionChecksum": "56f9f9373b8ba42f9c623d4a1fa83f94da4f2d0c662d98f95aedb52678b007ba",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03Policy.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03Policy.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_update_retention_policy",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_update_retention_policy",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "updateRetentionPolicyInTransaction",
+          "line": 60
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql",
+      "originatingCommit": "fb555a0315ba05133980e8f82a02fa4264433c12",
+      "historyCommits": [
+        "fb555a0315ba05133980e8f82a02fa4264433c12"
+      ],
+      "deployable": true,
+      "definitionChecksum": "f39e9a5129302a2eee8956e0638cb2eaffd47eb0ea543e8cc3dc754bec5f4c04",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.c03_upsert_tenant_feature_flag",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.c03_upsert_tenant_feature_flag",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "upsertTenantFeatureFlagInTransaction",
+          "line": 37
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql",
+      "originatingCommit": "fb555a0315ba05133980e8f82a02fa4264433c12",
+      "historyCommits": [
+        "fb555a0315ba05133980e8f82a02fa4264433c12"
+      ],
+      "deployable": true,
+      "definitionChecksum": "a45b52a3fd9bc886f06117114d1ac9779ec5baf4e4241c4c95d8bfaa604d0080",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.change_authenticated_password",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.change_authenticated_password",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "changeAuthenticatedPassword",
+          "line": 215
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.claim_audit_log_outbox_slice",
+      "signature": "timestamp without time zone,integer",
+      "callers": [
+        {
+          "functionName": "app_rls.claim_audit_log_outbox_slice",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimAuditLogOutboxSlice",
+          "line": 270
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": true,
+      "definitionChecksum": "f268d0e76f3ee818b18c4e8336b5cf5b176fbd19cef66cce8475573207f6bcde",
+      "returnType": "TABLE(\"id\" text,\"jobType\" text,\"requestId\" text,\"payloadDigest\" text,\"idempotencyKey\" text,\"organizationId\" text,\"licenseeId\" text,\"manufacturerId\" text,\"initiatingUserId\" text,\"expiresAt\" timestamp without time zone,\"attempt\" integer)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.claim_compliance_pack_slice",
+      "signature": "text,text,timestamp without time zone,integer",
+      "callers": [
+        {
+          "functionName": "app_rls.claim_compliance_pack_slice",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimCompliancePackSlice",
+          "line": 360
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+      "originatingCommit": "be0d672c8f3c1eede20a8270aa4ac33c259afeec",
+      "historyCommits": [
+        "be0d672c8f3c1eede20a8270aa4ac33c259afeec"
+      ],
+      "deployable": true,
+      "definitionChecksum": "1871b668d1351e0249aa666b357237fafa7dc253ab4b13f1562d653d4814f1ad",
+      "returnType": "TABLE(\"jobId\" text,\"requestId\" text,\"organizationId\" text,\"licenseeId\" text, \"scheduleScopeVersion\" text,\"expiresAt\" timestamp without time zone,\"attempt\" integer,\"report\" jsonb)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.claim_security_event_outbox_slice",
+      "signature": "timestamp without time zone,integer,text",
+      "callers": [
+        {
+          "functionName": "app_rls.claim_security_event_outbox_slice",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimSecurityEventOutboxSlice",
+          "line": 312
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": true,
+      "definitionChecksum": "e86160635cc4e326f75345139a70504d67163655b21003a925aee6c33d7dca0d",
+      "returnType": "TABLE(\"id\" text,\"jobType\" text,\"requestId\" text,\"payloadDigest\" text,\"idempotencyKey\" text,\"organizationId\" text,\"licenseeId\" text,\"manufacturerId\" text,\"initiatingUserId\" text,\"expiresAt\" timestamp without time zone,\"attempt\" integer,\"eventType\" text,\"eventPayload\" jsonb,\"createdAt\" timestamp without time zone)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.complete_security_event_outbox",
+      "signature": "text,text,timestamp without time zone,text",
+      "callers": [
+        {
+          "functionName": "app_rls.complete_security_event_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "completeSecurityEventOutbox",
+          "line": 333
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": true,
+      "definitionChecksum": "4e79b1ecef85f5fcbb009619a2ffa75b7168409c413ab08696289ce7a8952eea",
+      "returnType": "TABLE(\"completed\" boolean,\"replayed\" boolean)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.consume_audit_log_outbox",
+      "signature": "text,text,timestamp without time zone",
+      "callers": [
+        {
+          "functionName": "app_rls.consume_audit_log_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "consumeAuditLogOutbox",
+          "line": 285
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": true,
+      "definitionChecksum": "cf128738af3214e7f3c50b21ae0434e75cc27030b578e3c83c09496ae8d92576",
+      "returnType": "TABLE(\"auditLogId\" text,\"replayed\" boolean)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.create_refresh_token",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.create_refresh_token",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "createRefreshTokenRecord",
+          "line": 418
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "originatingCommit": "62b73a98b6e0f960e0d326df9addd310324c9740",
+      "historyCommits": [
+        "62b73a98b6e0f960e0d326df9addd310324c9740",
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": false,
+      "definitionChecksum": "2eb86ebe7dcc210cdb0cecb3989efa349a56fe25207b2d2f3962965bccf4a38e",
+      "returnType": "TABLE(\"id\" text, \"expiresAt\" timestamp without time zone)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.dashboard_snapshot_data",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.dashboard_snapshot_data",
+          "sourceFile": "backend/src/services/dashboardSnapshotService.ts",
+          "sourceFunction": "loadInventoryAggregate",
+          "line": 153
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "classification": "repository contract only",
+      "definitionLocation": null,
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.dashboard_snapshot_scope",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.dashboard_snapshot_scope",
+          "sourceFile": "backend/src/services/dashboardSnapshotService.ts",
+          "sourceFunction": "computeDashboardSnapshot",
+          "line": 193
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
+      ],
+      "classification": "repository contract only",
+      "definitionLocation": null,
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8"
+      ],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.enqueue_audit_log_outbox",
+      "signature": "jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text",
+      "callers": [
+        {
+          "functionName": "app_rls.enqueue_audit_log_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "enqueueAuditLogOutbox",
+          "line": 238
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "originatingCommit": "62b73a98b6e0f960e0d326df9addd310324c9740",
+      "historyCommits": [
+        "62b73a98b6e0f960e0d326df9addd310324c9740",
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": true,
+      "definitionChecksum": "7e92b94ee930ff732ab8dd5f71621c47d02753336efbeca3b1429c7b8b7c98fe",
+      "returnType": "TABLE(\"id\" text)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.enqueue_security_event_outbox",
+      "signature": "text,jsonb,text,text,text,text,text,text,text,timestamp without time zone",
+      "callers": [
+        {
+          "functionName": "app_rls.enqueue_security_event_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "enqueueSecurityEventOutbox",
+          "line": 252
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-siem-outbox-service-ts-queue-security-event"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": true,
+      "definitionChecksum": "b8d0fa4f32507ff1c2c97a7d96f3d2aa270baa30773c90c2b78d2e58435943ef",
+      "returnType": "TABLE(\"id\" text)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.fail_audit_log_outbox",
+      "signature": "text,text,timestamp without time zone,integer,text",
+      "callers": [
+        {
+          "functionName": "app_rls.fail_audit_log_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "failAuditLogOutbox",
+          "line": 296
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": true,
+      "definitionChecksum": "99543d259f349904a53bf83a1e25f771287799936adf42ec006ed5cb374791c1",
+      "returnType": "TABLE(\"terminal\" boolean,\"nextAttemptAt\" timestamp without time zone)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.fail_security_event_outbox",
+      "signature": "text,text,timestamp without time zone,integer,text",
+      "callers": [
+        {
+          "functionName": "app_rls.fail_security_event_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "failSecurityEventOutbox",
+          "line": 345
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": true,
+      "definitionChecksum": "ba00dcd400884b6bc386db3c7a2ce5b8326596ba3d9ddb9ec1d1c5e26cc05700",
+      "returnType": "TABLE(\"terminal\" boolean,\"nextAttemptAt\" timestamp without time zone)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.find_refresh_token_by_hashes",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.find_refresh_token_by_hashes",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "findRefreshTokenByHashes",
+          "line": 432
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "originatingCommit": "45961044fde6b0c887154b9e07c2dd582c129fa6",
+      "historyCommits": [
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": false,
+      "definitionChecksum": "708e6608de6a78aaff17e6cad311685ed05c04f3f63940cf6cf86d6e2c427c59",
+      "returnType": "TABLE( \"id\" text,\"userId\" text,\"orgId\" text,\"expiresAt\" timestamp without time zone, \"createdAt\" timestamp without time zone,\"createdIpHash\" text,\"createdUserAgent\" text, \"authenticatedAt\" timestamp without time zone,\"mfaVerifiedAt\" timestamp without time zone, \"lastUsedAt\" timestamp without time zone,\"revokedAt\" timestamp without time zone,\"revokedReason\" text )",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.find_refresh_token_by_id",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.find_refresh_token_by_id",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "findRefreshTokenByIdentifier",
+          "line": 440
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "originatingCommit": "45961044fde6b0c887154b9e07c2dd582c129fa6",
+      "historyCommits": [
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": false,
+      "definitionChecksum": "a8a4e92c56efca3cb06c7a5279278079775fc92bb19e7c7ce6e163508e908ea9",
+      "returnType": "TABLE( \"id\" text,\"userId\" text,\"orgId\" text,\"expiresAt\" timestamp without time zone, \"createdAt\" timestamp without time zone,\"createdIpHash\" text,\"createdUserAgent\" text, \"authenticatedAt\" timestamp without time zone,\"mfaVerifiedAt\" timestamp without time zone, \"lastUsedAt\" timestamp without time zone,\"revokedAt\" timestamp without time zone,\"revokedReason\" text )",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.list_active_refresh_tokens",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.list_active_refresh_tokens",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "listActiveRefreshTokenRecords",
+          "line": 453
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "originatingCommit": "45961044fde6b0c887154b9e07c2dd582c129fa6",
+      "historyCommits": [
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": false,
+      "definitionChecksum": "4de590162ca40c37b1d497b0aa9278173d50467fde96745320ca3bc3a4fe107e",
+      "returnType": "TABLE( \"id\" text,\"userId\" text,\"orgId\" text,\"expiresAt\" timestamp without time zone, \"createdAt\" timestamp without time zone,\"createdIpHash\" text,\"createdUserAgent\" text, \"authenticatedAt\" timestamp without time zone,\"mfaVerifiedAt\" timestamp without time zone, \"lastUsedAt\" timestamp without time zone,\"revokedAt\" timestamp without time zone,\"revokedReason\" text )",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.load_authenticated_actor",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.load_authenticated_actor",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "loadAuthenticatedActor",
+          "line": 43
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "originatingCommit": "62b73a98b6e0f960e0d326df9addd310324c9740",
+      "historyCommits": [
+        "62b73a98b6e0f960e0d326df9addd310324c9740",
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": false,
+      "definitionChecksum": "6404fd3e4d270a2702439e388bf5cca24598cc068a4fe2fd7d4d044f351230ba",
+      "returnType": "TABLE( \"id\" text, \"email\" text, \"name\" text, \"role\" text, \"licenseeId\" text, \"orgId\" text, \"emailVerifiedAt\" timestamp without time zone, \"pendingEmail\" text, \"pendingEmailRequestedAt\" timestamp without time zone, \"isActive\" boolean, \"status\" text, \"deletedAt\" timestamp without time zone, \"disabledAt\" timestamp without time zone, \"createdAt\" timestamp without time zone, \"licenseeRecordId\" text, \"licenseeName\" text, \"licenseePrefix\" text, \"licenseeBrandName\" text, \"licenseeOrgId\" text )",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.load_authenticated_password_actor",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.load_authenticated_password_actor",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "loadAuthenticatedPasswordActor",
+          "line": 50
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.load_recent_auth_session_risk_inputs",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.load_recent_auth_session_risk_inputs",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "loadRecentAuthSessionRiskInputs",
+          "line": 88
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.platform_audit_log_details",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.platform_audit_log_details",
+          "sourceFile": "backend/src/services/auditLogQueryService.ts",
+          "sourceFunction": "queryAuditLogs",
+          "line": 167
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-audit-controller-ts-get-logs"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c02/auditTrace.sql",
+      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "historyCommits": [
+        "4add7dec147de5530a3f39a884c87d129df020a8",
+        "cc14d113f577c0e1d44ef07e82793a775482542c"
+      ],
+      "deployable": true,
+      "definitionChecksum": "15a29b1cba406d223417687ca90004ec369c1c043272ac5b7db0f2c1fbe7af48",
+      "returnType": "TABLE(id text, ip_address text, user_agent text, user_id text, user_name text)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c02/auditTrace.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c02/auditTrace.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.prepare_invitation",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.prepare_invitation",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/invitationRepository.ts",
+          "sourceFunction": "prepareInvitation",
+          "line": 178
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/invitationPostgres18.fixture.sql",
+      "originatingCommit": "62b73a98b6e0f960e0d326df9addd310324c9740",
+      "historyCommits": [
+        "62b73a98b6e0f960e0d326df9addd310324c9740"
+      ],
+      "deployable": false,
+      "definitionChecksum": "1c89ee29da4505a591edcdd585a4a7113b56ae847043c2e62c87301feb6a8fda",
+      "returnType": "TABLE( \"actorDisplayName\" text, \"actorEmail\" text, \"actorUserId\" text, \"inviteEmail\" text, \"inviteExpiresAt\" timestamp without time zone, \"inviteId\" text, \"inviteRole\" text, \"licenseeName\" text, \"linkAction\" text, \"userEmail\" text, \"userId\" text, \"userLicenseeId\" text, \"userName\" text, \"userOrganizationId\" text, \"userRole\" text, \"userStatus\" text, \"workspaceOrganizationId\" text )",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/invitationPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.prove_authenticated_password_step_up",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.prove_authenticated_password_step_up",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "proveAuthenticatedPasswordStepUp",
+          "line": 184
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.record_auth_session_risk_signal",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.record_auth_session_risk_signal",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "recordAuthSessionRiskSignal",
+          "line": 114
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.request_authenticated_email_change",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.request_authenticated_email_change",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "prepareAuthenticatedEmailChange",
+          "line": 157
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.require_recent_mfa_session",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.require_recent_mfa_session",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "requireRecentMfaSession",
+          "line": 72
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "originatingCommit": "62b73a98b6e0f960e0d326df9addd310324c9740",
+      "historyCommits": [
+        "62b73a98b6e0f960e0d326df9addd310324c9740"
+      ],
+      "deployable": false,
+      "definitionChecksum": "a8f727c296d294dd0ca78325e37b368d2ff6d26f68c5541fb31973170709ae2b",
+      "returnType": "TABLE(\"verifiedAt\" timestamp without time zone)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.require_recent_sensitive_session",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.require_recent_sensitive_session",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "requireRecentSensitiveSession",
+          "line": 199
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.revalidate_authenticated_actor",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.revalidate_authenticated_actor",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/actorRevalidationRepository.ts",
+          "sourceFunction": "revalidateAuthenticatedActor",
+          "line": 55
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "originatingCommit": "62b73a98b6e0f960e0d326df9addd310324c9740",
+      "historyCommits": [
+        "62b73a98b6e0f960e0d326df9addd310324c9740",
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": false,
+      "definitionChecksum": "2ffbda8d1e0e17d3a4588cf4f0172eaafc9e3126b6c97bc8c693c6667d525e19",
+      "returnType": "TABLE( \"userId\" text, \"role\" text, \"organizationId\" text, \"licenseeId\" text, \"manufacturerId\" text, \"authAssurance\" text )",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.revoke_all_refresh_tokens",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.revoke_all_refresh_tokens",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "revokeAllRefreshTokenRecords",
+          "line": 488
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "originatingCommit": "45961044fde6b0c887154b9e07c2dd582c129fa6",
+      "historyCommits": [
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": false,
+      "definitionChecksum": "f098dbc93e159f8c8ebbb8ecc9ca4db1e442e5134a2b29ccc7998fa5e5301015",
+      "returnType": "TABLE(\"revokedCount\" integer)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.revoke_password_only_refresh_tokens",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.revoke_password_only_refresh_tokens",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "revokePasswordOnlyRefreshTokenRecords",
+          "line": 499
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "originatingCommit": "45961044fde6b0c887154b9e07c2dd582c129fa6",
+      "historyCommits": [
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": false,
+      "definitionChecksum": "05bc67167bfbfcdc9eb1da10694f72ac065ca6e4743d0d46eb8176521907d238",
+      "returnType": "TABLE(\"revokedCount\" integer)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.revoke_refresh_token_by_hashes",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.revoke_refresh_token_by_hashes",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "revokeRefreshTokenByHashes",
+          "line": 477
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "originatingCommit": "45961044fde6b0c887154b9e07c2dd582c129fa6",
+      "historyCommits": [
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": false,
+      "definitionChecksum": "f387808f6fcb3c679731d86936aae4111ea5f9c6bd4f48df5dae7c982a6005c9",
+      "returnType": "TABLE(\"revokedCount\" integer)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.revoke_refresh_token_by_id",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.revoke_refresh_token_by_id",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "revokeRefreshTokenByIdentifier",
+          "line": 510
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "fixture-only definition",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "originatingCommit": "62b73a98b6e0f960e0d326df9addd310324c9740",
+      "historyCommits": [
+        "62b73a98b6e0f960e0d326df9addd310324c9740",
+        "45961044fde6b0c887154b9e07c2dd582c129fa6"
+      ],
+      "deployable": false,
+      "definitionChecksum": "27c8f35e2adc82b1f6ad6b84dfe6df73e5e4280a843e05b3f5580fcedd009c51",
+      "returnType": "TABLE(\"revoked\" boolean)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": false,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": []
+    },
+    {
+      "functionName": "app_rls.scheduled_complete_compliance_pack_job",
+      "signature": "text,text,text,text,jsonb",
+      "callers": [
+        {
+          "functionName": "app_rls.scheduled_complete_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "completeScheduledCompliancePackJob",
+          "line": 387
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+      "originatingCommit": "be0d672c8f3c1eede20a8270aa4ac33c259afeec",
+      "historyCommits": [
+        "be0d672c8f3c1eede20a8270aa4ac33c259afeec"
+      ],
+      "deployable": true,
+      "definitionChecksum": "cfe6e92df537de28a102abcab5899470b53dfb4569cb452bb2368d72a2ef3ed0",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.scheduled_fail_compliance_pack_job",
+      "signature": "text,text,text,text,text",
+      "callers": [
+        {
+          "functionName": "app_rls.scheduled_fail_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "failScheduledCompliancePackJob",
+          "line": 397
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+      "originatingCommit": "be0d672c8f3c1eede20a8270aa4ac33c259afeec",
+      "historyCommits": [
+        "be0d672c8f3c1eede20a8270aa4ac33c259afeec"
+      ],
+      "deployable": true,
+      "definitionChecksum": "300022cbfe5cebb868d73dbafaf4221ac771b24d1dacffc7fa12e9cd83ec6e30",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityRollback.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_create_licensee",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_create_licensee",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "createLicenseeInTransaction",
+          "line": 132
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c01/administration.sql",
+      "originatingCommit": "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2",
+      "historyCommits": [
+        "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2"
+      ],
+      "deployable": true,
+      "definitionChecksum": "b69f7510860d9c74e7832491785bf429faf371dcb587b5963e3867eb63dbda3b",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_create_user",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_create_user",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "createUserInTransaction",
+          "line": 156
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c01/administration.sql",
+      "originatingCommit": "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2",
+      "historyCommits": [
+        "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2"
+      ],
+      "deployable": true,
+      "definitionChecksum": "a4e38ea7ec9e95b5fdcde0e4c87e6bdddbcca9be7efee17ba81d2f9d5bcf31ba",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_delete_licensee",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_delete_licensee",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "deleteLicenseeInTransaction",
+          "line": 148
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c01/administration.sql",
+      "originatingCommit": "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2",
+      "historyCommits": [
+        "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2"
+      ],
+      "deployable": true,
+      "definitionChecksum": "b72c517b056c1eb97a655e7ef2128a8b48cdebf40fa50f0c776e9c99a652af58",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_delete_user",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_delete_user",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "deleteUserInTransaction",
+          "line": 172
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c01/administration.sql",
+      "originatingCommit": "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2",
+      "historyCommits": [
+        "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2"
+      ],
+      "deployable": true,
+      "definitionChecksum": "be14afad09663fba6f6b7f017a267356dad9721f1a06e63a1b68cd9652eb1aa4",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_restore_manufacturer",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_restore_manufacturer",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "restoreManufacturerInTransaction",
+          "line": 180
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c01/administration.sql",
+      "originatingCommit": "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2",
+      "historyCommits": [
+        "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2"
+      ],
+      "deployable": true,
+      "definitionChecksum": "26913fac0e02f84bd430fdff1d6daa0bdc039e652c604050c23655f38071c1bc",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_update_licensee",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_update_licensee",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "updateLicenseeInTransaction",
+          "line": 140
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c01/administration.sql",
+      "originatingCommit": "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2",
+      "historyCommits": [
+        "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2"
+      ],
+      "deployable": true,
+      "definitionChecksum": "d007de0601331df599c0145a8038c910001d21657c1dee077a4886ae235b25d0",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_update_user",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_update_user",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "updateUserInTransaction",
+          "line": 164
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c01/administration.sql",
+      "originatingCommit": "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2",
+      "historyCommits": [
+        "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2"
+      ],
+      "deployable": true,
+      "definitionChecksum": "7f73e14aed669f20c0589f1680f46a259f7be15273c19d3ec8555195715221cc",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_upsert_manufacturer_licensee_link",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_upsert_manufacturer_licensee_link",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "upsertManufacturerLicenseeLinkInTransaction",
+          "line": 191
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c01/administration.sql",
+      "originatingCommit": "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2",
+      "historyCommits": [
+        "3bcba7fb47493fb237ac3ac887a695aceb8ee5e2"
+      ],
+      "deployable": true,
+      "definitionChecksum": "b79703a2ddd905b5c4e0614efbd5e0b0221770f5cad99754f25c785cba970211",
+      "returnType": "jsonb",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": false
+      },
+      "requiresAdaptation": true,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ],
+      "grantLocations": [],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c01/administration.sql"
+      ]
+    },
+    {
+      "functionName": "app_rls.update_authenticated_profile",
+      "signature": null,
+      "callers": [
+        {
+          "functionName": "app_rls.update_authenticated_profile",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "updateAuthenticatedProfile",
+          "line": 134
+        }
+      ],
+      "canonicalWorkflowIds": [],
+      "classification": "no definition found",
+      "definitionLocation": null,
+      "originatingCommit": null,
+      "historyCommits": [],
+      "deployable": false,
+      "definitionChecksum": null,
+      "returnType": null,
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": null,
+      "requiresAdaptation": true,
+      "candidateLocations": [],
+      "grantLocations": [],
+      "revokeLocations": []
+    }
+  ]
+}

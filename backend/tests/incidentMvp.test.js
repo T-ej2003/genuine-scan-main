@@ -1,10 +1,12 @@
 const nodemailer = require("nodemailer");
+const path = require("path");
 const { UserRole } = require("@prisma/client");
-const { normalizeCustomerContact, isIncidentAdminRole } = require("../dist/services/incidentService");
+const {
+  normalizeCustomerContact,
+  isIncidentAdminRole,
+  sanitizeIncidentText,
+} = require("../dist/services/incidentService");
 const { enforceIncidentRateLimit } = require("../dist/services/incidentRateLimitService");
-const incidentEmailService = require("../dist/services/incidentEmailService");
-const prisma = require("../dist/config/database").default;
-const auditService = require("../dist/services/auditService");
 const { requireAnyAdmin } = require("../dist/middleware/rbac");
 
 const assert = (condition, message) => {
@@ -18,7 +20,74 @@ const setNodemailerCreateTransport = (fn) => {
   }
 };
 
+const repositoryCalls = [];
+const repositoryPath = require.resolve(path.resolve(__dirname, "../dist/rls-waves/session-b/b03/repositoryFunctions.js"));
+require.cache[repositoryPath] = {
+  id: repositoryPath,
+  filename: repositoryPath,
+  loaded: true,
+  exports: {
+    requireB03AuthenticatedFunctionBoundary: (boundary) => {
+      assert(boundary?.run, "incident email requires the capability-backed database boundary");
+      return boundary;
+    },
+    b03PayloadDigest: () => "a".repeat(64),
+    resolveIncidentEmailActor: async (_db, actorUserId) => ({
+      id: actorUserId,
+      email: "superadmin.profile@mscqr.com",
+      name: "Super Admin",
+      role: UserRole.SUPER_ADMIN,
+      active: true,
+    }),
+    getPrimarySuperadminEmail: async () => ({ email: "primary-superadmin@mscqr.com" }),
+    claimIncidentEmailDelivery: async (_db, input) => {
+      repositoryCalls.push(["claim", input]);
+      return {
+        deliveryId: "comm-1",
+        disposition: "CLAIMED",
+        delivered: false,
+        providerMessageId: null,
+        emailErrorCode: null,
+        attemptedFrom: input.attemptedFrom,
+        usedFrom: input.usedFrom,
+        replyTo: input.replyTo,
+      };
+    },
+    completeIncidentEmailDelivery: async (_db, input) => {
+      repositoryCalls.push(["complete", input]);
+      return { communicationId: "comm-1", eventId: "evt-1", auditLogId: "audit-1" };
+    },
+  },
+};
+const incidentEmailService = require("../dist/services/incidentEmailService");
+
 const run = async () => {
+  assert(
+    sanitizeIncidentText("<b>Hello <i>world</i></b>") === "Hello world",
+    "Nested markup should become plain text"
+  );
+  assert(
+    sanitizeIncidentText("Before <<script>alert(1)</script> after") === "Before alert(1) after",
+    "Malformed nested tag openers should not recreate markup"
+  );
+  assert(
+    sanitizeIncidentText("Keep <script alert(1)") === "Keep",
+    "Malformed markup should not survive as executable text"
+  );
+  assert(
+    sanitizeIncidentText("<script>alert(1)</script>") === "alert(1)",
+    "Script tags should be removed while retaining harmless text"
+  );
+  assert(
+    sanitizeIncidentText("&lt;script&gt;alert(1)&lt;/script&gt;") === "alert(1)",
+    "Encoded markup should become plain text"
+  );
+  assert(
+    sanitizeIncidentText("  Harmless   plain text.  ") === "Harmless plain text.",
+    "Harmless plain text should retain content and normalized whitespace"
+  );
+  assert(sanitizeIncidentText("bounded", 4) === "boun", "Plain text should retain its length bound");
+
   // 1) Consent handling true/false
   const withConsent = normalizeCustomerContact({
     consentToContact: true,
@@ -101,41 +170,11 @@ const run = async () => {
   assert(allowedStatus === 200, "Super admin should not receive an error status");
   assert(allowedNextCalled, "Super admin should pass requireAnyAdmin middleware");
 
-  // 4) Email sender fallback + metadata persistence
-  const backupCommunicationCreate = prisma.incidentCommunication.create;
-  const backupIncidentEventCreate = prisma.incidentEvent.create;
-  const backupUserFindUnique = prisma.user.findUnique;
-  const backupUserFindFirst = prisma.user.findFirst;
-  const backupCreateAuditLog = auditService.createAuditLog;
-
+  // 4) Email sender fallback + capability-bound metadata persistence
   const originalCreateTransport = nodemailer.createTransport;
   const originalDefaultCreateTransport = nodemailer.default?.createTransport;
 
-  let communicationRow = null;
-  let incidentEventRow = null;
   let sendMailCalls = 0;
-
-  prisma.incidentCommunication.create = async (args) => {
-    communicationRow = args.data;
-    return { id: "comm-1", ...args.data };
-  };
-  prisma.incidentEvent.create = async (args) => {
-    incidentEventRow = args.data;
-    return { id: "evt-1", ...args.data };
-  };
-  prisma.user.findUnique = async ({ where }) => {
-    if (where.id !== "admin-1") return null;
-    return {
-      id: "admin-1",
-      email: "superadmin.profile@mscqr.com",
-      name: "Super Admin",
-      role: UserRole.SUPER_ADMIN,
-      isActive: true,
-      deletedAt: null,
-    };
-  };
-  prisma.user.findFirst = async () => ({ email: "primary-superadmin@mscqr.com" });
-  auditService.createAuditLog = async () => ({ id: "audit-1" });
 
   const oldEnv = {
     SMTP_HOST: process.env.SMTP_HOST,
@@ -184,6 +223,10 @@ const run = async () => {
     },
     senderMode: "actor",
     template: "customer_update",
+    databaseBoundary: {
+      requestId: "incident-mvp-email",
+      run: (callback) => callback({}),
+    },
   });
 
   assert(emailRes.delivered === true, "Email should succeed after SMTP-user fallback retry");
@@ -192,34 +235,24 @@ const run = async () => {
     transportConfig && transportConfig.host === "smtp.gmail.com",
     "SMTP host should be inferred from SMTP_USER domain when SMTP_HOST is missing"
   );
-  assert(communicationRow && communicationRow.status === "SENT", "Communication row should be persisted as SENT");
+  const claim = repositoryCalls.find(([operation]) => operation === "claim")[1];
+  const completion = repositoryCalls.find(([operation]) => operation === "complete")[1];
   assert(
-    communicationRow.attemptedFrom === "superadmin.profile@mscqr.com",
-    "Communication row should store attempted sender"
+    claim.attemptedFrom === "superadmin.profile@mscqr.com",
+    "Capability claim should store attempted sender"
   );
   assert(
-    communicationRow.usedFrom === "smtp-user@gmail.com",
-    "Communication row should store fallback used sender"
+    completion.usedFrom === "smtp-user@gmail.com",
+    "Capability completion should store fallback used sender"
   );
   assert(
-    communicationRow.replyTo === "superadmin.profile@mscqr.com",
-    "Communication row should store reply-to admin email"
+    claim.replyTo === "superadmin.profile@mscqr.com",
+    "Capability claim should store reply-to admin email"
   );
   assert(
-    incidentEventRow && incidentEventRow.eventType === "EMAIL_SENT",
-    "Incident timeline should persist EMAIL_SENT event"
+    completion.status === "SENT" && completion.providerMessageId === "msg-123",
+    "Capability completion should atomically persist sent communication and evidence"
   );
-  assert(
-    incidentEventRow.eventPayload && incidentEventRow.eventPayload.used_from === "sm***@gmail.com",
-    "Incident event payload should include redacted used_from"
-  );
-
-  // restore patches
-  prisma.incidentCommunication.create = backupCommunicationCreate;
-  prisma.incidentEvent.create = backupIncidentEventCreate;
-  prisma.user.findUnique = backupUserFindUnique;
-  prisma.user.findFirst = backupUserFindFirst;
-  auditService.createAuditLog = backupCreateAuditLog;
 
   setNodemailerCreateTransport(originalCreateTransport);
   if (nodemailer.default) {

@@ -6,11 +6,20 @@ import {
   type AuthenticationResponseJSON,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
+import { Prisma } from "@prisma/client";
 
 import prisma from "../../config/database";
 import { buildTokenHashCandidates, hashToken, normalizeUserAgent, randomOpaqueToken } from "../../utils/security";
+import {
+  completeAdminWebAuthnAuthenticationBoundary,
+  completeAdminWebAuthnRegistrationBoundary,
+  createAdminWebAuthnChallengeBoundary,
+  loadAdminWebAuthnChallengeBoundary,
+  loadAdminWebAuthnCredentials,
+} from "../../rls-waves/session-b/b01/adminMfaRepository";
 
 type WebAuthnChallengePurpose = "ENROLLMENT" | "LOGIN" | "STEP_UP";
+type WebAuthnDbClient = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 const parsePositiveIntEnv = (key: string, fallback: number) => {
   const raw = Number(String(process.env[key] || "").trim());
@@ -70,39 +79,20 @@ export const deriveWebAuthnOrigins = () => {
 
 const challengeTtlMinutes = () => parsePositiveIntEnv("AUTH_WEBAUTHN_CHALLENGE_TTL_MINUTES", 5);
 
-const loadChallengeByTicket = async (ticket: string, purpose?: WebAuthnChallengePurpose) => {
-  const row = await prisma.authWebAuthnChallenge.findFirst({
-    where: {
-      ticketHash: { in: buildTokenHashCandidates(ticket) },
-      purpose: purpose || undefined,
-      consumedAt: null,
-      expiresAt: { gt: new Date() },
-    },
-  });
-  if (!row) throw new Error("WEBAUTHN_CHALLENGE_NOT_FOUND");
-  return row;
-};
-
-const consumeChallenge = async (id: string) => {
-  await prisma.authWebAuthnChallenge.update({
-    where: { id },
-    data: { consumedAt: new Date() },
-  });
-};
-
 export const beginWebAuthnFactorRegistration = async (params: {
   userId: string;
   email: string;
   displayName: string;
   ipHash?: string | null;
   userAgent?: string | null;
-}) => {
+}, db?: Prisma.TransactionClient) => {
+  if (!db) throw new Error("B01 MFA capability transaction is required");
   const ticket = randomOpaqueToken(36);
   const rpID = deriveWebAuthnRpId();
-  const existing = await prisma.userMfaFactor.findMany({
-    where: { userId: params.userId, type: "WEBAUTHN", disabledAt: null, credentialId: { not: null } },
-    select: { credentialId: true, transports: true },
-  });
+  const state = await loadAdminWebAuthnCredentials(db);
+  const existing = [...state.factors, ...state.legacy]
+    .filter((row) => row.credentialId)
+    .map((row) => ({ credentialId: String(row.credentialId), transports: Array.isArray(row.transports) ? row.transports : [] }));
 
   const options = await generateRegistrationOptions({
     rpName: webAuthnRpName(),
@@ -122,19 +112,16 @@ export const beginWebAuthnFactorRegistration = async (params: {
   });
 
   const expiresAt = new Date(Date.now() + challengeTtlMinutes() * 60_000);
-  await prisma.authWebAuthnChallenge.create({
-    data: {
-      userId: params.userId,
-      purpose: "ENROLLMENT",
-      ticketHash: hashToken(ticket),
-      challengeHash: hashToken(options.challenge),
-      credentialIds: existing.map((row) => row.credentialId).filter((value): value is string => Boolean(value)),
-      createdIpHash: params.ipHash || null,
-      createdUserAgentHash: params.userAgent ? hashToken(normalizeUserAgent(params.userAgent) || params.userAgent) : null,
-      origin: deriveWebAuthnOrigins()[0] || null,
-      rpId: rpID,
-      expiresAt,
-    },
+  await createAdminWebAuthnChallengeBoundary(db, {
+    purpose: "ENROLLMENT",
+    ticketHash: hashToken(ticket),
+    challengeHash: hashToken(options.challenge),
+    ipHash: params.ipHash || null,
+    userAgentHash: params.userAgent ? hashToken(normalizeUserAgent(params.userAgent) || params.userAgent) : null,
+    origin: deriveWebAuthnOrigins()[0] || null,
+    rpId: rpID,
+    createdAt: new Date(),
+    expiresAt,
   });
 
   return { ticket, options, expiresAt };
@@ -145,8 +132,16 @@ export const completeWebAuthnFactorRegistration = async (params: {
   ticket: string;
   label?: string | null;
   credential: RegistrationResponseJSON;
-}) => {
-  const challenge = await loadChallengeByTicket(params.ticket, "ENROLLMENT");
+}, db?: Prisma.TransactionClient) => {
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  const loaded = await loadAdminWebAuthnChallengeBoundary(db, {
+    ticketHashes: buildTokenHashCandidates(params.ticket),
+    purpose: "ENROLLMENT",
+    credentialId: null,
+    checkedAt: new Date(),
+  });
+  if (!loaded?.challenge) throw new Error("WEBAUTHN_CHALLENGE_NOT_FOUND");
+  const challenge = loaded.challenge;
   if (challenge.userId !== params.userId) throw new Error("WEBAUTHN_CHALLENGE_USER_MISMATCH");
 
   const verification = await verifyRegistrationResponse({
@@ -165,36 +160,17 @@ export const completeWebAuthnFactorRegistration = async (params: {
   const credential = info.credential;
   const label = String(params.label || "").trim() || "Passkey";
 
-  await prisma.userMfaFactor.upsert({
-    where: { credentialId: credential.id },
-    update: {
-      userId: params.userId,
-      type: "WEBAUTHN",
-      label,
-      publicKey: toBase64Url(credential.publicKey),
-      counter: credential.counter,
-      transports: credential.transports || [],
-      credentialDeviceType: info.credentialDeviceType,
-      credentialBackedUp: info.credentialBackedUp,
-      lastUsedAt: new Date(),
-      disabledAt: null,
-    },
-    create: {
-      userId: params.userId,
-      type: "WEBAUTHN",
-      label,
-      credentialId: credential.id,
-      publicKey: toBase64Url(credential.publicKey),
-      counter: credential.counter,
-      transports: credential.transports || [],
-      credentialDeviceType: info.credentialDeviceType,
-      credentialBackedUp: info.credentialBackedUp,
-      lastUsedAt: new Date(),
-    },
+  return completeAdminWebAuthnRegistrationBoundary(db, {
+    challengeId: challenge.id,
+    credentialId: credential.id,
+    label,
+    publicKey: toBase64Url(credential.publicKey),
+    counter: credential.counter,
+    transports: credential.transports || [],
+    deviceType: info.credentialDeviceType,
+    backedUp: info.credentialBackedUp,
+    completedAt: new Date(),
   });
-
-  await consumeChallenge(challenge.id);
-  return { ok: true as const, credentialId: credential.id };
 };
 
 export const beginWebAuthnFactorAuthentication = async (params: {
@@ -202,11 +178,12 @@ export const beginWebAuthnFactorAuthentication = async (params: {
   purpose: Exclude<WebAuthnChallengePurpose, "ENROLLMENT">;
   ipHash?: string | null;
   userAgent?: string | null;
-}) => {
-  const credentials = await prisma.userMfaFactor.findMany({
-    where: { userId: params.userId, type: "WEBAUTHN", disabledAt: null, credentialId: { not: null }, publicKey: { not: null } },
-    select: { credentialId: true, transports: true },
-  });
+}, db?: Prisma.TransactionClient) => {
+  if (!db) throw new Error("B01 MFA capability transaction is required");
+  const state = await loadAdminWebAuthnCredentials(db);
+  const credentials = [...state.factors, ...state.legacy]
+    .filter((row) => row.credentialId)
+    .map((row) => ({ credentialId: String(row.credentialId), transports: Array.isArray(row.transports) ? row.transports : [] }));
   if (!credentials.length) throw new Error("WEBAUTHN_NOT_ENROLLED");
 
   const ticket = randomOpaqueToken(36);
@@ -221,19 +198,16 @@ export const beginWebAuthnFactorAuthentication = async (params: {
   });
   const expiresAt = new Date(Date.now() + challengeTtlMinutes() * 60_000);
 
-  await prisma.authWebAuthnChallenge.create({
-    data: {
-      userId: params.userId,
-      purpose: params.purpose,
-      ticketHash: hashToken(ticket),
-      challengeHash: hashToken(options.challenge),
-      credentialIds: credentials.map((row) => row.credentialId).filter((value): value is string => Boolean(value)),
-      createdIpHash: params.ipHash || null,
-      createdUserAgentHash: params.userAgent ? hashToken(normalizeUserAgent(params.userAgent) || params.userAgent) : null,
-      origin: deriveWebAuthnOrigins()[0] || null,
-      rpId: rpID,
-      expiresAt,
-    },
+  await createAdminWebAuthnChallengeBoundary(db, {
+    purpose: params.purpose,
+    ticketHash: hashToken(ticket),
+    challengeHash: hashToken(options.challenge),
+    ipHash: params.ipHash || null,
+    userAgentHash: params.userAgent ? hashToken(normalizeUserAgent(params.userAgent) || params.userAgent) : null,
+    origin: deriveWebAuthnOrigins()[0] || null,
+    rpId: rpID,
+    createdAt: new Date(),
+    expiresAt,
   });
 
   return { ticket, options, expiresAt };
@@ -243,15 +217,25 @@ export const completeWebAuthnFactorAuthentication = async (params: {
   userId: string;
   ticket: string;
   credential: AuthenticationResponseJSON;
-}) => {
-  const challenge = await loadChallengeByTicket(params.ticket);
-  if (challenge.userId !== params.userId) throw new Error("WEBAUTHN_CHALLENGE_USER_MISMATCH");
-
+}, db?: Prisma.TransactionClient): Promise<{ ok: true; purpose: WebAuthnChallengePurpose }> => {
+  if (!db) throw new Error("B01 MFA capability transaction is required");
   const credentialId = String(params.credential.rawId || params.credential.id || "").trim();
-  const factor = await prisma.userMfaFactor.findFirst({
-    where: { userId: params.userId, type: "WEBAUTHN", disabledAt: null, credentialId },
-    select: { id: true, credentialId: true, publicKey: true, counter: true, transports: true },
+  let loaded = await loadAdminWebAuthnChallengeBoundary(db, {
+    ticketHashes: buildTokenHashCandidates(params.ticket),
+    purpose: "LOGIN",
+    credentialId,
+    checkedAt: new Date(),
   });
+  if (!loaded) loaded = await loadAdminWebAuthnChallengeBoundary(db, {
+    ticketHashes: buildTokenHashCandidates(params.ticket),
+    purpose: "STEP_UP",
+    credentialId,
+    checkedAt: new Date(),
+  });
+  if (!loaded?.challenge) throw new Error("WEBAUTHN_CHALLENGE_NOT_FOUND");
+  const challenge = loaded.challenge;
+  if (challenge.userId !== params.userId) throw new Error("WEBAUTHN_CHALLENGE_USER_MISMATCH");
+  const factor = loaded.factor;
   if (!factor?.credentialId || !factor.publicKey) throw new Error("WEBAUTHN_CREDENTIAL_NOT_FOUND");
 
   const verification = await verifyAuthenticationResponse({
@@ -269,15 +253,15 @@ export const completeWebAuthnFactorAuthentication = async (params: {
   });
 
   if (!verification.verified) throw new Error("WEBAUTHN_ASSERTION_NOT_VERIFIED");
-  await prisma.userMfaFactor.update({
-    where: { id: factor.id },
-    data: {
-      counter: Math.max(factor.counter, verification.authenticationInfo.newCounter),
-      credentialDeviceType: verification.authenticationInfo.credentialDeviceType,
-      credentialBackedUp: verification.authenticationInfo.credentialBackedUp,
-      lastUsedAt: new Date(),
-    },
+  const completed = await completeAdminWebAuthnAuthenticationBoundary(db, {
+    challengeId: challenge.id,
+    credentialKind: "FACTOR",
+    credentialRowId: factor.id,
+    expectedCounter: factor.counter,
+    nextCounter: Math.max(factor.counter, verification.authenticationInfo.newCounter),
+    deviceType: verification.authenticationInfo.credentialDeviceType,
+    backedUp: verification.authenticationInfo.credentialBackedUp,
+    completedAt: new Date(),
   });
-  await consumeChallenge(challenge.id);
-  return { ok: true as const, purpose: challenge.purpose as WebAuthnChallengePurpose };
+  return { ok: true as const, purpose: completed.purpose as WebAuthnChallengePurpose };
 };

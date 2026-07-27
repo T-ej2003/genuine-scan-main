@@ -13,6 +13,8 @@ const readNormalized = (relativePath) =>
 const indexSource = readNormalized("src/index.ts");
 const appSource = readNormalized("src/app.ts");
 const authRoutesSource = readNormalized("src/routes/modules/authRoutes.ts");
+const authSecurityControllerSource = readNormalized("src/controllers/authAdminSecurityController.ts");
+const authClaimsContextSource = readNormalized("src/services/auth/authClaimsRlsContext.ts");
 const routesSource = readNormalized("src/routes/index.ts");
 const realtimeRoutesSource = readNormalized("src/routes/modules/realtimeRoutes.ts");
 const governanceRoutesSource = readNormalized("src/routes/modules/governanceRoutes.ts");
@@ -41,6 +43,15 @@ assert(
 ].forEach((pattern) => {
   assert(!authRoutesSource.includes(pattern), `auth routes should not use spread-applied limiter bundle ${pattern}`);
 });
+
+assert(
+  auditRoutesSource.includes('"/logs/export", auditLogsExportPreAuthRouteLimiter, authenticate, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
+  "audit CSV export must require the approved platform-admin MFA ceiling before tenant isolation"
+);
+assert(
+  auditRoutesSource.includes('"/logs", auditLogsReadPreAuthRouteLimiter, authenticate, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
+  "audit log reads must require the approved MFA ceiling before tenant isolation"
+);
 
 [
   "...verifyCodeLimiters",
@@ -77,10 +88,19 @@ assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLim
   'router.get("/auth/sessions", sessionReadPreAuthRouteLimiter, authenticate, sessionReadRouteLimiter, listSessions);',
   'router.post("/auth/sessions/revoke-all", secureSessionPreAuthRouteLimiter, authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeAllSessionsController);',
   'router.post("/auth/mfa/backup-codes/rotate", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, rotateAdminMfaBackupCodesController);',
-  'router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAnyAdmin, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);',
+  'router.post("/auth/mfa/setup/begin", mfaPreAuthRouteLimiter, authenticateAnySession, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaSetupController);',
+  'router.post("/auth/mfa/setup/confirm", mfaPreAuthRouteLimiter, authenticateAnySession, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, confirmAdminMfaSetupController);',
+  'router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAdministrationMutator, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);',
 ].forEach((pattern) => {
   assert(authRoutesSource.includes(pattern), `auth route contract missing: ${pattern}`);
 });
+
+assert.strictEqual(
+  authClaimsContextSource.includes('mode: "FIRST_ENROLLMENT"') && authClaimsContextSource.includes('mode: "REPLACEMENT"'),
+  true,
+  "atomic claim-bound TOTP operations must use explicit enrollment and replacement modes"
+);
+assert(!authSecurityControllerSource.includes("console.error"), "auth security controllers must not serialize raw WebAuthn errors");
 
 [
   '"/dashboard/stats", dashboardReadPreAuthRouteLimiter, authenticate,',
@@ -120,19 +140,19 @@ assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLim
   '"/verify/session/:id/intake", verifySessionMutationPreAuthRouteLimiter, requireCustomerVerifyAuth, verifyCustomerCookieRouteLimiter,',
   '"/verify/session/:id/reveal", verifySessionMutationPreAuthRouteLimiter, requireCustomerVerifyAuth, verifyCustomerCookieRouteLimiter,',
   '"/verify/auth/session", verifySessionPreAuthRouteLimiter, optionalCustomerVerifyAuth,',
-  '"/verify/auth/logout", verifyCustomerCookiePreAuthRouteLimiter, verifyCustomerCookieRouteLimiter,',
+  '"/verify/auth/logout", verifyCustomerCookiePreAuthRouteLimiter, optionalCustomerVerifyAuth, verifyCustomerCookieRouteLimiter,',
   '"/verify/auth/passkey/register/begin", verifyCustomerCookiePreAuthRouteLimiter, requireCustomerVerifyAuth,',
   '"/verify/auth/passkey/assertion/begin", verifyCustomerMutationPreAuthRouteLimiter, optionalCustomerVerifyAuth,',
-  '"/verify/:code/claim", verifyClaimPreAuthRouteLimiter, optionalCustomerVerifyAuth,',
+  '"/verify/session/:id/claim", verifyClaimPreAuthRouteLimiter, optionalCustomerVerifyAuth,',
   '"/telemetry/route-transition", telemetryMutationPreAuthRouteLimiter, optionalAuth,',
   '"/telemetry/csp-report", cspTelemetryPreAuthRouteLimiter, optionalAuth,',
   '"/internal/release", internalReleasePreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
   '"/security/abuse/rate-limits", securityOpsReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
   '"/security/abuse/rate-limits/alerts", securityOpsReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
   '"/licensees/export", licenseeExportPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
-  '"/licensees", licenseeReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
+  '"/licensees", licenseeReadPreAuthRouteLimiter, authenticate, requireTenantDirectoryReader,',
   '"/licensees", licenseeMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
-  '"/users", adminDirectoryMutationPreAuthRouteLimiter, authenticate, requireAnyAdmin,',
+  '"/users", adminDirectoryMutationPreAuthRouteLimiter, authenticate, requireAdministrationMutator,',
   '"/manufacturers", adminDirectoryReadPreAuthRouteLimiter, authenticate, requireAnyAdmin,',
   '"/qr/codes/export", qrExportPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
   '"/qr/requests", qrRequestReadPreAuthRouteLimiter, authenticate, requireAnyAdmin,',
@@ -141,6 +161,14 @@ assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLim
   '"/incidents", incidentReadPreAuthRouteLimiter, authenticate, requireAnyAdmin,',
   '"/ir/incidents", irReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
   '"/account/profile", accountMutationPreAuthRouteLimiter, authenticate, accountMutationRouteLimiter,',
+  '"/manufacturer/print-jobs", printMutationPreAuthRouteLimiter, authenticate, requireManufacturer,',
+  '"/manufacturer/printers", printMutationPreAuthRouteLimiter, authenticate, requireOpsUser,',
+  '"/manufacturer/printers/:id", printMutationPreAuthRouteLimiter, authenticate, requireOpsUser,',
+  '"/manufacturer/printers/:id/test", printMutationPreAuthRouteLimiter, authenticate, requireOpsUser,',
+  '"/manufacturer/printers/:id/test-label", printMutationPreAuthRouteLimiter, authenticate, requireOpsUser,',
+  '"/manufacturer/printers/:id/discover", printMutationPreAuthRouteLimiter, authenticate, requireOpsUser,',
+  '"/manufacturer/print-jobs/:id/direct-print/tokens", printMutationPreAuthRouteLimiter, authenticate, requireManufacturer,',
+  '"/manufacturer/print-jobs/:id/confirm", printMutationPreAuthRouteLimiter, authenticate, requireManufacturer,',
   '"/manufacturer/print-jobs/:id/sample-scan", printMutationPreAuthRouteLimiter, authenticate, requireManufacturer,',
 ].forEach((pattern) => {
   assert(routesSource.includes(pattern), `main route contract missing: ${pattern}`);

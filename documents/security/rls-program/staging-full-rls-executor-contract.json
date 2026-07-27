@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 3,
+  "environment": "staging",
+  "status": "green-executor-implemented-ready-for-reviewed-activation",
+  "deploymentModel": "blue-green-clean-room",
+  "blueExecutor": {
+    "database": "mscqr_staging",
+    "databaseAdministrator": "mscqr_staging_admin",
+    "taskFamily": "mscqr-staging-database-role-admin",
+    "allowedModes": [
+      "probe",
+      "provision",
+      "verify"
+    ],
+    "fullRlsMutationAllowed": false
+  },
+  "greenExecutor": {
+    "implemented": true,
+    "mutationAllowed": true,
+    "database": "mscqr_staging_rls_green_phase2",
+    "databasePattern": "^mscqr_staging_rls_green_phase2$",
+    "deploymentId": "phase2",
+    "databaseAdministrator": "mscqr_staging_admin",
+    "administrativeSecret": "mscqr/staging/rls-green/phase2/database-url/admin",
+    "runtimeSecretPrefix": "mscqr/staging/rls-green/phase2/database-url/",
+    "rolePrefix": "mscqr_stg_rls_phase2_",
+    "targetMustBeFresh": true,
+    "managedRolesMustBeNew": true,
+    "separateTaskDefinitionRequired": true,
+    "separateAdministrativeSecretRequired": true,
+    "tlsRequired": true,
+    "packageRoot": "/app/scripts/rls/sql/generated",
+    "evidenceRoot": "/app/documents/security/rls-program/generated",
+    "receiptPrefix": "rls-receipts/",
+    "releaseBinding": [
+      "releaseSha",
+      "sourceContractSha256",
+      "packageChecksumSha256",
+      "executorImageDigest"
+    ],
+    "activationOrder": [
+      "full-rls-capability-preflight",
+      "full-rls-admin-bootstrap",
+      "full-rls-role-provision",
+      "full-rls-role-verify",
+      "full-rls-admin-ownership",
+      "full-rls-runtime-policy",
+      "full-rls-verification"
+    ],
+    "modes": {
+      "full-rls-capability-preflight": {
+        "mutating": false,
+        "packageFile": null
+      },
+      "full-rls-role-provision": {
+        "mutating": true,
+        "confirmation": "MSCQR_STAGING_GREEN_PROVISION_RUNTIME_ROLES",
+        "packageFile": null
+      },
+      "full-rls-role-verify": {
+        "mutating": false,
+        "packageFile": null
+      },
+      "full-rls-admin-bootstrap": {
+        "mutating": true,
+        "confirmation": "MSCQR_STAGING_GREEN_CREATE_AND_BOOTSTRAP_DATABASE",
+        "packageFile": "admin-bootstrap.sql"
+      },
+      "full-rls-admin-ownership": {
+        "mutating": true,
+        "confirmation": "MSCQR_STAGING_GREEN_INSTALL_OWNERSHIP_GRANTS",
+        "packageFile": "admin-ownership.sql",
+        "schemaMigration": "prisma migrate deploy",
+        "migrationCredential": "mscqr/staging/rls-green/phase2/database-url/migration"
+      },
+      "full-rls-runtime-policy": {
+        "mutating": true,
+        "confirmation": "MSCQR_STAGING_GREEN_INSTALL_RUNTIME_POLICIES",
+        "packageFile": "runtime-policy.sql"
+      },
+      "full-rls-verification": {
+        "mutating": false,
+        "packageFile": "verification.sql"
+      },
+      "full-rls-rollback": {
+        "mutating": true,
+        "confirmation": "MSCQR_STAGING_GREEN_ROLLBACK_EXACT_PACKAGE",
+        "packageFile": "clean-room-cleanup.sql"
+      }
+    }
+  },
+  "receipts": {
+    "storage": "s3://mscqr-staging-*-artifacts-*/rls-receipts/",
+    "writeMode": "create-only",
+    "encryption": "AES256",
+    "fields": [
+      "releaseSha",
+      "sourceContractSha256",
+      "packageChecksumSha256",
+      "catalogueSha256",
+      "mode",
+      "status",
+      "completedAt",
+      "nonce",
+      "receiptSha256"
+    ],
+    "rollbackRestoresFreshCatalogue": true
+  },
+  "executorTask": {
+    "familyPrefix": "mscqr-staging-full-rls-green-",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": [
+      "FARGATE"
+    ],
+    "cpu": "256",
+    "memory": "512",
+    "runtimePlatform": {
+      "operatingSystemFamily": "LINUX",
+      "cpuArchitecture": "X86_64"
+    },
+    "container": {
+      "name": "full-rls-green",
+      "essential": true,
+      "command": [
+        "node",
+        "scripts/staging-full-rls-green-executor.mjs"
+      ],
+      "user": "node",
+      "privileged": false,
+      "readonlyRootFilesystem": true,
+      "environmentFiles": [],
+      "mountPoints": [],
+      "volumesFrom": [],
+      "linuxParameters": {
+        "initProcessEnabled": true,
+        "capabilities": {
+          "add": [],
+          "drop": [
+            "ALL"
+          ]
+        },
+        "devices": [],
+        "tmpfs": []
+      },
+      "portMappings": []
+    }
+  }
+}

@@ -35,7 +35,7 @@ const requirements = [
   {
     file: "authRoutes",
     description: "admin invite must keep a pre-auth invite limiter before authenticate",
-    pattern: 'router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAnyAdmin, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);',
+    pattern: 'router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAdministrationMutator, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);',
   },
   {
     file: "realtimeRoutes",
@@ -105,7 +105,7 @@ const requirements = [
   {
     file: "indexRoutes",
     description: "verify claim must keep a pre-auth limiter before customer auth checks",
-    pattern: '"/verify/:code/claim", verifyClaimPreAuthRouteLimiter, optionalCustomerVerifyAuth,',
+    pattern: '"/verify/session/:id/claim", verifyClaimPreAuthRouteLimiter, optionalCustomerVerifyAuth,',
   },
   {
     file: "indexRoutes",
@@ -130,7 +130,7 @@ const requirements = [
   {
     file: "indexRoutes",
     description: "licensee reads must keep a pre-auth limiter before authenticate",
-    pattern: 'protectedReadRouter.get("/licensees", licenseeReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
+    pattern: 'protectedReadRouter.get("/licensees", licenseeReadPreAuthRouteLimiter, authenticate, requireTenantDirectoryReader,',
   },
   {
     file: "indexRoutes",

@@ -1,12 +1,20 @@
-import { IncidentActorType, Prisma, SupportTicketStatus, UserRole } from "@prisma/client";
+import { createHash, randomUUID } from "crypto";
+import { SupportTicketStatus } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";
 
-import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { addSupportTicketMessage, ensureIncidentWorkflowArtifacts, ticketSlaSnapshot } from "../services/supportWorkflowService";
-import { createAuditLog } from "../services/auditService";
+import { ticketSlaSnapshot } from "../services/supportWorkflowService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import {
+  addSupportTicketMessage as addSupportTicketMessageBoundary,
+  getSupportTicket as getSupportTicketBoundary,
+  listSupportTickets as listSupportTicketsBoundary,
+  updateSupportTicket as updateSupportTicketBoundary,
+} from "../rls-waves/session-b/b03/repositoryFunctions";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
+import { trackSupportStatus } from "../rls-waves/session-b/b02/publicBoundaryRepository";
+import { getB01PreAuthPrisma } from "../rls-waves/session-b/b01/runtimeClients";
 
 const toInt = (value: unknown, fallback: number, min: number, max: number) => {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -15,6 +23,7 @@ const toInt = (value: unknown, fallback: number, min: number, max: number) => {
 };
 
 const listSchema = z.object({
+  scope: z.literal("platform").optional(),
   status: z.nativeEnum(SupportTicketStatus).optional(),
   priority: z.enum(["P1", "P2", "P3", "P4"]).optional(),
   licenseeId: z.string().uuid().optional(),
@@ -37,15 +46,13 @@ const publicTrackParamsSchema = z.object({
   reference: z.string().trim().min(4).max(64).regex(/^[a-z0-9_-]+$/i, "Invalid reference format"),
 }).strict();
 
-const supportTicketIdParamSchema = z.object({
-  id: z.string().uuid("Invalid support ticket id"),
-}).strict();
-
 const publicTrackQuerySchema = z.object({
   email: z.string().trim().email().max(160).optional(),
 }).strict();
 
-const isPlatform = (role: UserRole) => role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
+const supportTicketIdParamSchema = z.object({
+  id: z.string().uuid("Invalid support ticket id"),
+}).strict();
 
 export const listSupportTickets = async (req: AuthRequest, res: Response) => {
   const fallbackLimit = toInt(req.query.limit, 50, 1, 200);
@@ -60,60 +67,33 @@ export const listSupportTickets = async (req: AuthRequest, res: Response) => {
     const limit = parsed.data.limit ?? fallbackLimit;
     const offset = parsed.data.offset ?? fallbackOffset;
 
-    const where: Prisma.SupportTicketWhereInput = {};
-    if (parsed.data.status) where.status = parsed.data.status;
-    if (parsed.data.priority) where.priority = parsed.data.priority;
-
-    if (!isPlatform(req.user.role)) {
-      where.licenseeId = req.user.licenseeId || "__none__";
-    } else if (parsed.data.licenseeId) {
-      where.licenseeId = parsed.data.licenseeId;
-    }
-
-    if (parsed.data.search) {
-      const q = parsed.data.search;
-      where.OR = [
-        { referenceCode: { contains: q, mode: "insensitive" } },
-        { subject: { contains: q, mode: "insensitive" } },
-        { incident: { qrCodeValue: { contains: q.toUpperCase(), mode: "insensitive" } } },
-      ];
-    }
-
-    const [tickets, total] = await Promise.all([
-      prisma.supportTicket.findMany({
-        where,
-        orderBy: [{ createdAt: "desc" }],
-        take: limit,
-        skip: offset,
-        include: {
-          incident: {
-            select: {
-              id: true,
-              qrCodeValue: true,
-              status: true,
-              severity: true,
-              slaDueAt: true,
-            },
-          },
-          assignedToUser: { select: { id: true, name: true, email: true } },
-        },
-      }),
-      prisma.supportTicket.count({ where }),
-    ]);
-
-    return res.json({
-      success: true,
-      data: {
+    const boundary = b03BoundaryForRequest(req, "support-ticket-read");
+    const data = await boundary.run(async (db) => {
+      const result = await listSupportTicketsBoundary(db, {
+          licenseeId: parsed.data.scope === "platform" ? "__platform_all__" : parsed.data.licenseeId,
+          status: parsed.data.status,
+          priority: parsed.data.priority,
+          search: parsed.data.search,
+          limit,
+          offset,
+          requestId: boundary.requestId,
+        });
+      const tickets = result.tickets as Array<Record<string, any>>;
+      return {
         tickets: tickets.map((ticket) => ({
           ...ticket,
           sla: ticketSlaSnapshot(ticket.slaDueAt || ticket.incident?.slaDueAt || null),
         })),
-        total,
+        total: result.total,
         limit,
         offset,
-      },
+      };
     });
+    return res.json({ success: true, data });
   } catch (error) {
+    if (error instanceof Error && /B03_|RECENT_MFA_DENIED|AUTH_SESSION_CAPABILITY/.test(error.message)) {
+      return res.status(403).json({ success: false, error: "Support ticket authorization is stale or insufficient." });
+    }
     if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage", "incidenthandoff"])) {
       warnStorageUnavailableOnce(
         "support-ticket-storage",
@@ -143,37 +123,12 @@ export const getSupportTicket = async (req: AuthRequest, res: Response) => {
     if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Ticket ID is required" });
     const id = paramsParsed.data.id;
 
-    const where: Prisma.SupportTicketWhereInput = { id };
-    if (!isPlatform(req.user.role)) {
-      where.licenseeId = req.user.licenseeId || "__none__";
-    }
-
-    const ticket = await prisma.supportTicket.findFirst({
-      where,
-      include: {
-        incident: {
-          include: {
-            handoff: true,
-          },
-        },
-        assignedToUser: { select: { id: true, name: true, email: true } },
-        messages: {
-          orderBy: { createdAt: "asc" },
-          include: {
-            actorUser: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
+    const boundary = b03BoundaryForRequest(req, "support-ticket-read");
+    const ticket = await boundary.run((db) => getSupportTicketBoundary(db, {
+      ticketId: id,
+      requestId: boundary.requestId,
+    })) as Record<string, any> | null;
     if (!ticket) return res.status(404).json({ success: false, error: "Support ticket not found" });
-
     return res.json({
       success: true,
       data: {
@@ -182,6 +137,9 @@ export const getSupportTicket = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (error instanceof Error && /B03_|RECENT_MFA_DENIED|AUTH_SESSION_CAPABILITY/.test(error.message)) {
+      return res.status(403).json({ success: false, error: "Support ticket authorization is stale or insufficient." });
+    }
     if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage", "incidenthandoff"])) {
       warnStorageUnavailableOnce(
         "support-ticket-detail-storage",
@@ -207,62 +165,15 @@ export const patchSupportTicket = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
     }
 
-    const where: Prisma.SupportTicketWhereInput = { id };
-    if (!isPlatform(req.user.role)) {
-      where.licenseeId = req.user.licenseeId || "__none__";
-    }
-
-    const existing = await prisma.supportTicket.findFirst({ where });
-    if (!existing) return res.status(404).json({ success: false, error: "Support ticket not found" });
-
-    const updateData: Prisma.SupportTicketUncheckedUpdateInput = {};
-    if (parsed.data.status && parsed.data.status !== existing.status) {
-      updateData.status = parsed.data.status;
-      if ((parsed.data.status === SupportTicketStatus.RESOLVED || parsed.data.status === SupportTicketStatus.CLOSED) && !existing.resolvedAt) {
-        updateData.resolvedAt = new Date();
-      }
-      if (parsed.data.status !== SupportTicketStatus.RESOLVED && parsed.data.status !== SupportTicketStatus.CLOSED) {
-        updateData.resolvedAt = null;
-      }
-    }
-
-    if (parsed.data.assignedToUserId !== undefined && parsed.data.assignedToUserId !== existing.assignedToUserId) {
-      updateData.assignedToUserId = parsed.data.assignedToUserId || null;
-    }
-
-    if (Object.keys(updateData).length === 0) {
-      return res.json({ success: true, data: existing });
-    }
-
-    const updated = await prisma.supportTicket.update({
-      where: { id: existing.id },
-      data: updateData,
-      include: {
-        incident: true,
-      },
-    });
-
-    if (parsed.data.status) {
-      await ensureIncidentWorkflowArtifacts({
-        incidentId: updated.incidentId,
-        actorUserId: req.user.userId,
-        actorType: IncidentActorType.ADMIN,
-        emitEvents: true,
-      });
-    }
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: updated.licenseeId || undefined,
-      action: "SUPPORT_TICKET_UPDATED",
-      entityType: "SupportTicket",
-      entityId: updated.id,
-      ipAddress: req.ip,
-      details: {
-        status: updated.status,
-        assignedToUserId: updated.assignedToUserId,
-      },
-    });
+    const boundary = b03BoundaryForRequest(req, "support-ticket-update");
+    const updated = await boundary.run((db) => updateSupportTicketBoundary(db, {
+          ticketId: id,
+          status: parsed.data.status,
+          assignedToUserId: parsed.data.assignedToUserId,
+          changedAt: new Date(),
+          requestId: boundary.requestId,
+    })) as Record<string, any> | null;
+    if (!updated) return res.status(409).json({ success: false, error: "Support ticket changed; reload and retry" });
 
     return res.json({
       success: true,
@@ -272,6 +183,9 @@ export const patchSupportTicket = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (error instanceof Error && /B03_|RECENT_MFA_DENIED|AUTH_SESSION_CAPABILITY/.test(error.message)) {
+      return res.status(403).json({ success: false, error: "Support ticket authorization is stale or insufficient." });
+    }
     if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage", "incidenthandoff"])) {
       warnStorageUnavailableOnce(
         "support-ticket-update-storage",
@@ -297,37 +211,20 @@ export const addSupportMessage = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid message" });
     }
 
-    const where: Prisma.SupportTicketWhereInput = { id };
-    if (!isPlatform(req.user.role)) {
-      where.licenseeId = req.user.licenseeId || "__none__";
-    }
-
-    const ticket = await prisma.supportTicket.findFirst({ where, select: { id: true, licenseeId: true } });
-    if (!ticket) return res.status(404).json({ success: false, error: "Support ticket not found" });
-
-    const message = await addSupportTicketMessage({
-      ticketId: ticket.id,
-      actorType: IncidentActorType.ADMIN,
-      actorUserId: req.user.userId,
-      message: parsed.data.message,
-      isInternal: parsed.data.isInternal,
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: ticket.licenseeId || undefined,
-      action: "SUPPORT_TICKET_MESSAGE_ADDED",
-      entityType: "SupportTicket",
-      entityId: ticket.id,
-      ipAddress: req.ip,
-      details: {
-        isInternal: parsed.data.isInternal,
-        messageLength: parsed.data.message.length,
-      },
-    });
-
+    const boundary = b03BoundaryForRequest(req, "support-ticket-message");
+    const message = await boundary.run((db) => addSupportTicketMessageBoundary(db, {
+          ticketId: id,
+          message: parsed.data.message,
+          isInternal: parsed.data.isInternal,
+          createdAt: new Date(),
+          requestId: boundary.requestId,
+    }));
+    if (!message) return res.status(404).json({ success: false, error: "Support ticket not found" });
     return res.status(201).json({ success: true, data: message });
   } catch (error) {
+    if (error instanceof Error && /B03_|RECENT_MFA_DENIED|AUTH_SESSION_CAPABILITY/.test(error.message)) {
+      return res.status(403).json({ success: false, error: "Support ticket authorization is stale or insufficient." });
+    }
     if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage"])) {
       warnStorageUnavailableOnce(
         "support-ticket-message-storage",
@@ -349,55 +246,28 @@ export const trackSupportTicketPublic = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: firstError?.message || "Invalid tracking request" });
     }
 
-    const reference = paramsParsed.data.reference.trim().toUpperCase();
-    const contactEmail = String(queryParsed.data.email || "").trim().toLowerCase();
-
-    const ticket = await prisma.supportTicket.findFirst({
-      where: {
-        referenceCode: reference,
-      },
-      include: {
-        incident: {
-          select: {
-            id: true,
-            status: true,
-            severity: true,
-            handoff: {
-              select: {
-                currentStage: true,
-                slaDueAt: true,
-              },
-            },
-          },
-        },
-      },
+    const proofSubject = queryParsed.data.email?.toLowerCase() || "missing-support-contact-proof";
+    const ticket = await trackSupportStatus(getB01PreAuthPrisma(), {
+      referenceCode: paramsParsed.data.reference.toUpperCase(),
+      proofDigest: `sha256-v1:${createHash("sha256").update(proofSubject).digest("hex")}`,
+      proofVersion: 1,
+      checkedAt: new Date(),
+      requestId: String((req as Request & { requestId?: string }).requestId || randomUUID()),
     });
-
     if (!ticket) return res.status(404).json({ success: false, error: "Support ticket not found" });
-
-    if (ticket.customerEmail && contactEmail && ticket.customerEmail.toLowerCase() !== contactEmail) {
-      return res.status(403).json({ success: false, error: "Email does not match ticket contact" });
-    }
 
     return res.json({
       success: true,
       data: {
         referenceCode: ticket.referenceCode,
-        status: ticket.status,
+        status: ticket.customerFacingStatus,
         priority: ticket.priority,
         updatedAt: ticket.updatedAt,
-        handoffStage: ticket.incident?.handoff?.currentStage || null,
-        sla: ticketSlaSnapshot(ticket.slaDueAt || ticket.incident?.handoff?.slaDueAt || null),
+        handoffStage: ticket.handoffStage,
+        sla: ticketSlaSnapshot(ticket.slaDueAt),
       },
     });
   } catch (error) {
-    if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage", "incidenthandoff"])) {
-      warnStorageUnavailableOnce(
-        "support-ticket-track-storage",
-        "[support] Support workflow tables are unavailable. Public tracking is temporarily unavailable."
-      );
-      return res.status(404).json({ success: false, error: "Support ticket tracking unavailable" });
-    }
     console.error("trackSupportTicketPublic error:", error);
     return res.status(500).json({ success: false, error: "Failed to track support ticket" });
   }

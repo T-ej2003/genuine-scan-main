@@ -1,7 +1,10 @@
 import { randomBytes } from "crypto";
+import { Prisma } from "@prisma/client";
 
 import prisma from "../../config/database";
 import { buildBackupCodeHashCandidates, hashBackupCode, matchesBackupCodeHash } from "./backupCodeHashService";
+
+type BackupCodeDbClient = Pick<Prisma.TransactionClient, "adminMfaCredential" | "userBackupCode">;
 
 export { hashBackupCode } from "./backupCodeHashService";
 
@@ -23,25 +26,36 @@ export const generateBackupCodes = (count = getBackupCodeCount()) => {
 
 export const backupCodeShapeOk = (code: string) => /^[A-Za-z0-9]{4,8}-[A-Za-z0-9]{4,8}$/.test(String(code || "").trim());
 
-export const replaceUserBackupCodes = async (params: { userId: string; codes: string[] }) => {
-  await prisma.$transaction([
-    prisma.userBackupCode.deleteMany({
+const replaceUserBackupCodesWithClient = async (
+  params: { userId: string; codes: string[] },
+  db: BackupCodeDbClient
+) => {
+  await db.userBackupCode.deleteMany({
       where: { userId: params.userId, usedAt: null },
-    }),
-    prisma.userBackupCode.createMany({
+    });
+  await db.userBackupCode.createMany({
       data: params.codes.map((code) => ({
         userId: params.userId,
         codeHash: hashBackupCode(code),
       })),
-    }),
-  ]);
+    });
 };
 
-export const consumeUserBackupCode = async (params: { userId: string; code: string }) => {
+export const replaceUserBackupCodes = async (
+  params: { userId: string; codes: string[] },
+  db?: BackupCodeDbClient
+) => db
+  ? replaceUserBackupCodesWithClient(params, db)
+  : prisma.$transaction((tx) => replaceUserBackupCodesWithClient(params, tx));
+
+export const consumeUserBackupCode = async (
+  params: { userId: string; code: string },
+  db: BackupCodeDbClient = prisma
+) => {
   const normalized = String(params.code || "").trim().toUpperCase();
   if (!backupCodeShapeOk(normalized)) return false;
   const candidates = buildBackupCodeHashCandidates(normalized);
-  const consumed = await prisma.userBackupCode.updateMany({
+  const consumed = await db.userBackupCode.updateMany({
     where: {
       userId: params.userId,
       codeHash: { in: candidates },
@@ -58,7 +72,7 @@ export const consumeLegacyBackupCode = async (params: {
   userId: string;
   code: string;
   codesHash: string[];
-}) => {
+}, db: BackupCodeDbClient = prisma) => {
   const normalized = String(params.code || "").trim().toUpperCase();
   if (!backupCodeShapeOk(normalized)) return false;
 
@@ -67,12 +81,16 @@ export const consumeLegacyBackupCode = async (params: {
 
   const updated = [...params.codesHash];
   updated.splice(index, 1);
-  await prisma.adminMfaCredential.update({
-    where: { userId: params.userId },
+  const consumed = await db.adminMfaCredential.updateMany({
+    where: {
+      userId: params.userId,
+      isEnabled: true,
+      backupCodesHash: { equals: params.codesHash },
+    },
     data: {
       backupCodesHash: updated,
       lastUsedAt: new Date(),
     },
   });
-  return true;
+  return consumed.count === 1;
 };

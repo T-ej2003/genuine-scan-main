@@ -1694,6 +1694,28 @@ model CustomerVerificationSession {
   @@index([proofBindingExpiresAt])
 }
 
+model CustomerAuthSession {
+  id String @id @default(uuid())
+
+  tokenHash String @unique
+  customerUserId String
+  customerEmail String
+  authStrength String
+  authProvider String?
+
+  issuedAt DateTime @default(now())
+  expiresAt DateTime
+  lastSeenAt DateTime?
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerUserId, expiresAt])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
 model CustomerTrustIntake {
   id String @id @default(uuid())
 
@@ -1730,6 +1752,18 @@ model AuditLogOutbox {
   id String @id @default(uuid())
 
   payload Json
+  jobType String @default("AUDIT_LOG_RECOVERY")
+  requestId String?
+  payloadDigest String?
+  idempotencyKey String? @unique
+  organizationId String?
+  licenseeId String?
+  manufacturerId String?
+  initiatingUserId String?
+  initiatingActorRoleSnapshot String?
+  expiresAt DateTime?
+  claimedAt DateTime?
+  claimLeaseExpiresAt DateTime?
   status AuditLogOutboxStatus @default(QUEUED)
   attempts Int @default(0)
   nextAttemptAt DateTime @default(now())
@@ -1740,6 +1774,8 @@ model AuditLogOutbox {
   updatedAt DateTime @updatedAt
 
   @@index([status, nextAttemptAt])
+  @@index([jobType, status, nextAttemptAt])
+  @@index([claimLeaseExpiresAt])
   @@index([createdAt])
 }
 
@@ -1852,11 +1888,23 @@ model RefreshToken {
   revokedAt DateTime?
   revokedReason String?
   replacedByTokenHash String?
+  rotationRequestId String?
+  rotationClaimedAt DateTime?
+  rotationCompletedAt DateTime?
+  sessionCapabilityHash String? @unique
+  sessionCapabilityHashVersion String?
+  sessionCapabilityAssurance String?
+  sessionCapabilityExpiresAt DateTime?
+  sessionCapabilityLastUsedAt DateTime?
+  sessionCapabilityRevokedAt DateTime?
+  sessionCapabilityRevokedReason String?
 
   @@index([userId])
   @@index([orgId])
   @@index([expiresAt])
   @@index([revokedAt])
+  @@index([rotationRequestId])
+  @@index([sessionCapabilityExpiresAt])
 }
 
 model AdminMfaCredential {
@@ -2092,6 +2140,18 @@ model SecurityEventOutbox {
 
   eventType String
   payload Json
+  jobType String?
+  requestId String?
+  payloadDigest String?
+  idempotencyKey String? @unique
+  organizationId String?
+  licenseeId String?
+  manufacturerId String?
+  initiatingUserId String?
+  expiresAt DateTime?
+  claimedAt DateTime?
+  claimLeaseExpiresAt DateTime?
+  sinkEventId String?
   status SecurityEventDeliveryStatus @default(QUEUED)
   attempts Int @default(0)
   nextAttemptAt DateTime @default(now())
@@ -2102,6 +2162,8 @@ model SecurityEventOutbox {
   updatedAt DateTime @updatedAt
 
   @@index([status, nextAttemptAt])
+  @@index([jobType, status, nextAttemptAt])
+  @@index([claimLeaseExpiresAt])
   @@index([createdAt])
   @@index([updatedAt])
 }
@@ -2114,6 +2176,7 @@ model CompliancePackJob {
 
   status CompliancePackJobStatus @default(RUNNING)
   triggerType String
+  scheduledScheduleId String?
   periodFrom DateTime?
   periodTo DateTime?
 
@@ -2135,7 +2198,32 @@ model CompliancePackJob {
   @@index([licenseeId, startedAt])
   @@index([status, startedAt])
   @@index([triggerType, startedAt])
+  @@index([scheduledScheduleId, status, startedAt])
   @@index([startedByUserId])
+}
+
+model ScheduledJobCredential {
+  id String @id @default(uuid())
+
+  identityName String
+  jobFamily String
+  scheduleId String
+
+  capabilityHash String @unique
+  capabilityHashVersion String @default("sha256-v1")
+
+  expiresAt DateTime
+  revokedAt DateTime?
+  revokedReason String?
+  rotatedFromCredentialId String?
+  lastUsedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([identityName, jobFamily, scheduleId])
+  @@index([jobFamily, scheduleId, expiresAt])
+  @@index([expiresAt, revokedAt])
 }
 
 model QrAllocationRequest {

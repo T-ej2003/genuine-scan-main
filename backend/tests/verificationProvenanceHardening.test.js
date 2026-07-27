@@ -207,6 +207,43 @@ mockModule("services/degradationEventService.js", {
 mockModule("utils/requestFingerprint.js", {
   deriveRequestDeviceFingerprint: () => currentDeviceFingerprint,
 });
+mockModule("rls-waves/session-b/b01/runtimeClients.js", {
+  getB01PreAuthPrisma: () => ({ $queryRaw: async () => [] }),
+});
+const publicProjection = () => {
+  const notReady = currentQrRecord.issuanceMode === "BREAK_GLASS_DIRECT" || !currentQrRecord.customerVerifiableAt;
+  const review = currentQrRecord.id === "qr-2b";
+  const repeat = Boolean(currentQrRecord.signedFirstSeenAt);
+  if (!notReady) {
+    transactionCalled = true;
+    if (shouldRejectTransaction) throw new Error("recordScan should not run in this scenario");
+  }
+  const result = notReady ? "NOT_READY" : review ? "REVIEW" : repeat ? "AUTHENTIC_REPEAT" : "AUTHENTIC";
+  return {
+    result,
+    messageKey: notReady ? "verification.not_ready"
+      : review ? "verification.changed_context"
+        : repeat ? "verification.repeat" : "verification.first_scan",
+    nextAction: review ? "REPORT_CONCERN" : "NONE",
+    verificationMethod: "SIGNED_LABEL",
+    maskedCode: `${currentQrRecord.code.slice(0, 4)}…${currentQrRecord.code.slice(-2)}`,
+    brandName: licensee.brandName,
+    brandWebsite: licensee.website,
+    brandSupportEmail: licensee.supportEmail,
+    brandSupportPhone: licensee.supportPhone,
+    manufacturerName: batch.manufacturer.name,
+    manufacturerWebsite: batch.manufacturer.website,
+    printedAt: batch.printedAt,
+    firstVerifiedAt: repeat ? currentQrRecord.signedFirstSeenAt : new Date(),
+    latestVerifiedAt: new Date(),
+    ownershipClaimAvailable: !notReady,
+    sessionStartToken: null,
+  };
+};
+mockModule("rls-waves/session-b/b02/publicBoundaryRepository.js", {
+  verifyRawQr: async () => publicProjection(),
+  verifySignedQr: async () => publicProjection(),
+});
 
 process.env.QR_SIGN_HMAC_SECRET = "verification-provenance-hardening-secret";
 process.env.VERIFY_REPLAY_HARDENING_ENABLED = "true";
@@ -345,7 +382,7 @@ const buildReqRes = (options) => {
   assert.strictEqual(transactionCalled, true, "governed signed verification should record the scan");
 
   currentQrRecord = baseSignedQrRecord({
-    code: "MSC0002",
+    code: "MSC0002X",
     id: "qr-2",
     tokenNonce: "nonce-2",
   });
@@ -417,8 +454,8 @@ const buildReqRes = (options) => {
     "verified",
     "manual fallback after signed history should stay on the limited record outcome"
   );
-  assert.strictEqual(manualSignedHistoryReqRes.res.body?.data?.messageKey, undefined);
-  assert.strictEqual(manualSignedHistoryReqRes.res.body?.data?.nextActionKey, undefined);
+  assert.strictEqual(manualSignedHistoryReqRes.res.body?.data?.messageKey, "verification.repeat");
+  assert.strictEqual(manualSignedHistoryReqRes.res.body?.data?.nextActionKey, "NONE");
 
   currentQrRecord = baseSignedQrRecord({
     code: "MSC0002B",

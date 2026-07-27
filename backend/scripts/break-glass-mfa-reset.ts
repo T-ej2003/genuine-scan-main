@@ -1,16 +1,14 @@
-import os from "os";
 import path from "path";
 
 import dotenv from "dotenv";
-import { UserRole } from "@prisma/client";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 import prisma from "../src/config/database";
-import { createAuditLog } from "../src/services/auditService";
-import { disableAdminMfa } from "../src/services/auth/mfaService";
-import { revokeAllUserRefreshTokens } from "../src/services/auth/refreshTokenService";
+import { resetAccountMfaBreakGlass } from "../src/rls-waves/session-c/operatorProcedureService";
+
+const CONFIRMATION_PHRASE = "MSCQR_EXECUTE_DUAL_APPROVED_MFA_RESET";
 
 const readArg = (name: string) => {
   const flag = `--${name}`;
@@ -20,55 +18,33 @@ const readArg = (name: string) => {
 };
 
 const run = async () => {
-  const email = readArg("email").toLowerCase();
-  const reason = readArg("reason") || "Break-glass MFA recovery";
-
-  if (!email) {
-    throw new Error("Usage: tsx scripts/break-glass-mfa-reset.ts --email admin@example.com --reason \"Why this was needed\"");
+  if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
+    throw new Error("Break-glass MFA reset is available only through the production break-glass identity.");
+  }
+  if (String(process.env.MSCQR_BREAK_GLASS_CONFIRM || "").trim() !== CONFIRMATION_PHRASE) {
+    throw new Error(`MSCQR_BREAK_GLASS_CONFIRM must equal ${CONFIRMATION_PHRASE}.`);
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email },
-    select: {
-      id: true,
-      email: true,
-      role: true,
-      licenseeId: true,
-      orgId: true,
-    },
+  const result = await resetAccountMfaBreakGlass({
+    targetUserId: readArg("target-user-id"),
+    executorId: readArg("executor-id"),
+    reason: readArg("reason"),
+    approvalId: readArg("approval-id"),
+    purpose: "dual-approved-break-glass-mfa-reset",
+    assurance: "dual-approved-break-glass",
+    environment: "production",
   });
 
-  if (!user) {
-    throw new Error(`No user found for ${email}`);
-  }
-
-  if (user.role !== UserRole.SUPER_ADMIN && user.role !== UserRole.PLATFORM_SUPER_ADMIN) {
-    throw new Error("Break-glass MFA reset is restricted to platform admin accounts.");
-  }
-
-  await disableAdminMfa(user.id);
-  await revokeAllUserRefreshTokens({
-    userId: user.id,
-    reason: "BREAK_GLASS_MFA_RESET",
-  });
-
-  await createAuditLog({
-    userId: user.id,
-    licenseeId: user.licenseeId || undefined,
-    orgId: user.orgId || undefined,
-    action: "AUTH_MFA_BREAK_GLASS_RESET",
-    entityType: "User",
-    entityId: user.id,
-    details: {
-      email: user.email,
-      role: user.role,
-      reason,
-      host: os.hostname(),
-      invokedBy: "HOST_COMMAND",
-    },
-  } as any);
-
-  console.log(`Break-glass MFA reset completed for ${user.email}`);
+  console.log(
+    JSON.stringify({
+      ok: true,
+      operationId: result.operationId,
+      status: result.status,
+      affectedCount: result.affectedCount,
+      auditEventId: result.auditEventId,
+      targetPrinted: false,
+    })
+  );
 };
 
 run()

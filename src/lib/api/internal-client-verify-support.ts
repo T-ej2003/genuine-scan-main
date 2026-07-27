@@ -116,7 +116,6 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
   },
 
   async reportFraud(payload: {
-    code: string;
     reason: string;
     incidentType?: string;
     notes?: string;
@@ -127,8 +126,12 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     sessionId?: string;
     decisionId?: string;
     description?: string;
-  }) {
-    return core.request(`/fraud-report`, { method: "POST", body: JSON.stringify(payload) });
+  }, sessionProofToken?: string) {
+    return core.request(`/fraud-report`, {
+      method: "POST",
+      headers: withVerifySessionHeaders(sessionProofToken),
+      body: JSON.stringify(payload),
+    });
   },
 
   async submitProductFeedback(payload: {
@@ -219,7 +222,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     });
   },
 
-  async claimVerifiedProduct(code: string) {
+  async claimVerifiedProduct(session: { id: string; proof: string }) {
     return core.request<{
       claimResult: string;
       message?: string;
@@ -235,8 +238,12 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
         isClaimedByAnother: boolean;
         canClaim: boolean;
       };
-    }>(`/verify/${encodeURIComponent(code)}/claim`, {
+    }>(`/verify/session/${encodeURIComponent(session.id)}/claim`, {
       method: "POST",
+      headers: {
+        "x-verification-session-id": session.id,
+        "x-verification-session-proof": session.proof,
+      },
     });
   },
 
@@ -671,6 +678,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
   },
 
   async getSupportTickets(options?: {
+    scope?: "platform";
     status?: "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
     priority?: "P1" | "P2" | "P3" | "P4";
     licenseeId?: string;
@@ -679,6 +687,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     offset?: number;
   }) {
     const params = new URLSearchParams();
+    if (options?.scope) params.append("scope", options.scope);
     if (options?.status) params.append("status", options.status);
     if (options?.priority) params.append("priority", options.priority);
     if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
@@ -711,11 +720,6 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       method: "POST",
       body: JSON.stringify(payload),
     });
-  },
-
-  async trackSupportTicket(reference: string, email?: string) {
-    const query = email ? `?email=${encodeURIComponent(email)}` : "";
-    return core.request(`/support/tickets/track/${encodeURIComponent(reference)}${query}`);
   },
 
   async createSupportIssueReport(formData: FormData) {

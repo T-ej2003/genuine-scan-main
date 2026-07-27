@@ -46,26 +46,20 @@ let printerStatus = {
   printerId: "zebra-zd421",
 };
 
-mockModule("config/database.js", {
-  __esModule: true,
-  default: {
-    printerRegistration: {
-      findFirst: async ({ where }) => {
-        if (where?.agentId === registration.agentId && where?.deviceFingerprint === registration.deviceFingerprint) {
-          return registration;
-        }
-        return null;
+mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
+  resolvePrintingConnectorIdentity: async ({ agentId, deviceFingerprint }) => {
+    if (agentId !== registration.agentId || deviceFingerprint !== registration.deviceFingerprint) {
+      throw new Error("CONNECTOR_BOUNDARY_DENIED");
+    }
+    return {
+      registration,
+      printer: {
+        id: "printer-db-1",
+        nativePrinterId: printerStatus.selectedPrinterId,
       },
-    },
-    printer: {
-      findFirst: async () => null,
-    },
+      eligibleForPrinting: printerStatus.eligibleForPrinting,
+    };
   },
-});
-
-mockModule("services/printerConnectionService.js", {
-  getPrinterConnectionStatusForRegistration: async (registrationId) =>
-    registrationId === registration.id ? printerStatus : { ...printerStatus, connected: false, trusted: false },
 });
 
 const { buildPrinterAgentActionPayload, signPrinterAgentPayload } = require("../dist/services/printerAgentSigningService");

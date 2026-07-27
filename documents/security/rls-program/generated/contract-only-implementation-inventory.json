@@ -1,0 +1,701 @@
+{
+  "schemaVersion": 2,
+  "workflowCount": 24,
+  "groups": {
+    "account and security mutations": [
+      {
+        "workflowId": "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-submit-product-feedback",
+        "familyId": "family-contract-public-fn-submit-product-feedback",
+        "boundaryClass": "account and security mutations",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-action-idempotency-key-insert-0ab7268a79d3",
+          "command-action-idempotency-key-select-0ab7268a79d3",
+          "command-audit-log-insert-0ab7268a79d3",
+          "command-qrcode-select-0ab7268a79d3"
+        ]
+      },
+      {
+        "workflowId": "workflow-http-backend-src-controllers-incident-controller-ts-report-incident",
+        "familyId": "family-contract-public-fn-submit-public-incident",
+        "boundaryClass": "account and security mutations",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-action-idempotency-key-insert-7b25663aacba",
+          "command-action-idempotency-key-insert-ce4cb92a27ec",
+          "command-action-idempotency-key-select-7b25663aacba",
+          "command-action-idempotency-key-select-ce4cb92a27ec",
+          "command-action-idempotency-key-update-7b25663aacba",
+          "command-customer-verification-session-select-ce4cb92a27ec",
+          "command-incident-event-insert-7b25663aacba",
+          "command-incident-event-insert-ce4cb92a27ec",
+          "command-incident-evidence-insert-7b25663aacba",
+          "command-incident-evidence-insert-ce4cb92a27ec",
+          "command-incident-insert-7b25663aacba",
+          "command-incident-insert-ce4cb92a27ec",
+          "command-licensee-select-7b25663aacba",
+          "command-organization-select-7b25663aacba",
+          "command-qrcode-select-7b25663aacba",
+          "command-qrcode-select-ce4cb92a27ec",
+          "command-security-event-outbox-insert-ce4cb92a27ec",
+          "command-support-ticket-insert-ce4cb92a27ec"
+        ]
+      },
+      {
+        "workflowId": "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-report-fraud",
+        "familyId": "family-contract-public-fn-submit-public-incident",
+        "boundaryClass": "account and security mutations",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-action-idempotency-key-insert-7b25663aacba",
+          "command-action-idempotency-key-insert-ce4cb92a27ec",
+          "command-action-idempotency-key-select-7b25663aacba",
+          "command-action-idempotency-key-select-ce4cb92a27ec",
+          "command-action-idempotency-key-update-7b25663aacba",
+          "command-customer-verification-session-select-ce4cb92a27ec",
+          "command-incident-event-insert-7b25663aacba",
+          "command-incident-event-insert-ce4cb92a27ec",
+          "command-incident-evidence-insert-7b25663aacba",
+          "command-incident-evidence-insert-ce4cb92a27ec",
+          "command-incident-insert-7b25663aacba",
+          "command-incident-insert-ce4cb92a27ec",
+          "command-licensee-select-7b25663aacba",
+          "command-organization-select-7b25663aacba",
+          "command-qrcode-select-7b25663aacba",
+          "command-qrcode-select-ce4cb92a27ec",
+          "command-security-event-outbox-insert-ce4cb92a27ec",
+          "command-support-ticket-insert-ce4cb92a27ec"
+        ]
+      },
+      {
+        "workflowId": "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-support-issue",
+        "familyId": "family-contract-public-fn-submit-public-support",
+        "boundaryClass": "account and security mutations",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-action-idempotency-key-insert-2cbf3693bde3",
+          "command-action-idempotency-key-select-2cbf3693bde3",
+          "command-qrcode-select-2cbf3693bde3",
+          "command-support-issue-report-insert-2cbf3693bde3"
+        ]
+      },
+      {
+        "workflowId": "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-request-access",
+        "familyId": "family-contract-public-fn-submit-request-access",
+        "boundaryClass": "account and security mutations",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-action-idempotency-key-insert-e8b066967a4b",
+          "command-action-idempotency-key-select-e8b066967a4b",
+          "command-request-access-insert-e8b066967a4b"
+        ]
+      },
+      {
+        "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b02-public-boundary-repository-ts-track-support-status",
+        "familyId": "family-contract-public-fn-track-support-status",
+        "boundaryClass": "account and security mutations",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-incident-handoff-select-2b72e030edbe",
+          "command-support-ticket-select-2b72e030edbe"
+        ]
+      }
+    ],
+    "batch/QR lifecycle": [
+      {
+        "workflowId": "workflow-internal-backend-src-services-customer-verification-session-service-ts-get-customer-verification-session",
+        "familyId": "family-contract-public-fn-read-verification-session",
+        "boundaryClass": "batch/QR lifecycle",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-customer-auth-session-select-e57dd029ba7a",
+          "command-customer-auth-session-update-e57dd029ba7a",
+          "command-customer-verification-session-select-e57dd029ba7a",
+          "command-licensee-select-e57dd029ba7a",
+          "command-verification-decision-select-e57dd029ba7a",
+          "command-verification-evidence-snapshot-select-e57dd029ba7a"
+        ]
+      },
+      {
+        "workflowId": "workflow-internal-backend-src-services-customer-verification-session-service-ts-create-customer-verification-session",
+        "familyId": "family-contract-public-fn-start-verification-session",
+        "boundaryClass": "batch/QR lifecycle",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-customer-auth-session-select-b073f0a412d8",
+          "command-customer-auth-session-update-b073f0a412d8",
+          "command-customer-verification-session-insert-b073f0a412d8",
+          "command-licensee-select-b073f0a412d8",
+          "command-verification-decision-select-b073f0a412d8",
+          "command-verification-evidence-snapshot-select-b073f0a412d8",
+          "command-verification-evidence-snapshot-update-b073f0a412d8"
+        ]
+      },
+      {
+        "workflowId": "workflow-http-backend-src-controllers-verify-verification-handlers-ts-verify-qrcode",
+        "familyId": "family-contract-public-fn-verify-raw-qr",
+        "boundaryClass": "batch/QR lifecycle",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-audit-log-insert-13870f96bb48",
+          "command-batch-select-13870f96bb48",
+          "command-licensee-select-13870f96bb48",
+          "command-organization-select-13870f96bb48",
+          "command-qr-scan-log-insert-13870f96bb48",
+          "command-qr-scan-log-select-13870f96bb48",
+          "command-qrcode-select-13870f96bb48",
+          "command-qrcode-select-dcc20ed89fa2",
+          "command-qrcode-update-13870f96bb48",
+          "command-replacement-chain-select-13870f96bb48",
+          "command-security-event-outbox-insert-13870f96bb48",
+          "command-user-select-13870f96bb48",
+          "command-verification-decision-insert-13870f96bb48",
+          "command-verification-evidence-snapshot-insert-13870f96bb48"
+        ]
+      },
+      {
+        "workflowId": "workflow-http-backend-src-controllers-verify-verify-fraud-snapshot-ts-build-fraud-verification-snapshot",
+        "familyId": "family-contract-public-fn-verify-raw-qr",
+        "boundaryClass": "batch/QR lifecycle",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-audit-log-insert-13870f96bb48",
+          "command-batch-select-13870f96bb48",
+          "command-licensee-select-13870f96bb48",
+          "command-organization-select-13870f96bb48",
+          "command-qr-scan-log-insert-13870f96bb48",
+          "command-qr-scan-log-select-13870f96bb48",
+          "command-qrcode-select-13870f96bb48",
+          "command-qrcode-select-dcc20ed89fa2",
+          "command-qrcode-update-13870f96bb48",
+          "command-replacement-chain-select-13870f96bb48",
+          "command-security-event-outbox-insert-13870f96bb48",
+          "command-user-select-13870f96bb48",
+          "command-verification-decision-insert-13870f96bb48",
+          "command-verification-evidence-snapshot-insert-13870f96bb48"
+        ]
+      }
+    ],
+    "pre-auth function-backed workflows": [
+      {
+        "workflowId": "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification",
+        "familyId": "family-contract-preauth-fn-consume-email-verification",
+        "boundaryClass": "pre-auth function-backed workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-audit-log-outbox-insert-e1561aa306f2",
+          "command-email-verification-token-select-e1561aa306f2",
+          "command-email-verification-token-update-e1561aa306f2",
+          "command-refresh-token-select-e1561aa306f2",
+          "command-refresh-token-update-e1561aa306f2",
+          "command-user-select-e1561aa306f2",
+          "command-user-update-e1561aa306f2"
+        ]
+      },
+      {
+        "workflowId": "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite",
+        "familyId": "family-contract-preauth-fn-consume-invitation",
+        "boundaryClass": "pre-auth function-backed workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-audit-log-outbox-insert-93fe5e2f9580",
+          "command-invite-select-93fe5e2f9580",
+          "command-invite-update-93fe5e2f9580",
+          "command-licensee-select-93fe5e2f9580",
+          "command-organization-select-93fe5e2f9580",
+          "command-user-select-93fe5e2f9580",
+          "command-user-update-93fe5e2f9580"
+        ]
+      },
+      {
+        "workflowId": "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token",
+        "familyId": "family-contract-preauth-fn-consume-password-reset",
+        "boundaryClass": "pre-auth function-backed workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-audit-log-outbox-insert-963323294162",
+          "command-password-reset-select-963323294162",
+          "command-password-reset-update-963323294162",
+          "command-refresh-token-select-963323294162",
+          "command-refresh-token-update-963323294162",
+          "command-user-select-963323294162",
+          "command-user-update-963323294162"
+        ]
+      },
+      {
+        "workflowId": "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview",
+        "familyId": "family-contract-preauth-fn-lookup-invitation",
+        "boundaryClass": "pre-auth function-backed workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-invite-select-d113603cb7d4",
+          "command-licensee-select-d113603cb7d4",
+          "command-organization-select-d113603cb7d4",
+          "command-user-select-d113603cb7d4"
+        ]
+      },
+      {
+        "workflowId": "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user",
+        "familyId": "family-contract-preauth-fn-lookup-password-user",
+        "boundaryClass": "pre-auth function-backed workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-user-select-83c9cafb2978"
+        ]
+      },
+      {
+        "workflowId": "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure",
+        "familyId": "family-contract-preauth-fn-record-password-failure",
+        "boundaryClass": "pre-auth function-backed workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-user-select-8bfc0e3d6533",
+          "command-user-update-8bfc0e3d6533"
+        ]
+      },
+      {
+        "workflowId": "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset",
+        "familyId": "family-contract-preauth-fn-request-password-reset",
+        "boundaryClass": "pre-auth function-backed workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-audit-log-outbox-insert-e45d5f48ae3c",
+          "command-password-reset-insert-e45d5f48ae3c",
+          "command-user-select-e45d5f48ae3c"
+        ]
+      }
+    ],
+    "print lifecycle": [
+      {
+        "workflowId": "workflow-internal-backend-src-services-local-agent-claim-service-ts-count-local-agent-claim-items",
+        "familyId": "family-contract-system-boundary-local-agent-device-claim",
+        "boundaryClass": "print lifecycle",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-print-item-select-b20e44176ff5"
+        ]
+      }
+    ],
+    "prohibited or legacy workflows": [
+      {
+        "workflowId": "workflow-cli-scripts-run-system-integration-mjs-main",
+        "familyId": "family-contract-operator-boundary-prohibited-audit-browser",
+        "boundaryClass": "prohibited or legacy workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-audit-log-select-5998dbf5eb0a"
+        ]
+      }
+    ],
+    "simple tenant-scoped reads": [
+      {
+        "workflowId": "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile",
+        "familyId": "family-split-governanceservice-public-verification-policy-80f0c95935",
+        "boundaryClass": "simple tenant-scoped reads",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-tenant-feature-flag-select-84b23ee1039f",
+          "command-tenant-feature-flag-select-c90ec6c2be94"
+        ]
+      },
+      {
+        "workflowId": "workflow-internal-backend-src-services-governance-service-ts-resolve-verify-ux-policy",
+        "familyId": "family-split-governanceservice-public-verification-policy-80f0c95935",
+        "boundaryClass": "simple tenant-scoped reads",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-tenant-feature-flag-select-84b23ee1039f",
+          "command-tenant-feature-flag-select-c90ec6c2be94"
+        ]
+      }
+    ],
+    "worker/scheduled workflows": [
+      {
+        "workflowId": "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox",
+        "familyId": "family-contract-worker-boundary-audit-outbox-delivery",
+        "boundaryClass": "worker/scheduled workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-audit-log-insert-bbebad8a8023",
+          "command-audit-log-outbox-select-bbebad8a8023",
+          "command-audit-log-outbox-update-bbebad8a8023",
+          "command-security-event-outbox-insert-bbebad8a8023"
+        ]
+      },
+      {
+        "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+        "familyId": "family-contract-worker-boundary-scheduled-compliance-packs",
+        "boundaryClass": "worker/scheduled workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-action-idempotency-key-insert-56e28c0be62e",
+          "command-action-idempotency-key-select-56e28c0be62e",
+          "command-action-idempotency-key-update-56e28c0be62e",
+          "command-audit-log-outbox-insert-56e28c0be62e",
+          "command-audit-log-select-56e28c0be62e",
+          "command-compliance-pack-job-insert-56e28c0be62e",
+          "command-compliance-pack-job-select-56e28c0be62e",
+          "command-compliance-pack-job-update-56e28c0be62e",
+          "command-evidence-retention-policy-select-56e28c0be62e",
+          "command-incident-handoff-select-56e28c0be62e",
+          "command-incident-select-56e28c0be62e",
+          "command-licensee-select-56e28c0be62e",
+          "command-manufacturer-licensee-link-select-56e28c0be62e",
+          "command-organization-select-56e28c0be62e",
+          "command-refresh-token-select-56e28c0be62e",
+          "command-scheduled-job-credential-select-0b81b64aa57d",
+          "command-scheduled-job-credential-select-56e28c0be62e",
+          "command-scheduled-job-credential-update-0b81b64aa57d",
+          "command-scheduled-job-credential-update-56e28c0be62e",
+          "command-sensitive-action-approval-select-56e28c0be62e",
+          "command-user-select-56e28c0be62e"
+        ]
+      },
+      {
+        "workflowId": "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox",
+        "familyId": "family-contract-worker-boundary-siem-outbox-delivery",
+        "boundaryClass": "worker/scheduled workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-security-event-outbox-select-76e162f16ff9",
+          "command-security-event-outbox-update-76e162f16ff9"
+        ]
+      }
+    ]
+  },
+  "families": [
+    {
+      "familyId": "family-split-governanceservice-public-verification-policy-80f0c95935",
+      "boundaryClass": "simple tenant-scoped reads",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile",
+        "workflow-internal-backend-src-services-governance-service-ts-resolve-verify-ux-policy"
+      ],
+      "sourceCommandRuleIds": [
+        "command-tenant-feature-flag-select-84b23ee1039f",
+        "command-tenant-feature-flag-select-c90ec6c2be94"
+      ]
+    },
+    {
+      "familyId": "family-contract-public-fn-read-verification-session",
+      "boundaryClass": "batch/QR lifecycle",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-customer-verification-session-service-ts-get-customer-verification-session"
+      ],
+      "sourceCommandRuleIds": [
+        "command-customer-auth-session-select-e57dd029ba7a",
+        "command-customer-auth-session-update-e57dd029ba7a",
+        "command-customer-verification-session-select-e57dd029ba7a",
+        "command-licensee-select-e57dd029ba7a",
+        "command-verification-decision-select-e57dd029ba7a",
+        "command-verification-evidence-snapshot-select-e57dd029ba7a"
+      ]
+    },
+    {
+      "familyId": "family-contract-public-fn-start-verification-session",
+      "boundaryClass": "batch/QR lifecycle",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-customer-verification-session-service-ts-create-customer-verification-session"
+      ],
+      "sourceCommandRuleIds": [
+        "command-customer-auth-session-select-b073f0a412d8",
+        "command-customer-auth-session-update-b073f0a412d8",
+        "command-customer-verification-session-insert-b073f0a412d8",
+        "command-licensee-select-b073f0a412d8",
+        "command-verification-decision-select-b073f0a412d8",
+        "command-verification-evidence-snapshot-select-b073f0a412d8",
+        "command-verification-evidence-snapshot-update-b073f0a412d8"
+      ]
+    },
+    {
+      "familyId": "family-contract-public-fn-verify-raw-qr",
+      "boundaryClass": "batch/QR lifecycle",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-verify-verification-handlers-ts-verify-qrcode",
+        "workflow-http-backend-src-controllers-verify-verify-fraud-snapshot-ts-build-fraud-verification-snapshot"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-13870f96bb48",
+        "command-batch-select-13870f96bb48",
+        "command-licensee-select-13870f96bb48",
+        "command-organization-select-13870f96bb48",
+        "command-qr-scan-log-insert-13870f96bb48",
+        "command-qr-scan-log-select-13870f96bb48",
+        "command-qrcode-select-13870f96bb48",
+        "command-qrcode-select-dcc20ed89fa2",
+        "command-qrcode-update-13870f96bb48",
+        "command-replacement-chain-select-13870f96bb48",
+        "command-security-event-outbox-insert-13870f96bb48",
+        "command-user-select-13870f96bb48",
+        "command-verification-decision-insert-13870f96bb48",
+        "command-verification-evidence-snapshot-insert-13870f96bb48"
+      ]
+    },
+    {
+      "familyId": "family-contract-system-boundary-local-agent-device-claim",
+      "boundaryClass": "print lifecycle",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-local-agent-claim-service-ts-count-local-agent-claim-items"
+      ],
+      "sourceCommandRuleIds": [
+        "command-print-item-select-b20e44176ff5"
+      ]
+    },
+    {
+      "familyId": "family-contract-public-fn-submit-product-feedback",
+      "boundaryClass": "account and security mutations",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-submit-product-feedback"
+      ],
+      "sourceCommandRuleIds": [
+        "command-action-idempotency-key-insert-0ab7268a79d3",
+        "command-action-idempotency-key-select-0ab7268a79d3",
+        "command-audit-log-insert-0ab7268a79d3",
+        "command-qrcode-select-0ab7268a79d3"
+      ]
+    },
+    {
+      "familyId": "family-contract-public-fn-submit-public-incident",
+      "boundaryClass": "account and security mutations",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-incident-controller-ts-report-incident",
+        "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-report-fraud"
+      ],
+      "sourceCommandRuleIds": [
+        "command-action-idempotency-key-insert-7b25663aacba",
+        "command-action-idempotency-key-insert-ce4cb92a27ec",
+        "command-action-idempotency-key-select-7b25663aacba",
+        "command-action-idempotency-key-select-ce4cb92a27ec",
+        "command-action-idempotency-key-update-7b25663aacba",
+        "command-customer-verification-session-select-ce4cb92a27ec",
+        "command-incident-event-insert-7b25663aacba",
+        "command-incident-event-insert-ce4cb92a27ec",
+        "command-incident-evidence-insert-7b25663aacba",
+        "command-incident-evidence-insert-ce4cb92a27ec",
+        "command-incident-insert-7b25663aacba",
+        "command-incident-insert-ce4cb92a27ec",
+        "command-licensee-select-7b25663aacba",
+        "command-organization-select-7b25663aacba",
+        "command-qrcode-select-7b25663aacba",
+        "command-qrcode-select-ce4cb92a27ec",
+        "command-security-event-outbox-insert-ce4cb92a27ec",
+        "command-support-ticket-insert-ce4cb92a27ec"
+      ]
+    },
+    {
+      "familyId": "family-contract-public-fn-submit-public-support",
+      "boundaryClass": "account and security mutations",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-support-issue"
+      ],
+      "sourceCommandRuleIds": [
+        "command-action-idempotency-key-insert-2cbf3693bde3",
+        "command-action-idempotency-key-select-2cbf3693bde3",
+        "command-qrcode-select-2cbf3693bde3",
+        "command-support-issue-report-insert-2cbf3693bde3"
+      ]
+    },
+    {
+      "familyId": "family-contract-public-fn-submit-request-access",
+      "boundaryClass": "account and security mutations",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-request-access"
+      ],
+      "sourceCommandRuleIds": [
+        "command-action-idempotency-key-insert-e8b066967a4b",
+        "command-action-idempotency-key-select-e8b066967a4b",
+        "command-request-access-insert-e8b066967a4b"
+      ]
+    },
+    {
+      "familyId": "family-contract-public-fn-track-support-status",
+      "boundaryClass": "account and security mutations",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-internal-backend-src-rls-waves-session-b-b02-public-boundary-repository-ts-track-support-status"
+      ],
+      "sourceCommandRuleIds": [
+        "command-incident-handoff-select-2b72e030edbe",
+        "command-support-ticket-select-2b72e030edbe"
+      ]
+    },
+    {
+      "familyId": "family-contract-preauth-fn-consume-email-verification",
+      "boundaryClass": "pre-auth function-backed workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-e1561aa306f2",
+        "command-email-verification-token-select-e1561aa306f2",
+        "command-email-verification-token-update-e1561aa306f2",
+        "command-refresh-token-select-e1561aa306f2",
+        "command-refresh-token-update-e1561aa306f2",
+        "command-user-select-e1561aa306f2",
+        "command-user-update-e1561aa306f2"
+      ]
+    },
+    {
+      "familyId": "family-contract-preauth-fn-consume-invitation",
+      "boundaryClass": "pre-auth function-backed workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-93fe5e2f9580",
+        "command-invite-select-93fe5e2f9580",
+        "command-invite-update-93fe5e2f9580",
+        "command-licensee-select-93fe5e2f9580",
+        "command-organization-select-93fe5e2f9580",
+        "command-user-select-93fe5e2f9580",
+        "command-user-update-93fe5e2f9580"
+      ]
+    },
+    {
+      "familyId": "family-contract-preauth-fn-consume-password-reset",
+      "boundaryClass": "pre-auth function-backed workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-963323294162",
+        "command-password-reset-select-963323294162",
+        "command-password-reset-update-963323294162",
+        "command-refresh-token-select-963323294162",
+        "command-refresh-token-update-963323294162",
+        "command-user-select-963323294162",
+        "command-user-update-963323294162"
+      ]
+    },
+    {
+      "familyId": "family-contract-preauth-fn-lookup-invitation",
+      "boundaryClass": "pre-auth function-backed workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview"
+      ],
+      "sourceCommandRuleIds": [
+        "command-invite-select-d113603cb7d4",
+        "command-licensee-select-d113603cb7d4",
+        "command-organization-select-d113603cb7d4",
+        "command-user-select-d113603cb7d4"
+      ]
+    },
+    {
+      "familyId": "family-contract-preauth-fn-lookup-password-user",
+      "boundaryClass": "pre-auth function-backed workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user"
+      ],
+      "sourceCommandRuleIds": [
+        "command-user-select-83c9cafb2978"
+      ]
+    },
+    {
+      "familyId": "family-contract-preauth-fn-record-password-failure",
+      "boundaryClass": "pre-auth function-backed workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure"
+      ],
+      "sourceCommandRuleIds": [
+        "command-user-select-8bfc0e3d6533",
+        "command-user-update-8bfc0e3d6533"
+      ]
+    },
+    {
+      "familyId": "family-contract-preauth-fn-request-password-reset",
+      "boundaryClass": "pre-auth function-backed workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-e45d5f48ae3c",
+        "command-password-reset-insert-e45d5f48ae3c",
+        "command-user-select-e45d5f48ae3c"
+      ]
+    },
+    {
+      "familyId": "family-contract-worker-boundary-audit-outbox-delivery",
+      "boundaryClass": "worker/scheduled workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-bbebad8a8023",
+        "command-audit-log-outbox-select-bbebad8a8023",
+        "command-audit-log-outbox-update-bbebad8a8023",
+        "command-security-event-outbox-insert-bbebad8a8023"
+      ]
+    },
+    {
+      "familyId": "family-contract-worker-boundary-scheduled-compliance-packs",
+      "boundaryClass": "worker/scheduled workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "sourceCommandRuleIds": [
+        "command-action-idempotency-key-insert-56e28c0be62e",
+        "command-action-idempotency-key-select-56e28c0be62e",
+        "command-action-idempotency-key-update-56e28c0be62e",
+        "command-audit-log-outbox-insert-56e28c0be62e",
+        "command-audit-log-select-56e28c0be62e",
+        "command-compliance-pack-job-insert-56e28c0be62e",
+        "command-compliance-pack-job-select-56e28c0be62e",
+        "command-compliance-pack-job-update-56e28c0be62e",
+        "command-evidence-retention-policy-select-56e28c0be62e",
+        "command-incident-handoff-select-56e28c0be62e",
+        "command-incident-select-56e28c0be62e",
+        "command-licensee-select-56e28c0be62e",
+        "command-manufacturer-licensee-link-select-56e28c0be62e",
+        "command-organization-select-56e28c0be62e",
+        "command-refresh-token-select-56e28c0be62e",
+        "command-scheduled-job-credential-select-0b81b64aa57d",
+        "command-scheduled-job-credential-select-56e28c0be62e",
+        "command-scheduled-job-credential-update-0b81b64aa57d",
+        "command-scheduled-job-credential-update-56e28c0be62e",
+        "command-sensitive-action-approval-select-56e28c0be62e",
+        "command-user-select-56e28c0be62e"
+      ]
+    },
+    {
+      "familyId": "family-contract-worker-boundary-siem-outbox-delivery",
+      "boundaryClass": "worker/scheduled workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
+      ],
+      "sourceCommandRuleIds": [
+        "command-security-event-outbox-select-76e162f16ff9",
+        "command-security-event-outbox-update-76e162f16ff9"
+      ]
+    },
+    {
+      "familyId": "family-contract-operator-boundary-prohibited-audit-browser",
+      "boundaryClass": "prohibited or legacy workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-cli-scripts-run-system-integration-mjs-main"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-select-5998dbf5eb0a"
+      ]
+    }
+  ]
+}

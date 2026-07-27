@@ -1,0 +1,322 @@
+{
+  "schemaVersion": 11,
+  "environment": "local-disposable-only",
+  "deploymentModel": "clean-room-blue-green",
+  "postgresqlMajor": 18,
+  "sourceContractSha256": "68be98736423be84c0eb0baa9423a78109abe61835d8479dd61b656a68c423dc",
+  "tablesExpected": 79,
+  "forceRlsTargetsExpected": 77,
+  "tablesCertified": 77,
+  "generatedPoliciesCertified": 339,
+  "columnPrivilegeCellsCertified": 60,
+  "workflowCertificationStatus": "pending-application-path-certification",
+  "workflowsApplicationPathCertified": 0,
+  "applicationPathCertifiedWorkflowIds": [],
+  "applicationPathResults": [],
+  "b01PreAuthCertification": {
+    "status": "application-path-certified",
+    "postgresqlMajor": 18,
+    "testFile": "backend/tests/rls-wave-b/b01/preAuthSecurityPostgres18.test.js"
+  },
+  "scheduledJobIdentityCertification": {
+    "status": "application-path-certified",
+    "postgresqlMajor": 18,
+    "testFile": "backend/tests/rls-wave-b/b03/scheduledJobIdentityPostgres18.test.js"
+  },
+  "b03OutboxCertification": null,
+  "workflowsProductProhibited": 1,
+  "cleanRoomPreflightCertified": true,
+  "migrationsFromZeroCertified": true,
+  "managedRolesCreatedByPackage": true,
+  "nonSuperuserAdministrativeExecutorCertification": true,
+  "phaseEntrypointCertification": true,
+  "phaseTransactionAtomicityCertification": true,
+  "failureInjectionExpectedStages": [
+    "database-created",
+    "preflight",
+    "roles",
+    "migration-boundary",
+    "prisma-from-zero",
+    "ownership",
+    "helpers",
+    "runtime-grants",
+    "policies",
+    "verification",
+    "clean-room-destroy"
+  ],
+  "failureInjectionCertifiedStages": [
+    "database-created",
+    "preflight",
+    "roles",
+    "migration-boundary",
+    "prisma-from-zero",
+    "ownership",
+    "helpers",
+    "runtime-grants",
+    "policies",
+    "verification",
+    "clean-room-destroy"
+  ],
+  "preflightRefusalResults": [
+    {
+      "scenario": "managed-role-and-membership",
+      "status": "refused-before-mutation",
+      "entrypointsRefused": [
+        "00-preflight.sql",
+        "10-roles.sql"
+      ],
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "scenario": "application-object",
+      "status": "refused-before-mutation",
+      "entrypointsRefused": [
+        "00-preflight.sql",
+        "10-roles.sql"
+      ],
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "scenario": "policy",
+      "status": "refused-before-mutation",
+      "entrypointsRefused": [
+        "00-preflight.sql",
+        "10-roles.sql"
+      ],
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "scenario": "database-and-schema-grants",
+      "status": "refused-before-mutation",
+      "entrypointsRefused": [
+        "00-preflight.sql",
+        "10-roles.sql"
+      ],
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "scenario": "default-acl",
+      "status": "refused-before-mutation",
+      "entrypointsRefused": [
+        "00-preflight.sql",
+        "10-roles.sql"
+      ],
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "scenario": "package-schema",
+      "status": "refused-before-mutation",
+      "entrypointsRefused": [
+        "00-preflight.sql",
+        "10-roles.sql"
+      ],
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "scenario": "publication",
+      "status": "refused-before-mutation",
+      "entrypointsRefused": [
+        "00-preflight.sql",
+        "10-roles.sql"
+      ],
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "scenario": "wrong-owner",
+      "status": "refused-before-mutation",
+      "entrypointsRefused": [
+        "00-preflight.sql",
+        "10-roles.sql"
+      ],
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "scenario": "insufficient-administrator-capability",
+      "status": "refused-before-mutation",
+      "entrypointsRefused": [
+        "00-preflight.sql",
+        "10-roles.sql"
+      ],
+      "blueFingerprintUnchanged": true
+    }
+  ],
+  "directPhaseRefusalResults": [
+    {
+      "file": "15-migration-preflight.sql",
+      "status": "refused-before-mutation",
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "file": "11-ownership-grants.sql",
+      "status": "refused-before-mutation",
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "file": "20-context-helpers.sql",
+      "status": "refused-before-mutation",
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "file": "21-runtime-grants.sql",
+      "status": "refused-before-mutation",
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "file": "30-policies.sql",
+      "status": "refused-before-mutation",
+      "blueFingerprintUnchanged": true
+    }
+  ],
+  "failureInjectionResults": [
+    {
+      "stage": "database-created",
+      "failureMode": "simulated-process-stop-after-stage",
+      "databaseResidueCount": 0,
+      "managedRoleResidueCount": 0,
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "stage": "preflight",
+      "failureMode": "transactional-injected-failure",
+      "databaseResidueCount": 0,
+      "managedRoleResidueCount": 0,
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "stage": "roles",
+      "failureMode": "transactional-injected-failure",
+      "databaseResidueCount": 0,
+      "managedRoleResidueCount": 0,
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "stage": "migration-boundary",
+      "failureMode": "transactional-injected-failure",
+      "databaseResidueCount": 0,
+      "managedRoleResidueCount": 0,
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "stage": "prisma-from-zero",
+      "failureMode": "simulated-process-stop-after-stage",
+      "databaseResidueCount": 0,
+      "managedRoleResidueCount": 0,
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "stage": "ownership",
+      "failureMode": "transactional-injected-failure",
+      "databaseResidueCount": 0,
+      "managedRoleResidueCount": 0,
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "stage": "helpers",
+      "failureMode": "transactional-injected-failure",
+      "databaseResidueCount": 0,
+      "managedRoleResidueCount": 0,
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "stage": "runtime-grants",
+      "failureMode": "transactional-injected-failure",
+      "databaseResidueCount": 0,
+      "managedRoleResidueCount": 0,
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "stage": "policies",
+      "failureMode": "transactional-injected-failure",
+      "databaseResidueCount": 0,
+      "managedRoleResidueCount": 0,
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "stage": "verification",
+      "failureMode": "transactional-injected-failure",
+      "databaseResidueCount": 0,
+      "managedRoleResidueCount": 0,
+      "blueFingerprintUnchanged": true
+    },
+    {
+      "stage": "clean-room-destroy",
+      "failureMode": "transactional-injected-failure-and-retry",
+      "databaseResidueCount": 0,
+      "managedRoleResidueCount": 0,
+      "blueFingerprintUnchanged": true
+    }
+  ],
+  "catalogTamperResults": [
+    {
+      "dimension": "policy-definition",
+      "status": "exact-drift-refused",
+      "expectedFailure": "policy definition differs from the sealed generated contract"
+    },
+    {
+      "dimension": "routine-definition",
+      "status": "exact-drift-refused",
+      "expectedFailure": "routine definition or privilege inventory differs"
+    },
+    {
+      "dimension": "routine-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "routine definition or privilege inventory differs"
+    },
+    {
+      "dimension": "schema-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "schema privilege inventory differs"
+    },
+    {
+      "dimension": "table-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "table privilege inventory differs"
+    },
+    {
+      "dimension": "column-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "column privilege inventory differs"
+    },
+    {
+      "dimension": "type-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "type privilege inventory differs"
+    },
+    {
+      "dimension": "database-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "database privilege inventory differs"
+    },
+    {
+      "dimension": "default-acl",
+      "status": "exact-drift-refused",
+      "expectedFailure": "default privilege definition differs"
+    }
+  ],
+  "greenDatabaseResidueCount": 0,
+  "managedRoleResidueCount": 0,
+  "blueFingerprintUnchanged": true,
+  "rollbackVerified": true,
+  "policySemanticPreservation": true,
+  "columnPrivilegeCertification": true,
+  "exactCatalogTamperCertification": true,
+  "routeShutdownTemplateTests": true,
+  "packageChecksumsSha256": "2a72417d23d08c5ea296e7d914b24f869adb64ad53e2c100341d7538b6d1119d",
+  "status": "clean-room-full-table-enforcement-certified-workflows-pending",
+  "b01Certification": {
+    "predecessorReplayRejected": true,
+    "rollbackClaimCleared": true,
+    "successorHashPersisted": true,
+    "capabilityVerified": true,
+    "forgedGucDenied": true,
+    "capabilityRevocationEnforced": true
+  },
+  "c03Certification": {
+    "status": "application-path-certified",
+    "postgresqlMajor": 18,
+    "testFile": "backend/tests/rls-wave-c/c03/c03AuthenticatedBoundariesPostgres18.test.js"
+  },
+  "printingLifecycleCertification": null,
+  "publicVerificationCertification": null,
+  "disposableCertificationFixtureRows": 78
+}

@@ -2,6 +2,7 @@ import { Response } from "express";
 import { z } from "zod";
 
 import { AuthRequest } from "../middleware/auth";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import {
   listNotificationsForUser,
@@ -42,6 +43,7 @@ export const listNotifications = async (req: AuthRequest, res: Response) => {
     const unreadOnly = parseBool(req.query.unreadOnly);
     const cursor = cursorSchema.safeParse(req.query.cursor).success ? String(req.query.cursor || "").trim() || undefined : undefined;
     const licenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
+    const databaseBoundary = b03BoundaryForRequest(req, "notification-list");
 
     const data = await listNotificationsForUser({
       userId: req.user.userId,
@@ -53,6 +55,7 @@ export const listNotifications = async (req: AuthRequest, res: Response) => {
       offset,
       unreadOnly,
       cursor,
+      databaseBoundary,
     });
 
     return res.json({
@@ -80,6 +83,7 @@ export const readNotification = async (req: AuthRequest, res: Response) => {
     }
     const id = paramsParsed.data.id;
     const licenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
+    const databaseBoundary = b03BoundaryForRequest(req, "notification-read");
 
     const updated = await markNotificationRead({
       notificationId: id,
@@ -88,6 +92,7 @@ export const readNotification = async (req: AuthRequest, res: Response) => {
       licenseeId: req.user.licenseeId,
       licenseeIds,
       orgId: req.user.orgId,
+      databaseBoundary,
     });
 
     if (!updated) return res.status(404).json({ success: false, error: "Notification not found" });
@@ -102,6 +107,7 @@ export const readAllNotifications = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const licenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
+    const databaseBoundary = b03BoundaryForRequest(req, "notification-read-all");
 
     const updatedCount = await markAllNotificationsRead({
       userId: req.user.userId,
@@ -109,6 +115,7 @@ export const readAllNotifications = async (req: AuthRequest, res: Response) => {
       licenseeId: req.user.licenseeId,
       licenseeIds,
       orgId: req.user.orgId,
+      databaseBoundary,
     });
 
     return res.json({

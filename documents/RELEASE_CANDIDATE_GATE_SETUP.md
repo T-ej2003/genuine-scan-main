@@ -52,3 +52,25 @@ If branch protection is available for your plan:
 7. Save changes.
 
 If branch protection is not available on your current plan, the workflow still runs and reports failures, but GitHub cannot hard-block merges until branch protection/rulesets are enabled.
+
+## Phase 1 local release evidence — 2026-07-24
+
+Baseline: `44ef0de8e1ca154663b5b3f45c14c15109806076` on
+`rls-full-integration`.
+
+- The disposable P2 integration stack now uses PostgreSQL 18.4, applies Prisma
+  migrations, and installs the exact generated RF7 ownership, policy, grant,
+  and verification package before application fixtures run.
+- Printing readiness uses only its reviewed `QRCode` projection, and sample
+  membership failures emit and map the established `QR_NOT_IN_PRINT_JOB`
+  lifecycle contract without exposing PostgreSQL or Prisma internals.
+- The release-candidate trust-critical gate, security release gate, frontend
+  and backend suites and builds, production dependency audits, integration
+  suite, deterministic generation, full RLS verification, and PostgreSQL 18.4
+  certification passed locally.
+- Generated RLS inventory: 79 tables, 77 FORCE-RLS targets, 339 policies,
+  60 column-privilege cells, and 16 authoritative SQL inputs. Source contract:
+  `79ed6c312c88d01f09601fe04f3c3d5de11bace66a11fcfef8814262bc034ae1`.
+- This evidence is local Phase 1 certification only. No staging smoke,
+  deployment, AWS, production, shared database, push, or Phase 2 action was
+  performed.

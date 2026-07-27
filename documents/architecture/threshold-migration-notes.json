@@ -1,4 +1,9 @@
 {
+  "backend/src/controllers/authAdminSecurityController.ts": {
+    "summary": "Authentication security administration still combines account recovery, MFA reset, session controls, and security evidence endpoints.",
+    "nextStep": "Split recovery, MFA, and session administration into focused handlers after the RLS rollout is closed.",
+    "targetMaxLines": 500
+  },
   "backend/src/controllers/governanceController.ts": {
     "summary": "Governance approval, compliance-pack, and policy endpoints are still consolidated in one controller.",
     "nextStep": "Move approval workflow orchestration and policy pack assembly into dedicated governance services and slimmer route handlers.",
@@ -14,6 +19,11 @@
     "nextStep": "Extract escalation and evidence orchestration into incident-response services with route-level composition only.",
     "targetMaxLines": 500
   },
+  "backend/src/controllers/print-job/errorResponses.ts": {
+    "summary": "Printing lifecycle error translation remains centralized so PostgreSQL domain errors map consistently across print-job handlers.",
+    "nextStep": "Separate lifecycle response families only when the shared error contract can remain exhaustive and fail closed.",
+    "targetMaxLines": 500
+  },
   "backend/src/controllers/licenseeController.ts": {
     "summary": "Licensee enrollment, policy, and operational endpoints still share one controller surface.",
     "nextStep": "Separate licensee administration from operational actions and move policy assembly into services.",
@@ -22,6 +32,11 @@
   "backend/src/controllers/printerAgentJobController.ts": {
     "summary": "Printer agent job scheduling, retries, upgrade-required backoff, and status reconciliation are still controller-led.",
     "nextStep": "Move job orchestration and reconciliation into printer-agent services and keep controllers request-focused.",
+    "targetMaxLines": 500
+  },
+  "backend/src/controllers/printerAgentController.ts": {
+    "summary": "Printer-agent registration, session, command, acknowledgement, and diagnostic endpoints remain consolidated behind one trust boundary.",
+    "nextStep": "Split session and command handlers after connector protocol certification can be preserved by focused modules.",
     "targetMaxLines": 500
   },
   "backend/src/controllers/printerController.ts": {

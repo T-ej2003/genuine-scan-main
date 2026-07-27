@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { MessageSquareText, RefreshCw, TimerReset } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { formatDistanceToNowStrict } from "date-fns";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";

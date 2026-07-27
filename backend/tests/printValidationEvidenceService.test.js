@@ -1,45 +1,25 @@
 const assert = require("assert");
-const { UserRole } = require("@prisma/client");
-
+const repositoryPath = require.resolve("../dist/rls-waves/session-c/c02/printingLifecycleRepository");
+let repositoryError = null;
+require.cache[repositoryPath] = {
+  id: repositoryPath,
+  filename: repositoryPath,
+  loaded: true,
+  exports: {
+    readPrintingProjection: async () => {
+      if (repositoryError) throw repositoryError;
+      return null;
+    },
+  },
+};
 const {
-  canViewPrintValidationEvidence,
   formatPrintValidationEvidenceMarkdown,
+  generatePrintValidationEvidenceReport,
   maskPublicCode,
 } = require("../dist/services/printValidationEvidenceService");
 
-const batch = {
-  licenseeId: "licensee-a",
-  manufacturerId: "manufacturer-a",
-};
-
 assert.strictEqual(maskPublicCode("c_abcdefghijklmnopqrstuvwxyz"), "c_abcd...uvwxyz");
 assert.strictEqual(maskPublicCode("short"), "sho...rt");
-
-assert.strictEqual(
-  canViewPrintValidationEvidence({ userId: "platform", role: UserRole.SUPER_ADMIN }, batch),
-  true,
-  "platform admin can view validation evidence"
-);
-assert.strictEqual(
-  canViewPrintValidationEvidence({ userId: "brand-a", role: UserRole.LICENSEE_ADMIN, licenseeId: "licensee-a" }, batch),
-  true,
-  "owning licensee admin can view validation evidence"
-);
-assert.strictEqual(
-  canViewPrintValidationEvidence({ userId: "brand-b", role: UserRole.LICENSEE_ADMIN, licenseeId: "licensee-b" }, batch),
-  false,
-  "foreign licensee admin cannot view validation evidence"
-);
-assert.strictEqual(
-  canViewPrintValidationEvidence({ userId: "manufacturer-a", role: UserRole.MANUFACTURER_ADMIN, licenseeId: "licensee-a" }, batch),
-  true,
-  "owning manufacturer admin can view validation evidence"
-);
-assert.strictEqual(
-  canViewPrintValidationEvidence({ userId: "operator-a", role: UserRole.MANUFACTURER_USER, licenseeId: "licensee-a" }, batch),
-  false,
-  "normal manufacturer operator cannot view admin validation evidence"
-);
 
 const markdown = formatPrintValidationEvidenceMarkdown({
   generatedAt: "2026-06-09T00:00:00.000Z",
@@ -66,4 +46,35 @@ assert.match(markdown, /Transport: tcp-raw/);
 assert.match(markdown, /audit-1/);
 assert.doesNotMatch(markdown, /\^XA|password|secret/i);
 
-console.log("print validation evidence service tests passed");
+(async () => {
+  repositoryError = {
+    code: "P2010",
+    meta: { code: "42501", message: "ERROR: PRINTING_BOUNDARY_DENIED" },
+  };
+  await assert.rejects(
+    generatePrintValidationEvidenceReport({
+      batchId: "00000000-0000-4000-8000-000000000001",
+      capability: "test-capability",
+      requestId: "test-request",
+    }),
+    (error) => error.statusCode === 404 && error.message === "Validation evidence not found."
+  );
+
+  repositoryError = {
+    code: "P2010",
+    meta: { code: "42501", message: "ERROR: unrelated permission failure" },
+  };
+  await assert.rejects(
+    generatePrintValidationEvidenceReport({
+      batchId: "00000000-0000-4000-8000-000000000001",
+      capability: "test-capability",
+      requestId: "test-request",
+    }),
+    (error) => error === repositoryError
+  );
+
+  console.log("print validation evidence service tests passed");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

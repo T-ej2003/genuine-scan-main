@@ -29,7 +29,39 @@ const fakePrisma = {
 };
 
 mockModule("config/database.js", { __esModule: true, default: fakePrisma });
-mockModule("services/auditService.js", { createAuditLog: async () => null });
+mockModule("services/auditService.js", {
+  createAuditLog: async () => null,
+  createAuditLogInTransaction: async () => null,
+});
+class C03AccessError extends Error {
+  constructor(message, statusCode = 403) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+const canonicalContext = {
+  userId: "00000000-0000-4000-8000-000000000301",
+  role: "PLATFORM_SUPER_ADMIN",
+  organizationId: "00000000-0000-4000-8000-000000000101",
+  licenseeId: "4f8e11f6-3a11-4d93-8a62-9dc54ea1e4c0",
+  manufacturerId: null,
+  authAssurance: "step-up-verified",
+  requestId: "00000000-0000-4000-8000-000000000901",
+  purpose: "test",
+};
+const runC03 = async (_boundary, callback) => callback({}, canonicalContext);
+mockModule("rls-waves/session-c/c03/c03ActorBoundary.js", {
+  C03AccessError,
+  c03CanonicalDbContext: (context) => context,
+  c03DatabaseSessionCapability: () => "test-capability",
+  c03RequestId: () => canonicalContext.requestId,
+  withC03ActorTransaction: runC03,
+  withC03ResourceTransaction: runC03,
+});
+mockModule("rls-waves/session-c/c03/c03PolicyRepository.js", {
+  listIncidentPolicyAlertsInTransaction: async () => [],
+  listPolicyRulesInTransaction: async () => ({ rules: [], total: 0 }),
+});
 mockModule("services/customerTrustService.js", {
   listCustomerTrustCredentialsForQr: async () => [],
   updateCustomerTrustCredentialReview: async () => null,
@@ -59,9 +91,14 @@ const { listIrIncidents } = require("../dist/controllers/irIncidentController");
 
 const makeReqRes = (query) => {
   const req = {
-    user: { userId: "admin-1", role: "SUPER_ADMIN" },
+    user: { userId: canonicalContext.userId, role: "PLATFORM_SUPER_ADMIN" },
     query,
     ip: "198.51.100.10",
+    get(name) {
+      return String(name).toLowerCase() === "x-incident-authorization-id"
+        ? "00000000-0000-4000-8000-000000000801"
+        : undefined;
+    },
   };
   const res = {
     statusCode: 200,
@@ -82,7 +119,7 @@ const run = async () => {
   const alerts = makeReqRes({
     limit: "20",
     offset: "0",
-    licenseeId: "4f8e11f6-3a11-4d93-8a62-9dc54ea1e4c0",
+    incidentId: "00000000-0000-4000-8000-000000000701",
     acknowledged: "false",
     severity: "HIGH",
     alertType: "SUSPICIOUS_DUPLICATE",
@@ -117,6 +154,7 @@ const run = async () => {
   const blankPagination = makeReqRes({
     limit: "",
     offset: "",
+    incidentId: "00000000-0000-4000-8000-000000000701",
     severity: "HIGH",
   });
   await listIrAlerts(blankPagination.req, blankPagination.res);

@@ -5,15 +5,16 @@ import { z } from "zod";
 import { AuthRequest } from "../middleware/auth";
 import {
   buildIncidentEvidenceAuditBundle,
+  deleteCommittedRetentionArtifacts,
   generateComplianceReport,
   getOrCreateRetentionPolicy,
+  loadIncidentEvidenceAuditSnapshot,
   listTenantFeatureFlags,
   runRetentionLifecycle,
   updateRetentionPolicy,
   upsertTenantFeatureFlag,
 } from "../services/governanceService";
-import { createAuditLog } from "../services/auditService";
-import prisma from "../config/database";
+import { createAuditLogInTransaction } from "../services/auditService";
 import {
   listCompliancePackJobs,
   loadCompliancePackJobBuffer,
@@ -21,6 +22,14 @@ import {
   runCompliancePackJob,
 } from "../services/compliancePackService";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
+import {
+  C03AccessError, c03CanonicalDbContext,
+  c03DatabaseSessionCapability,
+  c03RequestId,
+  withC03ActorTransaction,
+  withC03ResourceTransaction,
+} from "../rls-waves/session-c/c03/c03ActorBoundary";
+import { loadCompliancePackJobInTransaction } from "../rls-waves/session-c/c03/c03CompliancePackRepository";
 
 const flagUpdateSchema = z.object({
   licenseeId: z.string().uuid().optional(),
@@ -72,6 +81,13 @@ const compliancePackJobParamSchema = z.object({
   id: z.string().uuid("Invalid compliance pack job id"),
 }).strict();
 
+const compliancePackReadRoles = Object.values(UserRole);
+
+const compliancePackReadAssurance = (role: UserRole) =>
+  role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
+    ? "mfa-verified" as const
+    : "password-verified" as const;
+
 const resolveLicenseeScope = (req: AuthRequest, value?: string) => {
   if (!req.user) return null;
   if (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN) {
@@ -100,10 +116,31 @@ export const getFeatureFlags = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
 
-    const flags = await listTenantFeatureFlags(licenseeId);
+    const flags = await withC03ActorTransaction(
+      {
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
+        requestId: c03RequestId(req),
+        purpose: "governance-feature-flag-list",
+        licenseeId,
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN],
+        requiredAssurance: "mfa-verified",
+      },
+      async (tx, context) => {
+        const rows = await listTenantFeatureFlags(licenseeId, tx);
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
+          action: "TENANT_FEATURE_FLAGS_LISTED",
+          entityType: "TenantFeatureFlag",
+          entityId: licenseeId,
+          details: { count: rows.length },
+          ipAddress: req.ip,
+        });
+        return rows;
+      }
+    );
     return res.json({ success: true, data: { licenseeId, flags } });
   } catch (error) {
     console.error("getFeatureFlags error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to load feature flags" });
   }
 };
@@ -146,6 +183,7 @@ export const upsertFeatureFlag = async (req: AuthRequest, res: Response) => {
       },
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
+      securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
     });
 
     return res.status(202).json({
@@ -159,6 +197,7 @@ export const upsertFeatureFlag = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error("upsertFeatureFlag error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to save feature flag" });
   }
 };
@@ -176,10 +215,30 @@ export const getRetentionPolicyController = async (req: AuthRequest, res: Respon
       return res.status(400).json({ success: false, error: "licenseeId is required" });
     }
 
-    const policy = await getOrCreateRetentionPolicy(licenseeId);
+    const policy = await withC03ActorTransaction(
+      {
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
+        requestId: c03RequestId(req),
+        purpose: "governance-retention-policy-read",
+        licenseeId,
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN],
+        requiredAssurance: "mfa-verified",
+      },
+      async (tx, context) => {
+        const row = await getOrCreateRetentionPolicy(licenseeId, tx);
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
+          action: "EVIDENCE_RETENTION_POLICY_READ",
+          entityType: "EvidenceRetentionPolicy",
+          entityId: row.id,
+          ipAddress: req.ip,
+        });
+        return row;
+      }
+    );
     return res.json({ success: true, data: policy });
   } catch (error) {
     console.error("getRetentionPolicyController error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to load retention policy" });
   }
 };
@@ -224,6 +283,7 @@ export const patchRetentionPolicyController = async (req: AuthRequest, res: Resp
       },
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
+      securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
     });
 
     return res.status(202).json({
@@ -237,6 +297,7 @@ export const patchRetentionPolicyController = async (req: AuthRequest, res: Resp
     });
   } catch (error) {
     console.error("patchRetentionPolicyController error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to update retention policy" });
   }
 };
@@ -276,6 +337,7 @@ export const runRetentionJobController = async (req: AuthRequest, res: Response)
         },
         ipAddress: req.ip,
         userAgent: req.get("user-agent") || null,
+        securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
       });
 
       return res.status(202).json({
@@ -289,29 +351,37 @@ export const runRetentionJobController = async (req: AuthRequest, res: Response)
       });
     }
 
-    const result = await runRetentionLifecycle({
-      licenseeId,
-      startedByUserId: req.user.userId,
-      mode: parsed.data.mode,
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId,
-      action: "EVIDENCE_RETENTION_JOB_RUN",
-      entityType: "EvidenceRetentionJob",
-      entityId: result.job.id,
-      ipAddress: req.ip,
-      details: {
-        mode: parsed.data.mode,
-        evaluated: result.evaluated,
-        purged: result.purged,
+    const result = await withC03ActorTransaction(
+      {
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
+        requestId: c03RequestId(req),
+        purpose: "governance-retention-preview",
+        licenseeId,
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN],
+        requiredAssurance: "mfa-verified",
       },
-    });
-
-    return res.status(201).json({ success: true, data: result });
+      async (tx, context) => {
+        const row = await runRetentionLifecycle({
+          licenseeId,
+          startedByUserId: req.user!.userId,
+          mode: parsed.data.mode,
+        }, tx);
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
+          action: "EVIDENCE_RETENTION_JOB_RUN",
+          entityType: "EvidenceRetentionJob",
+          entityId: row.job.id,
+          ipAddress: req.ip,
+          details: { mode: parsed.data.mode, evaluated: row.evaluated, purged: row.purged },
+        });
+        return row;
+      }
+    );
+    deleteCommittedRetentionArtifacts(result.storageKeysToDelete);
+    const { storageKeysToDelete: _storageKeys, ...response } = result;
+    return res.status(201).json({ success: true, data: response });
   } catch (error) {
     console.error("runRetentionJobController error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to run retention job" });
   }
 };
@@ -326,48 +396,40 @@ export const exportIncidentEvidenceBundleController = async (req: AuthRequest, r
     }
     const incidentId = paramsParsed.data.id;
 
-    const incident = await prisma.incident.findFirst({
-      where:
-        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-          ? { id: incidentId }
-          : { id: incidentId, licenseeId: req.user.licenseeId || "__none__" },
-      select: { id: true, licenseeId: true },
-    });
-
-    if (!incident) {
-      const matchingComplianceJob = await prisma.compliancePackJob.findFirst({
-        where:
-          req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-            ? { id: incidentId }
-            : { id: incidentId, licenseeId: req.user.licenseeId || "__none__" },
-        select: { id: true },
-      });
-      if (matchingComplianceJob) {
-        return res.status(400).json({
-          success: false,
-          error: "That ID belongs to a compliance pack job. Enter an incident ID to export an incident evidence bundle.",
+    const snapshot = await withC03ResourceTransaction(
+      {
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
+        requestId: c03RequestId(req),
+        purpose: "incident-evidence-audit-export",
+        resourceId: incidentId,
+        resourceType: "incident",
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN],
+        requiredAssurance: "mfa-verified",
+      },
+      async (tx, context) => {
+        const row = await loadIncidentEvidenceAuditSnapshot(incidentId, tx);
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
+          action: "INCIDENT_EVIDENCE_BUNDLE_EXPORTED",
+          entityType: "Incident",
+          entityId: incidentId,
+          ipAddress: req.ip,
+          details: {
+            evidenceCount: row.evidence.length,
+            eventsCount: row.events.length,
+            fingerprintCount: row.evidenceFingerprints.length,
+          },
         });
+        return row;
       }
-      return res.status(404).json({ success: false, error: "Incident not found" });
-    }
-
-    const bundle = await buildIncidentEvidenceAuditBundle(incident.id);
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: incident.licenseeId || undefined,
-      action: "INCIDENT_EVIDENCE_BUNDLE_EXPORTED",
-      entityType: "Incident",
-      entityId: incident.id,
-      ipAddress: req.ip,
-      details: bundle.metadata,
-    });
+    );
+    const bundle = await buildIncidentEvidenceAuditBundle(snapshot);
 
     res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename=\"${bundle.fileName}\"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${bundle.fileName}"`);
     return res.status(200).send(bundle.buffer);
   } catch (error) {
     console.error("exportIncidentEvidenceBundleController error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to export incident evidence bundle" });
   }
 };
@@ -381,23 +443,45 @@ export const generateComplianceReportController = async (req: AuthRequest, res: 
     }
 
     const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
+    if (!licenseeId) return res.status(400).json({ success: false, error: "licenseeId is required" });
     const from = toDate(parsed.data.from);
     const to = toDate(parsed.data.to);
 
-    const report = await generateComplianceReport({
-      actor: {
-        userId: req.user.userId,
-        role: req.user.role,
-        licenseeId: req.user.licenseeId,
+    const report = await withC03ActorTransaction(
+      {
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
+        requestId: c03RequestId(req),
+        purpose: "governance-compliance-report",
+        licenseeId,
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN],
+        requiredAssurance: "mfa-verified",
       },
-      licenseeId,
-      from,
-      to,
-    });
+      async (tx, context) => {
+        const row = await generateComplianceReport({
+          actor: {
+            userId: req.user!.userId,
+            role: req.user!.role,
+            licenseeId: req.user!.licenseeId,
+          },
+          licenseeId,
+          from,
+          to,
+        }, tx);
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
+          action: "COMPLIANCE_REPORT_GENERATED",
+          entityType: "ComplianceReport",
+          entityId: licenseeId,
+          details: { from: from?.toISOString() || null, to: to?.toISOString() || null },
+          ipAddress: req.ip,
+        });
+        return row;
+      }
+    );
 
     return res.json({ success: true, data: report });
   } catch (error) {
     console.error("generateComplianceReportController error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to generate compliance report" });
   }
 };
@@ -425,11 +509,13 @@ export const runCompliancePackController = async (req: AuthRequest, res: Respons
       licenseeId,
       from,
       to,
+      securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
     });
 
     return res.status(201).json({ success: true, data: out.job });
   } catch (error) {
     console.error("runCompliancePackController error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     const rawMessage = error instanceof Error ? String(error.message || "").trim() : "";
     const safeMessage =
       rawMessage && /missing|invalid|not configured|failed|error|denied|unavailable|timeout|encryption|signature/i.test(rawMessage)
@@ -450,11 +536,18 @@ export const listCompliancePackJobsController = async (req: AuthRequest, res: Re
     const limit = parsed.data.limit ?? 20;
     const offset = parsed.data.offset ?? 0;
     const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
+    if (!licenseeId) return res.status(400).json({ success: false, error: "licenseeId is required" });
 
     const result = await listCompliancePackJobs({
       licenseeId,
       limit,
       offset,
+      actor: {
+        userId: req.user.userId,
+        role: req.user.role,
+        licenseeId: req.user.licenseeId,
+      },
+      securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
     });
 
     return res.json({
@@ -468,6 +561,7 @@ export const listCompliancePackJobsController = async (req: AuthRequest, res: Re
     });
   } catch (error) {
     console.error("listCompliancePackJobsController error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to list compliance pack jobs" });
   }
 };
@@ -480,20 +574,28 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Compliance pack job ID is required" });
     }
 
-    const row = await prisma.compliancePackJob.findFirst({
-      where:
-        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-          ? { id: paramsParsed.data.id }
-          : { id: paramsParsed.data.id, licenseeId: req.user.licenseeId || "__none__" },
-      select: {
-        id: true,
-        licenseeId: true,
-        fileName: true,
-        storageKey: true,
-        status: true,
+    const snapshot = await withC03ResourceTransaction(
+      {
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
+        requestId: c03RequestId(req),
+        purpose: "compliance-pack-download",
+        resourceId: paramsParsed.data.id,
+        resourceType: "compliancePackJob",
+        allowedRoles: compliancePackReadRoles,
+        requiredAssurance: compliancePackReadAssurance(req.user.role),
       },
-    });
-    if (!row) return res.status(404).json({ success: false, error: "Compliance pack job not found" });
+      async (tx, context) => {
+        const result = await loadCompliancePackJobInTransaction<any>(tx, context, paramsParsed.data.id);
+        await createAuditLogInTransaction(tx, c03CanonicalDbContext(context), {
+          action: "COMPLIANCE_PACK_DOWNLOADED",
+          entityType: "CompliancePackJob",
+          entityId: paramsParsed.data.id,
+          ipAddress: req.ip,
+        });
+        return result;
+      }
+    );
+    const row = snapshot.job;
     if (row.status !== "COMPLETED" || !row.storageKey || !row.fileName) {
       return res.status(409).json({ success: false, error: "Compliance pack is not ready" });
     }
@@ -508,6 +610,7 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
             role: req.user.role,
             licenseeId: req.user.licenseeId || null,
           },
+          securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
         });
         buffer = await loadCompliancePackJobBuffer(rebuilt.job.storageKey || "");
       } catch (rebuildError) {
@@ -521,20 +624,12 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
       });
     }
 
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: row.licenseeId || undefined,
-      action: "COMPLIANCE_PACK_DOWNLOADED",
-      entityType: "CompliancePackJob",
-      entityId: row.id,
-      ipAddress: req.ip,
-    });
-
     res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename=\"${row.fileName}\"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${row.fileName}"`);
     return res.status(200).send(buffer);
   } catch (error) {
     console.error("downloadCompliancePackJobController error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to download compliance pack" });
   }
 };

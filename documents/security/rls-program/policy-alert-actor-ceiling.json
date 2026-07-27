@@ -1,0 +1,441 @@
+{
+  "schemaVersion": 1,
+  "id": "policy-alert-actor-ceiling-v1",
+  "decisionId": "decision-context-policy-alert-actor-ceiling",
+  "generatedFrom": [
+    "documents/security/rls-program/decisions.json",
+    "documents/security/rls-program/workflows.json",
+    "documents/security/rls-program/command-semantics.json",
+    "documents/security/rls-program/tables.json",
+    "documents/security/rls-program/context-boundary-families.json",
+    "documents/security/rls-program/platform-read-scope-boundary.json",
+    "documents/security/rls-program/operator-boundaries.json",
+    "documents/security/rls-program/worker-boundaries.json",
+    "documents/security/rls-program/runtime-identities.json",
+    "documents/security/rls-program/ARCHITECTURE.md",
+    "backend/prisma/schema.prisma",
+    "backend/src/controllers/tracePolicyController.ts",
+    "backend/src/controllers/irAlertController.ts",
+    "backend/src/controllers/auditController.ts",
+    "backend/src/services/attentionQueueService.ts",
+    "backend/src/services/siemOutboxService.ts",
+    "backend/src/routes/index.ts",
+    "backend/src/routes/auditRoutes.ts"
+  ],
+  "alertClasses": [
+    { "class": "tenant-security-alert-read", "disposition": "allowed-after-runtime-implementation", "actorClasses": ["licensee-admin"], "requiredAssurance": "mfa-verified", "maximumFreshnessMinutes": 30 },
+    { "class": "manufacturer-alert-read", "disposition": "allowed-only-through-future-isolated-safe-summary", "actorClasses": ["manufacturer"], "requiredAssurance": "password-verified", "maximumFreshnessMinutes": 0 },
+    { "class": "platform-alert-triage", "disposition": "allowed-only-with-bounded-platform-scope", "actorClasses": ["platform-admin"], "requiredAssurance": "mfa-verified", "maximumFreshnessMinutes": 30 },
+    { "class": "incident-response-alert-read", "disposition": "blocked-until-durable-incident-authorization-exists", "actorClasses": ["platform-admin"], "requiredAssurance": "step-up-verified", "maximumFreshnessMinutes": 30 },
+    { "class": "alert-acknowledgement", "disposition": "allowed-after-runtime-implementation", "actorClasses": ["licensee-admin"], "requiredAssurance": "mfa-verified", "maximumFreshnessMinutes": 30 },
+    { "class": "alert-assignment", "disposition": "prohibited-schema-state-missing", "actorClasses": [], "requiredAssurance": "none-grants-access", "maximumFreshnessMinutes": 0 },
+    { "class": "alert-resolution", "disposition": "prohibited-schema-state-missing", "actorClasses": [], "requiredAssurance": "none-grants-access", "maximumFreshnessMinutes": 0 },
+    { "class": "alert-suppression", "disposition": "prohibited-schema-state-missing", "actorClasses": [], "requiredAssurance": "none-grants-access", "maximumFreshnessMinutes": 0 },
+    { "class": "alert-escalation", "disposition": "allowed-only-with-active-incident-authorization", "actorClasses": ["platform-admin"], "requiredAssurance": "step-up-verified", "maximumFreshnessMinutes": 30 },
+    { "class": "worker-alert-delivery", "disposition": "existing-worker-contract-only", "actorClasses": ["worker"], "requiredAssurance": "system-verified", "maximumFreshnessMinutes": 0 },
+    { "class": "operator-alert-procedure", "disposition": "exact-operator-procedure-only", "actorClasses": ["operator-admin"], "requiredAssurance": "operator-approved", "maximumFreshnessMinutes": 60 },
+    { "class": "public-alert-status", "disposition": "prohibited-no-product-contract", "actorClasses": [], "requiredAssurance": "none-grants-access", "maximumFreshnessMinutes": 0 },
+    { "class": "prohibited-alert-access", "disposition": "prohibited", "actorClasses": [], "requiredAssurance": "none-grants-access", "maximumFreshnessMinutes": 0 }
+  ],
+  "actorCeilings": {
+    "licenseeAdmin": {
+      "allowedClasses": ["tenant-security-alert-read", "alert-acknowledgement"],
+      "scope": "PolicyAlert.licenseeId must equal the database-verified canonical licensee for an active LICENSEE_ADMIN or ORG_ADMIN actor.",
+      "foreignTenantAccess": false,
+      "platformOnlyDetectionAccess": false,
+      "platformOperatorAssignmentAllowed": false,
+      "suppressionAllowed": false,
+      "resolutionAllowed": false
+    },
+    "manufacturer": {
+      "allowedClasses": ["manufacturer-alert-read"],
+      "scope": "PolicyAlert.manufacturerId must equal the database-verified manufacturer actor; any batch or QR reference must independently resolve to that actor and one active linked licensee.",
+      "wholeLicenseeVisibility": false,
+      "unrelatedIncidentAccess": false,
+      "mutationAllowed": false
+    },
+    "platformAdmin": {
+      "allowedClasses": ["platform-alert-triage", "incident-response-alert-read", "alert-escalation"],
+      "databaseRevalidationRequired": true,
+      "roleAloneAuthorizesAccess": false,
+      "boundedSelectorRequired": true,
+      "purposeRequired": true,
+      "requestIdRequired": true,
+      "immutableAttributionRequired": true
+    },
+    "incidentResponse": {
+      "activeIncidentRequired": true,
+      "incidentScopedAuthorizationRequired": true,
+      "authorizationExpiryRequired": true,
+      "maximumAuthorizationMinutes": 60,
+      "stepUpRequired": true,
+      "unrelatedTenantBrowsingAllowed": false
+    },
+    "operator": {
+      "directAlertTableAccess": false,
+      "exactProcedureOnly": true,
+      "boundaryIds": ["operator-boundary-tenant-incident-summary"]
+    },
+    "worker": {
+      "humanImpersonationAllowed": false,
+      "boundaryIds": ["worker-boundary-siem-outbox-delivery"],
+      "deliveryOnly": true
+    },
+    "public": {
+      "accessAllowed": false,
+      "reason": "No registered product route has an unguessable proof-bound, non-enumerable public alert projection."
+    }
+  },
+  "requiredAssurance": {
+    "tenantSecurityAlertRead": "mfa-verified within ADMIN_STEP_UP_WINDOW_MINUTES (maximum 30)",
+    "manufacturerAlertRead": "password-verified active session for the future safe-summary projection; any future mutation requires separately approved MFA",
+    "platformAlertTriage": "mfa-verified within ADMIN_STEP_UP_WINDOW_MINUTES (maximum 30)",
+    "incidentResponseAlertRead": "step-up-verified plus active incident authorization expiring within 60 minutes",
+    "alertAcknowledgement": "mfa-verified within ADMIN_STEP_UP_WINDOW_MINUTES (maximum 30)",
+    "alertEscalation": "step-up-verified plus active incident authorization expiring within 60 minutes",
+    "workerAlertDelivery": "system-verified",
+    "operatorAlertProcedure": "operator-approved"
+  },
+  "scopeModels": {
+    "policyAlertTerminal": "PolicyAlert.licenseeId is mandatory and is the terminal tenant boundary. NULL or blank is invalid and never global.",
+    "policyRuleParent": "When policyRuleId is present, PolicyRule.licenseeId must equal PolicyAlert.licenseeId; an organization-scoped rule must resolve to the same Licensee.organization, and a manufacturer rule must also match manufacturerId.",
+    "batchParent": "When batchId is present, Batch.licenseeId must equal PolicyAlert.licenseeId; if manufacturerId is present, Batch.manufacturerId must equal it.",
+    "qrParent": "When qrCodeId is present, QRCode.licenseeId and QRCode.batch.licenseeId must equal PolicyAlert.licenseeId; a manufacturer actor must own the referenced batch.",
+    "incidentParent": "When incidentId is present, Incident.licenseeId must be non-NULL and equal PolicyAlert.licenseeId; incident authorization is an additional ceiling, never a replacement for tenant scope.",
+    "manufacturerActor": "When manufacturerId is present, it must identify the active manufacturer User and equal app.manufacturer_id for manufacturer reads; the active Licensee and Organization and a ManufacturerLicenseeLink row must agree.",
+    "platformOnlySecurityEvent": "SecurityEventOutbox rows are system-owned delivery records. JSON payload scope is not authority and must be revalidated from authoritative identifiers before delivery.",
+    "ambiguousOrMultiParent": "All non-NULL parents must resolve to one licensee and consistent manufacturer. Any conflict, missing parent, disabled tenant, or ambiguous relationship fails closed.",
+    "nullScopeBecomesGlobal": false
+  },
+  "terminalAuthorizationBoundaries": [
+    { "alertClass": "tenant-security-alert-read", "terminalBoundary": "exact active licensee" },
+    { "alertClass": "manufacturer-alert-read", "terminalBoundary": "exact manufacturer actor plus one verified linked licensee" },
+    { "alertClass": "platform-alert-triage", "terminalBoundary": "one database-validated licensee, manufacturer, batch, QR, actor, or alert selector under platform-read-scope-v1" },
+    { "alertClass": "incident-response-alert-read", "terminalBoundary": "one active incident authorization plus its exact licensee" },
+    { "alertClass": "alert-acknowledgement", "terminalBoundary": "exact alert ID under canonical licensee" },
+    { "alertClass": "alert-escalation", "terminalBoundary": "exact alert and exact active incident sharing one licensee" },
+    { "alertClass": "worker-alert-delivery", "terminalBoundary": "durable SecurityEventOutbox row under worker-boundary-siem-outbox-delivery" },
+    { "alertClass": "operator-alert-procedure", "terminalBoundary": "exact tenant and incident arguments under operator-boundary-tenant-incident-summary" }
+  ],
+  "allowedProjections": {
+    "tenantSecurityAlertRead": ["id", "alertType", "severity", "message", "incidentId", "batchId", "qrCodeId", "manufacturerId", "acknowledgedAt", "createdAt"],
+    "manufacturerAlertRead": ["id", "alertType", "severity", "safeSummary", "batchId", "qrCodeId", "acknowledgedAt", "createdAt"],
+    "platformAlertTriage": ["id", "licenseeId", "alertType", "severity", "message", "score", "policyRuleId", "incidentId", "batchId", "qrCodeId", "manufacturerId", "acknowledgedAt", "createdAt"],
+    "incidentResponseAlertRead": ["id", "licenseeId", "alertType", "severity", "safeSummary", "policyRuleId", "incidentId", "batchId", "qrCodeId", "manufacturerId", "acknowledgedAt", "createdAt"],
+    "alertAcknowledgement": ["id", "licenseeId", "acknowledgedAt", "acknowledgedByUserId"],
+    "alertEscalation": ["id", "licenseeId", "incidentId"],
+    "workerAlertDelivery": ["id", "eventType", "allowlistedPayload", "status", "attempts", "nextAttemptAt", "sentAt", "createdAt", "updatedAt"],
+    "operatorAlertProcedure": ["incident_id", "tenant_id", "status", "severity", "event_type", "created_at", "redacted_summary"]
+  },
+  "prohibitedFields": [
+    "PolicyAlert.details",
+    "rawDetectionPayload",
+    "ruleSecret",
+    "internalScoringLogic",
+    "passwordHash",
+    "tokenHash",
+    "resetHash",
+    "mfaSecret",
+    "recoveryCode",
+    "backupCodeHash",
+    "credentialPublicKey",
+    "sessionToken",
+    "privateKey",
+    "signingMaterial",
+    "fullIpAddress",
+    "deviceFingerprint",
+    "privateForensicMetadata",
+    "rawAuditDetails",
+    "customerPersonalData",
+    "unrelatedTenantIdentifier",
+    "siemWebhookUrl",
+    "siemWebhookSecret"
+  ],
+  "nestedProjectionRules": {
+    "rawJsonReturned": false,
+    "recursiveRedactionRequired": true,
+    "unknownNestedKeysDenied": true,
+    "emailsAllowed": false,
+    "qrPayloadOrTokenMaterialAllowed": false,
+    "displayNames": "Only an approved licensee, rule, batch, or actor display name may be joined; email, prefix, code payload, and security state are omitted."
+  },
+  "readBounds": {
+    "tenantSecurityAlertRead": { "pagination": "keyset", "maximumRows": 100, "maximumOffset": 0, "maximumDateWindowDays": 31, "ordering": ["createdAt DESC", "id DESC"] },
+    "manufacturerAlertRead": { "pagination": "keyset", "maximumRows": 50, "maximumOffset": 0, "maximumDateWindowDays": 31, "ordering": ["createdAt DESC", "id DESC"] },
+    "platformAlertTriage": { "pagination": "keyset", "maximumRows": 100, "maximumOffset": 0, "maximumDateWindowDays": 31, "ordering": ["createdAt DESC", "id DESC"] },
+    "incidentResponseAlertRead": { "pagination": "keyset", "maximumRows": 100, "maximumOffset": 0, "maximumDateWindowDays": 31, "ordering": ["createdAt DESC", "id DESC"] },
+    "countAndListSameScope": true,
+    "countAndListSameRepeatableReadSnapshot": true,
+    "readAttributionSameTransaction": true
+  },
+  "lifecycleTransitions": [
+    {
+      "class": "alert-acknowledgement",
+      "sourceState": "acknowledgedAt IS NULL AND acknowledgedByUserId IS NULL",
+      "targetState": "acknowledgedAt IS NOT NULL AND acknowledgedByUserId = verified actor",
+      "allowedColumns": ["acknowledgedAt", "acknowledgedByUserId"],
+      "protectedColumns": ["id", "licenseeId", "alertType", "severity", "message", "score", "policyRuleId", "incidentId", "batchId", "qrCodeId", "manufacturerId", "details", "createdAt"],
+      "concurrency": "database compare-and-set on id, canonical licenseeId, acknowledgedAt IS NULL, and acknowledgedByUserId IS NULL; exactly one row may change",
+      "idempotency": "A replay with the same idempotency key and actor returns the original acknowledgement; a conflicting actor, scope, or payload is denied.",
+      "replay": "Clearing acknowledgement is prohibited. Zero-row CAS reloads the scoped row and returns the existing result only for a matching replay.",
+      "requiredReason": false,
+      "auditEvent": "POLICY_ALERT_ACKNOWLEDGED",
+      "approvalRequirement": "none beyond actor ceiling and MFA",
+      "notificationSideEffects": "Tenant-safe notification is enqueued after the transition in the same transaction/outbox boundary; no email, raw payload, or foreign scope."
+    },
+    {
+      "class": "alert-escalation",
+      "sourceState": "incidentId IS NULL",
+      "targetState": "incidentId = exact active incident ID sharing PolicyAlert.licenseeId",
+      "allowedColumns": ["incidentId"],
+      "protectedColumns": ["id", "licenseeId", "alertType", "severity", "message", "score", "policyRuleId", "batchId", "qrCodeId", "manufacturerId", "acknowledgedAt", "acknowledgedByUserId", "details", "createdAt"],
+      "concurrency": "database compare-and-set on alert id, canonical licenseeId, and incidentId IS NULL after locking or validating the exact incident in the same transaction",
+      "idempotency": "A matching replay may return the existing incident link; a different incident ID is a conflict and is denied.",
+      "replay": "Unlinking or reassigning an incident is prohibited without a separately approved lifecycle.",
+      "requiredReason": true,
+      "auditEvent": "POLICY_ALERT_ESCALATED_TO_INCIDENT",
+      "approvalRequirement": "active incident authorization plus step-up; operator procedure if durable incident authorization is unavailable",
+      "notificationSideEffects": "Only incident-scoped redacted notifications are emitted after commit through an approved outbox."
+    },
+    {
+      "class": "alert-assignment",
+      "sourceState": "unsupported",
+      "targetState": "unsupported",
+      "allowedColumns": [],
+      "protectedColumns": ["licenseeId", "manufacturerId", "incidentId", "acknowledgedByUserId"],
+      "concurrency": "no transition permitted because PolicyAlert has no assignment state or version",
+      "idempotency": "not applicable",
+      "replay": "deny",
+      "requiredReason": true,
+      "auditEvent": "not-approved",
+      "approvalRequirement": "new product and schema decision required",
+      "notificationSideEffects": "none"
+    },
+    {
+      "class": "alert-resolution",
+      "sourceState": "unsupported",
+      "targetState": "unsupported",
+      "allowedColumns": [],
+      "protectedColumns": ["licenseeId", "manufacturerId", "incidentId", "acknowledgedAt", "acknowledgedByUserId"],
+      "concurrency": "no transition permitted because PolicyAlert has no resolution status, resolvedAt, reason, version, or immutable transition record",
+      "idempotency": "not applicable",
+      "replay": "deny",
+      "requiredReason": true,
+      "auditEvent": "not-approved",
+      "approvalRequirement": "new product and schema decision required",
+      "notificationSideEffects": "none"
+    },
+    {
+      "class": "alert-suppression",
+      "sourceState": "unsupported",
+      "targetState": "unsupported",
+      "allowedColumns": [],
+      "protectedColumns": ["licenseeId", "manufacturerId", "incidentId", "acknowledgedAt", "acknowledgedByUserId"],
+      "concurrency": "no transition permitted because PolicyAlert has no suppression status, expiry, reason, approver, or version",
+      "idempotency": "not applicable",
+      "replay": "deny",
+      "requiredReason": true,
+      "auditEvent": "not-approved",
+      "approvalRequirement": "new product and schema decision required",
+      "notificationSideEffects": "none"
+    }
+  ],
+  "mutableColumns": {
+    "alertAcknowledgement": ["acknowledgedAt", "acknowledgedByUserId"],
+    "alertEscalation": ["incidentId"],
+    "assignment": [],
+    "resolution": [],
+    "suppression": []
+  },
+  "protectedColumns": ["id", "licenseeId", "alertType", "severity", "message", "score", "policyRuleId", "batchId", "qrCodeId", "manufacturerId", "details", "createdAt"],
+  "concurrencyRules": {
+    "applicationPrecheckAloneSufficient": false,
+    "acknowledgementDatabaseEnforcement": "compare-and-set",
+    "escalationDatabaseEnforcement": "compare-and-set plus same-transaction incident validation",
+    "assignmentDatabaseEnforcement": "prohibited",
+    "resolutionDatabaseEnforcement": "prohibited",
+    "suppressionDatabaseEnforcement": "prohibited",
+    "deterministicConcurrentLoser": "matching replay returns the original result; conflicting transition returns conflict without mutation"
+  },
+  "idempotencyReplaySemantics": {
+    "idempotencyKeyRequiredForMutations": true,
+    "scope": "actor ID + canonical licensee + alert ID + action class",
+    "payloadDigestRequired": true,
+    "conflictingReplayDenied": true,
+    "sideEffectsDeduplicated": true
+  },
+  "purposeCodes": [
+    { "code": "tenant-alert-review", "classes": ["tenant-security-alert-read"] },
+    { "code": "manufacturer-own-alert-review", "classes": ["manufacturer-alert-read"] },
+    { "code": "platform-alert-triage", "classes": ["platform-alert-triage"] },
+    { "code": "incident-response-alert-triage", "classes": ["incident-response-alert-read"] },
+    { "code": "alert-acknowledgement", "classes": ["alert-acknowledgement"] },
+    { "code": "alert-escalation", "classes": ["alert-escalation"] },
+    { "code": "siem-alert-delivery", "classes": ["worker-alert-delivery"] },
+    { "code": "operator-incident-alert-summary", "classes": ["operator-alert-procedure"] }
+  ],
+  "purposeRules": {
+    "required": true,
+    "allowlistedCodesOnly": true,
+    "freeTextEstablishesAuthority": false,
+    "freeTextReasonMaySupplementAuditOnly": true
+  },
+  "auditRequirements": {
+    "required": true,
+    "immutable": true,
+    "sameTransactionAsReadOrMutation": true,
+    "fields": ["actorId", "role", "assurance", "requestId", "purposeCode", "alertClass", "alertIdOrBoundedSelector", "selectedScope", "sourceState", "targetState", "reason", "workflowId", "route", "resultCountOrBoundedSummary", "outcome", "timestamp"],
+    "denialsRecordedForSensitivePlatformIncidentAndMutationActions": true,
+    "returnedPayloadLogged": false,
+    "membershipOrForeignScopeLeaked": false
+  },
+  "approvalRequirements": {
+    "tenantRead": "none beyond verified actor, scope, MFA, purpose, and attribution",
+    "manufacturerRead": "none beyond verified actor, exact own-object scope, purpose, and attribution",
+    "platformTriage": "none beyond bounded platform-read-scope-v1 contract",
+    "incidentReadOrEscalation": "active expiring incident authorization; use operator-boundary-tenant-incident-summary if unavailable",
+    "assignmentResolutionSuppression": "not approved"
+  },
+  "workerOperatorMappings": [
+    { "alertClass": "worker-alert-delivery", "boundaryId": "worker-boundary-siem-outbox-delivery", "ordinaryHumanContext": false, "directHumanTableAccess": false },
+    { "alertClass": "operator-alert-procedure", "boundaryId": "operator-boundary-tenant-incident-summary", "ordinaryHumanContext": false, "directHumanTableAccess": false },
+    { "alertClass": "incident-response-alert-read", "boundaryId": "operator-boundary-tenant-incident-summary", "ordinaryHumanContext": false, "directHumanTableAccess": false }
+  ],
+  "publicAccessDisposition": {
+    "primaryClass": "public-alert-status",
+    "allowed": false,
+    "proofBindingRequiredIfReconsidered": true,
+    "enumerationProtectionRequiredIfReconsidered": true,
+    "rateLimitRequiredIfReconsidered": true,
+    "approvedPublicWorkflowIds": [],
+    "deferredDecision": "decision-context-public-read-contract"
+  },
+  "workflowClassifications": [
+    {
+      "workflowId": "workflow-http-backend-src-controllers-trace-policy-controller-ts-get-policy-alerts-controller",
+      "primaryClass": "tenant-security-alert-read",
+      "inventoryBoundaryType": "authenticated-context",
+      "actorClasses": ["licensee-admin"],
+      "requiredAssurance": "mfa-verified",
+      "purposeCodes": ["tenant-alert-review"],
+      "requiredSelectors": ["canonicalLicenseeId"],
+      "scopeRule": "PolicyAlert.licenseeId must equal the active LICENSEE_ADMIN or ORG_ADMIN actor's database-verified canonical licensee. Platform and manufacturer actors are denied on this route.",
+      "executionBoundary": "normal-actor-context",
+      "tableCommandProjections": [{ "tableId": "table-policy-alert", "commands": { "SELECT": ["id", "alertType", "severity", "message", "incidentId", "batchId", "qrCodeId", "manufacturerId", "acknowledgedAt", "createdAt"] } }],
+      "maximumRows": 100,
+      "maximumDateWindowDays": 31,
+      "implementationStatus": "blocked-runtime-contract-pending",
+      "blockers": ["The current route lacks recent MFA, fixed purpose, request attribution, date/keyset bounds, transaction-client-only access, explicit select, and same-snapshot count/list; platform role currently reaches a blank-scope fallback."]
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-trace-policy-controller-ts-acknowledge-policy-alert-controller",
+      "primaryClass": "alert-acknowledgement",
+      "inventoryBoundaryType": "authenticated-context",
+      "actorClasses": ["licensee-admin"],
+      "requiredAssurance": "mfa-verified",
+      "purposeCodes": ["alert-acknowledgement"],
+      "requiredSelectors": ["canonicalLicenseeId", "alertId"],
+      "scopeRule": "The exact alert ID must resolve under the active tenant administrator's canonical licensee; platform and manufacturer actors are denied on this route.",
+      "executionBoundary": "normal-actor-context",
+      "tableCommandProjections": [{ "tableId": "table-policy-alert", "commands": { "SELECT": ["id", "licenseeId", "acknowledgedAt", "acknowledgedByUserId"], "UPDATE": ["acknowledgedAt", "acknowledgedByUserId"] } }],
+      "maximumRows": 1,
+      "maximumDateWindowDays": 0,
+      "implementationStatus": "blocked-runtime-contract-pending",
+      "blockers": ["The current controller performs a pre-check plus unconditional update, has no database CAS/idempotency record, returns the full row, and writes audit/notifications outside one canonical transaction."]
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts",
+      "primaryClass": "incident-response-alert-read",
+      "inventoryBoundaryType": "authenticated-context",
+      "actorClasses": ["platform-admin"],
+      "requiredAssurance": "step-up-verified",
+      "purposeCodes": ["incident-response-alert-triage"],
+      "requiredSelectors": ["incidentId"],
+      "scopeRule": "Every alert must match an active unexpired incident authorization and its exact licensee; optional alert, batch, QR, manufacturer, rule, type, severity, or acknowledgement filters only narrow that set.",
+      "executionBoundary": "incident-bound-actor-context-or-approved-operator-boundary",
+      "tableCommandProjections": [{ "tableId": "table-policy-alert", "commands": { "SELECT": ["id", "licenseeId", "alertType", "severity", "message", "score", "policyRuleId", "incidentId", "batchId", "qrCodeId", "manufacturerId", "acknowledgedAt", "createdAt"] } }],
+      "maximumRows": 100,
+      "maximumDateWindowDays": 31,
+      "implementationStatus": "blocked-product-state-missing",
+      "blockers": ["The product has no durable expiring incident-read authorization. The current route lacks recent MFA, incident binding, purpose, attribution, explicit select, keyset/date bounds, same transaction, and redacts neither nested emails nor raw alert details."]
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-ir-alert-controller-ts-patch-ir-alert",
+      "primaryClass": "alert-escalation",
+      "inventoryBoundaryType": "authenticated-context",
+      "actorClasses": ["platform-admin"],
+      "requiredAssurance": "step-up-verified",
+      "purposeCodes": ["alert-escalation"],
+      "requiredSelectors": ["alertId", "incidentId"],
+      "scopeRule": "The exact alert and exact active incident must share one licensee and fall under one unexpired incident authorization; acknowledgement, unlinking, reassignment, and mixed-field patch requests are denied on this workflow.",
+      "executionBoundary": "incident-bound-actor-context-or-approved-operator-boundary",
+      "tableCommandProjections": [{ "tableId": "table-policy-alert", "commands": { "SELECT": ["id", "licenseeId", "incidentId"], "UPDATE": ["incidentId"] } }],
+      "maximumRows": 1,
+      "maximumDateWindowDays": 0,
+      "implementationStatus": "blocked-product-state-missing",
+      "blockers": ["The current generic patch accepts acknowledgement toggles and incident unlinking, does not validate incident tenant/authorization, lacks reason, request ID, purpose, CAS/idempotency, and atomic audit/outbox behavior. Split or narrow the route before implementation."]
+    },
+    {
+      "workflowId": "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox",
+      "primaryClass": "worker-alert-delivery",
+      "inventoryBoundaryType": "restricted-worker",
+      "actorClasses": ["worker"],
+      "requiredAssurance": "system-verified",
+      "purposeCodes": ["siem-alert-delivery"],
+      "requiredSelectors": ["durableOutboxRowId"],
+      "scopeRule": "The identity-worker runtime may claim only an allowlisted durable SecurityEventOutbox row under worker-boundary-siem-outbox-delivery; JSON scope never establishes tenant or human authority.",
+      "executionBoundary": "worker-boundary-siem-outbox-delivery",
+      "tableCommandProjections": [{ "tableId": "table-security-event-outbox", "commands": { "SELECT": ["id", "eventType", "payload", "status", "attempts", "nextAttemptAt", "createdAt"], "UPDATE": ["status", "attempts", "nextAttemptAt", "lastError", "sentAt", "updatedAt"] } }],
+      "maximumRows": 200,
+      "maximumDateWindowDays": 1,
+      "implementationStatus": "contract-only-worker-runtime-pending",
+      "blockers": ["The governing worker contract is approved, but runtime still needs durable payload digest/scope fields, per-row database claim, maximum-attempt dead-letter behavior, secret-free event schemas, and PostgreSQL certification."]
+    }
+  ],
+  "affectedWorkflows": [
+    "workflow-http-backend-src-controllers-trace-policy-controller-ts-get-policy-alerts-controller",
+    "workflow-http-backend-src-controllers-trace-policy-controller-ts-acknowledge-policy-alert-controller",
+    "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts",
+    "workflow-http-backend-src-controllers-ir-alert-controller-ts-patch-ir-alert",
+    "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
+  ],
+  "inspectedButNotGovernedWorkflows": [
+    { "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports", "reason": "Already governed by the implemented bounded fraud-report read contract; it is not a PolicyAlert lifecycle and remains pending PostgreSQL certification." },
+    { "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report", "reason": "Append-only AuditLog response semantics are not PolicyAlert state; it remains blocked pending bounded scope, fixed purpose, unique transition/idempotency, and atomic attribution." },
+    { "workflowId": "workflow-http-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached", "reason": "Mixed incident, alert, print, support, audit, tenant, manufacturer, and platform roots must split before the alert slice can use manufacturer-alert-read; current platform blank scope remains blocked." },
+    { "workflowId": "workflow-internal-backend-src-services-policy-engine-service-ts-create-policy-alert-if-fresh", "reason": "Alert generation is a separate system/lifecycle write boundary, not a human actor read or lifecycle action classified by this decision." },
+    { "workflowId": "workflow-internal-backend-src-services-notification-service-ts-create-role-notifications", "reason": "Generic notification creation mixes alert and non-alert producers and must be split by owning transaction before an alert delivery contract can be attached." },
+    { "workflowId": "workflow-internal-backend-src-services-notification-service-ts-notify-incident-lifecycle", "reason": "Incident lifecycle notification is governed by the incident transaction and notification visibility contract, not direct PolicyAlert access." }
+  ],
+  "allowScenarios": [
+    "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
+    "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
+    "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
+    "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
+    "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
+  ],
+  "denyScenarios": [
+    "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
+    "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
+    "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
+    "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
+    "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
+    "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
+  ],
+  "crossReferences": {
+    "publicReadContract": "public-read-contract-v1 classifies every alert disclosure as prohibited-public-access; no signed scan, support proof, public reference or notification token authorizes PolicyAlert or incident-security detail."
+  },
+  "implementationStatus": "architecture-resolved-runtime-pending",
+  "postgresqlCertificationRequirements": [
+    "Prove tenant own-scope allow and foreign/blank/NULL/ambiguous scope denial for PolicyAlert SELECT and UPDATE.",
+    "Prove platform role alone and missing/stale MFA, purpose, request ID, incident ID, authorization, or expiry denial.",
+    "Prove manufacturer actor scope cannot expand to all alerts for a linked licensee.",
+    "Prove SELECT projection excludes details and every prohibited or nested secret-bearing field.",
+    "Prove acknowledgement and escalation use database-enforced one-row CAS with deterministic replay and protected ownership columns.",
+    "Prove assignment, resolution, suppression, unacknowledgement, unlinking, reassignment, public access, and mixed patch are denied.",
+    "Prove count/list scope and snapshot match and immutable read/mutation attribution shares the transaction.",
+    "Prove worker delivery uses identity-worker, durable row authority, row claim, idempotency, bounded retries, and no human context.",
+    "Prove operator incident summaries are executable only through operator-boundary-tenant-incident-summary.",
+    "Retain all four currently pending workflow certifications until disposable PostgreSQL evidence is reviewed."
+  ]
+}

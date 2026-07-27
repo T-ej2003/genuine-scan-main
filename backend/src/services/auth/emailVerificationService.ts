@@ -1,11 +1,14 @@
-import prisma from "../../config/database";
-import { UserStatus } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { createAuditLog } from "../auditService";
 import { sendAuthEmail } from "./authEmailService";
 import { renderActionEmail } from "../emailTemplateService";
 import { buildTokenHashCandidates, hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../../utils/security";
 import { normalizeEmailAddress } from "../../utils/email";
 import { getTokenHashSecretSet } from "../../utils/secretConfig";
+import { consumeEmailVerificationBoundary } from "../../rls-waves/session-b/b01/preAuthRepository";
+import { prepareAuthenticatedEmailChange } from "../../rls-waves/session-b/b01/authenticatedSecurityRepository";
+
+type EmailChangeDb = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = String(process.env[key] || "").trim();
@@ -43,7 +46,7 @@ export const requestEmailChangeVerification = async (input: {
   actorUserId: string;
   actorIpAddress: string | null | undefined;
   actorUserAgent: string | null | undefined;
-}) => {
+}, db: EmailChangeDb) => {
   const nextEmail = normalizeEmailAddress(input.nextEmail);
   if (!nextEmail) throw new Error("Invalid email address");
 
@@ -52,69 +55,28 @@ export const requestEmailChangeVerification = async (input: {
   const rawToken = randomOpaqueToken(32);
   const tokenHash = hashToken(rawToken);
 
-  const user = await prisma.user.findUnique({
-    where: { id: input.userId },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      orgId: true,
-      licenseeId: true,
-      pendingEmail: true,
-    },
-  });
-
-  if (!user) throw new Error("User not found");
-  if (normalizeEmailAddress(user.email) === nextEmail) {
+  const prepared = await prepareAuthenticatedEmailChange({
+    nextEmail,
+    tokenHash,
+    secretVersion: tokenSecretVersion(),
+    expiresAt,
+    requestedAt: now,
+    ipHash: hashIp(input.actorIpAddress || null),
+    userAgentHash: userAgentHash(input.actorUserAgent || null),
+  }, db);
+  if (prepared.userId !== input.userId) throw new Error("Email-change boundary returned the wrong actor");
+  if (!prepared.verificationRequired) {
     return {
       changed: false as const,
-      verificationRequired: false,
-      message: "That email is already active on your account.",
+      verificationRequired: false as const,
+      pendingEmail: null,
+      expiresAt: null,
+      deliver: async () => undefined,
     };
   }
-
-  const collision = await prisma.user.findFirst({
-    where: {
-      id: { not: user.id },
-      OR: [{ email: nextEmail }, { pendingEmail: nextEmail }],
-    },
-    select: { id: true },
-  });
-  if (collision) throw new Error("Email already in use");
-
-  await prisma.$transaction(async (tx) => {
-    await tx.emailVerificationToken.updateMany({
-      where: {
-        userId: user.id,
-        purpose: "EMAIL_CHANGE",
-        usedAt: null,
-        expiresAt: { gt: now },
-      },
-      data: { usedAt: now },
-    });
-
-    await tx.user.update({
-      where: { id: user.id },
-      data: {
-        pendingEmail: nextEmail,
-        pendingEmailRequestedAt: now,
-      },
-    });
-
-    await tx.emailVerificationToken.create({
-      data: {
-        userId: user.id,
-        email: user.email,
-        pendingEmail: nextEmail,
-        purpose: "EMAIL_CHANGE",
-        tokenHash,
-        secretVersion: tokenSecretVersion(),
-        expiresAt,
-        createdIpHash: hashIp(input.actorIpAddress || null),
-        userAgentHash: userAgentHash(input.actorUserAgent || null),
-      },
-    });
-  });
+  if (prepared.pendingEmail !== nextEmail || !(prepared.expiresAt instanceof Date)) {
+    throw new Error("Email-change boundary returned an invalid verification result");
+  }
 
   const verifyUrl = buildVerificationUrl(rawToken);
   const subject = "Confirm your new MSCQR email address";
@@ -125,45 +87,48 @@ export const requestEmailChangeVerification = async (input: {
     actionUrl: verifyUrl,
     expiryText: `in ${getEmailVerificationTtlHours()} hours`,
     reason: "You received this email because an authenticated MSCQR account requested an email address change.",
-    extraText: `If you did not request this change, keep using ${user.email} and review your account security settings.`,
+    extraText: `If you did not request this change, keep using ${prepared.currentEmail} and review your account security settings.`,
   });
 
-  const delivery = await sendAuthEmail({
-    toAddress: nextEmail,
-    subject,
-    text: emailBody.text,
-    html: emailBody.html,
-    template: "account_email_change_verification",
-    orgId: user.orgId,
-    licenseeId: user.licenseeId,
-    actorUserId: input.actorUserId,
-    ipHash: hashIp(input.actorIpAddress || null),
-    userAgent: normalizeUserAgent(input.actorUserAgent),
-  });
+  const deliver = async () => {
+    const delivery = await sendAuthEmail({
+      toAddress: nextEmail,
+      subject,
+      text: emailBody.text,
+      html: emailBody.html,
+      template: "account_email_change_verification",
+      orgId: prepared.orgId,
+      licenseeId: prepared.licenseeId,
+      actorUserId: input.actorUserId,
+      ipHash: hashIp(input.actorIpAddress || null),
+      userAgent: normalizeUserAgent(input.actorUserAgent),
+    });
 
-  await createAuditLog({
-    userId: input.actorUserId,
-    licenseeId: user.licenseeId || undefined,
-    orgId: user.orgId || undefined,
-    action: "AUTH_EMAIL_CHANGE_REQUESTED",
-    entityType: "User",
-    entityId: user.id,
-    details: {
-      currentEmail: user.email,
-      pendingEmail: nextEmail,
-      expiresAt,
-      emailDelivered: delivery.delivered,
-      emailError: delivery.error || null,
-    },
-    ipAddress: input.actorIpAddress || undefined,
-    userAgent: normalizeUserAgent(input.actorUserAgent) || undefined,
-  });
+    await createAuditLog({
+      userId: input.actorUserId,
+      licenseeId: prepared.licenseeId || undefined,
+      orgId: prepared.orgId || undefined,
+      action: "AUTH_EMAIL_CHANGE_REQUESTED",
+      entityType: "User",
+      entityId: prepared.userId,
+      details: {
+        currentEmail: prepared.currentEmail,
+        pendingEmail: nextEmail,
+        expiresAt: prepared.expiresAt,
+        emailDelivered: delivery.delivered,
+        emailError: delivery.error || null,
+      },
+      ipAddress: input.actorIpAddress || undefined,
+      userAgent: normalizeUserAgent(input.actorUserAgent) || undefined,
+    });
+  };
 
   return {
     changed: false as const,
     verificationRequired: true as const,
     pendingEmail: nextEmail,
-    expiresAt: expiresAt.toISOString(),
+    expiresAt: prepared.expiresAt.toISOString(),
+    deliver,
   };
 };
 
@@ -174,120 +139,12 @@ export const confirmEmailVerification = async (input: {
 }) => {
   const now = new Date();
   const tokenHashCandidates = buildTokenHashCandidates(input.rawToken);
-
-  const result = await prisma.$transaction(async (tx) => {
-    const token = await tx.emailVerificationToken.findFirst({
-      where: { tokenHash: { in: tokenHashCandidates } },
-      select: {
-        id: true,
-        userId: true,
-        email: true,
-        pendingEmail: true,
-        purpose: true,
-        expiresAt: true,
-        usedAt: true,
-        user: {
-          select: {
-            id: true,
-            email: true,
-            pendingEmail: true,
-            orgId: true,
-            licenseeId: true,
-            status: true,
-            isActive: true,
-            deletedAt: true,
-          },
-        },
-      },
-    });
-
-    if (!token || !token.user) throw new Error("Invalid or expired verification link");
-    if (token.usedAt) throw new Error("Verification link already used");
-    if (token.expiresAt.getTime() <= now.getTime()) throw new Error("Verification link expired");
-    if (token.user.deletedAt || token.user.isActive === false) throw new Error("Account is disabled");
-
-    let nextEmail: string | null = token.user.email;
-    const updateData: Record<string, unknown> = {
-      emailVerifiedAt: now,
-    };
-
-    if (token.purpose === "EMAIL_CHANGE") {
-      nextEmail = normalizeEmailAddress(token.pendingEmail || token.user.pendingEmail || "");
-      if (!nextEmail) throw new Error("Verification link is missing the pending email");
-
-      const collision = await tx.user.findFirst({
-        where: {
-          id: { not: token.user.id },
-          OR: [{ email: nextEmail }, { pendingEmail: nextEmail }],
-        },
-        select: { id: true },
-      });
-      if (collision) throw new Error("Email already in use");
-
-      updateData.email = nextEmail;
-      updateData.pendingEmail = null;
-      updateData.pendingEmailRequestedAt = null;
-    }
-
-    const updatedUser = await tx.user.update({
-      where: { id: token.user.id },
-      data: {
-        ...updateData,
-        status: token.user.status === UserStatus.INVITED ? UserStatus.ACTIVE : undefined,
-      },
-      select: {
-        id: true,
-        email: true,
-        orgId: true,
-        licenseeId: true,
-        role: true,
-        emailVerifiedAt: true,
-      },
-    });
-
-    await tx.emailVerificationToken.update({
-      where: { id: token.id },
-      data: { usedAt: now },
-    });
-
-    if (token.purpose === "EMAIL_CHANGE") {
-      await tx.refreshToken.updateMany({
-        where: { userId: token.user.id, revokedAt: null },
-        data: {
-          revokedAt: now,
-          revokedReason: "EMAIL_CHANGED",
-          lastUsedAt: now,
-        },
-      });
-    }
-
-    return {
-      user: updatedUser,
-      purpose: token.purpose,
-      previousEmail: token.user.email,
-      pendingEmail: nextEmail,
-    };
-  });
-
-  await createAuditLog({
-    userId: result.user.id,
-    licenseeId: result.user.licenseeId || undefined,
-    orgId: result.user.orgId || undefined,
-    action: result.purpose === "EMAIL_CHANGE" ? "AUTH_EMAIL_CHANGE_CONFIRMED" : "AUTH_EMAIL_VERIFIED",
-    entityType: "User",
-    entityId: result.user.id,
-    details: {
-      email: result.user.email,
-      previousEmail: result.previousEmail,
-      purpose: result.purpose,
-    },
-    ipAddress: input.actorIpAddress || undefined,
-    userAgent: normalizeUserAgent(input.actorUserAgent) || undefined,
-  });
+  const result = await consumeEmailVerificationBoundary({ tokenHashCandidates, consumedAt: now });
+  if (!result?.verified) throw new Error("Invalid or expired verification link");
 
   return {
     verified: true as const,
     purpose: result.purpose,
-    email: result.user.email,
+    email: result.email,
   };
 };

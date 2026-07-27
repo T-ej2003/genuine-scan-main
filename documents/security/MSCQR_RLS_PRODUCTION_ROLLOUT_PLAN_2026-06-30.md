@@ -1,5 +1,10 @@
 # MSCQR RLS Production Rollout Plan - 2026-06-30
 
+> Historical plan, superseded by
+> `documents/security/rls-program/RLS_FINAL_CLOSURE_2026-07-24.md`.
+> Its route flags and fallback model were removed during final integration; do
+> not use this document to operate the current capability package.
+
 This is an operations plan for a future production MSCQR Row Level Security rollout. It does not enable production RLS, does not enable global RLS, does not create Prisma migrations, does not wire additional runtime routes, and does not change the production database.
 
 ## Sources Reviewed

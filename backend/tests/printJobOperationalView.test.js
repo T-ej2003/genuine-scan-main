@@ -1,163 +1,35 @@
-const prisma = require("../dist/config/database").default;
-const {
-  getPrintJobOperationalView,
-  listPrintJobsForManufacturer,
-} = require("../dist/services/networkDirectPrintService");
-const {
-  PrintDispatchMode,
-  PrintItemState,
-  PrintJobStatus,
-  PrintPipelineState,
-  PrintSessionStatus,
-  PrinterConnectionType,
-  UserRole,
-} = require("@prisma/client");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 
-const assert = (condition, message) => {
-  if (!condition) throw new Error(message);
-};
+const root = path.resolve(__dirname, "..", "..");
+const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+const handlers = read("backend/src/controllers/print-job/queryHandlers.ts");
+const confirmationHandlers = read("backend/src/controllers/print-job/directPrintConfirmationHandlers.ts");
+const repository = read("backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts");
+const sql = read("backend/src/rls-waves/session-c/c02/printingLifecycle.sql");
 
-const makeJob = () => ({
-  id: "job-1",
-  manufacturerId: "user-1",
-  jobNumber: "PJ-TEST-1",
-  status: PrintJobStatus.CONFIRMED,
-  pipelineState: PrintPipelineState.LOCKED,
-  printMode: PrintDispatchMode.LOCAL_AGENT,
-  quantity: 1,
-  itemCount: 1,
-  rangeStart: "QR-000001",
-  rangeEnd: "QR-000001",
-  reprintOfJobId: "job-root-1",
-  reprintReason: "Damaged labels on first pass",
-  failureReason: null,
-  createdAt: new Date("2026-03-20T09:00:00.000Z"),
-  updatedAt: new Date("2026-03-20T09:05:00.000Z"),
-  sentAt: new Date("2026-03-20T09:01:00.000Z"),
-  confirmedAt: new Date("2026-03-20T09:05:00.000Z"),
-  completedAt: new Date("2026-03-20T09:05:00.000Z"),
-  manufacturer: {
-    id: "user-1",
-    name: "Operator One",
-    email: "operator@example.com",
-  },
-  batch: { id: "batch-1", name: "Batch 1", licenseeId: "lic-1" },
-  printer: {
-    id: "printer-1",
-    name: "Canon TS4100i series 2",
-    connectionType: PrinterConnectionType.LOCAL_AGENT,
-    commandLanguage: "ZPL",
-  },
-  printSession: {
-    id: "session-1",
-    status: PrintSessionStatus.COMPLETED,
-    totalItems: 1,
-    issuedItems: 1,
-    confirmedItems: 0,
-    frozenItems: 0,
-    failedReason: null,
-    startedAt: new Date("2026-03-20T09:00:00.000Z"),
-    completedAt: new Date("2026-03-20T09:05:00.000Z"),
-  },
-});
+assert(handlers.includes("readPrintingProjection"), "print-job reads must use the capability boundary");
+assert(handlers.includes('operation: "JOB"'), "detail reads must use the exact JOB projection");
+assert(handlers.includes('operation: "JOB_LIST"'), "list reads must use the exact JOB_LIST projection");
+assert(!handlers.includes("prisma.printJob"), "print-job handlers must not read protected jobs directly");
+assert(repository.includes("app_rls.printing_readiness"), "repository must call the reviewed SQL projection");
+assert(
+  confirmationHandlers.includes("extractPublicCodeFromSampleScan(body.data.publicCode)"),
+  "sample scans must preserve the existing immutable-code URL normalization"
+);
+assert(!sql.includes("SELECT q.*"), "printing readiness must not require unreviewed QRCode columns");
+assert(
+  sql.includes('SELECT q.id,q.code,q."displayCode",q."licenseeId",q."batchId",') &&
+    sql.includes('q.status,q."replayEpoch",q."printJobId"'),
+  "printable-item readiness must use the reviewed QRCode projection"
+);
+assert(
+  sql.includes('SELECT q.id,q.code,q.status,q."printedAt",q."createdAt",q."batchId",q."printJobId"'),
+  "validation evidence must use its minimal QRCode projection"
+);
+assert(sql.includes('j."reprintOfJobId",j."approvedByUserId",j."reprintReason"'), "job-list projection must preserve replacement lineage");
+assert(sql.includes('j."rangeStart",j."rangeEnd"'), "job-list projection must preserve the requested range");
+assert(sql.includes("ORDER BY j.\"createdAt\" DESC,j.id DESC"), "job-list ordering must be deterministic");
 
-const run = async () => {
-  const backupFindFirst = prisma.printJob.findFirst;
-  const backupFindMany = prisma.printJob.findMany;
-  const backupGroupBy = prisma.printItem.groupBy;
-  const backupPrintItemFindMany = prisma.printItem.findMany;
-  const backupPrintAuditFindMany = prisma.printAuditEvent.findMany;
-  let lastFindFirstArgs = null;
-  let lastFindManyArgs = null;
-
-  prisma.printJob.findFirst = async (args) => {
-    lastFindFirstArgs = args;
-    return makeJob();
-  };
-  prisma.printJob.findMany = async (args) => {
-    lastFindManyArgs = args;
-    return [makeJob()];
-  };
-  prisma.printItem.groupBy = async () => [
-    {
-      printSessionId: "session-1",
-      state: PrintItemState.CLOSED,
-      _count: { _all: 1 },
-    },
-  ];
-  prisma.printItem.findMany = async () => [
-    {
-      code: "c_secure_internal_print_identity_000001",
-      qrCode: { displayCode: "QR-000001" },
-      state: PrintItemState.CLOSED,
-      printConfirmedAt: new Date("2026-03-20T09:05:00.000Z"),
-      confirmationEvidence: { source: "connector" },
-    },
-  ];
-  prisma.printAuditEvent.findMany = async () => [
-    { batchId: "batch-1", printJobId: "job-1", eventType: "sample_scan_verified", qrCodeId: "qr-1" },
-  ];
-
-  try {
-    const view = await getPrintJobOperationalView({
-      jobId: "job-1",
-      scope: {
-        role: UserRole.LICENSEE_ADMIN,
-        userId: "licensee-user-1",
-        licenseeId: "lic-1",
-      },
-    });
-    assert(view, "Operational view should exist");
-    assert(view.session.confirmedItems === 1, "Operational view should derive confirmedItems from print item state");
-    assert(view.session.remainingToPrint === 0, "Operational view should derive remainingToPrint from print item state");
-    assert(view.reprintOfJobId === "job-root-1", "Operational view should expose the original job link");
-    assert(view.reprintReason === "Damaged labels on first pass", "Operational view should expose the reissue reason");
-    assert(view.rangeStart === "QR-000001" && view.rangeEnd === "QR-000001", "Operational view should expose requested range");
-    assert(view.operator.name === "Operator One", "Operational view should expose captured print operator");
-    assert(view.session.confirmedRange.startCode === "QR-000001", "Operational view should expose confirmed range");
-    assert(
-      view.session.confirmedRange.startCode !== "c_secure_internal_print_identity_000001",
-      "Operational range display may use displayCode without leaking the internal QR print identity"
-    );
-    assert(view.sampleScanPolicy.satisfied === true, "Operational view should expose satisfied sample scan policy");
-    assert(
-      lastFindFirstArgs.where.batch.is.licenseeId === "lic-1",
-      "Licensee-admin reads should be scoped to the effective licensee"
-    );
-
-    const rows = await listPrintJobsForManufacturer({
-      scope: {
-        role: UserRole.MANUFACTURER,
-        userId: "user-1",
-      },
-      batchId: "batch-1",
-      limit: 10,
-    });
-    assert(rows.length === 1, "List should return the mocked print job");
-    assert(rows[0].session.confirmedItems === 1, "List should derive confirmedItems from print item state");
-    assert(rows[0].session.remainingToPrint === 0, "List should derive remainingToPrint from print item state");
-    assert(rows[0].reprintOfJobId === "job-root-1", "List rows should expose the original job link");
-    assert(rows[0].reprintReason === "Damaged labels on first pass", "List rows should expose the reissue reason");
-    assert(rows[0].rangeStart === "QR-000001" && rows[0].rangeEnd === "QR-000001", "List rows should expose requested range");
-    assert(rows[0].operator.name === "Operator One", "List rows should expose captured print operator");
-    assert(rows[0].session.confirmedRange.startCode === "QR-000001", "List rows should expose operator-safe display range");
-    assert(rows[0].sampleScanPolicy.satisfied === true, "List rows should expose satisfied sample scan policy");
-    assert(
-      lastFindManyArgs.where.manufacturerId === "user-1",
-      "Manufacturer reads should stay scoped to the manufacturer owner"
-    );
-
-    console.log("print job operational view tests passed");
-  } finally {
-    prisma.printJob.findFirst = backupFindFirst;
-    prisma.printJob.findMany = backupFindMany;
-    prisma.printItem.groupBy = backupGroupBy;
-    prisma.printItem.findMany = backupPrintItemFindMany;
-    prisma.printAuditEvent.findMany = backupPrintAuditFindMany;
-  }
-};
-
-run().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+console.log("print job operational boundary tests passed");

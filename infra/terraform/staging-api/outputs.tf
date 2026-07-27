@@ -43,6 +43,11 @@ output "database_role_executor_broker_function_name" {
   value       = aws_lambda_function.database_role_executor_broker.function_name
 }
 
+output "database_role_executor_broker_reviewed_alias_arn" {
+  description = "Immutable reviewed alias used for every staging database-role broker invocation."
+  value       = aws_lambda_alias.database_role_executor_broker_reviewed.arn
+}
+
 output "database_role_cutover_role_arn" {
   description = "Dedicated MFA-gated role for the reviewed staging ECS database-role cutover only."
   value       = aws_iam_role.database_role_cutover.arn

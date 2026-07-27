@@ -41,6 +41,8 @@ const parseIntEnv = (key: string, fallback: number) => {
 
 const getOtpTtlMinutes = () => parseIntEnv("CUSTOMER_VERIFY_OTP_TTL_MINUTES", 10);
 const getCustomerTokenTtlHours = () => parseIntEnv("CUSTOMER_VERIFY_TOKEN_TTL_HOURS", 24 * 30);
+export const getCustomerVerifySessionExpiry = (issuedAt = new Date()) =>
+  new Date(issuedAt.getTime() + getCustomerTokenTtlHours() * 60 * 60 * 1000);
 
 const getOtpSecret = () => {
   const explicit = String(process.env.CUSTOMER_VERIFY_OTP_SECRET || "").trim();

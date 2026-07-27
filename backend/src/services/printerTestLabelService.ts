@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "crypto";
 import {
-  Prisma,
   PrintPayloadType,
   Printer,
   PrinterConnectionType,
@@ -8,7 +7,6 @@ import {
   PrinterLanguageKind,
 } from "@prisma/client";
 
-import prisma from "../config/database";
 import { buildCanonicalQrLabel } from "../printing/canonicalLabel";
 import { inspectIppJob, submitPdfToIppPrinter } from "../printing/ippClient";
 import { normalizeLabelCalibration, renderPdfLabelBuffer } from "../printing/pdfLabel";
@@ -22,8 +20,8 @@ import {
 import { sendRawPayloadToNetworkPrinter } from "./networkPrinterSocketService";
 import { resolvePrinterConfirmationMode, type PrintConfirmationMode } from "./printConfirmationService";
 import { buildKnownGoodDiagnosticZplPayload, resolvePayloadType, supportsNetworkDirectPayload } from "./printPayloadService";
-import { markPrinterTestLabelConfirmed } from "./printerTestLabelGateService";
 import { getZebraTotalLabelCount, waitForZebraLabelConfirmation } from "./zebraPrinterStatusService";
+import { mutatePrintingTestLabelJob } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 
 const PRINTER_TEST_LABEL_TIMEOUT_MS = Math.max(
   15_000,
@@ -90,41 +88,17 @@ type GatewayPrinterTestJob = {
   promise: Promise<PrinterTestLabelResult>;
 };
 
+export type PrinterTestConnectorBoundary = {
+  registrationId: string;
+  agentId: string;
+  deviceFingerprint: string;
+  nonce: string;
+  issuedAt: Date | string;
+  requestId: string;
+};
+
 const gatewayPrinterTestJobsById = new Map<string, GatewayPrinterTestJob>();
 const gatewayPrinterTestJobIdsByPrinterId = new Map<string, string>();
-
-const metadataRecord = (value: unknown): Record<string, any> =>
-  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
-
-const localAgentTestJobFromMetadata = (printer: Pick<Printer, "metadata">) => {
-  const job = metadataRecord(printer.metadata).pendingLocalAgentTestLabel;
-  return job && typeof job === "object" && !Array.isArray(job) ? (job as Record<string, any>) : null;
-};
-
-const writeLocalAgentTestJobMetadata = async (printer: Pick<Printer, "id" | "metadata">, job: Record<string, any> | null) => {
-  const metadata = { ...metadataRecord(printer.metadata) };
-  if (job) metadata.pendingLocalAgentTestLabel = job;
-  else delete metadata.pendingLocalAgentTestLabel;
-  await prisma.printer.update({
-    where: { id: printer.id },
-    data: { metadata: metadata as Prisma.InputJsonValue },
-  });
-};
-
-const localAgentTestJobClaim = (job: Record<string, any>): GatewayPrinterTestClaim => ({
-  testJobId: String(job.testJobId || ""),
-  connectionType: PrinterConnectionType.LOCAL_AGENT,
-  code: String(job.code || "MSCQR-TEST"),
-  scanUrl: String(job.scanUrl || "MSCQR-DIAGNOSTIC-TEST"),
-  previewLabel: String(job.previewLabel || "MSCQR TEST"),
-  printer: metadataRecord(job.printer),
-  calibrationProfile: metadataRecord(job.calibrationProfile),
-  jobNumber: String(job.jobNumber || `SETUP-TEST-${job.testJobId || ""}`),
-  payloadType: (String(job.payloadType || PrintPayloadType.ZPL).trim() as PrintPayloadType) || PrintPayloadType.ZPL,
-  payloadContent: String(job.payloadContent || ""),
-  payloadHash: String(job.payloadHash || ""),
-  commandLanguage: String(job.commandLanguage || PrinterLanguageKind.ZPL),
-});
 
 const resolveTestLanguageKind = (printer: RegisteredPrinterWithStatus): PrinterLanguageKind => {
   const normalized = String(printer.profile?.activeLanguage || printer.commandLanguage || "AUTO").trim().toUpperCase();
@@ -398,68 +372,51 @@ const enqueueGatewayPrinterTestJob = (params: {
 const enqueuePersistentLocalAgentPrinterTestJob = async (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
+  boundary: { capability: string; requestId: string };
 }): Promise<PrinterTestLabelResult> => {
-  const existing = localAgentTestJobFromMetadata(params.printer);
-  const existingExpiresAt = existing?.expiresAt ? new Date(String(existing.expiresAt)).getTime() : NaN;
-  if (
-    existing &&
-    Number.isFinite(existingExpiresAt) &&
-    existingExpiresAt > Date.now() &&
-    !["CONFIRMED", "FAILED", "EXPIRED"].includes(String(existing.status || "").toUpperCase())
-  ) {
-    return {
-      outcome: "queued",
-      message: "A live setup test label is already queued. Keep MSCQR Connector running until it prints and confirms.",
-      confirmationMode: "LOCAL_QUEUE",
-      connectionType: PrinterConnectionType.LOCAL_AGENT,
-      deliveryMode: PrinterDeliveryMode.DIRECT,
-      payloadType: String(existing.payloadType || PrintPayloadType.ZPL) as PrintPayloadType,
-      deviceJobRef: null,
-      dispatchedAt: String(existing.createdAt || new Date().toISOString()),
-      confirmedAt: "",
-    };
-  }
-
   const context = buildPrinterTestScanContext(params);
-  const testJobId = randomUUID();
-  const payloadContent = buildKnownGoodDiagnosticZplPayload();
-  const payloadHash = sha256Hex(payloadContent);
   const now = new Date();
-  const job = {
-    testJobId,
-    status: "PENDING",
-    createdAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + PRINTER_TEST_LABEL_TIMEOUT_MS).toISOString(),
-    actorUserId: params.actorUserId,
-    printerProfileId: params.printer.id,
-    printerRegistrationId: params.printer.printerRegistrationId || null,
-    nativePrinterId: params.printer.nativePrinterId || null,
-    code: context.code,
-    scanUrl: context.scanUrl,
-    previewLabel: "MSCQR TEST",
-    printer: {
-      id: params.printer.id,
-      name: params.printer.name,
-      nativePrinterId: params.printer.nativePrinterId,
+  const payloadContent = buildKnownGoodDiagnosticZplPayload();
+  const stored = await mutatePrintingTestLabelJob({
+    ...params.boundary,
+    operation: "QUEUE",
+    printerId: params.printer.id,
+    job: {
+      testJobId: randomUUID(),
+      status: "PENDING",
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + PRINTER_TEST_LABEL_TIMEOUT_MS).toISOString(),
+      actorUserId: params.actorUserId,
+      printerProfileId: params.printer.id,
+      printerRegistrationId: params.printer.printerRegistrationId || null,
+      nativePrinterId: params.printer.nativePrinterId || null,
+      code: context.code,
+      scanUrl: context.scanUrl,
+      previewLabel: "MSCQR TEST",
+      printer: {
+        id: params.printer.id,
+        name: params.printer.name,
+        nativePrinterId: params.printer.nativePrinterId,
+      },
+      calibrationProfile: (params.printer.calibrationProfile as Record<string, unknown> | null) || null,
+      jobNumber: `SETUP-TEST-${context.code}`,
+      payloadType: PrintPayloadType.ZPL,
+      payloadContent,
+      payloadHash: sha256Hex(payloadContent),
+      commandLanguage: PrinterLanguageKind.ZPL,
     },
-    calibrationProfile: (params.printer.calibrationProfile as Record<string, unknown> | null) || null,
-    jobNumber: `SETUP-TEST-${context.code}`,
-    payloadType: PrintPayloadType.ZPL,
-    payloadContent,
-    payloadHash,
-    commandLanguage: PrinterLanguageKind.ZPL,
-  };
-
-  await writeLocalAgentTestJobMetadata(params.printer, job);
+  });
   return {
     outcome: "queued",
-    message: "Live setup test label queued. Keep MSCQR Connector 2026.6.26 running until it prints and confirms.",
+    message: stored?.idempotent
+      ? "A live setup test label is already queued. Keep MSCQR Connector running until it prints and confirms."
+      : "Live setup test label queued. Keep MSCQR Connector 2026.6.26 running until it prints and confirms.",
     confirmationMode: "LOCAL_QUEUE",
     connectionType: PrinterConnectionType.LOCAL_AGENT,
     deliveryMode: PrinterDeliveryMode.DIRECT,
-    payloadType: PrintPayloadType.ZPL,
+    payloadType: (stored?.payloadType || PrintPayloadType.ZPL) as PrintPayloadType,
     deviceJobRef: null,
-    dispatchedAt: now.toISOString(),
+    dispatchedAt: String(stored?.createdAt || now.toISOString()),
     confirmedAt: "",
   };
 };
@@ -476,31 +433,22 @@ export const claimGatewayPrinterTestJob = (params: {
   return job.claim;
 };
 
-export const claimLocalAgentPrinterTestJob = async (params: { printerIds: string[] }) => {
-  const printers = await prisma.printer.findMany({ where: { id: { in: params.printerIds }, isActive: true } });
-  const orderedPrinters = params.printerIds
-    .map((id) => printers.find((printer) => printer.id === id))
-    .filter((printer): printer is Printer => Boolean(printer));
-  for (const printer of orderedPrinters) {
-    const job = localAgentTestJobFromMetadata(printer);
-    if (!job) continue;
-    const status = String(job.status || "").toUpperCase();
-    const expiresAt = job.expiresAt ? new Date(String(job.expiresAt)).getTime() : NaN;
-    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-      await writeLocalAgentTestJobMetadata(printer, {
-        ...job,
-        status: "EXPIRED",
-        failedReason: "The site connector did not claim and confirm the test label before the setup timeout.",
-        failedAt: new Date().toISOString(),
+export const claimLocalAgentPrinterTestJob = async (params: {
+  printerIds: string[];
+  connectorBoundary?: PrinterTestConnectorBoundary;
+}) => {
+  if (params.connectorBoundary) {
+    for (const printerId of params.printerIds) {
+      const result = await mutatePrintingTestLabelJob({
+        requestId: params.connectorBoundary.requestId,
+        operation: "CLAIM",
+        printerId,
+        connector: params.connectorBoundary,
       });
-      continue;
+      if (result?.available) return result as GatewayPrinterTestClaim;
     }
-    if (status !== "PENDING") continue;
-    const claimedAt = new Date().toISOString();
-    await writeLocalAgentTestJobMetadata(printer, { ...job, status: "CLAIMED", claimedAt });
-    return localAgentTestJobClaim(job);
+    return null;
   }
-
   for (const printerId of params.printerIds) {
     const job = getGatewayPrinterTestJob(printerId);
     if (!job || job.connectionType !== PrinterConnectionType.LOCAL_AGENT || job.status !== "PENDING") continue;
@@ -526,19 +474,19 @@ export const acknowledgeLocalAgentPrinterTestJob = async (params: {
   printerId: string;
   testJobId: string;
   metadata?: Record<string, unknown> | null;
+  connectorBoundary?: PrinterTestConnectorBoundary;
 }) => {
-  const printer = await prisma.printer.findUnique({ where: { id: params.printerId } });
-  if (!printer) return false;
-  const job = localAgentTestJobFromMetadata(printer);
-  if (!job || String(job.testJobId || "") !== params.testJobId) return false;
-  if (!["CLAIMED", "ACKED"].includes(String(job.status || "").toUpperCase())) return false;
-  await writeLocalAgentTestJobMetadata(printer, {
-    ...job,
-    status: "ACKED",
-    ackedAt: new Date().toISOString(),
-    ackMetadata: params.metadata || null,
-  });
-  return true;
+  if (params.connectorBoundary) {
+    const result = await mutatePrintingTestLabelJob({
+      requestId: params.connectorBoundary.requestId,
+      operation: "ACK",
+      printerId: params.printerId,
+      connector: params.connectorBoundary,
+      job: { testJobId: params.testJobId, metadata: params.metadata || {} },
+    });
+    return result?.matched === true;
+  }
+  return acknowledgeGatewayPrinterTestJob(params);
 };
 
 export const confirmGatewayPrinterTestJob = (params: {
@@ -582,32 +530,28 @@ export const confirmLocalAgentPrinterTestJob = async (params: {
   deviceJobRef?: string | null;
   confirmationMode?: PrintConfirmationMode | null;
   metadata?: Record<string, unknown> | null;
+  connectorBoundary?: PrinterTestConnectorBoundary;
 }) => {
-  const printer = await prisma.printer.findUnique({ where: { id: params.printerId } });
-  if (!printer) return false;
-  const job = localAgentTestJobFromMetadata(printer);
-  if (!job || String(job.testJobId || "") !== params.testJobId) return false;
-  if (!["CLAIMED", "ACKED"].includes(String(job.status || "").toUpperCase())) return false;
-  const confirmedAt = new Date().toISOString();
-  await markPrinterTestLabelConfirmed({
-    printer,
-    confirmedAt,
-    connectionType: PrinterConnectionType.LOCAL_AGENT,
-    deviceJobRef: params.deviceJobRef || null,
-  });
-  const refreshed = await prisma.printer.findUnique({ where: { id: params.printerId } });
-  if (refreshed) {
-    await writeLocalAgentTestJobMetadata(refreshed, {
-      ...job,
-      status: "CONFIRMED",
-      confirmedAt,
-      payloadType: params.payloadType || null,
-      deviceJobRef: params.deviceJobRef || null,
-      confirmationMode: params.confirmationMode || null,
-      confirmMetadata: params.metadata || null,
+  if (params.connectorBoundary) {
+    const result = await mutatePrintingTestLabelJob({
+      requestId: params.connectorBoundary.requestId,
+      operation: "CONFIRM",
+      printerId: params.printerId,
+      connector: params.connectorBoundary,
+      job: {
+        testJobId: params.testJobId,
+        payloadType: params.payloadType || null,
+        deviceJobRef: params.deviceJobRef || null,
+        confirmationMode: params.confirmationMode || "LOCAL_QUEUE",
+        metadata: params.metadata || {},
+      },
     });
+    return result?.matched === true;
   }
-  return true;
+  return confirmGatewayPrinterTestJob({
+    ...params,
+    confirmationMode: params.confirmationMode || "LOCAL_QUEUE",
+  });
 };
 
 export const failGatewayPrinterTestJob = (params: {
@@ -627,18 +571,19 @@ export const failLocalAgentPrinterTestJob = async (params: {
   printerId: string;
   testJobId: string;
   reason: string;
+  connectorBoundary?: PrinterTestConnectorBoundary;
 }) => {
-  const printer = await prisma.printer.findUnique({ where: { id: params.printerId } });
-  if (!printer) return false;
-  const job = localAgentTestJobFromMetadata(printer);
-  if (!job || String(job.testJobId || "") !== params.testJobId) return false;
-  await writeLocalAgentTestJobMetadata(printer, {
-    ...job,
-    status: "FAILED",
-    failedAt: new Date().toISOString(),
-    failedReason: params.reason,
-  });
-  return true;
+  if (params.connectorBoundary) {
+    const result = await mutatePrintingTestLabelJob({
+      requestId: params.connectorBoundary.requestId,
+      operation: "FAIL",
+      printerId: params.printerId,
+      connector: params.connectorBoundary,
+      job: { testJobId: params.testJobId, reason: params.reason },
+    });
+    return result?.matched === true;
+  }
+  return failGatewayPrinterTestJob(params);
 };
 
 const dispatchGatewayPrinterTestLabel = async (params: {
@@ -753,6 +698,7 @@ const dispatchDirectRawTestLabel = async (params: {
 export const printTestLabelForRegisteredPrinter = async (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
+  boundary: { capability: string; requestId: string };
 }) => {
   if (params.printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
     return enqueuePersistentLocalAgentPrinterTestJob(params);

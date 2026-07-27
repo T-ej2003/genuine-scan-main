@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { executorModeForCommand } from "../aws/staging-database-role-credentials.mjs";
-import { ROLES, RLS_READ_TABLES, assertCompleteVerification, assertRouteFlagsFalse, classifyProvisioningMode, databaseInvariants, ensureAllPlaceholders, verifyCredentials, verifyDeniedOperation } from "../../backend/scripts/staging-database-role-vpc-executor.mjs";
+import { assertReviewedBrokerConfiguration, assertReviewedBrokerLaunch, executorModeForCommand } from "../aws/staging-database-role-credentials.mjs";
+import { ROLES, assertBlueExecutorModeAllowed, assertCompleteVerification, classifyProvisioningMode, databaseInvariants, ensureAllPlaceholders, verifyCredentials, verifyDeniedOperation } from "../../backend/scripts/staging-database-role-vpc-executor.mjs";
 
 function clientFactory(fault = "") {
   return (_url, key) => {
@@ -9,13 +9,11 @@ function clientFactory(fault = "") {
     const execute = async (sql) => {
       if (fault === "infrastructure-denial" && /CREATE ROLE/.test(sql)) throw new Error("connection terminated unexpectedly");
       if (fault === "app-can-set-owner" && key === "app" && /SET ROLE/.test(sql)) return 0;
-      if (fault === "rls-can-write" && key === "rlsRead" && /INSERT INTO/.test(sql)) return 1;
       return permissionError();
     };
     return {
       async $queryRawUnsafe(sql) {
         if (fault === "invalid-credentials") throw new Error("password authentication failed");
-        if (key === "rlsRead" && fault === "rls-missing-graph" && sql.includes(`"${RLS_READ_TABLES.at(-1)}"`)) throw new Error("permission denied");
         return [{ database_name: "mscqr_staging", database_user: ROLES[key] }];
       },
       async $executeRawUnsafe(sql) { return execute(sql); },
@@ -28,7 +26,6 @@ function clientFactory(fault = "") {
             if (key === "app" && /INSERT INTO "ActionIdempotencyKey"|UPDATE "ActionIdempotencyKey"|DELETE FROM "ActionIdempotencyKey"/.test(sql)) return 1;
             if (key === "migrator" && /SET LOCAL ROLE|CREATE TABLE mscqr_staging_migrator_credential_proof/.test(sql)) return 1;
             if (fault === "app-can-set-owner" && key === "app" && /SET LOCAL ROLE/.test(sql)) return 0;
-            if (fault === "rls-can-write" && key === "rlsRead" && /INSERT INTO/.test(sql)) return 1;
             if (fault === "infrastructure-denial" && /CREATE ROLE/.test(sql)) throw new Error("connection terminated unexpectedly");
             throw new Error("permission denied");
           },
@@ -43,19 +40,38 @@ function clientFactory(fault = "") {
 const urls = Object.fromEntries(Object.keys(ROLES).map((key) => [key, ["postgresql:", "//", ROLES[key], ":", "fixture-value", "@", "mscqr-staging-db.invalid/mscqr_staging"].join("")]));
 
 test("controller verify invokes verify executor mode and never probe", () => { assert.equal(executorModeForCommand("verify"), "verify"); assert.notEqual(executorModeForCommand("verify"), "probe"); });
+test("credential controller binds the reviewed alias to the exact executor revision",()=>{ const expectedTaskDefinitionArn="arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-database-role-admin:7"; const binding={executorContractSha256:"b".repeat(64),brokerSourceSha256:"a".repeat(64)}; const configuration={Version:"7",Environment:{Variables:{BROKER_CLUSTER_ARN:"arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main",BROKER_TASK_DEFINITION_ARN:expectedTaskDefinitionArn,BROKER_EXECUTOR_CONTRACT_SHA256:binding.executorContractSha256,BROKER_SOURCE_SHA256:binding.brokerSourceSha256}}}; assert.equal(assertReviewedBrokerConfiguration(configuration,expectedTaskDefinitionArn,binding),"7"); const taskArn="arn:aws:ecs:eu-west-2:368992683803:task/mscqr-staging-euw2-main/task-id"; const started={status:"started",taskArn,taskDefinitionArn:expectedTaskDefinitionArn,...binding}; assert.equal(assertReviewedBrokerLaunch({StatusCode:200,ExecutedVersion:"7"},started,{reviewedVersion:"7",expectedTaskDefinitionArn,binding}),taskArn); assert.throws(()=>assertReviewedBrokerConfiguration({...configuration,Version:"$LATEST"},expectedTaskDefinitionArn,binding),/alias configuration/); assert.throws(()=>assertReviewedBrokerLaunch({StatusCode:200,ExecutedVersion:"6"},started,{reviewedVersion:"7",expectedTaskDefinitionArn,binding}),/reviewed executor version/); assert.throws(()=>assertReviewedBrokerLaunch({StatusCode:200,ExecutedVersion:"7"},{...started,taskDefinitionArn:expectedTaskDefinitionArn.replace(":7",":8")},{reviewedVersion:"7",expectedTaskDefinitionArn,binding}),/reviewed executor version/); });
 test("complete permission matrix succeeds only with every advertised check", async () => { const result = await verifyCredentials(urls, { clientFactory: clientFactory() }); assert.equal(assertCompleteVerification(result), true); });
 for (const [fault, message] of [
   ["invalid-credentials", /authentication failed/],
   ["app-missing-crud", /permission denied/],
   ["app-can-set-owner", /unexpectedly succeeded/],
   ["migrator-cannot-set-owner", /permission denied/],
-  ["rls-can-write", /unexpectedly succeeded/],
-  ["rls-missing-graph", /permission denied/],
   ["infrastructure-denial", /non-permission reason/],
 ]) test(`verification fails closed for ${fault}`, async () => assert.rejects(verifyCredentials(urls, { clientFactory: clientFactory(fault) }), message));
 test("verification cannot report success with an incomplete matrix", async () => { const result = await verifyCredentials(urls, { clientFactory: clientFactory() }); result[0].permissionTests.pop(); assert.throws(() => assertCompleteVerification(result), /Missing expected denial|incomplete/); });
 test("verify requires zero RLS, FORCE RLS, and policy counts",async()=>{ const admin={ $queryRawUnsafe:async()=>[{database_name:"mscqr_staging",rls_enabled_count:0,force_rls_count:0,policy_count:0}]}; assert.equal((await databaseInvariants(admin)).policyCount,0); for(const key of ["rls_enabled_count","force_rls_count","policy_count"]){ admin.$queryRawUnsafe=async()=>[{database_name:"mscqr_staging",rls_enabled_count:0,force_rls_count:0,policy_count:0,[key]:1}]; await assert.rejects(databaseInvariants(admin),/invariants failed/); } });
-test("verify requires every staged RLS route flag to remain explicitly false",()=>{ const env={MSCQR_STAGING_RLS_BATCHES_READ_ENABLED:"false",MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED:"false",MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED:"false"}; assert.equal(assertRouteFlagsFalse(env),true); assert.throws(()=>assertRouteFlagsFalse({...env,MSCQR_STAGING_RLS_BATCHES_READ_ENABLED:"true"}),/explicitly false/); });
+
+const DISABLED_FULL_RLS_MODES = Object.freeze([
+  "full-rls-capability-preflight",
+  "full-rls-role-provision",
+  "full-rls-role-verify",
+  "full-rls-admin-bootstrap",
+  "full-rls-admin-ownership",
+  "full-rls-runtime-policy",
+  "full-rls-verification",
+  "full-rls-rollback",
+]);
+
+test("blue executor rejects every full-RLS mode while preserving credential modes", () => {
+  for (const mode of DISABLED_FULL_RLS_MODES) {
+    assert.throws(() => assertBlueExecutorModeAllowed(mode), /disabled on the blue staging executor/);
+  }
+  for (const mode of ["probe", "provision", "verify"]) {
+    assert.equal(assertBlueExecutorModeAllowed(mode), true);
+  }
+  for (const mode of ["install-rls", "cutover", "", null]) assert.throws(() => assertBlueExecutorModeAllowed(mode), /outside the reviewed/);
+});
 
 function probeClient({ deny = false, infrastructureFailure = false, rollbackFailure = false } = {}) {
   const state = { tables: new Set(), schemas: new Set(), rows: 0, begins: 0, rollbacks: 0, reusableChecks: 0 };
@@ -90,30 +106,30 @@ test("expected permission denial rolls back and leaves the connection reusable",
 test("infrastructure failure is not classified as permission denial",async()=>{ const db=probeClient({infrastructureFailure:true}); await assert.rejects(verifyDeniedOperation(db,{label:"create-table",sql:"CREATE TABLE infra_probe(id integer)",mutating:true}),/non-permission reason/); });
 test("rollback failure causes verification failure",async()=>{ const db=probeClient({deny:true,rollbackFailure:true}); await assert.rejects(verifyDeniedOperation(db,{label:"create-table",sql:"CREATE TABLE rollback_probe(id integer)",mutating:true}),/rollback failed/); });
 
-for (const initialCount of [1, 2, 3]) test(`first-time recovery converges ${initialCount}-of-3 placeholders to a retryable 3-of-3 state`, async () => {
+for (const initialCount of [0, 1, 2]) test(`first-time recovery converges ${initialCount}-of-2 placeholders to a retryable 2-of-2 state`, async () => {
   const keys = Object.keys(ROLES); const store = new Set(keys.slice(0, initialCount));
   await ensureAllPlaceholders({ metadataFn: async (key) => ({ exists: store.has(key) }), isPlaceholderFn: async (key) => store.has(key), createPlaceholderFn: async (key) => { store.add(key); } });
   assert.deepEqual([...store].sort(), keys.sort());
-  assert.doesNotThrow(() => { if (store.size !== 3) throw new Error("retry blocked"); });
+  assert.doesNotThrow(() => { if (store.size !== 2) throw new Error("retry blocked"); });
 });
 
 test("failed placeholder convergence requires operator recovery and never reports restored", async () => {
   const store = new Set(["app"]);
   await assert.rejects(ensureAllPlaceholders({ metadataFn: async (key) => ({ exists: store.has(key) }), isPlaceholderFn: async (key) => store.has(key), createPlaceholderFn: async () => { throw new Error("cleanup failed"); } }), /cleanup failed/);
-  assert.notEqual(store.size, 3);
+  assert.notEqual(store.size, 2);
 });
 
-for (const [boundary, initialCount] of [["first-placeholder-creation",1],["second-placeholder-creation",2],["all-placeholders-before-pending",3],["first-pending-version",3]]) test(`failure injection after ${boundary} leaves a retryable consistent state`, async () => {
+for (const [boundary, initialCount] of [["first-placeholder-creation",1],["second-placeholder-creation",2],["all-placeholders-before-pending",2],["first-pending-version",2]]) test(`failure injection after ${boundary} leaves a retryable consistent state`, async () => {
   const keys=Object.keys(ROLES); const store=new Set(keys.slice(0,initialCount));
   await ensureAllPlaceholders({metadataFn:async key=>({exists:store.has(key)}),isPlaceholderFn:async key=>store.has(key),createPlaceholderFn:async key=>store.add(key)});
   const states=Object.fromEntries(keys.map(key=>[key,{exists:store.has(key)}])); const flags=Object.fromEntries(keys.map(key=>[key,store.has(key)]));
   assert.equal(classifyProvisioningMode(states,flags),"first-time-recoverable");
 });
 
-for (const signal of ["SIGINT","SIGTERM","SIGHUP"]) for (const [boundary,initialCount] of [["first-placeholder",1],["second-placeholder",2],["all-placeholders",3],["first-pending",3]]) test(`${signal} compensation at ${boundary} converges and permits a second run`, async () => {
+for (const signal of ["SIGINT","SIGTERM","SIGHUP"]) for (const [boundary,initialCount] of [["first-placeholder",1],["second-placeholder",2],["all-placeholders",2],["first-pending",2]]) test(`${signal} compensation at ${boundary} converges and permits a second run`, async () => {
   const keys=Object.keys(ROLES); const store=new Set(keys.slice(0,initialCount));
   await ensureAllPlaceholders({metadataFn:async key=>({exists:store.has(key)}),isPlaceholderFn:async key=>store.has(key),createPlaceholderFn:async key=>store.add(key)});
   assert.equal(classifyProvisioningMode(Object.fromEntries(keys.map(key=>[key,{exists:true}])),Object.fromEntries(keys.map(key=>[key,true]))),"first-time-recoverable");
 });
 
-test("mixed one-of-three or two-of-three credential states are never classified as restored",()=>{ const keys=Object.keys(ROLES); for(const count of [1,2]){ const states=Object.fromEntries(keys.map((key,index)=>[key,{exists:index<count}])); const flags=Object.fromEntries(keys.slice(0,count).map(key=>[key,false])); assert.throws(()=>classifyProvisioningMode(states,flags),/Mixed credential/); } });
+test("mixed one-of-two credential states are never classified as restored",()=>{ const keys=Object.keys(ROLES); const states=Object.fromEntries(keys.map((key,index)=>[key,{exists:index<1}])); assert.throws(()=>classifyProvisioningMode(states,{[keys[0]]:false}),/Mixed credential/); });

@@ -62,6 +62,38 @@ mockModule("config/database.js", {
   },
 });
 
+mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
+  mutatePrintingTestLabelJob: async ({ operation, job }) => {
+    const current = printer.metadata.pendingLocalAgentTestLabel;
+    if (operation === "QUEUE") {
+      printer.metadata.pendingLocalAgentTestLabel = job;
+      return job;
+    }
+    if (!current) return operation === "CLAIM" ? { available: false } : { matched: false };
+    if (operation === "CLAIM") {
+      printer.metadata.pendingLocalAgentTestLabel = { ...current, status: "CLAIMED" };
+      return { ...current, available: true };
+    }
+    if (job.testJobId !== current.testJobId) return { matched: false };
+    const status = operation === "ACK" ? "ACKED" : operation === "CONFIRM" ? "CONFIRMED" : "FAILED";
+    printer.metadata.pendingLocalAgentTestLabel = { ...current, status };
+    if (operation === "CONFIRM") {
+      printer.metadata.lastTestLabelConfirmedAt = new Date().toISOString();
+      printer.metadata.lastTestLabelFingerprint = {
+        connectionType: printer.connectionType,
+        deliveryMode: printer.deliveryMode,
+        nativePrinterId: printer.nativePrinterId,
+        ipAddress: null,
+        host: null,
+        port: null,
+        printerUri: null,
+        commandLanguage: printer.commandLanguage,
+      };
+    }
+    return { matched: true };
+  },
+});
+
 const {
   acknowledgeLocalAgentPrinterTestJob,
   claimLocalAgentPrinterTestJob,
@@ -69,6 +101,15 @@ const {
   printTestLabelForRegisteredPrinter,
 } = require("../dist/services/printerTestLabelService");
 const { assertPrinterTestLabelConfirmed } = require("../dist/services/printerTestLabelGateService");
+const boundary = { capability: "test-capability", requestId: "50000000-0000-4000-8000-000000000001" };
+const connectorBoundary = {
+  registrationId: "50000000-0000-4000-8000-000000000002",
+  agentId: "agent-local-test-1",
+  deviceFingerprint: "device-local-test-1",
+  nonce: "connector-test-nonce-1",
+  issuedAt: new Date().toISOString(),
+  requestId: "50000000-0000-4000-8000-000000000003",
+};
 
 (async () => {
   await assert.rejects(
@@ -80,12 +121,13 @@ const { assertPrinterTestLabelConfirmed } = require("../dist/services/printerTes
   const queued = await printTestLabelForRegisteredPrinter({
     printer,
     actorUserId: "manufacturer-local-test-1",
+    boundary,
   });
   assert.equal(queued.outcome, "queued", "local-agent setup test endpoint should report queued");
   assert(printer.metadata.pendingLocalAgentTestLabel, "queued setup test job should be persisted on printer metadata");
   assert(!printer.metadata.lastTestLabelConfirmedAt, "queued setup test must not mark the printer confirmed");
 
-  const claim = await claimLocalAgentPrinterTestJob({ printerIds: [printer.id] });
+  const claim = await claimLocalAgentPrinterTestJob({ printerIds: [printer.id], connectorBoundary });
   assert(claim, "persisted setup test job should be claimable by any backend task");
   assert.equal(claim.printer.id, printer.id, "claim should carry the backend printer profile id for connector test ack");
   assert.equal(claim.printer.nativePrinterId, printer.nativePrinterId, "claim should bind the selected native printer");
@@ -95,6 +137,7 @@ const { assertPrinterTestLabelConfirmed } = require("../dist/services/printerTes
     printerId: printer.id,
     testJobId: claim.testJobId,
     metadata: { payloadHash: claim.payloadHash, deviceJobRef: "winspool:79" },
+    connectorBoundary,
   });
   assert.equal(acknowledged, true, "connector ack should update the persistent setup test job");
   assert.equal(printer.metadata.pendingLocalAgentTestLabel.status, "ACKED", "ack should be persisted");
@@ -106,6 +149,7 @@ const { assertPrinterTestLabelConfirmed } = require("../dist/services/printerTes
     deviceJobRef: "winspool:79",
     confirmationMode: "LOCAL_QUEUE",
     metadata: { payloadHash: claim.payloadHash },
+    connectorBoundary,
   });
   assert.equal(confirmed, true, "connector confirm should update the persistent setup test job");
   assert(printer.metadata.lastTestLabelConfirmedAt, "connector confirm should record setup test proof");
@@ -118,8 +162,9 @@ const { assertPrinterTestLabelConfirmed } = require("../dist/services/printerTes
   const other = await printTestLabelForRegisteredPrinter({
     printer,
     actorUserId: "manufacturer-local-test-1",
+    boundary,
   });
-  const otherClaim = await claimLocalAgentPrinterTestJob({ printerIds: [printer.id] });
+  const otherClaim = await claimLocalAgentPrinterTestJob({ printerIds: [printer.id], connectorBoundary });
   assert(otherClaim, "second queued setup test should be claimable");
   const wrongConfirm = await confirmLocalAgentPrinterTestJob({
     printerId: printer.id,
@@ -127,6 +172,7 @@ const { assertPrinterTestLabelConfirmed } = require("../dist/services/printerTes
     payloadType: otherClaim.payloadType,
     deviceJobRef: "winspool:80",
     confirmationMode: "LOCAL_QUEUE",
+    connectorBoundary,
   });
   assert.equal(wrongConfirm, false, "wrong setup-test id must not satisfy production gate");
   assert(!printer.metadata.lastTestLabelConfirmedAt, "wrong confirm must not mark setup test proof");

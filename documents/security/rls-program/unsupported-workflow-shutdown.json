@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "mode": "explicit-activation-reviewed-allowlist",
+  "implementation": "backend/src/middleware/unsupportedWorkflowShutdown.ts",
+  "appliesTo": [
+    "protected authenticated read router",
+    "protected authenticated mutation router"
+  ],
+  "defaultDisposition": "Inactive: registered application routes retain their existing behavior. Active: only reviewed enabledProtectedRoutes and exact dedicated boundaries proceed; every other protected request is denied before authentication or business queries.",
+  "enabledProtectedRoutes": [],
+  "activation": {
+    "environment": "MSCQR_FULL_RLS_REDUCED_SURFACE_ENABLED",
+    "inactiveValue": "false or unset",
+    "activeValue": "true",
+    "emptyAllowlist": "startup failure",
+    "gateRule": "Activation is prohibited until enabledProtectedRoutes is nonempty and every supported route omitted from it already has a frozen-product-prohibited disposition. Gate 1 pre-RLS regression runs with this control inactive."
+  },
+  "unknownDedicatedBoundaryDisposition": "While inactive, unknown routes reach the existing generic 404 handler. While active, unknown protected and telemetry descendants are denied; unknown paths beneath the non-overlapping public/auth/customer/health prefixes reach the generic 404 handler.",
+  "dedicatedBoundaryPrefixes": [
+    "/auth",
+    "/fraud-report",
+    "/health",
+    "/healthz",
+    "/incidents/report",
+    "/public",
+    "/scan",
+    "/support/tickets/track",
+    "/verify"
+  ],
+  "dedicatedBoundaryRoutes": [
+    "POST /telemetry/csp-report",
+    "POST /telemetry/route-transition"
+  ],
+  "exemptDedicatedBoundaries": [
+    "health and readiness without protected business reads",
+    "authentication and pre-auth routes",
+    "public/proof-bound routes",
+    "customer cookie routes"
+  ],
+  "exemptionRule": "An exempt router is not database-authorized by the exemption; its exact boundary must be certified before RLS activation.",
+  "operatorDisposition": "Operator-only routes remain disabled unless separately registered behind an exact operator procedure.",
+  "denialControl": {
+    "order": "The shared pre-auth denial limiter increments before any shutdown warning is emitted.",
+    "networkKey": "Normalized client IP hashed with the application's versioned IP HMAC secret into a fixed privacy-preserving bucket; body, query, resource path, bearer token, user agent and caller identity are excluded.",
+    "windowEnvironment": "UNSUPPORTED_WORKFLOW_DENIAL_WINDOW_MS",
+    "windowDefaultMs": 60000,
+    "limitEnvironment": "UNSUPPORTED_WORKFLOW_DENIAL_MAX_PER_NETWORK",
+    "limitDefault": 60,
+    "logThresholdEnvironment": "UNSUPPORTED_WORKFLOW_DENIAL_LOG_MAX_PER_NETWORK",
+    "logThresholdDefault": 5,
+    "overLimitDisposition": "429 RATE_LIMITED with Retry-After; the request remains denied before authentication or business access.",
+    "sharedStore": "The existing Redis rate-limit store provides horizontal-instance coordination whenever Redis is configured.",
+    "sharedStoreFailure": "A monotonic per-instance memory counter is incremented on every request and becomes the conservative limiter if Redis is unavailable; Redis failure never allows the request to reach a protected workflow.",
+    "logging": "At most the configured number of per-denial warnings plus one suppression summary are emitted for one network bucket in one window. Generic per-request completion logging is suppressed for shutdown denials so it cannot create a second unbounded stream; aggregate request metrics are still recorded against the fixed unresolved-route label.",
+    "aggregateCounters": [
+      "denied",
+      "rateLimited",
+      "logsEmitted",
+      "logsSuppressed",
+      "sharedStoreFallbacks"
+    ]
+  },
+  "auditEvent": {
+    "event": "UNSUPPORTED_WORKFLOW_DISABLED",
+    "fields": [
+      "method",
+      "fixed unresolved route label",
+      "hashed request reference when available",
+      "privacy-preserving network bucket",
+      "bucket-window denial count",
+      "stable aggregate counters",
+      "outcome",
+      "fixed reason"
+    ],
+    "payloadProhibition": "No concrete path, raw request ID, request body, query values, resource identifiers, IP address, credentials, bearer token, user agent or protected row data.",
+    "durabilityRequirement": "Production activation requires the existing structured log sink to retain this event immutably."
+  },
+  "overrides": {
+    "name": "MSCQR_TEST_ALLOW_UNSUPPORTED_WORKFLOWS",
+    "allowedEnvironment": "test only",
+    "production": "startup failure"
+  },
+  "activationStatus": "installed-inactive-launch-blocked",
+  "postgresqlCertification": "pending"
+}

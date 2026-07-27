@@ -79,16 +79,12 @@ export const reportFraudSchema = z
     observedStatus: z.string().trim().max(64).optional(),
     observedOutcome: z.string().trim().max(64).optional(),
     pageUrl: z.string().trim().max(1000).optional(),
-    sessionId: z.string().trim().max(128).optional(),
+    sessionId: z.string().uuid(),
     decisionId: z.string().trim().max(128).optional(),
     tags: z.union([z.string(), z.array(z.string())]).optional(),
     captchaToken: z.string().trim().max(4000).optional(),
   })
-  .strict()
-  .refine((value) => Boolean(String(value.code || value.qrCodeValue || "").trim()), {
-    message: "Code is required",
-    path: ["code"],
-  });
+  .strict();
 
 export const productFeedbackSchema = z.object({
   code: z.string().trim().min(2).max(128),

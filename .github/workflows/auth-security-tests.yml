@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 35
     services:
       postgres:
-        image: postgres:16
+        image: postgres:18.4
         env:
           POSTGRES_DB: mscqr_p2_ci_admin_test
           POSTGRES_USER: postgres

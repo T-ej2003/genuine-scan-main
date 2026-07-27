@@ -1,9 +1,11 @@
-import { Prisma, UserRole, UserStatus } from "@prisma/client";
+import { UserRole } from "@prisma/client";
 
-import prisma from "../../config/database";
+import {
+  bootstrapConfiguredSuperAdminProcedure,
+  ProcedureDatabase,
+} from "../../rls-waves/session-c/operatorProcedureService";
 import { logger } from "../../utils/logger";
 import { isValidEmailAddress, normalizeEmailAddress } from "../../utils/email";
-import { createAuditLogSafely } from "../auditService";
 import { hashPassword } from "./passwordService";
 
 type BootstrapResult =
@@ -28,9 +30,6 @@ type BootstrapResult =
       reason: string;
       email?: string;
     };
-
-const SUPER_ADMIN_ROLES = [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN];
-const BOOTSTRAP_LOCK_KEY = 723_425_101;
 
 const parseBool = (value: unknown, fallback = false) => {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -70,31 +69,7 @@ const validateBootstrapConfig = (config: ReturnType<typeof getBootstrapConfig>) 
   return null;
 };
 
-const auditBootstrap = async (result: BootstrapResult) => {
-  if (result.status === "disabled") return;
-
-  await createAuditLogSafely({
-    userId: result.status === "created" || result.status === "skipped_existing" ? result.userId : undefined,
-    action:
-      result.status === "created"
-        ? "AUTH_SUPER_ADMIN_BOOTSTRAPPED"
-        : result.status === "skipped_existing"
-          ? "AUTH_SUPER_ADMIN_BOOTSTRAP_SKIPPED_EXISTING"
-          : "AUTH_SUPER_ADMIN_BOOTSTRAP_BLOCKED",
-    entityType: "User",
-    entityId: result.status === "created" || result.status === "skipped_existing" ? result.userId : undefined,
-    details: {
-      status: result.status,
-      email: "email" in result && result.email ? redacted(result.email) : undefined,
-      role: "role" in result ? result.role : undefined,
-      autoVerified: "autoVerified" in result ? result.autoVerified : undefined,
-      reason: "reason" in result ? result.reason : undefined,
-      source: "startup",
-    },
-  });
-};
-
-export const bootstrapConfiguredSuperAdmin = async (): Promise<BootstrapResult> => {
+export const bootstrapConfiguredSuperAdmin = async (db?: ProcedureDatabase): Promise<BootstrapResult> => {
   const config = getBootstrapConfig();
   const validationError = validateBootstrapConfig(config);
 
@@ -109,70 +84,62 @@ export const bootstrapConfiguredSuperAdmin = async (): Promise<BootstrapResult> 
         reason: validationError,
         email: config.email ? redacted(config.email) : null,
       });
-      await auditBootstrap(result);
     }
     return result;
   }
 
-  const passwordHash = await hashPassword(config.password);
-  const now = new Date();
-
-  const result = await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${BOOTSTRAP_LOCK_KEY})`);
-
-    const existingSuperAdmin = await tx.user.findFirst({
-      where: {
-        role: { in: SUPER_ADMIN_ROLES },
-        deletedAt: null,
-      },
-      orderBy: { createdAt: "asc" },
-      select: { id: true, email: true, role: true },
-    });
-
-    if (existingSuperAdmin) {
-      return {
-        status: "skipped_existing" as const,
-        userId: existingSuperAdmin.id,
-        email: existingSuperAdmin.email,
-        role: existingSuperAdmin.role,
-      };
-    }
-
-    const existingConfiguredEmail = await tx.user.findUnique({
-      where: { email: config.email as string },
-      select: { id: true, email: true, role: true, deletedAt: true },
-    });
-
-    if (existingConfiguredEmail) {
-      return {
-        status: "blocked" as const,
-        reason: "Configured bootstrap email already belongs to a non-super-admin account.",
-        email: existingConfiguredEmail.email,
-      };
-    }
-
-    const created = await tx.user.create({
-      data: {
-        email: config.email as string,
-        passwordHash,
-        name: config.name,
-        role: UserRole.SUPER_ADMIN,
-        status: UserStatus.ACTIVE,
-        isActive: true,
-        deletedAt: null,
-        disabledAt: null,
-        emailVerifiedAt: config.autoVerify ? now : null,
-      },
-      select: { id: true, email: true },
-    });
-
-    return {
-      status: "created" as const,
-      userId: created.id,
-      email: created.email,
-      autoVerified: config.autoVerify,
+  if (!db) {
+    const result: BootstrapResult = {
+      status: "blocked",
+      reason: "Super-admin bootstrap requires the deployment-only migration database identity.",
+      email: config.email || undefined,
     };
-  });
+    logger.error("Super admin bootstrap blocked", { reason: result.reason, email: redacted(config.email || "") });
+    return result;
+  }
+
+  const environment = String(process.env.NODE_ENV || "").trim().toLowerCase();
+  if (!["development", "staging", "production"].includes(environment)) {
+    return { status: "blocked", reason: "NODE_ENV must identify the migration target environment.", email: config.email || undefined };
+  }
+
+  const passwordHash = await hashPassword(config.password);
+  const procedureResult = await bootstrapConfiguredSuperAdminProcedure(
+    {
+      email: config.email as string,
+      passwordHash,
+      name: config.name,
+      autoVerify: config.autoVerify,
+      purpose: "bootstrap-configured-super-admin",
+      assurance: "system-verified",
+      environment: environment as "development" | "staging" | "production",
+    },
+    db
+  );
+
+  const result: BootstrapResult =
+    procedureResult.status === "created" && procedureResult.userId && procedureResult.email
+      ? {
+          status: "created",
+          userId: procedureResult.userId,
+          email: procedureResult.email,
+          autoVerified: Boolean(procedureResult.autoVerified),
+        }
+      : procedureResult.status === "skipped_existing" && procedureResult.userId && procedureResult.email
+        ? {
+            status: "skipped_existing",
+            userId: procedureResult.userId,
+            email: procedureResult.email,
+            role:
+              procedureResult.role === UserRole.PLATFORM_SUPER_ADMIN
+                ? UserRole.PLATFORM_SUPER_ADMIN
+                : UserRole.SUPER_ADMIN,
+          }
+        : {
+            status: "blocked",
+            reason: procedureResult.reason || "Configured super-admin bootstrap was rejected by the database boundary.",
+            email: procedureResult.email || config.email || undefined,
+          };
 
   if (result.status === "created") {
     logger.info("Super admin bootstrap completed", {
@@ -197,7 +164,5 @@ export const bootstrapConfiguredSuperAdmin = async (): Promise<BootstrapResult> 
       email: result.email ? redacted(result.email) : null,
     });
   }
-
-  await auditBootstrap(result);
   return result;
 };

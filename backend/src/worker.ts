@@ -8,10 +8,6 @@ import { initBackendMonitoring } from "./observability/sentry";
 import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
 import { startAuditLogOutboxWorker, stopAuditLogOutboxWorker } from "./services/auditLogOutboxService";
 import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./services/compliancePackService";
-import {
-  startLegacyQrRiskReportScheduler,
-  stopLegacyQrRiskReportScheduler,
-} from "./services/legacyQrRiskReportJobService";
 import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
 import { startPrintConfirmationReconciler } from "./services/printConfirmationReconciler";
@@ -83,7 +79,6 @@ const boot = async () => {
   startSecurityEventOutboxWorker();
   startAuditLogOutboxWorker();
   startCompliancePackScheduler();
-  startLegacyQrRiskReportScheduler();
   await resumePendingNetworkDirectJobs().catch((error) => {
     logger.error("Worker failed to resume pending network-direct jobs", { error: error?.message || error });
   });
@@ -114,7 +109,6 @@ const shutdown = async (signal: string) => {
   stopSecurityEventOutboxWorker();
   stopAuditLogOutboxWorker();
   stopCompliancePackScheduler();
-  stopLegacyQrRiskReportScheduler();
   await closeRedisConnections().catch(() => undefined);
   await prisma.$disconnect().catch(() => undefined);
   process.exitCode = 0;

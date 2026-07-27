@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { APP_PATHS } from "@/app/route-metadata";
 
@@ -568,12 +568,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <MutationEventBridge />
-      <BrowserRouter
-        future={{
-          v7_startTransition: true,
-          v7_relativeSplatPath: true,
-        }}
-      >
+      <BrowserRouter>
         <AuthProvider>
           <TooltipProvider>
             <Toaster />

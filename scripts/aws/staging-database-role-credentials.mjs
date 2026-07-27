@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
@@ -15,7 +16,6 @@ import {
   assertExpectedAwsIdentity,
   assertReviewedDatabaseConsumers,
   assertRollbackTarget,
-  assertRlsRouteFlagsFalse,
   assertServiceStable,
   assertStagingOnlyName,
   assertTaskDefinitionOnlyDatabaseSecretChanged,
@@ -25,7 +25,6 @@ import {
   createPrivateEvidenceDirectory,
   createRestrictiveTempDirectory,
   compensateEcsCutoverFailure,
-  extractRlsRouteFlags,
   findDatabaseUrlSecret,
   inventoryDatabaseConsumers,
   mergeTaskDefinitions,
@@ -48,6 +47,13 @@ const ADMIN_TASK_ARN = process.env.MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN ||
 const PTY_CAPTURE = path.join(import.meta.dirname, "capture-pty-command.py");
 const PTY_CAPTURE_TIMEOUT_SECONDS = 120;
 const PTY_CAPTURE_MAX_OUTPUT_BYTES = 1024 * 1024;
+const PROVISION_BROKER_CONFIRMATION = "MSCQR_PROVISION_STAGING_DATABASE_ROLE_CREDENTIALS";
+const BROKER_ALIAS_ARN = `arn:aws:lambda:${C.region}:${C.accountId}:function:${C.brokerFunction}:reviewed`;
+const sha256File = (name) => crypto.createHash("sha256").update(fs.readFileSync(path.join(ROOT, name))).digest("hex");
+const BROKER_BINDING = Object.freeze({
+  executorContractSha256: sha256File("documents/security/rls-program/staging-full-rls-executor-contract.json"),
+  brokerSourceSha256: sha256File("infra/terraform/staging-api/lambda/database-role-executor-broker/index.mjs"),
+});
 const activeTemporaryDirectories = new Set();
 let interrupted = false;
 
@@ -72,6 +78,32 @@ function tempDirectory(prefix = "mscqr-staging-db-controller-") {
   const directory = createRestrictiveTempDirectory(prefix); activeTemporaryDirectories.add(directory); return directory;
 }
 function cleanup(directory) { if (directory) { securelyRemoveDirectory(directory); activeTemporaryDirectories.delete(directory); } }
+
+export function assertReviewedBrokerConfiguration(configuration, expectedTaskDefinitionArn, binding = BROKER_BINDING) {
+  const version = String(configuration?.Version || "");
+  const variables = configuration?.Environment?.Variables || {};
+  if (!/^[1-9][0-9]*$/.test(version)
+      || variables.BROKER_CLUSTER_ARN !== `arn:aws:ecs:${C.region}:${C.accountId}:cluster/${C.cluster}`
+      || variables.BROKER_TASK_DEFINITION_ARN !== expectedTaskDefinitionArn
+      || variables.BROKER_EXECUTOR_CONTRACT_SHA256 !== binding.executorContractSha256
+      || variables.BROKER_SOURCE_SHA256 !== binding.brokerSourceSha256) {
+    throw new Error("Reviewed broker alias configuration does not match the selected executor.");
+  }
+  return version;
+}
+
+export function assertReviewedBrokerLaunch(metadata, started, { reviewedVersion, expectedTaskDefinitionArn, binding = BROKER_BINDING }) {
+  const expectedKeys = ["brokerSourceSha256", "executorContractSha256", "status", "taskArn", "taskDefinitionArn"];
+  const taskArnPrefix = `arn:aws:ecs:${C.region}:${C.accountId}:task/${C.cluster}/`;
+  if (metadata?.FunctionError || metadata?.StatusCode !== 200 || String(metadata?.ExecutedVersion || "") !== reviewedVersion
+      || Object.keys(started || {}).sort().join(",") !== expectedKeys.join(",")
+      || started.status !== "started" || started.taskDefinitionArn !== expectedTaskDefinitionArn
+      || typeof started.taskArn !== "string" || !started.taskArn.startsWith(taskArnPrefix)
+      || Object.entries(binding).some(([name, value]) => started[name] !== value)) {
+    throw new Error("Broker refused or failed to start the reviewed executor version.");
+  }
+  return started.taskArn;
+}
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.once(signal, () => {
   interrupted = true;
   for (const directory of activeTemporaryDirectories) try { securelyRemoveDirectory(directory); } catch { /* evidence remains fail-closed */ }
@@ -88,7 +120,6 @@ function discoverBase() {
   assertStagingOnlyName("ECS cluster", C.cluster); assertStagingOnlyName("ECS service", service.serviceName);
   const taskArn = assertRollbackTarget(service.taskDefinition);
   const described = awsJson(["ecs", "describe-task-definition", "--task-definition", taskArn, "--include", "TAGS"]);
-  assertRlsRouteFlagsFalse(extractRlsRouteFlags(described.taskDefinition));
   return { identity, service, taskArn, taskDefinition: described.taskDefinition, tags: described.tags || [], adminSecretId: findDatabaseUrlSecret(described.taskDefinition) };
 }
 
@@ -124,8 +155,7 @@ function databaseConsumerInventory(base, { expectedClassification = null, preser
     return matches[0] || "";
   };
   const discoveredAppSecretArn = appSecretArn || uniqueMatchingSecret("app");
-  const rlsReadSecretArn = uniqueMatchingSecret("rls-read");
-  const consumers = inventoryDatabaseConsumers(definitions, activeServices, activeSchedules, [preservedAdminSecretId], discoveredAppSecretArn ? [discoveredAppSecretArn] : [], rlsReadSecretArn ? [rlsReadSecretArn] : []);
+  const consumers = inventoryDatabaseConsumers(definitions, activeServices, activeSchedules, [preservedAdminSecretId], discoveredAppSecretArn ? [discoveredAppSecretArn] : []);
   const reviewed = consumers.map((consumer) => {
     let requiredRole = "no-runtime-credential";
     if (consumer.service === C.service && consumer.container === C.backendContainer && consumer.variable === "DATABASE_URL") requiredRole = C.roles.app;
@@ -145,7 +175,10 @@ function executorPlan(base) {
   const backend = base.taskDefinition.containerDefinitions.find((item) => item.name === C.backendContainer);
   const admin = definition.containerDefinitions?.find((item) => item.name === "db-admin");
   if (!admin || definition.containerDefinitions.length !== 1) throw new Error("Admin task must contain exactly one db-admin container.");
-  if (admin.image !== backend.image) throw new Error("Admin task image must exactly match the reviewed staging backend image.");
+  if (admin.image !== backend.image
+      || !new RegExp(`^${C.accountId}\\.dkr\\.ecr\\.${C.region}\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$`).test(admin.image || "")) {
+    throw new Error("Admin task image must exactly match the digest-pinned staging backend image.");
+  }
   if (!(admin.command || []).join(" ").includes("staging-database-role-vpc-executor.mjs")) throw new Error("Admin task does not use the reviewed VPC executor entrypoint.");
   const dbSecrets = (admin.secrets || []).filter((item) => item.name === "DATABASE_URL");
   if (dbSecrets.length !== 1 || dbSecrets[0].valueFrom !== base.adminSecretId) throw new Error("Admin task must receive only the preserved staging admin DATABASE_URL secret reference.");
@@ -156,22 +189,25 @@ function executorPlan(base) {
 
 function runExecutor(base, mode) {
   const executor = executorPlan(base);
+  const brokerConfiguration = awsJson(["lambda", "get-function-configuration", "--function-name", BROKER_ALIAS_ARN]);
+  const reviewedVersion = assertReviewedBrokerConfiguration(brokerConfiguration, executor.arn);
   const directory = tempDirectory();
   try {
     const requestFile = path.join(directory, "broker-request.json");
     const responseFile = path.join(directory, "broker-response.json");
-    fs.writeFileSync(requestFile, JSON.stringify({ mode }), { mode: 0o600, flag: "wx" });
-    const invoked = run("aws", ["lambda", "invoke", "--function-name", C.brokerFunction, "--cli-binary-format", "raw-in-base64-out", "--payload", `fileb://${requestFile}`, responseFile, "--region", C.region, "--output", "json"]);
+    const payload = { mode, ...(mode === "provision" ? { confirmation: PROVISION_BROKER_CONFIRMATION } : {}) };
+    fs.writeFileSync(requestFile, JSON.stringify(payload), { mode: 0o600, flag: "wx" });
+    const invoked = run("aws", ["lambda", "invoke", "--function-name", BROKER_ALIAS_ARN, "--cli-binary-format", "raw-in-base64-out", "--payload", `fileb://${requestFile}`, responseFile, "--region", C.region, "--output", "json"]);
     let metadata; let started;
     try { metadata = JSON.parse(invoked.stdout || "{}"); started = JSON.parse(fs.readFileSync(responseFile, "utf8")); } catch { throw new Error("Broker returned invalid JSON."); }
-    if (metadata.FunctionError || metadata.StatusCode !== 200 || Object.keys(started).sort().join(",") !== "status,taskArn" || started.status !== "started") throw new Error("Broker refused or failed to start the reviewed executor.");
-    const taskArn = started.taskArn;
-    const expectedTaskPrefix = `arn:aws:ecs:${C.region}:${C.accountId}:task/${C.cluster}/`;
-    if (typeof taskArn !== "string" || !taskArn.startsWith(expectedTaskPrefix)) throw new Error("Broker returned a task outside the reviewed staging cluster.");
+    const taskArn = assertReviewedBrokerLaunch(metadata, started, { reviewedVersion, expectedTaskDefinitionArn: executor.arn });
     run("aws", ["ecs", "wait", "tasks-stopped", "--cluster", C.cluster, "--tasks", taskArn, "--region", C.region]);
     const stopped = awsJson(["ecs", "describe-tasks", "--cluster", C.cluster, "--tasks", taskArn]).tasks?.[0];
     const container = stopped?.containers?.find((item) => item.name === "db-admin");
-    if (container?.exitCode !== 0) throw Object.assign(new Error("VPC executor blocked; inspect sanitized task logs and follow recovery instructions."), { code: "VPC_EXECUTOR_FAILED" });
+    const expectedDigest = executor.definition.containerDefinitions.find((item) => item.name === "db-admin").image.split("@")[1];
+    if (stopped?.taskDefinitionArn !== executor.arn || container?.imageDigest !== expectedDigest || container?.exitCode !== 0) {
+      throw Object.assign(new Error("VPC executor identity or result was not the reviewed digest-pinned task."), { code: "VPC_EXECUTOR_FAILED" });
+    }
     return { mechanism: "lambda-brokered-disposable-ecs-admin-task", brokerFunction: C.brokerFunction, taskArn, exitCode: container.exitCode, topology: executor.topology };
   } finally { cleanup(directory); }
 }
@@ -205,7 +241,6 @@ function provisionOrVerify(command) {
       executorTaskDefinitionArn: executorPlan(base).arn,
       executorTaskArn: result.taskArn,
       verifiedRoles: Object.values(C.roles),
-      rlsRouteFlags: extractRlsRouteFlags(base.taskDefinition),
       verifiedAt: new Date().toISOString(),
     };
     verificationReceiptPath = path.relative(ROOT, writeSanitizedEvidence(evidence, "verification-receipt.json", receipt));
@@ -322,7 +357,7 @@ async function rollback() { const base = discoverBase(); assertDatabaseRoleCutov
 export async function execute() {
   if (process.argv.includes("--help")) return { status: "help", usage: usage() };
   if (interrupted) throw new Error("Controller was interrupted.");
-  if (COMMAND === "discover") { const base = discoverBase(); return { status: "discovery_complete", mutatesAws: false, accountId: base.identity.Account, region: C.region, cluster: C.cluster, service: C.service, taskDefinitionArn: base.taskArn, executor: executorPlan(base).topology, consumerInventory: databaseConsumerInventory(base), routeFlags: extractRlsRouteFlags(base.taskDefinition) }; }
+  if (COMMAND === "discover") { const base = discoverBase(); return { status: "discovery_complete", mutatesAws: false, accountId: base.identity.Account, region: C.region, cluster: C.cluster, service: C.service, taskDefinitionArn: base.taskArn, executor: executorPlan(base).topology, consumerInventory: databaseConsumerInventory(base) }; }
   if (COMMAND === "provision" || COMMAND === "verify") return provisionOrVerify(COMMAND);
   if (COMMAND === "cutover") return cutover();
   if (COMMAND === "rollback") return rollback();

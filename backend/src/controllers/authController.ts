@@ -1,31 +1,36 @@
 import { Request, Response } from "express";
-import { Prisma } from "@prisma/client";
-
 import { loginWithPassword, logoutSession, refreshSession } from "../services/auth/authService";
 import { acceptInvite, createInvite, getInvitePreview } from "../services/auth/inviteService";
 import { requestPasswordReset, resetPasswordWithToken } from "../services/auth/passwordResetService";
 import { confirmEmailVerification } from "../services/auth/emailVerificationService";
-import { listManufacturerLicenseeLinks, normalizeLinkedLicensees, isManufacturerRole } from "../services/manufacturerScopeService";
-// rls-prototype-approved-import: signed access claims establish auth/me context.
-import { withRlsPrototypeTransaction } from "../lib/rlsTransactionContextPrototype";
+import { isManufacturerRole, resolveManufacturerSessionScope } from "../services/manufacturerScopeService";
+import {
+  CanonicalAuthDenial,
+  isCanonicalAuthDenial,
+  withDatabaseAuthenticatedSession,
+} from "../rls-waves/session-b/b01/canonicalAuthContext";
+import { loadAuthenticatedActor } from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
+import {
+  buildAuthState,
+  getCurrentRefreshSession,
+} from "../rls-waves/session-b/b01/authenticatedSessionProjection";
 import {
   acceptInviteSchema,
   authResponseData,
-  buildAuthState,
   clearAuthCookies,
   ensureCsrfCookie,
   forgotPasswordSchema,
   getAuthClaims,
-  getCurrentRefreshSession,
   getRefreshTokenFromRequest,
+  getRequestId,
   hashIp,
   invitePreviewQuerySchema,
   inviteSchema,
   loginSchema,
   normalizeAuthError,
   normalizeUserAgent,
-  prisma,
   resetPasswordSchema,
+  refreshSessionSchema,
   setAuthCookies,
   verifyEmailSchema,
 } from "./authControllerShared";
@@ -46,6 +51,13 @@ export {
   rotateAdminMfaBackupCodesController,
 } from "./authAdminSecurityController";
 
+const denyInactiveSession = (error: unknown, res: Response) => {
+  if (!isCanonicalAuthDenial(error)) return false;
+  clearAuthCookies(res);
+  res.status(401).json({ success: false, error: "Not authenticated" });
+  return true;
+};
+
 export const login = async (req: Request, res: Response) => {
   try {
     const validation = loginSchema.safeParse(req.body);
@@ -62,6 +74,7 @@ export const login = async (req: Request, res: Response) => {
       password,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
+      requestId: getRequestId(req),
     });
 
     setAuthCookies(res, session);
@@ -81,36 +94,50 @@ export const me = async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
 
-    const { user, linkedLicensees } = await withRlsPrototypeTransaction(
-      prisma,
-      {
-        userId: claims.userId,
-        role: claims.role,
-        licenseeId: claims.licenseeId,
-        manufacturerId: isManufacturerRole(claims.role) ? claims.userId : null,
-        organizationId: claims.orgId,
-        // auth/me only needs actor-self visibility; do not elevate from a stale claim.
-        isPlatformAdmin: false,
-      },
-      async (tx: Prisma.TransactionClient) => {
-        const scopedUser = await tx.user.findUnique({
-          where: { id: userId },
-          include: { licensee: true },
-        });
-        const scopedLinks = scopedUser && isManufacturerRole(scopedUser.role)
-          ? normalizeLinkedLicensees(await listManufacturerLicenseeLinks(scopedUser.id, tx))
-          : [];
-        return { user: scopedUser, linkedLicensees: scopedLinks };
+    const capability = String((req as Request & { databaseSessionCapability?: unknown }).databaseSessionCapability || "");
+    const { actor, manufacturerScope, currentSession, auth } = await withDatabaseAuthenticatedSession(
+      claims,
+      { capability, requestId: getRequestId(req), purpose: "auth-me" },
+      async (tx, context) => {
+        const scopedUser = await loadAuthenticatedActor(tx);
+        if (scopedUser.id !== context.userId || scopedUser.role !== context.role) {
+          throw new CanonicalAuthDenial();
+        }
+        const scope = isManufacturerRole(scopedUser.role)
+          ? await resolveManufacturerSessionScope({
+              manufacturerId: scopedUser.id,
+              legacyLicenseeId: scopedUser.licenseeId,
+              legacyOrgId: scopedUser.orgId,
+              requestedLicenseeId: context.licenseeId,
+              requestedOrgId: context.organizationId,
+              requestedScopeVersion: claims.scopeVersion,
+            }, tx)
+          : null;
+        const session = await getCurrentRefreshSession(req, tx);
+        const authState = await buildAuthState(claims, scopedUser.role, scopedUser.id, session, tx);
+        return { actor: scopedUser, manufacturerScope: scope, currentSession: session, auth: authState };
       }
     );
-    if (!user) {
-      return res.status(404).json({ success: false, error: "User not found" });
-    }
-    const primaryLicensee = user.licensee || linkedLicensees.find((row) => row.isPrimary) || linkedLicensees[0] || null;
+    const user = {
+      ...actor,
+      licensee: actor.licenseeRecordId
+        ? {
+            id: actor.licenseeRecordId,
+            name: actor.licenseeName || "",
+            prefix: actor.licenseePrefix || "",
+            brandName: actor.licenseeBrandName,
+            orgId: actor.licenseeOrgId,
+          }
+        : null,
+    };
+    const manufacturer = isManufacturerRole(user.role);
+    const primaryLicensee = manufacturer ? manufacturerScope?.selectedLicensee || null : user.licensee;
+    const linkedLicensees = manufacturerScope?.linkedLicensees || [];
+    const sessionLicenseeId = primaryLicensee?.id || (manufacturer ? null : user.licenseeId);
+    const sessionOrgId = primaryLicensee?.orgId || (manufacturer ? null : user.orgId);
+    const scopeVersion = manufacturer ? manufacturerScope?.selectedLicensee?.scopeVersion ?? null : null;
 
     ensureCsrfCookie(req, res);
-    const currentSession = await getCurrentRefreshSession(req);
-    const auth = claims ? await buildAuthState(claims, user.role, user.id, currentSession) : null;
 
     return res.json({
       success: true,
@@ -122,14 +149,16 @@ export const me = async (req: Request, res: Response) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        licenseeId: primaryLicensee?.id || user.licenseeId,
-        orgId: user.orgId || primaryLicensee?.orgId || null,
+        licenseeId: sessionLicenseeId,
+        orgId: sessionOrgId,
+        scopeVersion,
         licensee: primaryLicensee
           ? {
               id: primaryLicensee.id,
               name: primaryLicensee.name,
               prefix: primaryLicensee.prefix,
               brandName: primaryLicensee.brandName ?? null,
+              ...(scopeVersion ? { scopeVersion } : {}),
             }
           : null,
         linkedLicensees,
@@ -140,6 +169,10 @@ export const me = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
+    if (denyInactiveSession(error, res)) return;
+    if (error instanceof Error && ["MANUFACTURER_SCOPE_DENIED", "MANUFACTURER_SCOPE_STALE"].includes(error.message)) {
+      return res.status(403).json({ success: false, error: "The current manufacturer workspace is unavailable." });
+    }
     console.error("Me error:", error);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -147,6 +180,10 @@ export const me = async (req: Request, res: Response) => {
 
 export const refresh = async (req: Request, res: Response) => {
   try {
+    const selection = refreshSessionSchema.safeParse(req.body || {});
+    if (!selection.success) {
+      return res.status(400).json({ success: false, error: selection.error.errors[0]?.message || "Invalid scope selection" });
+    }
     const rawRefresh = getRefreshTokenFromRequest(req);
     if (!rawRefresh) return res.status(401).json({ success: false, error: "No refresh token" });
 
@@ -154,6 +191,9 @@ export const refresh = async (req: Request, res: Response) => {
       rawRefreshToken: rawRefresh,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
+      requestId: getRequestId(req),
+      requestedLicenseeId: selection.data.licenseeId,
+      requestedScopeVersion: selection.data.scopeVersion,
     });
 
     if (!rotated.ok) {
@@ -164,6 +204,13 @@ export const refresh = async (req: Request, res: Response) => {
     setAuthCookies(res, rotated);
     return res.json({ success: true, data: authResponseData(rotated) });
   } catch (error) {
+    const category = error instanceof Error ? error.message : "";
+    if (["SCOPE_SELECTION_REQUIRED", "MANUFACTURER_SCOPE_VERSION_REQUIRED", "MANUFACTURER_SCOPE_STALE"].includes(category)) {
+      return res.status(409).json({ success: false, error: "Select a current manufacturer workspace and try again.", code: category });
+    }
+    if (category === "MANUFACTURER_SCOPE_DENIED") {
+      return res.status(403).json({ success: false, error: "The requested manufacturer workspace is unavailable." });
+    }
     console.error("Refresh error:", error);
     return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
   }
@@ -171,19 +218,32 @@ export const refresh = async (req: Request, res: Response) => {
 
 export const logout = async (req: Request, res: Response) => {
   try {
-    const userId = getAuthClaims(req)?.userId;
-    if (!userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    await logoutSession({
-      userId,
-      rawRefreshToken: getRefreshTokenFromRequest(req),
-      ipHash: hashIp(req.ip),
-      userAgent: normalizeUserAgent(req.get("user-agent")),
-    });
+    const claims = getAuthClaims(req);
+    if (!claims?.userId || !claims.sessionId || claims.sessionStage !== "ACTIVE") {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
+    const sessionId = claims.sessionId;
+    const requestId = getRequestId(req);
+    const capability = String((req as Request & { databaseSessionCapability?: unknown }).databaseSessionCapability || "");
+    await withDatabaseAuthenticatedSession(claims, { capability, requestId, purpose: "auth-logout" }, (tx, context) =>
+      logoutSession({
+        userId: context.userId,
+        sessionId,
+        ipHash: hashIp(req.ip),
+        userAgent: normalizeUserAgent(req.get("user-agent")),
+        requestId,
+        organizationId: context.organizationId ?? null,
+        licenseeId: context.licenseeId ?? null,
+        manufacturerId: context.manufacturerId ?? null,
+        actorRole: context.role,
+        databaseSessionCapability: capability,
+      }, tx)
+    );
 
     clearAuthCookies(res);
     return res.json({ success: true, data: { loggedOut: true } });
   } catch (error) {
+    if (denyInactiveSession(error, res)) return;
     console.error("Logout error:", error);
     return res.status(500).json({ success: false, error: "Logout failed" });
   }
@@ -233,12 +293,14 @@ export const invite = async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
   }
 
-  const actorUserId = (req as any).user?.userId as string | undefined;
-  if (!actorUserId) {
+  const claims = getAuthClaims(req);
+  const actorUserId = claims?.userId;
+  if (!claims || !actorUserId) {
     return res.status(401).json({ success: false, error: "Not authenticated" });
   }
 
   try {
+    const requestId = getRequestId(req);
     const out = await createInvite({
       email: parsed.data.email,
       role: parsed.data.role,
@@ -247,6 +309,10 @@ export const invite = async (req: Request, res: Response) => {
       manufacturerId: parsed.data.manufacturerId || null,
       allowExistingInvitedUser: parsed.data.allowExistingInvitedUser || false,
       createdByUserId: actorUserId,
+      actorSessionId: claims.sessionId,
+      databaseCapability: String((req as Request & { databaseSessionCapability?: unknown }).databaseSessionCapability || ""),
+      requestId,
+      actorRole: claims.role,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
     });
@@ -276,6 +342,7 @@ export const invite = async (req: Request, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (denyInactiveSession(error, res)) return;
     const msg = String(error?.message || "Invite failed");
     const isConflict = /already active|different|disabled|not required|existing/i.test(msg);
     const isNotFound = /not found/i.test(msg);
@@ -303,6 +370,7 @@ export const acceptInviteController = async (req: Request, res: Response) => {
       rawToken: parsed.data.token,
       password: parsed.data.password,
       name: parsed.data.name || null,
+      requestId: getRequestId(req),
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
     });
@@ -312,6 +380,7 @@ export const acceptInviteController = async (req: Request, res: Response) => {
       password: parsed.data.password,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
+      requestId: getRequestId(req),
     });
 
     setAuthCookies(res, session);

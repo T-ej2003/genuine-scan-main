@@ -56,6 +56,17 @@ export const requireAnyAdmin = requireRole(
   UserRole.LICENSEE_ADMIN,
   UserRole.ORG_ADMIN
 );
+export const requireTenantDirectoryReader = requireRole(
+  UserRole.SUPER_ADMIN,
+  UserRole.PLATFORM_SUPER_ADMIN,
+  UserRole.LICENSEE_ADMIN,
+  UserRole.MANUFACTURER_ADMIN
+);
+export const requireAdministrationMutator = requireRole(
+  UserRole.SUPER_ADMIN,
+  UserRole.PLATFORM_SUPER_ADMIN,
+  UserRole.LICENSEE_ADMIN
+);
 
 export const requireAuditViewer = requireRole(
   UserRole.SUPER_ADMIN,

@@ -30,6 +30,7 @@ const {
   gatewayJobIpLimiter,
   gatewayJobActorLimiter,
   printLifecycleRouteLimiter,
+  printMutationPreAuthRouteLimiter,
   printMutationRouteLimiter,
   printMutationIpLimiter,
   printMutationActorLimiter,
@@ -141,7 +142,7 @@ verifyCodeApp.get("/verify/:code", verifyCodeIpLimiter, verifyCodeActorLimiter, 
 const verifyClaimApp = express();
 verifyClaimApp.use(express.json());
 verifyClaimApp.post(
-  "/verify/:code/claim",
+  "/verify/session/:id/claim",
   verifyClaimRouteLimiter,
   verifyClaimIpLimiter,
   verifyClaimActorLimiter,
@@ -173,6 +174,13 @@ printMutationApp.post(
   printMutationRouteLimiter,
   printMutationIpLimiter,
   printMutationActorLimiter,
+  (_req, res) => res.status(200).json({ success: true })
+);
+
+const printMutationPreAuthApp = express();
+printMutationPreAuthApp.post(
+  "/manufacturer/printers/:id/test",
+  printMutationPreAuthRouteLimiter,
   (_req, res) => res.status(200).json({ success: true })
 );
 
@@ -222,7 +230,7 @@ verifySessionMutationApp.post("/verify/session/abc/intake", verifySessionMutatio
 
   await assertRateLimitAfter({
     app: verifyClaimApp,
-    path: "/verify/AADS00000020171/claim",
+    path: "/verify/session/60000000-0000-4000-8000-000000000501/claim",
     body: { token: "ownership-transfer-token" },
     allowed: 12,
     description: "ownership-sensitive claim flow",
@@ -252,6 +260,19 @@ verifySessionMutationApp.post("/verify/session/abc/intake", verifySessionMutatio
     body: { printerId: "printer-1" },
     allowed: 40,
     description: "manufacturer print mutation",
+  });
+
+  await assertRateLimitAfter({
+    app: printMutationPreAuthApp,
+    path: "/manufacturer/printers/printer-a/test",
+    allowed: 40,
+    description: "manufacturer print mutation pre-auth route family",
+  });
+  await assertAllowedFor({
+    app: printMutationPreAuthApp,
+    path: "/manufacturer/printers/printer-b/test",
+    count: 1,
+    description: "unrelated printer mutation resource",
   });
 
   await assertRateLimitAfter({

@@ -1,14 +1,18 @@
 import {
-  IncidentActorType,
-  IncidentCommChannel,
-  IncidentCommDirection,
   IncidentCommStatus,
-  IncidentEventType,
   UserRole,
 } from "@prisma/client";
 
-import prisma from "../config/database";
-import { createAuditLog } from "./auditService";
+import {
+  B03AuthenticatedFunctionBoundary,
+  b03PayloadDigest,
+  claimIncidentEmailDelivery,
+  completeIncidentEmailDelivery,
+  getPrimarySuperadminEmail as getPrimarySuperadminEmailThroughBoundary,
+  getSuperadminAlertEmails as getSuperadminAlertEmailsThroughBoundary,
+  requireB03AuthenticatedFunctionBoundary,
+  resolveIncidentEmailActor,
+} from "../rls-waves/session-b/b03/repositoryFunctions";
 import { appendMscqrIdentityToText } from "./emailTemplateService";
 import {
   __resetMailTransporterForTests,
@@ -37,6 +41,7 @@ type SendIncidentEmailInput = {
   actorUser?: IncidentEmailActorUser | null;
   senderMode?: "actor" | "system";
   template?: string;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 };
 
 type SendIncidentEmailResult = {
@@ -65,32 +70,17 @@ const isAdminRole = (role?: UserRole | string | null) => {
   );
 };
 
-const resolveActorUser = async (actorUser?: IncidentEmailActorUser | null) => {
+const resolveActorUser = async (
+  actorUser?: IncidentEmailActorUser | null,
+  boundary?: B03AuthenticatedFunctionBoundary
+) => {
   if (!actorUser) return null;
 
   const actorUserId = String(actorUser.id || "").trim();
-  if (!actorUserId) {
-    return {
-      id: null,
-      email: normalizeEmail(actorUser.email),
-      name: String(actorUser.name || "").trim() || null,
-      role: actorUser.role || null,
-    };
-  }
-
-  const dbUser = await prisma.user.findUnique({
-    where: { id: actorUserId },
-    select: { id: true, email: true, name: true, role: true, isActive: true, deletedAt: true },
-  });
-
-  if (!dbUser || dbUser.deletedAt || dbUser.isActive === false) {
-    return {
-      id: actorUserId,
-      email: normalizeEmail(actorUser.email),
-      name: String(actorUser.name || "").trim() || null,
-      role: actorUser.role || null,
-    };
-  }
+  if (!actorUserId) return null;
+  if (!boundary) throw new Error("B03 incident actor lookup requires an authenticated function boundary");
+  const dbUser = await boundary.run((db) => resolveIncidentEmailActor(db, actorUserId));
+  if (!dbUser.active) throw new Error("B03 incident email actor is inactive or stale");
 
   return {
     id: dbUser.id,
@@ -100,20 +90,12 @@ const resolveActorUser = async (actorUser?: IncidentEmailActorUser | null) => {
   };
 };
 
-const getPrimarySuperadminEmail = async () => {
+const getPrimarySuperadminEmail = async (boundary?: B03AuthenticatedFunctionBoundary) => {
   const fromEnv = getPreferredSuperadminEmailFromEnv();
   if (fromEnv) return fromEnv;
 
-  const primary = await prisma.user.findFirst({
-    where: {
-      role: { in: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN] },
-      isActive: true,
-      deletedAt: null,
-    },
-    orderBy: { createdAt: "asc" },
-    select: { email: true },
-  });
-  return normalizeEmail(primary?.email);
+  if (!boundary) throw new Error("B03 primary superadmin lookup requires an authenticated function boundary");
+  return normalizeEmail((await boundary.run(getPrimarySuperadminEmailThroughBoundary)).email);
 };
 
 const withSenderSignature = (text: string, senderEmail?: string | null, senderName?: string | null) => {
@@ -125,11 +107,15 @@ const withSenderSignature = (text: string, senderEmail?: string | null, senderNa
 };
 
 export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<SendIncidentEmailResult> => {
+  const databaseBoundary = requireB03AuthenticatedFunctionBoundary(input.databaseBoundary);
   const transportState = getMailTransportState();
   const smtpUser = transportState.smtpUser;
   const configuredFrom = getConfiguredMailFrom();
   const toAddress = normalizeEmail(input.toAddress);
-  const actorUser = await resolveActorUser(input.actorUser);
+  const actorUser = await resolveActorUser(input.actorUser, databaseBoundary);
+  if (input.senderMode === "actor" && !actorUser) {
+    throw new Error("B03 actor-sent incident email requires a database-verified actor");
+  }
   const senderMode = input.senderMode || (actorUser?.email ? "actor" : "system");
 
   let attemptedFrom: string | null = null;
@@ -148,13 +134,64 @@ export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<
       replyTo = attemptedFrom;
     }
   } else {
-    const primarySuperadminEmail = await getPrimarySuperadminEmail();
+    const primarySuperadminEmail = await getPrimarySuperadminEmail(databaseBoundary);
     attemptedFrom = configuredFrom || actorUser?.email || primarySuperadminEmail || smtpUser;
     usedFrom = configuredFrom || smtpUser || attemptedFrom;
     replyTo = actorUser?.email || primarySuperadminEmail || configuredFrom || null;
   }
 
   const sendTextBase = String(input.text || "").trim();
+  let secureDelivery: { deliveryId: string; idempotencyKey: string } | null = null;
+
+  const payloadDigest = b03PayloadDigest({
+      incidentId: input.incidentId,
+      licenseeId: input.licenseeId || null,
+      actorUserId: actorUser?.id || null,
+      senderMode,
+      toAddress,
+      subject: input.subject,
+      body: sendTextBase,
+      attemptedFrom,
+      usedFrom,
+      replyTo,
+      template: input.template || null,
+    });
+    const idempotencyKey = b03PayloadDigest({
+      workflow: "INCIDENT_EMAIL_DELIVERY",
+      requestId: databaseBoundary.requestId,
+      incidentId: input.incidentId,
+      toAddress,
+    });
+    const claim = await databaseBoundary.run((db) => claimIncidentEmailDelivery(db, {
+      incidentId: input.incidentId,
+      licenseeId: input.licenseeId || null,
+      actorUserId: actorUser?.id || null,
+      senderMode,
+      toAddress: toAddress || String(input.toAddress || "").trim(),
+      subject: input.subject,
+      bodyPreview: preview(sendTextBase),
+      attemptedFrom,
+      usedFrom,
+      replyTo,
+      template: input.template || null,
+      requestId: databaseBoundary.requestId,
+      idempotencyKey,
+      payloadDigest,
+    }));
+    if (claim.disposition === "IN_FLIGHT") {
+      throw new Error("B03 incident email delivery is already in flight");
+    }
+    if (claim.disposition !== "CLAIMED") {
+      return {
+        delivered: claim.delivered,
+        providerMessageId: claim.providerMessageId,
+        error: claim.emailErrorCode as EmailErrorCode | null,
+        attemptedFrom: claim.attemptedFrom,
+        usedFrom: claim.usedFrom,
+        replyTo: claim.replyTo,
+      };
+    }
+  secureDelivery = { deliveryId: claim.deliveryId, idempotencyKey };
 
   if (errCode) {
     status = IncidentCommStatus.FAILED;
@@ -183,68 +220,17 @@ export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<
     replyTo = delivery.replyTo || replyTo;
   }
 
-  await prisma.incidentCommunication.create({
-    data: {
-      incidentId: input.incidentId,
-      direction: IncidentCommDirection.OUTBOUND,
-      channel: IncidentCommChannel.EMAIL,
-      toAddress: toAddress || String(input.toAddress || "").trim(),
-      subject: input.subject,
-      bodyPreview: preview(sendTextBase),
-      attemptedFrom,
-      usedFrom,
-      replyTo,
-      providerMessageId,
-      errorMessage: errCode,
-      status,
-    } as any,
-  });
-
-  const actorType = actorUser?.id ? IncidentActorType.ADMIN : IncidentActorType.SYSTEM;
-
-  await prisma.incidentEvent.create({
-    data: {
-      incidentId: input.incidentId,
-      actorType,
-      actorUserId: actorType === IncidentActorType.ADMIN ? actorUser?.id || null : null,
-      eventType: IncidentEventType.EMAIL_SENT,
-      eventPayload: {
-        template: input.template || null,
-        to_address: maskEmailForLog(toAddress || input.toAddress),
-        subject: input.subject,
-        attempted_from: maskEmailForLog(attemptedFrom),
-        used_from: maskEmailForLog(usedFrom),
-        reply_to: maskEmailForLog(replyTo),
-        delivered: status === IncidentCommStatus.SENT,
-        provider_message_id: providerMessageId,
-        email_error_code: errCode,
-        sender_mode: senderMode,
-        smtp_config_source: transportState.configSource,
-      },
-    },
-  });
-
-  await createAuditLog({
-    userId: actorUser?.id || undefined,
-    licenseeId: input.licenseeId || undefined,
-    action: "INCIDENT_EMAIL_SENT",
-    entityType: "Incident",
-    entityId: input.incidentId,
-    details: {
-      template: input.template || null,
-      toAddress: maskEmailForLog(toAddress || input.toAddress),
-      subject: input.subject,
-      attemptedFrom: maskEmailForLog(attemptedFrom),
-      usedFrom: maskEmailForLog(usedFrom),
-      replyTo: maskEmailForLog(replyTo),
-      status,
-      delivered: status === IncidentCommStatus.SENT,
+  if (!secureDelivery) throw new Error("B03 incident email delivery claim is missing");
+  await databaseBoundary.run((db) => completeIncidentEmailDelivery(db, {
+      deliveryId: secureDelivery!.deliveryId,
+      idempotencyKey: secureDelivery!.idempotencyKey,
       providerMessageId,
       emailErrorCode: errCode,
-      senderMode,
+      status,
       smtpConfigSource: transportState.configSource,
-    },
-  });
+      usedFrom,
+      completedAt: new Date(),
+  }));
 
   return {
     delivered: status === IncidentCommStatus.SENT,
@@ -256,7 +242,9 @@ export const sendIncidentEmail = async (input: SendIncidentEmailInput): Promise<
   };
 };
 
-export const getSuperadminAlertEmails = async (): Promise<string[]> => {
+export const getSuperadminAlertEmails = async (
+  boundary?: B03AuthenticatedFunctionBoundary
+): Promise<string[]> => {
   const fromEnv = String(process.env.SUPERADMIN_ALERT_EMAILS || "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
@@ -270,16 +258,9 @@ export const getSuperadminAlertEmails = async (): Promise<string[]> => {
 
   if (explicitPrimary) return [explicitPrimary];
 
-  const users = await prisma.user.findMany({
-    where: {
-      role: { in: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN] },
-      isActive: true,
-      deletedAt: null,
-    },
-    select: { email: true },
-  });
-
-  return Array.from(new Set(users.map((u) => normalizeEmail(u.email)).filter(Boolean) as string[]));
+  if (!boundary) throw new Error("B03 superadmin alert lookup requires an authenticated function boundary");
+  const rows = await boundary.run(getSuperadminAlertEmailsThroughBoundary);
+  return Array.from(new Set(rows.map((row) => normalizeEmail(row.email)).filter(Boolean) as string[]));
 };
 
 export const __resetIncidentEmailTransporterForTests = __resetMailTransporterForTests;

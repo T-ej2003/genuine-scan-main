@@ -81,7 +81,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.resolve.outputs.deploy_sha }}
           TARGET_EVENTS: push,workflow_dispatch
-          REQUIRED_WORKFLOW_FILES: quality-gate.yml,secret-scan.yml,deployment-audit.yml
+          REQUIRED_WORKFLOW_FILES: quality-gate.yml,secret-scan.yml,deployment-audit.yml,auth-security-tests.yml,release-candidate-gate.yml
           MAX_ATTEMPTS: 1
           POLL_SECONDS: 0
         run: |
@@ -105,7 +105,7 @@ jobs:
     environment: production
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18.4
         env:
           POSTGRES_DB: mscqr_integration_admin_test
           POSTGRES_USER: postgres
@@ -222,6 +222,12 @@ jobs:
           admin_authority="${P2_TEST_DB_USER}@${P2_TEST_DB_HOST}:${P2_TEST_DB_PORT}"
           P2_TEST_DATABASE_ADMIN_URL="${admin_scheme}//${admin_authority}/${P2_TEST_DB_NAME}" npm run test:integration:ci
 
+      - name: Full RLS verification and PostgreSQL 18.4 certification
+        run: |
+          set -euo pipefail
+          npm run rls:full-verify
+          npm run rls:full-certify
+
       - name: Verify production environment requires approval
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -304,6 +310,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Generate and verify checksum-bound production RLS package
+        id: rls-package
+        run: |
+          set -euo pipefail
+          node scripts/rls/generate-clean-room-rls-sql.mjs --environment production --deployment-id phase2
+          npm run rls:full-verify
+          source_contract="$(node -e 'const value=require("./documents/security/rls-program/generated/checksums.json");process.stdout.write(value.sourceContractSha256)')"
+          package_checksum="$(sha256sum documents/security/rls-program/generated/checksums.json | cut -d' ' -f1)"
+          echo "source_contract_sha256=$source_contract" >> "$GITHUB_OUTPUT"
+          echo "package_checksum_sha256=$package_checksum" >> "$GITHUB_OUTPUT"
+
       - name: Resolve image metadata
         id: image-meta
         run: |
@@ -350,16 +367,46 @@ jobs:
             .filter(Boolean)
             .map((line) => JSON.parse(line));
 
-          for (const service of ["backend", "frontend", "worker"]) {
+          for (const service of ["backend", "frontend", "worker", "rls-executor"]) {
             const record = records.find((item) => item.service === service);
             if (!record?.image_ref) {
               throw new Error(`Missing published image record for ${service}.`);
             }
-            fs.appendFileSync(outputPath, `${service}_image_ref=${record.image_ref}\n`);
-            fs.appendFileSync(outputPath, `${service}_image_uri=${record.image_uri}\n`);
-            fs.appendFileSync(outputPath, `${service}_image_digest=${record.image_digest}\n`);
+            const outputName = service.replaceAll("-", "_");
+            fs.appendFileSync(outputPath, `${outputName}_image_ref=${record.image_ref}\n`);
+            fs.appendFileSync(outputPath, `${outputName}_image_uri=${record.image_uri}\n`);
+            fs.appendFileSync(outputPath, `${outputName}_image_digest=${record.image_digest}\n`);
           }
           NODE
+
+      - name: Apply and verify checksum-bound production RLS package
+        id: database-release
+        env:
+          MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256: ${{ steps.rls-package.outputs.source_contract_sha256 }}
+          MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256: ${{ steps.rls-package.outputs.package_checksum_sha256 }}
+          PRODUCTION_RLS_EXECUTOR_IMAGE: ${{ steps.images.outputs.rls_executor_image_ref }}
+          PRODUCTION_BACKEND_IMAGE: ${{ steps.images.outputs.backend_image_ref }}
+          PRODUCTION_WORKER_IMAGE: ${{ steps.images.outputs.worker_image_ref }}
+          PRODUCTION_FRONTEND_IMAGE: ${{ steps.images.outputs.frontend_image_ref }}
+          PRODUCTION_RLS_CLUSTER_ARN: arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main
+          PRODUCTION_RLS_TASK_ROLE_ARN: ${{ vars.PRODUCTION_RLS_TASK_ROLE_ARN }}
+          PRODUCTION_RLS_EXECUTION_ROLE_ARN: ${{ vars.PRODUCTION_RLS_EXECUTION_ROLE_ARN }}
+          PRODUCTION_RLS_ADMIN_SECRET_ARN: ${{ vars.PRODUCTION_RLS_ADMIN_SECRET_ARN }}
+          PRODUCTION_RLS_RECEIPT_BUCKET: ${{ vars.PRODUCTION_RLS_RECEIPT_BUCKET }}
+          PRODUCTION_RLS_PRIVATE_SUBNETS_JSON: ${{ vars.PRODUCTION_RLS_PRIVATE_SUBNETS_JSON }}
+          PRODUCTION_RLS_SECURITY_GROUPS_JSON: ${{ vars.PRODUCTION_RLS_SECURITY_GROUPS_JSON }}
+          PRODUCTION_RLS_RELEASE_RECEIPT_PATH: ${{ runner.temp }}/production-rls-release-receipt.json
+        run: |
+          set -euo pipefail
+          node scripts/aws/apply-production-full-rls-release.mjs
+
+      - name: Upload immutable production database receipt
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-rls-release-receipt
+          path: ${{ runner.temp }}/production-rls-release-receipt.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Deploy backend ECS service
         env:
@@ -432,6 +479,10 @@ jobs:
           BACKEND_IMAGE_REF: ${{ steps.images.outputs.backend_image_ref }}
           FRONTEND_IMAGE_REF: ${{ steps.images.outputs.frontend_image_ref }}
           WORKER_IMAGE_REF: ${{ steps.images.outputs.worker_image_ref }}
+          RLS_EXECUTOR_IMAGE_REF: ${{ steps.images.outputs.rls_executor_image_ref }}
+          RLS_SOURCE_CONTRACT_SHA256: ${{ steps.rls-package.outputs.source_contract_sha256 }}
+          RLS_PACKAGE_CHECKSUM_SHA256: ${{ steps.rls-package.outputs.package_checksum_sha256 }}
+          RLS_RELEASE_RECEIPT_FILE: ${{ runner.temp }}/production-rls-release-receipt.json
         run: |
           set -euo pipefail
 
@@ -457,6 +508,9 @@ jobs:
               node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.previousTaskDefinitionArn || "");' "$WORKER_METADATA_FILE"
             )"
           fi
+          rls_receipt_bundle="$(
+            node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.receiptBundleSha256 || "");' "$RLS_RELEASE_RECEIPT_FILE"
+          )"
 
           {
             echo "## Production ECS deployment"
@@ -466,6 +520,10 @@ jobs:
             echo "- AWS region: \`${AWS_REGION}\`"
             echo "- Cluster: \`${CLUSTER_NAME}\`"
             echo "- Platform: \`${PLATFORMS}\`"
+            echo "- RLS source contract: \`${RLS_SOURCE_CONTRACT_SHA256}\`"
+            echo "- RLS package checksum: \`${RLS_PACKAGE_CHECKSUM_SHA256}\`"
+            echo "- RLS executor image: \`${RLS_EXECUTOR_IMAGE_REF}\`"
+            echo "- RLS receipt bundle: \`${rls_receipt_bundle}\`"
             echo
             echo "### Backend"
             echo

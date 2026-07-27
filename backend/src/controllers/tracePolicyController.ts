@@ -1,14 +1,20 @@
 import { Response } from "express";
-import { AlertSeverity, NotificationAudience, NotificationChannel, PolicyAlertType, TraceEventType, UserRole } from "@prisma/client";
+import { AlertSeverity, NotificationAudience, NotificationChannel, PolicyAlertType, UserRole } from "@prisma/client";
 import { z } from "zod";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { getTraceTimeline } from "../services/traceEventService";
-import { getBatchSlaAnalytics, getRiskAnalytics } from "../services/analyticsService";
+import {
+  buildRiskAnalyticsBoundary,
+  getBatchSlaAnalytics,
+  getRiskAnalytics,
+  RiskAnalyticsAccessError,
+} from "../services/analyticsService";
 import { getOrCreateSecurityPolicy } from "../services/policyEngineService";
 import { createAuditLog } from "../services/auditService";
 import { buildImmutableBatchAuditPackage } from "../services/immutableAuditExportService";
 import { createRoleNotifications } from "../services/notificationService";
+import { withCanonicalDbContext } from "../lib/canonicalDbContext";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 
 const policyUpdateSchema = z
   .object({
@@ -38,17 +44,6 @@ const alertIdParamSchema = z.object({
 
 const batchAuditExportParamSchema = z.object({
   id: z.string().uuid("Invalid batch id"),
-}).strict();
-
-const traceTimelineQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(200).optional(),
-  offset: z.coerce.number().int().min(0).max(100000).optional(),
-  cursor: z.string().trim().max(512).optional(),
-  licenseeId: z.string().uuid().optional(),
-  eventType: z.nativeEnum(TraceEventType).optional(),
-  batchId: z.string().uuid().optional(),
-  manufacturerId: z.string().uuid().optional(),
-  qrCodeId: z.string().uuid().optional(),
 }).strict();
 
 const batchSlaQuerySchema = z.object({
@@ -89,12 +84,6 @@ const asInt = (value: unknown, fallback: number, min: number, max: number) => {
   return Math.min(Math.max(n, min), max);
 };
 
-const asOptionalString = (value: unknown) => {
-  if (typeof value !== "string") return undefined;
-  const s = value.trim();
-  return s || undefined;
-};
-
 const asOptionalBool = (value: unknown): boolean | undefined => {
   if (typeof value === "boolean") return value;
   if (typeof value !== "string") return undefined;
@@ -118,57 +107,6 @@ const requirePolicyLicenseeId = (req: AuthRequest, bodyLicenseeId?: string, quer
     return bodyLicenseeId || queryLicenseeId || undefined;
   }
   return req.user.licenseeId || undefined;
-};
-
-export const getTraceTimelineController = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
-    const parsed = traceTimelineQuerySchema.safeParse(req.query || {});
-    if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
-    }
-
-    const limit = parsed.data.limit ?? 50;
-    const offset = parsed.data.offset ?? 0;
-    const cursor = parsed.data.cursor;
-    const licenseeId = resolveScopedLicenseeId(req, parsed.data.licenseeId);
-    const eventType = parsed.data.eventType;
-
-    let manufacturerId = asOptionalString(req.query.manufacturerId);
-    if (
-      req.user.role === UserRole.MANUFACTURER ||
-      req.user.role === UserRole.MANUFACTURER_ADMIN ||
-      req.user.role === UserRole.MANUFACTURER_USER
-    ) {
-      manufacturerId = req.user.userId;
-    }
-
-    const result = await getTraceTimeline({
-      licenseeId,
-      eventType,
-      batchId: parsed.data.batchId,
-      manufacturerId,
-      qrCodeId: parsed.data.qrCodeId,
-      limit,
-      offset,
-      cursor,
-    });
-
-    return res.json({
-      success: true,
-      data: {
-        events: result.events,
-        total: result.total,
-        limit,
-        offset: cursor ? 0 : offset,
-        cursor: cursor || null,
-        nextCursor: result.nextCursor || null,
-      },
-    });
-  } catch (e) {
-    console.error("getTraceTimelineController error:", e);
-    return res.status(500).json({ success: false, error: "Internal server error" });
-  }
 };
 
 export const getBatchSlaAnalyticsController = async (req: AuthRequest, res: Response) => {
@@ -199,13 +137,22 @@ export const getRiskAnalyticsController = async (req: AuthRequest, res: Response
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
     }
 
-    const licenseeId = resolveScopedLicenseeId(req, parsed.data.licenseeId);
-    const limit = parsed.data.limit ?? 20;
-    const lookbackHours = parsed.data.lookbackHours ?? 24;
-
-    const data = await getRiskAnalytics({ licenseeId, lookbackHours, limit });
+    const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
+    const boundary = buildRiskAnalyticsBoundary(req.user, {
+      requestedLicenseeId: parsed.data.licenseeId,
+      limit: parsed.data.limit ?? 20,
+      lookbackHours: parsed.data.lookbackHours ?? 24,
+    }, requestId);
+    const data = await getRiskAnalytics(
+      boundary.query,
+      boundary.context,
+      String(req.databaseSessionCapability || "")
+    );
     return res.json({ success: true, data });
   } catch (e) {
+    if (e instanceof RiskAnalyticsAccessError) {
+      return res.status(e.statusCode).json({ success: false, error: e.message });
+    }
     console.error("getRiskAnalyticsController error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -391,6 +338,7 @@ export const acknowledgePolicyAlertController = async (req: AuthRequest, res: Re
 
     await Promise.all([
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
         type: "policy_alert_acknowledged",
         title: "Policy alert acknowledged",
@@ -406,6 +354,7 @@ export const acknowledgePolicyAlertController = async (req: AuthRequest, res: Re
         channels: [NotificationChannel.WEB],
       }),
       createRoleNotifications({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.LICENSEE_ADMIN,
         licenseeId: updated.licenseeId,
         type: "policy_alert_acknowledged",
@@ -436,23 +385,17 @@ export const exportBatchAuditPackageController = async (req: AuthRequest, res: R
     const parsed = batchAuditExportParamSchema.safeParse(req.params || {});
     if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid batch id" });
 
-    const batch = await prisma.batch.findFirst({
-      where:
-        req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-          ? { id: parsed.data.id }
-          : { id: parsed.data.id, licenseeId: req.user.licenseeId || "__none__" },
-      select: { id: true, licenseeId: true },
+    const pkg = await buildImmutableBatchAuditPackage(parsed.data.id,{
+      capability:String(req.databaseSessionCapability || ""),
+      requestId:String((req as AuthRequest & {requestId?:string}).requestId || req.get("x-request-id") || ""),
     });
-    if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
-
-    const pkg = await buildImmutableBatchAuditPackage(batch.id);
 
     await createAuditLog({
       userId: req.user.userId,
-      licenseeId: batch.licenseeId,
+      licenseeId: pkg.metadata.licenseeId,
       action: "EXPORT_IMMUTABLE_AUDIT_PACKAGE",
       entityType: "Batch",
-      entityId: batch.id,
+      entityId: parsed.data.id,
       details: pkg.metadata,
       ipAddress: req.ip,
     });

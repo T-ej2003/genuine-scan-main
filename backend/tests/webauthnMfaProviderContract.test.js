@@ -39,8 +39,19 @@ let authOptionsInput = null;
 let authVerifyInput = null;
 let registrationOptionsInput = null;
 let registrationVerifyInput = null;
+let failChallengeConsume = false;
 
 const prismaMock = {
+  $transaction: async (callback) => {
+    const snapshot = structuredClone({ factors, challenges });
+    try {
+      return await callback(prismaMock);
+    } catch (error) {
+      factors = snapshot.factors;
+      challenges = snapshot.challenges;
+      throw error;
+    }
+  },
   userMfaFactor: {
     findMany: async ({ where }) => factors.filter((row) => {
       if (where.userId && row.userId !== where.userId) return false;
@@ -98,11 +109,17 @@ const prismaMock = {
       });
       return row ? { ...row } : null;
     },
-    update: async ({ where, data }) => {
-      const row = challenges.find((entry) => entry.id === where.id);
-      if (!row) throw new Error("challenge not found");
+    updateMany: async ({ where, data }) => {
+      if (failChallengeConsume) throw new Error("WEBAUTHN_CHALLENGE_CONSUME_FAILED");
+      const row = challenges.find((entry) => {
+        if (entry.id !== where.id) return false;
+        if (where.consumedAt === null && entry.consumedAt) return false;
+        if (where.expiresAt?.gt && entry.expiresAt.getTime() <= where.expiresAt.gt.getTime()) return false;
+        return true;
+      });
+      if (!row) return { count: 0 };
       Object.assign(row, data);
-      return { ...row };
+      return { count: 1 };
     },
   },
 };
@@ -171,7 +188,7 @@ const run = async () => {
   assert.strictEqual(authOptionsInput.userVerification, "preferred");
   assert.deepStrictEqual(authOptionsInput.allowCredentials, [{ id: "credential-1", transports: ["internal"] }]);
 
-  const authComplete = await completeWebAuthnFactorAuthentication({
+  const authenticationPayload = {
     userId: "admin-1",
     ticket: authBegin.ticket,
     credential: {
@@ -184,7 +201,16 @@ const run = async () => {
         signature: "signature",
       },
     },
-  });
+  };
+  failChallengeConsume = true;
+  await assert.rejects(
+    completeWebAuthnFactorAuthentication(authenticationPayload),
+    /WEBAUTHN_CHALLENGE_CONSUME_FAILED/
+  );
+  assert.strictEqual(factors[0].counter, 3, "challenge failure must roll back WebAuthn counter advancement");
+  assert.strictEqual(challenges[0].consumedAt, null, "challenge failure must leave the WebAuthn challenge reusable");
+  failChallengeConsume = false;
+  const authComplete = await completeWebAuthnFactorAuthentication(authenticationPayload);
   assert.deepStrictEqual(authComplete, { ok: true, purpose: "LOGIN" });
   assert(authVerifyInput.expectedChallenge("auth-challenge"), "authentication verification should validate the stored challenge");
   assert.deepStrictEqual(authVerifyInput.expectedOrigin, ["https://www.mscqr.com", "https://mscqr.com"]);

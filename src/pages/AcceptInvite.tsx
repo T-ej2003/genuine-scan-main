@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { AlertCircle, CheckCircle2, KeyRound, Loader2, ShieldCheck, UserPlus } from "lucide-react";
 
 import apiClient from "@/lib/api-client";

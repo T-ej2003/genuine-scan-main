@@ -1,7 +1,16 @@
-import { createHmac } from "crypto";
-import { Prisma } from "@prisma/client";
-
-import prisma from "../config/database";
+import { createHash, createHmac, randomUUID } from "crypto";
+import {
+  B03FunctionClient,
+  B03SiemEnqueueInput,
+  b03PayloadDigest,
+  claimSecurityEventOutboxSlice,
+  completeSecurityEventOutbox,
+  enqueueSecurityEventOutbox,
+  failSecurityEventOutbox,
+} from "../rls-waves/session-b/b03/repositoryFunctions";
+import {
+  withB03SiemWorkerContext,
+} from "../rls-waves/session-b/b03/systemContext";
 import { logger } from "../utils/logger";
 import { withDistributedLease } from "./distributedLeaseService";
 
@@ -28,22 +37,33 @@ const computeSignature = (body: string) => {
   return createHmac("sha256", secret).update(body).digest("hex");
 };
 
-export const queueSecurityEvent = async (eventType: string, payload: Record<string, unknown>) => {
+export const queueSecurityEvent = async (
+  eventType: string,
+  payload: Record<string, unknown>,
+  boundary?: {
+    db: B03FunctionClient;
+    authority: Omit<B03SiemEnqueueInput, "eventType" | "payload" | "payloadDigest" | "idempotencyKey" | "expiresAt">;
+  }
+) => {
   if (!eventType) return;
 
-  try {
-    await prisma.securityEventOutbox.create({
-      data: {
-        eventType,
-        payload: payload as Prisma.InputJsonValue,
-      },
-    });
-  } catch (error) {
-    logger.warn("Failed to enqueue SIEM event", {
-      eventType,
-      error: error instanceof Error ? error.message : String(error),
-    });
+  if (!boundary || !["AUDIT_LOG", "CSP_VIOLATION"].includes(eventType)) {
+    throw new Error("B03 SIEM enqueue requires an attributed transaction and allowlisted event type");
   }
+  const typedEvent = eventType as "AUDIT_LOG" | "CSP_VIOLATION";
+  const payloadDigest = b03PayloadDigest(payload);
+  const idempotencyKey = createHash("sha256")
+    .update(`${typedEvent}:${boundary.authority.requestId}:${payloadDigest}`)
+    .digest("hex");
+  const row = await enqueueSecurityEventOutbox(boundary.db, {
+    ...boundary.authority,
+    eventType: typedEvent,
+    payload,
+    payloadDigest,
+    idempotencyKey,
+    expiresAt: new Date(Date.now() + 86_400_000),
+  });
+  return row.id;
 };
 
 const sendToWebhook = async (row: { id: string; eventType: string; payload: any; createdAt: Date }) => {
@@ -73,6 +93,7 @@ const sendToWebhook = async (row: { id: string; eventType: string; payload: any;
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "Idempotency-Key": row.id,
       ...(signature ? { "X-AQ-Signature": signature } : {}),
     },
     body,
@@ -83,48 +104,60 @@ const sendToWebhook = async (row: { id: string; eventType: string; payload: any;
   }
 };
 
+const flushSecurityEventOutboxThroughB03Boundary = async () => {
+  const batchSize = parseIntEnv("SIEM_OUTBOX_BATCH_SIZE", 20, 1, 200);
+  for (const jobType of ["AUDIT_LOG", "CSP_VIOLATION"] as const) {
+    const claimRequestId = randomUUID();
+    const claims = await withB03SiemWorkerContext(
+      { jobId: `siem-outbox-claim:${claimRequestId}`, requestId: claimRequestId, jobType },
+      (tx) => claimSecurityEventOutboxSlice(tx, { attemptedAt: new Date(), batchSize, jobType })
+    );
+
+    for (const claim of claims) {
+      const attemptedAt = new Date();
+      const context = {
+        jobId: claim.id,
+        requestId: claim.requestId,
+        jobType: claim.jobType,
+        organizationId: claim.organizationId,
+        licenseeId: claim.licenseeId,
+        manufacturerId: claim.manufacturerId,
+        initiatingUserId: claim.initiatingUserId,
+      };
+      try {
+        if (claim.expiresAt.getTime() <= attemptedAt.getTime()) throw new Error("SIEM_OUTBOX_EXPIRED");
+        await sendToWebhook({
+          id: claim.id,
+          eventType: claim.eventType,
+          payload: claim.eventPayload,
+          createdAt: claim.createdAt,
+        });
+        await withB03SiemWorkerContext(context, (tx) => completeSecurityEventOutbox(tx, {
+          jobId: claim.id,
+          payloadDigest: claim.payloadDigest,
+          attemptedAt,
+          sinkEventId: claim.id,
+        }));
+      } catch (error) {
+        const errorCode = error instanceof Error && /^[A-Z0-9_]{1,128}$/.test(error.message)
+          ? error.message
+          : "SIEM_OUTBOX_DELIVERY_FAILED";
+        await withB03SiemWorkerContext(context, (tx) => failSecurityEventOutbox(tx, {
+          jobId: claim.id,
+          payloadDigest: claim.payloadDigest,
+          attemptedAt,
+          attempt: claim.attempt,
+          errorCode,
+        }));
+      }
+    }
+  }
+};
+
 export const flushSecurityEventOutbox = async () => {
   const url = webhookUrl();
   if (!url && sinkMode() !== "stdout") return;
-
-  const batchSize = parseIntEnv("SIEM_OUTBOX_BATCH_SIZE", 20, 1, 200);
-  const now = new Date();
-  const rows = await prisma.securityEventOutbox.findMany({
-    where: {
-      status: { in: ["QUEUED", "FAILED"] },
-      nextAttemptAt: { lte: now },
-    },
-    orderBy: { createdAt: "asc" },
-    take: batchSize,
-  });
-
-  for (const row of rows) {
-    try {
-      await sendToWebhook(row);
-      await prisma.securityEventOutbox.update({
-        where: { id: row.id },
-        data: {
-          status: "SENT",
-          sentAt: new Date(),
-          attempts: { increment: 1 },
-          lastError: null,
-          nextAttemptAt: new Date(),
-        },
-      });
-    } catch (error) {
-      const attempts = (row.attempts || 0) + 1;
-      const retryDelaySec = Math.min(300, Math.max(5, 2 ** attempts));
-      await prisma.securityEventOutbox.update({
-        where: { id: row.id },
-        data: {
-          status: "FAILED",
-          attempts,
-          lastError: error instanceof Error ? error.message : String(error),
-          nextAttemptAt: new Date(Date.now() + retryDelaySec * 1000),
-        },
-      });
-    }
-  }
+  return flushSecurityEventOutboxThroughB03Boundary();
 };
 
 let started = false;

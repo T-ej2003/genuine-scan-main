@@ -126,11 +126,10 @@ const res = {
 (async () => {
   await reportPrinterHeartbeat(req, res);
 
-  assert.strictEqual(res.statusCode, 200, "printer heartbeat should not fail when sync/audit side effects throw");
-  assert(res.body && res.body.success === true, "printer heartbeat should still return a success payload");
-  assert.strictEqual(res.body.data.connected, true, "printer heartbeat should return the updated printer status");
+  assert.strictEqual(res.statusCode, 403, "deprecated MANUFACTURER actors must fail closed before heartbeat mutation");
+  assert(res.body && res.body.success === false, "deprecated actor heartbeat must return a denial payload");
 
-  console.log("printer heartbeat fail-open tests passed");
+  console.log("printer heartbeat deprecated-role denial tests passed");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

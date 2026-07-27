@@ -78,12 +78,35 @@ const createResponse = () => ({
       total: 1,
     }),
   });
-  mockModule("services/degradationEventService.js", { recordDegradationEvent: async () => undefined });
-  mockModule("services/verificationDecisionService.js", {
-    attachVerificationPresentationSnapshot: async () => undefined,
-    issuePublicVerificationSessionStartToken: async () => "public-session-start-token",
+  mockModule("services/auditCsvExportService.js", {
+    AuditCsvExportAccessError: class AuditCsvExportAccessError extends Error {},
+    readAuditCsvExport: async () => ({
+      logs: [
+        {
+          id: "audit-row",
+          createdAt: new Date("2026-05-18T00:00:00.000Z"),
+          action: "QR_EXPORT",
+          entityType: "QRCode",
+          entityId: "internal-qr-id",
+          userId: "actor-user",
+          licenseeId: "lic-secret",
+          ipAddress: "10.0.0.1",
+          details: { secret: "private-detail", manufacturerId: "manufacturer-secret" },
+        },
+      ],
+      userMap: new Map([["actor-user", { id: "actor-user", name: "Scoped Admin", email: "" }]]),
+      isSuper: false,
+    }),
   });
-
+  mockModule("services/degradationEventService.js", { recordDegradationEvent: async () => undefined });
+  class TenantDirectoryDenied extends Error {}
+  mockModule("rls-waves/session-a/tenantDirectoryRepository.js", {
+    TenantDirectoryDenied,
+    isTenantDirectoryDenied: (error) => error instanceof TenantDirectoryDenied,
+    readUserDirectory: async () => {
+      throw new TenantDirectoryDenied();
+    },
+  });
   const { getUsers } = require("../dist/controllers/userController");
   const tamperedUsersReq = {
     query: { licenseeId: "lic-b" },
@@ -108,6 +131,7 @@ const createResponse = () => ({
   await exportLogsCsv(
     {
       query: {},
+      requestId: "request-audit-export",
       ip: "127.0.0.1",
       user: {
         userId: "licensee-admin-a",
@@ -125,7 +149,7 @@ const createResponse = () => ({
   assert.doesNotMatch(auditRes.body, /internal-qr-id|actor-user|lic-secret|10\.0\.0\.1|private-detail|manufacturer-secret/);
 
   const { mapBatch, mapLicensee } = require("../dist/controllers/verify/verifyPresentation");
-  const { buildDecisionResponseBody } = require("../dist/controllers/verify/verificationDecisionHelpers");
+  const { buildPublicVerificationResponse } = require("../dist/controllers/verify/verificationHandlers");
   const publicObjects = [
     mapLicensee({
       id: "lic-internal",
@@ -147,32 +171,34 @@ const createResponse = () => ({
         name: "Factory",
       },
     }),
-    await buildDecisionResponseBody(
+    buildPublicVerificationResponse(
       {
-        code: "MSCQR123",
-        publicOutcome: "AUTHENTIC",
-        riskDisposition: "LOW_RISK",
+        result: "AUTHENTIC",
+        messageKey: "verification.first_scan",
+        nextAction: "NONE",
+        verificationMethod: "SIGNED_LABEL",
+        maskedCode: "MSC…123",
+        brandName: "Brand",
+        brandWebsite: null,
+        brandSupportEmail: null,
+        brandSupportPhone: null,
+        manufacturerName: null,
+        manufacturerWebsite: null,
+        printedAt: null,
+        firstVerifiedAt: null,
+        latestVerifiedAt: null,
+        ownershipClaimAvailable: false,
+        sessionStartToken: "public-session-start-token",
+        internalQrId: "qr-secret",
+        actorIpHash: "ip-secret",
       },
-      {
-        decisionId: "decision-internal",
-        decisionVersion: "v1",
-        proofTier: "PUBLIC",
-        reasonCodes: [],
-        riskBand: "LOW",
-        replacementStatus: null,
-        degradationMode: "NORMAL",
-        customerTrustLevel: "ANONYMOUS",
-        publicOutcome: "AUTHENTIC",
-        riskDisposition: "LOW_RISK",
-        messageKey: "AUTHENTIC",
-        nextActionKey: "NONE",
-      }
+      false
     ),
   ];
   const serialized = JSON.stringify(publicObjects);
   assert.doesNotMatch(
     serialized,
-    /tenantId|platformId|manufacturerId|licenseeId|userId|decisionId|proofTier|reasonCodes|riskBand|lic-internal|manufacturer-internal|admin@example\.com/
+    /tenantId|platformId|manufacturerId|licenseeId|userId|decisionId|proofTier|reasonCodes|riskBand|internalQrId|actorIpHash|qr-secret|lic-internal|manufacturer-internal|admin@example\.com/
   );
   assert.match(serialized, /public-session-start-token/);
 

@@ -1,14 +1,9 @@
-import { randomBytes } from "crypto";
-import { PrintDispatchMode, PrintJobStatus, PrintPipelineState } from "@prisma/client";
+import { PrintDispatchMode, PrintPipelineState } from "@prisma/client";
 
-import prisma from "../../config/database";
 import { AuthRequest } from "../../middleware/auth";
-import { createAuditLog } from "../../services/auditService";
 import { createUserNotification } from "../../services/notificationService";
-import { supportsNetworkDirectPayloadType } from "../../services/printPayloadService";
 import { startNetworkDirectDispatch } from "../../services/networkDirectPrintService";
 import { startNetworkIppDispatch } from "../../services/networkIppPrintService";
-import { completeIdempotentAction } from "../../services/idempotencyService";
 import { createPrintJobRecords } from "../../services/printJobCreationTransactionService";
 import { publishPrintJobViewEvent } from "../../services/printJobRealtimeService";
 import {
@@ -19,13 +14,12 @@ import {
 } from "./createPrintJobObservability";
 import { buildPrintJobErrorPayload, describePrintJobCreateFailure } from "./errorResponses";
 import {
-  beginPrintActionIdempotency, createPrintJobSchema, describePrintDispatchMode, ensureManufacturerUser,
-  ensureSelectedPrinterReady, getLockExpiresAt, handleIdempotencyError, hashLockToken, notifySystemPrintEvent,
-  replayIdempotentResponseIfAny,
+  abortPrintActionIdempotency, beginPrintActionIdempotency, completePrintActionIdempotency, createPrintJobSchema, describePrintDispatchMode, ensureManufacturerUser,
+  getLockExpiresAt, handleIdempotencyError, notifySystemPrintEvent, replayIdempotentResponseIfAny,
 } from "./shared";
-import { countReservableQrCodesForPrint } from "../../services/printReservationService";
 import { PRINT_JOB_MAX_RUN_LABELS, validatePrintJobRunQuantity } from "../../services/printJobRunLimitService";
 import { rejectPrintJobRunQuantity } from "./runLimitResponse";
+import { b03BoundaryForRequest } from "../../rls-waves/session-b/b03/requestBoundary";
 
 const getRequestId = getPrintJobCreateRequestId;
 const getRequestShape = getPrintJobCreateRequestShape;
@@ -33,6 +27,8 @@ const getRequestShape = getPrintJobCreateRequestShape;
 export const createPrintJob = async (req: AuthRequest, res: any) => {
   let failureStage = "request_received";
   let transactionStage: string | null = null;
+  let idempotency: Awaited<ReturnType<typeof beginPrintActionIdempotency>> | null = null;
+  let printJobCommitted = false;
   try {
     logPrintJobCreateEvent(req, "request_received", {
       bodyFields: {
@@ -85,7 +81,17 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       quantity: parsed.data.quantity,
     });
 
-    let idempotency;
+    const { batchId, printerId, quantity, rangeStart, rangeEnd } = parsed.data;
+    failureStage = "quantity_limit";
+    const quantityLimit = validatePrintJobRunQuantity({
+      quantity,
+      remainingPrintableCount: quantity,
+      maxConfiguredRunLabels: PRINT_JOB_MAX_RUN_LABELS,
+    });
+    if (!quantityLimit.ok) {
+      return rejectPrintJobRunQuantity({ req, res, batchId, quantity, failureStage, quantityLimit });
+    }
+
     try {
       failureStage = "idempotency_started";
       idempotency = await beginPrintActionIdempotency({
@@ -101,243 +107,31 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
 
     if (replayIdempotentResponseIfAny(idempotency, res)) return;
 
-    const { batchId, printerId, quantity, rangeStart, rangeEnd } = parsed.data;
-    failureStage = "batch_load";
-    const batch = await prisma.batch.findFirst({
-      where: { id: batchId, manufacturerId: user.userId },
-      select: { id: true, name: true, licenseeId: true, manufacturerId: true },
-    });
-    if (!batch) {
-      logPrintJobCreateEvent(req, "request_failed", {
-        status: 404,
-        errorCode: "batch_not_found",
-        failureStage,
-        batchId,
-      });
-      return res.status(404).json(
-        buildPrintJobErrorPayload({
-          code: "batch_not_found",
-          message: "Batch not found or not assigned to you.",
-          requestId: getRequestId(req),
-          failureStage,
-        })
-      );
-    }
-    failureStage = "batch_loaded";
-    logPrintJobCreateEvent(req, "batch_loaded", {
-      batchId: batch.id,
-      licenseeId: batch.licenseeId,
-      manufacturerId: batch.manufacturerId,
-    });
-
-    failureStage = "quantity_limit";
-    const remainingPrintableCount = await countReservableQrCodesForPrint(prisma as any, {
-      batchId: batch.id,
-      rangeStart,
-      rangeEnd,
-    });
-    const quantityLimit = validatePrintJobRunQuantity({
-      quantity,
-      remainingPrintableCount,
-      maxConfiguredRunLabels: PRINT_JOB_MAX_RUN_LABELS,
-    });
-    if (!quantityLimit.ok) {
-      return rejectPrintJobRunQuantity({ req, res, batchId: batch.id, quantity, failureStage, quantityLimit });
-    }
-
-    failureStage = "active_job_check";
-    const activeJob = await prisma.printJob.findFirst({
-      where: {
-        batchId: batch.id,
-        manufacturerId: user.userId,
-        status: { in: [PrintJobStatus.PENDING, PrintJobStatus.SENT] },
-        printSession: {
-          is: {
-            status: "ACTIVE",
-          },
-        },
-      },
-      orderBy: [{ createdAt: "desc" }],
-      select: {
-        id: true,
-        status: true,
-        pipelineState: true,
-        printMode: true,
-        quantity: true,
-        itemCount: true,
-        printer: {
-          select: {
-            id: true,
-            name: true,
-            connectionType: true,
-            commandLanguage: true,
-            deliveryMode: true,
-          },
-        },
-        printSession: {
-          select: {
-            id: true,
-            status: true,
-            totalItems: true,
-            confirmedItems: true,
-            frozenItems: true,
-          },
-        },
-      },
-    });
-    if (activeJob) {
-      const activeTotalItems = Number(activeJob.printSession?.totalItems || activeJob.itemCount || activeJob.quantity || 0);
-      const activeConfirmedItems = Number(activeJob.printSession?.confirmedItems || 0);
-      const activeRemainingItems = Math.max(0, activeTotalItems - activeConfirmedItems);
-      logPrintJobCreateEvent(req, "request_failed", {
-        status: 409,
-        errorCode: "active_print_job_exists",
-        failureStage,
-        batchId: batch.id,
-        activePrintJobId: activeJob.id,
-        activePrintSessionId: activeJob.printSession?.id || null,
-      });
-      const responsePayload = {
-        ...buildPrintJobErrorPayload({
-          code: "active_print_job_exists",
-          message: "An active print run already exists for this batch. Resume the current job instead of starting a duplicate run.",
-          requestId: getRequestId(req),
-          failureStage,
-        }),
-        activePrintJobId: activeJob.id,
-        activePrintSessionId: activeJob.printSession?.id || null,
-        confirmedItems: activeConfirmedItems,
-        remainingItems: activeRemainingItems,
-        recoveryAction: "resume_active_print_job",
-        data: {
-          activePrintJobId: activeJob.id,
-          activePrintSessionId: activeJob.printSession?.id || null,
-          confirmedItems: activeConfirmedItems,
-          remainingItems: activeRemainingItems,
-          recoveryAction: "resume_active_print_job",
-          job: {
-            id: activeJob.id,
-            status: activeJob.status,
-            pipelineState: activeJob.pipelineState,
-            printMode: activeJob.printMode,
-            quantity: activeJob.quantity,
-            itemCount: activeJob.itemCount,
-            printer: activeJob.printer,
-            session: activeJob.printSession
-              ? {
-                  ...activeJob.printSession,
-                  remainingToPrint: activeRemainingItems,
-                }
-              : null,
-          },
-        },
-      };
-      await completeIdempotentAction({
-        keyHash: idempotency.keyHash,
-        statusCode: 409,
-        responsePayload,
-      });
-      return res.status(409).json(responsePayload);
-    }
-
-    failureStage = "printer_readiness";
-    const printerSelection = await ensureSelectedPrinterReady({
-      printerId,
-      userId: user.userId,
-      orgId: user.orgId || null,
-      licenseeId: batch.licenseeId || null,
-    });
-    logPrintJobCreateEvent(req, "printer_loaded", {
-      printerId: printerSelection.printer.id,
-      printerName: printerSelection.printer.name,
-      nativePrinterId: printerSelection.printer.nativePrinterId,
-      connectionType: printerSelection.printer.connectionType,
-      deliveryMode: (printerSelection.printer as any).deliveryMode || null,
-    });
-    logPrintJobCreateEvent(req, "heartbeat_loaded", {
-      connected: printerSelection.printerStatus?.connected ?? null,
-      eligibleForPrinting: printerSelection.printerStatus?.eligibleForPrinting ?? null,
-      trusted: printerSelection.printerStatus?.trusted ?? null,
-      compatibilityMode: printerSelection.printerStatus?.compatibilityMode ?? null,
-      stale: printerSelection.printerStatus?.stale ?? null,
-      selectedPrinterId: printerSelection.printerStatus?.selectedPrinterId || null,
-      selectedPrinterName: printerSelection.printerStatus?.selectedPrinterName || null,
-      printerId: printerSelection.printerStatus?.printerId || null,
-      printerName: printerSelection.printerStatus?.printerName || null,
-    });
-    failureStage = "printer_mapping_resolved";
-    logPrintJobCreateEvent(req, "printer_mapping_resolved", {
-      requestedPrinterId: printerId,
-      resolvedPrinterId: printerSelection.printer.id,
-      resolvedNativePrinterId: printerSelection.printer.nativePrinterId || null,
-      printMode: printerSelection.printMode,
-    });
-    if (
-      printerSelection.printMode === PrintDispatchMode.NETWORK_DIRECT &&
-      !supportsNetworkDirectPayloadType(printerSelection.payloadType)
-    ) {
-      logPrintJobCreateEvent(req, "request_failed", {
-        status: 409,
-        errorCode: "unsupported_printer_route",
-        failureStage: "printer_payload_support",
-        printerId,
-      });
-      return res.status(409).json(
-        buildPrintJobErrorPayload({
-          code: "unsupported_printer_route",
-          message: "This printer profile needs a compatible setup before it can be used.",
-          requestId: getRequestId(req),
-          failureStage: "printer_payload_support",
-        })
-      );
-    }
-
-    const printLockToken =
-      printerSelection.printMode === PrintDispatchMode.LOCAL_AGENT ? randomBytes(24).toString("base64url") : null;
-    const printLockTokenHash = printLockToken ? hashLockToken(printLockToken) : null;
-
     failureStage = "transaction_started";
     logPrintJobCreateEvent(req, "transaction_started", {
-      batchId: batch.id,
-      printerId: printerSelection.printer.id,
+      batchId,
+      printerId,
       quantity,
     });
     const created = await createPrintJobRecords({
-      batch,
-      userId: user.userId,
-      printerSelection,
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: String(getRequestId(req) || ""),
+      batchId,
+      printerId,
       quantity,
       rangeStart,
       rangeEnd,
-      printLockTokenHash,
+      printLockTokenHash: null,
       onEvent: (event, data) => logPrintJobCreateEvent(req, event, data),
       onStage: (stage, event, data = {}) => {
         transactionStage = stage;
         logPrintJobCreateEvent(req, event, data);
       },
     });
+    printJobCommitted = true;
+    const batch = created.batch;
+    const printerSelection = created.printerSelection;
     failureStage = "transaction_completed";
-
-    failureStage = "audit_log";
-    await createAuditLog({
-      userId: user.userId,
-      licenseeId: batch.licenseeId,
-      action: "CREATED",
-      entityType: "PrintJob",
-      entityId: created.job.id,
-      details: {
-        batchId: batch.id,
-        quantity,
-        rangeStart: rangeStart || null,
-        rangeEnd: rangeEnd || null,
-        mode: printerSelection.printMode,
-        printerId: printerSelection.printer.id,
-        printerName: printerSelection.printer.name,
-        printSessionId: created.session.id,
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
-    });
 
     const responsePayload = {
       success: true,
@@ -373,11 +167,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
     };
 
     failureStage = "idempotency_complete";
-    await completeIdempotentAction({
-      keyHash: idempotency.keyHash,
-      statusCode: 201,
-      responsePayload,
-    });
+    await completePrintActionIdempotency(idempotency, 201, responsePayload);
 
     void publishPrintJobViewEvent({
       printJobId: created.job.id,
@@ -391,6 +181,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
     try {
       failureStage = "notification_dispatch";
       await createUserNotification({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         userId: user.userId,
         licenseeId: batch.licenseeId,
         type: "manufacturer_print_job_created",
@@ -414,6 +205,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
         },
       });
       await notifySystemPrintEvent({
+        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         licenseeId: batch.licenseeId,
         orgId: user.orgId || null,
         type: "system_print_job_created",
@@ -463,6 +255,11 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
 
     return res.status(201).json(responsePayload);
   } catch (e: any) {
+    if (idempotency && !printJobCommitted) {
+      await abortPrintActionIdempotency(idempotency).catch((error) => {
+        console.error("createPrintJob idempotency abort error:", error);
+      });
+    }
     console.error("createPrintJob error:", e);
     const initialFailure = describePrintJobCreateFailure(e, {
       requestId: getRequestId(req),

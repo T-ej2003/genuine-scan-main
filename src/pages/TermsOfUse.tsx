@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Cookie, FileText, Printer, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { LegalCallout, LegalDocumentLayout, type LegalSection } from "@/components/trust/LegalDocumentLayout";

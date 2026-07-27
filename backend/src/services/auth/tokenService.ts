@@ -11,6 +11,7 @@ import {
 
 export const ACCESS_TOKEN_COOKIE = "aq_access";
 export const REFRESH_TOKEN_COOKIE = "aq_refresh";
+export const AUTHENTICATED_SESSION_CAPABILITY_COOKIE = "aq_db_session";
 export const CSRF_TOKEN_COOKIE = "aq_csrf";
 
 const parseIntEnv = (key: string, fallback: number) => {

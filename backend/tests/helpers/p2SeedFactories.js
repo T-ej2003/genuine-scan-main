@@ -149,8 +149,8 @@ const seedP2Fixtures = async (prisma) => {
   await createUser(prisma, hashPassword, "superAdmin", UserRole.SUPER_ADMIN, null, null);
   await createUser(prisma, hashPassword, "licenseeAdminA", UserRole.LICENSEE_ADMIN, ids.licenseeA, ids.orgA);
   await createUser(prisma, hashPassword, "licenseeAdminB", UserRole.LICENSEE_ADMIN, ids.licenseeB, ids.orgB);
-  await createUser(prisma, hashPassword, "manufacturerA", UserRole.MANUFACTURER, ids.licenseeA, ids.orgA);
-  await createUser(prisma, hashPassword, "manufacturerB", UserRole.MANUFACTURER, ids.licenseeB, ids.orgB);
+  await createUser(prisma, hashPassword, "manufacturerA", UserRole.MANUFACTURER_ADMIN, ids.licenseeA, ids.orgA);
+  await createUser(prisma, hashPassword, "manufacturerB", UserRole.MANUFACTURER_ADMIN, ids.licenseeB, ids.orgB);
 
   await prisma.adminMfaCredential.createMany({
     data: [
@@ -188,17 +188,22 @@ const seedP2Fixtures = async (prisma) => {
     ],
   });
 
+  const tokenIssuedAt = new Date(Math.floor(Date.now() / 1000) * 1000);
+  const tokenExpiresAt = new Date(tokenIssuedAt.getTime() + 3600_000);
   const tokenA = signQrPayload({
     qr_id: ids.qrA,
     batch_id: ids.batchA,
     licensee_id: ids.licenseeA,
     manufacturer_id: ids.manufacturerA,
     epoch: 1,
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600,
+    iat: Math.floor(tokenIssuedAt.getTime() / 1000),
+    exp: Math.floor(tokenExpiresAt.getTime() / 1000),
     nonce: "p2-scan-a-nonce",
   });
-  await prisma.qRCode.update({ where: { id: ids.qrA }, data: { tokenHash: hashToken(tokenA), tokenIssuedAt: new Date(), tokenExpiresAt: new Date(Date.now() + 3600_000) } });
+  await prisma.qRCode.update({
+    where: { id: ids.qrA },
+    data: { tokenHash: hashToken(tokenA), tokenIssuedAt, tokenExpiresAt },
+  });
 
   await prisma.qrScanLog.createMany({
     data: [
@@ -255,10 +260,66 @@ const seedP2Fixtures = async (prisma) => {
   return { ids, emails, passwords, signedScanTokenA: tokenA };
 };
 
-const issueBearerTokens = async (userIds = ids) => {
+const activeSessionState = (row) => {
+  const manufacturer = row.role === UserRole.MANUFACTURER_ADMIN;
+  const linkedLicensees = row.linkedLicensees.map((licensee) => ({ ...licensee }));
+  const selectedLicensee = row.selectedLicenseeId
+    ? linkedLicensees.find((licensee) => licensee.id === row.selectedLicenseeId)
+    : null;
+  const mfaStatus = row.mfaRequired
+    ? {
+        enabled: row.mfaEnabled,
+        enrolled: row.mfaEnrolled,
+        methods: row.mfaMethods,
+        preferredMethod: row.mfaPreferredMethod,
+        lastUsedAt: row.mfaLastUsedAt,
+      }
+    : null;
+  return {
+    user: {
+      id: row.userId,
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      licenseeId: row.legacyLicenseeId,
+      orgId: row.legacyOrganizationId,
+      emailVerifiedAt: row.emailVerifiedAt,
+      deletedAt: null,
+      disabledAt: null,
+      isActive: true,
+      status: UserStatus.ACTIVE,
+      licensee: selectedLicensee,
+    },
+    linkedScope: {
+      selectedLicensee: manufacturer ? selectedLicensee : null,
+      linkedLicensees,
+      linkedLicenseeIds: linkedLicensees.map((licensee) => licensee.id),
+    },
+    mfaRequired: row.mfaRequired,
+    mfaStatus,
+    primaryLicensee: selectedLicensee,
+    sessionLicenseeId: row.sessionLicenseeId,
+    sessionOrgId: row.sessionOrganizationId,
+    scopeVersion: manufacturer ? row.scopeVersion : null,
+  };
+};
+
+const issueBearerTokenForUser = async (prisma, userId, email, assurance = "PASSWORD") => {
   const { issueSessionForUser } = loadDist("services/auth/authService");
-  const issue = async (userId, assurance = "PASSWORD") => {
-    const session = await issueSessionForUser({
+  const { assessAuthSessionRisk } = loadDist("services/auth/sessionRiskService");
+  const { lookupPasswordBootstrapUser } = loadDist("rls-waves/session-b/b01/preAuthRepository");
+  const { sealCookieToken } = loadDist("services/auth/cookieTokenProtectionService");
+  const session = await prisma.$transaction(async (tx) => {
+    const subject = await lookupPasswordBootstrapUser(email, tx);
+    if (!subject || subject.id !== userId) throw new Error("P2 login subject binding failed");
+    const risk = await assessAuthSessionRisk({
+      userId,
+      role: subject.role,
+      ipHash: "p2-test-ip",
+      userAgent: "p2-test-agent",
+      failedLoginAttempts: subject.failedLoginAttempts || 0,
+    }, tx);
+    return issueSessionForUser({
       userId,
       ipHash: "p2-test-ip",
       userAgent: "p2-test-agent",
@@ -266,8 +327,23 @@ const issueBearerTokens = async (userIds = ids) => {
       authenticatedAt: new Date(),
       mfaVerifiedAt: assurance === "ADMIN_MFA" ? new Date() : null,
       now: new Date(),
-    });
-    return session.accessToken;
+      requestId: `p2-session-${userId}`,
+      purpose: "manufacturer-bootstrap",
+      preparedState: activeSessionState(risk.actorState),
+    }, tx);
+  });
+  return {
+    accessToken: session.accessToken,
+    databaseCapability: sealCookieToken(session.databaseSessionCapability, "auth.database-session"),
+  };
+};
+
+const issueBearerTokens = async (prisma, userIds = ids) => {
+  const emailById = new Map(Object.entries(ids).map(([key, id]) => [id, emails[key]]).filter(([, email]) => email));
+  const issue = async (userId, assurance = "PASSWORD") => {
+    const email = emailById.get(userId);
+    if (!email) throw new Error(`No P2 login subject for ${userId}`);
+    return issueBearerTokenForUser(prisma, userId, email, assurance);
   };
   return {
     superAdmin: await issue(userIds.superAdmin, "ADMIN_MFA"),
@@ -281,6 +357,7 @@ const issueBearerTokens = async (userIds = ids) => {
 module.exports = {
   emails,
   ids,
+  issueBearerTokenForUser,
   issueBearerTokens,
   passwords,
   resetP2Fixtures,

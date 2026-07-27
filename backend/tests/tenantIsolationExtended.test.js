@@ -15,7 +15,7 @@ const mockModule = (relativePath, exportsValue) => {
 };
 
 (async () => {
-  const notificationUpdates = [];
+  const notificationCalls = [];
   mockModule("config/database.js", {
     __esModule: true,
     default: {
@@ -44,7 +44,19 @@ const mockModule = (relativePath, exportsValue) => {
         },
       },
       manufacturerLicenseeLink: {
-        findMany: async () => [],
+        findMany: async () => [{
+          licenseeId: "lic-a",
+          isPrimary: true,
+          createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-01-02T00:00:00.000Z"),
+          licensee: {
+            id: "lic-a",
+            name: "Licensee A",
+            prefix: "LICA",
+            brandName: null,
+            orgId: "org-a",
+          },
+        }],
       },
     },
   });
@@ -70,6 +82,28 @@ const mockModule = (relativePath, exportsValue) => {
   mockModule("utils/cursorPagination.js", {
     buildDateCursorWhere: () => null,
     encodeDateCursor: () => null,
+  });
+  mockModule("rls-waves/session-b/b03/repositoryFunctions.js", {
+    requireB03AuthenticatedFunctionBoundary: (boundary) => {
+      assert.ok(boundary?.run, "notification mutations require the capability-backed database boundary");
+      return boundary;
+    },
+    markNotificationRead: async (_db, input) => {
+      notificationCalls.push({ operation: "read-one", input });
+      return {
+        notification: {
+          id: input.notificationId,
+          userId: null,
+          channel: NotificationChannel.WEB,
+          audience: NotificationAudience.LICENSEE_ADMIN,
+          readAt: input.readAt,
+        },
+      };
+    },
+    markAllNotificationsRead: async (_db, input) => {
+      notificationCalls.push({ operation: "read-all", input });
+      return { count: 3 };
+    },
   });
 
   const { buildIncidentScopeWhere, buildScopedUserWhere } = require("../dist/services/accessControlService");
@@ -136,12 +170,17 @@ const mockModule = (relativePath, exportsValue) => {
     markAllNotificationsRead,
     markNotificationRead,
   } = require("../dist/services/notificationService");
+  const databaseBoundary = {
+    requestId: "tenant-isolation-notification-test",
+    run: (callback) => callback({}),
+  };
 
   const sharedRead = await markNotificationRead({
     notificationId: "shared-notification",
     userId: "user-a",
     role: UserRole.LICENSEE_ADMIN,
     licenseeId: "lic-a",
+    databaseBoundary,
   });
   assert.strictEqual(sharedRead.userId, null);
   assert.ok(sharedRead.readAt, "shared notification read responses can be presented as read without mutating the shared row");
@@ -150,13 +189,12 @@ const mockModule = (relativePath, exportsValue) => {
     userId: "user-a",
     role: UserRole.LICENSEE_ADMIN,
     licenseeId: "lic-a",
+    databaseBoundary,
   });
   assert.strictEqual(readAllCount, 3);
-  assert.deepStrictEqual(notificationUpdates[0], {
-    userId: "user-a",
-    channel: NotificationChannel.WEB,
-    readAt: null,
-  });
+  assert.deepStrictEqual(notificationCalls.map((entry) => entry.operation), ["read-one", "read-all"]);
+  assert.strictEqual(notificationCalls[0].input.userId, "user-a");
+  assert.strictEqual(notificationCalls[1].input.userId, "user-a");
 
   console.log("extended tenant isolation regression test passed");
 })().catch((error) => {

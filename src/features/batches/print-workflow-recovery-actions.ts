@@ -29,9 +29,9 @@ export const relinkSelectedPrinterAction = async (params: {
     }
 
     const repairedPrinterId = String((response.data as any)?.printer?.id || "").trim();
-    if (repairedPrinterId) params.setSelectedPrinterProfileId(repairedPrinterId);
     params.toast({ title: "Printer relinked", description: "The saved printer is now linked to this computer's connector." });
     await params.loadPrinterStatus({ force: true });
+    if (repairedPrinterId) params.setSelectedPrinterProfileId(repairedPrinterId);
   } finally {
     params.setRelinkingPrinter(false);
   }

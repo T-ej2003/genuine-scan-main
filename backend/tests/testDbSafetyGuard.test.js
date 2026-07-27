@@ -19,6 +19,7 @@ const allowed = [
   buildPgUrl({ host: "127.0.0.1", db: INTEGRATION_TEST_DB }),
   buildPgUrl({ host: PG_DEFAULT_USER, db: INTEGRATION_TEST_DB }),
   buildPgUrl({ user: MSCQR_P2_TEST_USER, omitAuthSecret: true, host: "localhost", port: 55432, db: "mscqr_p2_test_123" }),
+  buildPgUrl({ user: MSCQR_P2_TEST_USER, omitAuthSecret: true, host: "localhost", port: 55432, db: "mscqr_full_rls_cert_p2_123" }),
 ];
 
 for (const url of allowed) {

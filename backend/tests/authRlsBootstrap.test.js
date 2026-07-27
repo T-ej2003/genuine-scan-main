@@ -4,6 +4,7 @@ const path = require("node:path");
 const { UserRole, UserStatus } = require("@prisma/client");
 
 const distRoot = path.resolve(__dirname, "../dist");
+process.env.NODE_ENV = "test";
 const mockModule = (relativePath, exportsValue) => {
   const resolved = require.resolve(path.join(distRoot, relativePath));
   require.cache[resolved] = { id: resolved, filename: resolved, loaded: true, exports: exportsValue };
@@ -22,6 +23,7 @@ let verifyError = null;
 let failureError = null;
 let transactionCalls = 0;
 let contextWrites = 0;
+let riskWrites = 0;
 const updates = [];
 const auditLogs = [];
 const baseUser = () => ({
@@ -88,19 +90,49 @@ mockModule("services/auth/tokenService.js", {
   getMfaBootstrapTtlMinutes: () => 10,
 });
 mockModule("services/auth/refreshTokenService.js", {
-  createRefreshToken: async () => ({ row: { id: "session-1" }, expiresAt: new Date(Date.now() + 60_000) }),
+  createRefreshToken: async () => ({
+    row: { id: "session-1" },
+    expiresAt: new Date(Date.now() + 60_000),
+    tokenHash: "refresh-token-hash",
+  }),
   rotateRefreshToken: async () => null,
   revokeAllUserRefreshTokens: async () => null,
   revokePasswordOnlyRefreshTokensForUser: async () => null,
   revokeRefreshTokenByRaw: async () => null,
 });
+mockModule("services/auth/authenticatedSessionCapabilityService.js", {
+  createAuthenticatedSessionCapability: async () => ({
+    row: { id: "session-1", expiresAt: new Date(Date.now() + 60_000) },
+    rawCapability: "A".repeat(43),
+  }),
+});
 mockModule("services/auditService.js", { createAuditLog: async (entry) => { auditLogs.push(entry); } });
+mockModule("services/auditLogOutboxService.js", {
+  queueAuditLogOutbox: async (entry) => {
+    auditLogs.push(entry);
+    return "audit-outbox-1";
+  },
+});
 mockModule("services/auth/sessionRiskService.js", {
-  assessAuthSessionRisk: async () => ({ score: 0, riskLevel: "LOW", reasons: [], shouldBlock: false }),
+  assessAuthSessionRisk: async () => ({
+    score: 0, riskLevel: "LOW", reasons: [], shouldBlock: false,
+    actorState: {
+      userId: user.id, email: user.email, name: user.name, role: user.role,
+      legacyLicenseeId: user.licenseeId, legacyOrganizationId: user.orgId,
+      emailVerifiedAt: user.emailVerifiedAt, sessionLicenseeId: null, sessionOrganizationId: null,
+      scopeVersion: null, selectedLicenseeId: null, selectedLicenseeName: null,
+      selectedLicenseePrefix: null, selectedLicenseeBrandName: null,
+      selectedLicenseeOrganizationId: null, linkedLicensees: [], mfaRequired: true,
+      mfaEnabled: false, mfaEnrolled: false, mfaLastUsedAt: null, mfaMethods: [], mfaPreferredMethod: null,
+    },
+  }),
+  persistAuthSessionRisk: async (input) => {
+    riskWrites += 1;
+    user = { ...user, failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date(), passwordHash: input.passwordHash || user.passwordHash };
+  },
 });
 mockModule("services/manufacturerScopeService.js", {
-  listManufacturerLicenseeLinks: async () => [],
-  normalizeLinkedLicensees: () => [],
+  resolveManufacturerSessionScope: async () => ({ selectedLicensee: null, linkedLicensees: [], linkedLicenseeIds: [] }),
 });
 mockModule("services/auth/emailVerificationService.js", {
   isVerifiedAccount: (candidate) => Boolean(candidate.emailVerifiedAt),
@@ -111,7 +143,14 @@ mockModule("services/auth/mfaService.js", {
 });
 
 const { loginWithPassword } = require("../dist/services/auth/authService");
-const login = (email, password) => loginWithPassword({ email, password, ipHash: "ip", userAgent: "ua" });
+let requestSequence = 0;
+const login = (email, password) => loginWithPassword({
+  email,
+  password,
+  ipHash: "ip",
+  userAgent: "ua",
+  requestId: `auth-rls-bootstrap-${++requestSequence}`,
+});
 const errorMessage = async (promise) => {
   try {
     await promise;
@@ -172,17 +211,20 @@ const run = async () => {
   user = { ...baseUser(), failedLoginAttempts: 1 };
   rehash = true;
   updates.length = 0;
+  riskWrites = 0;
   transactionCalls = 0;
   contextWrites = 0;
   const result = await login(user.email, validPassword);
   assert.equal(result.sessionStage, "MFA_BOOTSTRAP");
+  assert.equal(result.databaseSessionCapability, "A".repeat(43));
   assert.equal(user.failedLoginAttempts, 0);
   assert.equal(user.lockedUntil, null);
   assert.ok(user.lastLoginAt instanceof Date);
   assert.equal(user.passwordHash, "upgraded-hash");
-  assert.equal(updates.length, 1, "successful auth state must update once inside verified context");
-  assert.equal(transactionCalls, 2, "verified login uses transaction-local context for update and MFA bootstrap");
-  assert.equal(contextWrites, 12, "each verified transaction establishes all six local context settings");
+  assert.equal(updates.length, 0, "successful auth state must not use direct Prisma mutation");
+  assert.equal(riskWrites, 1, "the exact login-risk boundary performs the successful-login mutation once");
+  assert.equal(transactionCalls, 2, "verified login uses one risk-read transaction and one atomic completion transaction");
+  assert.equal(contextWrites, 0, "login must not install caller-derived canonical context");
 
   console.log("auth RLS bootstrap unit tests passed");
 };

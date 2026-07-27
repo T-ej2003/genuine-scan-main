@@ -1,5 +1,6 @@
 import { UserRole } from "@prisma/client";
 
+import type { SessionCredentialClient } from "../../rls-waves/session-b/b01/sessionCredentialRepository";
 import { listActiveRefreshTokensForUser } from "./refreshTokenService";
 
 type SessionRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -42,9 +43,13 @@ const resolveIpReputation = (input: {
   return "trusted";
 };
 
-export const getSessionSecurityOverview = async (input: SessionOverviewInput) => {
-  const sessions = await listActiveRefreshTokensForUser(input.userId);
-  const now = Date.now();
+export const getSessionSecurityOverview = async (
+  input: SessionOverviewInput,
+  db: SessionCredentialClient,
+  checkedAt = new Date()
+) => {
+  const sessions = await listActiveRefreshTokensForUser(input.userId, db, checkedAt);
+  const now = checkedAt.getTime();
   const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
   const currentSession = sessions.find((session) => session.id === input.currentSessionId) || null;
 

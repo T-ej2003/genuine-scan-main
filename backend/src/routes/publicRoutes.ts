@@ -3,7 +3,8 @@ import { publicVerify } from "../controllers/publicController";
 
 const router = Router();
 
-// Legacy public aliases delegate to the canonical verification controller.
+// Quarantined legacy router: no production entry point imports or mounts this
+// module. Canonical /api/verify routes and their limiters live in routes/index.
 router.get("/verify/:code", publicVerify);
 router.get("/verify", publicVerify);
 

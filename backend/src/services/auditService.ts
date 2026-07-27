@@ -8,6 +8,7 @@ import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redi
 import { bumpCacheNamespaceVersion } from "./versionedCacheService";
 import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
 import { queueAuditLogOutbox } from "./auditLogOutboxService";
+import { CanonicalDbContext, validateCanonicalDbContext } from "../lib/canonicalDbContext";
 
 export interface AuditLogInput {
   userId?: string;
@@ -21,6 +22,8 @@ export interface AuditLogInput {
   ipHash?: string;
   userAgent?: string;
 }
+
+export type TransactionalAuditLogInput = Omit<AuditLogInput, "userId" | "orgId" | "licenseeId">;
 
 type Listener = (log: any) => void;
 
@@ -72,6 +75,46 @@ const resolveAuditPayload = async (data: AuditLogInput) => {
     userAgent: resolvedUserAgent || undefined,
     ipAddress: storeRawIp ? data.ipAddress : undefined,
   } as any;
+};
+
+export const createAuditLogInTransaction = async (
+  tx: Prisma.TransactionClient,
+  inputContext: CanonicalDbContext,
+  data: TransactionalAuditLogInput
+) => {
+  const context = validateCanonicalDbContext(inputContext);
+  const action = String(data.action || "").trim();
+  const entityType = String(data.entityType || "").trim();
+  if (!action || !entityType) throw new Error("Transactional audit log requires action and entityType");
+
+  const storeRawIp = ["1", "true", "yes", "on"].includes(
+    String(process.env.AUDIT_LOG_STORE_RAW_IP || "").trim().toLowerCase()
+  );
+  const [{ createdAt }] = await tx.$queryRaw<Array<{ createdAt: Date }>>`
+    SELECT transaction_timestamp() AS "createdAt"
+  `;
+  const payload = {
+    userId: context.userId,
+    orgId: context.organizationId || null,
+    licenseeId: context.licenseeId || null,
+    action,
+    entityType,
+    entityId: data.entityId || null,
+    details: data.details ?? null,
+    ipAddress: storeRawIp ? data.ipAddress || null : null,
+    ipHash: (data.ipHash ?? hashIp(data.ipAddress)) || null,
+    userAgent: normalizeUserAgent(data.userAgent) || null,
+    createdAt,
+  };
+  const outboxId = await queueAuditLogOutbox(payload, undefined, tx, {
+    requestId: context.requestId,
+    organizationId: context.organizationId,
+    licenseeId: context.licenseeId,
+    manufacturerId: context.manufacturerId,
+    initiatingUserId: context.userId,
+    initiatingActorRoleSnapshot: context.role,
+  });
+  return { ...payload, id: outboxId };
 };
 
 export const createAuditLog = async (data: AuditLogInput) => {

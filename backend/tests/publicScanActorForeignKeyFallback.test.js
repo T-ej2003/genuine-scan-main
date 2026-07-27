@@ -251,13 +251,12 @@ const res = {
 (async () => {
   await scanToken(req, res);
 
-  assert.strictEqual(res.statusCode, 200, "scan should retry instead of failing on stale actor FK");
-  assert(res.body && res.body.success === true, "scan should still return a success payload");
-  assert.strictEqual(scanLogCreateCalls, 2, "QrScanLog insert should retry once");
-  assert.strictEqual(lastScanLogPayload.customerUserId, null, "retry should clear stale customer linkage");
-  assert.strictEqual(lastScanLogPayload.ownershipId, null, "retry should clear ownership linkage too");
+  assert.strictEqual(res.statusCode, 503, "the authoritative scan boundary must fail closed");
+  assert.strictEqual(res.body?.success, false);
+  assert.strictEqual(scanLogCreateCalls, 0, "the public route must not retry through direct Prisma writes");
+  assert.strictEqual(lastScanLogPayload, null);
 
-  console.log("public scan actor foreign key fallback test passed");
+  console.log("public scan actor foreign-key fail-closed contract passed");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

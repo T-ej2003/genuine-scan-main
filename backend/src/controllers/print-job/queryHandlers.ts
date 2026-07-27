@@ -3,10 +3,8 @@ import { UserRole } from "@prisma/client";
 
 import { AuthRequest } from "../../middleware/auth";
 import { getEffectiveLicenseeId } from "../../middleware/tenantIsolation";
-import { getPrintJobOperationalView, listPrintJobsForManufacturer } from "../../services/networkDirectPrintService";
-import { createAuthorizedPrintReissue } from "../../services/printReissueService";
-import { abandonUnconfirmedPrintJob } from "../../services/printLifecycleService";
 import { pausePrintJob, resumePrintJob, stopPrintJob } from "../../services/printOperationControlService";
+import { controlPrintingJob, readPrintingProjection } from "../../rls-waves/session-c/c02/printingLifecycleRepository";
 import {
   createScopedPrintReissueRequest,
   decideScopedPrintReissueRequest,
@@ -50,21 +48,16 @@ export const listManufacturerPrintJobs = async (req: AuthRequest, res: Response)
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid query" });
     }
 
-    const scope = {
-      role: user.role,
-      userId: user.userId,
-      licenseeId: getEffectiveLicenseeId(req),
-    };
     const rows = await getOrComputeVersionedCache(
       "print-jobs",
-      [scope.role, scope.userId, scope.licenseeId || "none", parsed.data.batchId || "all", parsed.data.limit].join(":"),
+      [user.role, user.userId, getEffectiveLicenseeId(req) || "none", parsed.data.batchId || "all", parsed.data.limit].join(":"),
       5,
-      () =>
-        listPrintJobsForManufacturer({
-          scope,
-          batchId: parsed.data.batchId,
-          limit: parsed.data.limit,
-        })
+      () => readPrintingProjection({
+        ...printBoundary(req),
+        operation: "JOB_LIST",
+        subjectId: parsed.data.batchId || "00000000-0000-4000-8000-000000000000",
+        options: { batchId: parsed.data.batchId || null, limit: parsed.data.limit || 50 },
+      })
     );
 
     return res.json({ success: true, data: rows });
@@ -84,20 +77,11 @@ export const getManufacturerPrintJobStatus = async (req: AuthRequest, res: Respo
       return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
     }
 
-    const scope = {
-      role: user.role,
-      userId: user.userId,
-      licenseeId: getEffectiveLicenseeId(req),
-    };
     const view = await getOrComputeVersionedCache(
       "print-jobs",
-      [scope.role, scope.userId, scope.licenseeId || "none", "status", parsedParams.data.id].join(":"),
+      [user.role, user.userId, getEffectiveLicenseeId(req) || "none", "status", parsedParams.data.id].join(":"),
       3,
-      () =>
-        getPrintJobOperationalView({
-          jobId: parsedParams.data.id,
-          scope,
-        })
+      () => readPrintingProjection({ ...printBoundary(req), operation: "JOB", subjectId: parsedParams.data.id })
     );
     if (!view) {
       return res.status(404).json({ success: false, error: "Print job not found" });
@@ -114,6 +98,10 @@ const printControlScope = (req: AuthRequest, user: NonNullable<AuthRequest["user
   role: user.role,
   userId: user.userId,
   licenseeId: getEffectiveLicenseeId(req),
+});
+const printBoundary = (req: AuthRequest) => ({
+  capability: String(req.databaseSessionCapability || ""),
+  requestId: String((req as AuthRequest & { requestId?: string }).requestId || ""),
 });
 
 const handleUserSafeError = (res: Response, error: any, fallback: string) => {
@@ -145,6 +133,7 @@ export const pauseManufacturerPrintJob = async (req: AuthRequest, res: Response)
     const result = await pausePrintJob({
       printJobId: parsedParams.data.id,
       scope: printControlScope(req, user),
+      boundary: printBoundary(req),
       reason: parsedBody.data.reason,
     });
     return res.json({ success: true, data: result.view, meta: { idempotent: result.idempotent } });
@@ -167,6 +156,7 @@ export const resumeManufacturerPrintJob = async (req: AuthRequest, res: Response
     const result = await resumePrintJob({
       printJobId: parsedParams.data.id,
       scope: printControlScope(req, user),
+      boundary: printBoundary(req),
     });
     return res.json({ success: true, data: result.view, meta: { idempotent: result.idempotent } });
   } catch (error: any) {
@@ -192,6 +182,7 @@ export const stopManufacturerPrintJob = async (req: AuthRequest, res: Response) 
     const result = await stopPrintJob({
       printJobId: parsedParams.data.id,
       scope: printControlScope(req, user),
+      boundary: printBoundary(req),
       reason: parsedBody.data.reason,
     });
     return res.json({ success: true, data: result.view, meta: { idempotent: result.idempotent } });
@@ -205,37 +196,10 @@ export const reissueManufacturerPrintJob = async (req: AuthRequest, res: Respons
   try {
     const user = ensurePrintOperationsUser(req, res);
     if (!user) return;
-    if (!isPlatformAdmin(user.role)) {
-      return res.status(403).json({
-        success: false,
-        error: "Create a reissue request for approval before replacement labels can be generated.",
-      });
-    }
-
-    const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
-    if (!parsedParams.success) {
-      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
-    }
-
-    const parsedBody = reissuePrintJobSchema.safeParse(req.body || {});
-    if (!parsedBody.success) {
-      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "Invalid reissue request" });
-    }
-
-    const data = await createAuthorizedPrintReissue({
-      scope: {
-        role: user.role,
-        userId: user.userId,
-        licenseeId: getEffectiveLicenseeId(req),
-      },
-      originalPrintJobId: parsedParams.data.id,
-      reason: parsedBody.data.reason,
-      quantity: parsedBody.data.quantity ?? null,
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || null,
+    return res.status(409).json({
+      success: false,
+      error: "Create a reissue request for maker-checker approval before replacement labels can be generated.",
     });
-
-    return res.status(201).json({ success: true, data });
   } catch (error: any) {
     console.error("reissueManufacturerPrintJob error:", error);
     const message = String(error?.message || "");
@@ -274,6 +238,7 @@ export const createManufacturerPrintReissueRequest = async (req: AuthRequest, re
 
     const result = await createScopedPrintReissueRequest({
       scope: printControlScope(req, user),
+      boundary: printBoundary(req),
       originalPrintJobId: parsedParams.data.id,
       reason: parsedBody.data.reason,
       quantity: parsedBody.data.quantity ?? null,
@@ -299,6 +264,7 @@ export const listManufacturerPrintReissueRequests = async (req: AuthRequest, res
 
     const rows = await listScopedPrintReissueRequests({
       scope: printControlScope(req, user),
+      boundary: printBoundary(req),
       status: parsedQuery.data.status as any,
       limit: parsedQuery.data.limit,
     });
@@ -325,6 +291,7 @@ export const approveManufacturerPrintReissueRequest = async (req: AuthRequest, r
 
     const result = await decideScopedPrintReissueRequest({
       scope: printControlScope(req, user),
+      boundary: printBoundary(req),
       requestId: parsedParams.data.id,
       decision: "approve",
       decisionNote: parsedBody.data.decisionNote,
@@ -350,6 +317,7 @@ export const printApprovedManufacturerPrintReissueRequest = async (req: AuthRequ
 
     const result = await startApprovedPrintReissueRequest({
       scope: printControlScope(req, user),
+      boundary: printBoundary(req),
       requestId: parsedParams.data.id,
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
@@ -418,6 +386,7 @@ export const rejectManufacturerPrintReissueRequest = async (req: AuthRequest, re
 
     const result = await decideScopedPrintReissueRequest({
       scope: printControlScope(req, user),
+      boundary: printBoundary(req),
       requestId: parsedParams.data.id,
       decision: "reject",
       decisionNote: parsedBody.data.decisionNote,
@@ -446,26 +415,31 @@ export const abandonManufacturerPrintJob = async (req: AuthRequest, res: Respons
       userId: user.userId,
       licenseeId: getEffectiveLicenseeId(req),
     };
-    const view = await getPrintJobOperationalView({ jobId: parsedParams.data.id, scope });
+    const view = await readPrintingProjection({
+      ...printBoundary(req), operation: "JOB", subjectId: parsedParams.data.id,
+    });
     if (!view) {
       return res.status(404).json({ success: false, error: "Print job not found" });
     }
 
-    const result = await abandonUnconfirmedPrintJob({
-      printJobId: parsedParams.data.id,
-      actorUserId: user.userId,
-      licenseeId: scope.licenseeId || view.batch?.licenseeId || null,
+    const result = await controlPrintingJob({
+      ...printBoundary(req),
+      jobId: parsedParams.data.id,
+      operation: "ABANDON",
       reason: "Operator closed unconfirmed failed print run so labels can be started again.",
+    });
+    const closed = await readPrintingProjection({
+      ...printBoundary(req), operation: "JOB", subjectId: parsedParams.data.id,
     });
 
     return res.json({
       success: true,
       data: {
-        jobId: result.job.id,
-        status: result.job.status,
-        printSessionId: result.session.id,
-        sessionStatus: result.session.status,
-        releasedQrCodeCount: result.releasedQrCodeCount,
+        jobId: result.jobId,
+        status: closed.job.status,
+        printSessionId: closed.session.id,
+        sessionStatus: closed.session.status,
+        releasedQrCodeCount: 0,
       },
     });
   } catch (error: any) {

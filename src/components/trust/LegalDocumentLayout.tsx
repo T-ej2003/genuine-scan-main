@@ -1,5 +1,5 @@
 import type { ComponentType, ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { ArrowRight, CalendarDays, FileText, ShieldCheck, Tag } from "lucide-react";
 
 import { LegalFooter } from "@/components/trust/LegalFooter";
