@@ -4,7 +4,10 @@ const {
   describePrintJobCreateFailure,
   describeMissingPrinterReadinessFields,
 } = require("../dist/controllers/print-job/errorResponses");
-const { createPrintJobSchema } = require("../dist/controllers/print-job/shared");
+const {
+  createPrintJobSchema,
+  getLockExpiresAt,
+} = require("../dist/controllers/print-job/shared");
 const {
   hasExactTrustedSelectedPrinterMatch,
   pickSafeHeartbeatPrinterForProfile,
@@ -109,6 +112,11 @@ const run = () => {
     quantity: "2",
   });
   assert(!invalidPayload.success, "invalid_payload should remain reserved for true schema errors");
+  const createdAt = new Date("2026-07-27T12:00:00.000Z");
+  assert(
+    getLockExpiresAt(createdAt).getTime() === getLockExpiresAt(createdAt.toISOString()).getTime(),
+    "Print-lock expiry should accept both Prisma Date values and SQL JSON timestamps"
+  );
 
   const mappingFailure = describePrintJobCreateFailure(
     Object.assign(new Error("PRINTER_MAPPING_MISSING"), {

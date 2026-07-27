@@ -8,6 +8,7 @@ const publicSource = fs.readFileSync(path.join(sourceRoot, "publicBoundaryReposi
 const authenticatedSource = fs.readFileSync(path.join(sourceRoot, "authenticatedRepositories.ts"), "utf8");
 const {
   b02IdempotencyDigest,
+  submitPublicIncident,
   verifyRawQr,
 } = require("../../../dist/rls-waves/session-b/b02/publicBoundaryRepository");
 
@@ -159,4 +160,32 @@ test("B02 idempotency digest is stable across object key order", () => {
     b02IdempotencyDigest({ a: { y: [3, 4], z: 1 }, b: 2 })
   );
   assert.notEqual(b02IdempotencyDigest({ a: 1 }), b02IdempotencyDigest({ a: 2 }));
+});
+
+test("B02 public incident serializes reviewed evidence as one jsonb parameter", async () => {
+  let boundEvidence;
+  const result = await submitPublicIncident({
+    $queryRaw: async (_strings, ...values) => {
+      boundEvidence = values[6];
+      return [{ accepted: true, publicReference: "INC-ABC123", message: "Concern submitted successfully." }];
+    },
+  }, {
+    sessionId: "2055c788-9bef-44cf-9368-7ed6889156a3",
+    sessionProofHash: "a".repeat(64),
+    incidentType: "other",
+    description: "Reviewed concern",
+    contactEmail: null,
+    consentToContact: false,
+    evidence: [{ fileUrl: "/api/incidents/evidence-files/photo.webp", storageKey: "photo.webp", fileType: "image/webp" }],
+    submittedAt: new Date(),
+    requestId: "req-b02-incident-jsonb",
+    actorIpHash: null,
+    actorDeviceHash: null,
+    idempotencyDigest: "b".repeat(64),
+  });
+
+  assert.equal(boundEvidence, JSON.stringify([
+    { fileUrl: "/api/incidents/evidence-files/photo.webp", storageKey: "photo.webp", fileType: "image/webp" },
+  ]));
+  assert.equal(result.publicReference, "INC-ABC123");
 });

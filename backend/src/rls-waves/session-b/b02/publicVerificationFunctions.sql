@@ -70,6 +70,13 @@ BEGIN
     session_id,encode(sha256(convert_to(p_capability,'UTF8')),'hex'),p_customer_user_id,lower(p_customer_email),
     p_auth_strength,p_auth_provider,p_issued_at,p_expires_at,p_issued_at,NULL,p_issued_at,p_issued_at
   );
+  PERFORM app_public.public_verify_write_evidence(
+    CASE WHEN p_auth_strength='EMAIL_OTP' THEN 'VERIFY_CUSTOMER_OTP_VERIFIED'
+      ELSE 'VERIFY_CUSTOMER_SESSION_ISSUED' END,
+    'CustomerAuthSession',session_id,NULL,
+    jsonb_build_object('authStrength',p_auth_strength,'authProvider',p_auth_provider),
+    p_issued_at,p_request_id
+  );
   RETURN QUERY SELECT true;
 END
 $$;
@@ -161,15 +168,21 @@ BEGIN
     'app.public_verification_customer_session_hash',
     encode(sha256(convert_to(p_capability,'UTF8')),'hex'),true
   );
-  SELECT s.id INTO session_row FROM public."CustomerAuthSession" s
+  SELECT s.id,s."revokedAt" INTO session_row FROM public."CustomerAuthSession" s
   WHERE s."tokenHash"=encode(sha256(convert_to(p_capability,'UTF8')),'hex');
   IF session_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_CUSTOMER_SESSION_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.public_verification_target_id',session_row.id,true);
-  UPDATE public."CustomerAuthSession"
-    SET "revokedAt"=coalesce("revokedAt",p_revoked_at),"updatedAt"=p_revoked_at
-  WHERE id=session_row.id;
+  IF session_row."revokedAt" IS NULL THEN
+    UPDATE public."CustomerAuthSession"
+      SET "revokedAt"=p_revoked_at,"updatedAt"=p_revoked_at
+    WHERE id=session_row.id;
+    PERFORM app_public.public_verify_write_evidence(
+      'VERIFY_CUSTOMER_LOGOUT','CustomerAuthSession',session_row.id,NULL,
+      '{}'::jsonb,p_revoked_at,p_request_id
+    );
+  END IF;
   RETURN QUERY SELECT true;
 END
 $$;
@@ -644,6 +657,10 @@ BEGIN
     customer."customerUserId",customer."customerEmail",NULL,NULL,expires_at,p_session_proof_hash,p_checked_at,
     p_checked_at+interval '30 minutes',NULL,
     jsonb_build_object('boundCustomerUserId',customer."customerUserId"),p_checked_at,p_checked_at
+  );
+  PERFORM app_public.public_verify_write_evidence(
+    'VERIFY_SESSION_STARTED','CustomerVerificationSession',session_id,decision."licenseeId",
+    jsonb_build_object('entryMethod',p_entry_method),p_checked_at,p_request_id
   );
   RETURN QUERY SELECT session_id,NULL::text,
     CASE WHEN decision.code IS NULL THEN '' WHEN length(decision.code)<=4 THEN repeat('*',length(decision.code))

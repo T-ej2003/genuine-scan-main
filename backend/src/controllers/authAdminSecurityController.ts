@@ -166,7 +166,6 @@ export const confirmAdminMfaSetupController = async (req: Request, res: Response
   if (!parsed.success) {
     return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
   }
-
   try {
     const ipHash = hashIp(req.ip);
     const userAgent = normalizeUserAgent(req.get("user-agent"));
@@ -317,7 +316,7 @@ export const beginAdminWebAuthnChallengeController = async (req: Request, res: R
 
 export const completeAdminMfaChallengeController = async (req: Request, res: Response) => {
   const claims = getAuthClaims(req);
-  if (!claims?.userId) return res.status(401).json({ success: false, error: "Not authenticated" });
+  if (!claims?.userId || !claims.sessionId) return res.status(401).json({ success: false, error: "Not authenticated" });
   const parsed = mfaChallengeCompleteSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
@@ -353,6 +352,7 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
           requestedLicenseeId: parsed.data.licenseeId ?? claims.licenseeId,
           requestedScopeVersion: parsed.data.scopeVersion ?? claims.scopeVersion,
         }, tx);
+        await revokeRefreshTokenById({ sessionId: claims.sessionId!, userId: claims.userId, reason: "STEP_UP_REPLACED", now }, tx);
         return { ok: true as const, session };
       } catch (error) {
         if (error instanceof MfaAdapterError && error.commitFailure) {
@@ -442,7 +442,7 @@ export const completeAdminWebAuthnChallengeController = async (req: Request, res
         requestedLicenseeId: parsed.data.licenseeId ?? claims.licenseeId,
         requestedScopeVersion: parsed.data.scopeVersion ?? claims.scopeVersion,
       }, tx);
-      if (hasCurrentRefresh) {
+      if (claims.sessionStage === "MFA_BOOTSTRAP" || hasCurrentRefresh) {
         await revokeRefreshTokenById({
           sessionId: currentSessionId,
           userId: context.userId,

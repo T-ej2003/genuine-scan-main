@@ -167,6 +167,42 @@ describe("internal client core HTML error handling", () => {
     expect((vi.mocked(globalThis.fetch).mock.calls[1][1]?.headers as Record<string, string>)["x-csrf-token"]).toBe("csrf-1");
   });
 
+  it("coalesces direct and 401-triggered session refreshes", async () => {
+    let releaseRefresh!: () => void;
+    const refreshPending = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/refresh")) {
+        await refreshPending;
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ success: true, data: { user: { id: "user-1" } } }),
+        } as Response;
+      }
+      return {
+        ok: false,
+        status: 401,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ success: false, error: "Not authenticated" }),
+      } as Response;
+    });
+
+    const client = createApiClientCore();
+    const direct = client.request("/auth/refresh", { method: "POST" });
+    const protectedRead = client.request("/qr/batches", { method: "GET" });
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+    releaseRefresh();
+    await Promise.all([direct, protectedRead]);
+
+    expect(
+      vi.mocked(globalThis.fetch).mock.calls.filter(([input]) => String(input).endsWith("/auth/refresh")),
+    ).toHaveLength(1);
+  });
+
   it("clears stale bearer state before retrying a protected request after session restore", async () => {
     Object.defineProperty(document, "cookie", {
       configurable: true,

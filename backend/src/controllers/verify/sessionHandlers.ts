@@ -99,17 +99,6 @@ export const startCustomerVerificationSession = async (req: CustomerVerifyReques
       customerCapability: req.customerDatabaseCapability || null,
     });
 
-    await createAuditLogSafely({
-      action: "CUSTOMER_VERIFICATION_SESSION_STARTED",
-      entityType: "CustomerVerificationSession",
-      entityId: session.sessionId,
-      details: {
-        entryMethod: session.entryMethod,
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
-    });
-
     return res.status(201).json({
       success: true,
       data: session,

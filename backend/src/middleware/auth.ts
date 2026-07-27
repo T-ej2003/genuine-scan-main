@@ -96,8 +96,14 @@ export async function hydrateTenantIfNeeded(
   }
   const hydratedPayload: AuthenticatedSessionClaims = {
     ...payload,
-    sessionStage: canonicalAssurance === "mfa-bootstrap" ? "MFA_BOOTSTRAP" : "ACTIVE",
-    authAssurance: canonicalAssurance === "mfa-verified" ? "ADMIN_MFA" : "PASSWORD",
+    sessionStage:
+      payload.sessionStage === "MFA_BOOTSTRAP" && canonicalAssurance === "password-verified"
+        ? "MFA_BOOTSTRAP"
+        : "ACTIVE",
+    authAssurance:
+      canonicalAssurance === "mfa-verified" || canonicalAssurance === "step-up-verified"
+        ? "ADMIN_MFA"
+        : "PASSWORD",
   };
 
   const effectiveRole = u.role;

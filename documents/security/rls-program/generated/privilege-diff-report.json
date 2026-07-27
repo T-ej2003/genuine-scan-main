@@ -3598,6 +3598,7 @@
       "columns": [
         "id",
         "printerRegistrationId",
+        "heartbeatNonce",
         "attestedAt",
         "expiresAt",
         "signatureValid",
@@ -5238,6 +5239,7 @@
         "licenseeId",
         "severity",
         "status",
+        "slaDueAt",
         "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
@@ -5296,11 +5298,73 @@
       "command": "SELECT",
       "columns": [
         "id",
-        "licenseeId",
+        "incidentId",
         "referenceCode",
+        "licenseeId",
+        "customerEmail",
+        "subject",
         "status",
         "priority",
+        "assignedToUserId",
+        "slaDueAt",
+        "firstResponseAt",
+        "resolvedAt",
+        "createdAt",
         "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "SupportTicket",
+      "command": "UPDATE",
+      "columns": [
+        "status",
+        "assignedToUserId",
+        "resolvedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "SupportTicketMessage",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "ticketId",
+        "actorType",
+        "actorUserId",
+        "message",
+        "isInternal",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "SupportTicketMessage",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "ticketId",
+        "actorType",
+        "actorUserId",
+        "message",
+        "isInternal",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "IncidentHandoff",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "incidentId",
+        "currentStage",
+        "slaDueAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner"
@@ -5395,7 +5459,8 @@
         "action",
         "entityType",
         "entityId",
-        "details"
+        "details",
+        "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner"

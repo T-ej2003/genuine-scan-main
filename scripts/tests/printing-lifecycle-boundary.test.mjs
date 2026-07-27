@@ -56,6 +56,9 @@ assert.doesNotMatch(sql, /SELECT\s+a\.\*\s+INTO\s+approval_row\s+FROM\s+public\.
 assert.doesNotMatch(sql, /RETURNING\s+\*\s+INTO\s+approval_row/i);
 assert.match(sql, /coalesce\(policy->>'type',policy->>'mode','ONE_PER_PRINT_JOB'\)/);
 assert.match(sql, /coalesce\(\(policy->>'min'\)::integer,1\)/);
+assert.match(contracts, /\["PrinterAttestation","SELECT",\[[^\]]*"heartbeatNonce"/);
+assert.match(sql, /PRINTER_STATUS[\s\S]*set_config\('app\.printing_registration_id',coalesce\(target_registration_id,''\),true\)[\s\S]*FROM public\."PrinterAttestation"/);
+assert.match(sql, /PRINTER_STATUS[\s\S]*'requiredForPrinting',true[\s\S]*'lastHeartbeatAt',NULL,'ageSeconds',NULL/);
 
 for (const source of [connector, create, controls, query]) {
   assert.match(source, /printingLifecycleRepository|printing_(?:readiness|create_job|control_job|connector_event)/);
@@ -66,6 +69,8 @@ assert.doesNotMatch(query, /getPrintJobOperationalView|listPrintJobsForManufactu
 assert.match(repository, /app_rls\.printing_connector_event/);
 assert.match(repository, /app_rls\.printing_connector_registration/);
 assert.match(repository, /app_rls\.printing_idempotency/);
+assert.match(repository, /const items = JSON\.stringify\(input\.items\)/);
+assert.doesNotMatch(repository, /\$\{input\.items\}::jsonb/);
 assert.match(createHandler, /abortPrintActionIdempotency/);
 assert.doesNotMatch(printer, /beginIdempotentAction|completeIdempotentAction|createAuditLog|resolveAccessibleLicenseeIdsForUser/);
 assert.doesNotMatch(createHandler, /beginIdempotentAction|completeIdempotentAction/);

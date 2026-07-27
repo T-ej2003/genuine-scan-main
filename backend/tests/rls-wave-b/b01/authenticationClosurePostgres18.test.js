@@ -76,6 +76,19 @@ async function main() {
   assert.equal(last(bootstrap, `SELECT count(*) FROM public."MfaLoginChallenge" WHERE "userId"='${ids.userB}'`), "0");
 
   assert.equal(last(preauth, `SELECT id FROM app_auth.issue_authenticated_session_capability('${primaryId}','${hash("a")}','${capabilities.primary}','PASSWORD',(transaction_timestamp()+interval '1 hour')::timestamp)`), primaryId);
+  const loadedChallenge = JSON.parse(last(app, `BEGIN;
+    SELECT "userId" FROM app_auth.require_authenticated_session('${capabilities.primary}','admin-mfa-login-complete','auth-mfa-load');
+    SELECT app_rls.load_admin_mfa_challenge(ARRAY['${hash("d")}'],ARRAY['${hash("e")}'],transaction_timestamp()::timestamp)::text;
+    ROLLBACK;`));
+  assert.match(loadedChallenge.expiresAt, /(Z|[+-]\d{2}:\d{2})$/);
+  assert(Date.parse(loadedChallenge.expiresAt) > Date.now());
+  const completedChallenge = JSON.parse(last(app, `BEGIN;
+    SELECT "userId" FROM app_auth.require_authenticated_session('${capabilities.primary}','admin-mfa-login-complete','auth-mfa-complete');
+    SELECT app_rls.complete_admin_mfa_challenge('LOGIN','${loadedChallenge.id}','BACKUP_CODE',transaction_timestamp()::timestamp,NULL,NULL)::text;
+    COMMIT;`));
+  assert.equal(completedChallenge.completed, true);
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."MfaLoginChallenge" WHERE "userId"='${ids.userA}' AND "ticketHash"='${hash("d")}' AND "consumedAt" IS NOT NULL`), "1");
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuditLogOutbox" WHERE "requestId"='auth-mfa-complete' AND payload->>'action' IN ('AUTH_MFA_BACKUP_CODE_USED','AUTH_MFA_LOGIN_COMPLETE')`), "2");
   denied(app, "SELECT * FROM app_auth.require_authenticated_session('', 'auth-me', 'missing')");
   denied(app, `SELECT * FROM app_auth.require_authenticated_session('${"Z".repeat(43)}','auth-me','forged')`);
 
@@ -116,7 +129,7 @@ async function main() {
 
   psql(bootstrap, `UPDATE public."Licensee" SET "suspendedAt"=now() WHERE id='${ids.licenseeA}'`);
   assert.equal(last(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','auth-me','stale-licensee'); SELECT count(*) FROM app_rls.revalidate_authenticated_actor('${ids.userA}','${primaryId}','${ids.licenseeA}','${ids.orgA}',transaction_timestamp()::timestamp,'stale-licensee'); ROLLBACK`), "0");
-  psql(bootstrap, `UPDATE public."Licensee" SET "suspendedAt"=NULL WHERE id='${ids.licenseeA}'; UPDATE public."User" SET role='MANUFACTURER' WHERE id='${ids.userA}'; INSERT INTO public."ManufacturerLicenseeLink" ("manufacturerId","licenseeId","isPrimary","updatedAt") VALUES ('${ids.userA}','${ids.licenseeA}',true,now())`);
+  psql(bootstrap, `UPDATE public."Licensee" SET "suspendedAt"=NULL WHERE id='${ids.licenseeA}'; UPDATE public."User" SET role='MANUFACTURER',"orgId"=NULL,"licenseeId"=NULL WHERE id='${ids.userA}'; INSERT INTO public."ManufacturerLicenseeLink" ("manufacturerId","licenseeId","isPrimary","updatedAt") VALUES ('${ids.userA}','${ids.licenseeA}',true,now())`);
   denied(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','manufacturer-bootstrap','manufacturer-legacy'); SELECT app_rls.load_authenticated_manufacturer_scope(NULL,NULL,NULL,'manufacturer-bootstrap',false); ROLLBACK`, /MANUFACTURER_SCOPE_DENIED/);
   psql(bootstrap, `UPDATE public."User" SET role='MANUFACTURER_ADMIN' WHERE id='${ids.userA}'`);
   assert.equal(last(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','auth-me','manufacturer-live'); SELECT count(*) FROM app_rls.revalidate_authenticated_actor('${ids.userA}','${primaryId}','${ids.licenseeA}','${ids.orgA}',transaction_timestamp()::timestamp,'manufacturer-live'); ROLLBACK`), "1");
@@ -129,10 +142,16 @@ async function main() {
   assert.equal(manufacturerScope.selectedLicensee.id, ids.licenseeA);
   assert.deepEqual(manufacturerScope.linkedLicensees.map((item) => item.id), [ids.licenseeA]);
   assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuditLogOutbox" WHERE "requestId"='manufacturer-scope-live' AND payload->>'action'='MANUFACTURER_BOOTSTRAP_READ'`), "1");
+  const manufacturerReplacementId = last(app, `BEGIN;
+    SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','manufacturer-bootstrap','manufacturer-session-create');
+    SELECT id FROM app_rls.create_refresh_token('${ids.userA}','${ids.orgA}','${hash("manufacturer-replacement")}',(transaction_timestamp()+interval '1 day')::timestamp,NULL,'focused-postgres18-manufacturer',transaction_timestamp()::timestamp,transaction_timestamp()::timestamp,transaction_timestamp()::timestamp);
+    COMMIT;`);
+  assert.match(manufacturerReplacementId, /^[0-9a-f-]{36}$/i);
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."RefreshToken" WHERE id='${manufacturerReplacementId}' AND "userId"='${ids.userA}' AND "orgId"='${ids.orgA}'`), "1");
   psql(bootstrap, `DELETE FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.userA}' AND "licenseeId"='${ids.licenseeA}'`);
   assert.equal(last(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','auth-me','manufacturer-stale'); SELECT count(*) FROM app_rls.revalidate_authenticated_actor('${ids.userA}','${primaryId}','${ids.licenseeA}','${ids.orgA}',transaction_timestamp()::timestamp,'manufacturer-stale'); ROLLBACK`), "0");
   denied(app, `BEGIN; SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','manufacturer-bootstrap','manufacturer-scope-stale'); SELECT app_rls.load_authenticated_manufacturer_scope(NULL,NULL,NULL,'manufacturer-bootstrap',false); ROLLBACK`, /MANUFACTURER_MEMBERSHIP_REQUIRED/);
-  psql(bootstrap, `UPDATE public."User" SET role='LICENSEE_ADMIN' WHERE id='${ids.userA}'`);
+  psql(bootstrap, `UPDATE public."User" SET role='LICENSEE_ADMIN',"orgId"='${ids.orgA}',"licenseeId"='${ids.licenseeA}' WHERE id='${ids.userA}'`);
 
   psql(bootstrap, `UPDATE public."User" SET "isActive"=false,status='DISABLED' WHERE id='${ids.userA}'`);
   denied(app, `SELECT * FROM app_auth.require_authenticated_session('${capabilities.primary}','auth-me','inactive')`);

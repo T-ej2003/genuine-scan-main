@@ -190,3 +190,14 @@ policies, 74 column-privilege cells, the RF6 application path, concurrent
 first-scan classification, exact runtime grants, direct-access denial,
 session-bound claims and concerns, atomic delivery evidence, and the exact
 rollback. The run left zero disposable databases and zero disposable roles.
+
+## Phase 1 review recertification
+
+The Phase 1 review package makes customer-session revocation idempotent:
+only the first transition from active to revoked writes logout audit/outbox
+evidence; retries return the existing revoked result without duplicating the
+outbox idempotency key. The regenerated source-contract SHA-256 is
+`b80631f79f4ced5f15c0eab43e8518b8e41b1f672ac5959c887af285eea067cb`.
+PostgreSQL 18.4 clean-room certification passed with 77 FORCE-RLS tables,
+347 policies, 60 column-privilege cells, exact rollback, and zero disposable
+database or role residue.

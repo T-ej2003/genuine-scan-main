@@ -249,17 +249,26 @@ export function useBatchPrintWorkflow({
   };
 
   const applyRegisteredPrintersSnapshot = (
-    printers: RegisteredPrinterRow[],
-    preferredLocalPrinterId?: string | null
+    printers: RegisteredPrinterRow[], preferredLocalPrinterId?: string | null, preferredRegistrationId?: string | null
   ) => {
     setRegisteredPrinters(printers);
     setSelectedPrinterProfileId((previous) => {
-      if (previous && printers.some((row) => row.id === previous && row.isActive)) return previous;
+      const current = printers.find((row) => row.id === previous && row.isActive);
+      if (
+        current &&
+        (current.connectionType !== "LOCAL_AGENT" ||
+          !preferredRegistrationId ||
+          current.printerRegistrationId === preferredRegistrationId)
+      ) return previous;
 
       const trimmedLocalId = String(preferredLocalPrinterId || "").trim();
       if (trimmedLocalId) {
         const matchingLocal = printers.find(
-          (row) => row.connectionType === "LOCAL_AGENT" && row.nativePrinterId === trimmedLocalId && row.isActive
+          (row) =>
+            row.connectionType === "LOCAL_AGENT" &&
+            row.nativePrinterId === trimmedLocalId &&
+            row.isActive &&
+            (!preferredRegistrationId || row.printerRegistrationId === preferredRegistrationId)
         );
         if (matchingLocal) return matchingLocal.id;
       }
@@ -307,7 +316,8 @@ export function useBatchPrintWorkflow({
     }
     applyRegisteredPrintersSnapshot(
       snapshot.registeredPrinters as RegisteredPrinterRow[],
-      nextPreferredPrinterId || snapshot.preferredPrinterId
+      nextPreferredPrinterId || snapshot.preferredPrinterId,
+      snapshot.remoteStatus.registrationId
     );
   };
 
@@ -469,11 +479,15 @@ export function useBatchPrintWorkflow({
       if (current?.connectionType && current.connectionType !== "LOCAL_AGENT") return previous;
 
       const matchingLocal = registeredPrinters.find(
-        (row) => row.connectionType === "LOCAL_AGENT" && row.nativePrinterId === selectedPrinterId && row.isActive
+        (row) =>
+          row.connectionType === "LOCAL_AGENT" &&
+          row.nativePrinterId === selectedPrinterId &&
+          row.isActive &&
+          (!printerStatus.registrationId || row.printerRegistrationId === printerStatus.registrationId)
       );
       return matchingLocal?.id || previous;
     });
-  }, [registeredPrinters, selectedPrinterId]);
+  }, [printerStatus.registrationId, registeredPrinters, selectedPrinterId]);
 
   const openPrintPack = (batch: BatchRow) => {
     setPrintBatch(batch);

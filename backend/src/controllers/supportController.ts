@@ -1,19 +1,18 @@
 import { createHash, randomUUID } from "crypto";
-import { IncidentActorType, SupportTicketStatus } from "@prisma/client";
+import { SupportTicketStatus } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";
 
 import { AuthRequest } from "../middleware/auth";
 import { ticketSlaSnapshot } from "../services/supportWorkflowService";
-import { createAuditLog } from "../services/auditService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
-import { isB02AuthorizationError, withB02AuthenticatedRequest } from "../rls-waves/session-b/b02/authenticatedBoundary";
 import {
-  createSupportTicketMessageRow,
-  listSupportTicketRows,
-  loadSupportTicketRow,
-  updateSupportTicketRow,
-} from "../rls-waves/session-b/b02/authenticatedRepositories";
+  addSupportTicketMessage as addSupportTicketMessageBoundary,
+  getSupportTicket as getSupportTicketBoundary,
+  listSupportTickets as listSupportTicketsBoundary,
+  updateSupportTicket as updateSupportTicketBoundary,
+} from "../rls-waves/session-b/b03/repositoryFunctions";
+import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 import { trackSupportStatus } from "../rls-waves/session-b/b02/publicBoundaryRepository";
 import { getB01PreAuthPrisma } from "../rls-waves/session-b/b01/runtimeClients";
 
@@ -67,33 +66,31 @@ export const listSupportTickets = async (req: AuthRequest, res: Response) => {
     const limit = parsed.data.limit ?? fallbackLimit;
     const offset = parsed.data.offset ?? fallbackOffset;
 
-    const data = await withB02AuthenticatedRequest(
-      req,
-      { purpose: "support-ticket-read", assurance: "mfa-verified" },
-      async (tx, context) => {
-        const licenseeId = context.licenseeId || parsed.data.licenseeId || "";
-        const [tickets, total] = await listSupportTicketRows(tx, {
-          licenseeId,
+    const boundary = b03BoundaryForRequest(req, "support-ticket-read");
+    const data = await boundary.run(async (db) => {
+      const result = await listSupportTicketsBoundary(db, {
+          licenseeId: parsed.data.licenseeId,
           status: parsed.data.status,
           priority: parsed.data.priority,
           search: parsed.data.search,
           limit,
           offset,
+          requestId: boundary.requestId,
         });
-        return {
+      const tickets = result.tickets as Array<Record<string, any>>;
+      return {
         tickets: tickets.map((ticket) => ({
           ...ticket,
           sla: ticketSlaSnapshot(ticket.slaDueAt || ticket.incident?.slaDueAt || null),
         })),
-        total,
+        total: result.total,
         limit,
         offset,
-        };
-      }
-    );
+      };
+    });
     return res.json({ success: true, data });
   } catch (error) {
-    if (isB02AuthorizationError(error)) {
+    if (error instanceof Error && /B03_|RECENT_MFA_DENIED|AUTH_SESSION_CAPABILITY/.test(error.message)) {
       return res.status(403).json({ success: false, error: "Support ticket authorization is stale or insufficient." });
     }
     if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage", "incidenthandoff"])) {
@@ -125,14 +122,11 @@ export const getSupportTicket = async (req: AuthRequest, res: Response) => {
     if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Ticket ID is required" });
     const id = paramsParsed.data.id;
 
-    const ticket = await withB02AuthenticatedRequest(
-      req,
-      { purpose: "support-ticket-read", assurance: "mfa-verified" },
-      (tx, context) => loadSupportTicketRow(tx, {
-        id,
-        licenseeId: context.licenseeId || String(req.query.licenseeId || "").trim(),
-      })
-    );
+    const boundary = b03BoundaryForRequest(req, "support-ticket-read");
+    const ticket = await boundary.run((db) => getSupportTicketBoundary(db, {
+      ticketId: id,
+      requestId: boundary.requestId,
+    })) as Record<string, any> | null;
     if (!ticket) return res.status(404).json({ success: false, error: "Support ticket not found" });
     return res.json({
       success: true,
@@ -142,7 +136,7 @@ export const getSupportTicket = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
-    if (isB02AuthorizationError(error)) {
+    if (error instanceof Error && /B03_|RECENT_MFA_DENIED|AUTH_SESSION_CAPABILITY/.test(error.message)) {
       return res.status(403).json({ success: false, error: "Support ticket authorization is stale or insufficient." });
     }
     if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage", "incidenthandoff"])) {
@@ -170,34 +164,15 @@ export const patchSupportTicket = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
     }
 
-    const updated = await withB02AuthenticatedRequest(
-      req,
-      { purpose: "support-ticket-update", assurance: "mfa-verified" },
-      async (tx, context) => {
-        const licenseeId = context.licenseeId || String(req.query.licenseeId || "").trim();
-        const existing = await loadSupportTicketRow(tx, { id, licenseeId });
-        if (!existing) return null;
-        if (parsed.data.status === undefined && parsed.data.assignedToUserId === undefined) return existing;
-        return updateSupportTicketRow(tx, {
-          id,
-          licenseeId,
-          expectedUpdatedAt: existing.updatedAt,
+    const boundary = b03BoundaryForRequest(req, "support-ticket-update");
+    const updated = await boundary.run((db) => updateSupportTicketBoundary(db, {
+          ticketId: id,
           status: parsed.data.status,
           assignedToUserId: parsed.data.assignedToUserId,
           changedAt: new Date(),
-        });
-      }
-    );
+          requestId: boundary.requestId,
+    })) as Record<string, any> | null;
     if (!updated) return res.status(409).json({ success: false, error: "Support ticket changed; reload and retry" });
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: updated.licenseeId || undefined,
-      action: "SUPPORT_TICKET_UPDATED",
-      entityType: "SupportTicket",
-      entityId: updated.id,
-      ipAddress: req.ip,
-      details: { status: updated.status, assignedToUserId: updated.assignedToUserId },
-    });
 
     return res.json({
       success: true,
@@ -207,7 +182,7 @@ export const patchSupportTicket = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
-    if (isB02AuthorizationError(error)) {
+    if (error instanceof Error && /B03_|RECENT_MFA_DENIED|AUTH_SESSION_CAPABILITY/.test(error.message)) {
       return res.status(403).json({ success: false, error: "Support ticket authorization is stale or insufficient." });
     }
     if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage", "incidenthandoff"])) {
@@ -235,37 +210,18 @@ export const addSupportMessage = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid message" });
     }
 
-    const result = await withB02AuthenticatedRequest(
-      req,
-      { purpose: "support-ticket-message", assurance: "mfa-verified" },
-      async (tx, context) => {
-        const licenseeId = context.licenseeId || String(req.query.licenseeId || "").trim();
-        const ticket = await loadSupportTicketRow(tx, { id, licenseeId });
-        if (!ticket) return null;
-        const message = await createSupportTicketMessageRow(tx, {
+    const boundary = b03BoundaryForRequest(req, "support-ticket-message");
+    const message = await boundary.run((db) => addSupportTicketMessageBoundary(db, {
           ticketId: id,
-          licenseeId,
-          actorType: IncidentActorType.ADMIN,
-          actorUserId: context.userId,
           message: parsed.data.message,
           isInternal: parsed.data.isInternal,
-        });
-        return message ? { ticket, message } : null;
-      }
-    );
-    if (!result) return res.status(404).json({ success: false, error: "Support ticket not found" });
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: result.ticket.licenseeId || undefined,
-      action: "SUPPORT_TICKET_MESSAGE_ADDED",
-      entityType: "SupportTicket",
-      entityId: result.ticket.id,
-      ipAddress: req.ip,
-      details: { isInternal: parsed.data.isInternal, messageLength: parsed.data.message.length },
-    });
-    return res.status(201).json({ success: true, data: result.message });
+          createdAt: new Date(),
+          requestId: boundary.requestId,
+    }));
+    if (!message) return res.status(404).json({ success: false, error: "Support ticket not found" });
+    return res.status(201).json({ success: true, data: message });
   } catch (error) {
-    if (isB02AuthorizationError(error)) {
+    if (error instanceof Error && /B03_|RECENT_MFA_DENIED|AUTH_SESSION_CAPABILITY/.test(error.message)) {
       return res.status(403).json({ success: false, error: "Support ticket authorization is stale or insufficient." });
     }
     if (isPrismaMissingTableError(error, ["supportticket", "supportticketmessage"])) {

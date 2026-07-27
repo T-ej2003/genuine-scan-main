@@ -13,6 +13,11 @@ assert.doesNotMatch(service, /prisma\.(?:customerVerificationSession|customerTru
 assert.match(service, /hashToken\(raw\)/);
 assert.match(service, /hashToken\(proofToken\)/);
 assert.match(repository, /app_public\.start_verification_session/);
+assert.match(repository, /\$\{checkedAt\}::timestamp without time zone/);
+assert.match(repository, /hash:\s*hashToken\(raw\)/);
+assert.match(repository, /\["sessionProofToken",\s*"string",\s*true\]/);
+assert.doesNotMatch(repository, /\$\{date\([^}]+\)\}(?!::timestamp without time zone)/);
+assert.doesNotMatch(repository, /\$\{(?:checkedAt|submittedAt|scannedAt)\}(?!::timestamp without time zone)/);
 assert.match(repository, /app_public\.read_verification_session/);
 assert.match(repository, /app_public\.write_verification_session/);
 assert.match(sql, /"proofBindingTokenHash" IS DISTINCT FROM p_session_proof_hash/);
@@ -20,6 +25,9 @@ assert.match(sql, /"proofBindingExpiresAt"<=p_checked_at/);
 assert.match(sql, /require_customer_auth_session\([\s\S]*customer-verification-session/);
 assert.match(sql, /"customerUserId" IS DISTINCT FROM customer\."customerUserId"/);
 assert.match(sql, /PUBLIC_VERIFICATION_INTAKE_REQUIRED/);
+assert.match(sql, /VERIFY_SESSION_STARTED[\s\S]*CustomerVerificationSession/);
+assert.match(sql, /VERIFY_CUSTOMER_OTP_VERIFIED[\s\S]*CustomerAuthSession/);
+assert.match(sql, /VERIFY_CUSTOMER_LOGOUT[\s\S]*CustomerAuthSession/);
 assert.doesNotMatch(sql, /p_customer_user_id\s*=\s*metadata|app\.user_id/);
 
 console.log("customer verification session capability contract passed");

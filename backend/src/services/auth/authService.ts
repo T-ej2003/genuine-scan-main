@@ -403,6 +403,7 @@ type BootstrapSessionResult = {
   accessToken: string;
   refreshToken: null;
   refreshTokenExpiresAt: null;
+  databaseSessionCapability: string;
   user: SessionIssueResult["user"];
   auth: {
     sessionStage: "MFA_BOOTSTRAP";
@@ -448,6 +449,8 @@ const buildBootstrapSessionForUser = async (input: {
   requestId?: string | null;
   requestedLicenseeId?: string | null;
   requestedScopeVersion?: string | null;
+  sessionId: string;
+  databaseSessionCapability: string;
   preparedState: ActiveSessionState;
   challengeIssuer?: (params: Parameters<typeof createAdminMfaChallenge>[0]) => Promise<{
     ticket: string;
@@ -463,7 +466,6 @@ const buildBootstrapSessionForUser = async (input: {
     ? linkedScope.selectedLicensee?.scopeVersion ?? null
     : null;
 
-  const bootstrapSessionId = randomOpaqueToken(24);
   const accessToken = signMfaBootstrapToken({
     userId: input.user.id,
     email: input.user.email,
@@ -472,12 +474,12 @@ const buildBootstrapSessionForUser = async (input: {
     orgId: sessionOrgId,
     scopeVersion,
     linkedLicenseeIds: linkedScope.linkedLicenseeIds,
-    sessionId: bootstrapSessionId,
+    sessionId: input.sessionId,
   });
   const mfaChallenge = input.mfaEnrolled
     ? await (input.challengeIssuer || ((params) => createAdminMfaChallenge(params, db)))({
         userId: input.user.id,
-        sessionId: bootstrapSessionId,
+        sessionId: input.sessionId,
         purpose: "admin_login",
         riskScore: input.riskScore || 0,
         riskLevel: input.riskLevel || "LOW",
@@ -493,6 +495,7 @@ const buildBootstrapSessionForUser = async (input: {
     accessToken,
     refreshToken: null,
     refreshTokenExpiresAt: null,
+    databaseSessionCapability: input.databaseSessionCapability,
     user: {
       id: input.user.id,
       email: input.user.email,
@@ -525,7 +528,7 @@ const buildBootstrapSessionForUser = async (input: {
       stepUpRequired: true,
       scopeSelectionRequired: isManufacturerRole(input.user.role) && !primaryLicensee,
       stepUpMethod: "ADMIN_MFA" as const,
-      sessionId: bootstrapSessionId,
+      sessionId: input.sessionId,
       sessionExpiresAt: new Date(input.now.getTime() + getMfaBootstrapTtlMinutes() * 60 * 1000).toISOString(),
       mfaChallenge: mfaChallenge
         ? {
@@ -535,6 +538,34 @@ const buildBootstrapSessionForUser = async (input: {
         : null,
     },
   };
+};
+
+const createBootstrapSessionBacking = async (
+  state: ActiveSessionState,
+  input: { ipHash: string | null; userAgent: string | null; now: Date },
+  db: AuthDbClient
+) => {
+  const rawToken = newRefreshToken();
+  const expiresAt = new Date(input.now.getTime() + getMfaBootstrapTtlMinutes() * 60 * 1000);
+  const created = await createRefreshToken({
+    userId: state.user.id,
+    orgId: state.sessionOrgId,
+    rawToken,
+    ipHash: input.ipHash,
+    userAgent: input.userAgent,
+    authenticatedAt: input.now,
+    mfaVerifiedAt: null,
+    now: input.now,
+    expiresAt,
+  }, db);
+  const capability = await createAuthenticatedSessionCapability(db, {
+    refreshTokenId: created.row.id,
+    refreshTokenHash: created.tokenHash,
+    assurance: "PASSWORD",
+    expiresAt,
+    now: input.now,
+  });
+  return { sessionId: created.row.id, databaseSessionCapability: capability.rawCapability };
 };
 
 export const loginWithPassword = async (input: {
@@ -678,6 +709,11 @@ export const loginWithPassword = async (input: {
       if (!mfaStatus.enabled) {
         await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId, passwordHash: upgradedPasswordHash }, risk, tx);
       }
+      const backing = await createBootstrapSessionBacking(preparedState, {
+        ipHash: input.ipHash,
+        userAgent: input.userAgent,
+        now,
+      }, tx);
       const bootstrapSession = await buildBootstrapSessionForUser({
         user,
         ipHash: input.ipHash,
@@ -688,6 +724,7 @@ export const loginWithPassword = async (input: {
         riskLevel: risk.riskLevel,
         reasons: risk.reasons,
         requestId: input.requestId,
+        ...backing,
         preparedState,
         challengeIssuer: async (params) => {
           const ticket = randomOpaqueToken(36);
@@ -742,9 +779,18 @@ export const refreshSession = async (input: {
     authenticatedAt: Date;
     mfaVerifiedAt: Date | null;
   };
-  type BootstrapRefreshPreparation = { kind: "bootstrap"; session: BootstrapSessionResult };
+  type BootstrapRefreshPreparation = {
+    kind: "bootstrap";
+    state: ActiveSessionState;
+    mfaEnrolled: boolean;
+    reasons: string[];
+  };
 
-  const rotated = await rotateRefreshToken<ActiveRefreshPreparation, BootstrapRefreshPreparation, string>({
+  const rotated = await rotateRefreshToken<
+    ActiveRefreshPreparation | BootstrapRefreshPreparation,
+    never,
+    string | BootstrapSessionResult
+  >({
     rawToken: input.rawRefreshToken,
     ipHash: input.ipHash,
     userAgent: input.userAgent,
@@ -772,28 +818,18 @@ export const refreshSession = async (input: {
       }
 
       if (!token.mfaVerifiedAt && boundaryState.mfaRequired) {
-        const bootstrapSession = await buildBootstrapSessionForUser({
-          user,
-          ipHash: input.ipHash,
-          userAgent: input.userAgent,
-          now,
-          mfaEnrolled: Boolean(mfaStatus?.enabled),
-          reasons: ["MFA verification is required before refreshing this session."],
-          requestId: input.requestId,
-          requestedLicenseeId: input.requestedLicenseeId,
-          requestedScopeVersion: input.requestedScopeVersion,
-          preparedState: state,
-          challengeIssuer: refreshMfaChallengeIssuer(tx, {
-            tokenId: token.id,
-            tokenHashCandidates,
-            requestId: input.requestId,
-          }),
-        }, tx);
         return {
-          action: "consume",
-          value: { kind: "bootstrap", session: bootstrapSession },
-          revokeScope: "password-only",
-          revokeReason: "MFA_REQUIRED_AFTER_POLICY_CHANGE",
+          action: "rotate",
+          value: {
+            kind: "bootstrap",
+            state,
+            mfaEnrolled: Boolean(mfaStatus?.enabled),
+            reasons: ["MFA verification is required before refreshing this session."],
+          },
+          orgId: state.sessionOrgId,
+          authenticatedAt: token.authenticatedAt || now,
+          mfaVerifiedAt: null,
+          expiresAt: new Date(now.getTime() + getMfaBootstrapTtlMinutes() * 60 * 1000),
         };
       }
 
@@ -808,7 +844,7 @@ export const refreshSession = async (input: {
         mfaVerifiedAt: token.mfaVerifiedAt,
       };
     },
-    afterRotate: async ({ tx, predecessor, successor, now }) => {
+    afterRotate: async ({ tx, predecessor, successor, now, value }) => {
       const capability = await createAuthenticatedSessionCapability(tx, {
         refreshTokenId: successor.id,
         refreshTokenHash: successor.tokenHash,
@@ -816,6 +852,27 @@ export const refreshSession = async (input: {
         expiresAt: successor.expiresAt,
         now,
       });
+      if (value.kind === "bootstrap") {
+        return buildBootstrapSessionForUser({
+          user: value.state.user,
+          ipHash: input.ipHash,
+          userAgent: input.userAgent,
+          now,
+          mfaEnrolled: value.mfaEnrolled,
+          reasons: value.reasons,
+          requestId: input.requestId,
+          requestedLicenseeId: input.requestedLicenseeId,
+          requestedScopeVersion: input.requestedScopeVersion,
+          sessionId: successor.id,
+          databaseSessionCapability: capability.rawCapability,
+          preparedState: value.state,
+          challengeIssuer: refreshMfaChallengeIssuer(tx, {
+            tokenId: successor.id,
+            tokenHashCandidates: [successor.tokenHash],
+            requestId: input.requestId,
+          }),
+        }, tx);
+      }
       return capability.rawCapability;
     },
   });
@@ -823,13 +880,12 @@ export const refreshSession = async (input: {
   if (!rotated.ok) {
     return { ok: false as const, reason: rotated.reason };
   }
-
-  if (!rotated.rotated) {
-    const bootstrapSession = rotated.value.session;
-    return { ok: true as const, ...bootstrapSession };
-  }
+  if (!rotated.rotated) throw new Error("Refresh rotation returned an unexpected consume decision");
 
   const prepared = rotated.value;
+  if (prepared.kind === "bootstrap") {
+    return { ok: true as const, ...(rotated.rotation as BootstrapSessionResult) };
+  }
   const session = buildActiveSessionResponse(prepared.state, {
     authAssurance: prepared.authAssurance,
     authenticatedAt: prepared.authenticatedAt,
@@ -838,7 +894,7 @@ export const refreshSession = async (input: {
     rawToken: rotated.newRawToken,
     id: rotated.newTokenId,
     expiresAt: rotated.newExpiresAt,
-  }, rotated.rotation);
+  }, rotated.rotation as string);
   return { ok: true as const, ...session };
 };
 

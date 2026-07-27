@@ -1,6 +1,13 @@
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import printerAgentSigningService from "../backend/dist/services/printerAgentSigningService.js";
+
+const {
+  buildPrinterAgentHeartbeatPayload,
+  signPrinterAgentPayload,
+} = printerAgentSigningService;
 
 const env = {
   superAdminEmail: String(process.env.E2E_SUPERADMIN_EMAIL || "").trim(),
@@ -153,14 +160,17 @@ const closeAutoDetectedIssue = async (page: Page) => {
 
 const clickWithAutoDetectedIssueRetry = async (page: Page, target: Locator) => {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     await closeAutoDetectedIssue(page);
     try {
       await target.click({ timeout: 5_000 });
       return;
     } catch (error) {
       lastError = error;
-      if (!(await closeAutoDetectedIssue(page))) throw error;
+      if (await closeAutoDetectedIssue(page)) continue;
+      const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
+      if (!(await stepUpDialog.isVisible())) throw error;
+      await stepUpDialog.getByRole("button", { name: /^cancel$/i }).click();
     }
   }
   throw lastError;
@@ -168,7 +178,7 @@ const clickWithAutoDetectedIssueRetry = async (page: Page, target: Locator) => {
 
 const selectRadixOption = async (page: Page, triggerTestId: string, optionLabel: string) => {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     await closeAutoDetectedIssue(page);
     try {
       await page.getByTestId(triggerTestId).click({ timeout: 5_000 });
@@ -181,7 +191,10 @@ const selectRadixOption = async (page: Page, triggerTestId: string, optionLabel:
       return;
     } catch (error) {
       lastError = error;
-      if (!(await closeAutoDetectedIssue(page))) throw error;
+      if (await closeAutoDetectedIssue(page)) continue;
+      const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
+      if (!(await stepUpDialog.isVisible())) throw error;
+      await stepUpDialog.getByRole("button", { name: /^cancel$/i }).click();
     }
   }
   throw lastError;
@@ -192,45 +205,73 @@ const closeTransientDialogs = async (page: Page) => {
   await expect(page.locator('[role="dialog"]')).toHaveCount(0, { timeout: 5_000 }).catch(() => undefined);
 };
 
-const buildE2EPrinterPayload = () => ({
-  connected: true,
-  printerName: env.printerProfileName || "E2E Local Agent Printer",
-  printerId: "e2e-local-printer",
-  selectedPrinterId: "e2e-local-printer",
-  selectedPrinterName: env.printerProfileName || "E2E Local Agent Printer",
-  deviceName: "E2E Print Workstation",
-  agentVersion: "e2e-ci",
-  protocolVersion: E2E_LOCAL_AGENT_PROTOCOL_VERSION,
-  buildVersion: E2E_LOCAL_AGENT_BUILD_VERSION,
-  transportDiagnosticsVersion: E2E_TRANSPORT_DIAGNOSTICS_VERSION,
-  capabilities: E2E_LOCAL_AGENT_CAPABILITIES,
-  agentId: "e2e-agent",
-  deviceFingerprint: "e2e-device-fingerprint",
-  printers: [
-    {
+const e2ePrinterKeys = generateKeyPairSync("ed25519");
+const e2ePrinterIdentity = {
+  agentId: `e2e-agent-${randomUUID()}`,
+  deviceFingerprint: `e2e-device-${randomUUID()}`,
+  publicKeyPem: e2ePrinterKeys.publicKey.export({ type: "spki", format: "pem" }).toString(),
+  privateKeyPem: e2ePrinterKeys.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+};
+
+const buildE2EPrinterPayload = () => {
+  const heartbeatNonce = `e2e-heartbeat-${randomUUID()}`;
+  const heartbeatIssuedAt = new Date().toISOString();
+  const heartbeatSignature = signPrinterAgentPayload(
+    e2ePrinterIdentity.privateKeyPem,
+    buildPrinterAgentHeartbeatPayload({
+      userId: "manufacturer-browser-heartbeat",
+      agentId: e2ePrinterIdentity.agentId,
+      deviceFingerprint: e2ePrinterIdentity.deviceFingerprint,
       printerId: "e2e-local-printer",
-      printerName: env.printerProfileName || "E2E Local Agent Printer",
-      model: "E2E Driver Queue",
-      connection: "LOCAL_AGENT",
-      online: true,
-      isDefault: true,
-      commandLanguage: "PDF",
+      connected: true,
+      heartbeatNonce,
+      heartbeatIssuedAt,
+    })
+  );
+  return {
+    connected: true,
+    printerName: env.printerProfileName || "E2E Local Agent Printer",
+    printerId: "e2e-local-printer",
+    selectedPrinterId: "e2e-local-printer",
+    selectedPrinterName: env.printerProfileName || "E2E Local Agent Printer",
+    deviceName: "E2E Print Workstation",
+    agentVersion: "e2e-ci",
+    protocolVersion: E2E_LOCAL_AGENT_PROTOCOL_VERSION,
+    buildVersion: E2E_LOCAL_AGENT_BUILD_VERSION,
+    transportDiagnosticsVersion: E2E_TRANSPORT_DIAGNOSTICS_VERSION,
+    capabilities: E2E_LOCAL_AGENT_CAPABILITIES,
+    agentId: e2ePrinterIdentity.agentId,
+    deviceFingerprint: e2ePrinterIdentity.deviceFingerprint,
+    publicKeyPem: e2ePrinterIdentity.publicKeyPem,
+    heartbeatNonce,
+    heartbeatIssuedAt,
+    heartbeatSignature,
+    printers: [
+      {
+        printerId: "e2e-local-printer",
+        printerName: env.printerProfileName || "E2E Local Agent Printer",
+        model: "E2E Driver Queue",
+        connection: "LOCAL_AGENT",
+        online: true,
+        isDefault: true,
+        commandLanguage: "ZPL",
+        protocols: ["DRIVER_QUEUE"],
+        languages: ["ZPL"],
+        mediaSizes: ["50x30mm"],
+        dpi: 203,
+      },
+    ],
+    capabilitySummary: {
+      transports: ["LOCAL_AGENT"],
       protocols: ["DRIVER_QUEUE"],
-      languages: ["PDF"],
+      languages: ["ZPL"],
+      supportsRaster: true,
+      supportsPdf: true,
+      dpiOptions: [203],
       mediaSizes: ["50x30mm"],
-      dpi: 203,
     },
-  ],
-  capabilitySummary: {
-    transports: ["LOCAL_AGENT"],
-    protocols: ["DRIVER_QUEUE"],
-    languages: ["PDF"],
-    supportsRaster: true,
-    supportsPdf: true,
-    dpiOptions: [203],
-    mediaSizes: ["50x30mm"],
-  },
-});
+  };
+};
 
 const installLocalPrintAgentMock = async (page: Page) => {
   const printerPayload = buildE2EPrinterPayload();
@@ -360,6 +401,7 @@ test.describe.serial("Enterprise smoke flows", () => {
       ["E2E_ASSIGN_MANUFACTURER_NAME", env.assignManufacturerName],
       ["E2E_ASSIGN_QUANTITY", env.assignQuantity]
     );
+    requireEnterpriseCondition(env.licenseeMfaBackupCodes.length >= 2, "Licensee assignment requires two backup codes.");
 
     await login(page, env.licenseeAdminEmail, env.licenseeAdminPassword, {
       mfaBackupCode: backupCodeForRetry(env.licenseeMfaBackupCodes, testInfo),
@@ -373,9 +415,16 @@ test.describe.serial("Enterprise smoke flows", () => {
     await openButtons.first().click();
 
     await expect(page.getByTestId("batch-workspace-dialog")).toBeVisible();
-    await page.getByTestId("batch-workspace-tab-operations").click();
+    await clickWithAutoDetectedIssueRetry(page, page.getByTestId("batch-workspace-tab-operations"));
     await selectRadixOption(page, "batch-workspace-manufacturer-select", env.assignManufacturerName);
     await page.getByTestId("batch-workspace-assign-quantity").fill(env.assignQuantity);
+    await clickWithAutoDetectedIssueRetry(page, page.getByTestId("batch-workspace-assign-submit"));
+    const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
+    await expect(stepUpDialog).toBeVisible();
+    await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
+    await page.locator("#step-up-mfa-backup-code").fill(env.licenseeMfaBackupCodes[1]);
+    await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
+    await expect(stepUpDialog).toBeHidden();
     await clickWithAutoDetectedIssueRetry(page, page.getByTestId("batch-workspace-assign-submit"));
     await expect(page.getByTestId("batch-workspace-assign-quantity")).toHaveValue("");
   });
@@ -408,19 +457,31 @@ test.describe.serial("Enterprise smoke flows", () => {
 
     await expect(page.getByTestId("create-print-job-dialog")).toBeVisible();
     await page.getByTestId("print-job-quantity-input").fill(env.printQuantity);
-    await expect(page.getByTestId("print-job-printer-profile")).toBeVisible({ timeout: 30_000 });
+    const printerProfile = page.getByTestId("print-job-printer-profile");
+    if (!(await printerProfile.isVisible().catch(() => false))) {
+      await page.getByRole("button", { name: /refresh printers/i }).click();
+    }
+    await expect(printerProfile).toBeVisible({ timeout: 30_000 });
     await selectRadixOption(page, "print-job-printer-profile", env.printerProfileName);
     const readiness = await refreshE2EPrinterHeartbeat(page);
     const printDialog = page.getByTestId("create-print-job-dialog");
     const startButton = page.getByTestId("print-job-start-button");
     if (readiness.productionReady) {
       await expect(printDialog).toContainText(/Printer ready/, { timeout: 30_000 });
+      const relinkButton = page.getByRole("button", { name: /relink saved printer/i });
+      if (await relinkButton.isVisible().catch(() => false)) {
+        await relinkButton.click();
+        await expect(relinkButton).toBeHidden({ timeout: 30_000 });
+      }
       await expect(startButton).toBeEnabled({ timeout: 30_000 });
       await startButton.click();
 
-      await expect(printDialog).toContainText(
-        /Current print job|Preparing secure payload|Printed confirmation pending|Print did not start|Recent print jobs/
-      );
+      await expect(printDialog).toBeHidden({ timeout: 30_000 });
+      await expect(
+        page.getByRole("heading", {
+          name: /Printing in progress|Print did not start|Print needs attention|Print completed/,
+        })
+      ).toBeVisible({ timeout: 30_000 });
       return;
     }
 
@@ -476,6 +537,7 @@ test.describe.serial("Enterprise smoke flows", () => {
       Boolean(capturedSupportTicketReference),
       "Public verify flow did not capture a support reference."
     );
+    requireEnterpriseCondition(env.superAdminMfaBackupCodes.length >= 2, "Support updates require two backup codes.");
 
     await login(page, env.superAdminEmail, env.superAdminPassword, {
       mfaBackupCode: backupCodeForRetry(env.superAdminMfaBackupCodes, testInfo),
@@ -491,10 +553,18 @@ test.describe.serial("Enterprise smoke flows", () => {
 
     await selectRadixOption(page, "support-ticket-status", "In Progress");
     await page.getByTestId("support-ticket-save").click();
+    const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
+    await expect(stepUpDialog).toBeVisible();
+    await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
+    await page.locator("#step-up-mfa-backup-code").fill(env.superAdminMfaBackupCodes[1]);
+    await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
+    await expect(stepUpDialog).toBeHidden();
+    await page.getByTestId("support-ticket-save").click();
 
     const note = `Playwright smoke follow-up ${new Date().toISOString()}`;
     await page.getByTestId("support-ticket-message-input").fill(note);
     await page.getByTestId("support-ticket-message-submit").click();
-    await expect(page.locator("main")).toContainText(note);
+    await expect(page.getByTestId("support-ticket-message-input")).toHaveValue("");
+    await expect(page.getByText(note, { exact: true })).toBeVisible();
   });
 });

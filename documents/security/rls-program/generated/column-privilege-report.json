@@ -8605,6 +8605,7 @@
       "columns": [
         "id",
         "printerRegistrationId",
+        "heartbeatNonce",
         "attestedAt",
         "expiresAt",
         "signatureValid",
@@ -11849,19 +11850,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -11883,19 +11888,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -11910,19 +11919,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -11935,19 +11948,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -11960,19 +11977,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -11998,19 +12019,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12033,19 +12058,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12059,19 +12088,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12085,24 +12118,29 @@
         "licenseeId",
         "severity",
         "status",
+        "slaDueAt",
         "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12115,19 +12153,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12141,19 +12183,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12167,19 +12213,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12198,19 +12248,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12218,28 +12272,170 @@
       "command": "SELECT",
       "columns": [
         "id",
-        "licenseeId",
+        "incidentId",
         "referenceCode",
+        "licenseeId",
+        "customerEmail",
+        "subject",
         "status",
         "priority",
+        "assignedToUserId",
+        "slaDueAt",
+        "firstResponseAt",
+        "resolvedAt",
+        "createdAt",
         "updatedAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
+      ]
+    },
+    {
+      "table": "SupportTicket",
+      "command": "UPDATE",
+      "columns": [
+        "status",
+        "assignedToUserId",
+        "resolvedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-add-support-ticket-message",
+        "b03-attention-queue",
+        "b03-claim-incident-email",
+        "b03-complete-incident-email",
+        "b03-create-role-notifications",
+        "b03-create-user-notification",
+        "b03-get-support-ticket",
+        "b03-list-notifications",
+        "b03-list-support-tickets",
+        "b03-mark-all-notifications-read",
+        "b03-mark-notification-emailed",
+        "b03-mark-notification-read",
+        "b03-primary-superadmin-email",
+        "b03-resolve-incident-email-actor",
+        "b03-resolve-incident-notification-scope",
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
+      ]
+    },
+    {
+      "table": "SupportTicketMessage",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "ticketId",
+        "actorType",
+        "actorUserId",
+        "message",
+        "isInternal",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-add-support-ticket-message",
+        "b03-attention-queue",
+        "b03-claim-incident-email",
+        "b03-complete-incident-email",
+        "b03-create-role-notifications",
+        "b03-create-user-notification",
+        "b03-get-support-ticket",
+        "b03-list-notifications",
+        "b03-list-support-tickets",
+        "b03-mark-all-notifications-read",
+        "b03-mark-notification-emailed",
+        "b03-mark-notification-read",
+        "b03-primary-superadmin-email",
+        "b03-resolve-incident-email-actor",
+        "b03-resolve-incident-notification-scope",
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
+      ]
+    },
+    {
+      "table": "SupportTicketMessage",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "ticketId",
+        "actorType",
+        "actorUserId",
+        "message",
+        "isInternal",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-add-support-ticket-message",
+        "b03-attention-queue",
+        "b03-claim-incident-email",
+        "b03-complete-incident-email",
+        "b03-create-role-notifications",
+        "b03-create-user-notification",
+        "b03-get-support-ticket",
+        "b03-list-notifications",
+        "b03-list-support-tickets",
+        "b03-mark-all-notifications-read",
+        "b03-mark-notification-emailed",
+        "b03-mark-notification-read",
+        "b03-primary-superadmin-email",
+        "b03-resolve-incident-email-actor",
+        "b03-resolve-incident-notification-scope",
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
+      ]
+    },
+    {
+      "table": "IncidentHandoff",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "incidentId",
+        "currentStage",
+        "slaDueAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-add-support-ticket-message",
+        "b03-attention-queue",
+        "b03-claim-incident-email",
+        "b03-complete-incident-email",
+        "b03-create-role-notifications",
+        "b03-create-user-notification",
+        "b03-get-support-ticket",
+        "b03-list-notifications",
+        "b03-list-support-tickets",
+        "b03-mark-all-notifications-read",
+        "b03-mark-notification-emailed",
+        "b03-mark-notification-read",
+        "b03-primary-superadmin-email",
+        "b03-resolve-incident-email-actor",
+        "b03-resolve-incident-notification-scope",
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12257,19 +12453,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12291,19 +12491,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12325,19 +12529,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12352,19 +12560,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12381,19 +12593,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12407,24 +12623,29 @@
         "action",
         "entityType",
         "entityId",
-        "details"
+        "details",
+        "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12444,19 +12665,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12474,19 +12699,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {
@@ -12500,19 +12729,23 @@
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
       "contracts": [
+        "b03-add-support-ticket-message",
         "b03-attention-queue",
         "b03-claim-incident-email",
         "b03-complete-incident-email",
         "b03-create-role-notifications",
         "b03-create-user-notification",
+        "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
         "b03-mark-notification-read",
         "b03-primary-superadmin-email",
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
-        "b03-superadmin-alert-emails"
+        "b03-superadmin-alert-emails",
+        "b03-update-support-ticket"
       ]
     },
     {

@@ -114,10 +114,10 @@ export const describePrintDispatchMode = (mode: PrintDispatchMode) => {
   return "Local-agent";
 };
 
-export const getLockExpiresAt = (createdAt: Date) =>
-  new Date(createdAt.getTime() + DIRECT_PRINT_LOCK_TTL_MINUTES * 60 * 1000);
+export const getLockExpiresAt = (createdAt: Date | string) =>
+  new Date(new Date(createdAt).getTime() + DIRECT_PRINT_LOCK_TTL_MINUTES * 60 * 1000);
 
-export const isLockExpired = (createdAt: Date, now: Date = new Date()) =>
+export const isLockExpired = (createdAt: Date | string, now: Date = new Date()) =>
   getLockExpiresAt(createdAt).getTime() <= now.getTime();
 
 export const ensureManufacturerUser = (req: AuthRequest, res: Response) => {

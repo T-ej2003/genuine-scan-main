@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 343,
+  "count": 347,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -766,10 +766,12 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='incident-email-complete' AND \"userId\"=current_setting('app.b03_actor_id',true) AND \"licenseeId\"=current_setting('app.b03_licensee_id',true)",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND ((current_setting('app.b03_operation',true)='incident-email-complete' AND \"userId\"=current_setting('app.b03_actor_id',true) AND \"licenseeId\"=current_setting('app.b03_licensee_id',true)) OR (current_setting('app.b03_operation',true) IN ('support-ticket-update','support-ticket-message') AND \"userId\"=current_setting('app.b03_actor_id',true) AND \"entityType\"='SupportTicket' AND \"entityId\"=current_setting('app.b03_support_ticket_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
-        "contract:b03-complete-incident-email:AuditLog:INSERT"
+        "contract:b03-add-support-ticket-message:AuditLog:INSERT",
+        "contract:b03-complete-incident-email:AuditLog:INSERT",
+        "contract:b03-update-support-ticket:AuditLog:INSERT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -1247,11 +1249,14 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_audit_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:release-fix-6-customer-session-issue:AuditLog:INSERT",
+        "contract:release-fix-6-customer-session-revoke:AuditLog:INSERT",
         "contract:release-fix-6-feedback:AuditLog:INSERT",
         "contract:release-fix-6-ownership-claim:AuditLog:INSERT",
         "contract:release-fix-6-ownership-transfer-accept:AuditLog:INSERT",
         "contract:release-fix-6-ownership-transfer-cancel:AuditLog:INSERT",
         "contract:release-fix-6-ownership-transfer-create:AuditLog:INSERT",
+        "contract:release-fix-6-session-start:AuditLog:INSERT",
         "contract:release-fix-6-verify-raw:AuditLog:INSERT",
         "contract:release-fix-6-verify-signed:AuditLog:INSERT"
       ],
@@ -1368,7 +1373,7 @@
         "authentication-release-boundary"
       ],
       "scopeType": "security-definer-owner-and-capability-or-live-login-subject",
-      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_closure_user_id',true)<>'' AND current_setting('app.auth_closure_user_id',true)=current_setting('app.b01_preauth_user_id',true)) AND current_setting('app.auth_closure_operation',true) IN ('login-mfa-challenge','login-session-create') AND payload->>'userId'=current_setting('app.auth_closure_user_id',true) AND payload->>'action' IN ('AUTH_MFA_CHALLENGE_ISSUED','AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA')) OR ((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session.\"userId\"=current_setting('app.auth_closure_user_id',true) AND auth_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND auth_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND auth_session.\"sessionCapabilityRevokedAt\" IS NULL AND auth_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND auth_session.\"revokedAt\" IS NULL AND auth_session.\"expiresAt\">clock_timestamp())) AND (((current_setting('app.auth_closure_operation',true) IN ('profile-update','password-change','mfa-enrollment-complete','mfa-disable','mfa-challenge-create','mfa-challenge-fail','mfa-challenge-complete','mfa-webauthn-registration-complete','mfa-webauthn-delete') AND payload->>'action' IN ('AUTH_PROFILE_UPDATED','AUTH_PASSWORD_CHANGED','AUTH_MFA_ENROLLED','AUTH_MFA_REPLACED','AUTH_MFA_DISABLED','AUTH_MFA_CHALLENGE_ISSUED','AUTH_MFA_CHALLENGE_EXPIRED','AUTH_MFA_FAILURE','AUTH_MFA_TOO_MANY_ATTEMPTS','AUTH_MFA_BACKUP_CODE_USED','AUTH_MFA_SUCCESS','AUTH_WEBAUTHN_ENROLLED','AUTH_WEBAUTHN_CREDENTIAL_REMOVED')) OR (current_setting('app.auth_closure_operation',true)='authenticated-session-create' AND payload->>'action' IN ('AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA'))) OR (current_setting('app.auth_closure_operation',true)='manufacturer-scope-read' AND payload->>'action' IN ('MANUFACTURER_BOOTSTRAP_READ','MANUFACTURER_SCOPE_SWITCH'))) AND payload->>'userId'=current_setting('app.auth_closure_user_id',true))",
+      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_closure_user_id',true)<>'' AND current_setting('app.auth_closure_user_id',true)=current_setting('app.b01_preauth_user_id',true)) AND current_setting('app.auth_closure_operation',true) IN ('login-mfa-challenge','login-session-create') AND payload->>'userId'=current_setting('app.auth_closure_user_id',true) AND payload->>'action' IN ('AUTH_MFA_CHALLENGE_ISSUED','AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA')) OR ((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session.\"userId\"=current_setting('app.auth_closure_user_id',true) AND auth_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND auth_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND auth_session.\"sessionCapabilityRevokedAt\" IS NULL AND auth_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND auth_session.\"revokedAt\" IS NULL AND auth_session.\"expiresAt\">clock_timestamp())) AND (((current_setting('app.auth_closure_operation',true) IN ('profile-update','password-change','mfa-enrollment-complete','mfa-disable','mfa-challenge-create','mfa-challenge-fail','mfa-challenge-complete','mfa-webauthn-registration-complete','mfa-webauthn-delete') AND payload->>'action' IN ('AUTH_PROFILE_UPDATED','AUTH_PASSWORD_CHANGED','AUTH_MFA_ENROLLED','AUTH_MFA_REPLACED','AUTH_MFA_DISABLED','AUTH_MFA_CHALLENGE_ISSUED','AUTH_MFA_CHALLENGE_EXPIRED','AUTH_MFA_FAILURE','AUTH_MFA_TOO_MANY_ATTEMPTS','AUTH_MFA_BACKUP_CODE_USED','AUTH_MFA_SUCCESS','AUTH_MFA_LOGIN_COMPLETE','AUTH_WEBAUTHN_ENROLLED','AUTH_WEBAUTHN_CREDENTIAL_REMOVED')) OR (current_setting('app.auth_closure_operation',true)='authenticated-session-create' AND payload->>'action' IN ('AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA'))) OR (current_setting('app.auth_closure_operation',true)='manufacturer-scope-read' AND payload->>'action' IN ('MANUFACTURER_BOOTSTRAP_READ','MANUFACTURER_SCOPE_SWITCH'))) AND payload->>'userId'=current_setting('app.auth_closure_user_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b01-change-authenticated-password:AuditLogOutbox:INSERT",
@@ -1608,7 +1613,7 @@
         "authentication-release-boundary"
       ],
       "scopeType": "security-definer-owner-and-capability-or-live-login-subject",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session.\"userId\"=current_setting('app.auth_closure_user_id',true) AND auth_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND auth_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND auth_session.\"sessionCapabilityRevokedAt\" IS NULL AND auth_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND auth_session.\"revokedAt\" IS NULL AND auth_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.auth_closure_operation',true)='mfa-challenge-read' AND \"userId\"=current_setting('app.auth_closure_user_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session.\"userId\"=current_setting('app.auth_closure_user_id',true) AND auth_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND auth_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND auth_session.\"sessionCapabilityRevokedAt\" IS NULL AND auth_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND auth_session.\"revokedAt\" IS NULL AND auth_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.auth_closure_operation',true) IN ('mfa-challenge-read','mfa-challenge-fail','mfa-challenge-complete') AND \"userId\"=current_setting('app.auth_closure_user_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:rf7-create-admin-mfa-challenge:AuthMfaChallenge:SELECT",
@@ -2969,7 +2974,7 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_incident_id',true) OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))) OR (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' AND ((current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (current_setting('app.b03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))) OR (current_setting('app.b03_actor_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.b03_actor_licensee_id',true)) OR (current_setting('app.b03_actor_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=current_setting('app.b03_licensee_id',true))))",
+      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_incident_id',true) OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR current_setting('app.b03_operation',true) LIKE 'support-ticket-%')) OR (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' AND ((current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (current_setting('app.b03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))) OR (current_setting('app.b03_actor_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.b03_actor_licensee_id',true)) OR (current_setting('app.b03_actor_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=current_setting('app.b03_licensee_id',true))))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b03-attention-queue:Incident:SELECT",
@@ -2977,7 +2982,10 @@
         "contract:b03-complete-incident-email:Incident:SELECT",
         "contract:b03-create-role-notifications:Incident:SELECT",
         "contract:b03-create-user-notification:Incident:SELECT",
-        "contract:b03-resolve-incident-notification-scope:Incident:SELECT"
+        "contract:b03-get-support-ticket:Incident:SELECT",
+        "contract:b03-list-support-tickets:Incident:SELECT",
+        "contract:b03-resolve-incident-notification-scope:Incident:SELECT",
+        "contract:b03-update-support-ticket:Incident:SELECT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -3400,6 +3408,31 @@
       ],
       "workflowId": null,
       "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-incident-handoff",
+      "table": "IncidentHandoff",
+      "policyName": "b03_authenticated_incidenthandoff_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true) LIKE 'support-ticket-%'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-get-support-ticket:IncidentHandoff:SELECT",
+        "contract:b03-list-support-tickets:IncidentHandoff:SELECT",
+        "contract:b03-update-support-ticket:IncidentHandoff:SELECT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -4864,7 +4897,7 @@
         "authentication-release-boundary"
       ],
       "scopeType": "security-definer-owner-and-capability-or-live-login-subject",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session.\"userId\"=current_setting('app.auth_closure_user_id',true) AND auth_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND auth_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND auth_session.\"sessionCapabilityRevokedAt\" IS NULL AND auth_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND auth_session.\"revokedAt\" IS NULL AND auth_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.auth_closure_operation',true)='mfa-challenge-read' AND \"userId\"=current_setting('app.auth_closure_user_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session.\"userId\"=current_setting('app.auth_closure_user_id',true) AND auth_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND auth_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND auth_session.\"sessionCapabilityRevokedAt\" IS NULL AND auth_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND auth_session.\"revokedAt\" IS NULL AND auth_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.auth_closure_operation',true) IN ('mfa-challenge-read','mfa-challenge-fail','mfa-challenge-complete') AND \"userId\"=current_setting('app.auth_closure_user_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:rf7-load-admin-mfa-challenge:MfaLoginChallenge:SELECT"
@@ -7708,19 +7741,23 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND id=current_setting('app.auth_session_id',true) AND \"userId\"=current_setting('app.user_id',true) AND \"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND \"sessionCapabilityHashVersion\"='sha256-v1'",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-add-support-ticket-message:RefreshToken:SELECT",
         "contract:b03-attention-queue:RefreshToken:SELECT",
         "contract:b03-claim-incident-email:RefreshToken:SELECT",
         "contract:b03-complete-incident-email:RefreshToken:SELECT",
         "contract:b03-create-role-notifications:RefreshToken:SELECT",
         "contract:b03-create-user-notification:RefreshToken:SELECT",
+        "contract:b03-get-support-ticket:RefreshToken:SELECT",
         "contract:b03-list-notifications:RefreshToken:SELECT",
+        "contract:b03-list-support-tickets:RefreshToken:SELECT",
         "contract:b03-mark-all-notifications-read:RefreshToken:SELECT",
         "contract:b03-mark-notification-emailed:RefreshToken:SELECT",
         "contract:b03-mark-notification-read:RefreshToken:SELECT",
         "contract:b03-primary-superadmin-email:RefreshToken:SELECT",
         "contract:b03-resolve-incident-email-actor:RefreshToken:SELECT",
         "contract:b03-resolve-incident-notification-scope:RefreshToken:SELECT",
-        "contract:b03-superadmin-alert-emails:RefreshToken:SELECT"
+        "contract:b03-superadmin-alert-emails:RefreshToken:SELECT",
+        "contract:b03-update-support-ticket:RefreshToken:SELECT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -8343,11 +8380,14 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_outbox_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:release-fix-6-customer-session-issue:SecurityEventOutbox:INSERT",
+        "contract:release-fix-6-customer-session-revoke:SecurityEventOutbox:INSERT",
         "contract:release-fix-6-incident:SecurityEventOutbox:INSERT",
         "contract:release-fix-6-ownership-claim:SecurityEventOutbox:INSERT",
         "contract:release-fix-6-ownership-transfer-accept:SecurityEventOutbox:INSERT",
         "contract:release-fix-6-ownership-transfer-cancel:SecurityEventOutbox:INSERT",
         "contract:release-fix-6-ownership-transfer-create:SecurityEventOutbox:INSERT",
+        "contract:release-fix-6-session-start:SecurityEventOutbox:INSERT",
         "contract:release-fix-6-verify-raw:SecurityEventOutbox:INSERT",
         "contract:release-fix-6-verify-signed:SecurityEventOutbox:INSERT"
       ],
@@ -8647,10 +8687,37 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' AND current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (current_setting('app.b03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.b03_licensee_id',true))",
+      "scopePredicate": "((app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' OR (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true) LIKE 'support-ticket-%')) AND current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (coalesce(current_setting('app.b03_licensee_id',true),'')='' OR \"licenseeId\"=current_setting('app.b03_licensee_id',true)) AND (coalesce(current_setting('app.b03_support_ticket_id',true),'')='' OR id=current_setting('app.b03_support_ticket_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
-        "contract:b03-attention-queue:SupportTicket:SELECT"
+        "contract:b03-add-support-ticket-message:SupportTicket:SELECT",
+        "contract:b03-attention-queue:SupportTicket:SELECT",
+        "contract:b03-get-support-ticket:SupportTicket:SELECT",
+        "contract:b03-list-support-tickets:SupportTicket:SELECT",
+        "contract:b03-update-support-ticket:SupportTicket:SELECT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-ticket",
+      "table": "SupportTicket",
+      "policyName": "b03_authenticated_supportticket_update",
+      "command": "UPDATE",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-ticket-update' AND id=current_setting('app.b03_support_ticket_id',true) AND current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-update-support-ticket:SupportTicket:UPDATE"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -8700,6 +8767,53 @@
       ],
       "workflowId": null,
       "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-ticket-message",
+      "table": "SupportTicketMessage",
+      "policyName": "b03_authenticated_supportticketmessage_insert",
+      "command": "INSERT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-ticket-message' AND \"ticketId\"=current_setting('app.b03_support_ticket_id',true) AND \"actorUserId\"=current_setting('app.b03_actor_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-add-support-ticket-message:SupportTicketMessage:INSERT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-ticket-message",
+      "table": "SupportTicketMessage",
+      "policyName": "b03_authenticated_supportticketmessage_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-ticket-detail' AND \"ticketId\"=current_setting('app.b03_support_ticket_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-get-support-ticket:SupportTicketMessage:SELECT",
+        "contract:b03-update-support-ticket:SupportTicketMessage:SELECT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -9143,22 +9257,26 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR current_setting('app.b03_operation',true) LIKE 'support-ticket-%' OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-add-support-ticket-message:User:SELECT",
         "contract:b03-attention-queue:User:SELECT",
         "contract:b03-claim-incident-email:User:SELECT",
         "contract:b03-complete-incident-email:User:SELECT",
         "contract:b03-create-role-notifications:User:SELECT",
         "contract:b03-create-user-notification:User:SELECT",
+        "contract:b03-get-support-ticket:User:SELECT",
         "contract:b03-list-notifications:User:SELECT",
+        "contract:b03-list-support-tickets:User:SELECT",
         "contract:b03-mark-all-notifications-read:User:SELECT",
         "contract:b03-mark-notification-emailed:User:SELECT",
         "contract:b03-mark-notification-read:User:SELECT",
         "contract:b03-primary-superadmin-email:User:SELECT",
         "contract:b03-resolve-incident-email-actor:User:SELECT",
         "contract:b03-resolve-incident-notification-scope:User:SELECT",
-        "contract:b03-superadmin-alert-emails:User:SELECT"
+        "contract:b03-superadmin-alert-emails:User:SELECT",
+        "contract:b03-update-support-ticket:User:SELECT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",

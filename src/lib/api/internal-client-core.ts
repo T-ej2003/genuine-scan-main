@@ -21,6 +21,7 @@ type RequestOptions = RequestInit & {
   skipJson?: boolean;
   timeoutMs?: number;
   skipAuthRefresh?: boolean;
+  skipRefreshDedup?: boolean;
   suppressMutationEvent?: boolean;
 };
 
@@ -364,6 +365,18 @@ export function createApiClientCore(): ApiClientCore {
     endpoint.startsWith("/auth/mfa/");
 
   const request = async <T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> => {
+    if (endpoint === "/auth/refresh" && !options.skipRefreshDedup) {
+      if (!refreshInFlight) {
+        refreshInFlight = request<{ user: any; auth?: any; accessToken?: string }>(
+          endpoint,
+          { ...options, skipRefreshDedup: true },
+        ).finally(() => {
+          refreshInFlight = null;
+        });
+      }
+      return refreshInFlight as Promise<ApiResponse<T>>;
+    }
+
     const headers: Record<string, string> = {
       ...(options.headers as Record<string, string>),
     };
@@ -430,16 +443,11 @@ export function createApiClientCore(): ApiClientCore {
       });
     };
 
-    const refreshOnce = async () => {
-      if (refreshInFlight) return refreshInFlight;
-      refreshInFlight = request<{ user: any; auth?: any; accessToken?: string }>("/auth/refresh", {
+    const refreshOnce = () =>
+      request<{ user: any; auth?: any; accessToken?: string }>("/auth/refresh", {
         method: "POST",
         skipAuthRefresh: true,
-      }).finally(() => {
-        refreshInFlight = null;
       });
-      return refreshInFlight;
-    };
 
     try {
       const response = await fetch(`${BASE_URL}${endpoint}`, {

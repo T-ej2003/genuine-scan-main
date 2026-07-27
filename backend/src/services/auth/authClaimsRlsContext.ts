@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { AuthenticatedSessionClaims } from "../../types";
 import { issueSessionForUser } from "./authService";
 import { confirmAdminMfaSetup } from "./mfaService";
+import { revokeRefreshTokenById } from "./refreshTokenService";
 import { withDatabaseAuthenticatedSession } from "../../rls-waves/session-b/b01/canonicalAuthContext";
 import type { CanonicalDbContext } from "../../lib/canonicalDbContext";
 
@@ -52,6 +53,7 @@ export const confirmAdminMfaEnrollmentAndIssueSessionFromClaims = (
     requestedScopeVersion?: string | null;
   }
 ) => withAdminMfaClaimsTransaction(claims, input.databaseCapability, async (tx) => {
+  if (!claims.sessionId) throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
   await confirmAdminMfaSetup({
     userId: claims.userId,
     code: input.code,
@@ -70,6 +72,12 @@ export const confirmAdminMfaEnrollmentAndIssueSessionFromClaims = (
     purpose: "manufacturer-bootstrap",
     requestedLicenseeId: input.requestedLicenseeId,
     requestedScopeVersion: input.requestedScopeVersion,
+  }, tx);
+  await revokeRefreshTokenById({
+    sessionId: claims.sessionId,
+    userId: claims.userId,
+    reason: "STEP_UP_REPLACED",
+    now: input.now,
   }, tx);
   return session;
 }, { requestId: input.requestId, purpose: "admin-mfa-enrollment-complete" });

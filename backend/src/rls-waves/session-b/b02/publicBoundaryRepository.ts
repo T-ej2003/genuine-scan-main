@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
+import { hashToken } from "../../../utils/security";
 
 export type B02PublicFunctionClient = Pick<Prisma.TransactionClient, "$queryRaw">;
 
@@ -203,7 +204,7 @@ const acceptedProjection: Projection = [
 ];
 const intakeAcceptedProjection: Projection = [...acceptedProjection, ["deliveryRequired", "boolean"]];
 const sessionStartProjection: Projection = [
-  ["sessionId", "string"], ["sessionProofToken", "string"], ["maskedCode", "string"],
+  ["sessionId", "string"], ["sessionProofToken", "string", true], ["maskedCode", "string"],
   ["customerFacingState", "string"], ["entryMethod", "string"], ["authState", "string"],
   ["startedAt", "date"], ["expiresAt", "date"], ["proofBindingExpiresAt", "date"],
   ["brandName", "string", true],
@@ -229,7 +230,7 @@ export const b02IdempotencyDigest = (value: unknown) =>
 
 const proof = () => {
   const raw = randomBytes(32).toString("base64url");
-  return { raw, hash: createHash("sha256").update(raw).digest("hex") };
+  return { raw, hash: hashToken(raw) };
 };
 
 const REPORT_SESSION_RESULTS = new Set(["AUTHENTIC", "AUTHENTIC_REPEAT", "REVIEW", "BLOCKED", "NOT_READY"]);
@@ -266,8 +267,8 @@ export const issueCustomerAuthSession = async (
       ${email(input.customerEmail, "customer email")},
       ${oneOf(input.authStrength, "customer authentication strength", ["EMAIL_OTP","PASSKEY","SOCIAL"] as const)},
       ${oneOf(input.authProvider, "customer authentication provider", ["EMAIL_OTP","GOOGLE"] as const)},
-      ${date(input.issuedAt, "customer session issue time")},
-      ${date(input.expiresAt, "customer session expiry time")},
+      ${date(input.issuedAt, "customer session issue time")}::timestamp without time zone,
+      ${date(input.expiresAt, "customer session expiry time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     )
   `;
@@ -282,7 +283,7 @@ export const revokeCustomerAuthSession = async (
   return exactOne(await db.$queryRaw<Array<{ revoked: boolean }>>`
     SELECT * FROM app_public.revoke_customer_auth_session(
       ${text(input.capability, "customer session capability", 32, 4096)},
-      ${date(input.revokedAt, "customer session revocation time")},
+      ${date(input.revokedAt, "customer session revocation time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     )
   `, "app_public.revoke_customer_auth_session", [["revoked","boolean"]]);
@@ -301,7 +302,7 @@ export const readCustomerAuthSession = async (
   }>>`
     SELECT * FROM app_public.read_customer_auth_session(
       ${text(input.capability, "customer session capability", 32, 4096)},
-      ${date(input.checkedAt, "customer session check time")},
+      ${date(input.checkedAt, "customer session check time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     )
   `, "app_public.read_customer_auth_session", [
@@ -417,7 +418,7 @@ export const recordQrVerification = async (
   const actorDeviceHash = optionalDigest(input.actorDeviceHash, "actor device digest");
   return exactOne(await db.$queryRaw<RecordQrVerificationRow[]>`
     SELECT * FROM app_public.record_qr_verification(
-      ${qrId}, ${proofClass}, ${outcomeCode}, ${scannedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}
+      ${qrId}, ${proofClass}, ${outcomeCode}, ${scannedAt}::timestamp without time zone, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}
     )
   `, "app_public.record_qr_verification", [["decisionKey", "string"], ["recorded", "boolean"]]);
 };
@@ -441,7 +442,7 @@ export const startVerificationSession = async (
   const sessionProof = proof();
   const row = exactOne(await db.$queryRaw<StartVerificationSessionRow[]>`
     SELECT * FROM app_public.start_verification_session(
-      ${sessionStartTokenHash}, ${entryMethod}, ${customerCapability}, ${checkedAt}, ${validatedRequestId},
+      ${sessionStartTokenHash}, ${entryMethod}, ${customerCapability}, ${checkedAt}::timestamp without time zone, ${validatedRequestId},
       ${sessionProof.hash}
     )
   `, "app_public.start_verification_session", sessionStartProjection);
@@ -466,7 +467,7 @@ export const readVerificationSession = async (
   const customerCapability = optionalText(input.customerCapability, "customer session capability", 4096);
   return exactOne(await db.$queryRaw<ReadVerificationSessionRow[]>`
     SELECT * FROM app_public.read_verification_session(
-      ${sessionId}, ${sessionProofHash}, ${customerCapability}, ${checkedAt}, ${validatedRequestId}
+      ${sessionId}, ${sessionProofHash}, ${customerCapability}, ${checkedAt}::timestamp without time zone, ${validatedRequestId}
     )
   `, "app_public.read_verification_session", sessionReadProjection);
 };
@@ -494,7 +495,7 @@ export const writeVerificationSession = async (
       ${text(input.customerCapability, "customer session capability", 32, 4096)},
       ${input.operation},
       ${input.payload}::jsonb,
-      ${date(input.checkedAt, "verification session write time")},
+      ${date(input.checkedAt, "verification session write time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     ) AS result
   `;
@@ -542,7 +543,7 @@ export const claimCustomerOwnership = async (
       ${optionalDigest(input.ipHash, "claim IP digest")},
       ${optionalDigest(input.userAgentHash, "claim user-agent digest")},
       ${input.linkOnly},
-      ${date(input.checkedAt, "ownership claim time")},
+      ${date(input.checkedAt, "ownership claim time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     ) AS result
   `, "app_public.claim_customer_ownership");
@@ -569,8 +570,8 @@ export const createCustomerOwnershipTransfer = async (
       ${rawQr(input.requestedCode)},
       ${optionalEmail(input.recipientEmail, "ownership transfer recipient")},
       ${digest(input.tokenHash, "ownership transfer token digest")},
-      ${date(input.expiresAt, "ownership transfer expiry")},
-      ${date(input.checkedAt, "ownership transfer creation time")},
+      ${date(input.expiresAt, "ownership transfer expiry")}::timestamp without time zone,
+      ${date(input.checkedAt, "ownership transfer creation time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     ) AS result
   `, "app_public.create_customer_ownership_transfer");
@@ -592,7 +593,7 @@ export const cancelCustomerOwnershipTransfer = async (
       ${text(input.customerCapability, "customer session capability", 32, 4096)},
       ${rawQr(input.requestedCode)},
       ${optionalUuid(input.transferId, "ownership transfer ID")},
-      ${date(input.checkedAt, "ownership transfer cancellation time")},
+      ${date(input.checkedAt, "ownership transfer cancellation time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     ) AS result
   `, "app_public.cancel_customer_ownership_transfer");
@@ -618,7 +619,7 @@ export const acceptCustomerOwnershipTransfer = async (
       ${digest(input.tokenHash, "ownership transfer token digest")},
       ${optionalDigest(input.ipHash, "ownership transfer IP digest")},
       ${optionalDigest(input.userAgentHash, "ownership transfer user-agent digest")},
-      ${date(input.checkedAt, "ownership transfer acceptance time")},
+      ${date(input.checkedAt, "ownership transfer acceptance time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     ) AS result
   `, "app_public.accept_customer_ownership_transfer");
@@ -646,8 +647,8 @@ export const beginCustomerPasskey = async (
       ${optionalDigest(input.userAgentHash,"passkey user-agent digest")},
       ${optionalText(input.origin,"passkey origin",512)},
       ${optionalText(input.rpId,"passkey relying-party ID",253)},
-      ${date(input.expiresAt,"passkey expiry")},
-      ${date(input.checkedAt,"passkey start time")},
+      ${date(input.expiresAt,"passkey expiry")}::timestamp without time zone,
+      ${date(input.checkedAt,"passkey start time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     ) AS result
   `, "app_public.begin_customer_passkey");
@@ -667,7 +668,7 @@ export const loadCustomerPasskey = async (
       ${hashes}::text[],
       ${input.purpose ? oneOf(input.purpose,"passkey purpose",["ENROLLMENT","LOGIN","STEP_UP"] as const) : null},
       ${optionalText(input.credentialId,"passkey credential ID",1024)},
-      ${date(input.checkedAt,"passkey load time")},
+      ${date(input.checkedAt,"passkey load time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     ) AS result
   `, "app_public.load_customer_passkey");
@@ -692,7 +693,7 @@ export const finishCustomerPasskey = async (
       ${hashes}::text[],
       ${oneOf(input.purpose,"passkey purpose",["ENROLLMENT","LOGIN","STEP_UP"] as const)},
       ${input.payload}::jsonb,
-      ${date(input.checkedAt,"passkey finish time")},
+      ${date(input.checkedAt,"passkey finish time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     ) AS result
   `, "app_public.finish_customer_passkey");
@@ -706,7 +707,7 @@ export const listCustomerPasskeys = async (
   const rows = await db.$queryRaw<Array<{ payload: Record<string, unknown> }>>`
     SELECT * FROM app_public.list_customer_passkeys(
       ${text(input.customerCapability,"customer session capability",32,4096)},
-      ${date(input.checkedAt,"passkey list time")},
+      ${date(input.checkedAt,"passkey list time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     )
   `;
@@ -722,7 +723,7 @@ export const deleteCustomerPasskey = async (
     SELECT * FROM app_public.delete_customer_passkey(
       ${text(input.customerCapability,"customer session capability",32,4096)},
       ${uuid(input.credentialRowId,"passkey credential row ID")},
-      ${date(input.checkedAt,"passkey deletion time")},
+      ${date(input.checkedAt,"passkey deletion time")}::timestamp without time zone,
       ${requestId(input.requestId)}
     )
   `, "app_public.delete_customer_passkey", [["deleted","boolean"]]);
@@ -746,7 +747,7 @@ export const trackSupportStatus = async (
   const validatedRequestId = requestId(input.requestId);
   return exactOne(await db.$queryRaw<TrackSupportStatusRow[]>`
     SELECT * FROM app_public.track_support_status(
-      ${referenceCode}, ${proofDigest}, ${proofVersion}, ${checkedAt}, ${validatedRequestId}
+      ${referenceCode}, ${proofDigest}, ${proofVersion}, ${checkedAt}::timestamp without time zone, ${validatedRequestId}
     )
   `, "app_public.track_support_status", [
     ["referenceCode", "string"], ["customerFacingStatus", "string"], ["priority", "string"],
@@ -790,7 +791,7 @@ export const submitProductFeedback = async (
   return exactOne(await db.$queryRaw<AcceptedRow[]>`
     SELECT * FROM app_public.submit_product_feedback(
       ${requestedCode}, ${rating}, ${satisfaction}, ${notes}, ${observedStatus}, ${observedOutcome},
-      ${pageUrl}, ${submittedAt}, ${validatedRequestId}, ${actorIpHash}, ${idempotencyDigest}
+      ${pageUrl}, ${submittedAt}::timestamp without time zone, ${validatedRequestId}, ${actorIpHash}, ${idempotencyDigest}
     )
   `, "app_public.submit_product_feedback", acceptedProjection);
 };
@@ -832,11 +833,12 @@ export const submitPublicIncident = async (
   const actorIpHash = optionalDigest(input.actorIpHash, "actor IP digest");
   const actorDeviceHash = optionalDigest(input.actorDeviceHash, "actor device digest");
   const idempotencyDigest = digest(input.idempotencyDigest, "public incident idempotency digest");
+  const serializedEvidence = JSON.stringify(evidence);
   return exactOne(await db.$queryRaw<AcceptedRow[]>`
     SELECT * FROM app_public.submit_public_incident(
       ${sessionId}, ${sessionProofHash}, ${incidentType}, ${description}, ${contactEmail}, ${input.consentToContact},
-      ${evidence}::jsonb,
-      ${submittedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}, ${idempotencyDigest}
+      ${serializedEvidence}::jsonb,
+      ${submittedAt}::timestamp without time zone, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}, ${idempotencyDigest}
     )
   `, "app_public.submit_public_incident", acceptedProjection);
 };
@@ -877,7 +879,7 @@ export const submitRequestAccess = async (
   return exactOne(await db.$queryRaw<IntakeAcceptedRow[]>`
     SELECT * FROM app_public.submit_request_access(
       ${fullName}, ${workEmail}, ${companyName}, ${roleTitle}, ${country}, ${monthlyVolume}, ${message},
-      ${sourcePage}, ${referrer}, ${submittedAt}, ${validatedRequestId}, ${idempotencyDigest}
+      ${sourcePage}, ${referrer}, ${submittedAt}::timestamp without time zone, ${validatedRequestId}, ${idempotencyDigest}
     )
   `, "app_public.submit_request_access", intakeAcceptedProjection);
 };
@@ -923,7 +925,7 @@ export const submitPublicSupport = async (
   return exactOne(await db.$queryRaw<IntakeAcceptedRow[]>`
     SELECT * FROM app_public.submit_public_support(
       ${publicName}, ${publicEmail}, ${issueType}, ${title}, ${description}, ${verifiedCode},
-      ${productReference}, ${sourcePath}, ${pageUrl}, ${submittedAt}, ${validatedRequestId}, ${idempotencyDigest}
+      ${productReference}, ${sourcePath}, ${pageUrl}, ${submittedAt}::timestamp without time zone, ${validatedRequestId}, ${idempotencyDigest}
     )
   `, "app_public.submit_public_support", intakeAcceptedProjection);
 };
@@ -962,12 +964,12 @@ const completePublicDelivery = async (
   const rows = functionName === "complete_request_access_delivery"
     ? await db.$queryRaw<Array<{ updated: boolean }>>`
         SELECT * FROM app_public.complete_request_access_delivery(
-          ${args[0]},${args[1]},${args[2]},${args[3]},${args[4]},${args[5]},${args[6]}
+          ${args[0]},${args[1]},${args[2]},${args[3]},${args[4]},${args[5]}::timestamp without time zone,${args[6]}
         )
       `
     : await db.$queryRaw<Array<{ updated: boolean }>>`
         SELECT * FROM app_public.complete_public_support_delivery(
-          ${args[0]},${args[1]},${args[2]},${args[3]},${args[4]},${args[5]},${args[6]}
+          ${args[0]},${args[1]},${args[2]},${args[3]},${args[4]},${args[5]}::timestamp without time zone,${args[6]}
         )
       `;
   return exactOne(rows, `app_public.${functionName}`, [["updated","boolean"]]);

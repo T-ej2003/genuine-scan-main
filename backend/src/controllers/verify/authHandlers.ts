@@ -78,7 +78,7 @@ export const requestCustomerEmailOtp = async (req: Request, res: Response) => {
       },
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || undefined,
-    });
+    }).catch(() => {});
 
     return res.json({
       success: true,
@@ -120,17 +120,6 @@ export const verifyCustomerEmailOtp = async (req: Request, res: Response) => {
     const sessionToken = issueCustomerVerifySession(identity);
     await registerCustomerVerifyDatabaseSession(sessionToken, identity);
     setCustomerVerifySessionCookie(res, sessionToken);
-
-    await createAuditLog({
-      action: "VERIFY_CUSTOMER_OTP_VERIFIED",
-      entityType: "CustomerVerifyAuth",
-      entityId: identity.userId,
-      details: {
-        maskedEmail: maskEmail(identity.email),
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
-    });
 
     return res.json({
       success: true,
@@ -185,17 +174,6 @@ export const logoutCustomerVerifySession = async (req: CustomerVerifyRequest, re
   } finally {
     clearCustomerVerifySessionCookie(res);
   }
-  await createAuditLog({
-    action: "VERIFY_CUSTOMER_LOGOUT",
-    entityType: "CustomerVerifyAuth",
-    entityId: "cookie_session",
-    details: {
-      source: "verify_auth_logout",
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent") || undefined,
-  }).catch(() => {});
-
   return res.json({
     success: true,
     data: {

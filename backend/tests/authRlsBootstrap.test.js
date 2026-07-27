@@ -90,11 +90,21 @@ mockModule("services/auth/tokenService.js", {
   getMfaBootstrapTtlMinutes: () => 10,
 });
 mockModule("services/auth/refreshTokenService.js", {
-  createRefreshToken: async () => ({ row: { id: "session-1" }, expiresAt: new Date(Date.now() + 60_000) }),
+  createRefreshToken: async () => ({
+    row: { id: "session-1" },
+    expiresAt: new Date(Date.now() + 60_000),
+    tokenHash: "refresh-token-hash",
+  }),
   rotateRefreshToken: async () => null,
   revokeAllUserRefreshTokens: async () => null,
   revokePasswordOnlyRefreshTokensForUser: async () => null,
   revokeRefreshTokenByRaw: async () => null,
+});
+mockModule("services/auth/authenticatedSessionCapabilityService.js", {
+  createAuthenticatedSessionCapability: async () => ({
+    row: { id: "session-1", expiresAt: new Date(Date.now() + 60_000) },
+    rawCapability: "A".repeat(43),
+  }),
 });
 mockModule("services/auditService.js", { createAuditLog: async (entry) => { auditLogs.push(entry); } });
 mockModule("services/auditLogOutboxService.js", {
@@ -206,6 +216,7 @@ const run = async () => {
   contextWrites = 0;
   const result = await login(user.email, validPassword);
   assert.equal(result.sessionStage, "MFA_BOOTSTRAP");
+  assert.equal(result.databaseSessionCapability, "A".repeat(43));
   assert.equal(user.failedLoginAttempts, 0);
   assert.equal(user.lockedUntil, null);
   assert.ok(user.lastLoginAt instanceof Date);

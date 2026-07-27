@@ -158,16 +158,18 @@ export const createPrintingJob = (input: {
   printLockTokenHash?: string | null;
   items: Array<{ qrCodeId: string; tokenNonce: string; tokenHash: string; tokenExpiresAt: string }>;
   client?: SqlClient;
-}) =>
-  oneJson(input.client || prisma, Prisma.sql`
+}) => {
+  const items = JSON.stringify(input.items);
+  return oneJson(input.client || prisma, Prisma.sql`
     SELECT app_rls.printing_create_job(
       ${input.capability}::text,'printing-create-job'::text,${input.requestId}::text,
       ${input.batchId}::text,${input.printerId}::text,${input.quantity}::integer,
       ${input.rangeStart || null}::text,${input.rangeEnd || null}::text,
       ${input.printMode}::text,${input.payloadType}::text,${input.printLockTokenHash || null}::text,
-      ${input.items}::jsonb
+      ${items}::jsonb
     ) AS result
   `);
+};
 
 export const controlPrintingJob = (input: {
   capability: string;

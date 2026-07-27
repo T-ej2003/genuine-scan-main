@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85'
+    AND source_contract_sha256='b80631f79f4ced5f15c0eab43e8518b8e41b1f672ac5959c887af285eea067cb'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:b80631f79f4ced5f15c0eab43e8518b8e41b1f672ac5959c887af285eea067cb'
     AND administrator_role='certification-administrator'
     AND phase='ownership-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'context helpers lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:baf25b364eec0dd8850394b574710fa5f89635f86e875a2290fd48618d545f85')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:b80631f79f4ced5f15c0eab43e8518b8e41b1f672ac5959c887af285eea067cb')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -2447,7 +2447,8 @@ BEGIN
       current_setting('app.user_id',true),current_setting('app.auth_session_id',true),current_setting('app.request_id',true)
     );
     IF p_user_id IS DISTINCT FROM actor."userId"
-       OR p_organization_id IS DISTINCT FROM nullif(current_setting('app.organization_id',true),'')
+       OR (actor.role<>'MANUFACTURER_ADMIN'
+           AND p_organization_id IS DISTINCT FROM nullif(current_setting('app.organization_id',true),''))
     THEN RAISE EXCEPTION 'AUTH_LOGIN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
   ELSIF p_user_id IS DISTINCT FROM current_setting('app.b01_preauth_user_id',true) THEN
     RAISE EXCEPTION 'AUTH_LOGIN_SESSION_DENIED' USING ERRCODE='42501';
@@ -3128,11 +3129,13 @@ BEGIN
   SELECT to_jsonb(x) INTO result FROM (
     SELECT 'LOGIN'::text AS kind,c.id,c."userId",c.purpose,c."riskScore",c."riskLevel"::text AS "riskLevel",
       c.reasons,c.attempts,c."maxAttempts",c."createdIpHash",c."createdUserAgentHash",
-      c."expiresAt",c."consumedAt",NULL::timestamp without time zone AS "supersededAt"
+      c."expiresAt" AT TIME ZONE 'UTC' AS "expiresAt",
+      c."consumedAt" AT TIME ZONE 'UTC' AS "consumedAt",NULL::timestamp with time zone AS "supersededAt"
     FROM public."MfaLoginChallenge" c WHERE c."userId"=actor."userId" AND c."ticketHash"=ANY(p_ticket_hashes)
     UNION ALL
     SELECT 'SESSION',c.id,c."userId",c.purpose,c."riskScore",c."riskLevel"::text,c.reasons,c.attempts,c."maxAttempts",
-      c."createdIpHash",c."createdUserAgentHash",c."expiresAt",c."consumedAt",c."supersededAt"
+      c."createdIpHash",c."createdUserAgentHash",c."expiresAt" AT TIME ZONE 'UTC',
+      c."consumedAt" AT TIME ZONE 'UTC',c."supersededAt" AT TIME ZONE 'UTC'
     FROM public."AuthMfaChallenge" c WHERE c."userId"=actor."userId" AND c."ticketHash"=ANY(p_ticket_hashes)
       AND c."sessionBindingHash"=ANY(p_session_binding_hashes)
   ) x LIMIT 1;
@@ -7705,6 +7708,7 @@ DECLARE
   page_limit integer;
   target_batch_id text;
   target_job_id text;
+  target_registration_id text;
   released_user_id text;
   approved_user_id text;
 BEGIN
@@ -7998,15 +8002,19 @@ BEGIN
     IF p_subject_id IS DISTINCT FROM actor."userId" THEN
       RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
     END IF;
+    SELECT pr.id INTO target_registration_id
+      FROM public."PrinterRegistration" pr
+      WHERE pr."userId"=actor."userId" AND pr."revokedAt" IS NULL
+        AND pr."trustStatus"<>'REVOKED'::public."PrinterTrustStatus"
+      ORDER BY pr."approvedAt" DESC NULLS LAST,pr."lastSeenAt" DESC NULLS LAST,pr."updatedAt" DESC
+      LIMIT 1;
+    PERFORM set_config('app.printing_registration_id',coalesce(target_registration_id,''),true);
     RETURN (
       WITH registration AS (
         SELECT pr.id,pr."agentId",pr."deviceFingerprint",pr."trustStatus",pr."trustReason",
           pr."approvedAt",pr."lastSeenAt",pr."updatedAt"
         FROM public."PrinterRegistration" pr
-        WHERE pr."userId"=actor."userId" AND pr."revokedAt" IS NULL
-          AND pr."trustStatus"<>'REVOKED'::public."PrinterTrustStatus"
-        ORDER BY pr."approvedAt" DESC NULLS LAST,pr."lastSeenAt" DESC NULLS LAST,pr."updatedAt" DESC
-        LIMIT 1
+        WHERE pr.id=target_registration_id
       ), attestation AS (
         SELECT pa.id,pa."printerRegistrationId",pa.metadata,pa."expiresAt",pa."trustValid",
           pa."signatureValid",pa."attestedAt",pa."rejectionReason",pa."createdAt"
@@ -8016,12 +8024,14 @@ BEGIN
       )
       SELECT CASE WHEN pr.id IS NULL THEN jsonb_build_object(
         'connected',false,'trusted',false,'compatibilityMode',false,
-        'eligibleForPrinting',false,'connectionClass','BLOCKED','stale',true,
+        'eligibleForPrinting',false,'requiredForPrinting',true,
+        'connectionClass','BLOCKED','stale',true,
         'securePrinterSession',false,'freshHelperHeartbeat',false,
         'helperConnection',false,'eligiblePrinter',false,
         'missingFields',jsonb_build_array('printerRegistration','freshHelperHeartbeat',
           'helperConnection','eligiblePrinter','securePrinterSession','selectedPrinter'),
-        'registrationId',NULL,'error','No printer registration'
+        'registrationId',NULL,'lastHeartbeatAt',NULL,'ageSeconds',NULL,
+        'error','No printer registration'
       ) ELSE (
         coalesce(pa.metadata,'{}'::jsonb)
         ||jsonb_build_object(
@@ -8030,6 +8040,7 @@ BEGIN
           'trusted',pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
             AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid",
           'compatibilityMode',false,
+          'requiredForPrinting',true,
           'eligibleForPrinting',pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
             AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid"
             AND coalesce((pa.metadata->>'connected')::boolean,false)
@@ -8372,8 +8383,8 @@ BEGIN
         "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
         "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
         "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
-  ELSIF p_operation='RELINK' THEN
-    IF NOT EXISTS (
+	  ELSIF p_operation='RELINK' THEN
+	    IF NOT EXISTS (
       SELECT 1 FROM public."PrinterRegistration" pr
       WHERE pr.id=nullif(p_payload->>'printerRegistrationId','')
         AND pr."userId"=actor."userId" AND pr."trustStatus"='TRUSTED'
@@ -10180,6 +10191,13 @@ BEGIN
     session_id,encode(sha256(convert_to(p_capability,'UTF8')),'hex'),p_customer_user_id,lower(p_customer_email),
     p_auth_strength,p_auth_provider,p_issued_at,p_expires_at,p_issued_at,NULL,p_issued_at,p_issued_at
   );
+  PERFORM app_public.public_verify_write_evidence(
+    CASE WHEN p_auth_strength='EMAIL_OTP' THEN 'VERIFY_CUSTOMER_OTP_VERIFIED'
+      ELSE 'VERIFY_CUSTOMER_SESSION_ISSUED' END,
+    'CustomerAuthSession',session_id,NULL,
+    jsonb_build_object('authStrength',p_auth_strength,'authProvider',p_auth_provider),
+    p_issued_at,p_request_id
+  );
   RETURN QUERY SELECT true;
 END
 $$;
@@ -10271,15 +10289,21 @@ BEGIN
     'app.public_verification_customer_session_hash',
     encode(sha256(convert_to(p_capability,'UTF8')),'hex'),true
   );
-  SELECT s.id INTO session_row FROM public."CustomerAuthSession" s
+  SELECT s.id,s."revokedAt" INTO session_row FROM public."CustomerAuthSession" s
   WHERE s."tokenHash"=encode(sha256(convert_to(p_capability,'UTF8')),'hex');
   IF session_row.id IS NULL THEN
     RAISE EXCEPTION 'PUBLIC_CUSTOMER_SESSION_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.public_verification_target_id',session_row.id,true);
-  UPDATE public."CustomerAuthSession"
-    SET "revokedAt"=coalesce("revokedAt",p_revoked_at),"updatedAt"=p_revoked_at
-  WHERE id=session_row.id;
+  IF session_row."revokedAt" IS NULL THEN
+    UPDATE public."CustomerAuthSession"
+      SET "revokedAt"=p_revoked_at,"updatedAt"=p_revoked_at
+    WHERE id=session_row.id;
+    PERFORM app_public.public_verify_write_evidence(
+      'VERIFY_CUSTOMER_LOGOUT','CustomerAuthSession',session_row.id,NULL,
+      '{}'::jsonb,p_revoked_at,p_request_id
+    );
+  END IF;
   RETURN QUERY SELECT true;
 END
 $$;
@@ -10754,6 +10778,10 @@ BEGIN
     customer."customerUserId",customer."customerEmail",NULL,NULL,expires_at,p_session_proof_hash,p_checked_at,
     p_checked_at+interval '30 minutes',NULL,
     jsonb_build_object('boundCustomerUserId',customer."customerUserId"),p_checked_at,p_checked_at
+  );
+  PERFORM app_public.public_verify_write_evidence(
+    'VERIFY_SESSION_STARTED','CustomerVerificationSession',session_id,decision."licenseeId",
+    jsonb_build_object('entryMethod',p_entry_method),p_checked_at,p_request_id
   );
   RETURN QUERY SELECT session_id,NULL::text,
     CASE WHEN decision.code IS NULL THEN '' WHEN length(decision.code)<=4 THEN repeat('*',length(decision.code))
@@ -13195,6 +13223,208 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION app_rls.b03_list_support_tickets(
+  p_licensee_id text,p_status text,p_priority text,p_search text,
+  p_limit integer,p_offset integer,p_request_id text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE result jsonb;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+     OR current_setting('app.purpose',true) NOT IN ('support-ticket-read','support-ticket-update')
+     OR p_limit NOT BETWEEN 1 AND 200 OR p_offset NOT BETWEEN 0 AND 2000
+     OR (p_licensee_id IS NOT NULL AND p_licensee_id !~ '^[0-9a-fA-F-]{36}$')
+     OR (p_status IS NOT NULL AND p_status NOT IN ('OPEN','IN_PROGRESS','WAITING_CUSTOMER','RESOLVED','CLOSED'))
+     OR (p_priority IS NOT NULL AND p_priority NOT IN ('P1','P2','P3','P4'))
+     OR length(coalesce(p_search,''))>120 THEN
+    RAISE EXCEPTION 'B03_SUPPORT_TICKET_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM 1 FROM app_rls.require_recent_mfa_session(
+    current_setting('app.auth_session_id',true),clock_timestamp()::timestamp without time zone,30
+  );
+  PERFORM set_config('app.b03_operation','support-ticket-read',true),
+          set_config('app.b03_licensee_id',coalesce(p_licensee_id,''),true);
+  WITH visible AS MATERIALIZED (
+    SELECT t.id,t."incidentId",t."referenceCode",t."licenseeId",t."customerEmail",t.subject,
+      t.status::text AS status,t.priority::text AS priority,t."assignedToUserId",
+      t."slaDueAt",t."firstResponseAt",t."resolvedAt",t."createdAt",t."updatedAt",
+      i."qrCodeValue",i.status::text AS "incidentStatus",i.severity::text AS "incidentSeverity",
+      i."slaDueAt" AS "incidentSlaDueAt",h."currentStage"::text AS "handoffStage",
+      h."slaDueAt" AS "handoffSlaDueAt",u.name AS "assignedToName"
+    FROM public."SupportTicket" t
+    JOIN public."Incident" i ON i.id=t."incidentId"
+    LEFT JOIN public."IncidentHandoff" h ON h."incidentId"=i.id
+    LEFT JOIN public."User" u ON u.id=t."assignedToUserId"
+    WHERE (p_licensee_id IS NULL OR t."licenseeId"=p_licensee_id)
+      AND (p_status IS NULL OR t.status::text=p_status)
+      AND (p_priority IS NULL OR t.priority::text=p_priority)
+      AND (coalesce(p_search,'')='' OR position(lower(p_search) in lower(t."referenceCode"))>0
+        OR position(lower(p_search) in lower(t.subject))>0
+        OR position(upper(p_search) in upper(i."qrCodeValue"))>0)
+  ), page AS (
+    SELECT * FROM visible ORDER BY "createdAt" DESC,id DESC LIMIT p_limit OFFSET p_offset
+  )
+  SELECT jsonb_build_object(
+    'tickets',coalesce((SELECT jsonb_agg(jsonb_build_object(
+      'id',p.id,'incidentId',p."incidentId",'referenceCode',p."referenceCode",
+      'licenseeId',p."licenseeId",'customerEmail',p."customerEmail",'subject',p.subject,
+      'status',p.status,'priority',p.priority,'assignedToUserId',p."assignedToUserId",
+      'slaDueAt',p."slaDueAt",'firstResponseAt',p."firstResponseAt",'resolvedAt',p."resolvedAt",
+      'createdAt',p."createdAt",'updatedAt',p."updatedAt",
+      'incident',jsonb_build_object('id',p."incidentId",'qrCodeValue',p."qrCodeValue",
+        'status',p."incidentStatus",'severity',p."incidentSeverity",'slaDueAt',p."incidentSlaDueAt",
+        'handoff',CASE WHEN p."handoffStage" IS NULL THEN NULL ELSE jsonb_build_object(
+          'currentStage',p."handoffStage",'slaDueAt',p."handoffSlaDueAt") END),
+      'assignedToUser',CASE WHEN p."assignedToUserId" IS NULL THEN NULL ELSE
+        jsonb_build_object('id',p."assignedToUserId",'name',p."assignedToName") END
+    ) ORDER BY p."createdAt" DESC,p.id DESC) FROM page p),'[]'::jsonb),
+    'total',(SELECT count(*)::integer FROM visible),
+    'limit',p_limit,'offset',p_offset
+  ) INTO result;
+  RETURN result;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_get_support_ticket(
+  p_ticket_id text,p_request_id text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE result jsonb;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+     OR current_setting('app.purpose',true) NOT IN ('support-ticket-read','support-ticket-update')
+     OR p_ticket_id !~ '^[0-9a-fA-F-]{36}$' THEN
+    RAISE EXCEPTION 'B03_SUPPORT_TICKET_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM 1 FROM app_rls.require_recent_mfa_session(
+    current_setting('app.auth_session_id',true),clock_timestamp()::timestamp without time zone,30
+  );
+  PERFORM set_config('app.b03_operation','support-ticket-detail',true),
+          set_config('app.b03_support_ticket_id',p_ticket_id,true);
+  SELECT jsonb_build_object(
+    'id',t.id,'incidentId',t."incidentId",'referenceCode',t."referenceCode",
+    'licenseeId',t."licenseeId",'customerEmail',t."customerEmail",'subject',t.subject,
+    'status',t.status::text,'priority',t.priority::text,'assignedToUserId',t."assignedToUserId",
+    'slaDueAt',t."slaDueAt",'firstResponseAt',t."firstResponseAt",'resolvedAt',t."resolvedAt",
+    'createdAt',t."createdAt",'updatedAt',t."updatedAt",
+    'incident',jsonb_build_object('id',i.id,'qrCodeValue',i."qrCodeValue",
+      'status',i.status::text,'severity',i.severity::text,'slaDueAt',i."slaDueAt",
+      'handoff',CASE WHEN h.id IS NULL THEN NULL ELSE jsonb_build_object(
+        'currentStage',h."currentStage"::text,'slaDueAt',h."slaDueAt") END),
+    'assignedToUser',CASE WHEN u.id IS NULL THEN NULL ELSE jsonb_build_object('id',u.id,'name',u.name) END,
+    'messages',coalesce((SELECT jsonb_agg(jsonb_build_object(
+      'id',m.id,'actorType',m."actorType"::text,'actorUserId',m."actorUserId",
+      'message',m.message,'isInternal',m."isInternal",'createdAt',m."createdAt",
+      'actorUser',CASE WHEN author.id IS NULL THEN NULL ELSE jsonb_build_object('id',author.id,'name',author.name) END
+    ) ORDER BY m."createdAt",m.id)
+      FROM public."SupportTicketMessage" m LEFT JOIN public."User" author ON author.id=m."actorUserId"
+      WHERE m."ticketId"=t.id),'[]'::jsonb)
+  ) INTO result
+  FROM public."SupportTicket" t
+  JOIN public."Incident" i ON i.id=t."incidentId"
+  LEFT JOIN public."IncidentHandoff" h ON h."incidentId"=i.id
+  LEFT JOIN public."User" u ON u.id=t."assignedToUserId"
+  WHERE t.id=p_ticket_id;
+  RETURN result;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_update_support_ticket(
+  p_ticket_id text,p_status text,p_assigned_to_user_id text,p_set_assignee boolean,
+  p_changed_at timestamp without time zone,p_request_id text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE ticket record;
+DECLARE audit_id text:=gen_random_uuid()::text;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+     OR current_setting('app.purpose',true)<>'support-ticket-update'
+     OR p_ticket_id !~ '^[0-9a-fA-F-]{36}$'
+     OR (p_status IS NOT NULL AND p_status NOT IN ('OPEN','IN_PROGRESS','WAITING_CUSTOMER','RESOLVED','CLOSED'))
+     OR (p_set_assignee AND p_assigned_to_user_id IS NOT NULL AND p_assigned_to_user_id !~ '^[0-9a-fA-F-]{36}$')
+     OR p_changed_at IS NULL OR abs(extract(epoch FROM (p_changed_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'B03_SUPPORT_TICKET_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM 1 FROM app_rls.require_recent_mfa_session(
+    current_setting('app.auth_session_id',true),clock_timestamp()::timestamp without time zone,30
+  );
+  PERFORM set_config('app.b03_operation','support-ticket-update',true),
+          set_config('app.b03_support_ticket_id',p_ticket_id,true);
+  SELECT t.id,t."licenseeId" INTO ticket FROM public."SupportTicket" t WHERE t.id=p_ticket_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  IF p_set_assignee AND p_assigned_to_user_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM public."User" u WHERE u.id=p_assigned_to_user_id
+      AND u.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND u."isActive" AND u.status='ACTIVE' AND u."deletedAt" IS NULL
+  ) THEN RAISE EXCEPTION 'B03_SUPPORT_TICKET_ASSIGNEE_DENIED' USING ERRCODE='42501'; END IF;
+  UPDATE public."SupportTicket" t SET
+    status=coalesce(p_status,t.status::text)::public."SupportTicketStatus",
+    "assignedToUserId"=CASE WHEN p_set_assignee THEN p_assigned_to_user_id ELSE t."assignedToUserId" END,
+    "resolvedAt"=CASE WHEN p_status IN ('RESOLVED','CLOSED') THEN p_changed_at
+      WHEN p_status IS NOT NULL THEN NULL ELSE t."resolvedAt" END,
+    "updatedAt"=p_changed_at
+  WHERE t.id=p_ticket_id;
+  PERFORM set_config('app.b03_licensee_id',coalesce(ticket."licenseeId",''),true);
+  INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details,"createdAt")
+  VALUES (audit_id,actor.user_id,actor.organization_id,ticket."licenseeId",'SUPPORT_TICKET_UPDATED',
+    'SupportTicket',p_ticket_id,jsonb_build_object('status',p_status,'assignedToUserId',p_assigned_to_user_id),p_changed_at);
+  RETURN app_rls.b03_get_support_ticket(p_ticket_id,p_request_id);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_add_support_ticket_message(
+  p_ticket_id text,p_message text,p_is_internal boolean,
+  p_created_at timestamp without time zone,p_request_id text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE ticket record;
+DECLARE message_id text:=gen_random_uuid()::text;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+     OR current_setting('app.purpose',true)<>'support-ticket-message'
+     OR p_ticket_id !~ '^[0-9a-fA-F-]{36}$'
+     OR length(btrim(coalesce(p_message,''))) NOT BETWEEN 2 AND 4000
+     OR p_created_at IS NULL OR abs(extract(epoch FROM (p_created_at-clock_timestamp())))>300 THEN
+    RAISE EXCEPTION 'B03_SUPPORT_TICKET_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM 1 FROM app_rls.require_recent_mfa_session(
+    current_setting('app.auth_session_id',true),clock_timestamp()::timestamp without time zone,30
+  );
+  PERFORM set_config('app.b03_operation','support-ticket-message',true),
+          set_config('app.b03_support_ticket_id',p_ticket_id,true);
+  SELECT t.id,t."licenseeId" INTO ticket FROM public."SupportTicket" t WHERE t.id=p_ticket_id;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  PERFORM set_config('app.b03_licensee_id',coalesce(ticket."licenseeId",''),true);
+  INSERT INTO public."SupportTicketMessage"(
+    id,"ticketId","actorType","actorUserId",message,"isInternal","createdAt"
+  ) VALUES (message_id,p_ticket_id,'ADMIN',actor.user_id,btrim(p_message),p_is_internal,p_created_at);
+  INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details,"createdAt")
+  VALUES (gen_random_uuid()::text,actor.user_id,actor.organization_id,ticket."licenseeId",
+    'SUPPORT_TICKET_MESSAGE_ADDED','SupportTicket',p_ticket_id,
+    jsonb_build_object('isInternal',p_is_internal,'messageLength',length(btrim(p_message))),p_created_at);
+  RETURN jsonb_build_object(
+    'id',message_id,'ticketId',p_ticket_id,'actorType','ADMIN','actorUserId',actor.user_id,
+    'message',btrim(p_message),'isInternal',p_is_internal,'createdAt',p_created_at,
+    'actorUser',jsonb_build_object('id',actor.user_id,'name',(SELECT u.name FROM public."User" u WHERE u.id=actor.user_id))
+  );
+END
+$fn$;
+
 REVOKE ALL ON FUNCTION app_rls.b03_require_authenticated_actor(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_assert_requested_scope(text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_primary_superadmin_email() FROM PUBLIC;
@@ -13210,12 +13440,19 @@ REVOKE ALL ON FUNCTION app_rls.b03_attention_queue_projection(text,timestamp wit
 REVOKE ALL ON FUNCTION app_rls.b03_resolve_incident_notification_scope(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_claim_incident_email_delivery(text,text,text,text,text,text,text,text,text,text,text,text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_complete_incident_email_delivery(text,text,text,text,text,text,text,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_list_support_tickets(text,text,text,text,integer,integer,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_get_support_ticket(text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_update_support_ticket(text,text,text,boolean,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_add_support_ticket_message(text,text,boolean,timestamp without time zone,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_rls.b03_add_support_ticket_message(text,text,boolean,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_attention_queue_projection(text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_claim_incident_email_delivery(text,text,text,text,text,text,text,text,text,text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_complete_incident_email_delivery(text,text,text,text,text,text,text,timestamp without time zone) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_create_role_notifications(text,text,text,text,text,text,text,jsonb,text[],text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_create_user_notification(text,text,text,text,text,text,text,jsonb,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_get_support_ticket(text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_list_notifications_for_user(text,integer,integer,boolean,timestamp without time zone,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_list_support_tickets(text,text,text,text,integer,integer,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_mark_all_notifications_read(text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_mark_notification_emailed(text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_mark_notification_read(text,text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
@@ -13223,6 +13460,7 @@ GRANT EXECUTE ON FUNCTION app_rls.b03_primary_superadmin_email() TO "mscqr_rls_c
 GRANT EXECUTE ON FUNCTION app_rls.b03_resolve_incident_email_actor(text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_resolve_incident_notification_scope(text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_superadmin_alert_emails() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_update_support_ticket(text,text,text,boolean,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 RESET ROLE;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;

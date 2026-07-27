@@ -62,6 +62,7 @@ mockModule("services/auth/refreshTokenService.js", {
   createRefreshToken: async () => ({
     row: { id: "session-1" },
     expiresAt: new Date("2026-03-16T12:00:00.000Z"),
+    tokenHash: "refresh-token-hash",
   }),
   rotateRefreshToken: async (input) => {
     refreshDecision = await input.decide({
@@ -77,12 +78,44 @@ mockModule("services/auth/refreshTokenService.js", {
         mfaVerifiedAt: null,
       },
       now: new Date("2026-03-16T12:00:00.000Z"),
+      tokenHashCandidates: ["legacy-token-hash"],
     });
-    assert.strictEqual(refreshDecision.action, "consume");
-    return { ok: true, rotated: false, userId: prismaUser.id, value: refreshDecision.value };
+    assert.strictEqual(refreshDecision.action, "rotate");
+    const successor = {
+      id: "bootstrap-session-2",
+      expiresAt: refreshDecision.expiresAt,
+      tokenHash: "bootstrap-refresh-hash",
+    };
+    const rotation = await input.afterRotate({
+      tx: prismaMock,
+      predecessor: { mfaVerifiedAt: null },
+      successor,
+      now: new Date("2026-03-16T12:00:00.000Z"),
+      value: refreshDecision.value,
+    });
+    return {
+      ok: true,
+      rotated: true,
+      userId: prismaUser.id,
+      orgId: refreshDecision.orgId,
+      newRawToken: "unreturned-bootstrap-refresh",
+      newTokenId: successor.id,
+      newTokenHash: successor.tokenHash,
+      newExpiresAt: successor.expiresAt,
+      authenticatedAt: refreshDecision.authenticatedAt,
+      mfaVerifiedAt: null,
+      value: refreshDecision.value,
+      rotation,
+    };
   },
   revokeAllUserRefreshTokens: async () => null,
   revokeRefreshTokenByRaw: async () => null,
+});
+mockModule("services/auth/authenticatedSessionCapabilityService.js", {
+  createAuthenticatedSessionCapability: async (_db, input) => ({
+    row: { id: input.refreshTokenId, expiresAt: input.expiresAt },
+    rawCapability: "A".repeat(43),
+  }),
 });
 
 mockModule("services/auditService.js", {
@@ -235,10 +268,14 @@ const run = async () => {
   assert.strictEqual(refreshed.sessionStage, "MFA_BOOTSTRAP", "password-only manufacturer refresh must not mint an active session");
   assert.strictEqual(refreshed.accessToken, "bootstrap-token", "refresh should issue only an MFA bootstrap token");
   assert.strictEqual(refreshed.refreshToken, null, "refresh bootstrap must not keep a password-only refresh token");
+  assert.strictEqual(refreshed.databaseSessionCapability, "A".repeat(43), "bootstrap must carry only the database capability");
   assert.strictEqual(refreshed.auth?.authAssurance, "PASSWORD", "bootstrap remains password-only until MFA succeeds");
   assert.strictEqual(refreshed.auth?.stepUpRequired, true, "converted refresh must require MFA step-up");
-  assert.strictEqual(refreshDecision.revokeScope, "password-only", "conversion must revoke every password-only refresh token");
-  assert.strictEqual(refreshDecision.revokeReason, "MFA_REQUIRED_AFTER_POLICY_CHANGE");
+  assert.strictEqual(
+    refreshDecision.expiresAt.getTime(),
+    new Date("2026-03-16T12:10:00.000Z").getTime(),
+    "bootstrap database authority must expire with the MFA bootstrap window"
+  );
 
   console.log("manufacturer MFA login bootstrap tests passed");
 };

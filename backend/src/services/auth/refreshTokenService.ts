@@ -33,6 +33,7 @@ export type RefreshRotationDecision<TRotated, TConsumed = TRotated> =
       orgId: string | null;
       authenticatedAt: Date;
       mfaVerifiedAt: Date | null;
+      expiresAt?: Date;
     }
   | {
       action: "consume";
@@ -56,9 +57,10 @@ export const createRefreshToken = async (input: {
   authenticatedAt?: Date | null;
   mfaVerifiedAt?: Date | null;
   now?: Date;
+  expiresAt?: Date;
 }, db: SessionCredentialClient) => {
   const now = input.now || new Date();
-  const expiresAt = addDays(now, getRefreshTokenTtlDays());
+  const expiresAt = input.expiresAt || addDays(now, getRefreshTokenTtlDays());
   const tokenHash = hashRefreshToken(input.rawToken);
 
   const row = await createRefreshTokenRecord(db, {
@@ -133,6 +135,7 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
     predecessor: RefreshRotationToken;
     successor: { id: string; expiresAt: Date; tokenHash: string };
     now: Date;
+    value: TRotated;
   }) => Promise<TRotation>;
 }): Promise<
   | {
@@ -226,7 +229,7 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
 
     const newRawToken = newRefreshToken();
     const newHash = hashRefreshToken(newRawToken);
-    const newExpiresAt = addDays(now, getRefreshTokenTtlDays());
+    const newExpiresAt = decision.expiresAt || addDays(now, getRefreshTokenTtlDays());
 
     const successor = await completeRefreshTokenRotation(tx, {
       tokenId: tokenRow.id,
@@ -243,7 +246,7 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
       requestId: input.requestId,
     });
     const rotation = input.afterRotate
-      ? await input.afterRotate({ tx, predecessor: tokenRow, successor: { ...successor, tokenHash: newHash }, now })
+      ? await input.afterRotate({ tx, predecessor: tokenRow, successor: { ...successor, tokenHash: newHash }, now, value: decision.value })
       : undefined as TRotation;
 
     return {
@@ -260,5 +263,5 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
       value: decision.value,
       rotation,
     } as const;
-  });
+  }, { timeout: 15_000 });
 }

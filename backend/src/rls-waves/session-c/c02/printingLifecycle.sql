@@ -169,6 +169,7 @@ DECLARE
   page_limit integer;
   target_batch_id text;
   target_job_id text;
+  target_registration_id text;
   released_user_id text;
   approved_user_id text;
 BEGIN
@@ -462,15 +463,19 @@ BEGIN
     IF p_subject_id IS DISTINCT FROM actor."userId" THEN
       RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
     END IF;
+    SELECT pr.id INTO target_registration_id
+      FROM public."PrinterRegistration" pr
+      WHERE pr."userId"=actor."userId" AND pr."revokedAt" IS NULL
+        AND pr."trustStatus"<>'REVOKED'::public."PrinterTrustStatus"
+      ORDER BY pr."approvedAt" DESC NULLS LAST,pr."lastSeenAt" DESC NULLS LAST,pr."updatedAt" DESC
+      LIMIT 1;
+    PERFORM set_config('app.printing_registration_id',coalesce(target_registration_id,''),true);
     RETURN (
       WITH registration AS (
         SELECT pr.id,pr."agentId",pr."deviceFingerprint",pr."trustStatus",pr."trustReason",
           pr."approvedAt",pr."lastSeenAt",pr."updatedAt"
         FROM public."PrinterRegistration" pr
-        WHERE pr."userId"=actor."userId" AND pr."revokedAt" IS NULL
-          AND pr."trustStatus"<>'REVOKED'::public."PrinterTrustStatus"
-        ORDER BY pr."approvedAt" DESC NULLS LAST,pr."lastSeenAt" DESC NULLS LAST,pr."updatedAt" DESC
-        LIMIT 1
+        WHERE pr.id=target_registration_id
       ), attestation AS (
         SELECT pa.id,pa."printerRegistrationId",pa.metadata,pa."expiresAt",pa."trustValid",
           pa."signatureValid",pa."attestedAt",pa."rejectionReason",pa."createdAt"
@@ -480,12 +485,14 @@ BEGIN
       )
       SELECT CASE WHEN pr.id IS NULL THEN jsonb_build_object(
         'connected',false,'trusted',false,'compatibilityMode',false,
-        'eligibleForPrinting',false,'connectionClass','BLOCKED','stale',true,
+        'eligibleForPrinting',false,'requiredForPrinting',true,
+        'connectionClass','BLOCKED','stale',true,
         'securePrinterSession',false,'freshHelperHeartbeat',false,
         'helperConnection',false,'eligiblePrinter',false,
         'missingFields',jsonb_build_array('printerRegistration','freshHelperHeartbeat',
           'helperConnection','eligiblePrinter','securePrinterSession','selectedPrinter'),
-        'registrationId',NULL,'error','No printer registration'
+        'registrationId',NULL,'lastHeartbeatAt',NULL,'ageSeconds',NULL,
+        'error','No printer registration'
       ) ELSE (
         coalesce(pa.metadata,'{}'::jsonb)
         ||jsonb_build_object(
@@ -494,6 +501,7 @@ BEGIN
           'trusted',pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
             AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid",
           'compatibilityMode',false,
+          'requiredForPrinting',true,
           'eligibleForPrinting',pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
             AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid"
             AND coalesce((pa.metadata->>'connected')::boolean,false)
@@ -836,8 +844,8 @@ BEGIN
         "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
         "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
         "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
-  ELSIF p_operation='RELINK' THEN
-    IF NOT EXISTS (
+	  ELSIF p_operation='RELINK' THEN
+	    IF NOT EXISTS (
       SELECT 1 FROM public."PrinterRegistration" pr
       WHERE pr.id=nullif(p_payload->>'printerRegistrationId','')
         AND pr."userId"=actor."userId" AND pr."trustStatus"='TRUSTED'

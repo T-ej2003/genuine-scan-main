@@ -48,6 +48,14 @@ test("login challenge and risk policies are exact and actor-bound", () => {
   assert.match(policies, /b01_auth_closure_authsessionrisksignal_insert/);
   assert.match(policies, /b01_auth_closure_mfaloginchallenge_insert/);
   assert.match(policies, /"userId"=current_setting\('app\.auth_closure_user_id',true\)/);
+  for (const table of ["mfaloginchallenge", "authmfachallenge"]) {
+    const selectPolicy = policies.split("\n").find((line) =>
+      line.includes(`CREATE POLICY "b01_auth_closure_${table}_select"`)
+    );
+    assert(selectPolicy, `${table} SELECT policy missing`);
+    assert.match(selectPolicy, /IN \('mfa-challenge-read','mfa-challenge-fail','mfa-challenge-complete'\)/);
+  }
+  assert.match(policies, /'AUTH_MFA_SUCCESS','AUTH_MFA_LOGIN_COMPLETE'/);
   const webauthnPolicies = policies.split("\n").filter((line) =>
     line.includes('CREATE POLICY "b01_auth_closure_authwebauthnchallenge_')
   );
@@ -71,6 +79,8 @@ test("login challenge and risk policies are exact and actor-bound", () => {
   );
   assert.match(source, /authenticated-session-create/);
   assert.match(source, /app_rls\.b01_authenticated_actor/);
+  assert.match(source, /actor\.role<>'MANUFACTURER_ADMIN'[\s\S]*?p_organization_id IS DISTINCT FROM nullif\(current_setting\('app\.organization_id',true\),''\)/);
+  assert.match(source, /load_admin_mfa_challenge[\s\S]*?"expiresAt" AT TIME ZONE 'UTC'/);
   assert.match(source, /revoke_all_refresh_tokens[\s\S]*?DECLARE actor record; changed integer;/);
   assert.doesNotMatch(source, /;\s*RETURNING "riskScore","riskLevel",reasons INTO challenge/);
   const refreshSelectPolicy = policies.split("\n").find((line) => line.includes('CREATE POLICY "b01_auth_closure_refreshtoken_select"'));

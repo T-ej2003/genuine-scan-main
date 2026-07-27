@@ -21,12 +21,9 @@ for (const functionName of [
   "app_auth.revoke_refresh_token_scope",
   "app_auth.complete_refresh_token_rotation",
   "app_rls.create_refresh_token",
-  "app_rls.find_refresh_token_by_hashes",
   "app_rls.find_refresh_token_by_id",
   "app_rls.list_active_refresh_tokens",
-  "app_rls.revoke_refresh_token_by_hashes",
   "app_rls.revoke_all_refresh_tokens",
-  "app_rls.revoke_password_only_refresh_tokens",
   "app_rls.revoke_refresh_token_by_id",
 ]) {
   assert.match(repository, new RegExp(functionName.replace(".", "\\.")), `${functionName} must be static`);
@@ -40,6 +37,7 @@ assert.equal(
   "rotation owns one pre-authentication transaction"
 );
 const rotationBody = refresh.slice(refresh.indexOf("return getB01PreAuthPrisma().$transaction"));
+assert.match(rotationBody, /\}, \{ timeout: 15_000 \}\);/);
 assert.doesNotMatch(rotationBody, /installCanonicalDbContext/);
 assert.ok(rotationBody.indexOf("input.decide") < rotationBody.indexOf("completeRefreshTokenRotation"));
 assert.match(rotationBody, /tokenHashCandidates: presentedHashCandidates/);
@@ -69,14 +67,14 @@ for (const functionName of [
 }
 
 assert.doesNotMatch(sessions, /revokeRefreshTokenByRaw|getRefreshTokenFromRequest|\bprisma\./);
-assert.match(sessions, /withCanonicalAuthClaims/);
+assert.match(sessions, /withAdminMfaClaimsTransaction/);
 assert.match(sessions, /claims\.sessionId/);
 assert.match(controller, /withDatabaseAuthenticatedSession[\s\S]*logoutSession/);
 assert.match(controller, /authenticatedSessionProjection/);
 assert.match(sessions, /authenticatedSessionProjection/);
 assert.match(sessionProjection, /findRefreshTokenById/);
 assert.doesNotMatch(sessionProjection, /findRefreshTokenByRaw|\bprisma\.|config\/database/);
-assert.match(refresh, /REFRESH_TOKEN_DATABASE_BOUNDARY_REQUIRED/);
+assert.match(refresh, /createRefreshTokenRecord\(db,/);
 assert.doesNotMatch(admin, /revokeRefreshTokenByRaw/);
 assert.match(auth, /loadRefreshSessionState/);
 assert.match(auth, /getB01PreAuthPrisma\(\)/);

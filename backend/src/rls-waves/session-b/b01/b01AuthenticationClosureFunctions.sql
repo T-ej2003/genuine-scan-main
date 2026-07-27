@@ -361,7 +361,8 @@ BEGIN
       current_setting('app.user_id',true),current_setting('app.auth_session_id',true),current_setting('app.request_id',true)
     );
     IF p_user_id IS DISTINCT FROM actor."userId"
-       OR p_organization_id IS DISTINCT FROM nullif(current_setting('app.organization_id',true),'')
+       OR (actor.role<>'MANUFACTURER_ADMIN'
+           AND p_organization_id IS DISTINCT FROM nullif(current_setting('app.organization_id',true),''))
     THEN RAISE EXCEPTION 'AUTH_LOGIN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
   ELSIF p_user_id IS DISTINCT FROM current_setting('app.b01_preauth_user_id',true) THEN
     RAISE EXCEPTION 'AUTH_LOGIN_SESSION_DENIED' USING ERRCODE='42501';
@@ -1042,11 +1043,13 @@ BEGIN
   SELECT to_jsonb(x) INTO result FROM (
     SELECT 'LOGIN'::text AS kind,c.id,c."userId",c.purpose,c."riskScore",c."riskLevel"::text AS "riskLevel",
       c.reasons,c.attempts,c."maxAttempts",c."createdIpHash",c."createdUserAgentHash",
-      c."expiresAt",c."consumedAt",NULL::timestamp without time zone AS "supersededAt"
+      c."expiresAt" AT TIME ZONE 'UTC' AS "expiresAt",
+      c."consumedAt" AT TIME ZONE 'UTC' AS "consumedAt",NULL::timestamp with time zone AS "supersededAt"
     FROM public."MfaLoginChallenge" c WHERE c."userId"=actor."userId" AND c."ticketHash"=ANY(p_ticket_hashes)
     UNION ALL
     SELECT 'SESSION',c.id,c."userId",c.purpose,c."riskScore",c."riskLevel"::text,c.reasons,c.attempts,c."maxAttempts",
-      c."createdIpHash",c."createdUserAgentHash",c."expiresAt",c."consumedAt",c."supersededAt"
+      c."createdIpHash",c."createdUserAgentHash",c."expiresAt" AT TIME ZONE 'UTC',
+      c."consumedAt" AT TIME ZONE 'UTC',c."supersededAt" AT TIME ZONE 'UTC'
     FROM public."AuthMfaChallenge" c WHERE c."userId"=actor."userId" AND c."ticketHash"=ANY(p_ticket_hashes)
       AND c."sessionBindingHash"=ANY(p_session_binding_hashes)
   ) x LIMIT 1;

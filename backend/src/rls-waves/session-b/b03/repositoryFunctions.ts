@@ -703,3 +703,90 @@ export const completeIncidentEmailDelivery = async (
       ${timestamp(input.completedAt, "completedAt")}
     ) AS result
   `), "app_rls.b03_complete_incident_email_delivery");
+
+const supportProjection = (value: Prisma.JsonValue, operation: string) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${operation} returned an invalid projection`);
+  }
+  return value as Record<string, unknown>;
+};
+
+export const listSupportTickets = async (
+  db: B03FunctionClient,
+  input: {
+    licenseeId?: string | null;
+    status?: string | null;
+    priority?: string | null;
+    search?: string | null;
+    limit: number;
+    offset: number;
+    requestId: string;
+  }
+) => {
+  const limit = integer(input.limit, "support ticket limit", 1, 200);
+  const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
+    SELECT app_rls.b03_list_support_tickets(
+      ${optional(input.licenseeId, "licenseeId")}::text,
+      ${input.status ? exactEnum(input.status, "support ticket status", ["OPEN","IN_PROGRESS","WAITING_CUSTOMER","RESOLVED","CLOSED"]) : null}::text,
+      ${input.priority ? exactEnum(input.priority, "support ticket priority", ["P1","P2","P3","P4"]) : null}::text,
+      ${optional(input.search, "search", 120)}::text,
+      ${limit}::integer, ${integer(input.offset, "support ticket offset", 0, 2_000)}::integer,
+      ${authenticatedRequestId(input.requestId)}::text
+    ) AS result
+  `), "app_rls.b03_list_support_tickets");
+  const result = supportProjection(row.result, "app_rls.b03_list_support_tickets");
+  if (!Array.isArray(result.tickets) || result.tickets.length > limit) {
+    throw new Error("app_rls.b03_list_support_tickets returned an unbounded result");
+  }
+  integer(result.total, "support ticket total", 0, 1_000_000_000);
+  return result;
+};
+
+export const getSupportTicket = async (
+  db: B03FunctionClient,
+  input: { ticketId: string; requestId: string }
+) => {
+  const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue | null }>>(Prisma.sql`
+    SELECT app_rls.b03_get_support_ticket(
+      ${id(input.ticketId, "ticketId")}::text, ${authenticatedRequestId(input.requestId)}::text
+    ) AS result
+  `), "app_rls.b03_get_support_ticket");
+  return row.result === null ? null : supportProjection(row.result, "app_rls.b03_get_support_ticket");
+};
+
+export const updateSupportTicket = async (
+  db: B03FunctionClient,
+  input: {
+    ticketId: string;
+    status?: string;
+    assignedToUserId?: string | null;
+    changedAt: Date;
+    requestId: string;
+  }
+) => {
+  const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue | null }>>(Prisma.sql`
+    SELECT app_rls.b03_update_support_ticket(
+      ${id(input.ticketId, "ticketId")}::text,
+      ${input.status ? exactEnum(input.status, "support ticket status", ["OPEN","IN_PROGRESS","WAITING_CUSTOMER","RESOLVED","CLOSED"]) : null}::text,
+      ${input.assignedToUserId ? id(input.assignedToUserId, "assignedToUserId") : null}::text,
+      ${input.assignedToUserId !== undefined}::boolean,
+      ${timestamp(input.changedAt, "changedAt")}::timestamp without time zone,
+      ${authenticatedRequestId(input.requestId)}::text
+    ) AS result
+  `), "app_rls.b03_update_support_ticket");
+  return row.result === null ? null : supportProjection(row.result, "app_rls.b03_update_support_ticket");
+};
+
+export const addSupportTicketMessage = async (
+  db: B03FunctionClient,
+  input: { ticketId: string; message: string; isInternal: boolean; createdAt: Date; requestId: string }
+) => {
+  const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue | null }>>(Prisma.sql`
+    SELECT app_rls.b03_add_support_ticket_message(
+      ${id(input.ticketId, "ticketId")}::text, ${text(input.message, "support ticket message", 4_000)}::text,
+      ${Boolean(input.isInternal)}::boolean, ${timestamp(input.createdAt, "createdAt")}::timestamp without time zone,
+      ${authenticatedRequestId(input.requestId)}::text
+    ) AS result
+  `), "app_rls.b03_add_support_ticket_message");
+  return row.result === null ? null : supportProjection(row.result, "app_rls.b03_add_support_ticket_message");
+};

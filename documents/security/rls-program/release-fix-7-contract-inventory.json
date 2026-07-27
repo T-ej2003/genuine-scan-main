@@ -8,21 +8,21 @@
     "scripts/rls/lib/program-inventory.mjs"
   ],
   "summary": {
-    "reviewedCapabilities": 184,
-    "runtimeExecutableCapabilities": 183,
+    "reviewedCapabilities": 192,
+    "runtimeExecutableCapabilities": 191,
     "routes": 238,
     "uniqueRoutes": 238,
-    "frontendConsumers": 194,
-    "dynamicFrontendConsumers": 5,
+    "frontendConsumers": 195,
+    "dynamicFrontendConsumers": 6,
     "missingFrontendRoutes": 0,
     "dynamicNavigationSites": 68,
-    "directProtectedAccessReferences": 432,
-    "reachableDirectProtectedAccesses": 125,
+    "directProtectedAccessReferences": 425,
+    "reachableDirectProtectedAccesses": 103,
     "directAccessAuthorityStatus": {
-      "legacy-exception": 36,
+      "not-statically-reachable": 321,
+      "legacy-exception": 30,
       "reviewed-transaction-boundary": 11,
-      "not-statically-reachable": 306,
-      "uncontrolled": 78,
+      "uncontrolled": 62,
       "administrative-tooling": 1
     }
   },
@@ -418,14 +418,15 @@
       "returnType": "TABLE(id text, expiresAt timestamp without time zone)",
       "owner": "identity-auth-function-owner",
       "runtimeGrantees": [
-        "preauth"
+        "preauth",
+        "app"
       ],
       "inputAuthority": "refresh session identifier plus exact bearer-derived hash select a candidate; the raw capability is hashed in PostgreSQL",
       "outputColumns": [
         "id",
         "expiresAt"
       ],
-      "context": "Issues a capability only for the locked active refresh-session row after the caller presents its exact bearer-derived refresh hash; user and assurance are derived from that row.",
+      "context": "Issues a capability only for the locked active refresh-session row after the caller presents its exact bearer-derived refresh hash; authenticated session replacement additionally requires the same live capability-bound actor.",
       "tables": [
         [
           "RefreshToken",
@@ -434,13 +435,17 @@
         [
           "RefreshToken",
           "UPDATE"
+        ],
+        [
+          "User",
+          "SELECT"
         ]
       ],
       "workflows": [],
       "repositoryCallers": [
         "backend/src/services/auth/authenticatedSessionCapabilityService.ts:createAuthenticatedSessionCapability"
       ],
-      "idempotencyAndTransactionGuarantees": "Issues a capability only for the locked active refresh-session row after the caller presents its exact bearer-derived refresh hash; user and assurance are derived from that row.",
+      "idempotencyAndTransactionGuarantees": "Issues a capability only for the locked active refresh-session row after the caller presents its exact bearer-derived refresh hash; authenticated session replacement additionally requires the same live capability-bound actor.",
       "auditAndOutboxEffects": [],
       "denialEvidence": [
         "authenticated-session-capability-postgres18"
@@ -1406,6 +1411,14 @@
         [
           "CustomerAuthSession",
           "INSERT"
+        ],
+        [
+          "AuditLog",
+          "INSERT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "INSERT"
         ]
       ],
       "workflows": [
@@ -1415,7 +1428,16 @@
         "backend/src/services/customerVerifyDatabaseSessionService.ts:registerCustomerVerifyDatabaseSession"
       ],
       "idempotencyAndTransactionGuarantees": "Executes one exact anonymous hostile-input operation under the pre-auth runtime, stages row-local targets, derives tenant and lifecycle scope from protected rows, and returns an explicit customer-safe projection.",
-      "auditAndOutboxEffects": [],
+      "auditAndOutboxEffects": [
+        [
+          "AuditLog",
+          "INSERT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "INSERT"
+        ]
+      ],
       "denialEvidence": [
         "public-verification-postgres18"
       ],
@@ -1620,6 +1642,14 @@
         [
           "CustomerAuthSession",
           "UPDATE"
+        ],
+        [
+          "AuditLog",
+          "INSERT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "INSERT"
         ]
       ],
       "workflows": [
@@ -1629,7 +1659,16 @@
         "backend/src/services/customerVerifyDatabaseSessionService.ts:revokeCustomerVerifyDatabaseSession"
       ],
       "idempotencyAndTransactionGuarantees": "Executes one exact anonymous hostile-input operation under the pre-auth runtime, stages row-local targets, derives tenant and lifecycle scope from protected rows, and returns an explicit customer-safe projection.",
-      "auditAndOutboxEffects": [],
+      "auditAndOutboxEffects": [
+        [
+          "AuditLog",
+          "INSERT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "INSERT"
+        ]
+      ],
       "denialEvidence": [
         "public-verification-postgres18"
       ],
@@ -1685,6 +1724,14 @@
         [
           "CustomerVerificationSession",
           "INSERT"
+        ],
+        [
+          "AuditLog",
+          "INSERT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "INSERT"
         ]
       ],
       "workflows": [
@@ -1694,7 +1741,16 @@
         "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:startVerificationSession"
       ],
       "idempotencyAndTransactionGuarantees": "Executes one exact anonymous hostile-input operation under the pre-auth runtime, stages row-local targets, derives tenant and lifecycle scope from protected rows, and returns an explicit customer-safe projection.",
-      "auditAndOutboxEffects": [],
+      "auditAndOutboxEffects": [
+        [
+          "AuditLog",
+          "INSERT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "INSERT"
+        ]
+      ],
       "denialEvidence": [
         "public-verification-postgres18"
       ],
@@ -1945,7 +2001,7 @@
         ]
       ],
       "workflows": [
-        "workflow-http-backend-src-controllers-support-controller-ts-track-support-ticket-public"
+        "workflow-internal-backend-src-rls-waves-session-b-b02-public-boundary-repository-ts-track-support-status"
       ],
       "repositoryCallers": [
         "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:trackSupportStatus"
@@ -2258,6 +2314,138 @@
       "rollback": "backend/src/rls-waves/session-b/b01/b01AuthenticationClosureRollback.sql"
     },
     {
+      "functionName": "app_rls.b03_add_support_ticket_message",
+      "signature": "text,text,boolean,timestamp without time zone,text",
+      "returnType": "jsonb",
+      "owner": "identity-auth-function-owner",
+      "runtimeGrantees": [
+        "app"
+      ],
+      "inputAuthority": "authenticated capability and recent MFA; ticket ID is selection-only",
+      "outputColumns": [
+        "result"
+      ],
+      "context": "Appends one bounded support message and matching audit evidence atomically under live platform capability and recent MFA.",
+      "tables": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "SupportTicket",
+          "SELECT"
+        ],
+        [
+          "SupportTicketMessage",
+          "INSERT"
+        ],
+        [
+          "AuditLog",
+          "INSERT"
+        ]
+      ],
+      "workflows": [],
+      "repositoryCallers": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:addSupportTicketMessage"
+      ],
+      "idempotencyAndTransactionGuarantees": "Appends one bounded support message and matching audit evidence atomically under live platform capability and recent MFA.",
+      "auditAndOutboxEffects": [
+        [
+          "AuditLog",
+          "INSERT"
+        ]
+      ],
+      "denialEvidence": [
+        "b03-authenticated-postgres18"
+      ],
+      "rollback": "backend/src/rls-waves/session-b/b03/b03AuthenticatedRollback.sql"
+    },
+    {
+      "functionName": "app_rls.b03_attention_queue_projection",
+      "signature": "text,timestamp without time zone,text",
+      "returnType": "jsonb",
+      "owner": "identity-auth-function-owner",
+      "runtimeGrantees": [
+        "app"
+      ],
+      "inputAuthority": "authenticated capability and live database scope; licensee ID only narrows platform or linked authority",
+      "outputColumns": [
+        "result"
+      ],
+      "context": "Returns exact dashboard attention counts and latest-row projections under live capability, tenant and manufacturer scope.",
+      "tables": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ],
+        [
+          "ManufacturerLicenseeLink",
+          "SELECT"
+        ],
+        [
+          "Incident",
+          "SELECT"
+        ],
+        [
+          "QRCode",
+          "SELECT"
+        ],
+        [
+          "Batch",
+          "SELECT"
+        ],
+        [
+          "QrScanLog",
+          "SELECT"
+        ],
+        [
+          "PolicyAlert",
+          "SELECT"
+        ],
+        [
+          "SupportTicket",
+          "SELECT"
+        ],
+        [
+          "AuditLog",
+          "SELECT"
+        ]
+      ],
+      "workflows": [
+        "workflow-http-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached"
+      ],
+      "repositoryCallers": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:readAttentionQueueProjection"
+      ],
+      "idempotencyAndTransactionGuarantees": "Returns exact dashboard attention counts and latest-row projections under live capability, tenant and manufacturer scope.",
+      "auditAndOutboxEffects": [
+        [
+          "AuditLog",
+          "SELECT"
+        ]
+      ],
+      "denialEvidence": [
+        "b03-authenticated-postgres18"
+      ],
+      "rollback": "backend/src/rls-waves/session-b/b03/b03AuthenticatedRollback.sql"
+    },
+    {
       "functionName": "app_rls.b03_claim_incident_email_delivery",
       "signature": "text,text,text,text,text,text,text,text,text,text,text,text,text,text",
       "returnType": "TABLE(deliveryId text,disposition text,delivered boolean,providerMessageId text,emailErrorCode text,attemptedFrom text,usedFrom text,replyTo text)",
@@ -2517,6 +2705,56 @@
       "rollback": "backend/src/rls-waves/session-b/b03/b03AuthenticatedRollback.sql"
     },
     {
+      "functionName": "app_rls.b03_get_support_ticket",
+      "signature": "text,text",
+      "returnType": "jsonb",
+      "owner": "identity-auth-function-owner",
+      "runtimeGrantees": [
+        "app"
+      ],
+      "inputAuthority": "authenticated capability and recent MFA; ticket ID is selection-only",
+      "outputColumns": [
+        "result"
+      ],
+      "context": "Returns one explicit support-ticket and message projection only to a capability-bound live platform administrator with recent MFA.",
+      "tables": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "SupportTicket",
+          "SELECT"
+        ],
+        [
+          "SupportTicketMessage",
+          "SELECT"
+        ],
+        [
+          "Incident",
+          "SELECT"
+        ],
+        [
+          "IncidentHandoff",
+          "SELECT"
+        ]
+      ],
+      "workflows": [],
+      "repositoryCallers": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:getSupportTicket"
+      ],
+      "idempotencyAndTransactionGuarantees": "Returns one explicit support-ticket and message projection only to a capability-bound live platform administrator with recent MFA.",
+      "auditAndOutboxEffects": [],
+      "denialEvidence": [
+        "b03-authenticated-postgres18"
+      ],
+      "rollback": "backend/src/rls-waves/session-b/b03/b03AuthenticatedRollback.sql"
+    },
+    {
       "functionName": "app_rls.b03_list_notifications_for_user",
       "signature": "text,integer,integer,boolean,timestamp without time zone,text,text",
       "returnType": "TABLE(notifications jsonb,total integer,unread integer)",
@@ -2554,6 +2792,52 @@
         "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:listNotificationsForUser"
       ],
       "idempotencyAndTransactionGuarantees": "Returns one bounded stable page of direct and scoped broadcast notifications for the authenticated user only.",
+      "auditAndOutboxEffects": [],
+      "denialEvidence": [
+        "b03-authenticated-postgres18"
+      ],
+      "rollback": "backend/src/rls-waves/session-b/b03/b03AuthenticatedRollback.sql"
+    },
+    {
+      "functionName": "app_rls.b03_list_support_tickets",
+      "signature": "text,text,text,text,integer,integer,text",
+      "returnType": "jsonb",
+      "owner": "identity-auth-function-owner",
+      "runtimeGrantees": [
+        "app"
+      ],
+      "inputAuthority": "authenticated capability and recent MFA; filters only narrow platform scope",
+      "outputColumns": [
+        "result"
+      ],
+      "context": "Returns one stable bounded support-ticket page only to a capability-bound live platform administrator with recent MFA.",
+      "tables": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "SupportTicket",
+          "SELECT"
+        ],
+        [
+          "Incident",
+          "SELECT"
+        ],
+        [
+          "IncidentHandoff",
+          "SELECT"
+        ]
+      ],
+      "workflows": [],
+      "repositoryCallers": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:listSupportTickets"
+      ],
+      "idempotencyAndTransactionGuarantees": "Returns one stable bounded support-ticket page only to a capability-bound live platform administrator with recent MFA.",
       "auditAndOutboxEffects": [],
       "denialEvidence": [
         "b03-authenticated-postgres18"
@@ -2841,6 +3125,69 @@
       "rollback": "backend/src/rls-waves/session-b/b03/b03AuthenticatedRollback.sql"
     },
     {
+      "functionName": "app_rls.b03_update_support_ticket",
+      "signature": "text,text,text,boolean,timestamp without time zone,text",
+      "returnType": "jsonb",
+      "owner": "identity-auth-function-owner",
+      "runtimeGrantees": [
+        "app"
+      ],
+      "inputAuthority": "authenticated capability and recent MFA; target and assignee IDs are selection-only",
+      "outputColumns": [
+        "result"
+      ],
+      "context": "Locks and updates one support ticket under live platform capability and recent MFA, then appends audit evidence atomically.",
+      "tables": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "SupportTicket",
+          "SELECT"
+        ],
+        [
+          "SupportTicket",
+          "UPDATE"
+        ],
+        [
+          "SupportTicketMessage",
+          "SELECT"
+        ],
+        [
+          "Incident",
+          "SELECT"
+        ],
+        [
+          "IncidentHandoff",
+          "SELECT"
+        ],
+        [
+          "AuditLog",
+          "INSERT"
+        ]
+      ],
+      "workflows": [],
+      "repositoryCallers": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:updateSupportTicket"
+      ],
+      "idempotencyAndTransactionGuarantees": "Locks and updates one support ticket under live platform capability and recent MFA, then appends audit evidence atomically.",
+      "auditAndOutboxEffects": [
+        [
+          "AuditLog",
+          "INSERT"
+        ]
+      ],
+      "denialEvidence": [
+        "b03-authenticated-postgres18"
+      ],
+      "rollback": "backend/src/rls-waves/session-b/b03/b03AuthenticatedRollback.sql"
+    },
+    {
       "functionName": "app_rls.batch_inventory_rollups",
       "signature": "text,text,text,text,text,text,text,text,text[]",
       "returnType": "TABLE(batch_id text, dormant integer, active integer, activated integer, allocated integer, printed integer, redeemed integer, blocked integer, scanned integer)",
@@ -2865,10 +3212,6 @@
         [
           "RefreshToken",
           "SELECT"
-        ],
-        [
-          "RefreshToken",
-          "UPDATE"
         ],
         [
           "User",
@@ -2942,10 +3285,6 @@
         [
           "RefreshToken",
           "SELECT"
-        ],
-        [
-          "RefreshToken",
-          "UPDATE"
         ],
         [
           "User",
@@ -3023,10 +3362,6 @@
           "SELECT"
         ],
         [
-          "RefreshToken",
-          "UPDATE"
-        ],
-        [
           "User",
           "SELECT"
         ],
@@ -3096,10 +3431,6 @@
         [
           "RefreshToken",
           "SELECT"
-        ],
-        [
-          "RefreshToken",
-          "UPDATE"
         ],
         [
           "User",
@@ -3172,10 +3503,6 @@
         [
           "RefreshToken",
           "SELECT"
-        ],
-        [
-          "RefreshToken",
-          "UPDATE"
         ],
         [
           "User",
@@ -3265,10 +3592,6 @@
           "SELECT"
         ],
         [
-          "RefreshToken",
-          "UPDATE"
-        ],
-        [
           "User",
           "SELECT"
         ],
@@ -3343,10 +3666,6 @@
         [
           "RefreshToken",
           "SELECT"
-        ],
-        [
-          "RefreshToken",
-          "UPDATE"
         ],
         [
           "User",
@@ -3758,6 +4077,59 @@
         "c03-incident-postgres18"
       ],
       "rollback": "backend/src/rls-waves/session-c/c03/c03IncidentRollback.sql"
+    },
+    {
+      "functionName": "app_rls.c03_bind_sensitive_approval_actor",
+      "signature": "text,text,text,text",
+      "returnType": "TABLE(user_id text, role text, organization_id text, licensee_id text)",
+      "owner": "identity-auth-function-owner",
+      "runtimeGrantees": [
+        "app"
+      ],
+      "inputAuthority": "capability and live actor state are authority; approval ID selects one row only",
+      "outputColumns": [
+        "user_id",
+        "role",
+        "organization_id",
+        "licensee_id"
+      ],
+      "context": "Verifies one fresh authenticated-session capability and narrows the transaction to the exact live tenant that owns the selected sensitive approval.",
+      "tables": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ],
+        [
+          "ManufacturerLicenseeLink",
+          "SELECT"
+        ],
+        [
+          "SensitiveActionApproval",
+          "SELECT"
+        ]
+      ],
+      "workflows": [],
+      "repositoryCallers": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:withC03ResourceTransaction"
+      ],
+      "idempotencyAndTransactionGuarantees": "Verifies one fresh authenticated-session capability and narrows the transaction to the exact live tenant that owns the selected sensitive approval.",
+      "auditAndOutboxEffects": [],
+      "denialEvidence": [
+        "c03-approval-postgres18"
+      ],
+      "rollback": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql"
     },
     {
       "functionName": "app_rls.c03_build_incident_evidence_audit_snapshot",
@@ -4946,6 +5318,58 @@
       "rollback": "backend/src/rls-waves/session-c/c03/c03ApprovalRollback.sql"
     },
     {
+      "functionName": "app_rls.c03_list_tenant_feature_flags",
+      "signature": "text",
+      "returnType": "jsonb",
+      "owner": "identity-auth-function-owner",
+      "runtimeGrantees": [
+        "app"
+      ],
+      "inputAuthority": "licensee ID is a selector; database rows and the authenticated capability establish authority",
+      "outputColumns": [
+        "id",
+        "licenseeId",
+        "key",
+        "enabled",
+        "updatedAt"
+      ],
+      "context": "Returns the explicit feature-flag administration projection only after the live capability-bound platform actor is revalidated for the selected active licensee.",
+      "tables": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ],
+        [
+          "TenantFeatureFlag",
+          "SELECT"
+        ]
+      ],
+      "workflows": [
+        "workflow-internal-backend-src-services-governance-service-ts-list-tenant-feature-flags"
+      ],
+      "repositoryCallers": [
+        "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts:listTenantFeatureFlagsInTransaction"
+      ],
+      "idempotencyAndTransactionGuarantees": "Returns the explicit feature-flag administration projection only after the live capability-bound platform actor is revalidated for the selected active licensee.",
+      "auditAndOutboxEffects": [],
+      "denialEvidence": [
+        "c03-governance-postgres18"
+      ],
+      "rollback": "backend/src/rls-waves/session-c/c03/c03GovernanceRollback.sql"
+    },
+    {
       "functionName": "app_rls.c03_patch_incident",
       "signature": "text,jsonb",
       "returnType": "jsonb",
@@ -5126,6 +5550,45 @@
         "c03-approval-postgres18"
       ],
       "rollback": "backend/src/rls-waves/session-c/c03/c03ApprovalRollback.sql"
+    },
+    {
+      "functionName": "app_rls.c03_require_authenticated_actor",
+      "signature": "text,text,text",
+      "returnType": "TABLE(session_id text, user_id text, role text, organization_id text, licensee_id text, assurance text)",
+      "owner": "identity-auth-function-owner",
+      "runtimeGrantees": [
+        "app"
+      ],
+      "inputAuthority": "opaque authenticated-session capability; purpose and request ID are attribution only",
+      "outputColumns": [
+        "session_id",
+        "user_id",
+        "role",
+        "organization_id",
+        "licensee_id",
+        "assurance"
+      ],
+      "context": "Verifies the opaque authenticated-session capability and installs only its database-derived C03 actor context for the operation transaction.",
+      "tables": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ]
+      ],
+      "workflows": [],
+      "repositoryCallers": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:verifyCapability"
+      ],
+      "idempotencyAndTransactionGuarantees": "Verifies the opaque authenticated-session capability and installs only its database-derived C03 actor context for the operation transaction.",
+      "auditAndOutboxEffects": [],
+      "denialEvidence": [
+        "c03-authenticated-boundaries-postgres18"
+      ],
+      "rollback": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql"
     },
     {
       "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
@@ -6422,14 +6885,15 @@
       "returnType": "TABLE(id text, expiresAt timestamp without time zone)",
       "owner": "identity-auth-function-owner",
       "runtimeGrantees": [
-        "preauth"
+        "preauth",
+        "app"
       ],
-      "inputAuthority": "trusted password-verification application boundary plus live database actor validation",
+      "inputAuthority": "trusted password-verification subject or same live authenticated capability actor plus database-derived organization scope",
       "outputColumns": [
         "id",
         "expiresAt"
       ],
-      "context": "Creates one refresh credential and login audit for the password-verified application subject only after live account and tenant relationship validation; no GUC supplies user or tenant authority.",
+      "context": "Creates one refresh credential and login audit for either the password-verified pre-auth subject or the same live capability-bound actor during session replacement; no GUC or input can redirect user or tenant authority.",
       "tables": [
         [
           "User",
@@ -6462,7 +6926,7 @@
       "repositoryCallers": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:createRefreshTokenRecord"
       ],
-      "idempotencyAndTransactionGuarantees": "Creates one refresh credential and login audit for the password-verified application subject only after live account and tenant relationship validation; no GUC supplies user or tenant authority.",
+      "idempotencyAndTransactionGuarantees": "Creates one refresh credential and login audit for either the password-verified pre-auth subject or the same live capability-bound actor during session replacement; no GUC or input can redirect user or tenant authority.",
       "auditAndOutboxEffects": [
         [
           "AuditLogOutbox",
@@ -6503,10 +6967,6 @@
         [
           "RefreshToken",
           "SELECT"
-        ],
-        [
-          "RefreshToken",
-          "UPDATE"
         ],
         [
           "User",
@@ -6584,10 +7044,6 @@
         [
           "RefreshToken",
           "SELECT"
-        ],
-        [
-          "RefreshToken",
-          "UPDATE"
         ],
         [
           "User",
@@ -9898,10 +10354,6 @@
           "SELECT"
         ],
         [
-          "RefreshToken",
-          "UPDATE"
-        ],
-        [
           "User",
           "SELECT"
         ],
@@ -9966,10 +10418,6 @@
         [
           "RefreshToken",
           "SELECT"
-        ],
-        [
-          "RefreshToken",
-          "UPDATE"
         ],
         [
           "User",
@@ -11516,9 +11964,9 @@
       "backend/src/app.ts:createBackendApp",
       "backend/src/app.ts:getErrorMessage",
       "backend/src/app.ts:healthPayload",
-      "backend/src/app.ts:isStagingRlsBatchAllocationMapTelemetryRoute",
-      "backend/src/app.ts:isStagingRlsBatchReadTelemetryRoute",
-      "backend/src/app.ts:isStagingRlsManufacturerPrintersReadTelemetryRoute",
+      "backend/src/app.ts:isBatchAllocationMapRoute",
+      "backend/src/app.ts:isCapabilityBatchReadRoute",
+      "backend/src/app.ts:isManufacturerPrintersReadRoute",
       "backend/src/app.ts:meta",
       "backend/src/app.ts:normalized",
       "backend/src/app.ts:parseBool",
@@ -11528,25 +11976,6 @@
       "backend/src/app.ts:publicStatusIpLimiter",
       "backend/src/app.ts:requestId",
       "backend/src/config/database.ts:prisma",
-      "backend/src/config/rlsReadDatabase.ts:STAGING_RLS_BATCHES_READ_FLAG",
-      "backend/src/config/rlsReadDatabase.ts:STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG",
-      "backend/src/config/rlsReadDatabase.ts:STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG",
-      "backend/src/config/rlsReadDatabase.ts:assertRuntimePosture",
-      "backend/src/config/rlsReadDatabase.ts:client",
-      "backend/src/config/rlsReadDatabase.ts:clientFactory",
-      "backend/src/config/rlsReadDatabase.ts:createClient",
-      "backend/src/config/rlsReadDatabase.ts:getRlsReadDatabaseHealth",
-      "backend/src/config/rlsReadDatabase.ts:initializeRlsReadPrisma",
-      "backend/src/config/rlsReadDatabase.ts:initializeRlsReadPrismaClient",
-      "backend/src/config/rlsReadDatabase.ts:isAnyStagedRlsReadEnabled",
-      "backend/src/config/rlsReadDatabase.ts:isStagedRlsReadFlagEnabled",
-      "backend/src/config/rlsReadDatabase.ts:loadRuntimePosture",
-      "backend/src/config/rlsReadDatabase.ts:normalized",
-      "backend/src/config/rlsReadDatabase.ts:parseBooleanEnv",
-      "backend/src/config/rlsReadDatabase.ts:resolveRequiredRlsTables",
-      "backend/src/config/rlsReadDatabase.ts:resolveRlsReadDatabaseConfiguration",
-      "backend/src/config/rlsReadDatabase.ts:rlsUrl",
-      "backend/src/config/rlsReadDatabase.ts:validateRlsReadDatabaseConfiguration",
       "backend/src/controllers/accountController.ts:changeMyPassword",
       "backend/src/controllers/accountController.ts:changePasswordSchema",
       "backend/src/controllers/accountController.ts:data",
@@ -11856,7 +12285,6 @@
       "backend/src/controllers/print-job/createPrintJobObservability.ts:logPrintJobCreateEvent",
       "backend/src/controllers/print-job/directPrintConfirmationHandlers.ts:boundary",
       "backend/src/controllers/print-job/directPrintConfirmationHandlers.ts:capturePrintJobSampleScan",
-      "backend/src/controllers/print-job/directPrintConfirmationHandlers.ts:code",
       "backend/src/controllers/print-job/directPrintConfirmationHandlers.ts:confirmDirectPrintItem",
       "backend/src/controllers/print-job/directPrintConfirmationHandlers.ts:confirmPrintJob",
       "backend/src/controllers/print-job/directPrintConfirmationHandlers.ts:error",
@@ -11869,6 +12297,7 @@
       "backend/src/controllers/print-job/errorResponses.ts:data",
       "backend/src/controllers/print-job/errorResponses.ts:describeMissingPrinterReadinessFields",
       "backend/src/controllers/print-job/errorResponses.ts:describePrintJobCreateFailure",
+      "backend/src/controllers/print-job/errorResponses.ts:extractReviewedSqlLifecycleError",
       "backend/src/controllers/print-job/errorResponses.ts:hasAny",
       "backend/src/controllers/print-job/errorResponses.ts:hasVirtualSelectedPrinter",
       "backend/src/controllers/print-job/errorResponses.ts:missing",
@@ -11911,6 +12340,7 @@
       "backend/src/controllers/print-job/shared.ts:isPrintOperationsRole",
       "backend/src/controllers/print-job/shared.ts:notifySystemPrintEvent",
       "backend/src/controllers/print-job/shared.ts:replayIdempotentResponseIfAny",
+      "backend/src/controllers/print-job/shared.ts:sampleScanSchema",
       "backend/src/controllers/printJobEventsController.ts:error",
       "backend/src/controllers/printJobEventsController.ts:keepAlive",
       "backend/src/controllers/printJobEventsController.ts:off",
@@ -12014,7 +12444,6 @@
       "backend/src/controllers/qrController.ts:allocateQRRange",
       "backend/src/controllers/qrController.ts:allocateQRRangeForLicensee",
       "backend/src/controllers/qrController.ts:assignManufacturer",
-      "backend/src/controllers/qrController.ts:batchId",
       "backend/src/controllers/qrController.ts:blockBatch",
       "backend/src/controllers/qrController.ts:blockQRCode",
       "backend/src/controllers/qrController.ts:bulkDeleteBatches",
@@ -12082,10 +12511,10 @@
       "backend/src/controllers/supportController.ts:error",
       "backend/src/controllers/supportController.ts:getSupportTicket",
       "backend/src/controllers/supportController.ts:listSupportTickets",
+      "backend/src/controllers/supportController.ts:message",
       "backend/src/controllers/supportController.ts:n",
       "backend/src/controllers/supportController.ts:patchSupportTicket",
       "backend/src/controllers/supportController.ts:proofSubject",
-      "backend/src/controllers/supportController.ts:result",
       "backend/src/controllers/supportController.ts:ticket",
       "backend/src/controllers/supportController.ts:toInt",
       "backend/src/controllers/supportController.ts:trackSupportTicketPublic",
@@ -12120,24 +12549,26 @@
       "backend/src/controllers/tracePolicyController.ts:acknowledgePolicyAlertController",
       "backend/src/controllers/tracePolicyController.ts:batchAuditExportParamSchema",
       "backend/src/controllers/tracePolicyController.ts:batchSlaQuerySchema",
-      "backend/src/controllers/tracePolicyController.ts:cursor",
       "backend/src/controllers/tracePolicyController.ts:e",
       "backend/src/controllers/tracePolicyController.ts:exportBatchAuditPackageController",
       "backend/src/controllers/tracePolicyController.ts:getBatchSlaAnalyticsController",
       "backend/src/controllers/tracePolicyController.ts:getPolicyAlertsController",
       "backend/src/controllers/tracePolicyController.ts:getPolicyConfigController",
       "backend/src/controllers/tracePolicyController.ts:getRiskAnalyticsController",
-      "backend/src/controllers/tracePolicyController.ts:getTraceTimelineController",
       "backend/src/controllers/tracePolicyController.ts:licenseeId",
       "backend/src/controllers/tracePolicyController.ts:policyAlertsQuerySchema",
       "backend/src/controllers/tracePolicyController.ts:policyConfigQuerySchema",
       "backend/src/controllers/tracePolicyController.ts:policyUpdateSchema",
-      "backend/src/controllers/tracePolicyController.ts:query",
       "backend/src/controllers/tracePolicyController.ts:requestId",
       "backend/src/controllers/tracePolicyController.ts:requirePolicyLicenseeId",
       "backend/src/controllers/tracePolicyController.ts:resolveScopedLicenseeId",
-      "backend/src/controllers/tracePolicyController.ts:result",
       "backend/src/controllers/tracePolicyController.ts:updatePolicyConfigController",
+      "backend/src/controllers/traceTimelineController.ts:cursor",
+      "backend/src/controllers/traceTimelineController.ts:e",
+      "backend/src/controllers/traceTimelineController.ts:getTraceTimelineController",
+      "backend/src/controllers/traceTimelineController.ts:query",
+      "backend/src/controllers/traceTimelineController.ts:requestId",
+      "backend/src/controllers/traceTimelineController.ts:result",
       "backend/src/controllers/userController.ts:administrationErrorResponse",
       "backend/src/controllers/userController.ts:administrationRequestId",
       "backend/src/controllers/userController.ts:createUser",
@@ -12223,7 +12654,8 @@
       "backend/src/controllers/verify/verificationHandlers.ts:buildPublicVerificationResponse",
       "backend/src/controllers/verify/verificationHandlers.ts:code",
       "backend/src/controllers/verify/verificationHandlers.ts:db",
-      "backend/src/controllers/verify/verificationHandlers.ts:message",
+      "backend/src/controllers/verify/verificationHandlers.ts:error",
+      "backend/src/controllers/verify/verificationHandlers.ts:isSignedTokenRejection",
       "backend/src/controllers/verify/verificationHandlers.ts:messageFor",
       "backend/src/controllers/verify/verificationHandlers.ts:publicFailure",
       "backend/src/controllers/verify/verificationHandlers.ts:row",
@@ -12269,9 +12701,6 @@
       "backend/src/lib/canonicalDbContext.ts:unknown",
       "backend/src/lib/canonicalDbContext.ts:validateCanonicalDbContext",
       "backend/src/lib/canonicalDbContext.ts:withCanonicalDbContext",
-      "backend/src/lib/stagingRlsBatchReadContext.ts:isStagingRlsBatchAllocationMapEnabled",
-      "backend/src/lib/stagingRlsBatchReadContext.ts:isStagingRlsBatchesReadEnabled",
-      "backend/src/lib/stagingRlsBatchReadContext.ts:isStagingRlsManufacturerPrintersReadEnabled",
       "backend/src/local-print-agent/crypto.ts:randomOpaqueToken",
       "backend/src/local-print-agent/cups.ts:LABEL_PRINTER_TERMS",
       "backend/src/local-print-agent/cups.ts:VIRTUAL_PRINTER_TERMS",
@@ -12741,6 +13170,7 @@
       "backend/src/rls-waves/session-b/b01/canonicalAuthContext.ts:context",
       "backend/src/rls-waves/session-b/b01/canonicalAuthContext.ts:isCanonicalAuthDenial",
       "backend/src/rls-waves/session-b/b01/canonicalAuthContext.ts:required",
+      "backend/src/rls-waves/session-b/b01/canonicalAuthContext.ts:withDatabaseAuthenticatedSelection",
       "backend/src/rls-waves/session-b/b01/canonicalAuthContext.ts:withDatabaseAuthenticatedSession",
       "backend/src/rls-waves/session-b/b01/invitationRepository.ts:email",
       "backend/src/rls-waves/session-b/b01/invitationRepository.ts:ipHash",
@@ -12830,15 +13260,10 @@
       "backend/src/rls-waves/session-b/b02/authenticatedBoundary.ts:requestIdFrom",
       "backend/src/rls-waves/session-b/b02/authenticatedBoundary.ts:required",
       "backend/src/rls-waves/session-b/b02/authenticatedBoundary.ts:withB02AuthenticatedRequest",
-      "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:createSupportTicketMessageRow",
       "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:listRequestAccessRows",
-      "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:listSupportTicketRows",
-      "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:loadSupportTicketRow",
       "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:page",
-      "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:requireActiveSupportLicensee",
       "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:required",
       "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:updateRequestAccessRow",
-      "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:updateSupportTicketRow",
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:CUSTOMER_USER_ID",
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:REFERENCE",
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:UUID",
@@ -12858,6 +13283,7 @@
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:deliveryStatus",
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:digest",
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:email",
+      "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:evidence",
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:exactInput",
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:exactOne",
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:finishCustomerPasskey",
@@ -12902,7 +13328,9 @@
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:verifyRawProjection",
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:verifyRawQr",
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:verifySignedQr",
+      "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:withSessionPolicy",
       "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:writeVerificationSession",
+      "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:addSupportTicketMessage",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:authenticatedRequestId",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:b03PayloadDigest",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:batchSize",
@@ -12933,24 +13361,30 @@
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:failScheduledCompliancePackJob",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:failSecurityEventOutbox",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:getPrimarySuperadminEmail",
+      "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:getSupportTicket",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:id",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:integer",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:json",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:listNotificationsForUser",
+      "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:listSupportTickets",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:markAllNotificationsRead",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:markNotificationEmailed",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:markNotificationRead",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:normalized",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:optional",
+      "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:readAttentionQueueProjection",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:requestId",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:requireB03AuthenticatedFunctionBoundary",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:resolveIncidentEmailActor",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:resolveIncidentNotificationScope",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:row",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:rows",
+      "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:section",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:stableJson",
+      "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:supportProjection",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:text",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:timestamp",
+      "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:updateSupportTicket",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:uuid",
       "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:validateClaim",
       "backend/src/rls-waves/session-b/b03/requestBoundary.ts:b03BoundaryForRequest",
@@ -12984,6 +13418,7 @@
       "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:client",
       "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:deleteCodes",
       "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:getCodeScope",
+      "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:isQrBoundaryDenied",
       "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:mutateBatch",
       "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:projected",
       "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:readAuditExport",
@@ -13026,6 +13461,8 @@
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:runNetworkPrintingWorker",
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:stableStringify",
       "backend/src/rls-waves/session-c/c02/riskAnalyticsRepository.ts:isRiskAnalyticsBoundaryDenied",
+      "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:c03AccessErrorFromDatabase",
+      "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:c03CanonicalDbContext",
       "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:c03DatabaseSessionCapability",
       "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:c03RequestId",
       "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:capability",
@@ -13291,14 +13728,7 @@
       "backend/src/routes/modules/realtimeRoutes.ts:printerAgentStreamPreAuthRouteLimiter",
       "backend/src/routes/modules/realtimeRoutes.ts:printerAgentStreamRouteLimiter",
       "backend/src/routes/modules/realtimeRoutes.ts:resolveAuthenticatedActor",
-      "backend/src/services/accessControlService.ts:addLicenseeScope",
-      "backend/src/services/accessControlService.ts:buildScopedWhere",
-      "backend/src/services/accessControlService.ts:currentRelation",
-      "backend/src/services/accessControlService.ts:findScopedBatch",
       "backend/src/services/accessControlService.ts:isDisabledUserRecord",
-      "backend/src/services/accessControlService.ts:isObjectRecord",
-      "backend/src/services/accessControlService.ts:resolveRequestedLicenseeScope",
-      "backend/src/services/accessControlService.ts:where",
       "backend/src/services/analyticsRollupService.ts:ROLLUP_INTERVAL_MS",
       "backend/src/services/analyticsRollupService.ts:ROLLUP_LEASE_MS",
       "backend/src/services/analyticsRollupService.ts:normalized",
@@ -13339,11 +13769,8 @@
       "backend/src/services/analyticsService.ts:score",
       "backend/src/services/analyticsService.ts:scoreToLevel",
       "backend/src/services/analyticsService.ts:toRadians",
+      "backend/src/services/attentionQueueService.ts:attentionPromise",
       "backend/src/services/attentionQueueService.ts:attentionQueueScopeKey",
-      "backend/src/services/attentionQueueService.ts:buildAuditWhere",
-      "backend/src/services/attentionQueueService.ts:buildIncidentWhere",
-      "backend/src/services/attentionQueueService.ts:buildPolicyAlertWhere",
-      "backend/src/services/attentionQueueService.ts:buildSupportTicketWhere",
       "backend/src/services/attentionQueueService.ts:firstIso",
       "backend/src/services/attentionQueueService.ts:getAttentionQueueSnapshot",
       "backend/src/services/attentionQueueService.ts:getAttentionQueueSnapshotUncached",
@@ -13351,11 +13778,9 @@
       "backend/src/services/attentionQueueService.ts:isLicenseeAdminRole",
       "backend/src/services/attentionQueueService.ts:isPlatformRole",
       "backend/src/services/attentionQueueService.ts:notificationRoute",
-      "backend/src/services/attentionQueueService.ts:role",
       "backend/src/services/attentionQueueService.ts:route",
       "backend/src/services/attentionQueueService.ts:routeMatchesPrefix",
       "backend/src/services/attentionQueueService.ts:safeRouteForRole",
-      "backend/src/services/attentionQueueService.ts:since",
       "backend/src/services/auditCsvExportService.ts:buildBoundary",
       "backend/src/services/auditCsvExportService.ts:mfaVerifiedAt",
       "backend/src/services/auditCsvExportService.ts:readAuditCsvExport",
@@ -13424,6 +13849,7 @@
       "backend/src/services/auth/authService.ts:buildActiveSessionResponse",
       "backend/src/services/auth/authService.ts:buildBootstrapSessionForUser",
       "backend/src/services/auth/authService.ts:buildJwtPayloadForUser",
+      "backend/src/services/auth/authService.ts:createBootstrapSessionBacking",
       "backend/src/services/auth/authService.ts:createdAt",
       "backend/src/services/auth/authService.ts:email",
       "backend/src/services/auth/authService.ts:getAdminLoginMfaCycleDays",
@@ -13448,6 +13874,7 @@
       "backend/src/services/auth/authService.ts:now",
       "backend/src/services/auth/authService.ts:parseIntEnv",
       "backend/src/services/auth/authService.ts:password",
+      "backend/src/services/auth/authService.ts:preparedState",
       "backend/src/services/auth/authService.ts:raw",
       "backend/src/services/auth/authService.ts:refreshBoundaryState",
       "backend/src/services/auth/authService.ts:refreshMfaChallengeIssuer",
@@ -14397,6 +14824,8 @@
       "backend/src/services/printReservationService.ts:count",
       "backend/src/services/printReservationService.ts:listReservableQrCodeSummaries",
       "backend/src/services/printReservationService.ts:rows",
+      "backend/src/services/printSampleScanService.ts:extractPublicCodeFromSampleScan",
+      "backend/src/services/printSampleScanService.ts:trimmed",
       "backend/src/services/printValidationEvidenceService.ts:formatPrintValidationEvidenceMarkdown",
       "backend/src/services/printValidationEvidenceService.ts:generatePrintValidationEvidenceReport",
       "backend/src/services/printerAgentSessionBoundaryService.ts:active",
@@ -14622,6 +15051,8 @@
       "backend/src/services/sensitiveActionApprovalService.ts:approveSensitiveActionApproval",
       "backend/src/services/sensitiveActionApprovalService.ts:boundedInteger",
       "backend/src/services/sensitiveActionApprovalService.ts:createSensitiveActionApproval",
+      "backend/src/services/sensitiveActionApprovalService.ts:error",
+      "backend/src/services/sensitiveActionApprovalService.ts:isApprovalDenied",
       "backend/src/services/sensitiveActionApprovalService.ts:licenseeId",
       "backend/src/services/sensitiveActionApprovalService.ts:listSensitiveActionApprovals",
       "backend/src/services/sensitiveActionApprovalService.ts:normalized",
@@ -18860,9 +19291,17 @@
       "runtimeOrigin": "mscqr-backend"
     },
     {
+      "method": "GET",
+      "path": null,
+      "source": "src/lib/api/internal-client-core.ts:370",
+      "call": "request<{ user: any; auth?: any; accessToken?: string }>( endpoint, { ...options, skipRefreshDedup: true }, )",
+      "dynamic": true,
+      "runtimeOrigin": "mscqr-backend"
+    },
+    {
       "method": "POST",
       "path": "/auth/refresh",
-      "source": "src/lib/api/internal-client-core.ts:435",
+      "source": "src/lib/api/internal-client-core.ts:447",
       "call": "request<{ user: any; auth?: any; accessToken?: string }>(\"/auth/refresh\", { method: \"POST\", skipAuthRefresh: true, })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18870,7 +19309,7 @@
     {
       "method": "GET",
       "path": null,
-      "source": "src/lib/api/internal-client-core.ts:445",
+      "source": "src/lib/api/internal-client-core.ts:453",
       "call": "fetch(`${BASE_URL}${endpoint}`, { ...options, headers, cache: \"no-store\", credentials: \"include\", signal: controller.signal, })",
       "dynamic": true,
       "runtimeOrigin": "mscqr-backend"
@@ -18878,7 +19317,7 @@
     {
       "method": "GET",
       "path": null,
-      "source": "src/lib/api/internal-client-core.ts:480",
+      "source": "src/lib/api/internal-client-core.ts:488",
       "call": "request<T>(endpoint, { ...options, skipAuthRefresh: true })",
       "dynamic": true,
       "runtimeOrigin": "mscqr-backend"
@@ -20162,6 +20601,16 @@
     ],
     "directProtectedAccesses": [
       {
+        "id": "access-022fc059bd86466d",
+        "source": "backend/src/services/printerRegistryService.ts:1030",
+        "function": "testRegisteredPrinterConnection",
+        "tableId": "table-printer",
+        "command": "UPDATE",
+        "method": "update",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-02a11be8c7fb2048",
         "source": "backend/src/services/ir/incidentActionsService.ts:209",
         "function": "applyContainmentAction",
@@ -20192,6 +20641,16 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-046fd2b4dd5115e9",
+        "source": "backend/src/services/printSampleScanService.ts:171",
+        "function": "recordPrintJobSampleScan",
+        "tableId": "table-audit-log",
+        "command": "INSERT",
+        "method": "create",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-0482ebfd5f0eb360",
         "source": "backend/src/controllers/supportIssueController.ts:260",
         "function": "respondToSupportIssueReport",
@@ -20200,16 +20659,6 @@
         "method": "findUnique",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "uncontrolled"
-      },
-      {
-        "id": "access-048b9568b7522918",
-        "source": "backend/src/services/printerRegistryService.ts:406",
-        "function": "syncLocalAgentPrintersFromHeartbeat",
-        "tableId": "table-printer",
-        "command": "UPSERT",
-        "method": "upsert",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-06911efa1e30fd1d",
@@ -20322,16 +20771,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-0ac15455afa4957e",
-        "source": "backend/src/services/printerRegistryService.ts:953",
-        "function": "testRegisteredPrinterConnection",
-        "tableId": "table-printer",
-        "command": "UPDATE",
-        "method": "update",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
         "id": "access-0aef980ba698b6a0",
         "source": "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:321",
         "function": "updateSupportTicketRow",
@@ -20339,7 +20778,7 @@
         "command": "SELECT",
         "method": "findFirst",
         "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-0b267c580f6457be",
@@ -20372,6 +20811,16 @@
         "authorityStatus": "uncontrolled"
       },
       {
+        "id": "access-10f8df83ef18214e",
+        "source": "backend/src/services/printerRegistryService.ts:801",
+        "function": "deleteNetworkDirectPrinter",
+        "tableId": "table-printer",
+        "command": "DELETE",
+        "method": "delete",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-115fe192137b0b00",
         "source": "backend/src/services/printLifecycleService.ts:369",
         "function": "failStopPrintSession",
@@ -20392,14 +20841,14 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-12ea2d3cefb07f2a",
-        "source": "backend/src/services/accessControlService.ts:325",
-        "function": "findScopedBatch",
-        "tableId": "table-batch",
-        "command": "SELECT",
-        "method": "findFirst",
+        "id": "access-1345ca58c8339d67",
+        "source": "backend/src/services/printerRegistryService.ts:405",
+        "function": "syncLocalAgentPrintersFromHeartbeat",
+        "tableId": "table-printer",
+        "command": "UPSERT",
+        "method": "upsert",
         "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-1351a5d14c10bbb0",
@@ -20428,6 +20877,16 @@
         "tableId": "table-qr-scan-log",
         "command": "COUNT",
         "method": "count",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-1414ce79abe918ba",
+        "source": "backend/src/services/printerRegistryService.ts:935",
+        "function": "testRegisteredPrinterConnection",
+        "tableId": "table-printer",
+        "command": "UPDATE",
+        "method": "update",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -20472,6 +20931,26 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-177dd276f7fbea16",
+        "source": "backend/src/services/printerRegistryService.ts:824",
+        "function": "deleteNetworkDirectPrinter",
+        "tableId": "table-printer",
+        "command": "UPDATE",
+        "method": "updateMany",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-18577980c77fdf33",
+        "source": "backend/src/services/auditService.ts:133",
+        "function": "createAuditLog",
+        "tableId": "table-audit-log",
+        "command": "INSERT",
+        "method": "create",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "uncontrolled"
+      },
+      {
         "id": "access-188c11f66811ac97",
         "source": "backend/src/services/ir/policyRuleEngineService.ts:403",
         "function": "evaluatePolicyRulesForIncidentVolume",
@@ -20488,6 +20967,26 @@
         "tableId": "table-qrcode",
         "command": "UPDATE",
         "method": "updateMany",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-19acc44f5b8876a9",
+        "source": "backend/src/services/printerRegistryService.ts:598",
+        "function": "getRegisteredPrinterForManufacturer",
+        "tableId": "table-printer",
+        "command": "SELECT",
+        "method": "findFirst",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-1a2496747dc77e5c",
+        "source": "backend/src/printing/registry/printerProfileService.ts:361",
+        "function": "ensurePrinterProfileForPrinter",
+        "tableId": "table-printer-profile",
+        "command": "SELECT",
+        "method": "findUnique",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -20562,16 +21061,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-1db294ebe95c59db",
-        "source": "backend/src/services/auditService.ts:114",
-        "function": "createAuditLogInTransaction",
-        "tableId": "table-audit-log",
-        "command": "INSERT",
-        "method": "$executeRaw",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
-      },
-      {
         "id": "access-1dc1b55eb144189b",
         "source": "backend/src/services/printReservationService.ts:203",
         "function": "countReservableQrCodesForPrint",
@@ -20619,7 +21108,7 @@
         "command": "SELECT",
         "method": "findFirst",
         "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-214e9d1d4943afa0",
@@ -20722,16 +21211,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-267f19bb0ed1c43c",
-        "source": "backend/src/printing/registry/printerProfileService.ts:362",
-        "function": "ensurePrinterProfileForPrinter",
-        "tableId": "table-printer-profile",
-        "command": "SELECT",
-        "method": "findUnique",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
         "id": "access-27df853e9eb80bc2",
         "source": "backend/src/services/qrTrackingAnalyticsService.ts:287",
         "function": "loadEventMetrics",
@@ -20750,16 +21229,6 @@
         "method": "$queryRaw",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "uncontrolled"
-      },
-      {
-        "id": "access-2a130a8739c1c7c2",
-        "source": "backend/src/services/attentionQueueService.ts:277",
-        "function": "getAttentionQueueSnapshotUncached",
-        "tableId": "table-incident",
-        "command": "SELECT",
-        "method": "findFirst",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "legacy-exception"
       },
       {
         "id": "access-2a247ecabf1fc5e2",
@@ -20782,32 +21251,12 @@
         "authorityStatus": "uncontrolled"
       },
       {
-        "id": "access-2c5cdd1a83fb6214",
-        "source": "backend/src/services/printerRegistryService.ts:752",
-        "function": "upsertManagedNetworkPrinter",
-        "tableId": "table-printer",
-        "command": "INSERT",
-        "method": "create",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
         "id": "access-2cbe9c34d7b9665c",
         "source": "backend/src/services/printLifecycleService.ts:378",
         "function": "failStopPrintSession",
         "tableId": "table-print-job",
         "command": "UPDATE",
         "method": "updateMany",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-2cbf76fe66939019",
-        "source": "backend/src/services/printerRegistryService.ts:976",
-        "function": "testRegisteredPrinterConnection",
-        "tableId": "table-printer",
-        "command": "UPDATE",
-        "method": "update",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -20826,16 +21275,6 @@
         "source": "backend/src/services/printerAgentSessionService.ts:1157",
         "function": "handleTrustedSessionProgressMessage",
         "tableId": "table-print-job-chunk",
-        "command": "UPDATE",
-        "method": "update",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-2e6af45e09fdc702",
-        "source": "backend/src/services/printerRegistryService.ts:1031",
-        "function": "testRegisteredPrinterConnection",
-        "tableId": "table-printer",
         "command": "UPDATE",
         "method": "update",
         "registration": "reachable-from-registered-entrypoint",
@@ -20876,16 +21315,6 @@
         "source": "backend/src/services/printConfirmationService.ts:324",
         "function": "confirmPrintItemDispatch",
         "tableId": "table-print-job",
-        "command": "UPDATE",
-        "method": "update",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-313768055445f14b",
-        "source": "backend/src/services/printerRegistryService.ts:893",
-        "function": "testRegisteredPrinterConnection",
-        "tableId": "table-printer",
         "command": "UPDATE",
         "method": "update",
         "registration": "reachable-from-registered-entrypoint",
@@ -20973,7 +21402,7 @@
       },
       {
         "id": "access-3600d8039296e7ac",
-        "source": "backend/src/controllers/tracePolicyController.ts:403",
+        "source": "backend/src/controllers/tracePolicyController.ts:318",
         "function": "acknowledgePolicyAlertController",
         "tableId": "table-policy-alert",
         "command": "UPDATE",
@@ -20992,6 +21421,16 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-3825ee5d1670d214",
+        "source": "backend/src/services/printSampleScanService.ts:126",
+        "function": "recordPrintJobSampleScan",
+        "tableId": "table-print-audit-event",
+        "command": "SELECT",
+        "method": "findFirst",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-3834b4eae2ae9881",
         "source": "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:248",
         "function": "listSupportTicketRows",
@@ -20999,7 +21438,7 @@
         "command": "SELECT",
         "method": "findMany",
         "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-38468b34dcd72ea1",
@@ -21072,6 +21511,16 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-3da221364e1fad2d",
+        "source": "backend/src/services/printerRegistryService.ts:999",
+        "function": "testRegisteredPrinterConnection",
+        "tableId": "table-printer",
+        "command": "UPDATE",
+        "method": "update",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-3dbd15da467cc93e",
         "source": "backend/src/services/ir/incidentActionsService.ts:146",
         "function": "applyContainmentAction",
@@ -21139,7 +21588,7 @@
         "command": "UPDATE",
         "method": "updateMany",
         "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-409badc604c5c0a3",
@@ -21218,26 +21667,6 @@
         "tableId": "table-incident-handoff",
         "command": "UPDATE",
         "method": "update",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
-      },
-      {
-        "id": "access-4673ef2cae39f8a9",
-        "source": "backend/src/controllers/qrController.ts:709",
-        "function": "blockBatch",
-        "tableId": "table-batch",
-        "command": "SELECT",
-        "method": "findUnique",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "legacy-exception"
-      },
-      {
-        "id": "access-475df4e27d4bb352",
-        "source": "backend/src/services/attentionQueueService.ts:275",
-        "function": "getAttentionQueueSnapshotUncached",
-        "tableId": "table-support-ticket",
-        "command": "COUNT",
-        "method": "count",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "uncontrolled"
       },
@@ -21412,19 +21841,9 @@
         "authorityStatus": "legacy-exception"
       },
       {
-        "id": "access-4deafc3783cd1986",
-        "source": "backend/src/services/printerRegistryService.ts:1000",
+        "id": "access-4ee942480c45a9b0",
+        "source": "backend/src/services/printerRegistryService.ts:912",
         "function": "testRegisteredPrinterConnection",
-        "tableId": "table-printer",
-        "command": "UPDATE",
-        "method": "update",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-4eecbacca3dacc86",
-        "source": "backend/src/services/printerRegistryService.ts:738",
-        "function": "upsertManagedNetworkPrinter",
         "tableId": "table-printer",
         "command": "UPDATE",
         "method": "update",
@@ -21492,16 +21911,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-51fa21773fd51bb0",
-        "source": "backend/src/controllers/qrController.ts:496",
-        "function": "renameBatch",
-        "tableId": "table-batch",
-        "command": "UPDATE",
-        "method": "update",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "legacy-exception"
-      },
-      {
         "id": "access-5305ff9b41351d82",
         "source": "backend/src/services/auditLogQueryService.ts:147",
         "function": "queryAuditLogs",
@@ -21560,6 +21969,16 @@
         "method": "findFirst",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-54cc76efd997a6ac",
+        "source": "backend/src/controllers/qrController.ts:698",
+        "function": "blockBatch",
+        "tableId": "table-batch",
+        "command": "SELECT",
+        "method": "findUnique",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "legacy-exception"
       },
       {
         "id": "access-54e733e9de72c544",
@@ -21682,32 +22101,22 @@
         "authorityStatus": "uncontrolled"
       },
       {
+        "id": "access-5a29437b71da54e4",
+        "source": "backend/src/services/printerRegistryService.ts:737",
+        "function": "upsertManagedNetworkPrinter",
+        "tableId": "table-printer",
+        "command": "UPDATE",
+        "method": "update",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-5a9f5d462aa8adeb",
         "source": "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:1387",
         "function": "listVerificationDecisionsByQrCodeIds",
         "tableId": "table-verification-decision",
         "command": "SELECT",
         "method": "findMany",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-5b20cf893717c732",
-        "source": "backend/src/services/printerRegistryService.ts:460",
-        "function": "syncLocalAgentPrintersFromHeartbeat",
-        "tableId": "table-printer",
-        "command": "UPDATE",
-        "method": "updateMany",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-5bd23e98c291a230",
-        "source": "backend/src/services/printerRegistryService.ts:787",
-        "function": "deleteNetworkDirectPrinter",
-        "tableId": "table-printer",
-        "command": "SELECT",
-        "method": "findUnique",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -21739,7 +22148,7 @@
         "command": "COUNT",
         "method": "count",
         "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-5d7e4528d5070f16",
@@ -21822,42 +22231,12 @@
         "authorityStatus": "uncontrolled"
       },
       {
-        "id": "access-61809eb6176089a7",
-        "source": "backend/src/services/auditService.ts:285",
-        "function": "getAuditLogs",
-        "tableId": "table-audit-log",
-        "command": "COUNT",
-        "method": "count",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-6217e0decde0015b",
-        "source": "backend/src/services/printerRegistryService.ts:825",
-        "function": "deleteNetworkDirectPrinter",
-        "tableId": "table-printer",
-        "command": "UPDATE",
-        "method": "updateMany",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
         "id": "access-638a69824b68d5b9",
         "source": "backend/src/services/printerConnectionService.ts:887",
         "function": "upsertPrinterConnectionHeartbeat",
         "tableId": "table-printer-registration",
         "command": "INSERT",
         "method": "create",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-644bb0cacafeafcf",
-        "source": "backend/src/services/printerRegistryService.ts:401",
-        "function": "syncLocalAgentPrintersFromHeartbeat",
-        "tableId": "table-printer",
-        "command": "SELECT",
-        "method": "findUnique",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -21872,12 +22251,12 @@
         "authorityStatus": "uncontrolled"
       },
       {
-        "id": "access-6465e6b9d92938ea",
-        "source": "backend/src/services/printerRegistryService.ts:806",
-        "function": "deleteNetworkDirectPrinter",
+        "id": "access-6453f5f98d29dacf",
+        "source": "backend/src/services/printerRegistryService.ts:870",
+        "function": "testRegisteredPrinterConnection",
         "tableId": "table-printer",
-        "command": "SELECT",
-        "method": "findMany",
+        "command": "UPDATE",
+        "method": "update",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -21910,16 +22289,6 @@
         "method": "updateMany",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-657355a5a29bb3f5",
-        "source": "backend/src/services/attentionQueueService.ts:273",
-        "function": "getAttentionQueueSnapshotUncached",
-        "tableId": "table-policy-alert",
-        "command": "COUNT",
-        "method": "count",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
       },
       {
         "id": "access-6643e358cbd42bb1",
@@ -22022,16 +22391,6 @@
         "authorityStatus": "legacy-exception"
       },
       {
-        "id": "access-6bb1da162ac5a02f",
-        "source": "backend/src/services/auth/authService.ts:149",
-        "function": "loadActiveSessionState",
-        "tableId": "table-user",
-        "command": "SELECT",
-        "method": "findUnique",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "legacy-exception"
-      },
-      {
         "id": "access-6bcfd217210170c6",
         "source": "backend/src/services/printLifecycleService.ts:354",
         "function": "failStopPrintSession",
@@ -22092,16 +22451,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-703c6cafaa6365d9",
-        "source": "backend/src/printing/registry/printerProfileService.ts:257",
-        "function": "ensurePrinterProfileForPrinter",
-        "tableId": "table-printer-profile",
-        "command": "UPSERT",
-        "method": "upsert",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
         "id": "access-7046c2199e7fd278",
         "source": "backend/src/services/verificationDecisionReadService.ts:98",
         "function": "loadTrustByQrCodeIds",
@@ -22110,6 +22459,16 @@
         "method": "findMany",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "uncontrolled"
+      },
+      {
+        "id": "access-71d4066e4a585251",
+        "source": "backend/src/printing/registry/printerProfileService.ts:256",
+        "function": "ensurePrinterProfileForPrinter",
+        "tableId": "table-printer-profile",
+        "command": "UPSERT",
+        "method": "upsert",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-7214697fc1247ba2",
@@ -22192,16 +22551,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-750b73c68671280d",
-        "source": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts:20",
-        "function": "listTenantFeatureFlagsInTransaction",
-        "tableId": "table-tenant-feature-flag",
-        "command": "SELECT",
-        "method": "findMany",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
-      },
-      {
         "id": "access-755fa3da3a74910f",
         "source": "backend/src/controllers/irIncidentController.ts:450",
         "function": "patchIrIncident",
@@ -22242,6 +22591,16 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-7752a42db6eb18e5",
+        "source": "backend/src/services/printerRegistryService.ts:975",
+        "function": "testRegisteredPrinterConnection",
+        "tableId": "table-printer",
+        "command": "UPDATE",
+        "method": "update",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-7764f1d961e52ef4",
         "source": "backend/src/services/qrService.ts:178",
         "function": "recordScan",
@@ -22263,7 +22622,7 @@
       },
       {
         "id": "access-77f8da454fc3882d",
-        "source": "backend/src/controllers/tracePolicyController.ts:392",
+        "source": "backend/src/controllers/tracePolicyController.ts:307",
         "function": "acknowledgePolicyAlertController",
         "tableId": "table-policy-alert",
         "command": "SELECT",
@@ -22302,6 +22661,16 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-7a4204d1688c7fb9",
+        "source": "backend/src/services/printerRegistryService.ts:852",
+        "function": "testRegisteredPrinterConnection",
+        "tableId": "table-printer",
+        "command": "UPDATE",
+        "method": "update",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-7a4f0bff70373e2e",
         "source": "backend/src/services/localAgentClaimService.ts:28",
         "function": "reserveLocalAgentItem",
@@ -22318,16 +22687,6 @@
         "tableId": "table-print-item",
         "command": "SELECT",
         "method": "$queryRaw",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-7c1148e4698922a1",
-        "source": "backend/src/services/auditService.ts:279",
-        "function": "getAuditLogs",
-        "tableId": "table-audit-log",
-        "command": "SELECT",
-        "method": "findMany",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -22370,16 +22729,6 @@
         "method": "create",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-7f98551b8ca349bc",
-        "source": "backend/src/services/attentionQueueService.ts:272",
-        "function": "getAttentionQueueSnapshotUncached",
-        "tableId": "table-incident",
-        "command": "COUNT",
-        "method": "count",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "legacy-exception"
       },
       {
         "id": "access-801164758021e957",
@@ -22542,6 +22891,16 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-8acb6d4b4ead2c21",
+        "source": "backend/src/printing/registry/printerProfileService.ts:355",
+        "function": "ensurePrinterProfileForPrinter",
+        "tableId": "table-printer-profile",
+        "command": "UPDATE",
+        "method": "update",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-8b0b308e7e32a911",
         "source": "backend/src/services/printLifecycleService.ts:233",
         "function": "createFailStopIncident",
@@ -22558,6 +22917,16 @@
         "tableId": "table-printer",
         "command": "SELECT",
         "method": "findFirst",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-8e3f7bb626d80881",
+        "source": "backend/src/services/printSampleScanService.ts:155",
+        "function": "recordPrintJobSampleScan",
+        "tableId": "table-print-audit-event",
+        "command": "INSERT",
+        "method": "create",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -22622,16 +22991,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-919ebce15828bd33",
-        "source": "backend/src/services/attentionQueueService.ts:287",
-        "function": "getAttentionQueueSnapshotUncached",
-        "tableId": "table-support-ticket",
-        "command": "SELECT",
-        "method": "findFirst",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
-      },
-      {
         "id": "access-92650c104052496a",
         "source": "backend/src/services/batchPrintLifecycleReconciliationService.ts:183",
         "function": "loadEvidence",
@@ -22648,16 +23007,6 @@
         "tableId": "table-qrcode",
         "command": "SELECT",
         "method": "$queryRaw",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-92bd4202dce4f7c5",
-        "source": "backend/src/services/printerRegistryService.ts:537",
-        "function": "listRegisteredPrintersForManufacturer",
-        "tableId": "table-printer",
-        "command": "SELECT",
-        "method": "findMany",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -22692,26 +23041,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-947e47e56905cf7d",
-        "source": "backend/src/printing/registry/printerProfileService.ts:428",
-        "function": "discoverPrinterCapabilities",
-        "tableId": "table-printer-profile",
-        "command": "UPDATE",
-        "method": "update",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-948e37506d55d4ad",
-        "source": "backend/src/services/printerRegistryService.ts:837",
-        "function": "deleteNetworkDirectPrinter",
-        "tableId": "table-printer",
-        "command": "UPDATE",
-        "method": "update",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
         "id": "access-94b70a34a4d52367",
         "source": "backend/src/services/batchStateMachineService.ts:217",
         "function": "assertBatchTransitionAllowedFromDb",
@@ -22742,6 +23071,16 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-978eae40103afe4d",
+        "source": "backend/src/services/auditService.ts:124",
+        "function": "createAuditLog",
+        "tableId": "table-audit-log",
+        "command": "INSERT",
+        "method": "create",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "uncontrolled"
+      },
+      {
         "id": "access-988cdf767282093c",
         "source": "backend/src/services/supportWorkflowService.ts:174",
         "function": "ensureIncidentWorkflowArtifacts",
@@ -22758,16 +23097,6 @@
         "tableId": "table-ownership-transfer",
         "command": "SELECT",
         "method": "findFirst",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-991fb9b1ad59feb1",
-        "source": "backend/src/services/printerRegistryService.ts:913",
-        "function": "testRegisteredPrinterConnection",
-        "tableId": "table-printer",
-        "command": "UPDATE",
-        "method": "update",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -22793,13 +23122,23 @@
       },
       {
         "id": "access-9aba912d4d4e84ac",
-        "source": "backend/src/controllers/tracePolicyController.ts:363",
+        "source": "backend/src/controllers/tracePolicyController.ts:278",
         "function": "getPolicyAlertsController",
         "tableId": "table-policy-alert",
         "command": "COUNT",
         "method": "count",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "uncontrolled"
+      },
+      {
+        "id": "access-9b5edb59f95159d1",
+        "source": "backend/src/services/printSampleScanService.ts:107",
+        "function": "recordPrintJobSampleScan",
+        "tableId": "table-print-audit-event",
+        "command": "INSERT",
+        "method": "create",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-9c620ce2c94744a4",
@@ -22892,16 +23231,6 @@
         "authorityStatus": "legacy-exception"
       },
       {
-        "id": "access-a048b19f7c94cdd1",
-        "source": "backend/src/services/auditService.ts:60",
-        "function": "resolveOrgId",
-        "tableId": "table-licensee",
-        "command": "SELECT",
-        "method": "findUnique",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "legacy-exception"
-      },
-      {
         "id": "access-a1f8a09f5f2a135d",
         "source": "backend/src/services/sampleScanPolicyService.ts:66",
         "function": "evaluateSampleScanPolicy",
@@ -22912,22 +23241,22 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-a24d704c852f9f34",
+        "source": "backend/src/services/printerRegistryService.ts:892",
+        "function": "testRegisteredPrinterConnection",
+        "tableId": "table-printer",
+        "command": "UPDATE",
+        "method": "update",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-a29ac3f7b46a796c",
         "source": "backend/src/services/printerAgentSessionService.ts:948",
         "function": "loadChunkJob",
         "tableId": "table-print-job-chunk",
         "command": "SELECT",
         "method": "findFirst",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-a2c83cf50010ad6d",
-        "source": "backend/src/services/printerRegistryService.ts:641",
-        "function": "upsertManagedNetworkPrinter",
-        "tableId": "table-printer",
-        "command": "SELECT",
-        "method": "findUnique",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -22948,6 +23277,16 @@
         "tableId": "table-print-job",
         "command": "SELECT",
         "method": "findUnique",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-a325bdbe7cec9b66",
+        "source": "backend/src/services/auditService.ts:259",
+        "function": "getAuditLogs",
+        "tableId": "table-audit-log",
+        "command": "SELECT",
+        "method": "findMany",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -23052,16 +23391,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-a69a25bcf20d9ef2",
-        "source": "backend/src/services/attentionQueueService.ts:292",
-        "function": "getAttentionQueueSnapshotUncached",
-        "tableId": "table-audit-log",
-        "command": "SELECT",
-        "method": "findFirst",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "legacy-exception"
-      },
-      {
         "id": "access-a6c72c827d25a1eb",
         "source": "backend/src/services/printLifecycleService.ts:53",
         "function": "getOrCreatePrintSession",
@@ -23112,16 +23441,6 @@
         "authorityStatus": "uncontrolled"
       },
       {
-        "id": "access-aa07c193efba65bd",
-        "source": "backend/src/services/printerRegistryService.ts:802",
-        "function": "deleteNetworkDirectPrinter",
-        "tableId": "table-printer",
-        "command": "DELETE",
-        "method": "delete",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
         "id": "access-ab49ded0ca7a441f",
         "source": "backend/src/services/qrTrackingAnalyticsService.ts:497",
         "function": "buildActivityAnalytics",
@@ -23149,7 +23468,7 @@
         "command": "SELECT",
         "method": "findFirst",
         "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-ae50905a7ca3dd83",
@@ -23160,6 +23479,16 @@
         "method": "groupBy",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "uncontrolled"
+      },
+      {
+        "id": "access-af7ca6b4aa5e5d87",
+        "source": "backend/src/services/printerRegistryService.ts:751",
+        "function": "upsertManagedNetworkPrinter",
+        "tableId": "table-printer",
+        "command": "INSERT",
+        "method": "create",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-b07e0540ea55f6b8",
@@ -23202,16 +23531,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-b1b2d31fe5a703a7",
-        "source": "backend/src/services/attentionQueueService.ts:282",
-        "function": "getAttentionQueueSnapshotUncached",
-        "tableId": "table-policy-alert",
-        "command": "SELECT",
-        "method": "findFirst",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
-      },
-      {
         "id": "access-b1f1d4e36da27863",
         "source": "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:384",
         "function": "loadSupportIssueForResponse",
@@ -23232,26 +23551,6 @@
         "authorityStatus": "uncontrolled"
       },
       {
-        "id": "access-b3007cef27b7dd2d",
-        "source": "backend/src/services/auditService.ts:144",
-        "function": "createAuditLog",
-        "tableId": "table-audit-log",
-        "command": "INSERT",
-        "method": "create",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
-      },
-      {
-        "id": "access-b312adf0ea62711a",
-        "source": "backend/src/printing/registry/printerProfileService.ts:356",
-        "function": "ensurePrinterProfileForPrinter",
-        "tableId": "table-printer-profile",
-        "command": "UPDATE",
-        "method": "update",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
         "id": "access-b353cc302c75b098",
         "source": "backend/src/services/batchPrintLifecycleReconciliationService.ts:323",
         "function": "reconcileBatchPrintLifecycle",
@@ -23268,6 +23567,16 @@
         "tableId": "table-print-session",
         "command": "SELECT",
         "method": "findUnique",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-b490c64d93d22b40",
+        "source": "backend/src/services/printerRegistryService.ts:459",
+        "function": "syncLocalAgentPrintersFromHeartbeat",
+        "tableId": "table-printer",
+        "command": "UPDATE",
+        "method": "updateMany",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -23300,6 +23609,16 @@
         "method": "findFirst",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-b55caa16a26d2853",
+        "source": "backend/src/services/auditService.ts:57",
+        "function": "resolveOrgId",
+        "tableId": "table-licensee",
+        "command": "SELECT",
+        "method": "findUnique",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "legacy-exception"
       },
       {
         "id": "access-b570e720963f3237",
@@ -23372,12 +23691,42 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-bb9b6267196f4bbc",
-        "source": "backend/src/services/printerRegistryService.ts:936",
-        "function": "testRegisteredPrinterConnection",
+        "id": "access-b9fc2c1ca7ecb04b",
+        "source": "backend/src/services/printerRegistryService.ts:400",
+        "function": "syncLocalAgentPrintersFromHeartbeat",
+        "tableId": "table-printer",
+        "command": "SELECT",
+        "method": "findUnique",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-ba686fc199f08acd",
+        "source": "backend/src/services/printerRegistryService.ts:836",
+        "function": "deleteNetworkDirectPrinter",
         "tableId": "table-printer",
         "command": "UPDATE",
         "method": "update",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-bc689a477f0f0a88",
+        "source": "backend/src/printing/registry/printerProfileService.ts:377",
+        "function": "getPrinterProfileForPrinter",
+        "tableId": "table-printer-profile",
+        "command": "SELECT",
+        "method": "findUnique",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-bc7de55823fc8f0d",
+        "source": "backend/src/services/printSampleScanService.ts:77",
+        "function": "recordPrintJobSampleScan",
+        "tableId": "table-qrcode",
+        "command": "SELECT",
+        "method": "findUnique",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -23420,6 +23769,16 @@
         "method": "updateMany",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "uncontrolled"
+      },
+      {
+        "id": "access-bfc2cd6f4a1a2945",
+        "source": "backend/src/services/printerRegistryService.ts:640",
+        "function": "upsertManagedNetworkPrinter",
+        "tableId": "table-printer",
+        "command": "SELECT",
+        "method": "findUnique",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-c01fa0646fa4b9ea",
@@ -23532,16 +23891,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-c3c30c951e709b3b",
-        "source": "backend/src/services/attentionQueueService.ts:276",
-        "function": "getAttentionQueueSnapshotUncached",
-        "tableId": "table-audit-log",
-        "command": "COUNT",
-        "method": "count",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "legacy-exception"
-      },
-      {
         "id": "access-c3e0fe2e6a2335c5",
         "source": "backend/src/services/localAgentPrinterRelinkService.ts:178",
         "function": "relinkLocalAgentPrinterToCurrentConnector",
@@ -23582,6 +23931,16 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-c689b1a6597cffa6",
+        "source": "scripts/run-system-integration.mjs:312",
+        "function": "main",
+        "tableId": "table-audit-log",
+        "command": "SELECT",
+        "method": "findFirst",
+        "registration": "registered-entrypoint",
+        "authorityStatus": "administrative-tooling"
+      },
+      {
         "id": "access-c6e257f235a2d27e",
         "source": "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:1475",
         "function": "replaceVerificationEvidenceMetadata",
@@ -23612,22 +23971,22 @@
         "authorityStatus": "uncontrolled"
       },
       {
-        "id": "access-c8027b3764233754",
-        "source": "backend/src/services/printerRegistryService.ts:853",
-        "function": "testRegisteredPrinterConnection",
-        "tableId": "table-printer",
-        "command": "UPDATE",
-        "method": "update",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
         "id": "access-c89a4297af49788c",
         "source": "backend/src/services/printLifecycleService.ts:174",
         "function": "finalizePrintSessionIfReady",
         "tableId": "table-print-job",
         "command": "UPDATE",
         "method": "updateMany",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-c97e5ea924e74f0c",
+        "source": "backend/src/services/auditService.ts:265",
+        "function": "getAuditLogs",
+        "tableId": "table-audit-log",
+        "command": "COUNT",
+        "method": "count",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -23662,8 +24021,18 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-cc5627307344a3f7",
+        "source": "backend/src/services/printerRegistryService.ts:805",
+        "function": "deleteNetworkDirectPrinter",
+        "tableId": "table-printer",
+        "command": "SELECT",
+        "method": "findMany",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-cc65fa8e36dcd281",
-        "source": "backend/src/controllers/tracePolicyController.ts:300",
+        "source": "backend/src/controllers/tracePolicyController.ts:215",
         "function": "updatePolicyConfigController",
         "tableId": "table-security-policy",
         "command": "UPSERT",
@@ -23693,13 +24062,23 @@
       },
       {
         "id": "access-cda286a36221c918",
-        "source": "backend/src/controllers/tracePolicyController.ts:351",
+        "source": "backend/src/controllers/tracePolicyController.ts:266",
         "function": "getPolicyAlertsController",
         "tableId": "table-policy-alert",
         "command": "SELECT",
         "method": "findMany",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "uncontrolled"
+      },
+      {
+        "id": "access-cdcebd63745fd1bf",
+        "source": "backend/src/services/printerRegistryService.ts:786",
+        "function": "deleteNetworkDirectPrinter",
+        "tableId": "table-printer",
+        "command": "SELECT",
+        "method": "findUnique",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-cec3062ecba17664",
@@ -23712,16 +24091,6 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-cfa761f3eea9d763",
-        "source": "backend/src/services/auditService.ts:153",
-        "function": "createAuditLog",
-        "tableId": "table-audit-log",
-        "command": "INSERT",
-        "method": "create",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
-      },
-      {
         "id": "access-cfbc6fd16a822e28",
         "source": "backend/src/services/printLifecycleService.ts:132",
         "function": "finalizePrintSessionIfReady",
@@ -23730,16 +24099,6 @@
         "method": "findMany",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-cfd7a67e0fc24a5e",
-        "source": "scripts/run-system-integration.mjs:304",
-        "function": "main",
-        "tableId": "table-audit-log",
-        "command": "SELECT",
-        "method": "findFirst",
-        "registration": "registered-entrypoint",
-        "authorityStatus": "administrative-tooling"
       },
       {
         "id": "access-cff2064877c21248",
@@ -23822,6 +24181,16 @@
         "authorityStatus": "legacy-exception"
       },
       {
+        "id": "access-d6f89912b8204d1f",
+        "source": "backend/src/printing/registry/printerProfileService.ts:317",
+        "function": "ensurePrinterProfileForPrinter",
+        "tableId": "table-printer-profile-snapshot",
+        "command": "INSERT",
+        "method": "create",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-d7a34b09012ab642",
         "source": "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:337",
         "function": "createSupportTicketMessageRow",
@@ -23829,7 +24198,7 @@
         "command": "SELECT",
         "method": "findFirst",
         "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-d80ddb34ed7ce70f",
@@ -23838,6 +24207,16 @@
         "tableId": "table-print-session",
         "command": "SELECT",
         "method": "findUnique",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-d819e8814c946b4f",
+        "source": "backend/src/services/printerRegistryService.ts:952",
+        "function": "testRegisteredPrinterConnection",
+        "tableId": "table-printer",
+        "command": "UPDATE",
+        "method": "update",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -23910,16 +24289,6 @@
         "method": "findFirst",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-dbbaa7a024680ab8",
-        "source": "backend/src/services/auditService.ts:122",
-        "function": "createAuditLogInTransaction",
-        "tableId": "table-security-event-outbox",
-        "command": "INSERT",
-        "method": "$executeRaw",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
       },
       {
         "id": "access-dbd91e208e5771c1",
@@ -24112,32 +24481,12 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-e70fb1335ec4eb5d",
-        "source": "backend/src/printing/registry/printerProfileService.ts:378",
-        "function": "getPrinterProfileForPrinter",
-        "tableId": "table-printer-profile",
-        "command": "SELECT",
-        "method": "findUnique",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
         "id": "access-e7d4dafdcb3fe396",
         "source": "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts:467",
         "function": "findCustomerTrustCredential",
         "tableId": "table-customer-trust-credential",
         "command": "SELECT",
         "method": "findFirst",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
-      },
-      {
-        "id": "access-e8f1969a9242e48d",
-        "source": "backend/src/printing/registry/printerProfileService.ts:318",
-        "function": "ensurePrinterProfileForPrinter",
-        "tableId": "table-printer-profile-snapshot",
-        "command": "INSERT",
-        "method": "create",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -24152,12 +24501,12 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
-        "id": "access-e9b18e8656550ac3",
-        "source": "backend/src/services/printerRegistryService.ts:871",
-        "function": "testRegisteredPrinterConnection",
-        "tableId": "table-printer",
-        "command": "UPDATE",
-        "method": "update",
+        "id": "access-ea4a9d150787fec3",
+        "source": "backend/src/services/accessControlService.ts:324",
+        "function": "findScopedBatch",
+        "tableId": "table-batch",
+        "command": "SELECT",
+        "method": "findFirst",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -24209,7 +24558,7 @@
         "command": "INSERT",
         "method": "create",
         "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "uncontrolled"
+        "authorityStatus": "not-statically-reachable"
       },
       {
         "id": "access-ebc58d9547205880",
@@ -24288,6 +24637,16 @@
         "tableId": "table-print-session",
         "command": "UPDATE",
         "method": "update",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
+        "id": "access-f095900c291fdf81",
+        "source": "backend/src/services/printSampleScanService.ts:49",
+        "function": "recordPrintJobSampleScan",
+        "tableId": "table-print-job",
+        "command": "SELECT",
+        "method": "findUnique",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "not-statically-reachable"
       },
@@ -24432,6 +24791,16 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-fadd2160adc17bd4",
+        "source": "backend/src/services/printerRegistryService.ts:536",
+        "function": "listRegisteredPrintersForManufacturer",
+        "tableId": "table-printer",
+        "command": "SELECT",
+        "method": "findMany",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-faf10e66d535b357",
         "source": "backend/src/controllers/irIncidentController.ts:234",
         "function": "createIrIncident",
@@ -24462,6 +24831,16 @@
         "authorityStatus": "not-statically-reachable"
       },
       {
+        "id": "access-fda35a9aff389795",
+        "source": "backend/src/printing/registry/printerProfileService.ts:427",
+        "function": "discoverPrinterCapabilities",
+        "tableId": "table-printer-profile",
+        "command": "UPDATE",
+        "method": "update",
+        "registration": "reachable-from-registered-entrypoint",
+        "authorityStatus": "not-statically-reachable"
+      },
+      {
         "id": "access-fee471f6a5e965be",
         "source": "backend/src/controllers/irIncidentController.ts:327",
         "function": "getIrIncident",
@@ -24470,23 +24849,13 @@
         "method": "findUnique",
         "registration": "reachable-from-registered-entrypoint",
         "authorityStatus": "legacy-exception"
-      },
-      {
-        "id": "access-ffb5971eb393efd7",
-        "source": "backend/src/services/printerRegistryService.ts:599",
-        "function": "getRegisteredPrinterForManufacturer",
-        "tableId": "table-printer",
-        "command": "SELECT",
-        "method": "findFirst",
-        "registration": "reachable-from-registered-entrypoint",
-        "authorityStatus": "not-statically-reachable"
       }
     ],
     "directAccessAuthorityStatus": {
-      "legacy-exception": 36,
+      "not-statically-reachable": 321,
+      "legacy-exception": 30,
       "reviewed-transaction-boundary": 11,
-      "not-statically-reachable": 306,
-      "uncontrolled": 78,
+      "uncontrolled": 62,
       "administrative-tooling": 1
     }
   }
