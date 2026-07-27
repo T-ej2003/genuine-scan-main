@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 
 const {
+  b03PayloadDigest,
   claimAuditLogOutboxSlice,
   claimCompliancePackSlice,
   consumeAuditLogOutbox,
@@ -19,6 +20,15 @@ const client = (rows, captured) => ({
 });
 
 const main = async () => {
+  const digest = b03PayloadDigest({ action: "AUDIT", details: { b: 2, a: 1 } });
+  assert.match(digest, /^[0-9a-f]{64}$/);
+  assert.equal(
+    digest,
+    b03PayloadDigest({ details: { a: 1, b: 2 }, action: "AUDIT" }),
+    "Payload digest must canonicalize object-key order for deterministic replay checks"
+  );
+  assert.notEqual(digest, JSON.stringify({ action: "AUDIT", details: { b: 2, a: 1 } }));
+
   const auditCalls = [];
   const auditResult = await consumeAuditLogOutbox(client([
     { auditLogId: "audit-1", replayed: false },

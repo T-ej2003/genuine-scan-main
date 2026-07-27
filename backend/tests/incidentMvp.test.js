@@ -1,7 +1,11 @@
 const nodemailer = require("nodemailer");
 const path = require("path");
 const { UserRole } = require("@prisma/client");
-const { normalizeCustomerContact, isIncidentAdminRole } = require("../dist/services/incidentService");
+const {
+  normalizeCustomerContact,
+  isIncidentAdminRole,
+  sanitizeIncidentText,
+} = require("../dist/services/incidentService");
 const { enforceIncidentRateLimit } = require("../dist/services/incidentRateLimitService");
 const { requireAnyAdmin } = require("../dist/middleware/rbac");
 
@@ -58,6 +62,32 @@ require.cache[repositoryPath] = {
 const incidentEmailService = require("../dist/services/incidentEmailService");
 
 const run = async () => {
+  assert(
+    sanitizeIncidentText("<b>Hello <i>world</i></b>") === "Hello world",
+    "Nested markup should become plain text"
+  );
+  assert(
+    sanitizeIncidentText("Before <<script>alert(1)</script> after") === "Before alert(1) after",
+    "Malformed nested tag openers should not recreate markup"
+  );
+  assert(
+    sanitizeIncidentText("Keep <script alert(1)") === "Keep",
+    "Malformed markup should not survive as executable text"
+  );
+  assert(
+    sanitizeIncidentText("<script>alert(1)</script>") === "alert(1)",
+    "Script tags should be removed while retaining harmless text"
+  );
+  assert(
+    sanitizeIncidentText("&lt;script&gt;alert(1)&lt;/script&gt;") === "alert(1)",
+    "Encoded markup should become plain text"
+  );
+  assert(
+    sanitizeIncidentText("  Harmless   plain text.  ") === "Harmless plain text.",
+    "Harmless plain text should retain content and normalized whitespace"
+  );
+  assert(sanitizeIncidentText("bounded", 4) === "boun", "Plain text should retain its length bound");
+
   // 1) Consent handling true/false
   const withConsent = normalizeCustomerContact({
     consentToContact: true,

@@ -54,8 +54,30 @@ type IncidentActor = {
 type IncidentTransaction = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 const MAX_SAFE_TEXT = 3000;
-const cleanText = (value: unknown, max = MAX_SAFE_TEXT) =>
-  String(value || "").trim().replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim().slice(0, max);
+const decodeMarkupDelimiters = (value: string) => value
+  .replace(/&(?:lt|#0*60|#x0*3c);/gi, "<")
+  .replace(/&(?:gt|#0*62|#x0*3e);/gi, ">");
+const startsMarkup = (value: string, index: number) =>
+  value[index + 1] === "<" || /[A-Za-z/!?]/.test(value[index + 1] || "");
+export const sanitizeIncidentText = (value: unknown, max = MAX_SAFE_TEXT) => {
+  const input = decodeMarkupDelimiters(String(value || "").trim());
+  let output = "";
+  let insideMarkup = false;
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index];
+    if (!insideMarkup && character === "<" && startsMarkup(input, index)) {
+      insideMarkup = true;
+      continue;
+    }
+    if (insideMarkup) {
+      if (character === ">") insideMarkup = false;
+      continue;
+    }
+    output += character;
+  }
+  return output.replace(/\s+/g, " ").trim().slice(0, max);
+};
+const cleanText = sanitizeIncidentText;
 const normalizeCode = (value: string) => cleanText(value, 128).toUpperCase();
 const incidentTypeMap: Record<IncidentReportInput["incidentType"], IncidentType> = {
   counterfeit_suspected: IncidentType.COUNTERFEIT_SUSPECTED,

@@ -233,6 +233,9 @@ const stableJson = (value: unknown): string => {
     .join(",")}}`;
 };
 export const b03PayloadDigest = (payload: unknown) =>
+  // SHA-256 is intentional here: this is a deterministic JSON payload-integrity
+  // digest, never a password or credential verifier.
+  // codeql[js/insufficient-password-hash]
   createHash("sha256").update(stableJson(payload)).digest("hex");
 const exactEnum = <T extends string>(value: unknown, label: string, allowed: readonly T[]) => {
   const normalized = String(value || "") as T;

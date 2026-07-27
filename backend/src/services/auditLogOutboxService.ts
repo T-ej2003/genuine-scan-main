@@ -45,6 +45,9 @@ export const queueAuditLogOutbox = async (
   }
   const payloadDigest = b03PayloadDigest(payload);
   const idempotencyKey = createHash("sha256")
+    // SHA-256 is intentional here: this fixed workflow/request/payload tuple is
+    // an outbox idempotency key, never a password or credential verifier.
+    // codeql[js/insufficient-password-hash]
     .update(`AUDIT_LOG_RECOVERY:${authority.requestId}:${payloadDigest}`)
     .digest("hex");
   const row = await enqueueAuditLogOutbox(db as any, {
