@@ -1,8 +1,7 @@
 const assert = require("node:assert/strict");
 
 const {
-  b03PayloadDigest,
-  claimAuditLogOutboxSlice,
+  b03PayloadDigest, claimAuditLogOutboxSlice,
   claimCompliancePackSlice,
   consumeAuditLogOutbox,
   createRoleNotifications,
@@ -20,15 +19,6 @@ const client = (rows, captured) => ({
 });
 
 const main = async () => {
-  const digest = b03PayloadDigest({ action: "AUDIT", details: { b: 2, a: 1 } });
-  assert.match(digest, /^[0-9a-f]{64}$/);
-  assert.equal(
-    digest,
-    b03PayloadDigest({ details: { a: 1, b: 2 }, action: "AUDIT" }),
-    "Payload digest must canonicalize object-key order for deterministic replay checks"
-  );
-  assert.notEqual(digest, JSON.stringify({ action: "AUDIT", details: { b: 2, a: 1 } }));
-
   const auditCalls = [];
   const auditResult = await consumeAuditLogOutbox(client([
     { auditLogId: "audit-1", replayed: false },
@@ -67,6 +57,15 @@ const main = async () => {
     }], []), { attemptedAt: new Date("2026-07-20T10:00:00.000Z"), batchSize: 1 }),
     /SHA-256 payloadDigest/
   );
+
+  const digest = b03PayloadDigest({ action: "AUDIT", details: { b: 2, a: 1 } });
+  assert.match(digest, /^[0-9a-f]{64}$/);
+  assert.equal(
+    digest,
+    b03PayloadDigest({ details: { a: 1, b: 2 }, action: "AUDIT" }),
+    "Payload digest must canonicalize object-key order for deterministic replay checks"
+  );
+  assert.notEqual(digest, JSON.stringify({ action: "AUDIT", details: { b: 2, a: 1 } }));
 
   await assert.rejects(
     claimAuditLogOutboxSlice(client([], []), {
