@@ -41,6 +41,7 @@ type RequestAccessListResponse = {
 };
 
 const supportQueryOptions = (filters: SupportQueueFilters) => ({
+  scope: "platform" as const,
   status: filters.status !== "all" ? (filters.status as SupportTicketStatus) : undefined,
   priority: filters.priority !== "all" ? (filters.priority as SupportTicketPriority) : undefined,
   search: filters.search.trim() || undefined,

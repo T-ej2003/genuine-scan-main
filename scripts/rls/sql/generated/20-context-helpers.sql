@@ -13238,7 +13238,7 @@ BEGIN
      OR current_setting('app.purpose',true) NOT IN ('support-ticket-read','support-ticket-update')
      OR p_licensee_id IS NULL
      OR p_limit NOT BETWEEN 1 AND 200 OR p_offset NOT BETWEEN 0 AND 2000
-     OR (p_licensee_id IS NOT NULL AND p_licensee_id !~ '^[0-9a-fA-F-]{36}$')
+     OR (p_licensee_id <> '__platform_all__' AND p_licensee_id !~ '^[0-9a-fA-F-]{36}$')
      OR (p_status IS NOT NULL AND p_status NOT IN ('OPEN','IN_PROGRESS','WAITING_CUSTOMER','RESOLVED','CLOSED'))
      OR (p_priority IS NOT NULL AND p_priority NOT IN ('P1','P2','P3','P4'))
      OR length(coalesce(p_search,''))>120 THEN
@@ -13248,7 +13248,7 @@ BEGIN
     current_setting('app.auth_session_id',true),clock_timestamp()::timestamp without time zone,30
   );
   PERFORM set_config('app.b03_operation','support-ticket-read',true),
-          set_config('app.b03_licensee_id',coalesce(p_licensee_id,''),true);
+          set_config('app.b03_licensee_id',CASE WHEN p_licensee_id='__platform_all__' THEN '' ELSE p_licensee_id END,true);
   WITH visible AS MATERIALIZED (
     SELECT t.id,t."incidentId",t."referenceCode",t."licenseeId",t."customerEmail",t.subject,
       t.status::text AS status,t.priority::text AS priority,t."assignedToUserId",
@@ -13260,7 +13260,7 @@ BEGIN
     JOIN public."Incident" i ON i.id=t."incidentId"
     LEFT JOIN public."IncidentHandoff" h ON h."incidentId"=i.id
     LEFT JOIN public."User" u ON u.id=t."assignedToUserId"
-    WHERE (p_licensee_id IS NULL OR t."licenseeId"=p_licensee_id)
+    WHERE (p_licensee_id='__platform_all__' OR t."licenseeId"=p_licensee_id)
       AND (p_status IS NULL OR t.status::text=p_status)
       AND (p_priority IS NULL OR t.priority::text=p_priority)
       AND (coalesce(p_search,'')='' OR position(lower(p_search) in lower(t."referenceCode"))>0

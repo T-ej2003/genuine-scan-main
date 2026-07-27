@@ -678,6 +678,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
   },
 
   async getSupportTickets(options?: {
+    scope?: "platform";
     status?: "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
     priority?: "P1" | "P2" | "P3" | "P4";
     licenseeId?: string;
@@ -686,6 +687,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     offset?: number;
   }) {
     const params = new URLSearchParams();
+    if (options?.scope) params.append("scope", options.scope);
     if (options?.status) params.append("status", options.status);
     if (options?.priority) params.append("priority", options.priority);
     if (options?.licenseeId) params.append("licenseeId", options.licenseeId);

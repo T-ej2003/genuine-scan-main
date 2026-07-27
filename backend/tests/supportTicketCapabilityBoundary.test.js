@@ -20,8 +20,10 @@ for (const name of [
 assert.match(controller, /b03BoundaryForRequest\(req,\s*"support-ticket-read"\)/);
 assert.match(controller, /b03BoundaryForRequest\(req,\s*"support-ticket-update"\)/);
 assert.match(controller, /b03BoundaryForRequest\(req,\s*"support-ticket-message"\)/);
+assert.match(controller, /scope === "platform" \? "__platform_all__"/);
 assert.doesNotMatch(controller, /withB02AuthenticatedRequest|listSupportTicketRows|loadSupportTicketRow/);
 assert.match(sql, /actor\.role NOT IN \('SUPER_ADMIN','PLATFORM_SUPER_ADMIN'\)/);
+assert.match(sql, /p_licensee_id='__platform_all__'/);
 assert.match(sql, /require_recent_mfa_session\([\s\S]*clock_timestamp\(\)::timestamp without time zone,30/);
 assert.match(sql, /SUPPORT_TICKET_UPDATED[\s\S]*SUPPORT_TICKET_MESSAGE_ADDED/);
 assert.doesNotMatch(sql, /SELECT\s+t\.\*|RETURNING\s+\*/i);

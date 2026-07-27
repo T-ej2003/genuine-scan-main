@@ -23,6 +23,7 @@ const toInt = (value: unknown, fallback: number, min: number, max: number) => {
 };
 
 const listSchema = z.object({
+  scope: z.literal("platform").optional(),
   status: z.nativeEnum(SupportTicketStatus).optional(),
   priority: z.enum(["P1", "P2", "P3", "P4"]).optional(),
   licenseeId: z.string().uuid().optional(),
@@ -69,7 +70,7 @@ export const listSupportTickets = async (req: AuthRequest, res: Response) => {
     const boundary = b03BoundaryForRequest(req, "support-ticket-read");
     const data = await boundary.run(async (db) => {
       const result = await listSupportTicketsBoundary(db, {
-          licenseeId: parsed.data.licenseeId,
+          licenseeId: parsed.data.scope === "platform" ? "__platform_all__" : parsed.data.licenseeId,
           status: parsed.data.status,
           priority: parsed.data.priority,
           search: parsed.data.search,

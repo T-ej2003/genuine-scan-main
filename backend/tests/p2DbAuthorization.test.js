@@ -117,6 +117,14 @@ const assertNoCrossTenantLeak = (response, forbiddenMarker, label) => {
     });
     assertDenied(unscopedSupportAsAdmin, "platform support tickets without a licensee selector");
 
+    const platformSupportAsAdmin = await request("GET", "/api/support/tickets?scope=platform", null, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assert.strictEqual(platformSupportAsAdmin.status, 200, platformSupportAsAdmin.text);
+    assert.match(platformSupportAsAdmin.text, /P2 Support A/);
+    assert.match(platformSupportAsAdmin.text, /P2 Support B/);
+    assertSafeResponse(platformSupportAsAdmin, "explicit platform support tickets");
+
     const supportAsAdmin = await request("GET", `/api/support/tickets?licenseeId=${ids.licenseeA}`, null, {
       headers: authHeader(tokens.superAdmin),
     });
