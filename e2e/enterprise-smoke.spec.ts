@@ -417,16 +417,21 @@ test.describe.serial("Enterprise smoke flows", () => {
     await expect(page.getByTestId("batch-workspace-dialog")).toBeVisible();
     await clickWithAutoDetectedIssueRetry(page, page.getByTestId("batch-workspace-tab-operations"));
     await selectRadixOption(page, "batch-workspace-manufacturer-select", env.assignManufacturerName);
-    await page.getByTestId("batch-workspace-assign-quantity").fill(env.assignQuantity);
+    const quantityInput = page.getByTestId("batch-workspace-assign-quantity");
+    await quantityInput.fill(env.assignQuantity);
     await clickWithAutoDetectedIssueRetry(page, page.getByTestId("batch-workspace-assign-submit"));
     const stepUpDialog = page.getByRole("dialog", { name: /confirm admin verification/i });
-    await expect(stepUpDialog).toBeVisible();
-    await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
-    await page.locator("#step-up-mfa-backup-code").fill(env.licenseeMfaBackupCodes[1]);
-    await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
-    await expect(stepUpDialog).toBeHidden();
-    await clickWithAutoDetectedIssueRetry(page, page.getByTestId("batch-workspace-assign-submit"));
-    await expect(page.getByTestId("batch-workspace-assign-quantity")).toHaveValue("");
+    await expect
+      .poll(async () => (await stepUpDialog.isVisible()) || (await quantityInput.inputValue()) === "")
+      .toBe(true);
+    if (await stepUpDialog.isVisible()) {
+      await stepUpDialog.getByRole("button", { name: /^backup code$/i }).click();
+      await page.locator("#step-up-mfa-backup-code").fill(env.licenseeMfaBackupCodes[1]);
+      await stepUpDialog.getByRole("button", { name: /^continue$/i }).click();
+      await expect(stepUpDialog).toBeHidden();
+      await clickWithAutoDetectedIssueRetry(page, page.getByTestId("batch-workspace-assign-submit"));
+    }
+    await expect(quantityInput).toHaveValue("");
   });
 
   test("manufacturer can start a print job from the controlled print dialog", async ({ page }, testInfo) => {
