@@ -32,7 +32,10 @@ npm run verify:staging-smoke
 
 ## Admin MFA Login
 
-If the login lands in MFA bootstrap mode:
+CI uses the GitHub staging Environment secret `STAGING_SMOKE_ADMIN_MFA_SECRET`. Its value is the
+Base32 TOTP seed, not a six-digit code. Never place an `otpauth://` URI in logs.
+
+For manual or local runs, `SMOKE_ADMIN_MFA_CODE` remains an override:
 
 ```bash
 export SMOKE_LOGIN_EMAIL=admin@example.com
