@@ -22,7 +22,9 @@ const ids = {
   raceQr: "50000000-0000-4000-8000-000000000602",
   printer: "50000000-0000-4000-8000-000000000701",
   foreignPrinter: "50000000-0000-4000-8000-000000000702",
+  discoveredPrinter: "50000000-0000-4000-8000-000000000703",
   registration: "50000000-0000-4000-8000-000000000801",
+  staleRegistration: "50000000-0000-4000-8000-000000000803",
 };
 const caps = { maker: "M".repeat(43), checker: "C".repeat(43), outsider: "O".repeat(43) };
 const quorumCases = [
@@ -105,10 +107,10 @@ async function main() {
     DELETE FROM public."SensitiveActionApproval" WHERE "entityType"='Batch' AND "entityId" IN ('${ids.batch}','${ids.raceBatch}');
     DELETE FROM public."AuditLog" WHERE "entityId"='${ids.batch}' OR "licenseeId"='${ids.licenseeA}';
     DELETE FROM public."SecurityEventOutbox" WHERE "licenseeId"='${ids.licenseeA}';
-    DELETE FROM public."PrinterAttestation" WHERE "printerRegistrationId"='${ids.registration}';
+    DELETE FROM public."PrinterAttestation" WHERE "printerRegistrationId" IN ('${ids.registration}','${ids.staleRegistration}');
     DELETE FROM public."RefreshToken" WHERE id IN ('${ids.makerRefresh}','${ids.checkerRefresh}','${ids.outsiderRefresh}');
-    DELETE FROM public."Printer" WHERE id IN ('${ids.printer}','${ids.foreignPrinter}');
-    DELETE FROM public."PrinterRegistration" WHERE id='${ids.registration}';
+    DELETE FROM public."Printer" WHERE id IN ('${ids.printer}','${ids.foreignPrinter}','${ids.discoveredPrinter}');
+    DELETE FROM public."PrinterRegistration" WHERE id IN ('${ids.registration}','${ids.staleRegistration}');
     DELETE FROM public."QRCode" WHERE id IN ('${ids.qr}','${ids.raceQr}');
     DELETE FROM public."Batch" WHERE id IN ('${ids.batch}','${ids.raceBatch}');
     DELETE FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.maker}';
@@ -135,9 +137,13 @@ async function main() {
       ('${ids.qr}','immutable-printing-code','LBL-0001','${ids.licenseeA}','${ids.batch}','ALLOCATED',now()),
       ('${ids.raceQr}','immutable-printing-race-code','LBL-0002','${ids.licenseeA}','${ids.raceBatch}','ALLOCATED',now());
     INSERT INTO public."PrinterRegistration"(id,"userId","orgId","licenseeId","deviceFingerprint","agentId","publicKeyPem","trustStatus","approvedAt","lastSeenAt","updatedAt")
-      VALUES('${ids.registration}','${ids.maker}','${ids.orgA}','${ids.licenseeA}','printing-device','printing-agent','-----BEGIN PUBLIC KEY----- fixture','TRUSTED',now(),now(),now());
+      VALUES
+      ('${ids.registration}','${ids.maker}','${ids.orgA}','${ids.licenseeA}','printing-device','printing-agent','-----BEGIN PUBLIC KEY----- fixture','TRUSTED',now(),now(),now()),
+      ('${ids.staleRegistration}','${ids.maker}','${ids.orgA}','${ids.licenseeA}','printing-device-stale','printing-agent-stale','-----BEGIN PUBLIC KEY----- fixture','TRUSTED',now(),now(),now());
     INSERT INTO public."Printer"(id,name,"connectionType","commandLanguage","nativePrinterId","agentId","deviceFingerprint","printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive","isDefault","updatedAt")
-      VALUES('${ids.printer}','Printing Local Agent','LOCAL_AGENT','ZPL','printing-native','printing-agent','printing-device','${ids.registration}','${ids.orgA}','${ids.licenseeA}','${ids.maker}','${ids.maker}',true,true,now());
+      VALUES
+      ('${ids.printer}','Printing Local Agent','LOCAL_AGENT','ZPL','printing-native','printing-agent-stale','printing-device-stale','${ids.staleRegistration}','${ids.orgA}','${ids.licenseeA}','${ids.maker}','${ids.maker}',true,true,now()),
+      ('${ids.discoveredPrinter}','Printing Local Agent','LOCAL_AGENT','ZPL','printing-native','printing-agent','printing-device','${ids.registration}','${ids.orgA}','${ids.licenseeA}','${ids.maker}','${ids.maker}',true,false,now());
     INSERT INTO public."Printer"(id,name,"connectionType","commandLanguage","ipAddress",port,"orgId","licenseeId","assignedUserId","createdByUserId","isActive","isDefault","updatedAt")
       VALUES('${ids.foreignPrinter}','Other Manufacturer Printer','NETWORK_DIRECT','ZPL','127.0.0.2',9100,'${ids.orgA}','${ids.licenseeA}','${ids.outsider}','${ids.outsider}',true,false,now());
     INSERT INTO public."PrinterAttestation"(id,"printerRegistrationId","signedPayloadHash","heartbeatNonce","attestedAt","expiresAt","signatureValid","trustValid",metadata)
@@ -179,6 +185,16 @@ async function main() {
   )`);
   assert.equal(relinked.printerRegistrationId, ids.registration);
   assert.equal(relinked.nativePrinterId, "printing-native");
+  assert.deepEqual(json(admin, `SELECT jsonb_build_object(
+    'active',"isActive",'default',"isDefault",'registration',"printerRegistrationId",
+    'native',"nativePrinterId",'status',"lastValidationStatus"
+  ) FROM public."Printer" WHERE id='${ids.discoveredPrinter}'`), {
+    active: false,
+    default: false,
+    registration: null,
+    native: null,
+    status: "RELINKED",
+  });
   const idempotencyStart = json(app, `SELECT app_rls.printing_idempotency(
     '${caps.maker}','printing-idempotency','${requestId()}','BEGIN','PRINT_JOB_CREATE',
     '${idempotencyKeyHash}','${idempotencyRequestHash}',NULL,'{}'::jsonb

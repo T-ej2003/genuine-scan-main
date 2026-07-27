@@ -8407,6 +8407,20 @@ BEGIN
       WHERE "assignedUserId"=actor."userId" AND "connectionType"='LOCAL_AGENT'
         AND id<>p_printer_id;
     UPDATE public."Printer" SET
+      "printerRegistrationId"=NULL,"nativePrinterId"=NULL,
+      "agentId"=NULL,"deviceFingerprint"=NULL,
+      "isActive"=false,"isDefault"=false,
+      "lastValidationStatus"='RELINKED',
+      "lastValidationMessage"='Superseded by an explicit printer relink',
+      "updatedAt"=now_at
+      WHERE id<>p_printer_id
+        AND "printerRegistrationId"=nullif(p_payload->>'printerRegistrationId','')
+        AND "nativePrinterId"=nullif(p_payload->>'nativePrinterId','')
+        AND "assignedUserId"=actor."userId"
+        AND "orgId" IS NOT DISTINCT FROM scope_org
+        AND "licenseeId" IS NOT DISTINCT FROM scope_licensee
+        AND "connectionType"='LOCAL_AGENT';
+    UPDATE public."Printer" SET
       "printerRegistrationId"=nullif(p_payload->>'printerRegistrationId',''),
       "nativePrinterId"=nullif(p_payload->>'nativePrinterId',''),
       "agentId"=nullif(p_payload->>'agentId',''),
