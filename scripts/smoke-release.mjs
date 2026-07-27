@@ -1,3 +1,5 @@
+import { resolveSmokeAdminMfaCode } from "./lib/staging-smoke-totp.mjs";
+
 const trimTrailingSlash = (value) => String(value || "").trim().replace(/\/+$/, "");
 const parseBool = (value, fallback = false) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -40,6 +42,7 @@ const sanitizeResponsePreview = (value) =>
     .replace(new RegExp("postgres(?:ql)?://" + "[^\\s\"']+", "gi"), `${"postgres"}://${"[redacted]"}`)
     .replace(/password=[^;\s"']+/gi, "password=[redacted]")
     .replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer [redacted]")
+    .replace(/\b\d{6}\b/g, "[redacted]")
     .slice(0, 220);
 
 const recordSetCookies = (headers) => {
@@ -251,14 +254,17 @@ const run = async () => {
   logPass("login");
 
   if (loginPayload?.data?.auth?.sessionStage === "MFA_BOOTSTRAP") {
-    const mfaCode = String(process.env.SMOKE_ADMIN_MFA_CODE || "").trim();
-    if (!mfaCode) {
+    const staticMfaCode = String(process.env.SMOKE_ADMIN_MFA_CODE || "").trim();
+    const mfaSecret = String(process.env.SMOKE_ADMIN_MFA_SECRET || "").trim();
+    if (!staticMfaCode && !mfaSecret) {
       if (shouldSoftSkipMissingMfaSmokeCode()) {
-        logSkip("admin MFA bootstrap completion (set SMOKE_ADMIN_MFA_CODE)");
+        logSkip("admin MFA bootstrap completion (set SMOKE_ADMIN_MFA_CODE or SMOKE_ADMIN_MFA_SECRET)");
         logSkip("staging smoke remaining authenticated steps because SMOKE_REQUIRED=false and the smoke account requires MFA bootstrap");
         return;
       }
-      throw new Error("Login entered MFA bootstrap mode. Set SMOKE_ADMIN_MFA_CODE to complete the smoke flow.");
+      throw new Error(
+        "Login entered MFA bootstrap mode. Set SMOKE_ADMIN_MFA_CODE or SMOKE_ADMIN_MFA_SECRET to complete the smoke flow."
+      );
     }
 
     const { response: challengeResponse, payload: challengePayload } = await requestJson(`${apiBaseUrl}/auth/mfa/challenge/begin`, {
@@ -267,6 +273,10 @@ const run = async () => {
     });
     ensureOk("auth mfa challenge begin", challengeResponse.status, challengePayload);
 
+    const mfaCode = await resolveSmokeAdminMfaCode({
+      code: staticMfaCode,
+      secret: mfaSecret,
+    });
     ({ response: loginResponse, payload: loginPayload } = await requestJson(`${apiBaseUrl}/auth/mfa/challenge/complete`, {
       method: "POST",
       body: JSON.stringify({
@@ -274,7 +284,7 @@ const run = async () => {
         code: mfaCode,
       }),
     }));
-    ensureOk("auth mfa challenge complete", loginResponse.status, loginPayload);
+    ensureOk("auth mfa challenge complete", loginResponse.status, null);
     logPass("admin MFA bootstrap completion");
   }
 

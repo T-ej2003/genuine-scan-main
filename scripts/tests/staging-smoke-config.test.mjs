@@ -87,6 +87,21 @@ test("Dependabot PR runs normally when smoke credentials are configured", () => 
   assert.equal(decision.shouldSkip, false);
 });
 
+test("MFA bootstrap is configured by either a static code or a TOTP secret", () => {
+  for (const mfaEnv of [
+    { SMOKE_ADMIN_MFA_CODE: "123456" },
+    { SMOKE_ADMIN_MFA_SECRET: "base32-seed-placeholder" },
+  ]) {
+    const { configuredOptionalFlows } = collectStagingSmokeConfig({
+      ...baseEnv,
+      ...mfaEnv,
+      SMOKE_LOGIN_EMAIL: "release-smoke@example.test",
+      SMOKE_LOGIN_PASSWORD: "not-a-real-secret",
+    });
+    assert(configuredOptionalFlows.includes("step-up-or-mfa"));
+  }
+});
+
 test("Dependabot skip does not hide missing staging URL variables", () => {
   const env = {
     ...baseEnv,

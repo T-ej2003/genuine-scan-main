@@ -78,7 +78,8 @@ export const collectStagingSmokeConfig = (env = process.env) => {
   const hasStepUpFlow = Boolean(
     read("SMOKE_STEP_UP_PASSWORD") ||
     read("SMOKE_ADMIN_STEP_UP_CODE") ||
-    read("SMOKE_ADMIN_MFA_CODE")
+    read("SMOKE_ADMIN_MFA_CODE") ||
+    read("SMOKE_ADMIN_MFA_SECRET")
   );
 
   const configuredOptionalFlows = [
