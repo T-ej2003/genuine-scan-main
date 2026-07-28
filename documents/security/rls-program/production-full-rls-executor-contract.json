@@ -1,98 +1,124 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "environment": "production",
-  "status": "implemented-requires-protected-environment-approval",
-  "deploymentModel": "blue-green-clean-room",
-  "database": "mscqr_production_rls_green_phase2",
-  "maintenanceDatabase": "mscqr_production",
-  "databaseAdministrator": "mscqr_prod_admin",
-  "administrativeSecret": "mscqr/production/rls-green/phase2/database-url/admin",
-  "runtimeSecretPrefix": "mscqr/production/rls-green/phase2/database-url/",
-  "rolePrefix": "mscqr_prd_rls_phase2_",
-  "deploymentId": "phase2",
-  "tlsRequired": true,
-  "targetMustBeFresh": true,
-  "managedRolesMustBeNew": true,
-  "noRequiredCustomerDataPrecondition": true,
-  "packageRoot": "/app/scripts/rls/sql/generated",
-  "evidenceRoot": "/app/documents/security/rls-program/generated",
-  "receiptPrefix": "rls-receipts/",
-  "activationOrder": [
-    "full-rls-capability-preflight",
-    "full-rls-admin-bootstrap",
-    "full-rls-role-provision",
-    "full-rls-role-verify",
-    "full-rls-admin-ownership",
-    "full-rls-runtime-policy",
-    "full-rls-verification"
-  ],
-  "modes": {
-    "full-rls-capability-preflight": {
-      "mutating": false,
-      "packageFile": null
-    },
-    "full-rls-role-provision": {
-      "mutating": true,
-      "confirmation": "MSCQR_PRODUCTION_GREEN_PROVISION_RUNTIME_ROLES",
-      "packageFile": null
-    },
-    "full-rls-role-verify": {
-      "mutating": false,
-      "packageFile": null
-    },
-    "full-rls-admin-bootstrap": {
-      "mutating": true,
-      "confirmation": "MSCQR_PRODUCTION_GREEN_CREATE_AND_BOOTSTRAP_DATABASE",
-      "packageFile": "admin-bootstrap.sql"
-    },
-    "full-rls-admin-ownership": {
-      "mutating": true,
-      "confirmation": "MSCQR_PRODUCTION_GREEN_INSTALL_OWNERSHIP_GRANTS",
-      "packageFile": "admin-ownership.sql",
-      "schemaMigration": "prisma migrate deploy",
-      "migrationCredential": "mscqr/production/rls-green/phase2/database-url/migration"
-    },
-    "full-rls-runtime-policy": {
-      "mutating": true,
-      "confirmation": "MSCQR_PRODUCTION_GREEN_INSTALL_RUNTIME_POLICIES",
-      "packageFile": "runtime-policy.sql"
-    },
-    "full-rls-verification": {
-      "mutating": false,
-      "packageFile": "verification.sql"
-    },
-    "full-rls-rollback": {
-      "mutating": true,
-      "confirmation": "MSCQR_PRODUCTION_GREEN_ROLLBACK_EXACT_PACKAGE",
-      "packageFile": "clean-room-cleanup.sql"
+  "status": "implemented-not-activated",
+  "decision": "approval-gated-isolated-green-clean-room",
+  "blueDatabaseMutationAllowed": false,
+  "database": {
+    "engine": "PostgreSQL",
+    "majorVersion": 18,
+    "greenDatabase": "mscqr_production_rls_green_phase2",
+    "maintenanceDatabase": "mscqr_production",
+    "administrator": "mscqr_prod_admin",
+    "administratorCredential": "RDS managed master-user secret",
+    "publiclyAccessible": false,
+    "multiAz": true,
+    "deletionProtection": true,
+    "targetMustBeFresh": true,
+    "managedRolesMustBeNew": true,
+    "noRequiredCustomerDataPrecondition": true
+  },
+  "approvalArtifact": {
+    "schemaVersion": 1,
+    "signatureAlgorithm": "RSASSA_PSS_SHA_256",
+    "maximumLifetimeMinutes": 120,
+    "signerRole": "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+    "signerRequiresMfa": true,
+    "secretHandle": "mscqr/production/rls-green/phase2/approval",
+    "exactFields": [
+      "schemaVersion",
+      "environment",
+      "releaseSha",
+      "deploymentId",
+      "greenDatabase",
+      "sourceContractSha256",
+      "migrationSetDigest",
+      "approvalId",
+      "ticketId",
+      "administratorIdentity",
+      "independentCheckerIdentity",
+      "issuedAt",
+      "expiresAt",
+      "kmsKeyArn",
+      "signatureAlgorithm",
+      "signatureBase64"
+    ],
+    "independentCheckerIdentity": "exact STS assumed-role session ARN",
+    "rollbackExpiryGraceHours": 24
+  },
+  "execution": {
+    "brokerAlias": "mscqr-production-rls-approval-broker:reviewed",
+    "directEcsRunTaskAllowed": false,
+    "callerTaskOverridesAllowed": false,
+    "publicNetworkingAllowed": false,
+    "taskRole": "mscqr-production-full-rls-green-executor-task",
+    "runtimeSuperuserAllowed": false,
+    "runtimeBypassRlsAllowed": false,
+    "packageRoot": "/app/scripts/rls/sql/generated",
+    "evidenceRoot": "/app/documents/security/rls-program/generated",
+    "receiptPrefix": "rls-receipts/",
+    "activationOrder": [
+      "full-rls-capability-preflight",
+      "full-rls-admin-bootstrap",
+      "full-rls-role-provision",
+      "full-rls-role-verify",
+      "zero-based-prisma-migrate-deploy",
+      "approval-bound-canary-identity-provision",
+      "full-rls-admin-ownership",
+      "full-rls-runtime-policy",
+      "full-rls-verification",
+      "full-rls-application-canary",
+      "backend-and-worker-secret-wiring",
+      "backend-traffic-switch"
+    ],
+    "rollback": {
+      "mode": "full-rls-rollback",
+      "automaticBeforeTraffic": true,
+      "requiresGreenConsumersStopped": true,
+      "requiresNoAcceptedGreenWrites": true,
+      "dropsOnlyExactPackageMarkedRoles": true,
+      "receiptRequired": true
     }
   },
-  "task": {
-    "familyPrefix": "mscqr-production-full-rls-green-",
-    "containerName": "full-rls-green",
-    "command": [
-      "node",
-      "scripts/production-full-rls-green-executor.mjs"
-    ],
-    "directDatabaseCredentialsInWorkflow": false,
-    "callerOverridesAllowed": false,
-    "publicNetworkingAllowed": false,
-    "readonlyRootFilesystem": true,
-    "linuxCapabilities": []
+  "runtimeSecrets": {
+    "DATABASE_URL": "mscqr/production/rls-green/phase2/database-url/app",
+    "AUTHENTICATED_APP_DATABASE_URL": "mscqr/production/rls-green/phase2/database-url/app",
+    "PREAUTH_DATABASE_URL": "mscqr/production/rls-green/phase2/database-url/preauth",
+    "MSCQR_C03_PREAUTH_DATABASE_URL": "mscqr/production/rls-green/phase2/database-url/preauth",
+    "worker.DATABASE_URL": "mscqr/production/rls-green/phase2/database-url/worker",
+    "partialConfigurationAllowed": false,
+    "secretValuesInLogsAllowed": false
   },
   "releaseBinding": [
+    "environment",
     "releaseSha",
+    "deploymentId",
+    "greenDatabase",
     "sourceContractSha256",
+    "migrationSetDigest",
     "packageChecksumSha256",
+    "administratorIdentity",
+    "approvalId",
+    "ticketId",
+    "independentCheckerIdentity",
+    "approvalExpiry",
     "executorImageDigest",
-    "backendImageDigest",
-    "workerImageDigest",
-    "frontendImageDigest"
+    "backendImageDigest"
   ],
-  "rollback": {
-    "automaticBeforeTraffic": true,
-    "requiresNoAcceptedGreenWrites": true,
-    "restoresFreshCatalogue": true,
-    "receiptRequired": true
+  "traffic": {
+    "frontendTaskDefinition": "mscqr-frontend:20",
+    "frontendChangeRequired": false,
+    "currentlyBrokenBackendRelease": "d355a77675d4320c2bfa975ebf3682995ba54a2f",
+    "activationBackendRelease": "exact approval-bound hotfix release SHA",
+    "bluePreservedUntilCanaryPasses": true,
+    "greenTrafficBeforeCanaryAllowed": false
+  },
+  "firstUserOnboarding": {
+    "emptyGreenSupported": true,
+    "bootstrap": "The brokered ownership phase creates only two marked pre-traffic canary administrators plus an isolation-control tenant from approved secret injection; it refuses unrelated users and records approval, ticket, and checker attribution.",
+    "sequence": ["platform-admin-invite", "licensee-admin-invite", "password-setup", "email-verification-if-required", "mfa-enrollment", "login", "refresh", "auth-me", "dashboard-stats", "qr-stats", "tenant-isolation", "logout"],
+    "credentialSource": "approved-setup-link-or-secret-injection",
+    "credentialsPrinted": false,
+    "stagingSmokeException": "known-broken-endpoint-only; green-pre-traffic-canary-mandatory"
   }
 }

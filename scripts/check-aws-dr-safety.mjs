@@ -181,6 +181,11 @@ const dangerousPatternExemptions = new Map([
     "scripts/rls/verify-full-rls-package.mjs",
     new Set(["drop-database"]),
   ],
+  [
+    // Loopback-only PostgreSQL 18 test; its URL guard rejects remote and production targets.
+    "scripts/tests/production-full-rls-package-postgres18.test.mjs",
+    new Set(["drop-database"]),
+  ],
 ]);
 
 const isDangerousPatternExempt = (repoPath, ruleId) =>

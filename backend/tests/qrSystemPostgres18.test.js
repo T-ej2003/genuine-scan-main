@@ -110,6 +110,11 @@ async function main(){
   denied(`SELECT app_rls.qr_delete_codes('${caps.tenant}','qr-code-delete','40000000-0000-4000-8000-000000000645',ARRAY['40000000-0000-4000-8000-000000000508'],ARRAY[]::text[])`);
   const tenantRead=JSON.parse(last(app,`SELECT jsonb_build_object('rows',payload,'total',total)::text FROM app_rls.qr_read_codes('${caps.tenant}','qr-code-read','40000000-0000-4000-8000-000000000602','${ids.licenseeA}',NULL,NULL,100,0)`));
   assert.equal(tenantRead.total,7);
+  const tenantStats=JSON.parse(call("qr_stats",`'${caps.tenant}','qr-code-stats','40000000-0000-4000-8000-000000000625','${ids.licenseeA}'`));
+  assert.equal(tenantStats.total,7);
+  denied(`SELECT app_rls.qr_stats('${caps.tenant}','qr-code-stats','40000000-0000-4000-8000-000000000626','${ids.licenseeB}')`);
+  const platformStats=JSON.parse(call("qr_stats",`'${caps.platform}','qr-code-stats','40000000-0000-4000-8000-000000000627','${ids.licenseeB}'`));
+  assert.equal(platformStats.total,1);
   const exportAudit=JSON.parse(call("qr_batch_command",`'${caps.platform}','qr-batch-command','40000000-0000-4000-8000-000000000649','AUDIT_CODE_EXPORT','{"licenseeId":"${ids.licenseeA}","status":"DORMANT","query":null,"count":7}'::jsonb`));
   assert.equal(exportAudit.exportedCount,7);
   assert.equal(last(bootstrap,`SELECT count(*) FROM public."AuditLog" WHERE action='EXPORT_QR_CODES' AND "licenseeId"='${ids.licenseeA}' AND details->>'count'='7'`),"1");

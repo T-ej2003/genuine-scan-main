@@ -77,6 +77,9 @@ const requestJson = async (url, options = {}) => {
     Accept: "application/json",
     ...(options.headers || {}),
   };
+  if (cookieJar.get("aq_csrf") && !["GET", "HEAD", "OPTIONS"].includes(String(options.method || "GET").toUpperCase())) {
+    headers["X-CSRF-Token"] = decodeURIComponent(cookieJar.get("aq_csrf"));
+  }
 
   const cookie = cookieHeader();
   if (cookie) {
@@ -241,6 +244,9 @@ const run = async () => {
   const loginPassword = String(process.env.SMOKE_LOGIN_PASSWORD || "").trim();
 
   if (!loginEmail || !loginPassword) {
+    if (parseBool(process.env.SMOKE_AUTHENTICATED_REQUIRED, false)) {
+      throw new Error("Authenticated production canary requires SMOKE_LOGIN_EMAIL and SMOKE_LOGIN_PASSWORD.");
+    }
     logSkip("authenticated smoke flow (set SMOKE_LOGIN_EMAIL and SMOKE_LOGIN_PASSWORD)");
     return;
   }
@@ -292,6 +298,31 @@ const run = async () => {
     const { response, payload } = await requestJson(`${apiBaseUrl}/auth/me`);
     ensureOk("auth me", response.status, payload);
     logPass("current user");
+  }
+
+  if (process.env.SMOKE_TENANT_ISOLATION_FORBIDDEN_PATH) {
+    const { response } = await requestJson(
+      `${apiBaseUrl}${String(process.env.SMOKE_TENANT_ISOLATION_FORBIDDEN_PATH).trim()}`
+    );
+    if (![403, 404].includes(response.status)) {
+      throw new Error(`tenant isolation expected HTTP 403/404, received ${response.status}`);
+    }
+    logPass("tenant isolation");
+  }
+
+  {
+    const { response, payload } = await requestJson(`${apiBaseUrl}/auth/refresh`, { method: "POST", body: "{}" });
+    ensureOk("auth refresh", response.status, payload);
+    logPass("refresh rotation");
+  }
+
+  for (const [label, route] of [
+    ["dashboard stats", process.env.SMOKE_DASHBOARD_STATS_PATH || "/dashboard/stats"],
+    ["QR stats", process.env.SMOKE_QR_STATS_PATH || "/qr/stats"],
+  ]) {
+    const { response, payload } = await requestJson(`${apiBaseUrl}${route}`);
+    ensureOk(label, response.status, payload);
+    logPass(label);
   }
 
   {
@@ -368,6 +399,12 @@ const run = async () => {
     logPass("evidence retrieval smoke");
   } else {
     logSkip("evidence retrieval smoke (set SMOKE_EVIDENCE_URL or SMOKE_EVIDENCE_PATH)");
+  }
+
+  {
+    const { response, payload } = await requestJson(`${apiBaseUrl}/auth/logout`, { method: "POST", body: "{}" });
+    ensureOk("auth logout", response.status, payload);
+    logPass("logout/session revocation");
   }
 };
 

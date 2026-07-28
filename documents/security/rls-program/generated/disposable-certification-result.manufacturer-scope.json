@@ -3,11 +3,11 @@
   "environment": "local-disposable-only",
   "deploymentModel": "clean-room-blue-green",
   "postgresqlMajor": 18,
-  "sourceContractSha256": "938f9a75f69db23a72941e4c0b6097573b24e05bdda6f94355f2a2cd5bfedcfd",
+  "sourceContractSha256": "d94b0e4fa868cc4b43daf576f3359c6d7910fdb2ceab92b030c9bb68173e4d88",
   "tablesExpected": 79,
   "forceRlsTargetsExpected": 77,
   "tablesCertified": 77,
-  "generatedPoliciesCertified": 343,
+  "generatedPoliciesCertified": 347,
   "columnPrivilegeCellsCertified": 60,
   "workflowCertificationStatus": "pending-application-path-certification",
   "workflowsApplicationPathCertified": 1,
@@ -41,6 +41,11 @@
     "testFile": "backend/tests/rls-wave-b/b03/scheduledJobIdentityPostgres18.test.js"
   },
   "b03OutboxCertification": null,
+  "qrSystemCertification": {
+    "status": "application-path-certified",
+    "postgresqlMajor": 18,
+    "testFile": "backend/tests/qrSystemPostgres18.test.js"
+  },
   "workflowsProductProhibited": 1,
   "cleanRoomPreflightCertified": true,
   "migrationsFromZeroCertified": true,
@@ -318,7 +323,7 @@
   "columnPrivilegeCertification": true,
   "exactCatalogTamperCertification": true,
   "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "2d4ea8d65337f2d60d928760115d82bce7ac7d413cd89669f2b769bf6201d42d",
+  "packageChecksumsSha256": "a17a446a4be535ae00267746547ee8535fdaac1023469664623acf4cdd184171",
   "status": "clean-room-full-table-enforcement-certified-workflows-pending",
   "b01Certification": {
     "predecessorReplayRejected": true,

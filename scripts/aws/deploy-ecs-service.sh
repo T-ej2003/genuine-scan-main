@@ -27,6 +27,10 @@ Optional environment:
                     GIT_SHA,RELEASE_GIT_SHA when EXPECTED_GIT_SHA is set.
   GIT_SHA           Value used when ENV_UPDATES includes GIT_SHA.
   RELEASE_GIT_SHA   Value used when ENV_UPDATES includes RELEASE_GIT_SHA.
+  SECRET_UPDATES_JSON
+                    Optional JSON object mapping reviewed database secret names
+                    to production green Secrets Manager ARNs. Backend app/preauth
+                    entries are all-or-nothing.
 
 Example:
   AWS_REGION=eu-west-2 \
@@ -94,10 +98,10 @@ fi
 GIT_SHA="${GIT_SHA:-${EXPECTED_GIT_SHA:-}}"
 RELEASE_GIT_SHA="${RELEASE_GIT_SHA:-${EXPECTED_GIT_SHA:-}}"
 
-node --input-type=module - "$RAW_FILE" "$PAYLOAD_FILE" "$CONTAINER_NAME" "$IMAGE_URI" "$ENV_UPDATES" "$GIT_SHA" "$RELEASE_GIT_SHA" <<'NODE'
+node --input-type=module - "$RAW_FILE" "$PAYLOAD_FILE" "$CONTAINER_NAME" "$IMAGE_URI" "$ENV_UPDATES" "$GIT_SHA" "$RELEASE_GIT_SHA" "${SECRET_UPDATES_JSON:-{}}" <<'NODE'
 import fs from "node:fs";
 
-const [rawPath, payloadPath, containerName, imageUri, envUpdatesText, gitSha, releaseGitSha] = process.argv.slice(2);
+const [rawPath, payloadPath, containerName, imageUri, envUpdatesText, gitSha, releaseGitSha, secretUpdatesText] = process.argv.slice(2);
 const raw = JSON.parse(fs.readFileSync(rawPath, "utf8"));
 const taskDefinition = raw.taskDefinition;
 
@@ -114,6 +118,26 @@ const envUpdates = envUpdatesText
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
+const secretUpdates = JSON.parse(secretUpdatesText);
+const allowedSecretNames = new Set([
+  "DATABASE_URL",
+  "AUTHENTICATED_APP_DATABASE_URL",
+  "PREAUTH_DATABASE_URL",
+  "MSCQR_C03_PREAUTH_DATABASE_URL",
+]);
+if (!secretUpdates || typeof secretUpdates !== "object" || Array.isArray(secretUpdates)
+    || Object.keys(secretUpdates).some((name) => !allowedSecretNames.has(name))
+    || Object.values(secretUpdates).some((arn) => !/^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr\/production\/rls-green\/phase2\/database-url\/(app|preauth|worker|scheduled)-[A-Za-z0-9]{6}$/.test(arn))) {
+  throw new Error("SECRET_UPDATES_JSON is outside the reviewed production green database contract.");
+}
+const backendRestrictedNames = ["DATABASE_URL", "AUTHENTICATED_APP_DATABASE_URL", "PREAUTH_DATABASE_URL"];
+const configuredBackendRestricted = backendRestrictedNames.filter((name) => Object.hasOwn(secretUpdates, name));
+const workerOnly = configuredBackendRestricted.length === 1
+  && configuredBackendRestricted[0] === "DATABASE_URL"
+  && /\/worker-[A-Za-z0-9]{6}$/.test(secretUpdates.DATABASE_URL);
+if (configuredBackendRestricted.length > 0 && configuredBackendRestricted.length !== backendRestrictedNames.length && !workerOnly) {
+  throw new Error("Production backend database secrets must be updated together.");
+}
 
 for (const envName of envUpdates) {
   if (!envValues.has(envName)) {
@@ -133,7 +157,11 @@ const containerDefinitions = (taskDefinition.containerDefinitions || []).map((co
   for (const envName of envUpdates) {
     environment.push({ name: envName, value: envValues.get(envName) });
   }
-  return { ...container, image: imageUri, environment };
+  const secrets = [
+    ...(Array.isArray(container.secrets) ? container.secrets : []).filter((entry) => !Object.hasOwn(secretUpdates, entry?.name)),
+    ...Object.entries(secretUpdates).map(([name, valueFrom]) => ({ name, valueFrom })),
+  ];
+  return { ...container, image: imageUri, environment, secrets };
 });
 
 if (!containerFound) {

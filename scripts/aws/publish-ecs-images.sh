@@ -188,6 +188,32 @@ for service in "${SERVICES[@]}"; do
   target="$(target_for_service "$service")"
   published_tag="${image_uri##*:}"
   IMAGE_URIS+=("$image_uri")
+  repository_name="${image_uri#${ECR_REGISTRY}/}"
+  repository_name="${repository_name%%:*}"
+  existing_digest="$(
+    aws ecr describe-images \
+      --region "$AWS_REGION" \
+      --repository-name "$repository_name" \
+      --image-ids imageTag="$published_tag" \
+      --query 'imageDetails[0].imageDigest' \
+      --output text 2>/dev/null || true
+  )"
+
+  if [[ "$existing_digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+    echo "Reusing immutable ${service} image ${image_uri}@${existing_digest}"
+    REQUIRED_PLATFORMS="$PLATFORMS" "$VERIFY_SCRIPT" "$image_uri"
+    if [[ -n "${OUTPUT_FILE:-}" ]]; then
+      node --input-type=module - "$OUTPUT_FILE" "$service" "$repository_name" "$image_uri" "$published_tag" "$existing_digest" <<'NODE'
+import fs from "node:fs";
+const [outputPath, service, repositoryName, imageUri, imageTag, imageDigest] = process.argv.slice(2);
+fs.appendFileSync(outputPath, `${JSON.stringify({
+  service, repository: repositoryName, image_uri: imageUri, image_tag: imageTag,
+  image_digest: imageDigest, image_ref: imageUri.replace(/:[^:@]+$/, `@${imageDigest}`),
+})}\n`);
+NODE
+    fi
+    continue
+  fi
 
   echo
   echo "Building ${service}"
@@ -215,9 +241,6 @@ for service in "${SERVICES[@]}"; do
     "$build_context"
 
   REQUIRED_PLATFORMS="$PLATFORMS" "$VERIFY_SCRIPT" "$image_uri"
-
-  repository_name="${image_uri#${ECR_REGISTRY}/}"
-  repository_name="${repository_name%%:*}"
 
   if [[ -n "${OUTPUT_FILE:-}" ]]; then
     image_digest="$(

@@ -90,7 +90,7 @@ export function verifyBoundPackage(target, {
     ["authOwner", roleName(target, "auth_owner")],
     ...roleKeys.map((key) => [key, roleName(target, key)]),
   ]);
-  if (manifest.environment !== target.environment
+  if (manifest.targetEnvironment !== target.environment
       || manifest.deploymentId !== target.deploymentId
       || manifest.sourceContractSha256 !== expectedSourceContract
       || JSON.stringify(manifest.roles) !== JSON.stringify(expectedRoles)) {
@@ -114,7 +114,7 @@ const psql = (url, args, label) => {
     encoding: "utf8",
     env: { ...process.env, PGCONNECT_TIMEOUT: "10" },
   });
-  if (result.status !== 0) throw new Error(`Staging green executor ${label} failed; database detail suppressed.`);
+  if (result.status !== 0) throw new Error(`Green executor ${label} failed; database detail suppressed.`);
   return String(result.stdout || "").trim();
 };
 
@@ -200,7 +200,15 @@ async function applySchemaMigrations(target, secretsManager) {
     encoding: "utf8",
     env: { ...process.env, DATABASE_URL: migrationUrl.toString() },
   });
-  if (result.status !== 0) throw new Error("Staging green schema migration failed; detail suppressed.");
+  if (result.status !== 0) throw new Error(`${target.environment} green schema migration failed; detail suppressed.`);
+  if (target.environment === "production") {
+    const provision = spawnSync(process.execPath, ["scripts/production-green-canary-provision.mjs"], {
+      cwd: backendRoot,
+      encoding: "utf8",
+      env: { ...process.env, DATABASE_URL: migrationUrl.toString() },
+    });
+    if (provision.status !== 0) throw new Error("Production green canary provisioning failed; detail suppressed.");
+  }
 }
 
 const catalogueFingerprint = (target, adminUrl) => sha256(JSON.stringify({
@@ -208,7 +216,16 @@ const catalogueFingerprint = (target, adminUrl) => sha256(JSON.stringify({
   managedRoleCount: managedRoleCount(target, adminUrl),
 }));
 
-const receipt = ({ target, mode, releaseSha, sourceContract, packageChecksum, status, catalogueSha256 }) => {
+const receipt = ({
+  target,
+  mode,
+  releaseSha,
+  sourceContract,
+  packageChecksum,
+  status,
+  catalogueSha256,
+  approval,
+}) => {
   const value = {
     schemaVersion: 1,
     environment: target.environment,
@@ -219,6 +236,15 @@ const receipt = ({ target, mode, releaseSha, sourceContract, packageChecksum, st
     releaseSha,
     sourceContractSha256: sourceContract,
     packageChecksumSha256: packageChecksum,
+    ...(approval ? {
+      migrationSetDigest: approval.approval.migrationSetDigest,
+      approvalContractSha256: approval.approvalContractSha256,
+      approvalId: approval.approval.approvalId,
+      ticketId: approval.approval.ticketId,
+      administratorIdentity: approval.approval.administratorIdentity,
+      independentCheckerIdentity: approval.approval.independentCheckerIdentity,
+      approvalExpiresAt: approval.approval.expiresAt,
+    } : {}),
     catalogueSha256,
     completedAt: new Date().toISOString(),
     nonce: crypto.randomUUID(),
@@ -246,6 +272,7 @@ export async function executeFullRlsGreenMode(target, {
   env = process.env,
   secretsManager = new SecretsManagerClient({ region: target.region }),
   s3 = new S3Client({ region: target.region }),
+  validateApproval = null,
 } = {}) {
   const mode = validateGreenExecutorMode(target, env.MSCQR_FULL_RLS_MODE, env.MSCQR_FULL_RLS_CONFIRMATION || "");
   const adminUrl = validateAdministratorUrl(target, env.DATABASE_URL);
@@ -254,6 +281,23 @@ export async function executeFullRlsGreenMode(target, {
     expectedPackageChecksum: env.MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256,
     expectedReleaseSha: env.RELEASE_GIT_SHA,
   });
+  const approval = validateApproval
+    ? await validateApproval(env.MSCQR_PRODUCTION_RLS_APPROVAL_ARTIFACT, {
+      releaseSha: env.RELEASE_GIT_SHA,
+      sourceContractSha256: bound.checksums.sourceContractSha256,
+      migrationSetDigest: bound.checksums.migrationSetDigest,
+      deploymentId: target.deploymentId,
+      greenDatabase: target.database,
+      administratorIdentity: target.administrator,
+      kmsKeyArn: env.MSCQR_PRODUCTION_RLS_APPROVAL_KMS_KEY_ARN,
+    }, { allowExpiredRollback: mode === "full-rls-rollback" })
+    : null;
+  if (validateApproval && (
+    bound.checksums.productionApprovalContractSha256 !== approval.approvalContractSha256
+    || bound.manifest.administrativeExecutor?.approval?.approvalContractSha256 !== approval.approvalContractSha256
+  )) {
+    throw new Error("Production approval does not match the generated package.");
+  }
   verifyAdministrator(target, adminUrl);
   if (mode === "full-rls-capability-preflight") {
     if (databaseExists(target, adminUrl) || managedRoleCount(target, adminUrl) !== 0) {
@@ -287,6 +331,7 @@ export async function executeFullRlsGreenMode(target, {
     packageChecksum: bound.packageChecksum,
     status: "passed",
     catalogueSha256: catalogueFingerprint(target, adminUrl),
+    approval,
   });
   const stored = await writeReceipt(target, value, env.MSCQR_FULL_RLS_RECEIPT_BUCKET, s3);
   process.stdout.write(`${JSON.stringify({ status: "passed", mode, ...stored })}\n`);
