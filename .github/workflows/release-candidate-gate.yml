@@ -150,7 +150,7 @@ jobs:
           SMOKE_REQUIRED: "true"
           ALLOW_STAGING_SMOKE_DEGRADED_ON_PR: "false"
           GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
-          KNOWN_BLUE_ENDPOINT_MISMATCH: "known-blue-production-auth-http-500-pr131"
+          KNOWN_BLUE_ENDPOINT_MISMATCH: "known-blue-production-auth-http-500-production-green-lineage"
           STAGING_SMOKE_RESULT_PATH: staging-smoke-result.json
           SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL || secrets.SMOKE_LOGIN_EMAIL }}
           SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD || secrets.SMOKE_LOGIN_PASSWORD }}

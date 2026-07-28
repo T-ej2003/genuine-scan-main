@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "stage": "B",
+  "requires": ["stage-a-remote-state-outputs", "external-protected-release-role", "independent-checker-distinct-from-deployer", "kms-signed-approval", "immutable-backend-worker-executor-images", "approved-canary-secret-injection"],
+  "operations": ["fixed-task-definitions", "reviewed-broker", "green-canaries", "approved-backend-worker-cutover"],
+  "frontendTaskDefinition": "mscqr-frontend:20",
+  "trafficSwitchBeforeCanariesAllowed": false
+}

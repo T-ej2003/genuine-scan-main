@@ -21,21 +21,26 @@ const baseEnv = {
   SMOKE_BASE_URL: "https://staging.example.test",
   STAGING_SMOKE_CHANGED_FILES: "backend/package.json\nbackend/package-lock.json",
 };
-const activationFiles = [
+const pr131ActivationFiles = [
   "backend/scripts/production-full-rls-green-executor.mjs",
   "documents/security/rls-program/PRODUCTION_RLS_GREEN_ACTIVATION_DECISION.md",
-  "infra/aws/terraform/production-rls-green.tf",
+  "infra/aws/terraform/production-green-stage-a/main.tf",
   "scripts/aws/apply-production-full-rls-release.mjs",
+].join("\n");
+const pr132PlanningFiles = [
+  "infra/aws/terraform/production-green-stage-a/main.tf",
+  "infra/aws/terraform/production-green-stage-a/production-state-backend-prerequisite.json",
+  "infra/aws/terraform/production-green-stage-b/release-activation-contract.json",
+  "scripts/tests/production-green-terraform-planning.test.mjs",
 ].join("\n");
 const approvedBlueMismatchEnv = {
   GITHUB_EVENT_NAME: "pull_request",
-  GITHUB_HEAD_REF: "release/production-green-first-user-readiness",
   GITHUB_PR_NUMBER: "131",
   GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main",
   KNOWN_BLUE_ENDPOINT_MISMATCH: KNOWN_BLUE_LOGIN_SKIP_REASON,
   SMOKE_API_BASE_URL: "https://www.mscqr.com/api",
   SMOKE_BASE_URL: "https://www.mscqr.com",
-  STAGING_SMOKE_CHANGED_FILES: activationFiles,
+  STAGING_SMOKE_CHANGED_FILES: pr131ActivationFiles,
 };
 const blueLoginDecision = (overrides = {}, inputs = {}) =>
   evaluateKnownBlueLoginSkip({
@@ -146,7 +151,7 @@ test("Dependabot skip does not hide missing staging URL variables", () => {
   assert.equal(decision.shouldSkip, false);
 });
 
-test("PR #131 production-green scope may skip only the known blue login failure", () => {
+test("PR #131-equivalent production-green activation scope may skip only the known blue login failure", () => {
   const decision = blueLoginDecision();
   assert.equal(decision.shouldSkip, true);
   assert.equal(decision.reasonCode, KNOWN_BLUE_LOGIN_SKIP_REASON);
@@ -178,7 +183,7 @@ test("approved blue login failure emits a warning and machine-readable skip", (t
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /::warning title=Approved PR #131 staging smoke skip::/);
+  assert.match(result.stdout, /::warning title=Approved production-green lineage staging smoke skip::/);
   assert.deepEqual(JSON.parse(fs.readFileSync(resultPath, "utf8")), {
     schemaVersion: 1,
     status: "skipped",
@@ -189,10 +194,24 @@ test("approved blue login failure emits a warning and machine-readable skip", (t
   });
 });
 
-test("unrelated pull requests cannot use the known blue login exception", () => {
-  assert.equal(blueLoginDecision({ GITHUB_PR_NUMBER: "132" }).shouldSkip, false);
-  assert.equal(blueLoginDecision({ GITHUB_HEAD_REF: "feature/unrelated" }).shouldSkip, false);
-  assert.equal(blueLoginDecision({ STAGING_SMOKE_CHANGED_FILES: activationFiles.split("\n")[0] }).shouldSkip, false);
+test("PR #132-equivalent production-green planning scope may skip the known blue login failure", () => {
+  const decision = blueLoginDecision({
+    GITHUB_PR_NUMBER: "132",
+    STAGING_SMOKE_CHANGED_FILES: pr132PlanningFiles,
+  });
+  assert.equal(decision.shouldSkip, true);
+  assert.equal(decision.activationScope, true);
+});
+
+test("unrelated and mixed pull requests cannot use the known blue login exception", () => {
+  assert.equal(
+    blueLoginDecision({ STAGING_SMOKE_CHANGED_FILES: "backend/src/routes/unrelated.ts" }).shouldSkip,
+    false
+  );
+  assert.equal(
+    blueLoginDecision({ STAGING_SMOKE_CHANGED_FILES: `${pr132PlanningFiles}\nfrontend/src/App.tsx` }).shouldSkip,
+    false
+  );
 });
 
 test("failed health cannot use the known blue login exception", () => {
@@ -200,15 +219,21 @@ test("failed health cannot use the known blue login exception", () => {
   assert.equal(blueLoginDecision({}, { liveHealthPassed: false }).shouldSkip, false);
 });
 
-test("non-login failures and other login statuses remain blocking", () => {
+test("a different endpoint cannot use the known blue login exception", () => {
+  assert.equal(blueLoginDecision({ SMOKE_BASE_URL: "https://staging.example.test" }).shouldSkip, false);
+  assert.equal(blueLoginDecision({ SMOKE_API_BASE_URL: "https://www.mscqr.com/internal-api" }).shouldSkip, false);
+});
+
+test("non-login failures and statuses other than HTTP 500 remain blocking", () => {
   assert.equal(blueLoginDecision({}, { failureStage: "dashboard" }).shouldSkip, false);
   assert.equal(blueLoginDecision({}, { status: 401 }).shouldSkip, false);
   assert.equal(blueLoginDecision({}, { status: 503 }).shouldSkip, false);
 });
 
-test("push and release contexts cannot use the pull-request exception", () => {
+test("push, tag, release, and workflow dispatch contexts cannot use the pull-request exception", () => {
   assert.equal(blueLoginDecision({ GITHUB_EVENT_NAME: "push" }).shouldSkip, false);
   assert.equal(blueLoginDecision({ GITHUB_EVENT_NAME: "workflow_dispatch" }).shouldSkip, false);
+  assert.equal(blueLoginDecision({ GITHUB_EVENT_NAME: "release" }).shouldSkip, false);
   assert.equal(blueLoginDecision({ GITHUB_REF: "refs/tags/v1.0.0", GITHUB_EVENT_NAME: "push" }).shouldSkip, false);
 });
 
@@ -220,8 +245,11 @@ test("release workflow keeps blue exception narrow and green application canary 
     "utf8"
   );
   assert.match(candidateWorkflow, /SMOKE_REQUIRED: "true"/);
-  assert.match(candidateWorkflow, /KNOWN_BLUE_ENDPOINT_MISMATCH: "known-blue-production-auth-http-500-pr131"/);
-  assert.match(decision, /known-blue-production-auth-http-500-pr131/);
+  assert.match(
+    candidateWorkflow,
+    /KNOWN_BLUE_ENDPOINT_MISMATCH: "known-blue-production-auth-http-500-production-green-lineage"/
+  );
+  assert.match(decision, /known-blue-production-auth-http-500-production-green-lineage/);
   assert.match(releaseSource, /invokeBroker\("full-rls-application-canary"/);
   assert.match(releaseSource, /waitForTask\(canaryTaskArn/);
   assert(

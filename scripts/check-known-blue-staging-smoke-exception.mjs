@@ -19,7 +19,9 @@ const decision = evaluateKnownBlueLoginSkip({
 });
 
 if (!decision.shouldSkip) {
-  throw new Error(`Staging smoke failed and is not eligible for the PR #131 blue-login exception (exit ${smokeExitCode}).`);
+  throw new Error(
+    `Staging smoke failed and is not eligible for the production-green lineage blue-login exception (exit ${smokeExitCode}).`
+  );
 }
 
 const result = {
@@ -28,9 +30,9 @@ const result = {
   reasonCode: KNOWN_BLUE_LOGIN_SKIP_REASON,
   endpoint: "https://www.mscqr.com/api/auth/login",
   httpStatus: 500,
-  pullRequest: 131,
+  pullRequest: Number.parseInt(process.env.GITHUB_PR_NUMBER || "", 10),
 };
 fs.writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
 console.log(
-  `::warning title=Approved PR #131 staging smoke skip::Existing blue login returned HTTP 500 after ready/live health passed; mandatory green pre-traffic canaries remain required. reason=${KNOWN_BLUE_LOGIN_SKIP_REASON}`
+  `::warning title=Approved production-green lineage staging smoke skip::Existing blue login returned HTTP 500 after ready/live health passed; mandatory green pre-traffic canaries remain required. reason=${KNOWN_BLUE_LOGIN_SKIP_REASON}`
 );

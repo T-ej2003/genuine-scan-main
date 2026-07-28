@@ -80,7 +80,8 @@ The aggregate result remains `clean-room-full-table-enforcement-certified-workfl
 - `infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs`
 - `infra/aws/terraform/main.tf`
 - `infra/aws/terraform/outputs.tf`
-- `infra/aws/terraform/production-rls-green.tf`
+- `infra/aws/terraform/production-green-stage-a/`
+- `infra/aws/terraform/production-green-stage-b/`
 - `infra/aws/terraform/providers.tf`
 - `infra/aws/terraform/terraform.tfvars.example`
 - `infra/aws/terraform/variables.tf`
@@ -115,6 +116,10 @@ The aggregate result remains `clean-room-full-table-enforcement-certified-workfl
 - `scripts/rls/sql/generated/90-clean-room-role-cleanup.sql`
 
 ## Approval and production blockers
+
+### Terraform planning remediation
+
+The original general Terraform root mixed blue baseline ownership with green resources and could not generate a trustworthy green-only plan without remote-state/import work. Green planning now has a separate Stage A root at `infra/aws/terraform/production-green-stage-a`; it owns only new isolated infrastructure and references approved VPC/subnet/runtime-SG inputs. Stage A requires no image digest, creates no runtime deployment or traffic switch, and leaves executor egress absent pending an explicit Stage B NAT/VPC-endpoint decision. The production state bucket, protected release role, and independent checker remain external prerequisites; AWS root must not plan or apply. Stage B remains release activation after immutable images and approval exist. Blue production stays outside green Terraform ownership.
 
 1. Obtain independent checker, change-ticket, protected-environment, saved Terraform-plan, database-operator, and traffic-switch approvals.
 2. Confirm the actual production VPC, subnet, security-group, task-role, worker-service, artifact-bucket, RDS engine/version availability, and immutable image inputs through an AWS read-only plan/review.
