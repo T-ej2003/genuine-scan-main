@@ -42,6 +42,15 @@ test("Stage A explicitly revokes executor egress and keeps database ingress SG-t
   assert.doesNotMatch(source, /aws_ecs_task_definition|aws_ecs_service|aws_lambda_function/);
 });
 
+test("Stage A preserves the RDS force-SSL parameter's provider-stable apply method", () => {
+  const parameterGroup = source.match(/resource "aws_db_parameter_group" "green" \{([\s\S]*?)\n\}/)?.[1] || "";
+  const parameter = parameterGroup.match(/parameter \{([\s\S]*?)\n  \}/)?.[1] || "";
+  assert.match(parameter, /name\s+=\s+"rds\.force_ssl"/);
+  assert.match(parameter, /value\s+=\s+"1"/);
+  assert.match(parameter, /apply_method\s+=\s+"pending-reboot"/);
+  assert.doesNotMatch(parameterGroup, /lifecycle[\s\S]*ignore_changes/);
+});
+
 test("Stage A exposes only the RDS-managed administrator secret ARN", () => {
   assert.match(source, /manage_master_user_password\s+=\s+true/);
   assert.match(outputs, /output "rds_managed_administrator_secret"/);
