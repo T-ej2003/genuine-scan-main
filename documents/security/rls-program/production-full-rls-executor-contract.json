@@ -111,7 +111,12 @@
     "currentlyBrokenBackendRelease": "d355a77675d4320c2bfa975ebf3682995ba54a2f",
     "activationBackendRelease": "exact approval-bound hotfix release SHA",
     "bluePreservedUntilCanaryPasses": true,
-    "greenTrafficBeforeCanaryAllowed": false
+    "greenTrafficBeforeCanaryAllowed": false,
+    "stageAInfrastructureOnly": true,
+    "stageAImageDigestRequired": false,
+    "stageAOwnsBlueResources": false,
+    "stageAStateBackend": "external-dedicated-production-s3-with-lockfile",
+    "stageBRequiresDistinctCheckerAndReleaseDeployer": true
   },
   "firstUserOnboarding": {
     "emptyGreenSupported": true,

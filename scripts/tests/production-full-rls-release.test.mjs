@@ -208,24 +208,21 @@ test("production workflow applies verified green and canaries before backend tra
   assert.doesNotMatch(workflow, /PRODUCTION_RLS_ADMIN_SECRET_ARN|PRODUCTION_RLS_PRIVATE_SUBNETS_JSON/);
 });
 
-test("production Terraform provisions isolated PG18, exact secrets, KMS checker and fixed broker", () => {
-  const source = fs.readFileSync("infra/aws/terraform/production-rls-green.tf", "utf8");
-  const shared = fs.readFileSync("infra/aws/terraform/main.tf", "utf8");
-  const provider = fs.readFileSync("infra/aws/terraform/providers.tf", "utf8");
-  assert.match(source, /resource "aws_db_instance" "full_rls_green"[\s\S]*engine_version\s*=\s*"18\.4"/);
+test("production Terraform Stage A provisions isolated PG18 while Stage B remains approval-bound", () => {
+  const source = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
+  const variables = fs.readFileSync("infra/aws/terraform/production-green-stage-a/variables.tf", "utf8");
+  const provider = fs.readFileSync("infra/aws/terraform/production-green-stage-a/providers.tf", "utf8");
+  const stageB = fs.readFileSync("infra/aws/terraform/production-green-stage-b/release-activation-contract.json", "utf8");
+  assert.match(source, /resource "aws_db_instance" "green"[\s\S]*engine_version\s*=\s*"18\.4"/);
   assert.match(source, /publicly_accessible\s*=\s*false[\s\S]*deletion_protection\s*=\s*true/);
   assert.match(source, /customer_master_key_spec\s*=\s*"RSA_3072"/);
   assert.match(source, /mscqr-production-rls-independent-checker/);
-  assert.match(source, /resource "aws_lambda_alias" "full_rls_green_broker_reviewed"/);
-  assert.match(source, /full-rls-application-canary/);
-  assert.match(source, /MSCQR_CANARY_ORDINARY_MFA_SECRET/);
-  assert.match(source, /each\.key == "full-rls-admin-ownership"/);
+  assert.match(source, /aws_secretsmanager_secret" "canary/);
+  assert.match(variables, /checker_is_independent_of_release_deployer/);
+  assert.match(stageB, /immutable-backend-worker-executor-images/);
   assert.match(fs.readFileSync("backend/Dockerfile", "utf8"), /scripts\/release-smoke/);
-  const releasePolicy = source.slice(source.indexOf('resource "aws_iam_role_policy" "full_rls_green_release_broker"'));
-  assert.match(releasePolicy, /lambda:InvokeFunction/);
-  assert.doesNotMatch(releasePolicy, /ecs:RunTask/);
-  assert.match(`${source}\n${shared}`, /AUTHENTICATED_APP_DATABASE_URL|full_rls_green_backend_secrets/);
+  assert.doesNotMatch(source, /aws_ecs_task_definition|aws_ecs_service|aws_lambda_function/);
   assert.match(provider, /allowed_account_ids\s*=\s*\["368992683803"\]/);
   assert.doesNotMatch(source, /BYPASSRLS|SUPERUSER/);
-  assert.doesNotMatch(source, /full_rls_green_database"[\s\S]{0,500}cidr_ipv4/);
+  assert.doesNotMatch(source, /cidr_ipv4/);
 });

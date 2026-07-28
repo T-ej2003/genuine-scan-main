@@ -95,17 +95,17 @@ After traffic activation, the canary platform administrator creates or invites t
 Nothing in this section is authorized by this repository change.
 
 1. Record blue database identifier, backend task definition `mscqr-backend:47`, worker task definition, current secret version IDs, target-group health, and a read-only blue fingerprint.
-2. Initialise the reviewed encrypted/versioned production S3 state backend, review a saved plan, then apply Terraform with `enable_full_rls_green_infrastructure=true`, `enable_full_rls_green_executor=false`, and `activate_full_rls_green_runtime=false`:
+2. Stage A is the isolated green-infrastructure root. It has no blue-resource ownership, no image input, no ECS deployment, no runtime secret value, and no traffic switch. AWS root must not plan or apply. An authorised non-root role first creates or approves the dedicated state backend described by `infra/aws/terraform/production-green-stage-a/production-state-backend-prerequisite.json`, then initialises the dedicated root:
 
 ```sh
-terraform -chdir=infra/aws/terraform init \
+terraform -chdir=infra/aws/terraform/production-green-stage-a init \
   -backend-config='bucket=<approved-production-terraform-state-bucket>' \
-  -backend-config='key=mscqr/production/rls-green/terraform.tfstate' \
+  -backend-config='key=mscqr/production/rls-green/stage-a/terraform.tfstate' \
   -backend-config='region=eu-west-2' \
   -backend-config='encrypt=true' \
   -backend-config='use_lockfile=true'
-terraform -chdir=infra/aws/terraform plan -out=/secure/operator/rls-green-base.tfplan
-terraform -chdir=infra/aws/terraform apply /secure/operator/rls-green-base.tfplan
+terraform -chdir=infra/aws/terraform/production-green-stage-a plan -out=/secure/operator/rls-green-stage-a.tfplan
+terraform -chdir=infra/aws/terraform/production-green-stage-a apply /secure/operator/rls-green-stage-a.tfplan
 ```
 
 This creates the isolated RDS instance, KMS keys, checker/executor roles, security groups, and empty secret handles. It creates no secret value and does not touch blue.
@@ -151,7 +151,7 @@ node scripts/rls/generate-clean-room-rls-sql.mjs \
 npm run rls:full-verify
 ```
 
-8. Review the package checksum, source digest, migration digest, SQL install-state metadata, Terraform plan, task definitions, broker alias version, and immutable images. Create and apply a second saved Terraform plan with the exact release SHA, package/source/migration digests and immutable image refs, `enable_full_rls_green_infrastructure=true`, `enable_full_rls_green_executor=true`, and `activate_full_rls_green_runtime=false`.
+8. Stage B is the protected release-activation contract in `infra/aws/terraform/production-green-stage-b/`. It starts only after Stage A outputs, the external protected release role, distinct checker, signed approval, and immutable backend/worker/executor image digests exist. It creates fixed executor/canary tasks and the reviewed broker, then runs mandatory green canaries; it is not part of the Stage A plan.
 9. Invoke the protected release workflow with production approval, the exact approval secret ARN/ID, exact broker alias ARN, and `preserve_current_frontend=true`. It invokes only the broker. The broker revalidates the signed approval before every fixed phase.
 10. The executor performs capability preflight, creates the exact database, creates restricted roles and generated credentials, writes only the declared secret handles, runs all Prisma migrations from zero, transfers ownership, installs grants/functions/policies, verifies the catalog, and writes redacted receipts.
 11. The broker runs the application canary task against green. Required checks are ordinary login, admin login with recent MFA, admin MFA challenge completion, `/auth/me`, refresh-token rotation, dashboard stats, QR stats, catalog verification, and tenant-isolation certification. Any failure triggers pre-traffic green cleanup and leaves backend traffic on blue.

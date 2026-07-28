@@ -12,21 +12,9 @@ worker_task_role_arn       = "arn:aws:iam::368992683803:role/mscqr-worker-task"
 
 backend_target_group_arn = "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend/xxxxxxxxxxxx"
 
-# Apply 1 creates only the isolated green database and signing boundary.
-enable_full_rls_green_infrastructure = false
-full_rls_green_checker_principal_arns = ["arn:aws:iam::368992683803:user/independent-checker"]
-full_rls_receipt_bucket_arn           = "arn:aws:s3:::mscqr-production-example-artifacts-368992683803"
-full_rls_green_release_role_arn       = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
-
-# Apply 2 is permitted only after review supplies exact release/package bindings.
-enable_full_rls_green_executor          = false
-activate_full_rls_green_runtime         = false
-full_rls_green_release_sha              = ""
-full_rls_green_source_contract_sha256   = ""
-full_rls_green_migration_set_digest     = ""
-full_rls_green_package_checksum_sha256  = ""
-full_rls_green_executor_image           = ""
-full_rls_green_backend_image            = ""
+# Production green infrastructure is planned only from
+# production-green-stage-a/terraform.tfvars.example. This baseline root does
+# not own the isolated green environment.
 
 backend_container_definitions_json = jsonencode([
   {

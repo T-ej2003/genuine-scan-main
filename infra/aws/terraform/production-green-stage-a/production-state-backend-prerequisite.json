@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "environment": "production",
+  "required": true,
+  "bucketName": null,
+  "bucketNameSource": "externally approved dedicated production Terraform state bucket; never staging or the artifact bucket",
+  "region": "eu-west-2",
+  "stateKey": "mscqr/production/rls-green/stage-a/terraform.tfstate",
+  "encryption": "enabled",
+  "versioning": "enabled",
+  "publicAccessBlock": "enabled",
+  "ownershipControls": "BucketOwnerEnforced",
+  "deletionProtectionProcess": "approved retention and recovery procedure",
+  "locking": "s3-use_lockfile=true",
+  "authorisedRole": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+  "rootApplyAllowed": false
+}

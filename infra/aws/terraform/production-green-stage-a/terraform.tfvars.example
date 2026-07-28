@@ -1,0 +1,9 @@
+aws_region = "eu-west-2"
+vpc_id = "vpc-xxxxxxxx"
+private_subnet_ids = ["subnet-aaaaaaaa", "subnet-bbbbbbbb"]
+runtime_security_group_ids = ["sg-xxxxxxxx"]
+
+# External prerequisites. Do not infer these from root credentials or deploy roles.
+checker_principal_arns = ["arn:aws:iam::368992683803:role/<approved-independent-checker-principal>"]
+release_role_arn       = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+receipt_bucket_arn     = "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"

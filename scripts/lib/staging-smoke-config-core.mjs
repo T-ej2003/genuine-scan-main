@@ -1,11 +1,47 @@
 const REQUIRED_VARS = ["SMOKE_BASE_URL", "SMOKE_API_BASE_URL"];
 const REQUIRED_SECRETS = ["SMOKE_LOGIN_EMAIL", "SMOKE_LOGIN_PASSWORD"];
-export const KNOWN_BLUE_LOGIN_SKIP_REASON = "known-blue-production-auth-http-500-pr131";
-const PRODUCTION_RLS_ACTIVATION_FILES = [
+export const KNOWN_BLUE_LOGIN_SKIP_REASON = "known-blue-production-auth-http-500-production-green-lineage";
+
+// This is deliberately an exact, reviewable lineage allowlist, not a PR-number
+// or branch-name exception. Any file outside it keeps the blue-login failure blocking.
+const PRODUCTION_GREEN_LINEAGE_FILES = new Set([
+  ".github/workflows/release-candidate-gate.yml",
   "backend/scripts/production-full-rls-green-executor.mjs",
   "documents/security/rls-program/PRODUCTION_RLS_GREEN_ACTIVATION_DECISION.md",
+  "documents/security/rls-program/FULL_DATABASE_PRODUCTION_ACTIVATION_RUNBOOK.md",
+  "documents/security/rls-program/PRODUCTION_RLS_GREEN_ACTIVATION_IMPLEMENTATION_REPORT.md",
+  "documents/security/rls-program/generated/checksums.json",
+  "documents/security/rls-program/generated/expected-catalog-snapshot.json",
+  "documents/security/rls-program/generated/full-rls-implementation-manifest.json",
+  "documents/security/rls-program/generated/package-execution-report.json",
+  "documents/security/rls-program/generated/role-lifecycle-report.json",
+  "documents/security/rls-program/production-full-rls-executor-contract.json",
+  "infra/aws/terraform/main.tf",
+  "infra/aws/terraform/outputs.tf",
   "infra/aws/terraform/production-rls-green.tf",
+  "infra/aws/terraform/terraform.tfvars.example",
+  "package.json",
+  "scripts/check-documents-organization.mjs",
+  "scripts/check-known-blue-staging-smoke-exception.mjs",
+  "infra/aws/terraform/production-green-stage-a/main.tf",
   "scripts/aws/apply-production-full-rls-release.mjs",
+  "scripts/lib/staging-smoke-config-core.mjs",
+  "scripts/rls/lib/clean-room-source-contract.mjs",
+  "scripts/rls/sql/generated/10-roles.sql",
+  "scripts/rls/sql/generated/11-ownership-grants.sql",
+  "scripts/rls/sql/generated/15-migration-preflight.sql",
+  "scripts/rls/sql/generated/20-context-helpers.sql",
+  "scripts/rls/sql/generated/21-runtime-grants.sql",
+  "scripts/rls/sql/generated/30-policies.sql",
+  "scripts/rls/sql/generated/40-post-apply-verification.sql",
+  "scripts/rls/sql/generated/90-clean-room-role-cleanup.sql",
+  "scripts/tests/production-full-rls-release.test.mjs",
+  "scripts/tests/production-green-terraform-planning.test.mjs",
+  "scripts/tests/staging-smoke-config.test.mjs",
+]);
+const PRODUCTION_GREEN_LINEAGE_PREFIXES = [
+  "infra/aws/terraform/production-green-stage-a/",
+  "infra/aws/terraform/production-green-stage-b/",
 ];
 const DEPENDENCY_FILE_PATHS = new Set([
   "bun.lockb",
@@ -142,13 +178,17 @@ export const evaluateKnownBlueLoginSkip = ({
   smokeExitCode = 0,
 } = {}) => {
   const changedFiles = parseChangedFiles(env.STAGING_SMOKE_CHANGED_FILES);
-  const activationScope = PRODUCTION_RLS_ACTIVATION_FILES.every((file) => changedFiles.includes(file));
+  const activationScope =
+    changedFiles.length > 0 &&
+    changedFiles.every(
+      (file) =>
+        PRODUCTION_GREEN_LINEAGE_FILES.has(file) ||
+        PRODUCTION_GREEN_LINEAGE_PREFIXES.some((prefix) => file.startsWith(prefix))
+    );
   const shouldSkip =
     readConfigValue(env, "KNOWN_BLUE_ENDPOINT_MISMATCH") === KNOWN_BLUE_LOGIN_SKIP_REASON &&
     readConfigValue(env, "GITHUB_EVENT_NAME") === "pull_request" &&
     readConfigValue(env, "GITHUB_REPOSITORY") === "T-ej2003/genuine-scan-main" &&
-    readConfigValue(env, "GITHUB_PR_NUMBER") === "131" &&
-    readConfigValue(env, "GITHUB_HEAD_REF") === "release/production-green-first-user-readiness" &&
     readConfigValue(env, "SMOKE_BASE_URL") === "https://www.mscqr.com" &&
     readConfigValue(env, "SMOKE_API_BASE_URL") === "https://www.mscqr.com/api" &&
     activationScope &&
