@@ -226,3 +226,16 @@ test("production Terraform Stage A provisions isolated PG18 while Stage B remain
   assert.doesNotMatch(source, /BYPASSRLS|SUPERUSER/);
   assert.doesNotMatch(source, /cidr_ipv4/);
 });
+
+test("production operator, zero-egress, and RDS-managed-secret contracts remain fail-closed", () => {
+  const contract = JSON.parse(fs.readFileSync("documents/security/rls-program/production-full-rls-executor-contract.json", "utf8"));
+  const stageA = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
+  assert.equal(contract.stageAOperatorPath.bootstrapOperator, "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator");
+  assert.equal(contract.stageAOperatorPath.releaseRole, "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");
+  assert.equal(contract.stageANetworking.executorEgress, "explicitly empty");
+  assert.equal(contract.stageANetworking.stageBRequiredBeforeExecutorRuns, true);
+  assert.equal(contract.rdsManagedAdministratorSecret.manageMasterUserPassword, true);
+  assert.equal(contract.rdsManagedAdministratorSecret.terraformStoresPassword, false);
+  assert.equal(contract.rdsManagedAdministratorSecret.applicationRuntimeMayRead, false);
+  assert.match(stageA, /egress\s+=\s+\[\]/);
+});
