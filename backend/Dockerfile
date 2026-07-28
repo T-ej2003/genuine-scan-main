@@ -25,6 +25,8 @@ COPY backend/tsconfig.json ./tsconfig.json
 COPY backend/src ./src
 COPY backend/tests ./tests
 COPY backend/scripts ./scripts
+COPY scripts/smoke-release.mjs ./scripts/release-smoke/smoke-release.mjs
+COPY scripts/lib/staging-smoke-totp.mjs ./scripts/release-smoke/lib/staging-smoke-totp.mjs
 # Connector release binaries are large and historical installers are not needed in
 # the backend image. Build a latest-only runtime payload so production cannot
 # accidentally serve old connector releases as the launch-required connector.
@@ -63,6 +65,7 @@ COPY --from=builder --chown=node:node /workspace/backend/local-print-agent-runti
 COPY --chown=node:node backend/docker/start-runtime.sh /usr/local/bin/start-runtime.sh
 COPY --from=builder --chown=node:node /workspace/backend/node_modules ./node_modules
 COPY --from=builder --chown=node:node /workspace/backend/dist ./dist
+COPY --from=builder --chown=node:node /workspace/backend/scripts/release-smoke ./scripts/release-smoke
 RUN chmod +x /usr/local/bin/start-runtime.sh
 
 EXPOSE 4000

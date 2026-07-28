@@ -63,7 +63,17 @@ const startMfaBootstrapServer = async () => {
       return json(200, { success: true, data: { auth: { sessionStage: "ACTIVE" } } });
     }
     if (req.url === "/api/auth/me") return json(200, { success: true, data: { user: { role: "ADMIN" } } });
+    if (req.url === "/api/auth/refresh" && req.method === "POST") {
+      req.resume();
+      return json(200, { success: true, data: { auth: { sessionStage: "ACTIVE" } } });
+    }
+    if (req.url === "/api/dashboard/stats") return json(200, { success: true, data: {} });
+    if (req.url === "/api/qr/stats") return json(200, { success: true, data: { total: 0, byStatus: {} } });
     if (req.url === "/api/internal/release") return json(403, { success: false, error: "admin only" });
+    if (req.url === "/api/auth/logout" && req.method === "POST") {
+      req.resume();
+      return json(200, { success: true, data: { loggedOut: true } });
+    }
 
     return json(404, { success: false, error: "unexpected smoke path" });
   });

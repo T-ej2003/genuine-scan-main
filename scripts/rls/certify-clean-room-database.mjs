@@ -228,6 +228,26 @@ const runPublicVerificationCertification = (connections, env) => {
   }
   return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-b/b02/publicVerificationPostgres18.test.js" };
 };
+const runQrSystemCertification = (connections, env) => {
+  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/qrSystemPostgres18.test.js")], {
+    cwd: root,
+    env: {
+      ...env,
+      NODE_ENV: "test",
+      DATABASE_URL: connections.app,
+      MSCQR_QR_SYSTEM_BOOTSTRAP_URL: connections.bootstrap,
+      MSCQR_QR_SYSTEM_POSTGRES18_TEST: "true",
+      MSCQR_QR_SYSTEM_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_QR_SYSTEM_POSTGRES18_TEST",
+    },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`QR stats/system certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+  if (!/QR system PostgreSQL 18 proof passed/.test(result.stdout || "")) {
+    throw new Error("QR stats/system certification did not emit its success marker");
+  }
+  return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/qrSystemPostgres18.test.js" };
+};
 const runB01PreAuthCertification = (connections, env) => {
   const result = spawnSync(process.execPath, [path.join(root, "backend/tests/rls-wave-b/b01/preAuthSecurityPostgres18.test.js")], {
     cwd: root,
@@ -875,8 +895,9 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     const applicationPathResults = env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "c03-authenticated-boundaries"
       ? []
       : runApplicationPathCertifications(connections, env);
+    const qrSystemCertification = runQrSystemCertification(connections, env);
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
-    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, b03OutboxCertification, c03Certification, printingLifecycleCertification: null, publicVerificationCertification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
+    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, b03OutboxCertification, c03Certification, printingLifecycleCertification: null, publicVerificationCertification, qrSystemCertification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
     try { destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true }); } catch (cleanupError) { throw new Error(`${error.message}; cleanup failed: ${cleanupError.message}`); }
     throw error;
@@ -928,6 +949,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     b01PreAuthCertification: null,
     scheduledJobIdentityCertification: null,
     b03OutboxCertification: null,
+    qrSystemCertification: null,
     workflowsProductProhibited: workflowEvidence.summary.frozenProductProhibited,
     cleanRoomPreflightCertified: false,
     migrationsFromZeroCertified: false,
@@ -992,6 +1014,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     result.c03Certification = finalRun.c03Certification;
     result.printingLifecycleCertification = finalRun.printingLifecycleCertification;
     result.publicVerificationCertification = finalRun.publicVerificationCertification;
+    result.qrSystemCertification = finalRun.qrSystemCertification;
     result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;
     result.generatedPoliciesCertified = policies.count;
     result.columnPrivilegeCellsCertified = privileges.cells;

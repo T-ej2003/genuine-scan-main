@@ -57,6 +57,7 @@
     "rls:context-next": "node scripts/rls/context-boundary-next-family.mjs",
     "rls:context-check": "node scripts/rls/validate-manifests.mjs && node --test scripts/tests/full-database-rls-program.test.mjs",
     "rls:full-generate": "node scripts/rls/generate-full-rls-sql.mjs",
+    "rls:production-approval": "node scripts/rls/create-production-rls-approval.mjs",
     "rls:named-function-inventory": "node scripts/rls/named-sql-function-inventory.mjs",
     "rls:named-function-recovery": "node scripts/rls/named-sql-function-recovery.mjs",
     "rls:full-verify": "node scripts/rls/verify-full-rls-package.mjs && node --test scripts/tests/full-database-rls-enforcement.test.mjs",

@@ -8,6 +8,7 @@ import {
   validateGreenExecutorMode as validateGreenExecutorModeCore,
   verifyBoundPackage as verifyBoundPackageCore,
 } from "./full-rls-green-executor-core.mjs";
+import { validateProductionRlsApproval } from "./production-rls-approval.mjs";
 
 export { GREEN_EXECUTOR_MODES };
 
@@ -38,7 +39,26 @@ export const validateGreenExecutorMode = (mode, confirmation) =>
 export const validateProductionAdministratorUrl = (raw) =>
   validateAdministratorUrlCore(PRODUCTION_GREEN, raw);
 export const verifyBoundPackage = (options) => verifyBoundPackageCore(PRODUCTION_GREEN, options);
-export const executeProductionGreenMode = (options) => executeFullRlsGreenMode(PRODUCTION_GREEN, options);
+export const validateProductionApproval = (raw, expected, options) =>
+  validateProductionRlsApproval(raw, expected, options);
+export const productionAdministratorUrlFromEnvironment = (env) => {
+  if (env.DATABASE_URL) return env.DATABASE_URL;
+  const url = new URL("postgresql://localhost/mscqr_production");
+  url.username = String(env.MSCQR_RLS_ADMIN_USERNAME || "");
+  url.password = String(env.MSCQR_RLS_ADMIN_PASSWORD || "");
+  url.hostname = String(env.MSCQR_RLS_GREEN_ENDPOINT || "");
+  url.port = String(env.MSCQR_RLS_GREEN_PORT || "5432");
+  url.searchParams.set("sslmode", "require");
+  return url.toString();
+};
+export const executeProductionGreenMode = (options = {}) => {
+  const env = options.env || process.env;
+  return executeFullRlsGreenMode(PRODUCTION_GREEN, {
+    ...options,
+    env: { ...env, DATABASE_URL: productionAdministratorUrlFromEnvironment(env) },
+    validateApproval: validateProductionRlsApproval,
+  });
+};
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   executeProductionGreenMode().catch(() => {

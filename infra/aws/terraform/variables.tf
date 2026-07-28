@@ -1,6 +1,11 @@
 variable "aws_region" {
   type        = string
   description = "AWS region for the ECS/ECR stack."
+
+  validation {
+    condition     = var.aws_region == "eu-west-2"
+    error_message = "Production infrastructure is locked to eu-west-2."
+  }
 }
 
 variable "name_prefix" {
@@ -154,22 +159,106 @@ variable "enable_container_insights" {
   default     = true
 }
 
-variable "enable_full_rls_green_executor" {
+variable "enable_full_rls_green_infrastructure" {
   type        = bool
-  description = "Provision the isolated production full-RLS green executor role, log group, and exact runtime secrets."
+  description = "Provision the isolated production green database, approval key, roles, and secret handles without enabling execution."
   default     = false
 }
 
-variable "full_rls_green_admin_secret_arn" {
+variable "enable_full_rls_green_executor" {
+  type        = bool
+  description = "Provision release-bound fixed task definitions and the reviewed approval broker."
+  default     = false
+}
+
+variable "activate_full_rls_green_runtime" {
+  type        = bool
+  description = "Replace backend and worker database secret wiring with the complete green restricted-runtime set."
+  default     = false
+}
+
+variable "full_rls_green_release_sha" {
   type        = string
-  description = "Exact production green non-superuser administrator DATABASE_URL secret ARN."
+  description = "Exact release commit approved for the production green package."
   default     = ""
   validation {
-    condition = !var.enable_full_rls_green_executor || can(regex(
-      "^arn:aws:secretsmanager:eu-west-2:[0-9]{12}:secret:mscqr/production/rls-green/phase2/database-url/admin-[A-Za-z0-9]{6}$",
-      var.full_rls_green_admin_secret_arn
-    ))
-    error_message = "full_rls_green_admin_secret_arn must identify the exact production green administrator secret."
+    condition     = !var.enable_full_rls_green_executor || can(regex("^[a-f0-9]{40}$", var.full_rls_green_release_sha))
+    error_message = "full_rls_green_release_sha must be a full Git commit SHA."
+  }
+}
+
+variable "full_rls_green_source_contract_sha256" {
+  type        = string
+  description = "Approved clean-room package source contract digest."
+  default     = ""
+  validation {
+    condition     = !var.enable_full_rls_green_executor || can(regex("^[a-f0-9]{64}$", var.full_rls_green_source_contract_sha256))
+    error_message = "full_rls_green_source_contract_sha256 must be sha256."
+  }
+}
+
+variable "full_rls_green_migration_set_digest" {
+  type        = string
+  description = "Approved ordered Prisma migration-set digest."
+  default     = ""
+  validation {
+    condition     = !var.enable_full_rls_green_executor || can(regex("^[a-f0-9]{64}$", var.full_rls_green_migration_set_digest))
+    error_message = "full_rls_green_migration_set_digest must be sha256."
+  }
+}
+
+variable "full_rls_green_package_checksum_sha256" {
+  type        = string
+  description = "Approved generated package checksum-manifest digest."
+  default     = ""
+  validation {
+    condition     = !var.enable_full_rls_green_executor || can(regex("^[a-f0-9]{64}$", var.full_rls_green_package_checksum_sha256))
+    error_message = "full_rls_green_package_checksum_sha256 must be sha256."
+  }
+}
+
+variable "full_rls_green_executor_image" {
+  type        = string
+  description = "Immutable production RLS executor ECR image."
+  default     = ""
+  validation {
+    condition     = !var.enable_full_rls_green_executor || can(regex("^[0-9]{12}\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$", var.full_rls_green_executor_image))
+    error_message = "full_rls_green_executor_image must be an immutable production backend digest."
+  }
+}
+
+variable "full_rls_green_backend_image" {
+  type        = string
+  description = "Immutable current backend image used for the pre-traffic green application canary."
+  default     = ""
+  validation {
+    condition     = !var.enable_full_rls_green_executor || can(regex("^[0-9]{12}\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$", var.full_rls_green_backend_image))
+    error_message = "full_rls_green_backend_image must be an immutable production backend digest."
+  }
+}
+
+variable "full_rls_green_db_subnet_ids" {
+  type        = list(string)
+  description = "Private subnet IDs for the isolated production green PostgreSQL instance."
+  default     = []
+}
+
+variable "full_rls_green_db_instance_class" {
+  type        = string
+  description = "RDS instance class for production green."
+  default     = "db.t4g.medium"
+}
+
+variable "full_rls_green_checker_principal_arns" {
+  type        = list(string)
+  description = "Independent human principals allowed to assume the approval signer role with MFA."
+  default     = []
+  validation {
+    condition = !var.enable_full_rls_green_infrastructure || (
+      length(var.full_rls_green_checker_principal_arns) > 0
+      && alltrue([for arn in var.full_rls_green_checker_principal_arns : can(regex("^arn:aws:iam::368992683803:(user|role)/", arn))])
+    )
+    error_message = "At least one exact IAM checker principal is required when production green is enabled."
   }
 }
 
@@ -178,10 +267,23 @@ variable "full_rls_receipt_bucket_arn" {
   description = "Production artifact bucket ARN used only for immutable full-RLS receipts."
   default     = ""
   validation {
-    condition = !var.enable_full_rls_green_executor || can(regex(
-      "^arn:aws:s3:::mscqr-production-[a-z0-9-]+-artifacts-[0-9]{12}$",
+    condition = !var.enable_full_rls_green_infrastructure || can(regex(
+      "^arn:aws:s3:::mscqr-production-[a-z0-9-]+-artifacts-368992683803$",
       var.full_rls_receipt_bucket_arn
     ))
     error_message = "full_rls_receipt_bucket_arn must identify the reviewed production artifacts bucket."
+  }
+}
+
+variable "full_rls_green_release_role_arn" {
+  type        = string
+  description = "Exact protected-workflow IAM role allowed to verify approvals, invoke the reviewed broker alias, and read receipts."
+  default     = ""
+  validation {
+    condition = !var.enable_full_rls_green_executor || can(regex(
+      "^arn:aws:iam::368992683803:role/mscqr-production-release-deployer$",
+      var.full_rls_green_release_role_arn
+    ))
+    error_message = "full_rls_green_release_role_arn must be the reviewed production release deployer role."
   }
 }

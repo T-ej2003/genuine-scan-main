@@ -82,6 +82,13 @@ async function main() {
     ROLLBACK;`));
   assert.match(loadedChallenge.expiresAt, /(Z|[+-]\d{2}:\d{2})$/);
   assert(Date.parse(loadedChallenge.expiresAt) > Date.now());
+  const failedAttempt = JSON.parse(last(app, `BEGIN;
+    SELECT "userId" FROM app_auth.require_authenticated_session('${capabilities.primary}','admin-mfa-login-complete','auth-mfa-failed');
+    SELECT app_rls.record_admin_mfa_challenge_failure('LOGIN','${loadedChallenge.id}','AUTH_MFA_FAILURE',1,transaction_timestamp()::timestamp,NULL,NULL)::text;
+    COMMIT;`));
+  assert.equal(failedAttempt.recorded, true);
+  assert.equal(failedAttempt.attempts, 1);
+  assert.equal(last(bootstrap, `SELECT attempts FROM public."MfaLoginChallenge" WHERE id='${loadedChallenge.id}'`), "1");
   const completedChallenge = JSON.parse(last(app, `BEGIN;
     SELECT "userId" FROM app_auth.require_authenticated_session('${capabilities.primary}','admin-mfa-login-complete','auth-mfa-complete');
     SELECT app_rls.complete_admin_mfa_challenge('LOGIN','${loadedChallenge.id}','BACKUP_CODE',transaction_timestamp()::timestamp,NULL,NULL)::text;

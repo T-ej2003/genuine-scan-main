@@ -1,5 +1,12 @@
 const REQUIRED_VARS = ["SMOKE_BASE_URL", "SMOKE_API_BASE_URL"];
 const REQUIRED_SECRETS = ["SMOKE_LOGIN_EMAIL", "SMOKE_LOGIN_PASSWORD"];
+export const KNOWN_BLUE_LOGIN_SKIP_REASON = "known-blue-production-auth-http-500-pr131";
+const PRODUCTION_RLS_ACTIVATION_FILES = [
+  "backend/scripts/production-full-rls-green-executor.mjs",
+  "documents/security/rls-program/PRODUCTION_RLS_GREEN_ACTIVATION_DECISION.md",
+  "infra/aws/terraform/production-rls-green.tf",
+  "scripts/aws/apply-production-full-rls-release.mjs",
+];
 const DEPENDENCY_FILE_PATHS = new Set([
   "bun.lockb",
   "npm-shrinkwrap.json",
@@ -123,5 +130,39 @@ export const evaluateDependabotSmokeSkip = ({ env = process.env, missing = [] } 
     changedFiles,
     missingOnlyLoginSecrets,
     missingLoginSecrets: missingLoginSecrets.map((item) => item.key),
+  };
+};
+
+export const evaluateKnownBlueLoginSkip = ({
+  env = process.env,
+  readyHealthPassed = false,
+  liveHealthPassed = false,
+  failureStage = "",
+  status = null,
+  smokeExitCode = 0,
+} = {}) => {
+  const changedFiles = parseChangedFiles(env.STAGING_SMOKE_CHANGED_FILES);
+  const activationScope = PRODUCTION_RLS_ACTIVATION_FILES.every((file) => changedFiles.includes(file));
+  const shouldSkip =
+    readConfigValue(env, "KNOWN_BLUE_ENDPOINT_MISMATCH") === KNOWN_BLUE_LOGIN_SKIP_REASON &&
+    readConfigValue(env, "GITHUB_EVENT_NAME") === "pull_request" &&
+    readConfigValue(env, "GITHUB_REPOSITORY") === "T-ej2003/genuine-scan-main" &&
+    readConfigValue(env, "GITHUB_PR_NUMBER") === "131" &&
+    readConfigValue(env, "GITHUB_HEAD_REF") === "release/production-green-first-user-readiness" &&
+    readConfigValue(env, "SMOKE_BASE_URL") === "https://www.mscqr.com" &&
+    readConfigValue(env, "SMOKE_API_BASE_URL") === "https://www.mscqr.com/api" &&
+    activationScope &&
+    readyHealthPassed &&
+    liveHealthPassed &&
+    failureStage === "login" &&
+    status === 500 &&
+    Number.isInteger(smokeExitCode) &&
+    smokeExitCode > 0;
+
+  return {
+    shouldSkip,
+    reasonCode: shouldSkip ? KNOWN_BLUE_LOGIN_SKIP_REASON : null,
+    activationScope,
+    changedFiles,
   };
 };

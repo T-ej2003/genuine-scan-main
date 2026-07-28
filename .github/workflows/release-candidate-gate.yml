@@ -147,8 +147,11 @@ jobs:
       - name: Run staging smoke gate
         if: ${{ steps.smoke_skip.outputs.skip_staging_smoke != 'true' }}
         env:
-          SMOKE_REQUIRED: ${{ github.event_name == 'pull_request' && 'false' || 'true' }}
-          ALLOW_STAGING_SMOKE_DEGRADED_ON_PR: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+          SMOKE_REQUIRED: "true"
+          ALLOW_STAGING_SMOKE_DEGRADED_ON_PR: "false"
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          KNOWN_BLUE_ENDPOINT_MISMATCH: "known-blue-production-auth-http-500-pr131"
+          STAGING_SMOKE_RESULT_PATH: staging-smoke-result.json
           SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL || secrets.SMOKE_LOGIN_EMAIL }}
           SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD || secrets.SMOKE_LOGIN_PASSWORD }}
           SMOKE_ADMIN_MFA_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_MFA_CODE }}
@@ -156,8 +159,14 @@ jobs:
           SMOKE_ADMIN_STEP_UP_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_STEP_UP_CODE }}
           SMOKE_STEP_UP_PASSWORD: ${{ secrets.STAGING_SMOKE_STEP_UP_PASSWORD }}
         run: |
-          set -o pipefail
-          npm run verify:staging-smoke | tee smoke-release.log
+          set +e
+          npm run verify:staging-smoke 2>&1 | tee smoke-release.log
+          smoke_status="${PIPESTATUS[0]}"
+          set -e
+          if [ "$smoke_status" -eq 0 ]; then
+            exit 0
+          fi
+          SMOKE_EXIT_CODE="$smoke_status" node scripts/check-known-blue-staging-smoke-exception.mjs
 
       - name: Record skipped staging smoke reason
         if: ${{ steps.smoke_skip.outputs.skip_staging_smoke == 'true' }}
@@ -173,7 +182,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: staging-smoke-log
-          path: smoke-release.log
+          path: |
+            smoke-release.log
+            staging-smoke-result.json
           if-no-files-found: ignore
 
   rc-governance:

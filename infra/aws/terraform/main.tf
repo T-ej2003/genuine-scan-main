@@ -99,7 +99,7 @@ resource "aws_cloudwatch_log_group" "full_rls_green" {
 }
 
 resource "aws_iam_role" "full_rls_green_executor" {
-  count = var.enable_full_rls_green_executor ? 1 : 0
+  count = var.enable_full_rls_green_infrastructure ? 1 : 0
   name  = "mscqr-production-full-rls-green-executor-task"
 
   assume_role_policy = jsonencode({
@@ -115,7 +115,7 @@ resource "aws_iam_role" "full_rls_green_executor" {
 }
 
 resource "aws_secretsmanager_secret" "full_rls_green_runtime" {
-  for_each                = var.enable_full_rls_green_executor ? toset(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"]) : toset([])
+  for_each                = var.enable_full_rls_green_infrastructure ? toset(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"]) : toset([])
   name                    = "mscqr/production/rls-green/phase2/database-url/${each.key}"
   description             = "MSCQR production full-RLS green ${each.key} database URL"
   recovery_window_in_days = 30
@@ -134,7 +134,7 @@ resource "aws_iam_role_policy" "full_rls_green_executor" {
         Sid      = "ReadOnlyProductionGreenAdministratorCredential"
         Effect   = "Allow"
         Action   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
-        Resource = var.full_rls_green_admin_secret_arn
+        Resource = aws_db_instance.full_rls_green[0].master_user_secret[0].secret_arn
       },
       {
         Sid      = "ProvisionOnlyExactProductionGreenRuntimeCredentials"
@@ -147,6 +147,12 @@ resource "aws_iam_role_policy" "full_rls_green_executor" {
         Effect   = "Allow"
         Action   = ["s3:PutObject"]
         Resource = "${var.full_rls_receipt_bucket_arn}/rls-receipts/*"
+      },
+      {
+        Sid      = "VerifyIndependentProductionApproval"
+        Effect   = "Allow"
+        Action   = ["kms:Verify"]
+        Resource = aws_kms_key.full_rls_green_approval[0].arn
       }
     ]
   })
@@ -159,11 +165,41 @@ resource "aws_iam_role_policy" "full_rls_green_execution_secret" {
 
   policy = jsonencode({
     Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ReadProductionGreenExecutorSecretsAtTaskStart"
+        Effect = "Allow"
+        Action = ["secretsmanager:GetSecretValue"]
+        Resource = [
+          aws_db_instance.full_rls_green[0].master_user_secret[0].secret_arn,
+          aws_secretsmanager_secret.full_rls_green_approval[0].arn,
+        ]
+      },
+      {
+        Sid    = "ReadProductionGreenBackendRuntimeSecretsAtTaskStart"
+        Effect = "Allow"
+        Action = ["secretsmanager:GetSecretValue"]
+        Resource = concat(
+          [for secret in aws_secretsmanager_secret.full_rls_green_runtime : secret.arn],
+          [for secret in aws_secretsmanager_secret.full_rls_green_canary : secret.arn],
+        )
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "full_rls_green_worker_execution_secret" {
+  count = var.enable_full_rls_green_executor && var.worker_execution_role_arn != var.backend_execution_role_arn ? 1 : 0
+  name  = "mscqr-production-full-rls-green-worker-runtime-secret"
+  role  = element(reverse(split("/", var.worker_execution_role_arn)), 0)
+
+  policy = jsonencode({
+    Version = "2012-10-17"
     Statement = [{
-      Sid      = "ReadOnlyProductionGreenAdministratorCredentialAtTaskStart"
+      Sid      = "ReadProductionGreenWorkerDatabaseSecretAtTaskStart"
       Effect   = "Allow"
       Action   = ["secretsmanager:GetSecretValue"]
-      Resource = var.full_rls_green_admin_secret_arn
+      Resource = aws_secretsmanager_secret.full_rls_green_runtime["worker"].arn
     }]
   })
 }
@@ -197,7 +233,7 @@ resource "aws_ecs_task_definition" "backend" {
   memory                   = var.backend_memory
   execution_role_arn       = var.backend_execution_role_arn
   task_role_arn            = var.backend_task_role_arn
-  container_definitions    = var.backend_container_definitions_json
+  container_definitions    = local.backend_container_definitions
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -215,7 +251,7 @@ resource "aws_ecs_task_definition" "worker" {
   memory                   = var.worker_memory
   execution_role_arn       = var.worker_execution_role_arn
   task_role_arn            = var.worker_task_role_arn
-  container_definitions    = var.worker_container_definitions_json
+  container_definitions    = local.worker_container_definitions
 
   runtime_platform {
     operating_system_family = "LINUX"

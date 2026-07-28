@@ -66,6 +66,15 @@ assert.throws(
   () => resolveB01RuntimeDatabaseConfiguration({ NODE_ENV: "production" }),
   (error) => error.code === "B01_RUNTIME_DATABASE_URL_MISSING"
 );
+for (const partial of [
+  { PREAUTH_DATABASE_URL: stagingPreAuth },
+  { AUTHENTICATED_APP_DATABASE_URL: stagingApp },
+]) {
+  assert.throws(
+    () => resolveB01RuntimeDatabaseConfiguration({ NODE_ENV: "production", ...partial }),
+    (error) => error.code === "B01_RUNTIME_DATABASE_URL_MISSING"
+  );
+}
 assert.throws(
   () => resolveB01RuntimeDatabaseConfiguration({
     NODE_ENV: "production",

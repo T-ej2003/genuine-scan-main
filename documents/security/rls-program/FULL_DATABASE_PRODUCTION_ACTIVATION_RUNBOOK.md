@@ -1,40 +1,203 @@
-# Full-Database RLS Production Blue/Green Replication Runbook
+# Production full-RLS green activation runbook
 
-Status: plan only. Production access and deployment are prohibited in this programme run.
+Status: executable contract implemented; no AWS resource, secret value, production database, or ECS service has been changed.
 
-## Authority
+## Hard boundaries
 
-Production may use only the exact staging-proven source commit, image digests, Prisma migration inventory, SQL package, role marker, catalog expectations and cleanup checksum. Production approval is separate from merge and staging approval.
+- Currently deployed broken backend release: `d355a77675d4320c2bfa975ebf3682995ba54a2f`. Activation uses the exact reviewed commit containing this contract; substitute that full SHA consistently below.
+- Frontend remains `mscqr-frontend:20`.
+- Blue production database is read-only for this procedure and is never a package target.
+- Green database is exactly `mscqr_production_rls_green_phase2` on a separate PostgreSQL 18 instance.
+- Only the `mscqr-production-rls-approval-broker:reviewed` Lambda alias may launch fixed executor tasks.
+- The protected workflow role may read/verify the approval, invoke that alias, observe its tasks, and read receipts; it has no `ecs:RunTask` permission.
+- Do not run if green contains application objects, any `mscqr_prd_rls_phase2_*` role exists, the approval is absent/expired, or required production data lacks an approved transfer contract.
+- Never print, copy into command arguments, or save database URLs, passwords, MFA seeds, or approval signatures in evidence.
 
-## Topology and data precondition
+## Approval artifact
 
-- Blue is the current production database and task-definition set. It remains untouched.
-- Green is a separate encrypted PostgreSQL 18 RDS instance or cluster with a fresh template0-derived database and no application objects or managed roles.
-- All package roles are new on green. Existing blue roles/ACLs are irrelevant and are neither inspected for restoration nor modified.
-- This zero-based procedure is valid only while there is no required onboarded customer data to migrate. If that fact changes, stop and obtain a reviewed data-migration/cutover contract; do not improvise dual writes or destructive cleanup.
+The JSON object has exactly these fields:
 
-## Preconditions
+```json
+{
+  "schemaVersion": 1,
+  "environment": "production",
+  "releaseSha": "<40 lowercase hex>",
+  "deploymentId": "phase2",
+  "greenDatabase": "mscqr_production_rls_green_phase2",
+  "sourceContractSha256": "<64 lowercase hex>",
+  "migrationSetDigest": "<64 lowercase hex>",
+  "approvalId": "<reviewed approval id>",
+  "ticketId": "<change ticket id>",
+  "administratorIdentity": "mscqr_prod_admin",
+  "independentCheckerIdentity": "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/<session>",
+  "issuedAt": "<ISO-8601>",
+  "expiresAt": "<ISO-8601, no more than two hours after issuedAt>",
+  "kmsKeyArn": "arn:aws:kms:eu-west-2:368992683803:key/<key id>",
+  "signatureAlgorithm": "RSASSA_PSS_SHA_256",
+  "signatureBase64": "<KMS signature>"
+}
+```
 
-1. Staging completed all 428 workflow dispositions, full soak, performance gate, blue/green rollback rehearsal and clean rebuild using the exact candidate artifacts.
-2. The final system review has zero P0-P2 findings and staging exposed no new unresolved correctness or security defect.
-3. Production green topology, administrator capability, KMS/encryption, backups/PITR, monitoring, task definitions, secret separation and broker audit are independently approved.
-4. Incident commander, database operator, security checker and application rollback owner are named for the window.
-5. The no-required-data assertion and rollback write-acceptance threshold are machine-verifiable.
+The checker assumes the dedicated signer role with MFA. The exact STS session ARN is signed and recorded; the release operator cannot sign.
 
-## Green build and certification
+## Local dry run
 
-Run the same five checksum-bound phases proven in staging: `admin-bootstrap.sql`, restricted zero-based Prisma migration, `admin-ownership.sql`, `runtime-policy.sql`, and `verification.sql`. No phase targets blue. No runtime task uses the administrator, migration identity or either NOLOGIN owner.
+These commands perform no AWS apply, secret creation, deployment, or production connection:
 
-Before traffic, run safe production-environment smoke checks that create no customer data, exact catalog/role/privilege verification, pool/reconnect checks and performance comparisons. Match the reviewed commit, image and SQL checksums byte-for-byte.
+```sh
+npm install --ignore-scripts
+npm run rls:full-generate
+npm run rls:full-verify
+node --test scripts/tests/production-rls-approval.test.mjs scripts/tests/production-full-rls-release.test.mjs
+terraform -chdir=infra/aws/terraform init -backend=false
+terraform -chdir=infra/aws/terraform fmt -check
+terraform -chdir=infra/aws/terraform validate
+```
 
-## Traffic switch
+For the disposable PostgreSQL 18 production-target package proof:
 
-Switch only the exact approved task definitions and secret versions to green, with bounded weighted traffic and immediate alarms for supported-workflow failures, RLS denials, cross-scope anomalies, connection saturation and latency regression. Do not weaken policies or bypass RLS to recover a failing workflow.
+```sh
+docker run --name mscqr-production-package-postgres18 --rm \
+  -e POSTGRES_USER=mscqr_test_admin \
+  -e POSTGRES_DB=mscqr_production_package_disposable \
+  -e POSTGRES_HOST_AUTH_METHOD=trust \
+  -p 127.0.0.1:55434:5432 -d postgres:18.4
 
-Blue remains the rollback target. If a rollback criterion trips before required data is accepted, stop/disconnect green, switch tasks to blue, prove blue health, destroy the green database and drop only exact package-marked roles. If required data may have been accepted, stop the automated rollback and invoke the approved incident/data-reconciliation procedure.
+MSCQR_PRODUCTION_PACKAGE_POSTGRES18_TEST=true \
+MSCQR_PRODUCTION_PACKAGE_POSTGRES18_ADMIN_URL=postgresql://mscqr_test_admin@127.0.0.1:55434/mscqr_production_package_disposable \
+node --test scripts/tests/production-full-rls-package-postgres18.test.mjs
+```
 
-## Evidence
+The test locally signs only under the explicit test contract, restores the certification package, drops its green database, and proves zero `mscqr_prd_rls_phase2_*` residue. Production generation and execution still require KMS verification.
 
-Record immutable activation ID, operator and checker identities, timestamps, blue and green infrastructure identifiers, source/image/package/cleanup checksums, catalog and role snapshots, workflow results, performance/soak results, traffic weights and rollback readiness. Exclude endpoints, credentials, tokens, request bodies and customer row data.
+Run the complete and focused application-path certificates against the same disposable PostgreSQL 18 administrator database:
 
-No production command in this runbook is authorized until the user separately approves production replication.
+```sh
+export MSCQR_FULL_RLS_CERTIFICATION_CONFIRM=MSCQR_RUN_LOCAL_FULL_RLS_CERTIFICATION
+export MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL=postgresql://mscqr_test_admin@127.0.0.1:55434/mscqr_production_package_disposable
+
+npm run rls:full-certify
+for family in b03-durable-outbox c03-authenticated-boundaries public-verification printing-lifecycle; do
+  MSCQR_FULL_RLS_CERTIFICATION_FAMILY="$family" npm run rls:full-certify
+done
+```
+
+The current aggregate certificate proves the required login/session, dashboard, QR, tenant-isolation and catalog paths, while still reporting `clean-room-full-table-enforcement-certified-workflows-pending`: 11 workflows have aggregate application-path evidence and 24 generated contracts do not yet have aggregate application-path certification. The focused B03 outbox, C03, public-verification and printing certificates pass independently. This is an evidence boundary, not permission to claim every registered route is production-certified; the change approvers must either accept that bounded evidence for the activation window or require the remaining workflow certificates before traffic.
+
+## Empty-green first-user onboarding
+
+An empty green database is a supported launch state. During the brokered `full-rls-admin-ownership` task, after zero-based Prisma migration and before ownership transfer or policy installation, `backend/scripts/production-green-canary-provision.mjs` creates only the marked platform-admin and licensee-admin canary identities plus an isolation-control tenant. It accepts credentials and MFA seeds only through the pre-created secret handles, requires the validated production approval artifact and ownership confirmation, refuses any unrelated user already present, reconciles only its exact marked identities, and records approval ID, ticket ID, and independent-checker attribution without recording credentials. The mandatory canary then proves login, MFA completion, refresh rotation, `/api/auth/me`, dashboard statistics, QR statistics, cross-tenant denial, and logout/session revocation.
+
+After traffic activation, the canary platform administrator creates or invites the first pilot platform and licensee administrators through the normal application governance route. Each recipient consumes the one-time invitation, completes password setup and email verification when required, enrols MFA, and signs in. `backend/scripts/resend-password-setup-link.js` remains the approved operator recovery path; it is dry-run by default, requires an operator, approval, reason, and explicit `--apply`, and never prints setup tokens or credentials. Passwords, MFA seeds, URLs, and setup tokens are never hard-coded or emitted in logs. Staging smoke remains in the workflow and may be marked non-blocking only when it is explicitly targeting the known broken endpoint; it does not replace the green canary gate.
+
+## Operator sequence requiring separate authorization
+
+Nothing in this section is authorized by this repository change.
+
+1. Record blue database identifier, backend task definition `mscqr-backend:47`, worker task definition, current secret version IDs, target-group health, and a read-only blue fingerprint.
+2. Initialise the reviewed encrypted/versioned production S3 state backend, review a saved plan, then apply Terraform with `enable_full_rls_green_infrastructure=true`, `enable_full_rls_green_executor=false`, and `activate_full_rls_green_runtime=false`:
+
+```sh
+terraform -chdir=infra/aws/terraform init \
+  -backend-config='bucket=<approved-production-terraform-state-bucket>' \
+  -backend-config='key=mscqr/production/rls-green/terraform.tfstate' \
+  -backend-config='region=eu-west-2' \
+  -backend-config='encrypt=true' \
+  -backend-config='use_lockfile=true'
+terraform -chdir=infra/aws/terraform plan -out=/secure/operator/rls-green-base.tfplan
+terraform -chdir=infra/aws/terraform apply /secure/operator/rls-green-base.tfplan
+```
+
+This creates the isolated RDS instance, KMS keys, checker/executor roles, security groups, and empty secret handles. It creates no secret value and does not touch blue.
+3. Verify PostgreSQL 18, private networking, encryption, deletion protection, backups, empty public catalog, no package roles, and exact administrator attributes. Confirm the no-required-customer-data precondition or stop for an approved data-transfer plan.
+4. Build/publish the backend, worker, and executor images from the release SHA and resolve immutable ECR digests. `publish-ecs-images.sh` reuses an existing immutable release tag on the later activation run:
+
+```sh
+AWS_REGION=eu-west-2 IMAGE_TAG='<approved-release-sha>' \
+  OUTPUT_FILE=/secure/operator/production-images.jsonl \
+  scripts/aws/publish-ecs-images.sh backend
+AWS_REGION=eu-west-2 IMAGE_TAG='<approved-release-sha>' \
+  OUTPUT_FILE=/secure/operator/production-images.jsonl \
+  scripts/aws/publish-ecs-images.sh worker
+AWS_REGION=eu-west-2 IMAGE_TAG='<approved-release-sha>' \
+  OUTPUT_FILE=/secure/operator/production-images.jsonl \
+  scripts/aws/publish-ecs-images.sh rls-executor
+```
+
+Generate the source-contract and ordered migration digests locally.
+5. The independent checker assumes `mscqr-production-rls-independent-checker` with MFA and runs:
+
+```sh
+node scripts/rls/create-production-rls-approval.mjs \
+  --output /secure/operator/production-rls-approval.json \
+  --release-sha '<approved-release-sha>' \
+  --deployment-id phase2 \
+  --approval-id '<approval-id>' \
+  --ticket-id '<change-id>' \
+  --kms-key-arn '<terraform-output-kms-key-arn>' \
+  --expires-at '<ISO-8601-within-two-hours>'
+```
+
+6. The checker reviews the artifact fields, stores it as the current value of the Terraform-created approval secret, and records only its approval ID and contract SHA256 in the ticket. Do not expose the signature.
+7. Generate the production package using the KMS-backed artifact:
+
+```sh
+node scripts/rls/generate-clean-room-rls-sql.mjs \
+  --environment production \
+  --deployment-id phase2 \
+  --release-sha '<approved-release-sha>' \
+  --approval-artifact /secure/operator/production-rls-approval.json \
+  --approval-kms-key-arn '<terraform-output-kms-key-arn>'
+npm run rls:full-verify
+```
+
+8. Review the package checksum, source digest, migration digest, SQL install-state metadata, Terraform plan, task definitions, broker alias version, and immutable images. Create and apply a second saved Terraform plan with the exact release SHA, package/source/migration digests and immutable image refs, `enable_full_rls_green_infrastructure=true`, `enable_full_rls_green_executor=true`, and `activate_full_rls_green_runtime=false`.
+9. Invoke the protected release workflow with production approval, the exact approval secret ARN/ID, exact broker alias ARN, and `preserve_current_frontend=true`. It invokes only the broker. The broker revalidates the signed approval before every fixed phase.
+10. The executor performs capability preflight, creates the exact database, creates restricted roles and generated credentials, writes only the declared secret handles, runs all Prisma migrations from zero, transfers ownership, installs grants/functions/policies, verifies the catalog, and writes redacted receipts.
+11. The broker runs the application canary task against green. Required checks are ordinary login, admin login with recent MFA, admin MFA challenge completion, `/auth/me`, refresh-token rotation, dashboard stats, QR stats, catalog verification, and tenant-isolation certification. Any failure triggers pre-traffic green cleanup and leaves backend traffic on blue.
+12. Only after independent receipt review, set `activate_full_rls_green_runtime=true` or deploy the release task definition with the exact all-or-nothing secret map. Deploy backend and worker; do not deploy the frontend. Wait for ECS steady state and rerun external canaries.
+13. Record task-definition ARNs, secret version IDs (not values), receipt bundle hash, approval ID, checker identity, catalog hash, canary results, and blue fingerprint.
+
+## Database invariants
+
+Before:
+
+- blue identifier/fingerprint unchanged and never named as an executor target;
+- green PostgreSQL major is 18 and public catalog contains zero application objects;
+- no `mscqr_prd_rls_phase2_*` role exists;
+- administrator is `LOGIN NOINHERIT NOSUPERUSER CREATEDB CREATEROLE NOREPLICATION NOBYPASSRLS`;
+- approval, release, green database, source digest, migration digest, and KMS key match.
+
+After installation, before traffic:
+
+- all Prisma migrations exist in order with approved checksums;
+- 79 inventoried tables and 77 FORCE-RLS targets match the generated report;
+- all `app_auth` and `app_rls` routines, policies, grants, owners, default ACLs, and role attributes match;
+- `mscqr_rls_install.state` matches the approval and executing administrator;
+- the backend has both restricted URLs and the worker has its restricted URL;
+- every canary and tenant-isolation proof passes;
+- blue fingerprint is unchanged.
+
+After pre-traffic rollback:
+
+- green database is absent;
+- zero `mscqr_prd_rls_phase2_*` roles remain;
+- no runtime secret is wired to an ECS service;
+- backend remains `mscqr-backend:47` on blue;
+- blue fingerprint is unchanged.
+
+## Rollback trigger and window
+
+Before accepted green writes, rollback on any checksum/approval mismatch, migration failure, catalog drift, secret partiality, health failure, RLS denial anomaly, cross-tenant result, login/refresh/MFA failure, dashboard/QR failure, or latency/error-budget breach. Stop green consumers, invoke the brokered rollback, verify zero residue, and retain blue traffic.
+
+After any accepted green write, automated blue rollback is prohibited until an approved reconciliation procedure proves write safety.
+
+Maximum recommended temporary activation window: two hours from approval issuance for installation and pre-traffic validation. Do not extend an approval; issue a new independently reviewed artifact. Keep blue available through at least one full production session/token lifetime and the agreed observation window, subject to the no-divergent-writes rule.
+
+## Human/AWS blockers
+
+- Independent checker, change-ticket, protected-environment, Terraform-plan, database-operator, and traffic-switch approvals.
+- AWS access to create the isolated resources and populate secret values.
+- Verified current production data inventory. Required customer data needs a separate reviewed copy/reconciliation contract before traffic.
+- Approved existing canary accounts/data on green; fixture SQL is certification-only and must never seed production.
+- Confirmation that worker secret wiring and current worker artifact are included in the same cutover.

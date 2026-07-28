@@ -5,17 +5,33 @@ vpc_id                     = "vpc-xxxxxxxx"
 private_subnet_ids         = ["subnet-aaaaaaa", "subnet-bbbbbbb"]
 service_security_group_ids = ["sg-xxxxxxxx"]
 
-backend_execution_role_arn = "arn:aws:iam::123456789012:role/mscqr-backend-execution"
-backend_task_role_arn      = "arn:aws:iam::123456789012:role/mscqr-backend-task"
-worker_execution_role_arn  = "arn:aws:iam::123456789012:role/mscqr-worker-execution"
-worker_task_role_arn       = "arn:aws:iam::123456789012:role/mscqr-worker-task"
+backend_execution_role_arn = "arn:aws:iam::368992683803:role/mscqr-production-ecs-execution-role"
+backend_task_role_arn      = "arn:aws:iam::368992683803:role/mscqr-backend-task"
+worker_execution_role_arn  = "arn:aws:iam::368992683803:role/mscqr-worker-execution"
+worker_task_role_arn       = "arn:aws:iam::368992683803:role/mscqr-worker-task"
 
-backend_target_group_arn = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:targetgroup/mscqr-backend/xxxxxxxxxxxx"
+backend_target_group_arn = "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend/xxxxxxxxxxxx"
+
+# Apply 1 creates only the isolated green database and signing boundary.
+enable_full_rls_green_infrastructure = false
+full_rls_green_checker_principal_arns = ["arn:aws:iam::368992683803:user/independent-checker"]
+full_rls_receipt_bucket_arn           = "arn:aws:s3:::mscqr-production-example-artifacts-368992683803"
+full_rls_green_release_role_arn       = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+
+# Apply 2 is permitted only after review supplies exact release/package bindings.
+enable_full_rls_green_executor          = false
+activate_full_rls_green_runtime         = false
+full_rls_green_release_sha              = ""
+full_rls_green_source_contract_sha256   = ""
+full_rls_green_migration_set_digest     = ""
+full_rls_green_package_checksum_sha256  = ""
+full_rls_green_executor_image           = ""
+full_rls_green_backend_image            = ""
 
 backend_container_definitions_json = jsonencode([
   {
     name      = "backend"
-    image     = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:replace-me"
+    image     = "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:replace-me"
     essential = true
     portMappings = [
       {
@@ -43,7 +59,7 @@ backend_container_definitions_json = jsonencode([
 worker_container_definitions_json = jsonencode([
   {
     name      = "worker"
-    image     = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker@sha256:replace-me"
+    image     = "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker@sha256:replace-me"
     essential = true
     command   = ["sh", "-c", "npm run worker"]
     logConfiguration = {

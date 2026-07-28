@@ -6,11 +6,12 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { GREEN_EXECUTOR_MODES, PRODUCTION_GREEN } from "../../backend/scripts/production-full-rls-green-executor.mjs";
+import { PRODUCTION_GREEN } from "../../backend/scripts/production-full-rls-green-executor.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
 const CLUSTER_ARN = `arn:aws:ecs:${REGION}:${ACCOUNT}:cluster/mscqr-prod-euw2-main`;
+const BROKER_ARN = `arn:aws:lambda:${REGION}:${ACCOUNT}:function:mscqr-production-rls-approval-broker:reviewed`;
 const APPLY_MODES = Object.freeze([
   "full-rls-capability-preflight",
   "full-rls-admin-bootstrap",
@@ -21,38 +22,29 @@ const APPLY_MODES = Object.freeze([
   "full-rls-verification",
 ]);
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
-const parseArray = (raw, pattern, label) => {
-  const values = JSON.parse(raw || "[]");
-  if (!Array.isArray(values) || values.length === 0 || values.some((value) => typeof value !== "string" || !pattern.test(value))) {
-    throw new Error(`${label} is outside the protected production contract.`);
-  }
-  return values;
-};
 
 export function validateProductionReleaseEnvironment(env = process.env) {
   const config = {
     releaseSha: env.RELEASE_GIT_SHA,
     sourceContractSha256: env.MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256,
+    migrationSetDigest: env.MSCQR_FULL_RLS_MIGRATION_SET_DIGEST,
     packageChecksumSha256: env.MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256,
+    approvalId: env.PRODUCTION_RLS_APPROVAL_ID,
+    brokerArn: env.PRODUCTION_RLS_BROKER_ARN,
     executorImage: env.PRODUCTION_RLS_EXECUTOR_IMAGE,
     backendImage: env.PRODUCTION_BACKEND_IMAGE,
     workerImage: env.PRODUCTION_WORKER_IMAGE,
     frontendImage: env.PRODUCTION_FRONTEND_IMAGE,
     clusterArn: env.PRODUCTION_RLS_CLUSTER_ARN,
-    taskRoleArn: env.PRODUCTION_RLS_TASK_ROLE_ARN,
-    executionRoleArn: env.PRODUCTION_RLS_EXECUTION_ROLE_ARN,
-    adminSecretArn: env.PRODUCTION_RLS_ADMIN_SECRET_ARN,
     receiptBucket: env.PRODUCTION_RLS_RECEIPT_BUCKET,
-    subnets: parseArray(env.PRODUCTION_RLS_PRIVATE_SUBNETS_JSON, /^subnet-[a-f0-9]+$/, "Production executor subnets"),
-    securityGroups: parseArray(env.PRODUCTION_RLS_SECURITY_GROUPS_JSON, /^sg-[a-f0-9]+$/, "Production executor security groups"),
   };
   if (!/^[a-f0-9]{40}$/.test(config.releaseSha || "")
       || !/^[a-f0-9]{64}$/.test(config.sourceContractSha256 || "")
+      || !/^[a-f0-9]{64}$/.test(config.migrationSetDigest || "")
       || !/^[a-f0-9]{64}$/.test(config.packageChecksumSha256 || "")
+      || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(config.approvalId || "")
       || config.clusterArn !== CLUSTER_ARN
-      || !new RegExp(`^arn:aws:iam::${ACCOUNT}:role/mscqr-production-full-rls-green-executor-task$`).test(config.taskRoleArn || "")
-      || !new RegExp(`^arn:aws:iam::${ACCOUNT}:role/mscqr-production-ecs-execution-role$`).test(config.executionRoleArn || "")
-      || !new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:mscqr/production/rls-green/phase2/database-url/admin-[A-Za-z0-9]{6}$`).test(config.adminSecretArn || "")
+      || config.brokerArn !== BROKER_ARN
       || !PRODUCTION_GREEN.receiptBucketPattern.test(config.receiptBucket || "")) {
     throw new Error("Production release binding is incomplete or outside the reviewed identity.");
   }
@@ -64,82 +56,33 @@ export function validateProductionReleaseEnvironment(env = process.env) {
   return config;
 }
 
-export function buildTaskDefinition(mode, config) {
-  if (!GREEN_EXECUTOR_MODES.includes(mode)) throw new Error("Production executor mode is not reviewed.");
-  const confirmation = PRODUCTION_GREEN.confirmations[mode];
-  return {
-    family: `mscqr-production-full-rls-green-${mode.replace("full-rls-", "")}`,
-    taskRoleArn: config.taskRoleArn,
-    executionRoleArn: config.executionRoleArn,
-    networkMode: "awsvpc",
-    requiresCompatibilities: ["FARGATE"],
-    cpu: "256",
-    memory: "512",
-    runtimePlatform: { operatingSystemFamily: "LINUX", cpuArchitecture: "X86_64" },
-    containerDefinitions: [{
-      name: "full-rls-green",
-      image: config.executorImage,
-      essential: true,
-      command: ["node", "scripts/production-full-rls-green-executor.mjs"],
-      environment: [
-        { name: "MSCQR_FULL_RLS_MODE", value: mode },
-        { name: "MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256", value: config.sourceContractSha256 },
-        { name: "MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256", value: config.packageChecksumSha256 },
-        { name: "MSCQR_FULL_RLS_RECEIPT_BUCKET", value: config.receiptBucket },
-        { name: "RELEASE_GIT_SHA", value: config.releaseSha },
-        ...(confirmation ? [{ name: "MSCQR_FULL_RLS_CONFIRMATION", value: confirmation }] : []),
-      ],
-      secrets: [{ name: "DATABASE_URL", valueFrom: config.adminSecretArn }],
-      readonlyRootFilesystem: true,
-      privileged: false,
-      user: "node",
-      linuxParameters: { initProcessEnabled: true, capabilities: { add: [], drop: ["ALL"] }, devices: [], tmpfs: [] },
-      logConfiguration: {
-        logDriver: "awslogs",
-        options: {
-          "awslogs-group": "/ecs/mscqr-production/full-rls-green",
-          "awslogs-region": REGION,
-          "awslogs-stream-prefix": mode,
-        },
-      },
-    }],
-    tags: [
-      { key: "Environment", value: "production" },
-      { key: "ReleaseSha", value: config.releaseSha },
-      { key: "SourceContractSha256", value: config.sourceContractSha256 },
-      { key: "PackageChecksumSha256", value: config.packageChecksumSha256 },
-    ],
-  };
-}
-
 const defaultAws = (args) => {
   const result = spawnSync("aws", [...args, "--region", REGION, "--output", "json"], { encoding: "utf8" });
-  if (result.status !== 0) throw new Error("Protected production executor command failed; provider detail suppressed.");
+  if (result.status !== 0) throw new Error("Protected production broker command failed; provider detail suppressed.");
   return result.stdout.trim() ? JSON.parse(result.stdout) : {};
 };
 
-const registerTask = (mode, config, aws, directory) => {
-  const file = path.join(directory, `${mode}.json`);
-  fs.writeFileSync(file, JSON.stringify(buildTaskDefinition(mode, config)), { mode: 0o600, flag: "wx" });
-  const response = aws(["ecs", "register-task-definition", "--cli-input-json", `file://${file}`]);
-  const arn = response.taskDefinition?.taskDefinitionArn;
-  const expected = `arn:aws:ecs:${REGION}:${ACCOUNT}:task-definition/mscqr-production-full-rls-green-${mode.replace("full-rls-", "")}:`;
-  if (typeof arn !== "string" || !arn.startsWith(expected)) throw new Error("Registered production task identity is invalid.");
-  return arn;
+const invokeBroker = (mode, config, aws, directory) => {
+  const requestPath = path.join(directory, `${mode}-broker-request.json`);
+  const responsePath = path.join(directory, `${mode}-broker-response.json`);
+  fs.writeFileSync(requestPath, JSON.stringify({ mode, approvalId: config.approvalId }), { mode: 0o600, flag: "wx" });
+  const invoked = aws([
+    "lambda", "invoke",
+    "--function-name", config.brokerArn.replace(/:reviewed$/, ""),
+    "--qualifier", "reviewed",
+    "--cli-binary-format", "raw-in-base64-out",
+    "--payload", `fileb://${requestPath}`,
+    responsePath,
+  ]);
+  if (invoked.FunctionError) throw new Error("Production approval broker rejected the activation request.");
+  const response = JSON.parse(fs.readFileSync(responsePath, "utf8"));
+  if (response.status !== "started" || response.mode !== mode || response.approvalId !== config.approvalId) {
+    throw new Error("Production approval broker response binding is invalid.");
+  }
+  return response.taskArn;
 };
 
-const runTask = (taskDefinition, config, aws) => {
-  const startedAt = Date.now();
-  const response = aws([
-    "ecs", "run-task",
-    "--cluster", config.clusterArn,
-    "--task-definition", taskDefinition,
-    "--launch-type", "FARGATE",
-    "--count", "1",
-    "--network-configuration", `awsvpcConfiguration={subnets=[${config.subnets.join(",")}],securityGroups=[${config.securityGroups.join(",")}],assignPublicIp=DISABLED}`,
-  ]);
-  if ((response.failures || []).length || response.tasks?.length !== 1) throw new Error("Production executor did not launch exactly one task.");
-  const taskArn = response.tasks[0]?.taskArn;
+const waitForTask = (taskArn, config, aws) => {
   if (typeof taskArn !== "string" || !taskArn.startsWith(`${config.clusterArn.replace(":cluster/", ":task/")}/`)) {
     throw new Error("Production executor task identity is invalid.");
   }
@@ -148,7 +91,6 @@ const runTask = (taskDefinition, config, aws) => {
   if (described.tasks?.length !== 1 || described.tasks[0]?.containers?.length !== 1 || described.tasks[0].containers[0]?.exitCode !== 0) {
     throw new Error("Production executor task failed; task detail suppressed.");
   }
-  return startedAt;
 };
 
 const readReceipt = (mode, config, aws, directory, startedAt) => {
@@ -166,12 +108,19 @@ const readReceipt = (mode, config, aws, directory, startedAt) => {
       || value.status !== "passed"
       || value.releaseSha !== config.releaseSha
       || value.sourceContractSha256 !== config.sourceContractSha256
+      || value.migrationSetDigest !== config.migrationSetDigest
       || value.packageChecksumSha256 !== config.packageChecksumSha256
+      || value.approvalId !== config.approvalId
       || Date.parse(value.completedAt || 0) < startedAt - 300_000
       || receiptSha256 !== sha256(`${JSON.stringify(value)}\n`)) {
     throw new Error("Production executor receipt binding is invalid.");
   }
-  return { mode, receiptSha256, catalogueSha256: value.catalogueSha256 };
+  return {
+    mode,
+    receiptSha256,
+    catalogueSha256: value.catalogueSha256,
+    approvalContractSha256: value.approvalContractSha256,
+  };
 };
 
 export async function applyProductionFullRlsRelease({
@@ -184,18 +133,28 @@ export async function applyProductionFullRlsRelease({
   const receipts = [];
   let mutationStarted = false;
   try {
-    const tasks = Object.fromEntries(GREEN_EXECUTOR_MODES.map((mode) => [mode, registerTask(mode, config, aws, directory)]));
     for (const mode of APPLY_MODES) {
       mutationStarted ||= Boolean(PRODUCTION_GREEN.confirmations[mode]);
-      const startedAt = runTask(tasks[mode], config, aws);
+      const startedAt = Date.now();
+      const taskArn = invokeBroker(mode, config, aws, directory);
+      waitForTask(taskArn, config, aws);
       receipts.push(readReceipt(mode, config, aws, directory, startedAt));
     }
+    const canaryTaskArn = invokeBroker("full-rls-application-canary", config, aws, directory);
+    waitForTask(canaryTaskArn, config, aws);
+    if (new Set(receipts.map((item) => item.approvalContractSha256)).size !== 1) {
+      throw new Error("Production executor receipts do not share one approval contract.");
+    }
     const bundle = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       environment: "production",
       releaseSha: config.releaseSha,
       sourceContractSha256: config.sourceContractSha256,
+      migrationSetDigest: config.migrationSetDigest,
       packageChecksumSha256: config.packageChecksumSha256,
+      approvalId: config.approvalId,
+      approvalContractSha256: receipts[0].approvalContractSha256,
+      applicationCanary: "passed",
       images: {
         executor: config.executorImage,
         backend: config.backendImage,
@@ -209,17 +168,18 @@ export async function applyProductionFullRlsRelease({
     fs.writeFileSync(outputPath, `${JSON.stringify(bundle, null, 2)}\n`, { mode: 0o600, flag: "wx" });
     process.stdout.write(`${JSON.stringify({ status: "verified", releaseSha: config.releaseSha, receiptBundleSha256: bundle.receiptBundleSha256 })}\n`);
     return bundle;
-  } catch (error) {
+  } catch {
     if (mutationStarted) {
       try {
-        const rollbackTask = registerTask("full-rls-rollback", config, aws, directory);
-        const startedAt = runTask(rollbackTask, config, aws);
+        const startedAt = Date.now();
+        const taskArn = invokeBroker("full-rls-rollback", config, aws, directory);
+        waitForTask(taskArn, config, aws);
         readReceipt("full-rls-rollback", config, aws, directory, startedAt);
       } catch {
         throw new Error("Production package failed and exact rollback could not be verified.");
       }
     }
-    throw error;
+    throw new Error("Production full-RLS activation failed; detail suppressed.");
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

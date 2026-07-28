@@ -7,37 +7,43 @@ import test from "node:test";
 import {
   GREEN_EXECUTOR_MODES,
   PRODUCTION_GREEN,
+  productionAdministratorUrlFromEnvironment,
   validateGreenExecutorMode,
   validateProductionAdministratorUrl,
 } from "../../backend/scripts/production-full-rls-green-executor.mjs";
 import {
   applyProductionFullRlsRelease,
-  buildTaskDefinition,
   validateProductionReleaseEnvironment,
 } from "../aws/apply-production-full-rls-release.mjs";
+import {
+  provisionProductionGreenCanaries,
+  validateCanaryEnvironment,
+} from "../../backend/scripts/production-green-canary-provision.mjs";
 
 const releaseSha = "a".repeat(40);
 const sourceContractSha256 = "b".repeat(64);
-const packageChecksumSha256 = "c".repeat(64);
+const migrationSetDigest = "c".repeat(64);
+const packageChecksumSha256 = "d".repeat(64);
+const approvalContractSha256 = "e".repeat(64);
+const approvalId = "APR-130-RLS-ACTIVATION";
 const image = (repository, digest) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}@sha256:${digest.repeat(64)}`;
-const secretArn = (name) => ["arn", "aws", "secretsmanager", "eu-west-2", "368992683803", `secret:${name}`].join(":");
 const env = {
   RELEASE_GIT_SHA: releaseSha,
   MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256: sourceContractSha256,
+  MSCQR_FULL_RLS_MIGRATION_SET_DIGEST: migrationSetDigest,
   MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256: packageChecksumSha256,
+  PRODUCTION_RLS_APPROVAL_ID: approvalId,
+  PRODUCTION_RLS_BROKER_ARN: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
   PRODUCTION_RLS_EXECUTOR_IMAGE: image("mscqr-backend", "1"),
   PRODUCTION_BACKEND_IMAGE: image("mscqr-backend", "2"),
   PRODUCTION_WORKER_IMAGE: image("mscqr-worker", "3"),
   PRODUCTION_FRONTEND_IMAGE: image("mscqr-web", "4"),
   PRODUCTION_RLS_CLUSTER_ARN: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
-  PRODUCTION_RLS_TASK_ROLE_ARN: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
-  PRODUCTION_RLS_EXECUTION_ROLE_ARN: "arn:aws:iam::368992683803:role/mscqr-production-ecs-execution-role",
-  PRODUCTION_RLS_ADMIN_SECRET_ARN: secretArn("mscqr/production/rls-green/phase2/database-url/admin-Ab12Cd"),
   PRODUCTION_RLS_RECEIPT_BUCKET: "mscqr-production-release-artifacts-368992683803",
-  PRODUCTION_RLS_PRIVATE_SUBNETS_JSON: '["subnet-abc123"]',
-  PRODUCTION_RLS_SECURITY_GROUPS_JSON: '["sg-abc123"]',
 };
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+const randomMfaSecret = () =>
+  [...crypto.randomBytes(32)].map((value) => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[value & 31]).join("");
 
 test("production executor accepts only the exact production identity and TLS endpoint", () => {
   assert.equal(validateProductionAdministratorUrl(
@@ -46,52 +52,96 @@ test("production executor accepts only the exact production identity and TLS end
   assert.throws(() => validateProductionAdministratorUrl(
     "postgresql://mscqr_prod_admin@mscqr-staging-db.internal/mscqr_production?sslmode=require"
   ), /production administrator/);
+  assert.equal(new URL(productionAdministratorUrlFromEnvironment({
+    MSCQR_RLS_ADMIN_USERNAME: "mscqr_prod_admin",
+    MSCQR_RLS_ADMIN_PASSWORD: crypto.randomBytes(24).toString("base64url"),
+    MSCQR_RLS_GREEN_ENDPOINT: "mscqr-production-green.internal",
+  })).username, "mscqr_prod_admin");
   for (const mode of GREEN_EXECUTOR_MODES) {
     const confirmation = PRODUCTION_GREEN.confirmations[mode];
     assert.equal(validateGreenExecutorMode(mode, confirmation || ""), mode);
   }
 });
 
-test("production task definition is checksum-bound, fixed, secret-backed, and hardened", () => {
-  const config = validateProductionReleaseEnvironment(env);
-  const definition = buildTaskDefinition("full-rls-runtime-policy", config);
-  assert.equal(definition.family, "mscqr-production-full-rls-green-runtime-policy");
-  assert.equal(definition.containerDefinitions[0].image, env.PRODUCTION_RLS_EXECUTOR_IMAGE);
-  assert.deepEqual(definition.containerDefinitions[0].command, ["node", "scripts/production-full-rls-green-executor.mjs"]);
-  assert.deepEqual(definition.containerDefinitions[0].secrets, [{ name: "DATABASE_URL", valueFrom: env.PRODUCTION_RLS_ADMIN_SECRET_ARN }]);
-  assert.equal(definition.containerDefinitions[0].readonlyRootFilesystem, true);
-  assert.deepEqual(definition.containerDefinitions[0].linuxParameters.capabilities, { add: [], drop: ["ALL"] });
-  assert.equal(definition.containerDefinitions[0].environment.find((item) => item.name === "MSCQR_FULL_RLS_CONFIRMATION")?.value, PRODUCTION_GREEN.confirmations["full-rls-runtime-policy"]);
-  assert(!JSON.stringify(definition).includes("postgresql://"));
+test("production green canary provisioning is approval-bound, secret-safe and idempotent", async () => {
+  const smokeSource = fs.readFileSync(path.resolve("scripts/smoke-release.mjs"), "utf8");
+  assert.match(smokeSource, /\/auth\/logout/);
+  assert.match(smokeSource, /logout\/session revocation/);
+
+  const fixture = (suffix) => `${suffix.padEnd(20, "A")}234567`;
+  const config = validateCanaryEnvironment({
+    MSCQR_CANARY_ORDINARY_EMAIL: "ordinary@green-canary.invalid",
+    MSCQR_CANARY_ORDINARY_PASSWORD: fixture("ordinary-password-"),
+    MSCQR_CANARY_ORDINARY_MFA_SECRET: randomMfaSecret(),
+    MSCQR_CANARY_ADMIN_EMAIL: "admin@green-canary.invalid",
+    MSCQR_CANARY_ADMIN_PASSWORD: fixture("admin-password-"),
+    MSCQR_CANARY_ADMIN_MFA_SECRET: randomMfaSecret(),
+    AUTH_MFA_ENCRYPTION_KEY: crypto.randomBytes(32).toString("base64url"),
+    MSCQR_PRODUCTION_RLS_APPROVAL_ARTIFACT: JSON.stringify({
+      approvalId,
+      ticketId: "CHG-PRODUCTION-RLS-2026-07",
+      independentCheckerIdentity: "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/reviewer",
+    }),
+  });
+  assert.throws(() => validateCanaryEnvironment({}), /missing or invalid/);
+
+  const created = { users: [], mfa: [], audit: [] };
+  const tx = {
+    $executeRaw: () => 1,
+    user: {
+      findMany: async () => created.users.map(({ id, email, role, metadata }) => ({ id, email, role, metadata })),
+      upsert: async ({ create, update }) => {
+        const existing = created.users.find((item) => item.email === create.email);
+        if (existing) Object.assign(existing, update);
+        else created.users.push(create);
+      },
+    },
+    organization: { upsert: async () => undefined },
+    licensee: { upsert: async () => undefined },
+    adminMfaCredential: { upsert: async ({ create }) => { created.mfa.push(create); } },
+    auditLog: { upsert: async ({ create }) => { created.audit.push(create); } },
+  };
+  const prisma = { $transaction: (operation) => operation(tx) };
+  assert.deepEqual(await provisionProductionGreenCanaries(prisma, config), { status: "created", userCount: 2 });
+  assert.deepEqual(await provisionProductionGreenCanaries(prisma, config), { status: "reconciled", userCount: 2 });
+  assert.equal(created.users.length, 2);
+  assert.equal(created.mfa.length, 4);
+  assert.equal(created.audit[0].details.independentCheckerIdentity, config.checker);
+  const stored = JSON.stringify(created);
+  for (const secret of [
+    config.ordinaryPassword,
+    config.adminPassword,
+    config.ordinaryMfaSecret,
+    config.adminMfaSecret,
+    config.encryptionKey,
+  ]) assert.doesNotMatch(stored, new RegExp(secret));
 });
 
-test("production release rejects mutable images, foreign infrastructure, and arbitrary package bindings", () => {
+test("production release rejects mutable images and incomplete broker bindings", () => {
   for (const candidate of [
     { PRODUCTION_RLS_EXECUTOR_IMAGE: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend:latest" },
     { PRODUCTION_RLS_CLUSTER_ARN: env.PRODUCTION_RLS_CLUSTER_ARN.replace("prod", "staging") },
-    { PRODUCTION_RLS_ADMIN_SECRET_ARN: env.PRODUCTION_RLS_ADMIN_SECRET_ARN.replace("production", "staging") },
-    { PRODUCTION_RLS_PRIVATE_SUBNETS_JSON: '["subnet-good","forged"]' },
-  ]) assert.throws(() => validateProductionReleaseEnvironment({ ...env, ...candidate }), /production contract|release binding|immutable ECR/);
+    { PRODUCTION_RLS_BROKER_ARN: env.PRODUCTION_RLS_BROKER_ARN.replace("production", "staging") },
+    { MSCQR_FULL_RLS_MIGRATION_SET_DIGEST: "" },
+  ]) assert.throws(() => validateProductionReleaseEnvironment({ ...env, ...candidate }), /release binding|immutable ECR/);
 });
 
-test("production release runs the exact ordered package and writes one bound receipt bundle", async (t) => {
+test("production release uses only the approval broker, runs canaries, and writes one receipt bundle", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-production-release-test-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const outputPath = path.join(directory, "release-receipt.json");
   const modes = [];
-  const modeByTask = new Map();
   const aws = (args) => {
-    if (args[0] === "ecs" && args[1] === "register-task-definition") {
-      const definition = JSON.parse(fs.readFileSync(args.at(-1).replace("file://", ""), "utf8"));
-      const mode = definition.containerDefinitions[0].environment.find((item) => item.name === "MSCQR_FULL_RLS_MODE").value;
-      const arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${definition.family}:1`;
-      modeByTask.set(arn, mode);
-      return { taskDefinition: { taskDefinitionArn: arn } };
-    }
-    if (args[0] === "ecs" && args[1] === "run-task") {
-      assert(!args.includes("--overrides"));
-      modes.push(modeByTask.get(args[args.indexOf("--task-definition") + 1]));
-      return { tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fixture" }], failures: [] };
+    if (args[0] === "lambda" && args[1] === "invoke") {
+      const request = JSON.parse(fs.readFileSync(args.find((item) => item.startsWith("fileb://")).slice(8), "utf8"));
+      modes.push(request.mode);
+      fs.writeFileSync(args.at(-1), JSON.stringify({
+        status: "started",
+        mode: request.mode,
+        approvalId,
+        taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fixture",
+      }));
+      return { StatusCode: 200 };
     }
     if (args[0] === "ecs" && args[1] === "wait") return {};
     if (args[0] === "ecs" && args[1] === "describe-tasks") return { tasks: [{ containers: [{ exitCode: 0 }] }] };
@@ -111,8 +161,15 @@ test("production release runs the exact ordered package and writes one bound rec
         status: "passed",
         releaseSha,
         sourceContractSha256,
+        migrationSetDigest,
         packageChecksumSha256,
-        catalogueSha256: "d".repeat(64),
+        approvalContractSha256,
+        approvalId,
+        ticketId: "CHG-PRODUCTION-RLS-2026-07",
+        administratorIdentity: "mscqr_prod_admin",
+        independentCheckerIdentity: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+        approvalExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        catalogueSha256: "f".repeat(64),
         completedAt: new Date().toISOString(),
         nonce: crypto.randomUUID(),
       };
@@ -131,33 +188,44 @@ test("production release runs the exact ordered package and writes one bound rec
     "full-rls-admin-ownership",
     "full-rls-runtime-policy",
     "full-rls-verification",
+    "full-rls-application-canary",
   ]);
+  assert.equal(bundle.applicationCanary, "passed");
   assert.equal(bundle.receipts.length, 7);
-  assert.equal(JSON.parse(fs.readFileSync(outputPath, "utf8")).receiptBundleSha256, bundle.receiptBundleSha256);
+  assert.equal(JSON.parse(fs.readFileSync(outputPath, "utf8")).approvalId, approvalId);
 });
 
-test("production workflow applies the verified database receipt before application deployment", () => {
+test("production workflow applies verified green and canaries before backend traffic switch", () => {
   const workflow = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
   const apply = workflow.indexOf("Apply and verify checksum-bound production RLS package");
   const backend = workflow.indexOf("Deploy backend ECS service");
   assert(apply > 0 && backend > apply);
-  assert.match(workflow, /PRODUCTION_RLS_RELEASE_RECEIPT_PATH/);
-  assert.match(workflow, /production-rls-release-receipt/);
-  assert.doesNotMatch(workflow, /PRODUCTION_DATABASE_URL|RLS_DATABASE_URL/);
+  assert.match(workflow, /PRODUCTION_RLS_APPROVAL_SECRET_ARN/);
+  assert.match(workflow, /MSCQR_FULL_RLS_MIGRATION_SET_DIGEST/);
+  assert.match(workflow, /SECRET_UPDATES_JSON/);
+  assert.match(workflow, /Require complete production worker deployment configuration/);
+  assert.match(workflow, /mscqr-frontend:20/);
+  assert.doesNotMatch(workflow, /PRODUCTION_RLS_ADMIN_SECRET_ARN|PRODUCTION_RLS_PRIVATE_SUBNETS_JSON/);
 });
 
-test("production Terraform grants only exact executor secrets and receipt writes", () => {
-  const source = fs.readFileSync("infra/aws/terraform/main.tf", "utf8");
-  const variables = fs.readFileSync("infra/aws/terraform/variables.tf", "utf8");
-  const policy = source.match(/resource "aws_iam_role_policy" "full_rls_green_executor"[\s\S]*?\n\}/)?.[0] || "";
-  const executionPolicy = source.match(/resource "aws_iam_role_policy" "full_rls_green_execution_secret"[\s\S]*?\n\}/)?.[0] || "";
-  assert.match(policy, /ReadOnlyProductionGreenAdministratorCredential[\s\S]*full_rls_green_admin_secret_arn/);
-  assert.match(policy, /ProvisionOnlyExactProductionGreenRuntimeCredentials[\s\S]*full_rls_green_runtime/);
-  assert.match(policy, /AppendOnlyProductionGreenReceipts[\s\S]*rls-receipts\/\*/);
-  assert.doesNotMatch(policy, /Resource\s*=\s*"\*"|s3:GetObject|secretsmanager:CreateSecret/);
-  assert.match(executionPolicy, /secretsmanager:GetSecretValue[\s\S]*full_rls_green_admin_secret_arn/);
-  assert.doesNotMatch(executionPolicy, /Resource\s*=\s*"\*"|PutSecretValue|CreateSecret/);
-  assert.match(source, /full_rls_green_execution_role_guard[\s\S]*mscqr-production-ecs-execution-role/);
-  assert.match(variables, /database-url\/admin-\[A-Za-z0-9\]\{6\}/);
-  assert.match(source, /recovery_window_in_days = 30/);
+test("production Terraform provisions isolated PG18, exact secrets, KMS checker and fixed broker", () => {
+  const source = fs.readFileSync("infra/aws/terraform/production-rls-green.tf", "utf8");
+  const shared = fs.readFileSync("infra/aws/terraform/main.tf", "utf8");
+  const provider = fs.readFileSync("infra/aws/terraform/providers.tf", "utf8");
+  assert.match(source, /resource "aws_db_instance" "full_rls_green"[\s\S]*engine_version\s*=\s*"18\.4"/);
+  assert.match(source, /publicly_accessible\s*=\s*false[\s\S]*deletion_protection\s*=\s*true/);
+  assert.match(source, /customer_master_key_spec\s*=\s*"RSA_3072"/);
+  assert.match(source, /mscqr-production-rls-independent-checker/);
+  assert.match(source, /resource "aws_lambda_alias" "full_rls_green_broker_reviewed"/);
+  assert.match(source, /full-rls-application-canary/);
+  assert.match(source, /MSCQR_CANARY_ORDINARY_MFA_SECRET/);
+  assert.match(source, /each\.key == "full-rls-admin-ownership"/);
+  assert.match(fs.readFileSync("backend/Dockerfile", "utf8"), /scripts\/release-smoke/);
+  const releasePolicy = source.slice(source.indexOf('resource "aws_iam_role_policy" "full_rls_green_release_broker"'));
+  assert.match(releasePolicy, /lambda:InvokeFunction/);
+  assert.doesNotMatch(releasePolicy, /ecs:RunTask/);
+  assert.match(`${source}\n${shared}`, /AUTHENTICATED_APP_DATABASE_URL|full_rls_green_backend_secrets/);
+  assert.match(provider, /allowed_account_ids\s*=\s*\["368992683803"\]/);
+  assert.doesNotMatch(source, /BYPASSRLS|SUPERUSER/);
+  assert.doesNotMatch(source, /full_rls_green_database"[\s\S]{0,500}cidr_ipv4/);
 });
