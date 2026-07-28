@@ -1,6 +1,12 @@
 output "green_database" {
   value = { identifier = aws_db_instance.green.identifier, endpoint = aws_db_instance.green.address, port = aws_db_instance.green.port }
 }
+
+output "rds_managed_administrator_secret" {
+  description = "RDS-managed master-user secret ARN only; Terraform never receives its value."
+  value       = one(aws_db_instance.green.master_user_secret).secret_arn
+}
+
 output "stage_b_prerequisites" {
   value = {
     approval_kms_key_arn       = aws_kms_key.approval.arn

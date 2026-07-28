@@ -36,9 +36,12 @@ resource "aws_db_parameter_group" "green" {
 
 resource "aws_security_group" "executor" {
   name        = "mscqr-production-rls-green-executor"
-  description = "No-ingress executor security group for isolated production green"
+  description = "No-ingress or egress executor security group until reviewed Stage B networking"
   vpc_id      = var.vpc_id
-  tags        = local.tags
+  # Explicitly revoke AWS's default allow-all egress rule. Stage B must add a
+  # reviewed NAT or VPC-endpoint model before any executor task can run.
+  egress = []
+  tags   = local.tags
 }
 
 resource "aws_security_group" "database" {

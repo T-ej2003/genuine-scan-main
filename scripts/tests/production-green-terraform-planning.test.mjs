@@ -5,6 +5,8 @@ import test from "node:test";
 const root = "infra/aws/terraform/production-green-stage-a";
 const source = fs.readFileSync(`${root}/main.tf`, "utf8");
 const variables = fs.readFileSync(`${root}/variables.tf`, "utf8");
+const outputs = fs.readFileSync(`${root}/outputs.tf`, "utf8");
+const readme = fs.readFileSync(`${root}/README.md`, "utf8");
 const receiptPattern = /^arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an$/;
 
 test("Stage A accepts only the reviewed production receipt bucket", () => {
@@ -27,9 +29,32 @@ test("Stage A owns no blue infrastructure or release activation", () => {
   assert.doesNotMatch(source, /cidr_ipv4/);
 });
 
+test("Stage A explicitly revokes executor egress and keeps database ingress SG-to-SG only", () => {
+  const executor = source.match(/resource "aws_security_group" "executor" \{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(executor, /egress\s+=\s+\[\]/);
+  assert.doesNotMatch(executor, /0\.0\.0\.0\/0|::\/0|cidr_/);
+  const ingress = [...source.matchAll(/resource "aws_vpc_security_group_ingress_rule"[\s\S]*?\n\}/g)].map((match) => match[0]);
+  assert.equal(ingress.length, 2);
+  for (const rule of ingress) {
+    assert.match(rule, /referenced_security_group_id/);
+    assert.doesNotMatch(rule, /cidr_ipv4|cidr_ipv6|0\.0\.0\.0\/0|::\/0/);
+  }
+  assert.doesNotMatch(source, /aws_ecs_task_definition|aws_ecs_service|aws_lambda_function/);
+});
+
+test("Stage A exposes only the RDS-managed administrator secret ARN", () => {
+  assert.match(source, /manage_master_user_password\s+=\s+true/);
+  assert.match(outputs, /output "rds_managed_administrator_secret"/);
+  assert.match(outputs, /master_user_secret.*secret_arn/);
+  assert.doesNotMatch(outputs, /password\s*=/);
+  assert.match(readme, /separate\s+from the 14 empty application\/runtime secret handles/);
+});
+
 test("Stage A needs no image digest and Stage B keeps canaries mandatory", () => {
   assert.doesNotMatch(`${source}\n${variables}`, /sha256|image/);
   const stageB = JSON.parse(fs.readFileSync("infra/aws/terraform/production-green-stage-b/release-activation-contract.json", "utf8"));
   assert.equal(stageB.trafficSwitchBeforeCanariesAllowed, false);
   assert.equal(stageB.frontendTaskDefinition, "mscqr-frontend:20");
+  assert.equal(stageB.networking.requiredBeforeExecutor, true);
+  assert.equal(stageB.networking.stageAExecutorEgress, "none");
 });

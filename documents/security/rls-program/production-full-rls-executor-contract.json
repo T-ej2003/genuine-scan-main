@@ -118,6 +118,27 @@
     "stageAStateBackend": "external-dedicated-production-s3-with-lockfile",
     "stageBRequiresDistinctCheckerAndReleaseDeployer": true
   },
+  "stageAOperatorPath": {
+    "bootstrapOperator": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator",
+    "releaseRole": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+    "bootstrapOperatorRequirements": ["MFA required", "no console password", "no permanent access keys", "only sts:AssumeRole to release role"],
+    "temporaryAccessKey": "Allowed only to obtain an MFA-backed STS session and must be deleted before Terraform runs.",
+    "releaseRoleRequirements": ["MFA required", "maximum session duration one hour", "root cannot assume", "checker cannot assume", "release role cannot assume checker", "GitHub deploy/runtime roles cannot assume", "no GitHub OIDC trust in this change"],
+    "futureTrustMigration": "A protected GitHub OIDC/operator trust requires a separately reviewed change."
+  },
+  "stageANetworking": {
+    "executorEgress": "explicitly empty",
+    "stageBRequiredBeforeExecutorRuns": true,
+    "approvedModels": ["NAT TCP/443 plus green-DB TCP/5432", "approved VPC-endpoint TCP/443 plus green-DB TCP/5432"]
+  },
+  "rdsManagedAdministratorSecret": {
+    "manageMasterUserPassword": true,
+    "terraformStoresPassword": false,
+    "createdBy": "RDS when the Stage A database is created",
+    "applicationRuntimeMayRead": false,
+    "stageBInput": "Stage A output rds_managed_administrator_secret ARN only",
+    "secretValueMayAppearInPlanLogsGitOrReceipts": false
+  },
   "firstUserOnboarding": {
     "emptyGreenSupported": true,
     "bootstrap": "The brokered ownership phase creates only two marked pre-traffic canary administrators plus an isolation-control tenant from approved secret injection; it refuses unrelated users and records approval, ticket, and checker attribution.",
