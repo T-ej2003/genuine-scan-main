@@ -4,6 +4,8 @@ import prisma from "../../../config/database";
 
 export const PREAUTH_DATABASE_URL_ENV = "PREAUTH_DATABASE_URL";
 export const AUTHENTICATED_APP_DATABASE_URL_ENV = "AUTHENTICATED_APP_DATABASE_URL";
+export const ALLOW_LEGACY_DATABASE_URL_FALLBACK_ENV =
+  "ALLOW_LEGACY_DATABASE_URL_FALLBACK";
 
 type RuntimeClient = Pick<PrismaClient, "$queryRaw" | "$transaction">;
 
@@ -52,8 +54,18 @@ export const resolveB01RuntimeDatabaseConfiguration = (env: NodeJS.ProcessEnv = 
   const preAuthValue = String(env[PREAUTH_DATABASE_URL_ENV] || "").trim();
   const authenticatedValue = String(env[AUTHENTICATED_APP_DATABASE_URL_ENV] || "").trim();
   const testFallbackAllowed = env.NODE_ENV === "test";
+  const emergencyFallbackAllowed =
+    env[ALLOW_LEGACY_DATABASE_URL_FALLBACK_ENV] === "true";
+  const fallbackAllowed = testFallbackAllowed || emergencyFallbackAllowed;
 
-  if (!preAuthValue && !authenticatedValue && testFallbackAllowed) {
+  if (!preAuthValue && !authenticatedValue && fallbackAllowed) {
+    if (emergencyFallbackAllowed && !String(env.DATABASE_URL || "").trim()) {
+      throw new B01RuntimeConfigurationError(
+        "B01_RUNTIME_DEFAULT_DATABASE_URL_MISSING",
+        `${ALLOW_LEGACY_DATABASE_URL_FALLBACK_ENV} requires DATABASE_URL`
+      );
+    }
+
     return { preAuthDatabaseUrl: null, authenticatedDatabaseUrl: null } as const;
   }
   if (!preAuthValue || !authenticatedValue) {

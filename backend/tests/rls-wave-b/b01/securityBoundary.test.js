@@ -38,6 +38,7 @@ assert.match(preAuth, /getB01PreAuthPrisma\(\)/);
 
 assert.match(runtimeClients, /PREAUTH_DATABASE_URL/);
 assert.match(runtimeClients, /AUTHENTICATED_APP_DATABASE_URL/);
+assert.match(runtimeClients, /ALLOW_LEGACY_DATABASE_URL_FALLBACK/);
 assert.match(runtimeClients, /env\.NODE_ENV === "test"/);
 assert.match(runtimeClients, /mscqr_\(dev\|stg\|prd\)_rls_/);
 assert.match(runtimeClients, /B01_RUNTIME_DATABASE_CREDENTIAL_REUSED/);
@@ -64,6 +65,32 @@ assert.throws(
 );
 assert.throws(
   () => resolveB01RuntimeDatabaseConfiguration({ NODE_ENV: "production" }),
+  (error) => error.code === "B01_RUNTIME_DATABASE_URL_MISSING"
+);
+
+assert.deepEqual(resolveB01RuntimeDatabaseConfiguration({
+  NODE_ENV: "production",
+  ALLOW_LEGACY_DATABASE_URL_FALLBACK: "true",
+  DATABASE_URL: "postgresql://postgres@db.internal/mscqr",
+}), {
+  preAuthDatabaseUrl: null,
+  authenticatedDatabaseUrl: null,
+});
+
+assert.throws(
+  () => resolveB01RuntimeDatabaseConfiguration({
+    NODE_ENV: "production",
+    ALLOW_LEGACY_DATABASE_URL_FALLBACK: "true",
+  }),
+  (error) => error.code === "B01_RUNTIME_DEFAULT_DATABASE_URL_MISSING"
+);
+
+assert.throws(
+  () => resolveB01RuntimeDatabaseConfiguration({
+    NODE_ENV: "production",
+    ALLOW_LEGACY_DATABASE_URL_FALLBACK: "false",
+    DATABASE_URL: "postgresql://postgres@db.internal/mscqr",
+  }),
   (error) => error.code === "B01_RUNTIME_DATABASE_URL_MISSING"
 );
 assert.throws(
