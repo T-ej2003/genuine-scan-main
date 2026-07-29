@@ -83,6 +83,7 @@ FRONTEND_BUILD_CONTEXT="${FRONTEND_BUILD_CONTEXT:-.}"
 WORKER_BUILD_CONTEXT="${WORKER_BUILD_CONTEXT:-.}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERIFY_SCRIPT="$REPO_ROOT/scripts/aws/verify-image-manifest.sh"
+STAGE_B_BINDING_SCRIPT="$REPO_ROOT/scripts/aws/stage-b-image-bindings.mjs"
 
 if [[ -z "${ECR_REGISTRY:-}" ]]; then
   AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
@@ -210,6 +211,13 @@ target_for_service() {
   esac
 }
 
+verify_stage_b_reuse() {
+  local service="$1" image_uri="$2" labels
+  docker pull --platform "$PLATFORMS" "$image_uri" >/dev/null
+  labels="$(docker image inspect "$image_uri" --format '{{json .Config.Labels}}')"
+  printf '%s' "$labels" | node "$STAGE_B_BINDING_SCRIPT" "$service" "$IMAGE_TAG" "$SOURCE_CONTRACT_SHA256" "$MIGRATION_SET_DIGEST"
+}
+
 declare -a IMAGE_URIS=()
 
 for service in "${SERVICES[@]}"; do
@@ -233,6 +241,9 @@ for service in "${SERVICES[@]}"; do
   if [[ "$existing_digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
     echo "Reusing immutable ${service} image ${image_uri}@${existing_digest}"
     REQUIRED_PLATFORMS="$PLATFORMS" "$VERIFY_SCRIPT" "$image_uri"
+    if [[ "$SERVICE_SCOPE" == "production-green-stage-b" ]]; then
+      verify_stage_b_reuse "$service" "$image_uri"
+    fi
     if [[ -n "${OUTPUT_FILE:-}" ]]; then
       node --input-type=module - "$OUTPUT_FILE" "$service" "$repository_name" "$image_uri" "$published_tag" "$existing_digest" <<'NODE'
 import fs from "node:fs";

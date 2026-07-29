@@ -30,6 +30,8 @@ jobs:
         with:
           ref: ${{ inputs.release_sha }}
           fetch-depth: 0
+      - name: Require the approved release to be merged into protected main
+        run: node scripts/aws/stage-b-release-gate.mjs "${{ inputs.release_sha }}"
       - uses: actions/setup-node@v6
         with:
           node-version: 24

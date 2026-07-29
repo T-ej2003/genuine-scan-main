@@ -6,9 +6,11 @@
   "memory": "2048",
   "executionRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
   "taskRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+  "volumes": [{ "name": "backend-uploads" }],
   "containerDefinitions": [{
     "name": "backend", "image": "{{BACKEND_IMAGE}}", "essential": true,
     "entryPoint": ["/usr/local/bin/start-runtime.sh"], "readonlyRootFilesystem": true,
+    "mountPoints": [{ "sourceVolume": "backend-uploads", "containerPath": "/app/uploads", "readOnly": false }],
     "privileged": false, "interactive": false, "pseudoTerminal": false,
     "environment": [{ "name": "RELEASE_GIT_SHA", "value": "{{RELEASE_SHA}}" }, { "name": "COOKIE_SECURE", "value": "true" }, { "name": "RUN_BACKGROUND_WORKERS", "value": "false" }, { "name": "OBJECT_STORAGE_BUCKET", "value": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" }, { "name": "OBJECT_STORAGE_REGION", "value": "eu-west-2" }],
     "secrets": [

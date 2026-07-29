@@ -72,7 +72,7 @@ export async function validateProductionRlsApproval(raw, expected, {
       ? "./production-green-stage-b-contract.mjs"
       : "../../scripts/aws/production-green-stage-b-contract.mjs";
     const { validateStageBApproval } = await import(contractPath);
-    const validated = await validateStageBApproval(artifact, expected, { now, verifySignature });
+    const validated = await validateStageBApproval(artifact, expected, { now, verifySignature, allowExpiredRollback, requestedMode: expected.mode });
     if (validated.approval.greenDatabaseName !== expected.greenDatabase
         || validated.approval.administratorIdentity !== expected.administratorIdentity) {
       throw new Error("Production RLS approval does not match the executor identity.");

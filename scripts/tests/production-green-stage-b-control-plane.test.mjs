@@ -42,6 +42,18 @@ test("executor accepts the same signed Stage B approval and binds its package ch
   }, { now, verifySignature }), /packageChecksumSha256/);
 });
 
+test("Stage B permits only an explicitly requested rollback inside the 24-hour grace", async () => {
+  const expired = artifact({ issuedAt: "2026-07-29T10:00:00.000Z", expiresAt: "2026-07-29T11:59:00.000Z" });
+  await assert.rejects(() => validateStageBApproval(expired, expected, { now, verifySignature }), /invalid or expired/);
+  await assert.rejects(() => validateStageBApproval(expired, expected, { now, verifySignature, allowExpiredRollback: true, requestedMode: "full-rls-verification" }), /invalid or expired/);
+  await assert.rejects(() => validateStageBApproval(expired, expected, { now: new Date("2026-07-30T12:00:00.000Z"), verifySignature, allowExpiredRollback: true, requestedMode: "full-rls-rollback" }), /invalid or expired/);
+  await assert.doesNotReject(() => validateStageBApproval(expired, expected, { now, verifySignature, allowExpiredRollback: true, requestedMode: "full-rls-rollback" }));
+  await assert.doesNotReject(() => validateProductionRlsApproval(expired, {
+    ...expected, greenDatabase: "mscqr_production_rls_green_phase2", administratorIdentity: "mscqr_prod_admin", mode: "full-rls-rollback",
+  }, { now, verifySignature, allowExpiredRollback: true }));
+  await assert.rejects(() => validateStageBApproval(artifact({ releaseSha: "e".repeat(40), issuedAt: "2026-07-29T10:00:00.000Z", expiresAt: "2026-07-29T11:59:00.000Z" }), expected, { now, verifySignature, allowExpiredRollback: true, requestedMode: "full-rls-rollback" }), /releaseSha/);
+});
+
 test("Stage B templates require immutable images, private executor networking, and no administrator secret outside executor", () => {
   const common = { releaseSha, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: "/ecs/executor", canaryLogGroup: "/ecs/canary", backendLogGroup: "/ecs/backend", workerLogGroup: "/ecs/worker" };
   const executor = renderStageBTaskDefinition("executor", { ...common, executorImage: images.executorImageDigest, mode: "full-rls-verification" });
@@ -51,6 +63,12 @@ test("Stage B templates require immutable images, private executor networking, a
   for (const definition of [executor, canary, backend, worker]) assertFixedTaskDefinition(definition);
   assert.match(JSON.stringify(executor), /rds!db-/);
   assert.doesNotMatch(`${JSON.stringify(canary)}${JSON.stringify(backend)}${JSON.stringify(worker)}`, /rds!db-/);
+  assert.deepEqual(backend.volumes, [{ name: "backend-uploads" }]);
+  assert.deepEqual(backend.containerDefinitions[0].mountPoints, [{ sourceVolume: "backend-uploads", containerPath: "/app/uploads", readOnly: false }]);
+  assert.equal(canary.volumes, undefined); assert.equal(worker.volumes, undefined); assert.equal(executor.volumes, undefined);
+  for (const source of ["backend/src/middleware/incidentUpload.ts", "backend/src/services/compliancePackService.ts", "backend/src/services/legacyQrRiskReportJobService.ts"]) {
+    assert.match(fs.readFileSync(source, "utf8"), /uploads/);
+  }
   assert.deepEqual(approvedNetworkConfiguration(config.privateSubnetIds).awsvpcConfiguration, { subnets: [...config.privateSubnetIds].sort(), securityGroups: [STAGE_B.executorSecurityGroupId], assignPublicIp: "DISABLED" });
   assert.throws(() => approvedNetworkConfiguration([config.privateSubnetIds[0], "subnet-0123456789abcdef0"]), /approved private subnets/);
   assert.throws(() => renderStageBTaskDefinition("executor", { ...common, executorImage: "mscqr-backend:latest", mode: "full-rls-verification" }), /immutable/);
@@ -99,6 +117,8 @@ test("Stage B workflow and Docker targets keep the executor fixed and front-end 
   assert.match(dockerfile, /scripts\/aws\/production-green-stage-b-contract\.mjs \.\/scripts\/production-green-stage-b-contract\.mjs/);
   assert.match(workflow, /rls:full-verify/); assert.match(workflow, /trivy-action/); assert.match(workflow, /cosign attest/);
   assert.match(publisher, /IMAGE_TAG.*git rev-parse HEAD/); assert.match(publisher, /npm run rls:full-verify/);
+  assert.match(publisher, /verify_stage_b_reuse/); assert.match(publisher, /stage-b-image-bindings\.mjs/);
+  assert.match(workflow, /stage-b-release-gate\.mjs/);
   assert.match(workflow, /docker save/); assert.match(workflow, /Expected exactly one immutable image record/);
   assert.doesNotMatch(workflow, /mscqr-frontend:20|deploy-ecs-service|ecs update-service/i);
   const policy = fs.readFileSync("infra/aws/terraform/production-green-stage-b/broker/invocation-policy.json", "utf8");

@@ -47,6 +47,8 @@ export function assertFixedTaskDefinition(definition) {
   const container = definition?.containerDefinitions?.[0];
   const environmentNames = container?.environment?.map(({ name }) => name) || [];
   const secretNames = container?.secrets?.map(({ name }) => name) || [];
+  const backendUploads = definition?.family === "mscqr-production-rls-green-backend-candidate";
+  const uploadMount = container?.mountPoints?.find((mount) => mount.sourceVolume === "backend-uploads");
   const fargateSizes = new Set(["256/512", "256/1024", "512/1024", "512/2048", "1024/2048", "1024/3072", "1024/4096", "2048/4096", "2048/5120", "2048/6144", "2048/7168", "2048/8192", "4096/8192", "4096/16384", "4096/30720"]);
   if (!container || definition.networkMode !== "awsvpc" || !definition.requiresCompatibilities?.includes("FARGATE")
       || container.privileged || container.interactive || container.pseudoTerminal || !Array.isArray(container.entryPoint)
@@ -54,6 +56,9 @@ export function assertFixedTaskDefinition(definition) {
       || !["awslogs"].includes(container.logConfiguration.logDriver) || !container.image?.includes("@sha256:")
       || !fargateSizes.has(`${definition.cpu}/${definition.memory}`) || new Set(environmentNames).size !== environmentNames.length
       || new Set(secretNames).size !== secretNames.length || environmentNames.some((name) => secretNames.includes(name))
+      || (backendUploads && (!definition.volumes?.some((volume) => volume.name === "backend-uploads" && !Object.hasOwn(volume, "host"))
+        || uploadMount?.containerPath !== "/app/uploads" || uploadMount.readOnly !== false))
+      || (!backendUploads && (definition.volumes?.length || container.mountPoints?.length))
       || JSON.stringify(definition).includes("rds!db-70d459ec-4f6f-45da-aafc-618e83d660a1-Dy9GLo")
         && (definition.taskRoleArn !== STAGE_B.executorRoleArn || definition.executionRoleArn !== STAGE_B.executorExecutionRoleArn)) {
     throw new Error("Stage B task definition is outside the fixed reviewed contract.");

@@ -21,34 +21,30 @@ const baseEnv = {
   SMOKE_BASE_URL: "https://staging.example.test",
   STAGING_SMOKE_CHANGED_FILES: "backend/package.json\nbackend/package-lock.json",
 };
-const pr131ActivationFiles = [
-  "backend/scripts/production-full-rls-green-executor.mjs",
-  "documents/security/rls-program/PRODUCTION_RLS_GREEN_ACTIVATION_DECISION.md",
-  "infra/aws/terraform/production-green-stage-a/main.tf",
-  "scripts/aws/apply-production-full-rls-release.mjs",
-].join("\n");
-const pr132PlanningFiles = [
-  "infra/aws/terraform/production-green-stage-a/main.tf",
-  "infra/aws/terraform/production-green-stage-a/production-state-backend-prerequisite.json",
-  "infra/aws/terraform/production-green-stage-b/release-activation-contract.json",
-  "scripts/tests/production-green-terraform-planning.test.mjs",
-].join("\n");
+// This is the real pre-cutover Stage B PR #135 path shape, including generated
+// package evidence and Lambda dependencies, but excluding every blue/runtime surface.
 const pr135StageBFiles = [
   ".github/workflows/production-green-stage-b-images.yml",
   "backend/Dockerfile",
+  "backend/scripts/full-rls-green-executor-core.mjs",
+  "backend/scripts/production-rls-approval.mjs",
+  "documents/security/rls-program/generated/checksums.json",
   "infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs",
+  "infra/aws/terraform/lambda/production-rls-approval-broker/package.json",
   "infra/aws/terraform/production-green-stage-b/task-definitions/green-application-canary.json",
+  "package.json",
   "scripts/aws/production-green-stage-b-contract.mjs",
+  "scripts/rls/sql/generated/20-context-helpers.sql",
   "scripts/tests/production-green-stage-b-control-plane.test.mjs",
 ].join("\n");
 const approvedBlueMismatchEnv = {
   GITHUB_EVENT_NAME: "pull_request",
-  GITHUB_PR_NUMBER: "131",
+  GITHUB_PR_NUMBER: "135",
   GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main",
   KNOWN_BLUE_ENDPOINT_MISMATCH: KNOWN_BLUE_LOGIN_SKIP_REASON,
   SMOKE_API_BASE_URL: "https://www.mscqr.com/api",
   SMOKE_BASE_URL: "https://www.mscqr.com",
-  STAGING_SMOKE_CHANGED_FILES: pr131ActivationFiles,
+  STAGING_SMOKE_CHANGED_FILES: pr135StageBFiles,
 };
 const blueLoginDecision = (overrides = {}, inputs = {}) =>
   evaluateKnownBlueLoginSkip({
@@ -159,13 +155,6 @@ test("Dependabot skip does not hide missing staging URL variables", () => {
   assert.equal(decision.shouldSkip, false);
 });
 
-test("PR #131-equivalent production-green activation scope may skip only the known blue login failure", () => {
-  const decision = blueLoginDecision();
-  assert.equal(decision.shouldSkip, true);
-  assert.equal(decision.reasonCode, KNOWN_BLUE_LOGIN_SKIP_REASON);
-  assert.equal(decision.activationScope, true);
-});
-
 test("approved blue login failure emits a warning and machine-readable skip", (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-staging-smoke-skip-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -198,17 +187,8 @@ test("approved blue login failure emits a warning and machine-readable skip", (t
     reasonCode: KNOWN_BLUE_LOGIN_SKIP_REASON,
     endpoint: "https://www.mscqr.com/api/auth/login",
     httpStatus: 500,
-    pullRequest: 131,
+    pullRequest: 135,
   });
-});
-
-test("PR #132-equivalent production-green planning scope may skip the known blue login failure", () => {
-  const decision = blueLoginDecision({
-    GITHUB_PR_NUMBER: "132",
-    STAGING_SMOKE_CHANGED_FILES: pr132PlanningFiles,
-  });
-  assert.equal(decision.shouldSkip, true);
-  assert.equal(decision.activationScope, true);
 });
 
 test("PR #135-equivalent production-green Stage B scope may skip the known blue login failure", () => {
@@ -218,6 +198,18 @@ test("PR #135-equivalent production-green Stage B scope may skip the known blue 
   });
   assert.equal(decision.shouldSkip, true);
   assert.equal(decision.activationScope, true);
+  assert.equal(decision.stageBPreCutoverScope, true);
+});
+
+test("blue/runtime, frontend, traffic, secret, and Stage A changes cannot use the Stage B exception", () => {
+  for (const file of [
+    "backend/src/index.ts", "src/pages/Login.tsx", ".github/workflows/release-gate.yml",
+    "infra/aws/terraform/production-green-stage-a/main.tf", "infra/aws/terraform/main.tf",
+  ]) {
+    const decision = blueLoginDecision({ GITHUB_PR_NUMBER: "135", STAGING_SMOKE_CHANGED_FILES: `${pr135StageBFiles}\n${file}` });
+    assert.equal(decision.shouldSkip, false, file);
+    assert.equal(decision.blueOrRuntimeChange, true, file);
+  }
 });
 
 test("unrelated and mixed pull requests cannot use the known blue login exception", () => {
@@ -226,7 +218,7 @@ test("unrelated and mixed pull requests cannot use the known blue login exceptio
     false
   );
   assert.equal(
-    blueLoginDecision({ STAGING_SMOKE_CHANGED_FILES: `${pr132PlanningFiles}\nfrontend/src/App.tsx` }).shouldSkip,
+    blueLoginDecision({ STAGING_SMOKE_CHANGED_FILES: `${pr135StageBFiles}\nfrontend/src/App.tsx` }).shouldSkip,
     false
   );
 });

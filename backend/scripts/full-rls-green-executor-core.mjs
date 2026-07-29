@@ -288,6 +288,7 @@ export async function executeFullRlsGreenMode(target, {
       migrationSetDigest: bound.checksums.migrationSetDigest,
       packageChecksumSha256: bound.packageChecksum,
       deploymentId: target.deploymentId,
+      mode,
       greenDatabase: target.database,
       administratorIdentity: target.administrator,
       kmsKeyArn: env.MSCQR_PRODUCTION_RLS_APPROVAL_KMS_KEY_ARN,

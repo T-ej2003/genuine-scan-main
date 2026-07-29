@@ -65,7 +65,7 @@ const assumedRole = (role) => new RegExp(`^arn:aws:sts::${STAGE_B.account}:assum
 const isDigest = (value) => /^[a-f0-9]{64}$/.test(value || "");
 const strictKeys = (value, expected) => Object.keys(value || {}).sort().join(",") === [...expected].sort().join(",");
 
-export async function validateStageBApproval(raw, expected, { now = new Date(), verifySignature } = {}) {
+export async function validateStageBApproval(raw, expected, { now = new Date(), verifySignature, allowExpiredRollback = false, requestedMode = "" } = {}) {
   let artifact;
   try { artifact = typeof raw === "string" ? JSON.parse(raw) : raw; } catch { throw new Error("Stage B approval is not valid JSON."); }
   if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)
@@ -74,6 +74,8 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
   }
   const issuedAt = Date.parse(artifact.issuedAt);
   const expiresAt = Date.parse(artifact.expiresAt);
+  const withinRollbackGrace = allowExpiredRollback && requestedMode === "full-rls-rollback"
+    && Number.isFinite(expiresAt) && now.getTime() <= expiresAt + 24 * 60 * 60 * 1000;
   const templateHashes = artifact.taskDefinitionTemplateHashes;
   const taskDefinitionArns = artifact.taskDefinitionArns;
   if (artifact.schemaVersion !== STAGE_B_APPROVAL_SCHEMA_VERSION
@@ -89,7 +91,7 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
       || !assumedRole("mscqr-production-rls-independent-checker").test(artifact.checkerIdentity || "")
       || !assumedRole("mscqr-production-release-deployer").test(artifact.deployerIdentity || "")
       || artifact.executorIdentity !== STAGE_B.executorRoleArn || !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)
-      || issuedAt > now.getTime() + 300_000 || expiresAt <= now.getTime() || expiresAt <= issuedAt || expiresAt - issuedAt > 7_200_000
+      || issuedAt > now.getTime() + 300_000 || (expiresAt <= now.getTime() && !withinRollbackGrace) || expiresAt <= issuedAt || expiresAt - issuedAt > 7_200_000
       || !templateHashes || typeof templateHashes !== "object" || Array.isArray(templateHashes)
       || Object.values(templateHashes).some((value) => !isDigest(value))
       || !taskDefinitionArns || typeof taskDefinitionArns !== "object" || Array.isArray(taskDefinitionArns)

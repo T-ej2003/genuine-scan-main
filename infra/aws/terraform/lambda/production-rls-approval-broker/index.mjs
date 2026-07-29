@@ -25,7 +25,7 @@ export function createHandler({ config, readApproval, verifySignature, claimAppr
     const approval = await validateStageBApproval(await readApproval(STAGE_B.approvalSecretArn), {
       ...config.approvalExpected,
       images: config.images,
-    }, { now: now(), verifySignature });
+    }, { now: now(), verifySignature, allowExpiredRollback: request.mode === "full-rls-rollback", requestedMode: request.mode });
     if (approval.approval.approvalId !== request.approvalId || !exact(approval.approval.taskDefinitionTemplateHashes, config.templateHashes)
         || !exact(approval.approval.taskDefinitionArns, config.taskDefinitionArns)) {
       throw new Error("Stage B broker request is not bound to the signed approval.");

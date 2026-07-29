@@ -9,6 +9,10 @@ Run `.github/workflows/production-green-stage-b-images.yml` only for the exact m
 release SHA. It verifies the generated RLS package, builds backend, worker, executor,
 and canary images for `linux/amd64`, requires immutable digest references, creates SBOM
 and provenance attestations, signs images, and fails on critical vulnerabilities.
+Before any dependency installation or AWS credential acquisition, the workflow requires
+that exact 40-character SHA to be checked out and merged into `origin/main`. A pre-existing
+SHA tag is reusable only when its image revision, source-contract, migration digest, and
+service identity labels exactly match the reviewed Stage B bindings.
 
 The executor is `backend/Dockerfile` target `production-rls-executor`; it contains only
 the reviewed executor scripts, generated package, Prisma tooling, PostgreSQL client, and
@@ -28,6 +32,9 @@ Each template has a dedicated execution role. In particular,
 read the RDS-managed administrator secret. The executor and canary intentionally retain a
 writable ephemeral root filesystem because their reviewed Node entrypoints use `/tmp`; the
 backend and worker remain read-only.
+The backend alone mounts a Fargate ephemeral `backend-uploads` volume at `/app/uploads`,
+which covers incident attachments, compliance packs, and legacy QR reports without making
+the image root filesystem writable. No other Stage B task receives that mount.
 
 The broker Lambda source is under `infra/aws/terraform/lambda/production-rls-approval-broker`.
 Its `reviewed` alias must receive the separately deployed policy represented by
@@ -38,6 +45,9 @@ It accepts only `{ approvalId, mode }`, validates canonical signed approval JSON
 each approval/mode once in the replay store, starts one fixed Fargate task with no
 overrides, and writes a write-once receipt. The deployment contract requires a DynamoDB
 conditional-write replay store and a versioned receipt-bucket prefix.
+Normal activation and canary modes reject expired approvals. Only the fixed rollback mode
+may use the signed approval for the documented 24-hour grace period, and only when its
+broker/executor call explicitly enables that path.
 
 ## Executor networking decision
 
