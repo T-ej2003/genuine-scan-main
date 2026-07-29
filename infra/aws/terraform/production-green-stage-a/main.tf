@@ -1,5 +1,12 @@
 locals {
-  tags                 = merge({ Environment = "production", ManagedBy = "Terraform", Component = "full-rls-green-stage-a" }, var.tags)
+  tags = merge({ Environment = "production", ManagedBy = "Terraform", Component = "full-rls-green-stage-a" }, var.tags)
+  executor_interface_endpoint_services = toset([
+    "ecr.api",
+    "ecr.dkr",
+    "logs",
+    "secretsmanager",
+    "kms",
+  ])
   runtime_secret_roles = toset(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"])
   canary_secret_names  = toset(["ordinary_email", "ordinary_password", "ordinary_mfa_secret", "admin_email", "admin_password", "admin_mfa_secret"])
 }
@@ -49,6 +56,33 @@ resource "aws_security_group" "database" {
   tags        = local.tags
 }
 
+resource "aws_security_group" "executor_endpoints" {
+  name        = "mscqr-production-rls-green-executor-endpoints"
+  description = "HTTPS only from the production green executor"
+  vpc_id      = var.vpc_id
+  tags        = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "executor_endpoints_https" {
+  security_group_id            = aws_security_group.executor_endpoints.id
+  referenced_security_group_id = aws_security_group.executor.id
+  from_port                    = 443
+  to_port                      = 443
+  ip_protocol                  = "tcp"
+  description                  = "Production green executor to reviewed AWS interface endpoints"
+}
+
+resource "aws_vpc_endpoint" "executor" {
+  for_each            = local.executor_interface_endpoint_services
+  vpc_id              = var.vpc_id
+  service_name        = "com.amazonaws.${var.aws_region}.${each.value}"
+  vpc_endpoint_type   = "Interface"
+  private_dns_enabled = true
+  subnet_ids          = var.private_subnet_ids
+  security_group_ids  = [aws_security_group.executor_endpoints.id]
+  tags                = merge(local.tags, { Service = each.value })
+}
+
 resource "aws_vpc_security_group_ingress_rule" "executor_database" {
   security_group_id            = aws_security_group.database.id
   referenced_security_group_id = aws_security_group.executor.id
@@ -68,9 +102,8 @@ resource "aws_vpc_security_group_egress_rule" "executor_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "executor_interface_endpoints" {
-  for_each                     = var.executor_interface_endpoint_security_group_ids
   security_group_id            = aws_security_group.executor.id
-  referenced_security_group_id = each.value
+  referenced_security_group_id = aws_security_group.executor_endpoints.id
   from_port                    = 443
   to_port                      = 443
   ip_protocol                  = "tcp"

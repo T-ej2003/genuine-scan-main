@@ -50,6 +50,6 @@ green canaries before any backend/worker cutover. Frontend remains
 
 Stage A exclusively owns the green database and executor security groups, the executor and broker log groups, the executor and broker roles, approval resources, and runtime-role secret resources. Its `stage_b_prerequisites` output is the only supported handoff to the Production Green Stage B root.
 
-The executor security group has no default egress. Stage A permits only PostgreSQL to the green database security group, HTTPS to the reviewed AWS interface endpoint security groups and regional S3 prefix list, and TCP/UDP DNS to the exact VPC resolver `/32`. Stage B must consume this group and must not recreate or mutate its network rules.
+The executor security group has no default egress. Stage A permits only PostgreSQL to the green database security group, HTTPS to its private ECR API, ECR Docker, CloudWatch Logs, Secrets Manager, and KMS interface endpoints and the regional S3 prefix list, and TCP/UDP DNS to the exact VPC resolver `/32`. Stage B must consume this group and must not recreate or mutate its network rules.
 
-`executor_interface_endpoint_security_group_ids` must contain exactly `ecr_api`, `ecr_dkr`, `logs`, `secretsmanager`, and `kms`; the S3 gateway prefix list and VPC resolver are separate exact inputs.
+The five interface endpoints share one Stage A-owned security group that accepts TCP/443 only from the executor security group. The S3 gateway prefix list and VPC resolver remain separate exact inputs.
