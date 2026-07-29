@@ -17,6 +17,9 @@ FROM deps AS builder
 ARG RUN_VERIFY=false
 ARG GIT_SHA=unknown
 ARG RELEASE_GIT_SHA=${GIT_SHA}
+ARG SOURCE_CONTRACT_SHA256=unbound
+ARG MIGRATION_SET_DIGEST=unbound
+ARG BUILD_TIMESTAMP=unbound
 COPY backend/prisma ./prisma
 COPY backend/prisma.config.ts ./prisma.config.ts
 RUN npx prisma generate
@@ -41,12 +44,18 @@ FROM node:24-bookworm-slim AS runtime
 WORKDIR /app
 ARG GIT_SHA=unknown
 ARG RELEASE_GIT_SHA=${GIT_SHA}
+ARG SOURCE_CONTRACT_SHA256=unbound
+ARG MIGRATION_SET_DIGEST=unbound
+ARG BUILD_TIMESTAMP=unbound
 ENV NODE_ENV=production
 ENV PORT=4000
 ENV GIT_SHA=${GIT_SHA}
 ENV RELEASE_GIT_SHA=${RELEASE_GIT_SHA}
 ENV RUN_DB_MIGRATIONS_ON_START=false
-LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA}
+LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA} \
+  org.opencontainers.image.created=${BUILD_TIMESTAMP} \
+  com.mscqr.rls.source-contract-sha256=${SOURCE_CONTRACT_SHA256} \
+  com.mscqr.rls.migration-set-digest=${MIGRATION_SET_DIGEST}
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates postgresql-client \
   && rm -rf /var/lib/apt/lists/*
@@ -55,6 +64,7 @@ COPY --chown=node:node backend/package*.json ./
 COPY --chown=node:node backend/prisma ./prisma
 COPY --chown=node:node backend/prisma.config.ts ./prisma.config.ts
 COPY --chown=node:node backend/scripts ./scripts
+COPY --chown=node:node scripts/aws/production-green-stage-b-contract.mjs ./scripts/production-green-stage-b-contract.mjs
 COPY --chown=node:node documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql ./documents/security/
 COPY --chown=node:node documents/security/mscqr_staging_rls_shared_batch_phase_rollback_2026-07-15.sql ./documents/security/
 COPY --chown=node:node documents/security/mscqr_staging_rls_shared_batch_phase_verify_2026-07-15.sql ./documents/security/
@@ -74,9 +84,48 @@ USER node
 
 CMD ["/usr/local/bin/start-runtime.sh"]
 
-FROM runtime AS rls-executor
+FROM node:24-bookworm-slim AS production-rls-executor
 
+WORKDIR /app
+ARG GIT_SHA=unknown
+ARG RELEASE_GIT_SHA=${GIT_SHA}
+ARG SOURCE_CONTRACT_SHA256=unbound
+ARG MIGRATION_SET_DIGEST=unbound
+ARG BUILD_TIMESTAMP=unbound
+ENV NODE_ENV=production
+ENV GIT_SHA=${GIT_SHA}
+ENV RELEASE_GIT_SHA=${RELEASE_GIT_SHA}
+LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA} \
+  org.opencontainers.image.created=${BUILD_TIMESTAMP} \
+  com.mscqr.rls.source-contract-sha256=${SOURCE_CONTRACT_SHA256} \
+  com.mscqr.rls.migration-set-digest=${MIGRATION_SET_DIGEST} \
+  org.opencontainers.image.title=mscqr-production-rls-executor
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates postgresql-client \
+  && rm -rf /var/lib/apt/lists/*
+COPY --chown=node:node backend/package*.json ./
+COPY --chown=node:node backend/prisma ./prisma
+COPY --chown=node:node backend/prisma.config.ts ./prisma.config.ts
+COPY --chown=node:node backend/scripts ./scripts
+COPY --chown=node:node scripts/aws/production-green-stage-b-contract.mjs ./scripts/production-green-stage-b-contract.mjs
+COPY --from=builder --chown=node:node /workspace/backend/node_modules ./node_modules
 COPY --chown=node:node scripts/rls/sql/generated ./scripts/rls/sql/generated
 COPY --chown=node:node documents/security/rls-program/generated ./documents/security/rls-program/generated
+USER node
+ENTRYPOINT ["node", "scripts/production-full-rls-green-executor.mjs"]
+CMD []
 
-CMD ["node", "scripts/staging-full-rls-green-executor.mjs"]
+FROM runtime AS production-rls-canary
+
+ARG GIT_SHA=unknown
+ARG RELEASE_GIT_SHA=${GIT_SHA}
+ARG SOURCE_CONTRACT_SHA256=unbound
+ARG MIGRATION_SET_DIGEST=unbound
+ARG BUILD_TIMESTAMP=unbound
+LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA} \
+  org.opencontainers.image.created=${BUILD_TIMESTAMP} \
+  com.mscqr.rls.source-contract-sha256=${SOURCE_CONTRACT_SHA256} \
+  com.mscqr.rls.migration-set-digest=${MIGRATION_SET_DIGEST} \
+  org.opencontainers.image.title=mscqr-production-rls-canary
+ENTRYPOINT ["node", "scripts/production-green-application-canary.mjs"]
+CMD []

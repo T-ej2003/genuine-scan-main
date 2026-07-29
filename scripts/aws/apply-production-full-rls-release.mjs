@@ -34,7 +34,8 @@ export function validateProductionReleaseEnvironment(env = process.env) {
     executorImage: env.PRODUCTION_RLS_EXECUTOR_IMAGE,
     backendImage: env.PRODUCTION_BACKEND_IMAGE,
     workerImage: env.PRODUCTION_WORKER_IMAGE,
-    frontendImage: env.PRODUCTION_FRONTEND_IMAGE,
+    canaryImage: env.PRODUCTION_RLS_CANARY_IMAGE,
+    frontendTaskDefinition: env.PRODUCTION_FRONTEND_TASK_DEFINITION,
     clusterArn: env.PRODUCTION_RLS_CLUSTER_ARN,
     receiptBucket: env.PRODUCTION_RLS_RECEIPT_BUCKET,
   };
@@ -45,11 +46,12 @@ export function validateProductionReleaseEnvironment(env = process.env) {
       || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(config.approvalId || "")
       || config.clusterArn !== CLUSTER_ARN
       || config.brokerArn !== BROKER_ARN
+      || config.frontendTaskDefinition !== "mscqr-frontend:20"
       || !PRODUCTION_GREEN.receiptBucketPattern.test(config.receiptBucket || "")) {
     throw new Error("Production release binding is incomplete or outside the reviewed identity.");
   }
-  for (const image of [config.executorImage, config.backendImage, config.workerImage, config.frontendImage]) {
-    if (!new RegExp(`^${ACCOUNT}\\.dkr\\.ecr\\.${REGION}\\.amazonaws\\.com/mscqr-(?:backend|worker|web)@sha256:[a-f0-9]{64}$`).test(image || "")) {
+  for (const image of [config.executorImage, config.backendImage, config.workerImage, config.canaryImage]) {
+    if (!new RegExp(`^${ACCOUNT}\\.dkr\\.ecr\\.${REGION}\\.amazonaws\\.com/mscqr-(?:backend|worker)@sha256:[a-f0-9]{64}$`).test(image || "")) {
       throw new Error("Production image binding must use an approved immutable ECR digest.");
     }
   }
@@ -159,7 +161,8 @@ export async function applyProductionFullRlsRelease({
         executor: config.executorImage,
         backend: config.backendImage,
         worker: config.workerImage,
-        frontend: config.frontendImage,
+        canary: config.canaryImage,
+        frontendTaskDefinition: config.frontendTaskDefinition,
       },
       receipts,
     };

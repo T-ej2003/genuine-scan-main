@@ -1,0 +1,13 @@
+{
+  "name": "mscqr-production-rls-approval-broker",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "24.x" },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1055.0",
+    "@aws-sdk/client-ecs": "3.1055.0",
+    "@aws-sdk/client-kms": "3.1055.0",
+    "@aws-sdk/client-s3": "3.1055.0",
+    "@aws-sdk/client-secrets-manager": "3.1055.0"
+  }
+}

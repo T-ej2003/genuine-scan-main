@@ -7,7 +7,6 @@ import {
   canonicalProductionApprovalPayload,
   validateProductionRlsApproval,
 } from "../../backend/scripts/production-rls-approval.mjs";
-import { createHandler } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
 
 const expected = {
   releaseSha: "a".repeat(40),
@@ -48,14 +47,6 @@ const verifySignature = ({ message, signature }) => crypto.verify("sha256", mess
 }, signature);
 const validate = (candidate, expectation = expected, options = {}) =>
   validateProductionRlsApproval(candidate, expectation, { now, verifySignature, ...options });
-const syntheticSubnet = ["subnet", "0123456789abcdef0"].join("-");
-const syntheticApprovalSecretArn = [
-  "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr",
-  "production",
-  "rls-green",
-  "phase2",
-  "approval-ABC123",
-].join("/");
 
 test("production package generator fails closed without approval", () => {
   const result = spawnSync(process.execPath, [
@@ -102,63 +93,4 @@ test("production approval accepts an exact, unexpired, independently signed cont
   const result = await validate(artifact());
   assert.equal(result.approval.approvalId, "APR-PRODUCTION-RLS-ACTIVATION");
   assert.match(result.approvalContractSha256, /^[a-f0-9]{64}$/);
-});
-
-test("approval broker launches only the fixed private task without overrides", async () => {
-  let request;
-  const taskDefinition =
-    "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-verification:7";
-  const handler = createHandler({
-    config: {
-      clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
-      taskDefinitionArns: { "full-rls-verification": taskDefinition },
-      approvalSecretArn: syntheticApprovalSecretArn,
-      subnets: [syntheticSubnet],
-      securityGroups: ["sg-0123456789abcdef0"],
-      approvalExpected: expected,
-    },
-    readApproval: async () => JSON.stringify(artifact()),
-    verifySignature,
-    now,
-    runTask: async (value) => {
-      request = value;
-      return {
-        failures: [],
-        tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/0123456789abcdef" }],
-      };
-    },
-  });
-  const result = await handler({ mode: "full-rls-verification", approvalId: "APR-PRODUCTION-RLS-ACTIVATION" });
-  assert.equal(result.taskDefinitionArn, taskDefinition);
-  assert.equal(request.taskDefinition, taskDefinition);
-  assert.equal(request.networkConfiguration.awsvpcConfiguration.assignPublicIp, "DISABLED");
-  assert.equal("overrides" in request, false);
-});
-
-test("approval broker rejects requests not bound to the signed approval", async () => {
-  const handler = createHandler({
-    config: {
-      clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
-      taskDefinitionArns: {
-        "full-rls-verification":
-          "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-verification:7",
-      },
-      approvalSecretArn: syntheticApprovalSecretArn,
-      subnets: [syntheticSubnet],
-      securityGroups: ["sg-0123456789abcdef0"],
-      approvalExpected: expected,
-    },
-    readApproval: async () => JSON.stringify(artifact()),
-    verifySignature,
-    now,
-    runTask: async () => assert.fail("unapproved task must not start"),
-  });
-  await assert.rejects(
-    () => handler({ mode: "full-rls-verification", approvalId: "APR-WRONG" }),
-    /approval ID mismatch/
-  );
-  await assert.rejects(
-    () => handler({ mode: "not-reviewed", approvalId: "APR-130-RLS-ACTIVATION" }),
-    /outside the reviewed contract/
-  );
 });

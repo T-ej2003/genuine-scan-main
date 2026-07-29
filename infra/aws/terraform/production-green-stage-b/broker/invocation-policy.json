@@ -1,0 +1,12 @@
+{
+  "representation": "design-contract-not-direct-add-permission-payload",
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "OnlyProtectedReleaseRoleMayInvokeReviewedAlias",
+    "Effect": "Allow",
+    "Principal": { "AWS": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" },
+    "Action": "lambda:InvokeFunction",
+    "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
+    "Condition": { "ArnEquals": { "aws:PrincipalArn": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" } }
+  }]
+}

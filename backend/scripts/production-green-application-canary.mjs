@@ -24,6 +24,15 @@ const child = (command, args, env) => new Promise((resolve, reject) => {
     : reject(new Error(`Canary child failed (${signal || code}).`)));
 });
 
+const assertConfiguration = () => {
+  const required = [
+    "DATABASE_URL", "PREAUTH_DATABASE_URL", "AUTHENTICATED_APP_DATABASE_URL", "MSCQR_C03_PREAUTH_DATABASE_URL",
+    "MSCQR_CANARY_ORDINARY_EMAIL", "MSCQR_CANARY_ORDINARY_PASSWORD", "MSCQR_CANARY_ORDINARY_MFA_SECRET",
+    "MSCQR_CANARY_ADMIN_EMAIL", "MSCQR_CANARY_ADMIN_PASSWORD", "MSCQR_CANARY_ADMIN_MFA_SECRET",
+  ];
+  if (required.some((name) => !process.env[name])) throw new Error("Green application canary configuration is incomplete.");
+};
+
 const smokeEnvironment = (kind) => ({
   ...process.env,
   SMOKE_BASE_URL: "http://127.0.0.1:4000",
@@ -39,6 +48,7 @@ const smokeEnvironment = (kind) => ({
 });
 
 const run = async () => {
+  assertConfiguration();
   const backend = spawn("/usr/local/bin/start-runtime.sh", [], { env: process.env, stdio: "inherit" });
   try {
     await waitForReady();

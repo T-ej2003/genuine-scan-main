@@ -23,7 +23,7 @@ export const PRODUCTION_GREEN = Object.freeze({
   secretPrefix: "mscqr/production/rls-green/phase2/database-url/",
   hostnamePattern: /(?:production|prod)/i,
   forbiddenHostnamePattern: /staging|stg|dev|local/i,
-  receiptBucketPattern: /^mscqr-production-[a-z0-9-]+-artifacts-[0-9]{12}$/,
+  receiptBucketPattern: /^mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an$/,
   confirmations: Object.freeze({
     "full-rls-role-provision": "MSCQR_PRODUCTION_GREEN_PROVISION_RUNTIME_ROLES",
     "full-rls-admin-bootstrap": "MSCQR_PRODUCTION_GREEN_CREATE_AND_BOOTSTRAP_DATABASE",

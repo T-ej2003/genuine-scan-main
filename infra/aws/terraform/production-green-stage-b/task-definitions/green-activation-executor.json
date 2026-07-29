@@ -1,0 +1,38 @@
+{
+  "family": "mscqr-production-full-rls-green-{{MODE}}",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
+  "taskRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
+  "containerDefinitions": [{
+    "name": "production-rls-executor",
+    "image": "{{EXECUTOR_IMAGE}}",
+    "essential": true,
+    "entryPoint": ["node", "scripts/production-full-rls-green-executor.mjs"],
+    "readonlyRootFilesystem": false,
+    "privileged": false,
+    "interactive": false,
+    "pseudoTerminal": false,
+    "environment": [
+      { "name": "MSCQR_FULL_RLS_MODE", "value": "{{MODE}}" },
+      { "name": "MSCQR_FULL_RLS_CONFIRMATION", "value": "{{CONFIRMATION}}" },
+      { "name": "RELEASE_GIT_SHA", "value": "{{RELEASE_SHA}}" },
+      { "name": "MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256", "value": "{{SOURCE_CONTRACT_SHA256}}" },
+      { "name": "MSCQR_FULL_RLS_MIGRATION_SET_DIGEST", "value": "{{MIGRATION_SET_DIGEST}}" },
+      { "name": "MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256", "value": "{{PACKAGE_CHECKSUM_SHA256}}" },
+      { "name": "MSCQR_STAGE_B_EXECUTOR", "value": "true" },
+      { "name": "MSCQR_PRODUCTION_RLS_APPROVAL_KMS_KEY_ARN", "value": "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478" },
+      { "name": "MSCQR_RLS_GREEN_ENDPOINT", "value": "mscqr-production-rls-green-phase2.c3ewey6o6mq5.eu-west-2.rds.amazonaws.com" },
+      { "name": "MSCQR_RLS_GREEN_PORT", "value": "5432" },
+      { "name": "MSCQR_RLS_ADMIN_USERNAME", "value": "mscqr_prod_admin" },
+      { "name": "MSCQR_FULL_RLS_RECEIPT_BUCKET", "value": "{{RECEIPT_BUCKET}}" }
+    ],
+    "secrets": [
+      { "name": "MSCQR_RLS_ADMIN_PASSWORD", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:rds!db-70d459ec-4f6f-45da-aafc-618e83d660a1-Dy9GLo:password::" },
+      { "name": "MSCQR_PRODUCTION_RLS_APPROVAL_ARTIFACT", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho" }
+    ],
+    "logConfiguration": { "logDriver": "awslogs", "options": { "awslogs-region": "eu-west-2", "awslogs-group": "{{EXECUTOR_LOG_GROUP}}", "awslogs-stream-prefix": "stage-b" } }
+  }]
+}
