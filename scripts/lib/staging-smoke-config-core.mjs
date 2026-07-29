@@ -16,6 +16,7 @@ const PRE_CUTOVER_STAGE_B_FILES = new Set([
   "backend/scripts/production-rls-approval.mjs",
   "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_CONTROL_PLANE.md",
   "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_IMAGE_PUBLISHER_IDENTITY.md",
+  "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_PUBLISHER_BOOTSTRAP.md",
   "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json",
   "documents/security/rls-program/production-full-rls-executor-contract.json",
   "package.json",
@@ -35,6 +36,7 @@ const PRE_CUTOVER_STAGE_B_FILES = new Set([
   "scripts/tests/production-green-stage-b-control-plane.test.mjs",
   "scripts/tests/production-green-stage-b-image-bindings.test.mjs",
   "scripts/tests/production-green-stage-b-image-publisher-boundary.test.mjs",
+  "scripts/tests/production-green-stage-b-publisher-bootstrap.test.mjs",
   "scripts/tests/production-rls-approval.test.mjs",
   "scripts/tests/stage-b-release-gate.test.mjs",
   "scripts/tests/staging-smoke-config.test.mjs",
@@ -44,6 +46,7 @@ const PRE_CUTOVER_STAGE_B_PREFIXES = [
   "infra/aws/terraform/lambda/production-rls-approval-broker/",
   "infra/aws/terraform/production-green-stage-b/",
   "infra/aws/terraform/production-green-stage-b-image-publisher/",
+  "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/",
   "scripts/rls/sql/generated/",
 ];
 const BLUE_OR_RUNTIME_PREFIXES = [

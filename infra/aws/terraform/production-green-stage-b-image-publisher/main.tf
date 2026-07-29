@@ -15,8 +15,13 @@ resource "aws_iam_role" "publisher" {
   tags                 = local.tags
 }
 
-resource "aws_iam_role_policy" "publisher" {
-  name   = "MSCQRProductionGreenStageBImagePublisher"
-  role   = aws_iam_role.publisher.id
-  policy = file("${path.module}/permissions-policy.json")
+resource "aws_iam_policy" "publisher" {
+  name        = "MSCQRProductionGreenStageBImagePublisher"
+  description = "ECR-only policy for the reviewed production-green Stage B image publisher."
+  policy      = file("${path.module}/permissions-policy.json")
+}
+
+resource "aws_iam_role_policy_attachment" "publisher" {
+  role       = aws_iam_role.publisher.name
+  policy_arn = aws_iam_policy.publisher.arn
 }

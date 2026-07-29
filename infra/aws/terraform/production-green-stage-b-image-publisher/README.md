@@ -1,7 +1,7 @@
 # Production green Stage B image publisher
 
-This isolated root creates only `mscqr-production-stage-b-image-publisher` and its
-inline ECR publication policy. It does not manage Stage A, databases, networking,
+This isolated root creates only `mscqr-production-stage-b-image-publisher`, its exact
+managed ECR publication policy, and their attachment. It does not manage Stage A, databases, networking,
 secrets, ECS, Lambda, broker resources, services, traffic, or GitHub configuration.
 
 The repository OIDC subject template remains default and is not changed by this root. The
@@ -21,7 +21,7 @@ backend and plan before apply. AWS root must not plan or apply:
 ```sh
 terraform -chdir=infra/aws/terraform/production-green-stage-b-image-publisher init \
   -upgrade=false -input=false \
-  -backend-config='bucket=<approved-production-state-bucket>' \
+  -backend-config='bucket=mscqr-production-terraform-state-368992683803-eu-west-2' \
   -backend-config='key=mscqr/production/rls-green/stage-b-image-publisher/terraform.tfstate' \
   -backend-config='region=eu-west-2' \
   -backend-config='encrypt=true' \

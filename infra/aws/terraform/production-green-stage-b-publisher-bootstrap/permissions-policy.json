@@ -1,0 +1,169 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListOnlyPublisherTerraformStateObjects",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "mscqr/production/rls-green/stage-b-image-publisher/terraform.tfstate",
+            "mscqr/production/rls-green/stage-b-image-publisher/terraform.tfstate.tflock"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadOnlyPublisherStateBucketLocation",
+      "Effect": "Allow",
+      "Action": "s3:GetBucketLocation",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
+    },
+    {
+      "Sid": "ReadWriteOnlyPublisherTerraformState",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b-image-publisher/terraform.tfstate"
+    },
+    {
+      "Sid": "ManageOnlyPublisherTerraformLockfile",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b-image-publisher/terraform.tfstate.tflock"
+    },
+    {
+      "Sid": "CreateOnlyTaggedPublisherRole",
+      "Effect": "Allow",
+      "Action": "iam:CreateRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-image-publisher",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/Stack": "production-green-stage-b-image-publisher"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "ManagedBy",
+            "Environment",
+            "Stack"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ManageOnlyExactPublisherRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:ListRoleTags",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:UpdateRole"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-image-publisher"
+    },
+    {
+      "Sid": "TagOnlyPublisherRoleWithReviewedTags",
+      "Effect": "Allow",
+      "Action": "iam:TagRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-image-publisher",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/Stack": "production-green-stage-b-image-publisher"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "ManagedBy",
+            "Environment",
+            "Stack"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "UntagOnlyReviewedPublisherRoleTags",
+      "Effect": "Allow",
+      "Action": "iam:UntagRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-image-publisher",
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "ManagedBy",
+            "Environment",
+            "Stack"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ManageOnlyExactPublisherManagedPolicy",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreatePolicy",
+        "iam:DeletePolicy",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyVersions",
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicyVersion",
+        "iam:SetDefaultPolicyVersion"
+      ],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBImagePublisher"
+    },
+    {
+      "Sid": "AttachOnlyExactPublisherPolicy",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-image-publisher",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PolicyARN": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBImagePublisher"
+        }
+      }
+    },
+    {
+      "Sid": "DenyPrivilegeEscalationAndUnrelatedInfrastructure",
+      "Effect": "Deny",
+      "Action": [
+        "cloudfront:*",
+        "ec2:*",
+        "iam:CreateAccessKey",
+        "iam:CreateUser",
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:PassRole",
+        "iam:PutRolePermissionsBoundary",
+        "ecr:*",
+        "ecs:*",
+        "elasticloadbalancing:*",
+        "lambda:*",
+        "rds:*",
+        "route53:*",
+        "secretsmanager:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyKmsDecrypt",
+      "Effect": "Deny",
+      "Action": "kms:Decrypt",
+      "Resource": "*"
+    }
+  ]
+}

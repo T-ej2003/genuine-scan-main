@@ -1,0 +1,26 @@
+{
+  "status": "template-only-no-live-apply-performed",
+  "approvedMainSha": null,
+  "sourceContractSha256": null,
+  "migrationSetDigest": null,
+  "breakGlassApprovalId": null,
+  "rootUseSecurityEventId": null,
+  "bootstrapPlanSha256": null,
+  "bootstrapRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-publisher-bootstrap",
+  "bootstrapTrustPolicySha256": null,
+  "bootstrapPermissionsPolicySha256": null,
+  "maximumSessionDurationSeconds": 3600,
+  "publisherPlanSha256": null,
+  "publisherRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-image-publisher",
+  "publisherTrustPolicySha256": null,
+  "publisherPermissionsPolicySha256": null,
+  "mfaBackedSessionEvidence": {
+    "operatorArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator",
+    "temporaryCredentialsOnly": true,
+    "credentialsRedacted": true,
+    "expiresAt": null
+  },
+  "noApplicationInfrastructureMutation": true,
+  "noSecretValueAccess": true,
+  "noImagePublication": true
+}
