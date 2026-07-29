@@ -16,6 +16,7 @@ const PRE_CUTOVER_STAGE_B_FILES = new Set([
   "backend/scripts/production-rls-approval.mjs",
   "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_CONTROL_PLANE.md",
   "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_IMAGE_PUBLISHER_IDENTITY.md",
+  "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json",
   "documents/security/rls-program/production-full-rls-executor-contract.json",
   "package.json",
   "scripts/aws/apply-production-full-rls-release.mjs",

@@ -80,6 +80,7 @@ const pr137PublisherBoundaryFiles = [
   ".github/workflows/production-green-stage-b-images.yml",
   "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_CONTROL_PLANE.md",
   "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_IMAGE_PUBLISHER_IDENTITY.md",
+  "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json",
   "infra/aws/terraform/production-green-stage-b-image-publisher/.terraform.lock.hcl",
   "infra/aws/terraform/production-green-stage-b-image-publisher/README.md",
   "infra/aws/terraform/production-green-stage-b-image-publisher/main.tf",
