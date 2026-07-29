@@ -44,7 +44,7 @@ resource "aws_db_parameter_group" "green" {
 
 resource "aws_security_group" "executor" {
   name        = "mscqr-production-rls-green-executor"
-  description = "No ingress; reviewed green database, AWS endpoint, S3 and VPC DNS egress only"
+  description = "No-ingress or egress executor security group until reviewed Stage B networking"
   vpc_id      = var.vpc_id
   tags        = local.tags
 }
