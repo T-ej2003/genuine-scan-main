@@ -1,0 +1,129 @@
+name: Production Green Stage B Image Build
+
+on:
+  workflow_call:
+    inputs:
+      release_sha:
+        description: Exact merged Git SHA to build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  build-and-attest:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: eu-west-2
+      AWS_ACCOUNT_ID: "368992683803"
+      IMAGE_TAG: ${{ inputs.release_sha }}
+      PLATFORMS: linux/amd64
+      BACKEND_ECR_REPO: mscqr-backend
+      WORKER_ECR_REPO: mscqr-worker
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+      - name: Require the approved release to be merged into protected main
+        run: node scripts/aws/stage-b-release-gate.mjs "${{ inputs.release_sha }}"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+      - run: npm ci && npm --prefix backend ci
+      - name: Bind the exact release and verified RLS package
+        id: package
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$IMAGE_TAG"
+          npm run rls:full-verify
+          test -z "$(git status --porcelain)"
+          echo "source_contract=$(node -p 'require("./documents/security/rls-program/generated/checksums.json").sourceContractSha256')" >> "$GITHUB_OUTPUT"
+          echo "migration_digest=$(node -p 'require("./documents/security/rls-program/generated/checksums.json").migrationSetDigest')" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: ${{ vars.PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v4
+      - uses: sigstore/cosign-installer@v4.1.2
+      - name: Publish immutable backend, worker, executor, and canary images
+        env:
+          SOURCE_CONTRACT_SHA256: ${{ steps.package.outputs.source_contract }}
+          MIGRATION_SET_DIGEST: ${{ steps.package.outputs.migration_digest }}
+          OUTPUT_FILE: ${{ runner.temp }}/stage-b-images.jsonl
+        run: ./scripts/aws/publish-ecs-images.sh production-green-stage-b
+      - name: Bind image digest outputs
+        env:
+          IMAGES_FILE: ${{ runner.temp }}/stage-b-images.jsonl
+        run: |
+          set -euo pipefail
+          node --input-type=module - "$IMAGES_FILE" "$GITHUB_ENV" <<'NODE'
+          import fs from "node:fs";
+          const [imagesFile, envFile] = process.argv.slice(2);
+          const records = fs.readFileSync(imagesFile, "utf8").trim().split("\n").map(JSON.parse);
+          if (records.length !== 4 || new Set(records.map(({ service }) => service)).size !== 4) {
+            throw new Error("Expected exactly one immutable image record for backend, worker, executor, and canary.");
+          }
+          for (const name of ["backend", "worker", "rls-executor", "rls-canary"]) {
+            const value = records.find((record) => record.service === name)?.image_ref;
+            if (!value?.includes("@sha256:")) throw new Error(`Missing immutable ${name} image.`);
+            fs.appendFileSync(envFile, `${name.replaceAll("-", "_").toUpperCase()}_IMAGE=${value}\n`);
+          }
+          NODE
+      - name: Pull immutable images into the authenticated Docker store
+        run: |
+          set -euo pipefail
+          for image in "$BACKEND_IMAGE" "$WORKER_IMAGE" "$RLS_EXECUTOR_IMAGE" "$RLS_CANARY_IMAGE"; do
+            docker pull "$image"
+          done
+      - uses: aquasecurity/trivy-action@v0.33.1
+        with: { image-ref: '${{ env.BACKEND_IMAGE }}', severity: CRITICAL, ignore-unfixed: true, exit-code: '1' }
+      - uses: aquasecurity/trivy-action@v0.33.1
+        with: { image-ref: '${{ env.WORKER_IMAGE }}', severity: CRITICAL, ignore-unfixed: true, exit-code: '1' }
+      - uses: aquasecurity/trivy-action@v0.33.1
+        with: { image-ref: '${{ env.RLS_EXECUTOR_IMAGE }}', severity: CRITICAL, ignore-unfixed: true, exit-code: '1' }
+      - uses: aquasecurity/trivy-action@v0.33.1
+        with: { image-ref: '${{ env.RLS_CANARY_IMAGE }}', severity: CRITICAL, ignore-unfixed: true, exit-code: '1' }
+      - name: Generate SBOMs, sign, and attest provenance
+        env:
+          IMAGES_FILE: ${{ runner.temp }}/stage-b-images.jsonl
+          SOURCE_CONTRACT_SHA256: ${{ steps.package.outputs.source_contract }}
+          MIGRATION_SET_DIGEST: ${{ steps.package.outputs.migration_digest }}
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          while IFS= read -r record; do
+            image_ref="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).image_ref)' "$record")"
+            id="$(printf '%s' "$image_ref" | sha256sum | cut -c1-16)"
+            docker save "$image_ref" -o "$RUNNER_TEMP/$id.tar"
+            docker run --rm -v "$RUNNER_TEMP:/workspace:ro" anchore/syft:v1.38.0 "/workspace/$id.tar" -o spdx-json > "$RUNNER_TEMP/$id.spdx.json"
+            node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({releaseSha:process.env.IMAGE_TAG,sourceContractSha256:process.env.SOURCE_CONTRACT_SHA256,migrationSetDigest:process.env.MIGRATION_SET_DIGEST,builtAt:new Date().toISOString()}))' "$RUNNER_TEMP/$id.provenance.json"
+            cosign sign --yes "$image_ref"
+            cosign attest --yes --type spdxjson --predicate "$RUNNER_TEMP/$id.spdx.json" "$image_ref"
+            cosign attest --yes --type mscqr-stage-b-provenance --predicate "$RUNNER_TEMP/$id.provenance.json" "$image_ref"
+          done < "$IMAGES_FILE"
+      - name: Verify signed immutable artifacts
+        env:
+          IMAGES_FILE: ${{ runner.temp }}/stage-b-images.jsonl
+          COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/production-green-stage-b-image-build.yml@.*$"
+          PROVENANCE_ATTESTATION_TYPE: mscqr-stage-b-provenance
+        run: |
+          set -euo pipefail
+          while IFS= read -r record; do
+            ./scripts/aws/verify-release-artifacts.sh "$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).image_ref)' "$record")"
+          done < "$IMAGES_FILE"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: production-green-stage-b-images
+          path: ${{ runner.temp }}/stage-b-images.jsonl
+          if-no-files-found: error
+          retention-days: 90

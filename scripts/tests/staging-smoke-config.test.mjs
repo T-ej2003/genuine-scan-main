@@ -74,6 +74,26 @@ const pr135StageBFiles = [
   "scripts/tests/stage-b-release-gate.test.mjs",
   "scripts/tests/staging-smoke-config.test.mjs",
 ].join("\n");
+// Exact newline-delimited STAGING_SMOKE_CHANGED_FILES for PR #137.
+const pr137PublisherBoundaryFiles = [
+  ".github/workflows/production-green-stage-b-image-build.yml",
+  ".github/workflows/production-green-stage-b-images.yml",
+  "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_CONTROL_PLANE.md",
+  "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_IMAGE_PUBLISHER_IDENTITY.md",
+  "infra/aws/terraform/production-green-stage-b-image-publisher/.terraform.lock.hcl",
+  "infra/aws/terraform/production-green-stage-b-image-publisher/README.md",
+  "infra/aws/terraform/production-green-stage-b-image-publisher/main.tf",
+  "infra/aws/terraform/production-green-stage-b-image-publisher/outputs.tf",
+  "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json",
+  "infra/aws/terraform/production-green-stage-b-image-publisher/providers.tf",
+  "infra/aws/terraform/production-green-stage-b-image-publisher/trust-policy.json",
+  "infra/aws/terraform/production-green-stage-b-image-publisher/versions.tf",
+  "package.json",
+  "scripts/check-documents-organization.mjs",
+  "scripts/lib/staging-smoke-config-core.mjs",
+  "scripts/tests/production-green-stage-b-control-plane.test.mjs",
+  "scripts/tests/production-green-stage-b-image-publisher-boundary.test.mjs",
+].join("\n");
 const approvedBlueMismatchEnv = {
   GITHUB_EVENT_NAME: "pull_request",
   GITHUB_PR_NUMBER: "135",
@@ -238,6 +258,12 @@ test("PR #135-equivalent production-green Stage B scope may skip the known blue 
   assert.equal(decision.activationScope, true);
   assert.equal(decision.stageBPreCutoverScope, true);
   assert.equal(decision.changedFiles.length, 50);
+  assert.deepEqual(decision.offendingFiles, []);
+});
+
+test("PR #137-equivalent Stage B publisher boundary scope may skip the known blue login failure", () => {
+  const decision = blueLoginDecision({ STAGING_SMOKE_CHANGED_FILES: pr137PublisherBoundaryFiles });
+  assert.equal(decision.shouldSkip, true);
   assert.deepEqual(decision.offendingFiles, []);
 });
 

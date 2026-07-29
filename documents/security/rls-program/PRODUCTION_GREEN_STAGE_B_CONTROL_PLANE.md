@@ -5,14 +5,26 @@ connect to PostgreSQL, execute SQL, register an ECS task definition, or switch t
 
 ## Immutable images
 
-Run `.github/workflows/production-green-stage-b-images.yml` only for the exact merged
-release SHA. It verifies the generated RLS package, builds backend, worker, executor,
-and canary images for `linux/amd64`, requires immutable digest references, creates SBOM
-and provenance attestations, signs images, and fails on critical vulnerabilities.
-Before any dependency installation or AWS credential acquisition, the workflow requires
-that exact 40-character SHA to be checked out and merged into `origin/main`. A pre-existing
-SHA tag is reusable only when its image revision, source-contract, migration digest, and
-service identity labels exactly match the reviewed Stage B bindings.
+The SHA-only dispatcher `.github/workflows/production-green-stage-b-images.yml` verifies
+the exact merged release SHA before it calls
+`.github/workflows/production-green-stage-b-image-build.yml`. The reusable workflow is
+the only job with GitHub OIDC publication authority: it verifies the generated RLS package,
+builds backend, worker, executor, and canary images for `linux/amd64`, requires immutable
+digest references, creates SBOM and provenance attestations, signs images, and fails on
+critical vulnerabilities. Before any dependency installation or AWS credential acquisition,
+both workflow layers require that exact 40-character SHA to be checked out and merged into
+`origin/main`. A pre-existing SHA tag is reusable only when its image revision,
+source-contract, migration digest, and service identity labels exactly match the reviewed
+Stage B bindings.
+
+`infra/aws/terraform/production-green-stage-b-image-publisher/` is an isolated future
+apply root for the dedicated `mscqr-production-stage-b-image-publisher` role. It trusts
+only the GitHub OIDC `production` environment, this repository, and the exact reusable
+workflow at `refs/heads/main`; it grants ECR publication only for `mscqr-backend` and
+`mscqr-worker`. An MFA-backed non-root operator must apply that root through the approved
+production state backend, verify its output hashes, then set only the protected production
+environment variable `PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE` to its ARN. This PR does not
+apply Terraform, set the variable, or access AWS.
 
 The executor is `backend/Dockerfile` target `production-rls-executor`; it contains only
 the reviewed executor scripts, generated package, Prisma tooling, PostgreSQL client, and

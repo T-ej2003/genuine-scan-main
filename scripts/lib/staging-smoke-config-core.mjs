@@ -6,6 +6,7 @@ export const KNOWN_BLUE_LOGIN_SKIP_REASON = "known-blue-production-auth-http-500
 // a PR-number or branch-name exception. Any file outside it keeps login blocking.
 const PRE_CUTOVER_STAGE_B_FILES = new Set([
   ".github/workflows/production-green-stage-b-images.yml",
+  ".github/workflows/production-green-stage-b-image-build.yml",
   ".github/workflows/release-candidate-gate.yml",
   "backend/Dockerfile",
   "backend/scripts/full-rls-green-executor-core.mjs",
@@ -14,6 +15,7 @@ const PRE_CUTOVER_STAGE_B_FILES = new Set([
   "backend/scripts/production-green-canary-provision.mjs",
   "backend/scripts/production-rls-approval.mjs",
   "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_CONTROL_PLANE.md",
+  "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_IMAGE_PUBLISHER_IDENTITY.md",
   "documents/security/rls-program/production-full-rls-executor-contract.json",
   "package.json",
   "scripts/aws/apply-production-full-rls-release.mjs",
@@ -24,12 +26,14 @@ const PRE_CUTOVER_STAGE_B_FILES = new Set([
   "scripts/aws/stage-b-image-bindings.mjs",
   "scripts/aws/stage-b-release-gate.mjs",
   "scripts/check-known-blue-staging-smoke-exception.mjs",
+  "scripts/check-documents-organization.mjs",
   "scripts/lib/staging-smoke-config-core.mjs",
   "scripts/rls/lib/clean-room-source-contract.mjs",
   "scripts/tests/full-database-rls-enforcement.test.mjs",
   "scripts/tests/production-full-rls-release.test.mjs",
   "scripts/tests/production-green-stage-b-control-plane.test.mjs",
   "scripts/tests/production-green-stage-b-image-bindings.test.mjs",
+  "scripts/tests/production-green-stage-b-image-publisher-boundary.test.mjs",
   "scripts/tests/production-rls-approval.test.mjs",
   "scripts/tests/stage-b-release-gate.test.mjs",
   "scripts/tests/staging-smoke-config.test.mjs",
@@ -38,6 +42,7 @@ const PRE_CUTOVER_STAGE_B_PREFIXES = [
   "documents/security/rls-program/generated/",
   "infra/aws/terraform/lambda/production-rls-approval-broker/",
   "infra/aws/terraform/production-green-stage-b/",
+  "infra/aws/terraform/production-green-stage-b-image-publisher/",
   "scripts/rls/sql/generated/",
 ];
 const BLUE_OR_RUNTIME_PREFIXES = [
