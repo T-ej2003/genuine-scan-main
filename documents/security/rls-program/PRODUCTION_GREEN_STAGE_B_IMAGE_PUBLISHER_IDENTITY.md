@@ -12,8 +12,9 @@ accepts exactly one value, `release_sha`, checks that it is the checked-out 40-c
 commit merged into `origin/main`, and calls the fixed reusable workflow
 `.github/workflows/production-green-stage-b-image-build.yml`.
 
-The reusable job runs in the protected `production` environment. It independently repeats
-the release and generated-package checks before it requests GitHub OIDC credentials. All
+The reusable job runs in the protected `production-stage-b-image-publish` environment. It
+independently repeats the release and generated-package checks before it requests GitHub
+OIDC credentials. All
 repository names, image targets, labels, service identities, region, account, platform,
 source contract, and migration digest are fixed in reviewed source; no caller can override
 them. It publishes only backend, worker, RLS executor, and canary digest images, scans them,
@@ -27,29 +28,24 @@ Terraform root:
 Role: `mscqr-production-stage-b-image-publisher`
 
 AWS IAM accepts GitHub's `aud` and `sub` as trust-policy condition keys. It cannot use
-the auxiliary `repository` or `job_workflow_ref` claims as direct IAM condition keys.
+the auxiliary `repository` or `job_workflow_ref` claims as direct IAM condition keys. The
+repository-wide custom-sub proposal is superseded: the repository template stays default.
 The role therefore permits only GitHub's existing OIDC provider when these supported
 claims match:
 
 - `aud`: `sts.amazonaws.com`;
 - `sub`:
-  `repo:T-ej2003/genuine-scan-main:environment:production:job_workflow_ref:T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/main`.
+  `repo:T-ej2003/genuine-scan-main:environment:production-stage-b-image-publish`.
 
-GitHub must encode that reusable-workflow identity into `sub` through the repository OIDC
-subject-customization API. The exact request is the machine-readable
-`oidc-subject-template.json` contract: `PUT
-/repos/T-ej2003/genuine-scan-main/actions/oidc/customization/sub` with
-`use_default:false` and `include_claim_keys` exactly `repo`, `context`, and
-`job_workflow_ref`.
-
-This repository-level change affects every OIDC token emitted by this repository. Do not
-apply it until the transition inventory in
-`PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json` has been completed: first add
-compatible custom-subject trusts alongside every still-required legacy trust, then apply
-the GitHub template, inspect a safe token or run a non-mutating assumption test, set the
-publisher environment variable, and finally retire legacy trust only after every listed
-consumer passes. Roll back by restoring verified legacy IAM subjects first, then PUT
-`{"use_default":true}` to the same GitHub endpoint and repeat non-mutating checks.
+Create the protected `production-stage-b-image-publish` environment outside Terraform.
+Its contract requires protected `main` deployment branches, at least one required reviewer,
+no unprotected branch or tag access, and only the non-secret
+`PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE` variable. It needs no AWS credential secrets.
+Only the reviewed publisher workflow may reference this environment. Another workflow may
+do so only through a reviewed change merged to protected main; environment approval and
+the exact ECR-only IAM role remain the operational boundary. Existing repository OIDC
+consumers remain on default subjects and require no dual-trust migration. The historical
+custom-sub inventory is retained as superseded evidence and must not be applied.
 
 The role has no console login or access keys. Its only allow statements are
 `ecr:GetAuthorizationToken` and image publication/read/scan operations on
@@ -61,7 +57,7 @@ repository. It explicitly denies ECS, Lambda, Secrets Manager, RDS, and IAM acti
 An MFA-backed non-root operator must first receive separate approval for the isolated
 Terraform plan. Root must not plan or apply. The plan must create only this IAM role and its
 inline policy. After apply, verify the role ARN and output hashes, then set only the
-protected GitHub `production` environment variable:
+protected GitHub `production-stage-b-image-publish` environment variable:
 
 `PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE=<publisher_role_arn>`
 

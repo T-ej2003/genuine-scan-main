@@ -10,13 +10,15 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-  attestations: write
 
 jobs:
   build-and-attest:
     runs-on: ubuntu-latest
-    environment: production
+    environment: production-stage-b-image-publish
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     env:
       AWS_REGION: eu-west-2
       AWS_ACCOUNT_ID: "368992683803"

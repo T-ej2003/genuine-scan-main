@@ -1,0 +1,16 @@
+{
+  "name": "production-stage-b-image-publish",
+  "deploymentBranches": "protected-main-only",
+  "requiredReviewers": true,
+  "forbidUnprotectedBranchesAndTags": true,
+  "variables": [
+    "PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE"
+  ],
+  "forbiddenSecrets": [
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN"
+  ],
+  "requiresEnvironmentSecrets": false,
+  "activation": "operator-configured; not managed by Terraform"
+}
