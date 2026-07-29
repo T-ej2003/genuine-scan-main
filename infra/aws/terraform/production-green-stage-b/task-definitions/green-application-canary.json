@@ -1,0 +1,36 @@
+{
+  "family": "mscqr-production-full-rls-green-application-canary",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
+  "containerDefinitions": [{
+    "name": "production-green-canary",
+    "image": "{{CANARY_IMAGE}}",
+    "essential": true,
+    "entryPoint": ["node", "scripts/production-green-application-canary.mjs"],
+    "command": [],
+    "readonlyRootFilesystem": false,
+    "privileged": false,
+    "interactive": false,
+    "pseudoTerminal": false,
+    "environment": [
+      { "name": "RELEASE_GIT_SHA", "value": "{{RELEASE_SHA}}" },
+      { "name": "MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256", "value": "{{SOURCE_CONTRACT_SHA256}}" },
+      { "name": "MSCQR_FULL_RLS_MIGRATION_SET_DIGEST", "value": "{{MIGRATION_SET_DIGEST}}" }
+    ],
+    "secrets": [
+      { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh" },
+      { "name": "PREAUTH_DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/preauth-xW2U7k" },
+      { "name": "MSCQR_CANARY_ORDINARY_EMAIL", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/canary/ordinary-email-CY8wvQ" },
+      { "name": "MSCQR_CANARY_ORDINARY_PASSWORD", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/canary/ordinary-password-8idPQt" },
+      { "name": "MSCQR_CANARY_ORDINARY_MFA_SECRET", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/canary/ordinary-mfa-secret-ZzD549" },
+      { "name": "MSCQR_CANARY_ADMIN_EMAIL", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/canary/admin-email-gctAQZ" },
+      { "name": "MSCQR_CANARY_ADMIN_PASSWORD", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/canary/admin-password-20v4Km" },
+      { "name": "MSCQR_CANARY_ADMIN_MFA_SECRET", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/canary/admin-mfa-secret-qDnA6D" }
+    ],
+    "logConfiguration": { "logDriver": "awslogs", "options": { "awslogs-region": "eu-west-2", "awslogs-group": "{{CANARY_LOG_GROUP}}", "awslogs-stream-prefix": "stage-b" } }
+  }]
+}

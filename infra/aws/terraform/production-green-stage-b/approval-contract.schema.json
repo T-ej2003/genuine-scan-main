@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MSCQR Stage B approval artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "environment", "account", "region", "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "deploymentId", "greenDatabaseIdentifier", "databaseSecurityGroupId", "executorSecurityGroupId", "taskDefinitionArns", "taskDefinitionTemplateHashes", "brokerAliasArn", "brokerVersion", "checkerIdentity", "deployerIdentity", "executorIdentity", "approvalId", "ticketId", "issuedAt", "expiresAt", "nonce", "signatureAlgorithm", "signatureBase64"],
+  "properties": {
+    "schemaVersion": { "const": 2 }, "environment": { "const": "production" }, "account": { "const": "368992683803" }, "region": { "const": "eu-west-2" },
+    "releaseSha": { "pattern": "^[a-f0-9]{40}$" }, "sourceContractSha256": { "pattern": "^[a-f0-9]{64}$" }, "migrationSetDigest": { "pattern": "^[a-f0-9]{64}$" }, "packageChecksumSha256": { "pattern": "^[a-f0-9]{64}$" },
+    "backendImageDigest": { "pattern": "^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$" }, "workerImageDigest": { "pattern": "^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-worker@sha256:[a-f0-9]{64}$" }, "executorImageDigest": { "pattern": "^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$" }, "canaryImageDigest": { "pattern": "^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$" },
+    "signatureBase64": { "pattern": "^[A-Za-z0-9+/]+={0,2}$" }
+  }
+}

@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "dde239bd582b0f6c8878b078fef879a85bf0b1ddaae90b654a45b05e1479a178",
+  "sourceContractSha256": "0825b3e5d42aaa5f78b1ed3b506e70c6808bd1a45bc5340df70ee5f69be5ec4c",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -76,7 +76,7 @@
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "0b42e2744481ece47e8ac2c632d9efde6a62eb8712484da1140e993891584980"
+      "sha256": "6a8add584762da3b016ce3efd5b14d62e895f3c52df23fa7dec1272659dd1fa7"
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
@@ -100,7 +100,7 @@
     },
     {
       "path": "backend/Dockerfile",
-      "sha256": "3363f0fa3dd3ba29d23be9f98f6a3caf36f7bf5febc54649dc7f0c0c426ed9fe"
+      "sha256": "5ff0ae4aed27a3e822430af92d0b02df0a7c9b4e1fd364d1107644d0a0803ea9"
     },
     {
       "path": "backend/scripts/full-rls-green-executor-core.mjs",
@@ -176,7 +176,7 @@
     },
     {
       "path": "infra/aws/terraform/production-green-stage-b/release-activation-contract.json",
-      "sha256": "e4fdca505d2c44844f97d1969dd3ce51472dc0378631c14bff3e199a69e353d9"
+      "sha256": "4c172f92064061d11b00483ddc7e10e4b7ab9ac418c2312f17789fdeeb135f5c"
     },
     {
       "path": "infra/aws/terraform/providers.tf",
@@ -196,7 +196,11 @@
     },
     {
       "path": "infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs",
-      "sha256": "bd2ac9f2e8efa366cb5344ddfbd08024e7aa7229593c1ffc1b6ca010f08e8cdc"
+      "sha256": "5ff48addc9c890b320db132829cf72a4fc37a6b32ab68eab0eb093661aafe293"
+    },
+    {
+      "path": "scripts/aws/production-green-stage-b-contract.mjs",
+      "sha256": "a0d9dc13918ddc23fcda8f98c45883f4cabc41bb34da8c4fca92fc2d0169a5de"
     },
     {
       "path": "scripts/aws/apply-production-full-rls-release.mjs",
@@ -208,7 +212,7 @@
     },
     {
       "path": "scripts/aws/publish-ecs-images.sh",
-      "sha256": "9107d53aa5eb6dd09adc0e73ae254f2240bbb5434e9066a39671ce9d44b25a30"
+      "sha256": "74fc09d6ae34d57d488cf1bcc071b1ee84e172c1df6e656f5c561f90cc925e1e"
     },
     {
       "path": "scripts/smoke-release.mjs",
@@ -316,7 +320,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:dde239bd582b0f6c8878b078fef879a85bf0b1ddaae90b654a45b05e1479a178",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:0825b3e5d42aaa5f78b1ed3b506e70c6808bd1a45bc5340df70ee5f69be5ec4c",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

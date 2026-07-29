@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/aws/publish-ecs-images.sh <backend|frontend|worker|rls-executor|both|all>
+Usage: scripts/aws/publish-ecs-images.sh <backend|frontend|worker|rls-executor|rls-canary|production-green-stage-b|both|all>
 
 Build and push the production backend/frontend/worker/runtime-boundary images to ECR with
 docker buildx. The default output is an ECS/Fargate-ready linux/amd64 manifest
@@ -45,9 +45,9 @@ if [[ -z "$SERVICE_SCOPE" ]]; then
 fi
 
 case "$SERVICE_SCOPE" in
-  backend|frontend|worker|rls-executor|both|all) ;;
+  backend|frontend|worker|rls-executor|rls-canary|production-green-stage-b|both|all) ;;
   *)
-    echo "Expected backend, frontend, worker, rls-executor, both, or all. Got: $SERVICE_SCOPE" >&2
+    echo "Expected backend, frontend, worker, rls-executor, rls-canary, production-green-stage-b, both, or all. Got: $SERVICE_SCOPE" >&2
     exit 1
     ;;
 esac
@@ -108,6 +108,14 @@ case "$SERVICE_SCOPE" in
     SERVICES=("rls-executor")
     REPOSITORIES=("$BACKEND_ECR_REPO")
     ;;
+  rls-canary)
+    SERVICES=("rls-canary")
+    REPOSITORIES=("$BACKEND_ECR_REPO")
+    ;;
+  production-green-stage-b)
+    SERVICES=("backend" "worker" "rls-executor" "rls-canary")
+    REPOSITORIES=("$BACKEND_ECR_REPO" "$WORKER_ECR_REPO")
+    ;;
   both)
     SERVICES=("backend" "frontend")
     REPOSITORIES=("$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO")
@@ -133,6 +141,27 @@ docker buildx inspect --builder "$BUILDER_NAME" --bootstrap >/dev/null
 
 REMOTE_URL="$(git remote get-url origin 2>/dev/null || true)"
 
+if [[ "$SERVICE_SCOPE" == *"rls"* || "$SERVICE_SCOPE" == "production-green-stage-b" ]]; then
+  if ! [[ "${SOURCE_CONTRACT_SHA256:-}" =~ ^[a-f0-9]{64}$ ]] || ! [[ "${MIGRATION_SET_DIGEST:-}" =~ ^[a-f0-9]{64}$ ]]; then
+    echo "SOURCE_CONTRACT_SHA256 and MIGRATION_SET_DIGEST must be reviewed SHA256 values for Stage B images." >&2
+    exit 1
+  fi
+fi
+if [[ "$SERVICE_SCOPE" == "production-green-stage-b" ]]; then
+  if ! [[ "$IMAGE_TAG" =~ ^[a-f0-9]{40}$ ]] || [[ "$IMAGE_TAG" != "$(git rev-parse HEAD)" ]]; then
+    echo "Stage B image publishing requires IMAGE_TAG to equal the checked-out exact release SHA." >&2
+    exit 1
+  fi
+  npm run rls:full-verify >/dev/null
+  actual_source_contract="$(node -p 'require("./documents/security/rls-program/generated/checksums.json").sourceContractSha256')"
+  actual_migration_digest="$(node -p 'require("./documents/security/rls-program/generated/checksums.json").migrationSetDigest')"
+  if [[ "$SOURCE_CONTRACT_SHA256" != "$actual_source_contract" ]] || [[ "$MIGRATION_SET_DIGEST" != "$actual_migration_digest" ]]; then
+    echo "Stage B image labels do not match the verified generated RLS package." >&2
+    exit 1
+  fi
+fi
+BUILD_TIMESTAMP="${BUILD_TIMESTAMP:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+
 echo "Publishing ${SERVICE_SCOPE} image(s)"
 echo "  Tag: ${IMAGE_TAG}"
 echo "  Platforms: ${PLATFORMS}"
@@ -143,7 +172,8 @@ image_uri_for_service() {
     backend) printf '%s/%s:%s' "$ECR_REGISTRY" "$BACKEND_ECR_REPO" "$IMAGE_TAG" ;;
     frontend) printf '%s/%s:%s' "$ECR_REGISTRY" "$FRONTEND_ECR_REPO" "$IMAGE_TAG" ;;
     worker) printf '%s/%s:%s' "$ECR_REGISTRY" "$WORKER_ECR_REPO" "$IMAGE_TAG" ;;
-    rls-executor) printf '%s/%s:%s-rls-executor' "$ECR_REGISTRY" "$BACKEND_ECR_REPO" "$IMAGE_TAG" ;;
+  rls-executor) printf '%s/%s:%s-rls-executor' "$ECR_REGISTRY" "$BACKEND_ECR_REPO" "$IMAGE_TAG" ;;
+  rls-canary) printf '%s/%s:%s-rls-canary' "$ECR_REGISTRY" "$BACKEND_ECR_REPO" "$IMAGE_TAG" ;;
     *) echo "Unsupported service: $service" >&2; return 1 ;;
   esac
 }
@@ -154,7 +184,7 @@ dockerfile_for_service() {
     backend) printf '%s' "$BACKEND_DOCKERFILE" ;;
     frontend) printf '%s' "$FRONTEND_DOCKERFILE" ;;
     worker) printf '%s' "$WORKER_DOCKERFILE" ;;
-    rls-executor) printf '%s' "$BACKEND_DOCKERFILE" ;;
+  rls-executor|rls-canary) printf '%s' "$BACKEND_DOCKERFILE" ;;
     *) echo "Unsupported service: $service" >&2; return 1 ;;
   esac
 }
@@ -165,7 +195,7 @@ context_for_service() {
     backend) printf '%s' "$BACKEND_BUILD_CONTEXT" ;;
     frontend) printf '%s' "$FRONTEND_BUILD_CONTEXT" ;;
     worker) printf '%s' "$WORKER_BUILD_CONTEXT" ;;
-    rls-executor) printf '%s' "$BACKEND_BUILD_CONTEXT" ;;
+  rls-executor|rls-canary) printf '%s' "$BACKEND_BUILD_CONTEXT" ;;
     *) echo "Unsupported service: $service" >&2; return 1 ;;
   esac
 }
@@ -173,7 +203,8 @@ context_for_service() {
 target_for_service() {
   case "$1" in
     frontend) printf '' ;;
-    rls-executor) printf 'rls-executor' ;;
+    rls-executor) printf 'production-rls-executor' ;;
+    rls-canary) printf 'production-rls-canary' ;;
     backend|worker) printf 'runtime' ;;
     *) echo "Unsupported service: $1" >&2; return 1 ;;
   esac
@@ -227,8 +258,14 @@ NODE
     --file "$dockerfile" \
     --build-arg "GIT_SHA=${IMAGE_TAG}" \
     --build-arg "RELEASE_GIT_SHA=${IMAGE_TAG}" \
+    --build-arg "SOURCE_CONTRACT_SHA256=${SOURCE_CONTRACT_SHA256:-unbound}" \
+    --build-arg "MIGRATION_SET_DIGEST=${MIGRATION_SET_DIGEST:-unbound}" \
+    --build-arg "BUILD_TIMESTAMP=${BUILD_TIMESTAMP}" \
     --label "org.opencontainers.image.revision=${IMAGE_TAG}" \
     --label "org.opencontainers.image.source=${REMOTE_URL}" \
+    --label "org.opencontainers.image.created=${BUILD_TIMESTAMP}" \
+    --label "com.mscqr.rls.source-contract-sha256=${SOURCE_CONTRACT_SHA256:-unbound}" \
+    --label "com.mscqr.rls.migration-set-digest=${MIGRATION_SET_DIGEST:-unbound}" \
     --label "org.opencontainers.image.title=mscqr-${service}"
   )
   if [[ -n "$target" ]]; then

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": "B",
-  "requires": ["stage-a-remote-state-outputs", "external-protected-release-role", "independent-checker-distinct-from-deployer", "kms-signed-approval", "immutable-backend-worker-executor-images", "approved-canary-secret-injection"],
+  "requires": ["stage-a-remote-state-outputs", "external-protected-release-role", "independent-checker-distinct-from-deployer", "kms-signed-approval", "immutable-backend-worker-executor-images", "immutable-canary-image", "approved-canary-secret-injection", "approved-executor-network-model"],
   "networking": {
     "requiredBeforeExecutor": true,
     "stageAExecutorEgress": "none",
@@ -10,6 +10,8 @@
       "VPC endpoints: TCP/443 only to approved interface/gateway endpoints and TCP/5432 only to the green database security group"
     ]
   },
+  "approvalSchema": "approval-contract.schema.json",
+  "brokerDeploymentContract": "broker/deployment-contract.json",
   "operations": ["fixed-task-definitions", "reviewed-broker", "green-canaries", "approved-backend-worker-cutover"],
   "frontendTaskDefinition": "mscqr-frontend:20",
   "trafficSwitchBeforeCanariesAllowed": false

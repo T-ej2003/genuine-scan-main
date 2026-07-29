@@ -1,0 +1,21 @@
+{
+  "family": "mscqr-production-rls-green-backend-candidate",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+  "containerDefinitions": [{
+    "name": "backend", "image": "{{BACKEND_IMAGE}}", "essential": true,
+    "entryPoint": ["/usr/local/bin/start-runtime.sh"], "command": [], "readonlyRootFilesystem": true,
+    "privileged": false, "interactive": false, "pseudoTerminal": false,
+    "environment": [{ "name": "RELEASE_GIT_SHA", "value": "{{RELEASE_SHA}}" }],
+    "secrets": [
+      { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh" },
+      { "name": "AUTHENTICATED_APP_DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh" },
+      { "name": "PREAUTH_DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/preauth-xW2U7k" }
+    ],
+    "logConfiguration": { "logDriver": "awslogs", "options": { "awslogs-region": "eu-west-2", "awslogs-group": "{{BACKEND_LOG_GROUP}}", "awslogs-stream-prefix": "stage-b" } }
+  }]
+}

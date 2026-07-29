@@ -1,0 +1,17 @@
+{
+  "family": "mscqr-production-rls-green-worker-candidate",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
+  "containerDefinitions": [{
+    "name": "worker", "image": "{{WORKER_IMAGE}}", "essential": true,
+    "entryPoint": ["node", "dist/worker.js"], "command": [], "readonlyRootFilesystem": true,
+    "privileged": false, "interactive": false, "pseudoTerminal": false,
+    "environment": [{ "name": "RELEASE_GIT_SHA", "value": "{{RELEASE_SHA}}" }],
+    "secrets": [{ "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/worker-9rba4z" }],
+    "logConfiguration": { "logDriver": "awslogs", "options": { "awslogs-region": "eu-west-2", "awslogs-group": "{{WORKER_LOG_GROUP}}", "awslogs-stream-prefix": "stage-b" } }
+  }]
+}

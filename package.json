@@ -101,6 +101,7 @@
     "test:staging-terraform-apply": "node --test scripts/tests/staging-terraform-apply.test.mjs",
     "test:staging-terraform-backend": "node --test scripts/tests/staging-terraform-backend.test.mjs",
     "test:production-green-terraform-planning": "node --test scripts/tests/production-green-terraform-planning.test.mjs",
+    "test:production-green-stage-b-control-plane": "node --test scripts/tests/production-green-stage-b-control-plane.test.mjs",
     "test:staging-runtime-secret-sync": "node --test scripts/tests/staging-runtime-secret-sync.test.mjs",
     "test:staging-database-role-credentials": "node --test scripts/tests/staging-database-role-*.test.mjs",
     "test:staging-full-rls-capability-preflight": "node --test scripts/tests/staging-full-rls-capability-preflight.test.mjs scripts/tests/staging-full-rls-capability-postgres.test.mjs",
