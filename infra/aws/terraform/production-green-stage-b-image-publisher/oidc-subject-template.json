@@ -1,16 +1,9 @@
 {
   "repository": "T-ej2003/genuine-scan-main",
-  "api": {
-    "method": "PUT",
-    "path": "/repos/T-ej2003/genuine-scan-main/actions/oidc/customization/sub",
-    "request": {
-      "use_default": false,
-      "include_claim_keys": [
-        "repo",
-        "context",
-        "job_workflow_ref"
-      ]
-    }
+  "repositoryOidcSubjectTemplate": {
+    "use_default": true,
+    "activation": "do-not-change"
   },
-  "publisherSubject": "repo:T-ej2003/genuine-scan-main:environment:production:job_workflow_ref:T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/main"
+  "publisherEnvironment": "production-stage-b-image-publish",
+  "publisherSubject": "repo:T-ej2003/genuine-scan-main:environment:production-stage-b-image-publish"
 }

@@ -19,12 +19,14 @@ Stage B bindings.
 
 `infra/aws/terraform/production-green-stage-b-image-publisher/` is an isolated future
 apply root for the dedicated `mscqr-production-stage-b-image-publisher` role. It trusts
-only the GitHub OIDC `production` environment, this repository, and the exact reusable
-workflow at `refs/heads/main`; it grants ECR publication only for `mscqr-backend` and
-`mscqr-worker`. An MFA-backed non-root operator must apply that root through the approved
-production state backend, verify its output hashes, then set only the protected production
-environment variable `PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE` to its ARN. This PR does not
-apply Terraform, set the variable, or access AWS.
+only the default OIDC subject of the dedicated protected
+`production-stage-b-image-publish` environment and grants ECR publication only for
+`mscqr-backend` and `mscqr-worker`. The repository-wide OIDC subject template remains
+default, leaving unrelated OIDC consumers unchanged. An MFA-backed non-root operator must
+apply that root through the approved production state backend, verify its output hashes,
+then set only the dedicated environment variable
+`PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE` to its ARN. This PR does not apply Terraform, set
+the variable, or access AWS.
 
 The executor is `backend/Dockerfile` target `production-rls-executor`; it contains only
 the reviewed executor scripts, generated package, Prisma tooling, PostgreSQL client, and
