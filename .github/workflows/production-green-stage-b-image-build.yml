@@ -85,13 +85,13 @@ jobs:
           for image in "$BACKEND_IMAGE" "$WORKER_IMAGE" "$RLS_EXECUTOR_IMAGE" "$RLS_CANARY_IMAGE"; do
             docker pull "$image"
           done
-      - uses: aquasecurity/trivy-action@v0.33.1
+      - uses: aquasecurity/trivy-action@v0.36.0
         with: { image-ref: '${{ env.BACKEND_IMAGE }}', severity: CRITICAL, ignore-unfixed: true, exit-code: '1' }
-      - uses: aquasecurity/trivy-action@v0.33.1
+      - uses: aquasecurity/trivy-action@v0.36.0
         with: { image-ref: '${{ env.WORKER_IMAGE }}', severity: CRITICAL, ignore-unfixed: true, exit-code: '1' }
-      - uses: aquasecurity/trivy-action@v0.33.1
+      - uses: aquasecurity/trivy-action@v0.36.0
         with: { image-ref: '${{ env.RLS_EXECUTOR_IMAGE }}', severity: CRITICAL, ignore-unfixed: true, exit-code: '1' }
-      - uses: aquasecurity/trivy-action@v0.33.1
+      - uses: aquasecurity/trivy-action@v0.36.0
         with: { image-ref: '${{ env.RLS_CANARY_IMAGE }}', severity: CRITICAL, ignore-unfixed: true, exit-code: '1' }
       - name: Generate SBOMs, sign, and attest provenance
         env:
