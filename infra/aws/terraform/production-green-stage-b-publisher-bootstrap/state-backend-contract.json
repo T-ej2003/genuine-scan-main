@@ -8,6 +8,7 @@
   "publisherStateLockKey": "mscqr/production/rls-green/stage-b-image-publisher/terraform.tfstate.tflock",
   "publisherBootstrapRole": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-publisher-bootstrap",
   "publisherRole": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-image-publisher",
+  "publisherPermissionsBoundary": "arn:aws:iam::368992683803:policy/MSCQRProductionStageBImagePublisherBoundary",
   "rootApplyAllowed": false,
   "oneTimeBreakGlassBootstrapRequired": true
 }

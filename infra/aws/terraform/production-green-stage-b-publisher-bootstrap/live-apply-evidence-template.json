@@ -9,6 +9,8 @@
   "bootstrapRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-publisher-bootstrap",
   "bootstrapTrustPolicySha256": null,
   "bootstrapPermissionsPolicySha256": null,
+  "publisherPermissionsBoundaryArn": "arn:aws:iam::368992683803:policy/MSCQRProductionStageBImagePublisherBoundary",
+  "publisherPermissionsBoundarySha256": null,
   "maximumSessionDurationSeconds": 3600,
   "publisherPlanSha256": null,
   "publisherRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-image-publisher",

@@ -3,6 +3,8 @@
 This isolated root creates only `mscqr-production-stage-b-image-publisher`, its exact
 managed ECR publication policy, and their attachment. It does not manage Stage A, databases, networking,
 secrets, ECS, Lambda, broker resources, services, traffic, or GitHub configuration.
+It requires the immutable `MSCQRProductionStageBImagePublisherBoundary` created by the
+separately approved bootstrap root; this root cannot create, update, or detach that boundary.
 
 The repository OIDC subject template remains default and is not changed by this root. The
 publisher uses the dedicated protected GitHub environment

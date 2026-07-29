@@ -7,6 +7,12 @@ locals {
   }
 }
 
+resource "aws_iam_policy" "publisher_permissions_boundary" {
+  name        = "MSCQRProductionStageBImagePublisherBoundary"
+  description = "Immutable maximum permissions for the production-green Stage B image publisher."
+  policy      = file("${path.module}/publisher-permissions-boundary.json")
+}
+
 resource "aws_iam_role" "publisher_bootstrap" {
   name        = local.role_name
   description = "MFA-only operator role for the isolated Stage B image-publisher Terraform root."

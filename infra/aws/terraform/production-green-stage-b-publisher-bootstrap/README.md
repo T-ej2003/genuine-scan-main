@@ -1,10 +1,14 @@
 # Production green Stage B publisher bootstrap
 
 This isolated root creates only the MFA-only role
-`mscqr-production-stage-b-publisher-bootstrap` and its inline policy. The role may apply
+`mscqr-production-stage-b-publisher-bootstrap`, its inline policy, and the immutable
+maximum-permissions boundary `MSCQRProductionStageBImagePublisherBoundary`. The role may apply
 only `../production-green-stage-b-image-publisher/`, which creates only
 `mscqr-production-stage-b-image-publisher`, the exact managed policy
 `MSCQRProductionGreenStageBImagePublisher`, and their reviewed attachment.
+
+The bootstrap role cannot modify or detach the boundary. The publisher role cannot exceed
+the boundary's ECR-only permissions even if its trust or attached policy is later altered.
 
 It has no authority over Stage A, application infrastructure, databases, ECS, Lambda,
 networking, Secrets Manager, KMS decrypt, traffic, or unrelated IAM identities. It can
@@ -16,7 +20,7 @@ bootstrap root's state.
 
 The bootstrap role does not yet exist, so a separately approved break-glass event is
 required to apply this root once. That event must use a saved plan containing only this
-role and its inline policy, record the root use as a security event, and use the exact
+role, its inline policy, and the immutable publisher permissions boundary, record the root use as a security event, and use the exact
 bootstrap state key from `state-backend-contract.json`. Root must never plan or apply the
 publisher root itself.
 

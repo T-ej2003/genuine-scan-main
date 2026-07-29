@@ -164,6 +164,7 @@ test("publisher Terraform plan safety root owns only the dedicated role, exact p
   assert.match(main, /resource "aws_iam_role" "publisher"/);
   assert.match(main, /resource "aws_iam_policy" "publisher"/);
   assert.match(main, /resource "aws_iam_role_policy_attachment" "publisher"/);
+  assert.match(main, /permissions_boundary = "arn:aws:iam::368992683803:policy\/MSCQRProductionStageBImagePublisherBoundary"/);
   assert.doesNotMatch(main, /aws_(ecs|db|rds|lambda|secretsmanager|security_group|vpc|ecr)_/);
   assert.match(provider, /allowed_account_ids = \["368992683803"\]/);
   assert.doesNotMatch(fs.readFileSync(`${root}/outputs.tf`, "utf8"), /aws_secretsmanager|password\s*=/i);

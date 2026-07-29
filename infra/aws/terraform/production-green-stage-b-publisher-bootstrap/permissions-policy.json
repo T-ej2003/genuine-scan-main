@@ -51,6 +51,9 @@
           "aws:RequestTag/Environment": "production",
           "aws:RequestTag/Stack": "production-green-stage-b-image-publisher"
         },
+        "ArnEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::368992683803:policy/MSCQRProductionStageBImagePublisherBoundary"
+        },
         "ForAllValues:StringEquals": {
           "aws:TagKeys": [
             "ManagedBy",

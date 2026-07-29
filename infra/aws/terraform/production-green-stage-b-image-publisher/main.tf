@@ -11,6 +11,7 @@ resource "aws_iam_role" "publisher" {
   name                 = local.role_name
   description          = "GitHub OIDC only: publish reviewed production-green Stage B images."
   max_session_duration = 3600
+  permissions_boundary = "arn:aws:iam::368992683803:policy/MSCQRProductionStageBImagePublisherBoundary"
   assume_role_policy   = file("${path.module}/trust-policy.json")
   tags                 = local.tags
 }
