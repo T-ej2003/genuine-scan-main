@@ -22,11 +22,24 @@ export function stagingSmokeMode(values = env) {
   return "live_staging";
 }
 
+export async function verifyStagingIdentity(values = env, fetchImpl = globalThis.fetch) {
+  stagingSmokeMode(values);
+  const apiUrl = new URL(String(values.STAGING_SMOKE_API_BASE_URL));
+  const response = await fetchImpl(new URL(`${apiUrl.pathname.replace(/\/$/, "")}/health/ready`, apiUrl.origin), {
+    headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000),
+  });
+  let payload;
+  try { payload = await response.json(); } catch { throw new Error("Staging identity response is not valid JSON."); }
+  if (!response.ok || payload?.release?.environment !== "staging") throw new Error("Staging identity preflight did not report release.environment=staging.");
+  return true;
+}
+
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   const mode = stagingSmokeMode();
   if (mode === "staging_not_provisioned") {
     console.log(JSON.stringify({ status: mode, network: "not_attempted" }));
   } else {
+    await verifyStagingIdentity();
     const result = spawnSync("node", ["scripts/smoke-release.mjs"], { stdio: "inherit", env: { ...env, SMOKE_BASE_URL: base, SMOKE_API_BASE_URL: api, SMOKE_LOGIN_EMAIL: env.STAGING_SMOKE_LOGIN_EMAIL, SMOKE_LOGIN_PASSWORD: env.STAGING_SMOKE_LOGIN_PASSWORD, SMOKE_VERIFY_CODE: env.STAGING_SMOKE_VERIFY_CODE || "", SMOKE_ALLOW_LOCAL_DEFAULT: "false" } });
     process.exit(result.status ?? 1);
   }
