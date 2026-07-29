@@ -58,7 +58,9 @@ LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA} \
   com.mscqr.rls.migration-set-digest=${MIGRATION_SET_DIGEST}
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates postgresql-client \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install --global npm@11.18.0 --no-audit --no-fund \
+  && rm -rf /root/.npm
 
 COPY --chown=node:node backend/package*.json ./
 COPY --chown=node:node backend/prisma ./prisma
@@ -102,7 +104,9 @@ LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA} \
   org.opencontainers.image.title=mscqr-production-rls-executor
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates postgresql-client \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install --global npm@11.18.0 --no-audit --no-fund \
+  && rm -rf /root/.npm
 COPY --chown=node:node backend/package*.json ./
 COPY --chown=node:node backend/prisma ./prisma
 COPY --chown=node:node backend/prisma.config.ts ./prisma.config.ts
