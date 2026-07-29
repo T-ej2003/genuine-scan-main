@@ -24,14 +24,14 @@ const readTemplate = (kind) => {
 const replace = (value, values) => {
   if (Array.isArray(value)) return value.map((item) => replace(item, values));
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replace(item, values)]));
-  return typeof value === "string" ? value.replace(/{{([A-Z_]+)}}/g, (_, key) => {
+  return typeof value === "string" ? value.replace(/{{([A-Z0-9_]+)}}/g, (_, key) => {
     if (!(key in values)) throw new Error(`Missing fixed Stage B task binding: ${key}.`);
     return values[key];
   }) : value;
 };
 const assertNoTokens = (value) => {
   const text = JSON.stringify(value);
-  if (/{{[A-Z_]+}}/.test(text)) throw new Error("Stage B task template has an unresolved binding.");
+  if (/{{[A-Z0-9_]+}}/.test(text)) throw new Error("Stage B task template has an unresolved binding.");
 };
 
 export const stageBTemplateHashes = () => Object.fromEntries(Object.entries(files).map(([kind]) => [kind, canonicalSha256(readTemplate(kind))]));

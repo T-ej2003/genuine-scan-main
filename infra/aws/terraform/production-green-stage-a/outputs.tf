@@ -13,6 +13,12 @@ output "stage_b_prerequisites" {
     approval_secret_arn        = aws_secretsmanager_secret.approval.arn
     executor_role_arn          = aws_iam_role.executor.arn
     broker_role_arn            = aws_iam_role.broker.arn
+    database_security_group_id = aws_security_group.database.id
     executor_security_group_id = aws_security_group.executor.id
+    executor_log_group_name    = aws_cloudwatch_log_group.executor.name
+    executor_log_group_arn     = aws_cloudwatch_log_group.executor.arn
+    broker_log_group_name      = aws_cloudwatch_log_group.broker.name
+    broker_log_group_arn       = aws_cloudwatch_log_group.broker.arn
+    runtime_secret_arns        = { for role, secret in aws_secretsmanager_secret.runtime : role => secret.arn }
   }
 }

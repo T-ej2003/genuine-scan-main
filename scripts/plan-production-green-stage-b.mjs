@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const root = "infra/aws/terraform/production-green-stage-b";
-const allowed = new Set(["aws_security_group", "aws_vpc_security_group_egress_rule", "aws_cloudwatch_log_group", "aws_iam_role", "aws_iam_role_policy_attachment", "aws_iam_role_policy", "aws_ecs_task_definition", "aws_dynamodb_table", "aws_lambda_function", "aws_lambda_alias", "aws_lambda_permission"]);
+const allowed = new Set(["aws_cloudwatch_log_group", "aws_iam_role", "aws_iam_role_policy", "aws_ecs_task_definition", "aws_dynamodb_table", "aws_lambda_function", "aws_lambda_alias", "aws_lambda_permission"]);
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
 
 export function assertStageBPlan(plan) {

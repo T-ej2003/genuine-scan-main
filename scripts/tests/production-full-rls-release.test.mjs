@@ -226,18 +226,23 @@ test("production Terraform Stage A provisions isolated PG18 while Stage B remain
   assert.doesNotMatch(source, /aws_ecs_task_definition|aws_ecs_service|aws_lambda_function/);
   assert.match(provider, /allowed_account_ids\s*=\s*\["368992683803"\]/);
   assert.doesNotMatch(source, /BYPASSRLS|SUPERUSER/);
-  assert.doesNotMatch(source, /cidr_ipv4/);
+  assert.doesNotMatch(source, /cidr_ipv4\s*=\s*"(?:0\.0\.0\.0\/0|::\/0)"/);
+  assert.match(source, /cidr_ipv4\s*=\s*var\.vpc_dns_resolver_cidr/);
 });
 
-test("production operator, zero-egress, and RDS-managed-secret contracts remain fail-closed", () => {
+test("production operator, scoped executor egress, and RDS-managed-secret contracts remain fail-closed", () => {
   const contract = JSON.parse(fs.readFileSync("documents/security/rls-program/production-full-rls-executor-contract.json", "utf8"));
   const stageA = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
   assert.equal(contract.stageAOperatorPath.bootstrapOperator, "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator");
   assert.equal(contract.stageAOperatorPath.releaseRole, "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");
-  assert.equal(contract.stageANetworking.executorEgress, "explicitly empty");
+  assert.equal(contract.stageANetworking.executorEgress, "green database plus reviewed AWS endpoints, regional S3 and exact VPC resolver only");
   assert.equal(contract.stageANetworking.stageBRequiredBeforeExecutorRuns, true);
   assert.equal(contract.rdsManagedAdministratorSecret.manageMasterUserPassword, true);
   assert.equal(contract.rdsManagedAdministratorSecret.terraformStoresPassword, false);
   assert.equal(contract.rdsManagedAdministratorSecret.applicationRuntimeMayRead, false);
-  assert.match(stageA, /egress\s+=\s+\[\]/);
+  assert.match(stageA, /executor_database[\s\S]*referenced_security_group_id\s*=\s*aws_security_group\.database\.id/);
+  assert.match(stageA, /executor_interface_endpoints/);
+  assert.match(stageA, /executor_s3/);
+  assert.match(stageA, /executor_dns_(?:udp|tcp)/);
+  assert.doesNotMatch(stageA, /0\.0\.0\.0\/0|::\/0/);
 });

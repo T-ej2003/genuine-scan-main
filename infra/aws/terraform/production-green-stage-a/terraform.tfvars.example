@@ -2,6 +2,15 @@ aws_region = "eu-west-2"
 vpc_id = "vpc-xxxxxxxx"
 private_subnet_ids = ["subnet-aaaaaaaa", "subnet-bbbbbbbb"]
 runtime_security_group_ids = ["sg-xxxxxxxx"]
+executor_interface_endpoint_security_group_ids = {
+  ecr_api        = "sg-xxxxxxxxxxxxxxxxx"
+  ecr_dkr        = "sg-xxxxxxxxxxxxxxxxx"
+  logs           = "sg-xxxxxxxxxxxxxxxxx"
+  secretsmanager = "sg-xxxxxxxxxxxxxxxxx"
+  kms            = "sg-xxxxxxxxxxxxxxxxx"
+}
+s3_prefix_list_id     = "pl-xxxxxxxxxxxxxxxxx"
+vpc_dns_resolver_cidr = "10.0.0.2/32"
 
 # External prerequisites. Do not infer these from root credentials or deploy roles.
 checker_principal_arns = ["arn:aws:iam::368992683803:role/<approved-independent-checker-principal>"]

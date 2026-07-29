@@ -141,9 +141,9 @@
     "futureTrustMigration": "A protected GitHub OIDC/operator trust requires a separately reviewed change."
   },
   "stageANetworking": {
-    "executorEgress": "explicitly empty",
+    "executorEgress": "green database plus reviewed AWS endpoints, regional S3 and exact VPC resolver only",
     "stageBRequiredBeforeExecutorRuns": true,
-    "approvedModels": ["NAT TCP/443 plus green-DB TCP/5432", "approved VPC-endpoint TCP/443 plus green-DB TCP/5432"]
+    "approvedModels": ["ECR API, ECR DKR, Logs, Secrets Manager and KMS interface endpoints; regional S3 managed prefix list; VPC resolver TCP/UDP 53; green-DB TCP/5432"]
   },
   "rdsManagedAdministratorSecret": {
     "manageMasterUserPassword": true,

@@ -37,12 +37,9 @@ resource "aws_db_parameter_group" "green" {
 
 resource "aws_security_group" "executor" {
   name        = "mscqr-production-rls-green-executor"
-  description = "No-ingress or egress executor security group until reviewed Stage B networking"
+  description = "No ingress; reviewed green database, AWS endpoint, S3 and VPC DNS egress only"
   vpc_id      = var.vpc_id
-  # Explicitly revoke AWS's default allow-all egress rule. Stage B must add a
-  # reviewed NAT or VPC-endpoint model before any executor task can run.
-  egress = []
-  tags   = local.tags
+  tags        = local.tags
 }
 
 resource "aws_security_group" "database" {
@@ -59,6 +56,52 @@ resource "aws_vpc_security_group_ingress_rule" "executor_database" {
   to_port                      = 5432
   ip_protocol                  = "tcp"
   description                  = "Brokered production RLS executor"
+}
+
+resource "aws_vpc_security_group_egress_rule" "executor_database" {
+  security_group_id            = aws_security_group.executor.id
+  referenced_security_group_id = aws_security_group.database.id
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  description                  = "Green PostgreSQL only"
+}
+
+resource "aws_vpc_security_group_egress_rule" "executor_interface_endpoints" {
+  for_each                     = var.executor_interface_endpoint_security_group_ids
+  security_group_id            = aws_security_group.executor.id
+  referenced_security_group_id = each.value
+  from_port                    = 443
+  to_port                      = 443
+  ip_protocol                  = "tcp"
+  description                  = "Reviewed AWS interface endpoints only"
+}
+
+resource "aws_vpc_security_group_egress_rule" "executor_s3" {
+  security_group_id = aws_security_group.executor.id
+  prefix_list_id    = var.s3_prefix_list_id
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Regional S3 gateway endpoint only"
+}
+
+resource "aws_vpc_security_group_egress_rule" "executor_dns_udp" {
+  security_group_id = aws_security_group.executor.id
+  cidr_ipv4         = var.vpc_dns_resolver_cidr
+  from_port         = 53
+  to_port           = 53
+  ip_protocol       = "udp"
+  description       = "VPC resolver DNS only"
+}
+
+resource "aws_vpc_security_group_egress_rule" "executor_dns_tcp" {
+  security_group_id = aws_security_group.executor.id
+  cidr_ipv4         = var.vpc_dns_resolver_cidr
+  from_port         = 53
+  to_port           = 53
+  ip_protocol       = "tcp"
+  description       = "VPC resolver DNS fallback only"
 }
 
 resource "aws_vpc_security_group_ingress_rule" "runtime_database" {

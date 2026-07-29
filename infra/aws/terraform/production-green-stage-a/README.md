@@ -30,10 +30,9 @@ review. The checker must be distinct from the release deployer.
 
 Stage A creates no ECS task definition, ECS service, Lambda function, image
 binding, runtime secret value, broker invocation, canary, or traffic switch.
-The executor security group has explicit empty egress, so no executor can send
-traffic in Stage A. Stage B must choose and review either NAT TCP/443 plus
-green-DB TCP/5432, or approved VPC-endpoint TCP/443 plus green-DB TCP/5432,
-before it creates a runnable executor task.
+The executor security group has no default egress. It permits only green-DB
+TCP/5432, reviewed AWS interface endpoint and S3 TCP/443, and exact VPC resolver
+DNS paths required by the later Stage B executor.
 
 `manage_master_user_password = true` asks RDS—not Terraform—to create the
 KMS-encrypted administrator secret when the database is created. It is separate
@@ -47,3 +46,10 @@ images exist. It attaches least-privilege execution policies, creates fixed
 executor/canary task definitions and the reviewed broker, then runs mandatory
 green canaries before any backend/worker cutover. Frontend remains
 `mscqr-frontend:20`.
+## Stage B ownership boundary
+
+Stage A exclusively owns the green database and executor security groups, the executor and broker log groups, the executor and broker roles, approval resources, and runtime-role secret resources. Its `stage_b_prerequisites` output is the only supported handoff to the Production Green Stage B root.
+
+The executor security group has no default egress. Stage A permits only PostgreSQL to the green database security group, HTTPS to the reviewed AWS interface endpoint security groups and regional S3 prefix list, and TCP/UDP DNS to the exact VPC resolver `/32`. Stage B must consume this group and must not recreate or mutate its network rules.
+
+`executor_interface_endpoint_security_group_ids` must contain exactly `ecr_api`, `ecr_dkr`, `logs`, `secretsmanager`, and `kms`; the S3 gateway prefix list and VPC resolver are separate exact inputs.
