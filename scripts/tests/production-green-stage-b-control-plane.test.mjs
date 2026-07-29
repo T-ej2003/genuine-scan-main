@@ -65,7 +65,10 @@ test("Stage B templates require immutable images, private executor networking, a
   assert.doesNotMatch(`${JSON.stringify(canary)}${JSON.stringify(backend)}${JSON.stringify(worker)}`, /rds!db-/);
   assert.deepEqual(backend.volumes, [{ name: "backend-uploads" }]);
   assert.deepEqual(backend.containerDefinitions[0].mountPoints, [{ sourceVolume: "backend-uploads", containerPath: "/app/uploads", readOnly: false }]);
-  assert.equal(canary.volumes, undefined); assert.equal(worker.volumes, undefined); assert.equal(executor.volumes, undefined);
+  assert.deepEqual(executor.volumes, [{ name: "executor-tmp" }]);
+  assert.deepEqual(canary.volumes, [{ name: "canary-tmp" }]);
+  assert.equal(worker.volumes, undefined);
+  for (const definition of [executor, canary, backend, worker]) assert.equal(definition.containerDefinitions[0].readonlyRootFilesystem, true);
   for (const source of ["backend/src/middleware/incidentUpload.ts", "backend/src/services/compliancePackService.ts", "backend/src/services/legacyQrRiskReportJobService.ts"]) {
     assert.match(fs.readFileSync(source, "utf8"), /uploads/);
   }

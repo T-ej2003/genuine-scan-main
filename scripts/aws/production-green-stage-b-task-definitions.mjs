@@ -49,6 +49,7 @@ export function assertFixedTaskDefinition(definition) {
   const secretNames = container?.secrets?.map(({ name }) => name) || [];
   const backendUploads = definition?.family === "mscqr-production-rls-green-backend-candidate";
   const uploadMount = container?.mountPoints?.find((mount) => mount.sourceVolume === "backend-uploads");
+  const scratchMount = container?.mountPoints?.find((mount) => /^(executor|canary)-tmp$/.test(mount.sourceVolume));
   const fargateSizes = new Set(["256/512", "256/1024", "512/1024", "512/2048", "1024/2048", "1024/3072", "1024/4096", "2048/4096", "2048/5120", "2048/6144", "2048/7168", "2048/8192", "4096/8192", "4096/16384", "4096/30720"]);
   if (!container || definition.networkMode !== "awsvpc" || !definition.requiresCompatibilities?.includes("FARGATE")
       || container.privileged || container.interactive || container.pseudoTerminal || !Array.isArray(container.entryPoint)
@@ -58,7 +59,8 @@ export function assertFixedTaskDefinition(definition) {
       || new Set(secretNames).size !== secretNames.length || environmentNames.some((name) => secretNames.includes(name))
       || (backendUploads && (!definition.volumes?.some((volume) => volume.name === "backend-uploads" && !Object.hasOwn(volume, "host"))
         || uploadMount?.containerPath !== "/app/uploads" || uploadMount.readOnly !== false))
-      || (!backendUploads && (definition.volumes?.length || container.mountPoints?.length))
+      || (!backendUploads && (definition.volumes?.length || container.mountPoints?.length) && (!scratchMount || scratchMount.containerPath !== "/tmp" || scratchMount.readOnly !== false
+        || definition.volumes?.length !== 1 || container.mountPoints?.length !== 1))
       || JSON.stringify(definition).includes("rds!db-70d459ec-4f6f-45da-aafc-618e83d660a1-Dy9GLo")
         && (definition.taskRoleArn !== STAGE_B.executorRoleArn || definition.executionRoleArn !== STAGE_B.executorExecutionRoleArn)) {
     throw new Error("Stage B task definition is outside the fixed reviewed contract.");
