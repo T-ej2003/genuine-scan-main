@@ -9,6 +9,7 @@ on:
       - "scripts/**"
       - "ops/deploy/**"
       - "ops/aws/**"
+      - "backend/Dockerfile"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/**"
