@@ -358,7 +358,7 @@ test("push, tag, release, and workflow dispatch contexts cannot use the pull-req
   assert.equal(blueLoginDecision({ GITHUB_REF: "refs/tags/v1.0.0", GITHUB_EVENT_NAME: "push" }).shouldSkip, false);
 });
 
-test("release workflow keeps blue exception narrow and green application canary mandatory", () => {
+test("rc-staging-smoke is isolated from the production-blue exception and green canary remains mandatory", () => {
   const candidateWorkflow = fs.readFileSync(".github/workflows/release-candidate-gate.yml", "utf8");
   const releaseSource = fs.readFileSync("scripts/aws/apply-production-full-rls-release.mjs", "utf8");
   const decision = fs.readFileSync(
@@ -366,10 +366,8 @@ test("release workflow keeps blue exception narrow and green application canary 
     "utf8"
   );
   assert.match(candidateWorkflow, /SMOKE_REQUIRED: "true"/);
-  assert.match(
-    candidateWorkflow,
-    /KNOWN_BLUE_ENDPOINT_MISMATCH: "known-blue-production-auth-http-500-production-green-lineage"/
-  );
+  assert.doesNotMatch(candidateWorkflow, /KNOWN_BLUE_ENDPOINT_MISMATCH|check-known-blue-staging-smoke-exception\.mjs/);
+  assert.match(candidateWorkflow, /STAGING_SMOKE_ENABLED/);
   assert.match(decision, /known-blue-production-auth-http-500-production-green-lineage/);
   assert.match(releaseSource, /invokeBroker\("full-rls-application-canary"/);
   assert.match(releaseSource, /waitForTask\(canaryTaskArn/);

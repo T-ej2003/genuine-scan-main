@@ -60,6 +60,10 @@ jobs:
     environment: staging
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
     env:
+      STAGING_SMOKE_ENABLED: ${{ vars.STAGING_SMOKE_ENABLED }}
+      STAGING_SMOKE_BASE_URL: ${{ vars.STAGING_SMOKE_BASE_URL }}
+      STAGING_SMOKE_API_BASE_URL: ${{ vars.STAGING_SMOKE_API_BASE_URL }}
+      STAGING_SMOKE_VERIFY_CODE: ${{ vars.STAGING_SMOKE_VERIFY_CODE }}
       SMOKE_BASE_URL: ${{ vars.STAGING_SMOKE_BASE_URL }}
       SMOKE_API_BASE_URL: ${{ vars.STAGING_SMOKE_API_BASE_URL }}
       SMOKE_VERIFY_CODE: ${{ vars.STAGING_SMOKE_VERIFY_CODE }}
@@ -107,8 +111,10 @@ jobs:
         id: smoke_skip
         env:
           ALLOW_DEPENDABOT_DEPENDENCY_SMOKE_SKIP: "true"
-          SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL || secrets.SMOKE_LOGIN_EMAIL }}
-          SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD || secrets.SMOKE_LOGIN_PASSWORD }}
+          STAGING_SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL }}
+          STAGING_SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD }}
+          SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL }}
+          SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD }}
         run: |
           node --input-type=module <<'NODE'
           import fs from "node:fs";
@@ -136,8 +142,10 @@ jobs:
       - name: Validate staging smoke configuration
         env:
           ALLOW_DEPENDABOT_DEPENDENCY_SMOKE_SKIP: "true"
-          SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL || secrets.SMOKE_LOGIN_EMAIL }}
-          SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD || secrets.SMOKE_LOGIN_PASSWORD }}
+          STAGING_SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL }}
+          STAGING_SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD }}
+          SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL }}
+          SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD }}
           SMOKE_ADMIN_MFA_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_MFA_CODE }}
           SMOKE_ADMIN_MFA_SECRET: ${{ secrets.STAGING_SMOKE_ADMIN_MFA_SECRET }}
           SMOKE_ADMIN_STEP_UP_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_STEP_UP_CODE }}
@@ -150,23 +158,15 @@ jobs:
           SMOKE_REQUIRED: "true"
           ALLOW_STAGING_SMOKE_DEGRADED_ON_PR: "false"
           GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
-          KNOWN_BLUE_ENDPOINT_MISMATCH: "known-blue-production-auth-http-500-production-green-lineage"
           STAGING_SMOKE_RESULT_PATH: staging-smoke-result.json
-          SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL || secrets.SMOKE_LOGIN_EMAIL }}
-          SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD || secrets.SMOKE_LOGIN_PASSWORD }}
+          STAGING_SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL }}
+          STAGING_SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD }}
           SMOKE_ADMIN_MFA_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_MFA_CODE }}
           SMOKE_ADMIN_MFA_SECRET: ${{ secrets.STAGING_SMOKE_ADMIN_MFA_SECRET }}
           SMOKE_ADMIN_STEP_UP_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_STEP_UP_CODE }}
           SMOKE_STEP_UP_PASSWORD: ${{ secrets.STAGING_SMOKE_STEP_UP_PASSWORD }}
         run: |
-          set +e
           npm run verify:staging-smoke 2>&1 | tee smoke-release.log
-          smoke_status="${PIPESTATUS[0]}"
-          set -e
-          if [ "$smoke_status" -eq 0 ]; then
-            exit 0
-          fi
-          SMOKE_EXIT_CODE="$smoke_status" node scripts/check-known-blue-staging-smoke-exception.mjs
 
       - name: Record skipped staging smoke reason
         if: ${{ steps.smoke_skip.outputs.skip_staging_smoke == 'true' }}
