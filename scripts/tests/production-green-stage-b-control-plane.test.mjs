@@ -56,16 +56,39 @@ test("Stage B permits only an explicitly requested rollback inside the 24-hour g
 
 test("Stage B templates require immutable images, private executor networking, and no administrator secret outside executor", () => {
   const common = { releaseSha, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: "/ecs/executor", canaryLogGroup: "/ecs/canary", backendLogGroup: "/ecs/backend", workerLogGroup: "/ecs/worker" };
-  const executor = renderStageBTaskDefinition("executor", { ...common, executorImage: images.executorImageDigest, mode: "full-rls-verification" });
+  const confirmations = {
+    "full-rls-capability-preflight": "",
+    "full-rls-admin-bootstrap": "MSCQR_PRODUCTION_GREEN_CREATE_AND_BOOTSTRAP_DATABASE",
+    "full-rls-role-provision": "MSCQR_PRODUCTION_GREEN_PROVISION_RUNTIME_ROLES",
+    "full-rls-role-verify": "",
+    "full-rls-admin-ownership": "MSCQR_PRODUCTION_GREEN_INSTALL_OWNERSHIP_GRANTS",
+    "full-rls-runtime-policy": "MSCQR_PRODUCTION_GREEN_INSTALL_RUNTIME_POLICIES",
+    "full-rls-verification": "",
+    "full-rls-rollback": "MSCQR_PRODUCTION_GREEN_ROLLBACK_EXACT_PACKAGE",
+  };
+  const executors = Object.fromEntries(Object.entries(confirmations).map(([mode, confirmation]) => {
+    const definition = renderStageBTaskDefinition("executor", { ...common, executorImage: images.executorImageDigest, mode });
+    assert.equal(definition.containerDefinitions.length, 1);
+    assert.equal(definition.containerDefinitions[0].environment.find(({ name }) => name === "MSCQR_FULL_RLS_CONFIRMATION").value, confirmation);
+    assert.doesNotMatch(JSON.stringify(definition), /\{\{[^}]+}}/);
+    return [mode, definition];
+  }));
+  const executor = executors["full-rls-verification"];
   const canary = renderStageBTaskDefinition("canary", { ...common, canaryImage: images.canaryImageDigest });
   const backend = renderStageBTaskDefinition("backend", { ...common, backendImage: images.backendImageDigest });
   const worker = renderStageBTaskDefinition("worker", { ...common, workerImage: images.workerImageDigest });
-  for (const definition of [executor, canary, backend, worker]) assertFixedTaskDefinition(definition);
+  for (const definition of [...Object.values(executors), canary, backend, worker]) {
+    assertFixedTaskDefinition(definition);
+    assert.equal(definition.containerDefinitions.length, 1);
+  }
   assert.match(JSON.stringify(executor), /rds!db-/);
   assert.doesNotMatch(`${JSON.stringify(canary)}${JSON.stringify(backend)}${JSON.stringify(worker)}`, /rds!db-/);
   assert.deepEqual(backend.volumes, [{ name: "backend-uploads" }]);
   assert.deepEqual(backend.containerDefinitions[0].mountPoints, [{ sourceVolume: "backend-uploads", containerPath: "/app/uploads", readOnly: false }]);
-  assert.equal(canary.volumes, undefined); assert.equal(worker.volumes, undefined); assert.equal(executor.volumes, undefined);
+  assert.deepEqual(executor.volumes, [{ name: "executor-tmp" }]);
+  assert.deepEqual(canary.volumes, [{ name: "canary-tmp" }]);
+  assert.equal(worker.volumes, undefined);
+  for (const definition of [executor, canary, backend, worker]) assert.equal(definition.containerDefinitions[0].readonlyRootFilesystem, true);
   for (const source of ["backend/src/middleware/incidentUpload.ts", "backend/src/services/compliancePackService.ts", "backend/src/services/legacyQrRiskReportJobService.ts"]) {
     assert.match(fs.readFileSync(source, "utf8"), /uploads/);
   }

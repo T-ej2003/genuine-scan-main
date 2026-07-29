@@ -9,6 +9,30 @@ variable "aws_region" {
 variable "vpc_id" { type = string }
 variable "private_subnet_ids" { type = list(string) }
 variable "runtime_security_group_ids" { type = set(string) }
+variable "executor_interface_endpoint_security_group_ids" {
+  type = map(string)
+  validation {
+    condition = (
+      toset(keys(var.executor_interface_endpoint_security_group_ids)) == toset(["ecr_api", "ecr_dkr", "logs", "secretsmanager", "kms"]) &&
+      alltrue([for id in values(var.executor_interface_endpoint_security_group_ids) : can(regex("^sg-[a-f0-9]{17}$", id))])
+    )
+    error_message = "Executor networking requires exact ECR API, ECR DKR, Logs, Secrets Manager, and KMS endpoint security-group IDs."
+  }
+}
+variable "s3_prefix_list_id" {
+  type = string
+  validation {
+    condition     = can(regex("^pl-[a-f0-9]{8,17}$", var.s3_prefix_list_id))
+    error_message = "s3_prefix_list_id must identify the reviewed regional S3 managed prefix list."
+  }
+}
+variable "vpc_dns_resolver_cidr" {
+  type = string
+  validation {
+    condition     = can(cidrhost(var.vpc_dns_resolver_cidr, 0)) && endswith(var.vpc_dns_resolver_cidr, "/32")
+    error_message = "vpc_dns_resolver_cidr must be the exact VPC resolver address as a /32."
+  }
+}
 variable "checker_principal_arns" {
   type = set(string)
   validation {
