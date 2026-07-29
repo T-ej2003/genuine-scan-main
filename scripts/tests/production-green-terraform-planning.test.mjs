@@ -33,6 +33,10 @@ test("Stage A owns no blue infrastructure or release activation", () => {
 
 test("Stage A declares executor egress only through standalone reviewed rules and keeps database ingress SG-to-SG only", () => {
   const executor = source.match(/resource "aws_security_group" "executor" \{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(executor, /name\s+=\s+"mscqr-production-rls-green-executor"/);
+  assert.match(executor, /description\s+=\s+"No-ingress or egress executor security group until reviewed Stage B networking"/);
+  assert.match(executor, /vpc_id\s+=\s+var\.vpc_id/);
+  assert.doesNotMatch(executor, /name_prefix|lifecycle|ignore_changes|create_before_destroy/);
   assert.doesNotMatch(executor, /egress\s*\{|0\.0\.0\.0\/0|::\/0|cidr_/);
   const ingress = [...source.matchAll(/resource "aws_vpc_security_group_ingress_rule" "(?:executor_database|runtime_database)"[\s\S]*?\n\}/g)].map((match) => match[0]);
   assert.equal(ingress.length, 2);
