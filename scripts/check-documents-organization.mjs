@@ -8,6 +8,7 @@ const allowedConventionalMarkdown = new Set([
   "infra/aws/terraform/production-green-stage-a/README.md",
   "infra/aws/terraform/production-green-stage-b/README.md",
   "infra/aws/terraform/production-green-stage-b-image-publisher/README.md",
+  "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/README.md",
 ]);
 
 const allowedDocumentationPrefixes = [

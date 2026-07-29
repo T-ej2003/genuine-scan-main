@@ -55,8 +55,8 @@ repository. It explicitly denies ECS, Lambda, Secrets Manager, RDS, and IAM acti
 ## Apply and verification procedure
 
 An MFA-backed non-root operator must first receive separate approval for the isolated
-Terraform plan. Root must not plan or apply. The plan must create only this IAM role and its
-inline policy. After apply, verify the role ARN and output hashes, then set only the
+Terraform plan. Root must not plan or apply. The plan must create only this IAM role, its
+exact managed ECR-only policy, and their attachment. After apply, verify the role ARN and output hashes, then set only the
 protected GitHub `production-stage-b-image-publish` environment variable:
 
 `PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE=<publisher_role_arn>`

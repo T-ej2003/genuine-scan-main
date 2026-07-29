@@ -3,6 +3,10 @@ output "publisher_role_arn" {
   value       = aws_iam_role.publisher.arn
 }
 
+output "publisher_policy_arn" {
+  value = aws_iam_policy.publisher.arn
+}
+
 output "trust_policy_sha256" {
   value = filesha256("${path.module}/trust-policy.json")
 }
