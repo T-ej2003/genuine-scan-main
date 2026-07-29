@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "repository": "T-ej2003/genuine-scan-main",
+  "status": "operator-transition-required",
+  "scope": "repository-level GitHub Actions OIDC subject customization changes every opt-in OIDC token for this repository",
+  "publisher": {
+    "workflow": ".github/workflows/production-green-stage-b-image-build.yml",
+    "environment": "production",
+    "legacySubject": "repo:T-ej2003/genuine-scan-main:environment:production",
+    "customSubject": "repo:T-ej2003/genuine-scan-main:environment:production:job_workflow_ref:T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/main"
+  },
+  "repositoryOidcConsumers": [
+    { "workflow": ".github/workflows/production-green-stage-b-image-build.yml", "roleSource": "production environment variable PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE", "environment": "production", "migration": "new publisher trust only" },
+    { "workflow": ".github/workflows/release-gate.yml", "roleSource": "AWS_ROLE_TO_ASSUME", "environment": "production", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/deploy-ecs-release.yml", "roleSource": "AWS_ROLE_TO_ASSUME", "environment": "caller-selected release/canary/frontend environment", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/publish-ecs-images.yml", "roleSource": "AWS_ROLE_TO_ASSUME", "environment": "none declared", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/staging-terraform-remote-state-drift.yml", "roleSource": "MSCQR_STAGING_TERRAFORM_PLAN_ROLE_ARN", "environment": "none declared", "migration": "tracked planned trust uses legacy subject and requires a reviewed replacement" },
+    { "workflow": ".github/workflows/auto-failover-monitor.yml", "roleSource": "AUTO_FAILOVER_READONLY_ROLE_TO_ASSUME", "environment": "none declared", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/aws-dr-cleanup-apply.yml", "roleSource": "AWS_DR_RECOVERY_CLEANUP_ROLE_ARN or DR_RECOVERY_CLEANUP_ROLE_TO_ASSUME", "environment": "dr-recovery-cleanup", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/aws-dr-dns-apply.yml", "roleSource": "DR_DNS_CUTOVER_ROLE_TO_ASSUME or DR_DNS_ROLLBACK_ROLE_TO_ASSUME", "environment": "dr-dns-cutover or dr-dns-rollback", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/aws-dr-snapshot-apply.yml", "roleSource": "DR_DB_RESTORE_ROLE_TO_ASSUME", "environment": "dr-db-restore", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/aws-dr-hardening-apply.yml", "roleSource": "AWS_DR_HARDENING_APPLY_ROLE_ARN or DR_HARDENING_APPLY_ROLE_TO_ASSUME", "environment": "dr-hardening-apply", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/aws-dr-regional-readiness.yml", "roleSource": "AWS_DR_REGIONAL_READINESS_ROLE_ARN or DR_REGIONAL_READINESS_ROLE_TO_ASSUME", "environment": "dr-regional-readiness", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/aws-dr-alb-apply.yml", "roleSource": "AWS_DR_ALB_APPLY_ROLE_ARN or DR_ALB_APPLY_ROLE_TO_ASSUME", "environment": "dr-alb-entrypoint-apply", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/aws-dr-operations.yml", "roleSource": "AWS_DR_OBJECT_STORAGE_ROLE_ARN or AWS_DR_DB_RESTORE_ROLE_ARN or DR_DB_RESTORE_ROLE_TO_ASSUME", "environment": "dr-object-storage-write-test or dr-db-restore", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/aws-dr-db-apply.yml", "roleSource": "DR_DB_RESTORE_ROLE_TO_ASSUME", "environment": "dr-db-restore", "migration": "live trust must accept its custom subject before opt-in" },
+    { "workflow": ".github/workflows/aws-dr-object-storage-apply.yml", "roleSource": "DR_OBJECT_STORAGE_WRITE_TEST_ROLE_TO_ASSUME", "environment": "dr-object-storage-write-test", "migration": "live trust must accept its custom subject before opt-in" }
+  ],
+  "transitionOrder": [
+    "Inventory every live IAM OIDC trust and record its current subject.",
+    "Add an exact custom-subject statement alongside each still-required legacy subject; do not remove legacy access first.",
+    "PUT the repository subject template with repo, context, and job_workflow_ref and use_default false.",
+    "Inspect a safe OIDC token or perform a non-mutating AssumeRoleWithWebIdentity test for each migrated workflow.",
+    "Set the protected production environment variable PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE only after publisher assumption succeeds.",
+    "Remove legacy-subject statements only after all listed consumers have passed their non-mutating verification."
+  ],
+  "rollback": [
+    "Restore each verified legacy IAM subject before changing GitHub configuration.",
+    "PUT the repository subject template with use_default true.",
+    "Run a non-mutating OIDC assumption test for every restored consumer before resuming dispatches."
+  ]
+}
