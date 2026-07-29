@@ -26,9 +26,11 @@ const PRE_CUTOVER_STAGE_B_FILES = new Set([
   "scripts/check-known-blue-staging-smoke-exception.mjs",
   "scripts/lib/staging-smoke-config-core.mjs",
   "scripts/rls/lib/clean-room-source-contract.mjs",
+  "scripts/tests/full-database-rls-enforcement.test.mjs",
   "scripts/tests/production-full-rls-release.test.mjs",
   "scripts/tests/production-green-stage-b-control-plane.test.mjs",
   "scripts/tests/production-green-stage-b-image-bindings.test.mjs",
+  "scripts/tests/production-rls-approval.test.mjs",
   "scripts/tests/stage-b-release-gate.test.mjs",
   "scripts/tests/staging-smoke-config.test.mjs",
 ]);
@@ -176,27 +178,34 @@ export const evaluateKnownBlueLoginSkip = ({
   failureStage = "",
   status = null,
   smokeExitCode = 0,
+  knownBlueSignaturePassed = false,
 } = {}) => {
   const changedFiles = parseChangedFiles(env.STAGING_SMOKE_CHANGED_FILES);
   const blueOrRuntimeChange = changedFiles.some((file) => BLUE_OR_RUNTIME_PREFIXES.some((prefix) => file === prefix || file.startsWith(prefix)));
+  const offendingFiles = changedFiles.filter((file) =>
+    !PRE_CUTOVER_STAGE_B_FILES.has(file) &&
+    !PRE_CUTOVER_STAGE_B_PREFIXES.some((prefix) => file.startsWith(prefix))
+  );
   const stageBPreCutoverScope =
     changedFiles.length > 0 &&
     !blueOrRuntimeChange &&
-    changedFiles.every((file) => PRE_CUTOVER_STAGE_B_FILES.has(file) || PRE_CUTOVER_STAGE_B_PREFIXES.some((prefix) => file.startsWith(prefix)));
+    offendingFiles.length === 0;
   const activationScope = !blueOrRuntimeChange && stageBPreCutoverScope;
-  const shouldSkip =
-    readConfigValue(env, "KNOWN_BLUE_ENDPOINT_MISMATCH") === KNOWN_BLUE_LOGIN_SKIP_REASON &&
-    readConfigValue(env, "GITHUB_EVENT_NAME") === "pull_request" &&
-    readConfigValue(env, "GITHUB_REPOSITORY") === "T-ej2003/genuine-scan-main" &&
-    readConfigValue(env, "SMOKE_BASE_URL") === "https://www.mscqr.com" &&
-    readConfigValue(env, "SMOKE_API_BASE_URL") === "https://www.mscqr.com/api" &&
-    activationScope &&
-    readyHealthPassed &&
-    liveHealthPassed &&
-    failureStage === "login" &&
-    status === 500 &&
-    Number.isInteger(smokeExitCode) &&
-    smokeExitCode > 0;
+  const predicates = {
+    mismatch_contract: readConfigValue(env, "KNOWN_BLUE_ENDPOINT_MISMATCH") === KNOWN_BLUE_LOGIN_SKIP_REASON,
+    pull_request_context: readConfigValue(env, "GITHUB_EVENT_NAME") === "pull_request",
+    pull_request_number: /^[1-9]\d*$/.test(readConfigValue(env, "GITHUB_PR_NUMBER")),
+    repository: readConfigValue(env, "GITHUB_REPOSITORY") === "T-ej2003/genuine-scan-main",
+    endpoint: readConfigValue(env, "SMOKE_BASE_URL") === "https://www.mscqr.com" &&
+      readConfigValue(env, "SMOKE_API_BASE_URL") === "https://www.mscqr.com/api",
+    pre_cutover_stage_b_scope: activationScope,
+    ready_health: readyHealthPassed,
+    live_health: liveHealthPassed,
+    exact_login_signature: knownBlueSignaturePassed && failureStage === "login" && status === 500,
+    failed_smoke_exit: Number.isInteger(smokeExitCode) && smokeExitCode > 0,
+  };
+  const failedPredicates = Object.entries(predicates).filter(([, passed]) => !passed).map(([name]) => name);
+  const shouldSkip = failedPredicates.length === 0;
 
   return {
     shouldSkip,
@@ -205,5 +214,7 @@ export const evaluateKnownBlueLoginSkip = ({
     stageBPreCutoverScope,
     blueOrRuntimeChange,
     changedFiles,
+    offendingFiles,
+    failedPredicates,
   };
 };

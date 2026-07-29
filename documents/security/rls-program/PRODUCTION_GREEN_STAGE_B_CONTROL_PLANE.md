@@ -49,6 +49,12 @@ Normal activation and canary modes reject expired approvals. Only the fixed roll
 may use the signed approval for the documented 24-hour grace period, and only when its
 broker/executor call explicitly enables that path.
 
+The pre-cutover release-candidate smoke exception is limited to the exact known blue
+login response (`HTTP 500` with the fixed internal-error JSON) after both health checks
+pass and only when every changed path is in the reviewed Stage B control-plane allowlist.
+Denied runs emit safe predicate codes and offending paths; unknown, mixed, blue, runtime,
+frontend, traffic, secret, database, and Stage A changes remain blocking.
+
 ## Executor networking decision
 
 Choose VPC endpoints, not a NAT gateway. Fargate image pull and log delivery require ECR
