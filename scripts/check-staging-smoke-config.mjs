@@ -3,6 +3,15 @@ import {
   evaluateDependabotSmokeSkip,
 } from "./lib/staging-smoke-config-core.mjs";
 
+if (String(process.env.STAGING_SMOKE_ENABLED || "").trim() === "false") {
+  for (const key of ["STAGING_SMOKE_BASE_URL", "STAGING_SMOKE_API_BASE_URL"]) {
+    const value = String(process.env[key] || "");
+    if (/https:\/\/(www\.)?mscqr\.com/.test(value)) throw new Error("Unprovisioned staging smoke may not contain a production URL.");
+  }
+  console.log("Staging smoke configuration: staging_not_provisioned.");
+  process.exit(0);
+}
+
 const { missing, configuredOptionalFlows } = collectStagingSmokeConfig(process.env);
 
 if (missing.length > 0) {

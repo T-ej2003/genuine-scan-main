@@ -1,41 +1,33 @@
 import { spawnSync } from "node:child_process";
 
-const ensurePath = () => {
-  const segments = String(process.env.PATH || "")
-    .split(":")
-    .filter(Boolean);
-  for (const entry of ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]) {
-    if (!segments.includes(entry)) segments.unshift(entry);
-  }
-  return segments.join(":");
-};
+const env = process.env;
+const base = String(env.STAGING_SMOKE_BASE_URL || "").trim();
+const api = String(env.STAGING_SMOKE_API_BASE_URL || "").trim();
+const enabled = String(env.STAGING_SMOKE_ENABLED || "").trim();
+const productionHosts = new Set(["mscqr.com", "www.mscqr.com"]);
 
-const smokeBaseUrl = String(process.env.SMOKE_BASE_URL || "").trim();
-if (!smokeBaseUrl) {
-  console.error(
-    "verify:staging-smoke requires SMOKE_BASE_URL. Set it explicitly so release smoke never falls back to localhost."
-  );
-  process.exit(1);
+export function stagingSmokeMode(values = env) {
+  const value = String(values.STAGING_SMOKE_ENABLED || "").trim();
+  const urls = [values.STAGING_SMOKE_BASE_URL, values.STAGING_SMOKE_API_BASE_URL].filter(Boolean);
+  for (const raw of urls) {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" || productionHosts.has(url.hostname)) throw new Error("Staging smoke configuration contains a prohibited production or non-HTTPS target.");
+  }
+  if (value === "false") return "staging_not_provisioned";
+  const configuredBase = String(values.STAGING_SMOKE_BASE_URL || "").trim();
+  const configuredApi = String(values.STAGING_SMOKE_API_BASE_URL || "").trim();
+  if (value !== "true" || !configuredBase || !configuredApi || !values.STAGING_SMOKE_LOGIN_EMAIL || !values.STAGING_SMOKE_LOGIN_PASSWORD) throw new Error("Live staging smoke requires enabled staging URLs and dedicated credentials.");
+  const baseUrl = new URL(configuredBase); const apiUrl = new URL(configuredApi);
+  if (baseUrl.origin !== apiUrl.origin) throw new Error("Staging base and API origins must match.");
+  return "live_staging";
 }
 
-const run = (cmd, args) => {
-  const result = spawnSync(cmd, args, {
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      PATH: ensurePath(),
-      SMOKE_ALLOW_LOCAL_DEFAULT: "false",
-    },
-  });
-  if (typeof result.status === "number" && result.status !== 0) {
-    process.exit(result.status);
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+  const mode = stagingSmokeMode();
+  if (mode === "staging_not_provisioned") {
+    console.log(JSON.stringify({ status: mode, network: "not_attempted" }));
+  } else {
+    const result = spawnSync("node", ["scripts/smoke-release.mjs"], { stdio: "inherit", env: { ...env, SMOKE_BASE_URL: base, SMOKE_API_BASE_URL: api, SMOKE_LOGIN_EMAIL: env.STAGING_SMOKE_LOGIN_EMAIL, SMOKE_LOGIN_PASSWORD: env.STAGING_SMOKE_LOGIN_PASSWORD, SMOKE_VERIFY_CODE: env.STAGING_SMOKE_VERIFY_CODE || "", SMOKE_ALLOW_LOCAL_DEFAULT: "false" } });
+    process.exit(result.status ?? 1);
   }
-  if (result.error) {
-    console.error(result.error.message || result.error);
-    process.exit(1);
-  }
-};
-
-run("node", ["scripts/check-staging-smoke-config.mjs"]);
-run("node", ["scripts/smoke-release.mjs"]);
-
+}
