@@ -7,11 +7,14 @@ export const STAGE_B = Object.freeze({
   greenDatabaseIdentifier: "mscqr-production-rls-green-phase2",
   databaseSecurityGroupId: "sg-0703d3f227f35b81c",
   executorSecurityGroupId: "sg-051a24aedff773761",
+  privateSubnetIds: Object.freeze(["subnet-068d949017bd2ce45", "subnet-07e0a76e3a5241138"]),
+  receiptBucket: "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
   approvalSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho",
   approvalKmsKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",
   brokerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
   checkerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
   executorRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
+  executorExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
   brokerAliasArn: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
   frontendTaskDefinition: "mscqr-frontend:20",
 });
@@ -47,8 +50,8 @@ export const assertImmutableImage = (value, field = "image") => {
 
 const approvalFields = Object.freeze([
   "account", "approvalId", "backendImageDigest", "brokerAliasArn", "brokerVersion", "canaryImageDigest",
-  "checkerIdentity", "databaseSecurityGroupId", "deployerIdentity", "deploymentId", "environment",
-  "executorIdentity", "executorImageDigest", "executorSecurityGroupId", "expiresAt", "greenDatabaseIdentifier",
+  "administratorIdentity", "checkerIdentity", "databaseSecurityGroupId", "deployerIdentity", "deploymentId", "environment",
+  "executorIdentity", "executorImageDigest", "executorSecurityGroupId", "expiresAt", "greenDatabaseIdentifier", "greenDatabaseName",
   "issuedAt", "migrationSetDigest", "nonce", "packageChecksumSha256", "region", "releaseSha",
   "schemaVersion", "signatureAlgorithm", "sourceContractSha256", "taskDefinitionArns", "taskDefinitionTemplateHashes", "ticketId", "workerImageDigest",
 ]);
@@ -80,6 +83,7 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
       || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(artifact.approvalId || "")
       || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(artifact.ticketId || "") || !/^[a-f0-9-]{16,64}$/.test(artifact.nonce || "")
       || artifact.greenDatabaseIdentifier !== STAGE_B.greenDatabaseIdentifier
+      || artifact.greenDatabaseName !== "mscqr_production_rls_green_phase2" || artifact.administratorIdentity !== "mscqr_prod_admin"
       || artifact.databaseSecurityGroupId !== STAGE_B.databaseSecurityGroupId || artifact.executorSecurityGroupId !== STAGE_B.executorSecurityGroupId
       || artifact.brokerAliasArn !== STAGE_B.brokerAliasArn || !/^[1-9][0-9]*$/.test(String(artifact.brokerVersion || ""))
       || !assumedRole("mscqr-production-rls-independent-checker").test(artifact.checkerIdentity || "")
@@ -94,7 +98,7 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
       || !/^[A-Za-z0-9+/]+={0,2}$/.test(artifact.signatureBase64 || "")) {
     throw new Error("Stage B approval is invalid or expired.");
   }
-  for (const field of ["releaseSha", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "deploymentId", "approvalId", "ticketId"]) {
+  for (const field of ["releaseSha", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "deploymentId", "approvalId", "ticketId", "greenDatabaseName", "administratorIdentity"]) {
     if (expected?.[field] && artifact[field] !== expected[field]) throw new Error(`Stage B approval ${field} does not match the release contract.`);
   }
   for (const [field, value] of Object.entries(expected?.images || {})) {

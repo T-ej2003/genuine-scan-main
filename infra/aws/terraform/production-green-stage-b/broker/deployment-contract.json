@@ -7,9 +7,9 @@
   "handler": "index.handler",
   "taskStartAuthority": "broker-only",
   "taskOverridesAllowed": false,
-  "replayStore": { "required": true, "conditionalWrite": "attribute_not_exists(approvalMode)", "retention": "approval expiry" },
+  "replayStore": { "required": true, "partitionKey": { "name": "approvalMode", "type": "S" }, "ttlAttribute": "expiresAt", "conditionalWrite": "attribute_not_exists(approvalMode)", "launchFailureRecovery": "explicit ECS failures release the claim; transport-uncertain launches remain blocked for reviewed reconciliation" },
   "receiptStore": { "required": true, "writeOnce": true, "prefix": "rls-broker-receipts/" },
-  "resourcePolicy": "invocation-policy.json",
+  "resourcePolicy": { "contract": "invocation-policy.json", "representation": "design contract, not an AddPermission payload", "nextDeploymentPackage": "aws_lambda_permission with function_name, qualifier=reviewed, action=lambda:InvokeFunction, and principal=mscqr-production-release-deployer" },
   "forbiddenActions": ["ecs:UpdateService", "ecs:RegisterTaskDefinition", "elasticloadbalancing:*", "route53:*", "rds:*", "secretsmanager:GetSecretValue:runtime", "sql"],
   "stageAResourcesMutable": false,
   "frontendTaskDefinition": "mscqr-frontend:20"

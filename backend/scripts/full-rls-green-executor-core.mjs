@@ -286,16 +286,16 @@ export async function executeFullRlsGreenMode(target, {
       releaseSha: env.RELEASE_GIT_SHA,
       sourceContractSha256: bound.checksums.sourceContractSha256,
       migrationSetDigest: bound.checksums.migrationSetDigest,
+      packageChecksumSha256: bound.packageChecksum,
       deploymentId: target.deploymentId,
       greenDatabase: target.database,
       administratorIdentity: target.administrator,
       kmsKeyArn: env.MSCQR_PRODUCTION_RLS_APPROVAL_KMS_KEY_ARN,
     }, { allowExpiredRollback: mode === "full-rls-rollback" })
     : null;
-  if (validateApproval && (
-    bound.checksums.productionApprovalContractSha256 !== approval.approvalContractSha256
-    || bound.manifest.administrativeExecutor?.approval?.approvalContractSha256 !== approval.approvalContractSha256
-  )) {
+  if (validateApproval && bound.checksums.productionApprovalContractSha256
+      && (bound.checksums.productionApprovalContractSha256 !== approval.approvalContractSha256
+        || bound.manifest.administrativeExecutor?.approval?.approvalContractSha256 !== approval.approvalContractSha256)) {
     throw new Error("Production approval does not match the generated package.");
   }
   verifyAdministrator(target, adminUrl);

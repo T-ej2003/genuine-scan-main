@@ -1,4 +1,5 @@
 {
+  "representation": "design-contract-not-direct-add-permission-payload",
   "Version": "2012-10-17",
   "Statement": [{
     "Sid": "OnlyProtectedReleaseRoleMayInvokeReviewedAlias",

@@ -44,7 +44,7 @@ export function validateCanaryEnvironment(env = process.env) {
     encryptionKey: String(env.AUTH_MFA_ENCRYPTION_KEY || "").trim(),
     approvalId: String(approval.approvalId || "").trim(),
     ticketId: String(approval.ticketId || "").trim(),
-    checker: String(approval.independentCheckerIdentity || "").trim(),
+    checker: String(approval.checkerIdentity || approval.independentCheckerIdentity || "").trim(),
   };
   if (value.ordinaryEmail === value.adminEmail
       || value.ordinaryPassword.length < 20

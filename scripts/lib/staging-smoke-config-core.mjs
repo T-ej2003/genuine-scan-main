@@ -38,6 +38,16 @@ const PRODUCTION_GREEN_LINEAGE_FILES = new Set([
   "scripts/tests/production-full-rls-release.test.mjs",
   "scripts/tests/production-green-terraform-planning.test.mjs",
   "scripts/tests/staging-smoke-config.test.mjs",
+  ".github/workflows/production-green-stage-b-images.yml",
+  "backend/Dockerfile",
+  "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_CONTROL_PLANE.md",
+  "infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs",
+  "infra/aws/terraform/lambda/production-rls-approval-broker/package.json",
+  "infra/aws/terraform/lambda/production-rls-approval-broker/package-lock.json",
+  "scripts/aws/package-production-green-stage-b-broker.mjs",
+  "scripts/aws/production-green-stage-b-contract.mjs",
+  "scripts/aws/production-green-stage-b-task-definitions.mjs",
+  "scripts/tests/production-green-stage-b-control-plane.test.mjs",
 ]);
 const PRODUCTION_GREEN_LINEAGE_PREFIXES = [
   "infra/aws/terraform/production-green-stage-a/",

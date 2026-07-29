@@ -43,9 +43,8 @@ const parseArtifact = (raw) => {
   } catch {
     throw new Error("Production RLS approval artifact is not valid JSON.");
   }
-  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)
-      || Object.keys(artifact).sort().join(",") !== [...exactKeys, "signatureBase64"].sort().join(",")) {
-    throw new Error("Production RLS approval artifact fields do not match schema version 1.");
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    throw new Error("Production RLS approval artifact fields do not match a reviewed schema.");
   }
   return artifact;
 };
@@ -68,6 +67,28 @@ export async function validateProductionRlsApproval(raw, expected, {
   allowExpiredRollback = false,
 } = {}) {
   const artifact = parseArtifact(raw);
+  if (artifact.schemaVersion === 2) {
+    const contractPath = process.env.MSCQR_STAGE_B_EXECUTOR === "true"
+      ? "./production-green-stage-b-contract.mjs"
+      : "../../scripts/aws/production-green-stage-b-contract.mjs";
+    const { validateStageBApproval } = await import(contractPath);
+    const validated = await validateStageBApproval(artifact, expected, { now, verifySignature });
+    if (validated.approval.greenDatabaseName !== expected.greenDatabase
+        || validated.approval.administratorIdentity !== expected.administratorIdentity) {
+      throw new Error("Production RLS approval does not match the executor identity.");
+    }
+    return {
+      approval: {
+        ...validated.approval,
+        independentCheckerIdentity: validated.approval.checkerIdentity,
+      },
+      signatureBase64: artifact.signatureBase64,
+      approvalContractSha256: validated.approvalContractSha256,
+    };
+  }
+  if (Object.keys(artifact).sort().join(",") !== [...exactKeys, "signatureBase64"].sort().join(",")) {
+    throw new Error("Production RLS approval artifact fields do not match schema version 1.");
+  }
   const issuedAt = new Date(artifact.issuedAt);
   const expiresAt = new Date(artifact.expiresAt);
   if (artifact.schemaVersion !== PRODUCTION_RLS_APPROVAL_SCHEMA_VERSION

@@ -23,9 +23,17 @@ disabled public IPs, fixed entrypoints, no command overrides, no privileged or i
 container, and awslogs. Backend, worker, and canary templates cannot reference the
 RDS-managed administrator secret. The executor alone receives the password JSON key from
 that secret; no value is recorded in a template, receipt, log, image, or approval.
+Each template has a dedicated execution role. In particular,
+`mscqr-production-full-rls-green-executor-execution` is the only execution role that may
+read the RDS-managed administrator secret. The executor and canary intentionally retain a
+writable ephemeral root filesystem because their reviewed Node entrypoints use `/tmp`; the
+backend and worker remain read-only.
 
 The broker Lambda source is under `infra/aws/terraform/lambda/production-rls-approval-broker`.
-Its `reviewed` alias must receive the resource policy in `broker/invocation-policy.json`.
+Its `reviewed` alias must receive the separately deployed policy represented by
+`broker/invocation-policy.json`; that file is a design contract, not an `AddPermission`
+payload. The next AWS package must create the alias-qualified permission for only the
+protected release role.
 It accepts only `{ approvalId, mode }`, validates canonical signed approval JSON, claims
 each approval/mode once in the replay store, starts one fixed Fargate task with no
 overrides, and writes a write-once receipt. The deployment contract requires a DynamoDB
@@ -33,21 +41,20 @@ conditional-write replay store and a versioned receipt-bucket prefix.
 
 ## Executor networking decision
 
-Choose VPC endpoints, not a NAT gateway. The executor and canary need TCP/5432 only to
-`sg-0703d3f227f35b81c`, plus TCP/443 to interface endpoints for ECR API, ECR Docker,
-CloudWatch Logs, Secrets Manager, KMS, and STS only when task credentials require it.
-Use an S3 gateway endpoint for ECR layer downloads and receipt writes. Enable private DNS
-on interface endpoints; allow inbound TCP/443 to endpoint SGs only from
-`sg-051a24aedff773761`. Broker Lambda calls ECS, DynamoDB, KMS, Secrets Manager, and S3;
-it does not need database network access.
+Choose VPC endpoints, not a NAT gateway. Fargate image pull and log delivery require ECR
+API, ECR Docker, S3, and CloudWatch Logs. The executor itself additionally calls Secrets
+Manager, KMS verification, and S3 receipt writes, and connects to the green database on
+TCP/5432. The canary needs only its injected runtime secrets, the green database, and the
+same Fargate image/log path; it does not call STS, KMS, or S3 itself. Broker Lambda calls
+ECS, DynamoDB, KMS, Secrets Manager, and S3, and must remain outside the VPC because it
+does not need database network access. Use interface endpoints for ECR API, ECR Docker,
+CloudWatch Logs, Secrets Manager, and KMS, plus an S3 gateway endpoint. Enable private DNS
+and allow endpoint-SG TCP/443 only from `sg-051a24aedff773761`.
 
 This is the smaller security boundary: endpoint policies and SGs name AWS services and
-the executor explicitly, while NAT admits arbitrary internet destinations. For a planning
-baseline only, six interface services across two AZs at the AWS published example rate of
-`$0.01/hour` is about `$87.60/month`, plus `$0.01/GB`; the S3 gateway endpoint is free.
-Two NAT gateways at the published example rate of `$0.045/hour` are about `$65.70/month`,
-plus `$0.045/GB` and any internet-transfer charges. Those examples are not eu-west-2
-quotes: the approver must obtain the current eu-west-2 calculator estimate before apply.
+the executor explicitly, while NAT admits arbitrary internet destinations. The approval
+record must carry a current eu-west-2 AWS Pricing Calculator estimate for the selected
+endpoint topology; no illustrative price is encoded in this release contract.
 
 ## Deployment stop gates
 
@@ -57,3 +64,13 @@ quotes: the approver must obtain the current eu-west-2 calculator estimate befor
 4. Stop unless the independent MFA-backed checker signs the canonical approval artifact.
 5. Stop on any broker receipt, executor receipt, catalogue, or canary mismatch.
 6. Never change `mscqr-frontend:20` or traffic before mandatory green canaries pass.
+
+## Next AWS deployment package
+
+Create the endpoint/endpoint-SG policy, Lambda function/version/`reviewed` alias and
+alias-qualified `aws_lambda_permission`, DynamoDB replay table (S key `approvalMode`, TTL
+`expiresAt`), receipt-prefix bucket policy, broker policy, four dedicated ECS execution
+roles and task roles, log groups, task definitions, the image-publish role, and bounded
+Stage B release-role permissions. The broker needs DynamoDB `PutItem`, conditional
+`DeleteItem`, and conditional `UpdateItem` on the exact replay table to implement its
+claim/release/uncertain-launch recovery. None of those resources is created by this PR.

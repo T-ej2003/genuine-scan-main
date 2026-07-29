@@ -4,6 +4,12 @@ import { canonicalSha256, assertImmutableImage, STAGE_B, STAGE_B_MODES } from ".
 
 const root = "infra/aws/terraform/production-green-stage-b/task-definitions";
 const files = Object.freeze({ executor: "green-activation-executor.json", canary: "green-application-canary.json", backend: "green-backend-candidate.json", worker: "green-worker-candidate.json" });
+const imagePatterns = Object.freeze({
+  backend: /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/,
+  worker: /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-worker@sha256:[a-f0-9]{64}$/,
+  executor: /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/,
+  canary: /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/,
+});
 const confirmations = Object.freeze({
   "full-rls-role-provision": "MSCQR_PRODUCTION_GREEN_PROVISION_RUNTIME_ROLES",
   "full-rls-admin-bootstrap": "MSCQR_PRODUCTION_GREEN_CREATE_AND_BOOTSTRAP_DATABASE",
@@ -30,7 +36,8 @@ const assertNoTokens = (value) => {
 
 export const stageBTemplateHashes = () => Object.fromEntries(Object.entries(files).map(([kind]) => [kind, canonicalSha256(readTemplate(kind))]));
 export const approvedNetworkConfiguration = (privateSubnetIds) => {
-  if (!Array.isArray(privateSubnetIds) || privateSubnetIds.length !== 2 || privateSubnetIds.some((id) => !/^subnet-[a-f0-9]+$/.test(id))) {
+  if (!Array.isArray(privateSubnetIds) || privateSubnetIds.length !== STAGE_B.privateSubnetIds.length
+      || [...privateSubnetIds].sort().join(",") !== [...STAGE_B.privateSubnetIds].sort().join(",")) {
     throw new Error("Stage B requires exactly two approved private subnets.");
   }
   return { awsvpcConfiguration: { subnets: [...privateSubnetIds].sort(), securityGroups: [STAGE_B.executorSecurityGroupId], assignPublicIp: "DISABLED" } };
@@ -38,11 +45,17 @@ export const approvedNetworkConfiguration = (privateSubnetIds) => {
 
 export function assertFixedTaskDefinition(definition) {
   const container = definition?.containerDefinitions?.[0];
+  const environmentNames = container?.environment?.map(({ name }) => name) || [];
+  const secretNames = container?.secrets?.map(({ name }) => name) || [];
+  const fargateSizes = new Set(["256/512", "256/1024", "512/1024", "512/2048", "1024/2048", "1024/3072", "1024/4096", "2048/4096", "2048/5120", "2048/6144", "2048/7168", "2048/8192", "4096/8192", "4096/16384", "4096/30720"]);
   if (!container || definition.networkMode !== "awsvpc" || !definition.requiresCompatibilities?.includes("FARGATE")
       || container.privileged || container.interactive || container.pseudoTerminal || !Array.isArray(container.entryPoint)
-      || !Array.isArray(container.command) || container.command.length || !container.logConfiguration
+      || (Object.hasOwn(container, "command") && (!Array.isArray(container.command) || container.command.length)) || !container.logConfiguration
       || !["awslogs"].includes(container.logConfiguration.logDriver) || !container.image?.includes("@sha256:")
-      || JSON.stringify(definition).includes("rds!db-70d459ec-4f6f-45da-aafc-618e83d660a1-Dy9GLo") && definition.taskRoleArn !== STAGE_B.executorRoleArn) {
+      || !fargateSizes.has(`${definition.cpu}/${definition.memory}`) || new Set(environmentNames).size !== environmentNames.length
+      || new Set(secretNames).size !== secretNames.length || environmentNames.some((name) => secretNames.includes(name))
+      || JSON.stringify(definition).includes("rds!db-70d459ec-4f6f-45da-aafc-618e83d660a1-Dy9GLo")
+        && (definition.taskRoleArn !== STAGE_B.executorRoleArn || definition.executionRoleArn !== STAGE_B.executorExecutionRoleArn)) {
     throw new Error("Stage B task definition is outside the fixed reviewed contract.");
   }
   if (definition.networkMode === "host" || JSON.stringify(definition).match(/hostPath|sourcePath|privileged\s*:\s*true/)) {
@@ -57,6 +70,7 @@ export function renderStageBTaskDefinition(kind, bindings) {
   const imageField = `${kind.toUpperCase()}_IMAGE`;
   const image = bindings[`${kind}Image`];
   assertImmutableImage(image, `${kind} image`);
+  if (!imagePatterns[kind].test(image)) throw new Error(`${kind} image is not from its reviewed ECR repository.`);
   const values = { ...base, [imageField]: image };
   if (kind === "executor") {
     if (!STAGE_B_MODES.includes(bindings.mode) || bindings.mode === "full-rls-application-canary") throw new Error("Executor mode is outside the fixed reviewed set.");

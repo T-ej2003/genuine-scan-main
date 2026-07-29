@@ -37,9 +37,10 @@ const env = {
   PRODUCTION_RLS_EXECUTOR_IMAGE: image("mscqr-backend", "1"),
   PRODUCTION_BACKEND_IMAGE: image("mscqr-backend", "2"),
   PRODUCTION_WORKER_IMAGE: image("mscqr-worker", "3"),
-  PRODUCTION_FRONTEND_IMAGE: image("mscqr-web", "4"),
+  PRODUCTION_RLS_CANARY_IMAGE: image("mscqr-backend", "4"),
+  PRODUCTION_FRONTEND_TASK_DEFINITION: "mscqr-frontend:20",
   PRODUCTION_RLS_CLUSTER_ARN: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
-  PRODUCTION_RLS_RECEIPT_BUCKET: "mscqr-production-release-artifacts-368992683803",
+  PRODUCTION_RLS_RECEIPT_BUCKET: "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
 };
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const randomMfaSecret = () =>
@@ -120,6 +121,7 @@ test("production green canary provisioning is approval-bound, secret-safe and id
 test("production release rejects mutable images and incomplete broker bindings", () => {
   for (const candidate of [
     { PRODUCTION_RLS_EXECUTOR_IMAGE: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend:latest" },
+    { PRODUCTION_FRONTEND_TASK_DEFINITION: "mscqr-frontend:21" },
     { PRODUCTION_RLS_CLUSTER_ARN: env.PRODUCTION_RLS_CLUSTER_ARN.replace("prod", "staging") },
     { PRODUCTION_RLS_BROKER_ARN: env.PRODUCTION_RLS_BROKER_ARN.replace("production", "staging") },
     { MSCQR_FULL_RLS_MIGRATION_SET_DIGEST: "" },

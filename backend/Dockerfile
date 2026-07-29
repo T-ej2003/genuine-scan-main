@@ -64,6 +64,7 @@ COPY --chown=node:node backend/package*.json ./
 COPY --chown=node:node backend/prisma ./prisma
 COPY --chown=node:node backend/prisma.config.ts ./prisma.config.ts
 COPY --chown=node:node backend/scripts ./scripts
+COPY --chown=node:node scripts/aws/production-green-stage-b-contract.mjs ./scripts/production-green-stage-b-contract.mjs
 COPY --chown=node:node documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql ./documents/security/
 COPY --chown=node:node documents/security/mscqr_staging_rls_shared_batch_phase_rollback_2026-07-15.sql ./documents/security/
 COPY --chown=node:node documents/security/mscqr_staging_rls_shared_batch_phase_verify_2026-07-15.sql ./documents/security/
@@ -106,6 +107,7 @@ COPY --chown=node:node backend/package*.json ./
 COPY --chown=node:node backend/prisma ./prisma
 COPY --chown=node:node backend/prisma.config.ts ./prisma.config.ts
 COPY --chown=node:node backend/scripts ./scripts
+COPY --chown=node:node scripts/aws/production-green-stage-b-contract.mjs ./scripts/production-green-stage-b-contract.mjs
 COPY --from=builder --chown=node:node /workspace/backend/node_modules ./node_modules
 COPY --chown=node:node scripts/rls/sql/generated ./scripts/rls/sql/generated
 COPY --chown=node:node documents/security/rls-program/generated ./documents/security/rls-program/generated

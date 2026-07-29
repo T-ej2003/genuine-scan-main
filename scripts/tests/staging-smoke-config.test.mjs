@@ -33,6 +33,14 @@ const pr132PlanningFiles = [
   "infra/aws/terraform/production-green-stage-b/release-activation-contract.json",
   "scripts/tests/production-green-terraform-planning.test.mjs",
 ].join("\n");
+const pr135StageBFiles = [
+  ".github/workflows/production-green-stage-b-images.yml",
+  "backend/Dockerfile",
+  "infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs",
+  "infra/aws/terraform/production-green-stage-b/task-definitions/green-application-canary.json",
+  "scripts/aws/production-green-stage-b-contract.mjs",
+  "scripts/tests/production-green-stage-b-control-plane.test.mjs",
+].join("\n");
 const approvedBlueMismatchEnv = {
   GITHUB_EVENT_NAME: "pull_request",
   GITHUB_PR_NUMBER: "131",
@@ -198,6 +206,15 @@ test("PR #132-equivalent production-green planning scope may skip the known blue
   const decision = blueLoginDecision({
     GITHUB_PR_NUMBER: "132",
     STAGING_SMOKE_CHANGED_FILES: pr132PlanningFiles,
+  });
+  assert.equal(decision.shouldSkip, true);
+  assert.equal(decision.activationScope, true);
+});
+
+test("PR #135-equivalent production-green Stage B scope may skip the known blue login failure", () => {
+  const decision = blueLoginDecision({
+    GITHUB_PR_NUMBER: "135",
+    STAGING_SMOKE_CHANGED_FILES: pr135StageBFiles,
   });
   assert.equal(decision.shouldSkip, true);
   assert.equal(decision.activationScope, true);
