@@ -4,11 +4,14 @@ This isolated root creates only `mscqr-production-stage-b-image-publisher` and i
 inline ECR publication policy. It does not manage Stage A, databases, networking,
 secrets, ECS, Lambda, broker resources, services, traffic, or GitHub configuration.
 
-The role trusts GitHub OIDC only when the token is for the protected `production`
-environment, this repository, and the exact reusable workflow
-`.github/workflows/production-green-stage-b-image-build.yml` at `refs/heads/main`.
+AWS IAM can evaluate GitHub's `aud` and `sub` claims, but not the auxiliary
+`repository` or `job_workflow_ref` claims directly. The role therefore requires the
+repository-level subject template in `oidc-subject-template.json`: protected `production`,
+this repository, and the exact reusable workflow are encoded into one exact `sub` value.
 The dispatcher remains `.github/workflows/production-green-stage-b-images.yml` and
-accepts only an exact merged release SHA.
+accepts only an exact merged release SHA. Apply the template only through the documented
+dual-trust migration in
+`documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json`.
 
 An MFA-backed, non-root operator must use the approved dedicated production state
 backend and plan before apply. AWS root must not plan or apply:

@@ -9,7 +9,10 @@ const dispatcher = yaml.load(fs.readFileSync(".github/workflows/production-green
 const reusable = yaml.load(fs.readFileSync(".github/workflows/production-green-stage-b-image-build.yml", "utf8"));
 const trust = JSON.parse(fs.readFileSync(`${root}/trust-policy.json`, "utf8"));
 const policy = JSON.parse(fs.readFileSync(`${root}/permissions-policy.json`, "utf8"));
+const subjectTemplate = JSON.parse(fs.readFileSync(`${root}/oidc-subject-template.json`, "utf8"));
+const transition = JSON.parse(fs.readFileSync("documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json", "utf8"));
 const roleArn = "arn:aws:iam::368992683803:role/mscqr-production-stage-b-image-publisher";
+const publisherSubject = "repo:T-ej2003/genuine-scan-main:environment:production:job_workflow_ref:T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/main";
 const repos = [
   "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
   "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker",
@@ -51,24 +54,59 @@ test("only the reusable build job receives fixed OIDC publishing authority", () 
   assert.doesNotMatch(JSON.stringify(reusable), /mscqr-frontend:20|ecs update-service|deploy-ecs-service/i);
 });
 
-test("OIDC trust permits only the reviewed production reusable workflow identity", () => {
+test("OIDC trust permits only the customized production reusable-workflow subject", () => {
   const expected = trust.Statement[0].Condition.StringEquals;
   assert.equal(trust.Statement[0].Principal.Federated, "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com");
   assert.deepEqual(expected, {
     "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-    "token.actions.githubusercontent.com:sub": "repo:T-ej2003/genuine-scan-main:environment:production",
-    "token.actions.githubusercontent.com:repository": "T-ej2003/genuine-scan-main",
-    "token.actions.githubusercontent.com:job_workflow_ref": "T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/main",
+    "token.actions.githubusercontent.com:sub": publisherSubject,
   });
   assert.equal(canAssume(expected), true);
-  for (const [claim, value] of [
-    ["token.actions.githubusercontent.com:job_workflow_ref", "T-ej2003/genuine-scan-main/.github/workflows/other.yml@refs/heads/main"],
-    ["token.actions.githubusercontent.com:repository", "other/repository"],
-    ["token.actions.githubusercontent.com:sub", "repo:T-ej2003/genuine-scan-main:ref:refs/heads/main"],
-    ["token.actions.githubusercontent.com:sub", "repo:T-ej2003/genuine-scan-main:pull_request"],
-    ["token.actions.githubusercontent.com:sub", "repo:T-ej2003/genuine-scan-main:environment:staging"],
-    ["token.actions.githubusercontent.com:aud", "other-audience"],
-  ]) assert.equal(canAssume({ ...expected, [claim]: value }), false);
+  for (const value of [
+    "repo:other/repository:environment:production:job_workflow_ref:T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/main",
+    "repo:T-ej2003/genuine-scan-main:environment:staging:job_workflow_ref:T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/main",
+    "repo:T-ej2003/genuine-scan-main:environment:production:job_workflow_ref:T-ej2003/genuine-scan-main/.github/workflows/other.yml@refs/heads/main",
+    "repo:T-ej2003/genuine-scan-main:environment:production:job_workflow_ref:T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/release",
+    "repo:T-ej2003/genuine-scan-main:pull_request",
+    "repo:T-ej2003/genuine-scan-main:ref:refs/tags/v1:job_workflow_ref:T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/main",
+    "repo:T-ej2003/genuine-scan-main:pull_request:job_workflow_ref:T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/main",
+  ]) assert.equal(canAssume({ ...expected, "token.actions.githubusercontent.com:sub": value }), false);
+  assert.equal(canAssume({ ...expected, "token.actions.githubusercontent.com:aud": "other-audience" }), false);
+});
+
+test("subject customization is exact and all repository OIDC consumers have a migration record", () => {
+  assert.deepEqual(subjectTemplate.api.request, {
+    use_default: false,
+    include_claim_keys: ["repo", "context", "job_workflow_ref"],
+  });
+  assert.equal(subjectTemplate.publisherSubject, publisherSubject);
+  const expectedWorkflows = [
+    "aws-dr-alb-apply.yml", "aws-dr-cleanup-apply.yml", "aws-dr-db-apply.yml", "aws-dr-dns-apply.yml",
+    "aws-dr-hardening-apply.yml", "aws-dr-object-storage-apply.yml", "aws-dr-operations.yml",
+    "aws-dr-regional-readiness.yml", "aws-dr-snapshot-apply.yml", "auto-failover-monitor.yml",
+    "deploy-ecs-release.yml", "production-green-stage-b-image-build.yml", "publish-ecs-images.yml",
+    "release-gate.yml", "staging-terraform-remote-state-drift.yml",
+  ];
+  assert.deepEqual(transition.repositoryOidcConsumers.map(({ workflow }) => workflow.split("/").at(-1)).sort(), expectedWorkflows.sort());
+  assert.ok(transition.transitionOrder.some((step) => /alongside/.test(step)));
+  assert.ok(transition.rollback.some((step) => /use_default true/.test(step)));
+});
+
+test("Terraform OIDC trust policies use only the repository-approved AWS claim keys", () => {
+  const allowed = new Set([
+    "token.actions.githubusercontent.com:aud",
+    "token.actions.githubusercontent.com:sub",
+  ]);
+  for (const file of fs.readdirSync("infra/aws/terraform", { recursive: true }).filter((entry) => entry.endsWith("trust-policy.json"))) {
+    const document = JSON.parse(fs.readFileSync(`infra/aws/terraform/${file}`, "utf8"));
+    for (const statement of document.Statement || []) {
+      for (const conditions of Object.values(statement.Condition || {})) {
+        for (const key of Object.keys(conditions)) {
+          if (key.startsWith("token.actions.githubusercontent.com:")) assert.equal(allowed.has(key), true, `${file} uses unsupported ${key}`);
+        }
+      }
+    }
+  }
 });
 
 test("publisher permissions are ECR-only for the reviewed repositories", () => {

@@ -26,14 +26,30 @@ Terraform root:
 
 Role: `mscqr-production-stage-b-image-publisher`
 
-Its trust policy permits only GitHub's existing OIDC provider when all of these claims
-match:
+AWS IAM accepts GitHub's `aud` and `sub` as trust-policy condition keys. It cannot use
+the auxiliary `repository` or `job_workflow_ref` claims as direct IAM condition keys.
+The role therefore permits only GitHub's existing OIDC provider when these supported
+claims match:
 
 - `aud`: `sts.amazonaws.com`;
-- `sub`: `repo:T-ej2003/genuine-scan-main:environment:production`;
-- `repository`: `T-ej2003/genuine-scan-main`;
-- `job_workflow_ref`:
-  `T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/main`.
+- `sub`:
+  `repo:T-ej2003/genuine-scan-main:environment:production:job_workflow_ref:T-ej2003/genuine-scan-main/.github/workflows/production-green-stage-b-image-build.yml@refs/heads/main`.
+
+GitHub must encode that reusable-workflow identity into `sub` through the repository OIDC
+subject-customization API. The exact request is the machine-readable
+`oidc-subject-template.json` contract: `PUT
+/repos/T-ej2003/genuine-scan-main/actions/oidc/customization/sub` with
+`use_default:false` and `include_claim_keys` exactly `repo`, `context`, and
+`job_workflow_ref`.
+
+This repository-level change affects every OIDC token emitted by this repository. Do not
+apply it until the transition inventory in
+`PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json` has been completed: first add
+compatible custom-subject trusts alongside every still-required legacy trust, then apply
+the GitHub template, inspect a safe token or run a non-mutating assumption test, set the
+publisher environment variable, and finally retire legacy trust only after every listed
+consumer passes. Roll back by restoring verified legacy IAM subjects first, then PUT
+`{"use_default":true}` to the same GitHub endpoint and repeat non-mutating checks.
 
 The role has no console login or access keys. Its only allow statements are
 `ecr:GetAuthorizationToken` and image publication/read/scan operations on
