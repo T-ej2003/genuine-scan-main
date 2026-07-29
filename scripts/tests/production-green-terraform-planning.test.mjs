@@ -26,14 +26,15 @@ test("Stage A owns no blue infrastructure or release activation", () => {
   assert.match(source, /engine_version\s+=\s+"18\.4"/);
   assert.match(source, /publicly_accessible\s+=\s+false/);
   assert.match(source, /referenced_security_group_id/);
-  assert.doesNotMatch(source, /cidr_ipv4/);
+  const databaseIngress = [...source.matchAll(/resource "aws_vpc_security_group_ingress_rule" "(?:executor_database|runtime_database)" \{([\s\S]*?)\n\}/g)].map((match) => match[1]);
+  assert.equal(databaseIngress.length, 2);
+  for (const rule of databaseIngress) assert.doesNotMatch(rule, /cidr_ipv4|cidr_ipv6/);
 });
 
-test("Stage A explicitly revokes executor egress and keeps database ingress SG-to-SG only", () => {
+test("Stage A declares executor egress only through standalone reviewed rules and keeps database ingress SG-to-SG only", () => {
   const executor = source.match(/resource "aws_security_group" "executor" \{([\s\S]*?)\n\}/)?.[1] || "";
-  assert.match(executor, /egress\s+=\s+\[\]/);
-  assert.doesNotMatch(executor, /0\.0\.0\.0\/0|::\/0|cidr_/);
-  const ingress = [...source.matchAll(/resource "aws_vpc_security_group_ingress_rule"[\s\S]*?\n\}/g)].map((match) => match[0]);
+  assert.doesNotMatch(executor, /egress\s*\{|0\.0\.0\.0\/0|::\/0|cidr_/);
+  const ingress = [...source.matchAll(/resource "aws_vpc_security_group_ingress_rule" "(?:executor_database|runtime_database)"[\s\S]*?\n\}/g)].map((match) => match[0]);
   assert.equal(ingress.length, 2);
   for (const rule of ingress) {
     assert.match(rule, /referenced_security_group_id/);

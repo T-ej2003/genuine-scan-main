@@ -9,16 +9,6 @@ variable "aws_region" {
 variable "vpc_id" { type = string }
 variable "private_subnet_ids" { type = list(string) }
 variable "runtime_security_group_ids" { type = set(string) }
-variable "executor_interface_endpoint_security_group_ids" {
-  type = map(string)
-  validation {
-    condition = (
-      toset(keys(var.executor_interface_endpoint_security_group_ids)) == toset(["ecr_api", "ecr_dkr", "logs", "secretsmanager", "kms"]) &&
-      alltrue([for id in values(var.executor_interface_endpoint_security_group_ids) : can(regex("^sg-[a-f0-9]{17}$", id))])
-    )
-    error_message = "Executor networking requires exact ECR API, ECR DKR, Logs, Secrets Manager, and KMS endpoint security-group IDs."
-  }
-}
 variable "s3_prefix_list_id" {
   type = string
   validation {
