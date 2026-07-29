@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadExactStageBBrokerCodeSigningConfig",
+      "Effect": "Allow",
+      "Action": "lambda:GetFunctionCodeSigningConfig",
+      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+    }
+  ]
+}

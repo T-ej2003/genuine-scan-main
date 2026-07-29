@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "TagExactStageBBrokerLambda",
+      "Effect": "Allow",
+      "Action": "lambda:TagResource",
+      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Component": "full-rls-green-stage-b"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "Environment",
+            "ManagedBy",
+            "Component"
+          ]
+        }
+      }
+    }
+  ]
+}
