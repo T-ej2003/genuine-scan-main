@@ -36,7 +36,7 @@ locals {
     backend          = replace(replace(replace(file("${path.module}/task-definitions/green-backend-candidate.json"), "{{BACKEND_IMAGE}}", var.backend_image), "{{RELEASE_SHA}}", var.release_sha), "{{BACKEND_LOG_GROUP}}", local.logs.backend)
     worker           = replace(replace(replace(file("${path.module}/task-definitions/green-worker-candidate.json"), "{{WORKER_IMAGE}}", var.worker_image), "{{RELEASE_SHA}}", var.release_sha), "{{WORKER_LOG_GROUP}}", local.logs.worker)
     canary           = replace(replace(replace(replace(replace(file("${path.module}/task-definitions/green-application-canary.json"), "{{CANARY_IMAGE}}", var.canary_image), "{{RELEASE_SHA}}", var.release_sha), "{{SOURCE_CONTRACT_SHA256}}", var.source_contract_sha256), "{{MIGRATION_SET_DIGEST}}", var.migration_set_digest), "{{CANARY_LOG_GROUP}}", local.logs.canary)
-    read_only_canary = replace(replace(replace(file("${path.module}/task-definitions/green-read-only-rls-canary.json"), "{{READ_ONLY_CANARY_IMAGE}}", var.read_only_canary_image), "{{READ_ONLY_CANARY_DATABASE_SECRET_ARN}}", var.read_only_canary_database_secret_arn), "{{READ_ONLY_CANARY_LOG_GROUP}}", local.logs.read_only_canary)
+    read_only_canary = replace(replace(replace(file("${path.module}/task-definitions/green-read-only-rls-canary.json"), "{{READ_ONLY_CANARY_IMAGE}}", var.read_only_canary_image), "{{READ_ONLY_CANARY_DATABASE_SECRET_ARN}}", var.stage_a_read_only_canary_database_secret_arn), "{{READ_ONLY_CANARY_LOG_GROUP}}", local.logs.read_only_canary)
   }
   candidate_definitions = {
     for kind, rendered in local.rendered_candidates : kind => jsondecode(rendered)
@@ -91,10 +91,10 @@ locals {
     { full-rls-application-canary = aws_ecs_task_definition.candidate["canary"].arn }
   )
   broker_template_hashes = {
-    backend          = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-backend-candidate.json"))))
-    worker           = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-worker-candidate.json"))))
-    executor         = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-activation-executor.json"))))
-    canary           = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-application-canary.json"))))
+    backend  = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-backend-candidate.json"))))
+    worker   = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-worker-candidate.json"))))
+    executor = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-activation-executor.json"))))
+    canary   = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-application-canary.json"))))
   }
   broker_images = {
     backendImageDigest  = var.backend_image

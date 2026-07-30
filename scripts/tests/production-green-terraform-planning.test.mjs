@@ -61,7 +61,7 @@ test("Stage A exposes only the RDS-managed administrator secret ARN", () => {
   assert.match(outputs, /output "rds_managed_administrator_secret"/);
   assert.match(outputs, /master_user_secret.*secret_arn/);
   assert.doesNotMatch(outputs, /password\s*=/);
-  assert.match(readme, /separate\s+from the 14 empty application\/runtime secret handles/);
+  assert.match(readme, /separate\s+from the 15 empty application\/runtime secret handles/);
 });
 
 test("Stage A needs no image digest and Stage B keeps canaries mandatory", () => {

@@ -255,6 +255,13 @@ resource "aws_secretsmanager_secret" "runtime" {
   tags                    = merge(local.tags, { Role = each.value })
 }
 
+resource "aws_secretsmanager_secret" "read_only_canary" {
+  name                    = "mscqr/production/rls-green/phase4/read-only-canary-database-url"
+  description             = "Dedicated production Phase 4 read-only RLS canary database URL handle"
+  recovery_window_in_days = 30
+  tags                    = merge(local.tags, { Role = "read_only_canary" })
+}
+
 resource "aws_secretsmanager_secret" "canary" {
   for_each                = local.canary_secret_names
   name                    = "mscqr/production/rls-green/phase2/canary/${replace(each.value, "_", "-")}"
