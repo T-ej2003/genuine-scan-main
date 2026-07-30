@@ -25,6 +25,8 @@ variable "backend_image" { type = string }
 variable "worker_image" { type = string }
 variable "executor_image" { type = string }
 variable "canary_image" { type = string }
+variable "read_only_canary_image" { type = string }
+variable "read_only_canary_database_secret_arn" { type = string }
 variable "log_retention_days" {
   type    = number
   default = 30
@@ -92,7 +94,14 @@ check "release_bindings" {
 
 check "immutable_images" {
   assert {
-    condition     = alltrue([for image in [var.backend_image, var.worker_image, var.executor_image, var.canary_image] : can(regex("^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-(backend|worker)@sha256:[a-f0-9]{64}$", image))])
+    condition     = alltrue([for image in [var.backend_image, var.worker_image, var.executor_image, var.canary_image, var.read_only_canary_image] : can(regex("^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-(backend|worker)@sha256:[a-f0-9]{64}$", image))])
     error_message = "Stage B accepts immutable reviewed ECR digests only."
+  }
+}
+
+check "read_only_canary_secret" {
+  assert {
+    condition     = can(regex("^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-[A-Za-z0-9]+$", var.read_only_canary_database_secret_arn))
+    error_message = "Phase 4 requires the exact dedicated read-only canary database secret ARN."
   }
 }

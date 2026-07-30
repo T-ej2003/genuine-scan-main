@@ -1,0 +1,11 @@
+{
+  "family": "mscqr-production-full-rls-green-read-only-canary",
+  "networkMode": "awsvpc", "requiresCompatibilities": ["FARGATE"], "cpu": "256", "memory": "512",
+  "containerDefinitions": [{
+    "name": "production-green-read-only-rls-canary", "image": "{{READ_ONLY_CANARY_IMAGE}}", "essential": true,
+    "entryPoint": ["node", "scripts/production-green-read-only-rls-canary.mjs"], "readonlyRootFilesystem": true,
+    "privileged": false, "interactive": false, "pseudoTerminal": false,
+    "secrets": [{ "name": "RLS_CANARY_DATABASE_URL", "valueFrom": "{{READ_ONLY_CANARY_DATABASE_SECRET_ARN}}" }],
+    "logConfiguration": { "logDriver": "awslogs", "options": { "awslogs-region": "eu-west-2", "awslogs-group": "{{READ_ONLY_CANARY_LOG_GROUP}}", "awslogs-stream-prefix": "phase-4" } }
+  }]
+}
