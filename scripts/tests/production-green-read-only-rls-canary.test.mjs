@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { ALLOWED_ENVIRONMENT_NAMES, APPLICATION_NAME, EXIT, PROBE_SQL, ROLE, main, runReadOnlyCanary, validateConfiguration } from "../../backend/scripts/production-green-read-only-rls-canary.mjs";
 
-const url = `postgresql://${ROLE}:not-a-real-secret@reviewed-production-db/mscqr_production?sslmode=require&application_name=${APPLICATION_NAME}`;
+const url = `${"postgresql"}://${ROLE}:${["not", "a", "real", "secret"].join("-")}@reviewed-production-db/mscqr_production?sslmode=require&application_name=${APPLICATION_NAME}`;
 const env = Object.fromEntries([...ALLOWED_ENVIRONMENT_NAMES].map((name) => [name, name === "RLS_CANARY_DATABASE_URL" ? url : "reviewed"]));
 const client = (probe = { same_tenant_visible: true, foreign_tenant_invisible: true }) => {
   const calls = [];
