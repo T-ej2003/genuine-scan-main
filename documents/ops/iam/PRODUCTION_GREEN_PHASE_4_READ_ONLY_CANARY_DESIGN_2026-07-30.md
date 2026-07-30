@@ -6,7 +6,7 @@ This is a separately reviewed, fixed-command package for a future one-shot produ
 
 The threat is a task or credential becoming an application mutation path, a tenant selector being supplied at launch, cross-tenant visibility, or a broker/retry causing an ambiguous repeat. The task runs only `node scripts/production-green-read-only-rls-canary.mjs`; it rejects arguments and environment outside its fixed runtime allowlist. It has no HTTP client use, login, MFA, OTP, session, audit, write SQL, broker invocation, DynamoDB, ECS, IAM, service-update, or S3 permission.
 
-The execution role can pull the immutable reviewed backend image, write only its dedicated CloudWatch stream, and read exactly `mscqr/production/rls-green/phase4/read-only-canary-database-url-*`. The empty task role has no runtime permissions. ECS networking is the Stage A executor group `sg-051a24aedff773761`, exactly `subnet-068d949017bd2ce45` and `subnet-07e0a76e3a5241138`, with public IP disabled.
+The execution role can pull the immutable reviewed backend image, write only its dedicated CloudWatch stream, and read exactly `mscqr/production/rls-green/phase4/read-only-canary-database-url-*`. The empty task role has no runtime permissions. ECS networking is the Stage A executor group `sg-051a24aedff773761`, using only the approved private production subnets selected by the reviewed private Stage A production subnet inputs, with `assign_public_ip` remaining `false`.
 
 ## Query allowlist and evidence
 
