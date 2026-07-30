@@ -2,6 +2,10 @@
   "name": "production-stage-b-image-publish",
   "deploymentBranches": "protected-main-only",
   "requiredReviewers": true,
+  "authorizedRequiredReviewers": [
+    "T-ej2003"
+  ],
+  "preventSelfReview": true,
   "forbidUnprotectedBranchesAndTags": true,
   "variables": [
     "PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE"

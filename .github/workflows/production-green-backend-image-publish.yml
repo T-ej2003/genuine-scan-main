@@ -22,6 +22,7 @@ jobs:
       PLATFORMS: linux/amd64
       RELEASE_SHA: ${{ inputs.release_sha }}
       COSIGN_EXPERIMENTAL: "1"
+      PROVENANCE_ATTESTATION_TYPE: https://mscqr.com/attestations/release-provenance/v1
     steps:
       - uses: actions/checkout@v6
         with:
@@ -151,8 +152,8 @@ jobs:
           NODE
           cosign sign --yes "$BACKEND_IMAGE"
           cosign attest --yes --type spdxjson --predicate "$RUNNER_TEMP/backend.spdx.json" "$BACKEND_IMAGE"
-          cosign attest --yes --type mscqr-release-provenance --predicate "$RUNNER_TEMP/backend.provenance.json" "$BACKEND_IMAGE"
-          COSIGN_CERT_IDENTITY_REGEXP="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/production-green-backend-image-publish.yml@.*$" REQUIRED_PLATFORMS="$PLATFORMS" ./scripts/aws/verify-release-artifacts.sh "$BACKEND_IMAGE"
+          cosign attest --yes --type "$PROVENANCE_ATTESTATION_TYPE" --predicate "$RUNNER_TEMP/backend.provenance.json" "$BACKEND_IMAGE"
+          COSIGN_CERT_IDENTITY_REGEXP="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/production-green-backend-image-publish.yml@.*$" REQUIRED_PLATFORMS="$PLATFORMS" PROVENANCE_ATTESTATION_TYPE="$PROVENANCE_ATTESTATION_TYPE" ./scripts/aws/verify-release-artifacts.sh "$BACKEND_IMAGE"
 
       - uses: actions/upload-artifact@v7
         with:

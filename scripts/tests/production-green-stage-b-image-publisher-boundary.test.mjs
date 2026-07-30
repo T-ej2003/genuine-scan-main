@@ -100,6 +100,8 @@ test("dedicated GitHub environment contract is approval-gated and used by no unr
     name: publisherEnvironment,
     deploymentBranches: "protected-main-only",
     requiredReviewers: true,
+    authorizedRequiredReviewers: ["T-ej2003"],
+    preventSelfReview: true,
     forbidUnprotectedBranchesAndTags: true,
     variables: ["PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE"],
     forbiddenSecrets: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"],
@@ -169,6 +171,14 @@ test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first
   assert.match(text, /trivy-high\.json/);
   assert.match(text, /backend\.spdx\.json/);
   assert.match(text, /cosign sign/);
+  const provenanceType = "https://mscqr.com/attestations/release-provenance/v1";
+  const legacyProvenanceType = ["mscqr", "release", "provenance"].join("-");
+  const attestationStep = job.steps.find((step) => step.name === "Generate SBOM, sign, attest, and verify immutable digest");
+  assert.equal(new URL(provenanceType).protocol, "https:");
+  assert.equal(job.env.PROVENANCE_ATTESTATION_TYPE, provenanceType);
+  assert.match(attestationStep.run, /cosign attest --yes --type "\$PROVENANCE_ATTESTATION_TYPE"/);
+  assert.match(attestationStep.run, /PROVENANCE_ATTESTATION_TYPE="\$PROVENANCE_ATTESTATION_TYPE" .*verify-release-artifacts/s);
+  assert.doesNotMatch(attestationStep.run, new RegExp(`--type ${legacyProvenanceType}`));
   assert.match(text, /verify-release-artifacts/);
   assert.match(text, /production-green-read-only-rls-canary\.mjs/);
   assert.doesNotMatch(text, /AWS_ROLE_TO_ASSUME|aws-actions\/configure-aws-credentials@v6[\s\S]*AWS_ACCESS_KEY_ID|ecs:(?:UpdateService|RunTask)|lambda:InvokeFunction|deploy-ecs-service|inputs\.(?:role|repository|services|platform)/i);
