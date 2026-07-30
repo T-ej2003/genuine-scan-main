@@ -12,7 +12,14 @@ permissions:
   contents: read
 
 jobs:
+  authorize-operator:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the sole authorized operator
+        run: test "${{ github.actor }}" = "T-ej2003"
+
   build-and-attest:
+    needs: authorize-operator
     runs-on: ubuntu-latest
     environment: production-stage-b-image-publish
     permissions:

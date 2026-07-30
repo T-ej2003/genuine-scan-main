@@ -58,6 +58,23 @@ test("only the reusable build job receives fixed OIDC publishing authority", () 
   assert.doesNotMatch(JSON.stringify(reusable), /mscqr-frontend:20|ecs update-service|deploy-ecs-service/i);
 });
 
+test("both publisher workflows visibly authorize only T-ej2003 before environment or AWS access", () => {
+  for (const [workflow, jobName] of [[backendPublisher, "publish-and-verify"], [reusable, "build-and-attest"]]) {
+    const authorize = workflow.jobs["authorize-operator"];
+    const publish = workflow.jobs[jobName];
+    assert.ok(authorize);
+    assert.equal(authorize.environment, undefined);
+    assert.deepEqual(authorize.permissions, undefined);
+    assert.match(authorize.steps[0].run, /github\.actor.*T-ej2003/);
+    assert.equal(publish.needs, "authorize-operator");
+    assert.equal(publish.environment, publisherEnvironment);
+    assert.match(JSON.stringify(publish), /PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE/);
+    assert.doesNotMatch(JSON.stringify(workflow), /AWS_ROLE_TO_ASSUME|ecs:(?:UpdateService|RunTask)|lambda:InvokeFunction|secretsmanager:|rds:|kms:|s3:|network|traffic|deploy-ecs-service/i);
+  }
+  assert.equal(backendPublisher.permissions["id-token"], undefined);
+  assert.equal(backendPublisher.jobs["publish-and-verify"].permissions["id-token"], "write");
+});
+
 test("OIDC trust permits only the dedicated default-sub publishing environment", () => {
   const expected = trust.Statement[0].Condition.StringEquals;
   assert.equal(trust.Statement[0].Principal.Federated, "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com");
@@ -95,19 +112,21 @@ test("repository OIDC stays default and all existing consumers require no subjec
   assert.ok(transition.repositoryOidcConsumers.find(({ workflow }) => workflow.endsWith("staging-terraform-remote-state-drift.yml")).migration.includes("missing MSCQRStagingTerraformPlanRole"));
 });
 
-test("dedicated GitHub environment contract is approval-gated and used by no unrelated workflow", () => {
+test("dedicated GitHub environment contract permits the sole operator and is used by no unrelated workflow", () => {
   assert.deepEqual(environmentContract, {
     name: publisherEnvironment,
     deploymentBranches: "protected-main-only",
-    requiredReviewers: true,
-    authorizedRequiredReviewers: ["T-ej2003"],
-    preventSelfReview: true,
+    requiredReviewers: false,
+    preventSelfReview: false,
     forbidUnprotectedBranchesAndTags: true,
     variables: ["PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE"],
     forbiddenSecrets: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"],
     requiresEnvironmentSecrets: false,
     activation: "operator-configured; not managed by Terraform",
   });
+  assert.equal(environmentContract.forbidUnprotectedBranchesAndTags, true);
+  assert.deepEqual(environmentContract.variables, ["PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE"]);
+  assert.equal(environmentContract.requiresEnvironmentSecrets, false);
   const workflowFiles = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml"));
   for (const file of workflowFiles.filter((file) => !["production-green-stage-b-image-build.yml", "production-green-backend-image-publish.yml"].includes(file))) {
     assert.doesNotMatch(fs.readFileSync(`.github/workflows/${file}`, "utf8"), new RegExp(`environment:\\s*${publisherEnvironment}`));
@@ -154,8 +173,9 @@ test("publisher permissions are ECR-only for the reviewed repositories", () => {
 
 test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first, and deployment-free", () => {
   assert.deepEqual(Object.keys(backendPublisher.on.workflow_dispatch.inputs), ["release_sha"]);
-  assert.deepEqual(backendPublisher.permissions, { contents: "read", "id-token": "write" });
+  assert.deepEqual(backendPublisher.permissions, { contents: "read" });
   const job = backendPublisher.jobs["publish-and-verify"];
+  assert.deepEqual(job.permissions, { contents: "read", "id-token": "write" });
   assert.equal(job.environment, publisherEnvironment);
   assert.equal(job.env.AWS_REGION, "eu-west-2");
   assert.equal(job.env.BACKEND_ECR_REPO, "mscqr-backend");

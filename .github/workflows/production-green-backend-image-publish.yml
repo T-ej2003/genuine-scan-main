@@ -10,12 +10,21 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
+  authorize-operator:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the sole authorized operator
+        run: test "${{ github.actor }}" = "T-ej2003"
+
   publish-and-verify:
+    needs: authorize-operator
     runs-on: ubuntu-latest
     environment: production-stage-b-image-publish
+    permissions:
+      contents: read
+      id-token: write
     env:
       AWS_REGION: eu-west-2
       BACKEND_ECR_REPO: mscqr-backend
