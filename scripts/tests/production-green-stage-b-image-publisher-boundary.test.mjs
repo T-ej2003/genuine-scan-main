@@ -7,6 +7,7 @@ import { assertStageBImageBindings } from "../aws/stage-b-image-bindings.mjs";
 const root = "infra/aws/terraform/production-green-stage-b-image-publisher";
 const dispatcher = yaml.load(fs.readFileSync(".github/workflows/production-green-stage-b-images.yml", "utf8"));
 const reusable = yaml.load(fs.readFileSync(".github/workflows/production-green-stage-b-image-build.yml", "utf8"));
+const backendPublisher = yaml.load(fs.readFileSync(".github/workflows/production-green-backend-image-publish.yml", "utf8"));
 const trust = JSON.parse(fs.readFileSync(`${root}/trust-policy.json`, "utf8"));
 const policy = JSON.parse(fs.readFileSync(`${root}/permissions-policy.json`, "utf8"));
 const subjectTemplate = JSON.parse(fs.readFileSync(`${root}/oidc-subject-template.json`, "utf8"));
@@ -106,7 +107,7 @@ test("dedicated GitHub environment contract is approval-gated and used by no unr
     activation: "operator-configured; not managed by Terraform",
   });
   const workflowFiles = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml"));
-  for (const file of workflowFiles.filter((file) => file !== "production-green-stage-b-image-build.yml")) {
+  for (const file of workflowFiles.filter((file) => !["production-green-stage-b-image-build.yml", "production-green-backend-image-publish.yml"].includes(file))) {
     assert.doesNotMatch(fs.readFileSync(`.github/workflows/${file}`, "utf8"), new RegExp(`environment:\\s*${publisherEnvironment}`));
   }
 });
@@ -135,8 +136,11 @@ test("publisher permissions are ECR-only for the reviewed repositories", () => {
     assert.equal(allows("ecr:UploadLayerPart", repository), true);
     assert.equal(allows("ecr:BatchGetImage", repository), true);
     assert.equal(allows("ecr:DescribeImageScanFindings", repository), true);
+    assert.equal(allows("ecr:PutImageTagMutability", repository), true);
+    assert.equal(allows("ecr:PutImageScanningConfiguration", repository), true);
+    assert.equal(allows("ecr:PutLifecyclePolicy", repository), true);
   }
-  assert.equal(allows("ecr:PutImage", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web"), false);
+  for (const action of ["ecr:PutImage", "ecr:PutImageTagMutability", "ecr:PutImageScanningConfiguration", "ecr:PutLifecyclePolicy"]) assert.equal(allows(action, "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web"), false, action);
   for (const action of ["ecs:UpdateService", "ecs:RunTask", "lambda:InvokeFunction", "secretsmanager:GetSecretValue", "rds:ModifyDBInstance", "iam:CreateRole"]) {
     assert.equal(allows(action, "*"), false);
     assert.equal(denies(action), true);
@@ -144,6 +148,30 @@ test("publisher permissions are ECR-only for the reviewed repositories", () => {
   assert.equal(allows("kms:Decrypt", "*"), false);
   assert.equal(allows("s3:PutObject", "*"), false);
   assert.equal(roleArn.endsWith("mscqr-production-stage-b-image-publisher"), true);
+});
+
+test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first, and deployment-free", () => {
+  assert.deepEqual(Object.keys(backendPublisher.on.workflow_dispatch.inputs), ["release_sha"]);
+  assert.deepEqual(backendPublisher.permissions, { contents: "read", "id-token": "write" });
+  const job = backendPublisher.jobs["publish-and-verify"];
+  assert.equal(job.environment, publisherEnvironment);
+  assert.equal(job.env.AWS_REGION, "eu-west-2");
+  assert.equal(job.env.BACKEND_ECR_REPO, "mscqr-backend");
+  assert.equal(job.env.PLATFORMS, "linux/amd64");
+  const text = JSON.stringify(backendPublisher);
+  assert.match(text, /PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE/);
+  assert.match(text, /stage-b-release-gate/);
+  assert.match(text, /apply-ecr-repository-controls\.sh backend/);
+  assert.match(text, /publish-ecs-images\.sh backend/);
+  assert.match(text, /@sha256:/);
+  assert.equal(job.steps.some((step) => step.uses === "aquasecurity/trivy-action@v0.36.0" && step.with?.severity === "CRITICAL" && step.with?.["exit-code"] === "1"), true);
+  assert.equal(job.steps.some((step) => step.uses === "aquasecurity/trivy-action@v0.36.0" && step.with?.severity === "HIGH" && step.with?.output?.endsWith("trivy-high.json")), true);
+  assert.match(text, /trivy-high\.json/);
+  assert.match(text, /backend\.spdx\.json/);
+  assert.match(text, /cosign sign/);
+  assert.match(text, /verify-release-artifacts/);
+  assert.match(text, /production-green-read-only-rls-canary\.mjs/);
+  assert.doesNotMatch(text, /AWS_ROLE_TO_ASSUME|aws-actions\/configure-aws-credentials@v6[\s\S]*AWS_ACCESS_KEY_ID|ecs:(?:UpdateService|RunTask)|lambda:InvokeFunction|deploy-ecs-service|inputs\.(?:role|repository|services|platform)/i);
 });
 
 test("all four fixed Stage B service identities remain immutable image bindings", () => {

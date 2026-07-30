@@ -59,8 +59,11 @@ test("immutable publisher boundary limits effective permissions to the reviewed 
     && (statement.Action === action || statement.Action.includes?.(action))
     && (statement.Resource === resource || (Array.isArray(statement.Resource) && statement.Resource.includes(resource))));
   assert.equal(boundaryAllows("ecr:GetAuthorizationToken", "*"), true);
-  assert.equal(boundaryAllows("ecr:PutImage", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"), true);
-  assert.equal(boundaryAllows("ecr:PutImage", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-unrelated"), false);
+  for (const action of ["ecr:PutImage", "ecr:PutImageTagMutability", "ecr:PutImageScanningConfiguration", "ecr:PutLifecyclePolicy"]) {
+    assert.equal(boundaryAllows(action, "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"), true, action);
+    assert.equal(boundaryAllows(action, "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"), true, action);
+    assert.equal(boundaryAllows(action, "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-unrelated"), false, action);
+  }
   for (const action of ["iam:CreateRole", "sts:AssumeRole", "ecs:RunTask", "secretsmanager:GetSecretValue", "rds:ModifyDBInstance"]) {
     assert.equal(boundaryAllows(action, "*"), false, action);
   }

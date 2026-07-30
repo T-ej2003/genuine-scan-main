@@ -1,0 +1,168 @@
+name: Production Green Backend Image Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact 40-character merged main SHA to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish-and-verify:
+    runs-on: ubuntu-latest
+    environment: production-stage-b-image-publish
+    env:
+      AWS_REGION: eu-west-2
+      BACKEND_ECR_REPO: mscqr-backend
+      PLATFORMS: linux/amd64
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      COSIGN_EXPERIMENTAL: "1"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Require an exact merged main source
+        run: |
+          set -euo pipefail
+          node scripts/aws/stage-b-release-gate.mjs "$RELEASE_SHA"
+          test -z "$(git status --porcelain)"
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: ${{ vars.PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v4
+      - uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Publish fixed backend image and bind immutable digest
+        id: image
+        env:
+          OUTPUT_FILE: ${{ runner.temp }}/production-green-backend-image.jsonl
+        run: |
+          set -euo pipefail
+          : > "$OUTPUT_FILE"
+          ./scripts/aws/apply-ecr-repository-controls.sh backend
+          IMAGE_TAG="$RELEASE_SHA" PLATFORMS="$PLATFORMS" AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)" OUTPUT_FILE="$OUTPUT_FILE" ./scripts/aws/publish-ecs-images.sh backend
+          node --input-type=module - "$OUTPUT_FILE" "$GITHUB_ENV" "$GITHUB_OUTPUT" "$RELEASE_SHA" <<'NODE'
+          import fs from "node:fs";
+          const [file, envFile, outputFile, releaseSha] = process.argv.slice(2);
+          const records = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
+          if (records.length !== 1 || records[0].service !== "backend" || records[0].image_tag !== releaseSha || !records[0].image_ref?.includes("@sha256:")) throw new Error("Expected one immutable backend digest bound to the requested release SHA.");
+          fs.appendFileSync(envFile, `BACKEND_IMAGE=${records[0].image_ref}\n`);
+          fs.appendFileSync(outputFile, `image_ref=${records[0].image_ref}\n`);
+          NODE
+
+      - name: Pull and verify published backend image
+        run: |
+          set -euo pipefail
+          docker pull "$BACKEND_IMAGE"
+          REQUIRED_PLATFORMS="$PLATFORMS" ./scripts/aws/verify-image-manifest.sh "$BACKEND_IMAGE"
+          docker run --rm --entrypoint sh "$BACKEND_IMAGE" -c 'test -f /app/scripts/production-green-read-only-rls-canary.mjs'
+          echo "- Canary script: present at /app/scripts/production-green-read-only-rls-canary.mjs" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify exact source labels and runtime provenance
+        run: |
+          set -euo pipefail
+          docker image inspect "$BACKEND_IMAGE" > "$RUNNER_TEMP/backend-image-inspect.json"
+          node --input-type=module - "$RUNNER_TEMP/backend-image-inspect.json" "$RELEASE_SHA" <<'NODE'
+          import fs from "node:fs";
+          const [file, releaseSha] = process.argv.slice(2);
+          const image = JSON.parse(fs.readFileSync(file, "utf8"))[0];
+          const labels = image.Config.Labels || {};
+          const environment = new Map((image.Config.Env || []).map((entry) => entry.split(/=(.*)/s)));
+          if (labels["org.opencontainers.image.revision"] !== releaseSha || environment.get("GIT_SHA") !== releaseSha || environment.get("RELEASE_GIT_SHA") !== releaseSha) throw new Error("Published image provenance does not bind to the requested release SHA.");
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Gate 4 immutable image evidence\n\n- Digest ref: \`${process.env.BACKEND_IMAGE}\`\n- Entrypoint: \`${JSON.stringify(image.Config.Entrypoint)}\`\n- Cmd: \`${JSON.stringify(image.Config.Cmd)}\`\n- Source SHA: \`${releaseSha}\`\n`);
+          NODE
+
+      - name: Fail on CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.image_ref }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Record HIGH vulnerabilities for Gate 4 evaluation
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.image_ref }}
+          scanners: vuln
+          severity: HIGH
+          ignore-unfixed: true
+          format: json
+          output: ${{ runner.temp }}/trivy-high.json
+          exit-code: "0"
+
+      - name: Summarize HIGH vulnerability evidence
+        run: |
+          set -euo pipefail
+          node --input-type=module - "$RUNNER_TEMP/trivy-high.json" <<'NODE'
+          import fs from "node:fs";
+          const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const count = (report.Results || []).flatMap((result) => result.Vulnerabilities || []).filter(({ Severity }) => Severity === "HIGH").length;
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Gate 4 vulnerability evidence\n\n- HIGH findings recorded: ${count}\n- Gate 5 must evaluate this immutable-digest artifact before deployment.\n`);
+          NODE
+
+      - name: Fail on embedded image secrets
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.image_ref }}
+          scanners: secret
+          exit-code: "1"
+
+      - name: Inspect image configuration and history for credential values
+        run: |
+          set -euo pipefail
+          docker history --no-trunc --format '{{json .}}' "$BACKEND_IMAGE" > "$RUNNER_TEMP/backend-image-history.jsonl"
+          node --input-type=module - "$RUNNER_TEMP/backend-image-inspect.json" "$RUNNER_TEMP/backend-image-history.jsonl" <<'NODE'
+          import fs from "node:fs";
+          const [inspectFile, historyFile] = process.argv.slice(2);
+          const image = JSON.parse(fs.readFileSync(inspectFile, "utf8"))[0];
+          const history = fs.readFileSync(historyFile, "utf8");
+          const text = JSON.stringify({ env: image.Config.Env, labels: image.Config.Labels, entrypoint: image.Config.Entrypoint, cmd: image.Config.Cmd }) + history;
+          const patterns = [
+            /postgres(?:ql)?:\/\/[^\s:@]+:[^\s@]+@/i,
+            /\bAKIA[0-9A-Z]{16}\b/,
+            /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
+            /(?:password|secret|token|api[_-]?key)\s*=\s*["']?[^$<\s"']{8,}/i,
+          ];
+          if (patterns.some((pattern) => pattern.test(text))) throw new Error("Image configuration or history contains credential-shaped material.");
+          NODE
+
+      - name: Generate SBOM, sign, attest, and verify immutable digest
+        run: |
+          set -euo pipefail
+          docker save "$BACKEND_IMAGE" -o "$RUNNER_TEMP/backend.tar"
+          docker run --rm -v "$RUNNER_TEMP:/workspace:ro" anchore/syft:v1.38.0 /workspace/backend.tar -o spdx-json > "$RUNNER_TEMP/backend.spdx.json"
+          node --input-type=module - "$RUNNER_TEMP/backend.provenance.json" "$BACKEND_IMAGE" "$RELEASE_SHA" <<'NODE'
+          import fs from "node:fs";
+          const [file, imageRef, releaseSha] = process.argv.slice(2);
+          fs.writeFileSync(file, JSON.stringify({ buildType: "mscqr-release-provenance", subject: { imageRef }, invocation: { repository: process.env.GITHUB_REPOSITORY, sha: releaseSha, workflow: process.env.GITHUB_WORKFLOW, runId: process.env.GITHUB_RUN_ID }, metadata: { builtAt: new Date().toISOString(), platforms: ["linux/amd64"] } }, null, 2));
+          NODE
+          cosign sign --yes "$BACKEND_IMAGE"
+          cosign attest --yes --type spdxjson --predicate "$RUNNER_TEMP/backend.spdx.json" "$BACKEND_IMAGE"
+          cosign attest --yes --type mscqr-release-provenance --predicate "$RUNNER_TEMP/backend.provenance.json" "$BACKEND_IMAGE"
+          COSIGN_CERT_IDENTITY_REGEXP="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/production-green-backend-image-publish.yml@.*$" REQUIRED_PLATFORMS="$PLATFORMS" ./scripts/aws/verify-release-artifacts.sh "$BACKEND_IMAGE"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: production-green-backend-image-evidence
+          path: |
+            ${{ runner.temp }}/production-green-backend-image.jsonl
+            ${{ runner.temp }}/trivy-high.json
+            ${{ runner.temp }}/backend.spdx.json
+            ${{ runner.temp }}/backend.provenance.json
+            ${{ runner.temp }}/backend-image-inspect.json
+            ${{ runner.temp }}/backend-image-history.jsonl
+          if-no-files-found: error
+          retention-days: 90
