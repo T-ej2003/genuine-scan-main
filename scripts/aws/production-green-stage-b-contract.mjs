@@ -24,6 +24,7 @@ export const STAGE_B_MODES = Object.freeze([
   "full-rls-role-verify", "full-rls-admin-ownership", "full-rls-runtime-policy",
   "full-rls-verification", "full-rls-application-canary", "full-rls-rollback",
 ]);
+export const STAGE_B_TASK_TEMPLATE_KEYS = Object.freeze(["executor", "canary", "backend", "worker"]);
 export const STAGE_B_APPROVAL_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const STAGE_B_APPROVAL_SCHEMA_VERSION = 2;
 const imagePattern = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-(?:backend|worker|web)@sha256:[a-f0-9]{64}$/;
@@ -64,6 +65,14 @@ export const stageBApprovalSha256 = (approval) => sha256(canonicalStageBApproval
 const assumedRole = (role) => new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/${role}/[A-Za-z0-9+=,.@_-]{2,64}$`);
 const isDigest = (value) => /^[a-f0-9]{64}$/.test(value || "");
 const strictKeys = (value, expected) => Object.keys(value || {}).sort().join(",") === [...expected].sort().join(",");
+const taskDefinitionArn = (value) => /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/.test(value || "");
+
+export const hasCompleteStageBTaskMaps = (taskDefinitionArns, taskDefinitionTemplateHashes) =>
+  Boolean(taskDefinitionArns && typeof taskDefinitionArns === "object" && !Array.isArray(taskDefinitionArns)
+    && taskDefinitionTemplateHashes && typeof taskDefinitionTemplateHashes === "object" && !Array.isArray(taskDefinitionTemplateHashes)
+    && strictKeys(taskDefinitionArns, STAGE_B_MODES) && strictKeys(taskDefinitionTemplateHashes, STAGE_B_TASK_TEMPLATE_KEYS)
+    && Object.values(taskDefinitionArns).every(taskDefinitionArn)
+    && Object.values(taskDefinitionTemplateHashes).every(isDigest));
 
 export async function validateStageBApproval(raw, expected, { now = new Date(), verifySignature, allowExpiredRollback = false, requestedMode = "" } = {}) {
   let artifact;
@@ -93,10 +102,7 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
       || artifact.checkerIdentity === artifact.deployerIdentity
       || artifact.executorIdentity !== STAGE_B.executorRoleArn || !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)
       || issuedAt > now.getTime() + 300_000 || (expiresAt <= now.getTime() && !withinRollbackGrace) || expiresAt <= issuedAt || expiresAt - issuedAt > 7_200_000
-      || !templateHashes || typeof templateHashes !== "object" || Array.isArray(templateHashes)
-      || Object.values(templateHashes).some((value) => !isDigest(value))
-      || !taskDefinitionArns || typeof taskDefinitionArns !== "object" || Array.isArray(taskDefinitionArns)
-      || Object.values(taskDefinitionArns).some((value) => !/^arn:aws:ecs:eu-west-2:368992683803:task-definition\//.test(value || ""))
+      || !hasCompleteStageBTaskMaps(taskDefinitionArns, templateHashes)
       || Object.entries(imagePatterns).some(([field, pattern]) => !pattern.test(artifact[field] || ""))
       || !/^[A-Za-z0-9+/]+={0,2}$/.test(artifact.signatureBase64 || "")) {
     throw new Error("Stage B approval is invalid or expired.");

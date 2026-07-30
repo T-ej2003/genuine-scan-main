@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-const { assertBrokerRequest, STAGE_B, STAGE_B_MODES, validateStageBApproval } = await import(
+const { assertBrokerRequest, hasCompleteStageBTaskMaps, STAGE_B, STAGE_B_MODES, validateStageBApproval } = await import(
   process.env.AWS_LAMBDA_FUNCTION_NAME ? "./stage-b-contract.mjs" : "../../../../../scripts/aws/production-green-stage-b-contract.mjs"
 );
 
@@ -11,8 +11,8 @@ export function validateBrokerConfiguration(config) {
   if (!config || config.clusterArn !== STAGE_B.clusterArn || config.approvalSecretArn !== STAGE_B.approvalSecretArn
       || config.executorSecurityGroupId !== STAGE_B.executorSecurityGroupId || !Array.isArray(config.privateSubnetIds)
       || [...config.privateSubnetIds].sort().join(",") !== [...STAGE_B.privateSubnetIds].sort().join(",")
-      || !config.taskDefinitionArns || STAGE_B_MODES.some((mode) => !taskArnPattern.test(config.taskDefinitionArns[mode] || ""))
-      || !config.templateHashes || Object.values(config.templateHashes).some((value) => !/^[a-f0-9]{64}$/.test(value || ""))) {
+      || !hasCompleteStageBTaskMaps(config.taskDefinitionArns, config.templateHashes)
+      || STAGE_B_MODES.some((mode) => !taskArnPattern.test(config.taskDefinitionArns[mode] || ""))) {
     throw new Error("Stage B broker configuration is outside the reviewed contract.");
   }
   return config;

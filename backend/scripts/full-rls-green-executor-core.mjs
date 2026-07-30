@@ -225,7 +225,11 @@ const provisionProductionReadOnlyCanaryControl = (target, adminUrl) => {
       SELECT scope_name,scope_id FROM (VALUES ('canary','${own}'),('isolation','${foreign}')) AS control(scope_name,scope_id)
       WHERE EXISTS (SELECT 1 FROM public."Licensee" WHERE "id"='${own}')
         AND EXISTS (SELECT 1 FROM public."Licensee" WHERE "id"='${foreign}');
-    SELECT CASE WHEN (SELECT count(*) FROM app_rls.production_read_only_canary_control)=2 THEN 1 ELSE 1/0 END;
+    DO $$ BEGIN
+      IF (SELECT count(*) FROM app_rls.production_read_only_canary_control) <> 2 THEN
+        RAISE EXCEPTION 'production read-only canary control must contain exactly two approved scopes';
+      END IF;
+    END $$;
     ALTER TABLE app_rls.production_read_only_canary_control ENABLE ROW LEVEL SECURITY;
     ALTER TABLE app_rls.production_read_only_canary_control FORCE ROW LEVEL SECURITY;
     CREATE POLICY production_read_only_canary_control_select ON app_rls.production_read_only_canary_control FOR SELECT TO "${owner}"

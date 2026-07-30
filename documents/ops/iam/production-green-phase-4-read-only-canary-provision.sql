@@ -7,7 +7,12 @@
 \else
   \quit 3
 \endif
-SELECT CASE WHEN :'canary_credential_rotation' IN ('true', 'false') THEN 1 ELSE 1 / 0 END;
+SELECT set_config('mscqr.canary_credential_rotation', :'canary_credential_rotation', false);
+DO $$ BEGIN
+  IF current_setting('mscqr.canary_credential_rotation') NOT IN ('true', 'false') THEN
+    RAISE EXCEPTION 'canary_credential_rotation must be true or false';
+  END IF;
+END $$;
 SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mscqr_prod_rls_canary_read') THEN 'true' ELSE 'false' END AS canary_role_exists \gset
 \if :canary_role_exists
   \if :canary_credential_rotation
@@ -34,8 +39,13 @@ ALTER ROLE mscqr_prod_rls_canary_read SET lock_timeout = '1s';
 ALTER ROLE mscqr_prod_rls_canary_read SET idle_in_transaction_session_timeout = '10s';
 ALTER ROLE mscqr_prod_rls_canary_read SET default_transaction_read_only = on;
 SET ROLE mscqr_prd_rls_phase2_auth_owner;
-SELECT scope_id AS canary_scope FROM app_rls.production_read_only_canary_control WHERE scope_name='canary' \gset
-SELECT CASE WHEN :'canary_scope' ~* '^[0-9a-f-]{36}$' THEN 1 ELSE 1 / 0 END;
+SELECT COALESCE((SELECT scope_id FROM app_rls.production_read_only_canary_control WHERE scope_name='canary'), '') AS canary_scope \gset
+SELECT set_config('mscqr.canary_scope_candidate', :'canary_scope', false);
+DO $$ BEGIN
+  IF current_setting('mscqr.canary_scope_candidate') !~* '^[0-9a-f-]{36}$' THEN
+    RAISE EXCEPTION 'production read-only canary control did not provide a valid canary scope';
+  END IF;
+END $$;
 RESET ROLE;
 ALTER ROLE mscqr_prod_rls_canary_read SET mscqr.rls_canary_scope = :'canary_scope';
 SET ROLE mscqr_prd_rls_phase2_auth_owner;
