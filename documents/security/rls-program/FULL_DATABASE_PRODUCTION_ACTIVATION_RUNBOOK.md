@@ -15,26 +15,22 @@ Status: executable contract implemented; no AWS resource, secret value, producti
 
 ## Approval artifact
 
+Stage B activation accepts only the strict v2 artifact defined by
+`infra/aws/terraform/production-green-stage-b/approval-contract.schema.json`.
+`scripts/rls/create-production-rls-approval.mjs` remains a legacy v1 compatibility
+tool and must not be used for Stage B activation.
+
 The JSON object has exactly these fields:
 
 ```json
 {
-  "schemaVersion": 1,
-  "environment": "production",
-  "releaseSha": "<40 lowercase hex>",
-  "deploymentId": "phase2",
-  "greenDatabase": "mscqr_production_rls_green_phase2",
-  "sourceContractSha256": "<64 lowercase hex>",
-  "migrationSetDigest": "<64 lowercase hex>",
-  "approvalId": "<reviewed approval id>",
-  "ticketId": "<change ticket id>",
-  "administratorIdentity": "mscqr_prod_admin",
-  "independentCheckerIdentity": "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/<session>",
-  "issuedAt": "<ISO-8601>",
-  "expiresAt": "<ISO-8601, no more than two hours after issuedAt>",
-  "kmsKeyArn": "arn:aws:kms:eu-west-2:368992683803:key/<key id>",
-  "signatureAlgorithm": "RSASSA_PSS_SHA_256",
-  "signatureBase64": "<KMS signature>"
+  "schemaVersion": 2, "environment": "production", "account": "368992683803", "region": "eu-west-2",
+  "releaseSha": "<40 lowercase hex>", "sourceContractSha256": "<64 lowercase hex>", "migrationSetDigest": "<64 lowercase hex>", "packageChecksumSha256": "<64 lowercase hex>", "deploymentId": "phase2",
+  "greenDatabaseIdentifier": "mscqr-production-rls-green-phase2", "greenDatabaseName": "mscqr_production_rls_green_phase2", "administratorIdentity": "mscqr_prod_admin", "databaseSecurityGroupId": "sg-0703d3f227f35b81c", "executorSecurityGroupId": "sg-051a24aedff773761",
+  "backendImageDigest": "<immutable backend @sha256>", "workerImageDigest": "<immutable worker @sha256>", "executorImageDigest": "<immutable backend @sha256>", "canaryImageDigest": "<immutable backend @sha256>",
+  "taskDefinitionArns": { "<mode>": "<registered task-definition ARN>" }, "taskDefinitionTemplateHashes": { "<template>": "<64 lowercase hex>" }, "brokerAliasArn": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed", "brokerVersion": "<positive integer>",
+  "checkerIdentity": "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/<session>", "deployerIdentity": "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/<session>", "executorIdentity": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
+  "approvalId": "<reviewed approval id>", "ticketId": "<change ticket id>", "issuedAt": "<ISO-8601>", "expiresAt": "<ISO-8601, no more than two hours after issuedAt>", "nonce": "<UUID>", "signatureAlgorithm": "RSASSA_PSS_SHA_256", "signatureBase64": "<KMS signature>"
 }
 ```
 
@@ -125,17 +121,14 @@ AWS_REGION=eu-west-2 IMAGE_TAG='<approved-release-sha>' \
 ```
 
 Generate the source-contract and ordered migration digests locally.
-5. The independent checker assumes `mscqr-production-rls-independent-checker` with MFA and runs:
+5. The independent checker assumes `mscqr-production-rls-independent-checker` with MFA. It first performs an unsigned local validation, then explicitly signs the exact v2 input; the input contains every v2 field except `signatureBase64` and no unknown fields:
 
 ```sh
-node scripts/rls/create-production-rls-approval.mjs \
-  --output /secure/operator/production-rls-approval.json \
-  --release-sha '<approved-release-sha>' \
-  --deployment-id phase2 \
-  --approval-id '<approval-id>' \
-  --ticket-id '<change-id>' \
-  --kms-key-arn '<terraform-output-kms-key-arn>' \
-  --expires-at '<ISO-8601-within-two-hours>'
+node scripts/aws/create-production-green-stage-b-approval.mjs \
+  --input /secure/operator/production-rls-stage-b-approval-input.json
+node scripts/aws/create-production-green-stage-b-approval.mjs --sign \
+  --input /secure/operator/production-rls-stage-b-approval-input.json \
+  --output /secure/operator/production-rls-approval.json
 ```
 
 6. The checker reviews the artifact fields, stores it as the current value of the Terraform-created approval secret, and records only its approval ID and contract SHA256 in the ticket. Do not expose the signature.

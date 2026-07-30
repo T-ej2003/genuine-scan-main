@@ -76,7 +76,7 @@ function provisioningSql(passwordEnvironmentName) {
   const source = fs.readFileSync(PROVISIONING, "utf8");
   const password = `\\getenv canary_password ${passwordEnvironmentName}\nALTER ROLE ${ROLE} PASSWORD :'canary_password';\n\\unset canary_password`;
   assert.equal(source.match(/\\password mscqr_prod_rls_canary_read/g)?.length, 2);
-  return source.replaceAll(`\\password ${ROLE}`, password);
+  return source.replaceAll(`\\password ${ROLE}`, password).replaceAll("mscqr_production_rls_green_phase2", "mscqr_production");
 }
 
 test("PostgreSQL 18 password-auth contract isolates, rotates, and rolls back the production read-only canary", { timeout: 120_000 }, async () => {
@@ -95,8 +95,6 @@ test("PostgreSQL 18 password-auth contract isolates, rotates, and rolls back the
   const initial = "MSCQR_GATE2_INITIAL_PASSWORD";
   const rotated = "MSCQR_GATE2_ROTATED_PASSWORD";
   const provisionArgs = (rotation) => [
-    `-v canary_tenant_id=${OWN_TENANT}`,
-    `-v foreign_tenant_id=${FOREIGN_TENANT}`,
     `-v canary_credential_rotation=${rotation}`,
     "-At",
   ];
@@ -106,13 +104,16 @@ test("PostgreSQL 18 password-auth contract isolates, rotates, and rolls back the
     assert.equal(await compose(env, ["port", SERVICE, "5432"]), `${endpoint.hostname}:${endpoint.port}`);
 
     await psql(env, admin, "postgres", `
-      CREATE ROLE mscqr_prod_auth_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
-      CREATE SCHEMA app_rls AUTHORIZATION mscqr_prod_auth_owner;
-      CREATE TABLE public."Batch" ("id" text PRIMARY KEY, "licenseeId" text NOT NULL);
-      ALTER TABLE public."Batch" OWNER TO mscqr_prod_auth_owner;
-      ALTER TABLE public."Batch" ENABLE ROW LEVEL SECURITY;
-      ALTER TABLE public."Batch" FORCE ROW LEVEL SECURITY;
-      INSERT INTO public."Batch" VALUES ('same', '${OWN_TENANT}'), ('foreign', '${FOREIGN_TENANT}');
+      CREATE ROLE mscqr_prd_rls_phase2_auth_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+      GRANT mscqr_prd_rls_phase2_auth_owner TO postgres;
+      CREATE SCHEMA app_rls AUTHORIZATION mscqr_prd_rls_phase2_auth_owner;
+      SET ROLE mscqr_prd_rls_phase2_auth_owner;
+      CREATE TABLE app_rls.production_read_only_canary_control (scope_name text PRIMARY KEY CHECK (scope_name IN ('canary','isolation')), scope_id text NOT NULL UNIQUE);
+      INSERT INTO app_rls.production_read_only_canary_control VALUES ('canary','${OWN_TENANT}'),('isolation','${FOREIGN_TENANT}');
+      ALTER TABLE app_rls.production_read_only_canary_control ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE app_rls.production_read_only_canary_control FORCE ROW LEVEL SECURITY;
+      CREATE POLICY production_read_only_canary_control_select ON app_rls.production_read_only_canary_control FOR SELECT TO mscqr_prd_rls_phase2_auth_owner USING (current_user='mscqr_prd_rls_phase2_auth_owner' AND (session_user='postgres' OR (session_user='mscqr_prod_rls_canary_read' AND scope_id=current_setting('mscqr.rls_canary_scope',true))));
+      RESET ROLE;
     `);
 
     await psql(env, admin, "postgres", provisioningSql(initial), provisionArgs("false"));
@@ -123,15 +124,16 @@ test("PostgreSQL 18 password-auth contract isolates, rotates, and rolls back the
     assert.equal(await psql(env, admin, "postgres", `SELECT (SELECT count(*) FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner WHERE r.rolname='${ROLE}') + (SELECT count(*) FROM pg_class c JOIN pg_roles r ON r.oid=c.relowner WHERE r.rolname='${ROLE}');`, ["-At"]), "0");
 
     for (const sql of [
-      `INSERT INTO public."Batch" VALUES ('blocked', '${OWN_TENANT}');`,
-      `UPDATE public."Batch" SET "licenseeId"='${FOREIGN_TENANT}' WHERE "id"='same';`,
-      `DELETE FROM public."Batch" WHERE "id"='same';`,
-      `TRUNCATE public."Batch";`,
-      "CREATE TABLE public.gate2_forbidden(id integer);",
-      `ALTER TABLE public."Batch" ADD COLUMN forbidden integer;`,
-      `DROP TABLE public."Batch";`,
-      `GRANT SELECT ON public."Batch" TO PUBLIC;`,
-      `REVOKE SELECT ON public."Batch" FROM PUBLIC;`,
+      "SELECT * FROM app_rls.production_read_only_canary_control;",
+      `INSERT INTO app_rls.production_read_only_canary_control VALUES ('blocked', '${OWN_TENANT}');`,
+      `UPDATE app_rls.production_read_only_canary_control SET scope_id='${FOREIGN_TENANT}' WHERE scope_name='canary';`,
+      `DELETE FROM app_rls.production_read_only_canary_control WHERE scope_name='canary';`,
+      `TRUNCATE app_rls.production_read_only_canary_control;`,
+      "CREATE TABLE app_rls.gate2_forbidden(id integer);",
+      `ALTER TABLE app_rls.production_read_only_canary_control ADD COLUMN forbidden integer;`,
+      `DROP TABLE app_rls.production_read_only_canary_control;`,
+      `GRANT SELECT ON app_rls.production_read_only_canary_control TO PUBLIC;`,
+      `REVOKE SELECT ON app_rls.production_read_only_canary_control FROM PUBLIC;`,
       "SET ROLE mscqr_prod_auth_owner;",
       "CREATE ROLE gate2_forbidden;",
     ]) await expectStatementFailure(env, initial, sql);
@@ -144,14 +146,14 @@ test("PostgreSQL 18 password-auth contract isolates, rotates, and rolls back the
     await expectAuthenticationFailure(env, initial);
     assert.equal(await psql(env, rotated, ROLE, "SELECT 1;", ["-At"]), "1");
 
-    const source = fs.readFileSync(PROVISIONING, "utf8");
+    const source = fs.readFileSync(PROVISIONING, "utf8").replaceAll("mscqr_production_rls_green_phase2", "mscqr_production");
     const rollback = source.match(/^-- Rollback never[^:]+:\s*(.+)$/m)?.[1].split(";").map((statement) => statement.trim()).filter(Boolean).join(";\n") + ";";
     assert.match(rollback, /DROP ROLE IF EXISTS mscqr_prod_rls_canary_read/);
     await psql(env, admin, "postgres", rollback);
-    assert.equal(await psql(env, admin, "postgres", `SELECT to_regclass('public."Batch"') IS NOT NULL, to_regnamespace('app_rls') IS NOT NULL, (SELECT count(*) FROM public."Batch");`, ["-At", "-F", "'|'"]), "t|t|2");
+    assert.equal(await psql(env, admin, "postgres", `SELECT to_regclass('app_rls.production_read_only_canary_control') IS NOT NULL, to_regnamespace('app_rls') IS NOT NULL, (SELECT count(*) FROM app_rls.production_read_only_canary_control);`, ["-At", "-F", "'|'"]), "t|t|2");
     assert.equal(await psql(env, admin, "postgres", `SELECT count(*) FROM pg_roles WHERE rolname='${ROLE}';`, ["-At"]), "0");
     assert.equal(await psql(env, admin, "postgres", "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='app_rls' AND p.proname='production_read_only_canary_probe';", ["-At"]), "0");
-    assert.equal(await psql(env, admin, "postgres", "SELECT count(*) FROM pg_policy WHERE polname='production_read_only_canary_batch_select';", ["-At"]), "0");
+    assert.equal(await psql(env, admin, "postgres", "SELECT count(*) FROM pg_policy WHERE polname='production_read_only_canary_control_select';", ["-At"]), "1");
 
     if (traces.some((trace) => secrets.some((secret) => trace.includes(secret)))) throw new Error("Gate 2 subprocess output exposed credential material.");
   } finally {

@@ -6,6 +6,7 @@ import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { GetSecretValueCommand, PutSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
+import { PRODUCTION_GREEN_CANARY_IDS } from "./production-green-canary-provision.mjs";
 
 export const GREEN_EXECUTOR_MODES = Object.freeze([
   "full-rls-capability-preflight",
@@ -211,6 +212,28 @@ async function applySchemaMigrations(target, secretsManager) {
   }
 }
 
+const provisionProductionReadOnlyCanaryControl = (target, adminUrl) => {
+  if (target.environment !== "production") return;
+  const owner = roleName(target, "auth_owner");
+  const canary = "mscqr_prod_rls_canary_read";
+  const own = PRODUCTION_GREEN_CANARY_IDS.licensee;
+  const foreign = PRODUCTION_GREEN_CANARY_IDS.isolationLicensee;
+  query(targetUrl(target, adminUrl), `BEGIN;
+    SET LOCAL ROLE "${owner}";
+    CREATE TABLE app_rls.production_read_only_canary_control (scope_name text PRIMARY KEY CHECK (scope_name IN ('canary','isolation')), scope_id text NOT NULL UNIQUE CHECK (scope_id ~* '^[0-9a-f-]{36}$'));
+    INSERT INTO app_rls.production_read_only_canary_control(scope_name,scope_id)
+      SELECT scope_name,scope_id FROM (VALUES ('canary','${own}'),('isolation','${foreign}')) AS control(scope_name,scope_id)
+      WHERE EXISTS (SELECT 1 FROM public."Licensee" WHERE "id"='${own}')
+        AND EXISTS (SELECT 1 FROM public."Licensee" WHERE "id"='${foreign}');
+    SELECT CASE WHEN (SELECT count(*) FROM app_rls.production_read_only_canary_control)=2 THEN 1 ELSE 1/0 END;
+    ALTER TABLE app_rls.production_read_only_canary_control ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE app_rls.production_read_only_canary_control FORCE ROW LEVEL SECURITY;
+    CREATE POLICY production_read_only_canary_control_select ON app_rls.production_read_only_canary_control FOR SELECT TO "${owner}"
+      USING (current_user='${owner}' AND (session_user='${target.administrator}' OR (session_user='${canary}' AND scope_id=current_setting('mscqr.rls_canary_scope',true))));
+    RESET ROLE;
+  COMMIT;`, "production-read-only-canary-control");
+};
+
 const catalogueFingerprint = (target, adminUrl) => sha256(JSON.stringify({
   databasePresent: databaseExists(target, adminUrl),
   managedRoleCount: managedRoleCount(target, adminUrl),
@@ -323,6 +346,7 @@ export async function executeFullRlsGreenMode(target, {
     if (!databaseExists(target, adminUrl)) throw new Error("Green database is unavailable for the requested package phase.");
     if (mode === "full-rls-admin-ownership") await applySchemaMigrations(target, secretsManager);
     runFile(targetUrl(target, adminUrl), fixedModeFiles[mode], mode);
+    if (mode === "full-rls-admin-ownership") provisionProductionReadOnlyCanaryControl(target, adminUrl);
   }
   const value = receipt({
     target,

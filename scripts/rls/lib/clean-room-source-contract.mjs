@@ -52,6 +52,7 @@ export const cleanRoomSourcePaths = [...new Set([
   "infra/aws/terraform/outputs.tf",
   "infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs",
   "scripts/aws/production-green-stage-b-contract.mjs",
+  "scripts/aws/create-production-green-stage-b-approval.mjs",
   "scripts/aws/apply-production-full-rls-release.mjs",
   "scripts/aws/deploy-ecs-service.sh",
   "scripts/aws/publish-ecs-images.sh",

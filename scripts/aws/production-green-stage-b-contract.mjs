@@ -48,7 +48,7 @@ export const assertImmutableImage = (value, field = "image") => {
   return value;
 };
 
-const approvalFields = Object.freeze([
+export const STAGE_B_APPROVAL_FIELDS = Object.freeze([
   "account", "approvalId", "backendImageDigest", "brokerAliasArn", "brokerVersion", "canaryImageDigest",
   "administratorIdentity", "checkerIdentity", "databaseSecurityGroupId", "deployerIdentity", "deploymentId", "environment",
   "executorIdentity", "executorImageDigest", "executorSecurityGroupId", "expiresAt", "greenDatabaseIdentifier", "greenDatabaseName",
@@ -57,7 +57,7 @@ const approvalFields = Object.freeze([
 ]);
 
 export const canonicalStageBApproval = (approval) => canonicalJson(Object.fromEntries(
-  approvalFields.map((key) => [key, approval[key]])
+  STAGE_B_APPROVAL_FIELDS.map((key) => [key, approval[key]])
 ));
 export const stageBApprovalSha256 = (approval) => sha256(canonicalStageBApproval(approval));
 
@@ -69,7 +69,7 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
   let artifact;
   try { artifact = typeof raw === "string" ? JSON.parse(raw) : raw; } catch { throw new Error("Stage B approval is not valid JSON."); }
   if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)
-      || !strictKeys(artifact, [...approvalFields, "signatureBase64"])) {
+      || !strictKeys(artifact, [...STAGE_B_APPROVAL_FIELDS, "signatureBase64"])) {
     throw new Error("Stage B approval fields do not match schema version 2.");
   }
   const issuedAt = Date.parse(artifact.issuedAt);
@@ -90,6 +90,7 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
       || artifact.brokerAliasArn !== STAGE_B.brokerAliasArn || !/^[1-9][0-9]*$/.test(String(artifact.brokerVersion || ""))
       || !assumedRole("mscqr-production-rls-independent-checker").test(artifact.checkerIdentity || "")
       || !assumedRole("mscqr-production-release-deployer").test(artifact.deployerIdentity || "")
+      || artifact.checkerIdentity === artifact.deployerIdentity
       || artifact.executorIdentity !== STAGE_B.executorRoleArn || !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)
       || issuedAt > now.getTime() + 300_000 || (expiresAt <= now.getTime() && !withinRollbackGrace) || expiresAt <= issuedAt || expiresAt - issuedAt > 7_200_000
       || !templateHashes || typeof templateHashes !== "object" || Array.isArray(templateHashes)
@@ -114,7 +115,15 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
     message: Buffer.from(canonicalStageBApproval(artifact)),
     signature: Buffer.from(artifact.signatureBase64, "base64"),
   })) throw new Error("Stage B approval signature verification failed.");
-  return { approval: Object.fromEntries(approvalFields.map((field) => [field, artifact[field]])), approvalContractSha256: stageBApprovalSha256(artifact) };
+  return { approval: Object.fromEntries(STAGE_B_APPROVAL_FIELDS.map((field) => [field, artifact[field]])), approvalContractSha256: stageBApprovalSha256(artifact) };
+}
+
+export async function validateStageBApprovalPayload(payload, expected, options = {}) {
+  return validateStageBApproval(
+    { ...payload, signatureBase64: "AA==" },
+    expected,
+    { ...options, verifySignature: async () => true },
+  );
 }
 
 export const assertBrokerRequest = (event) => {

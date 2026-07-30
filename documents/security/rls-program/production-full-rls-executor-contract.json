@@ -155,7 +155,7 @@
   },
   "firstUserOnboarding": {
     "emptyGreenSupported": true,
-    "bootstrap": "The brokered ownership phase creates only two marked pre-traffic canary administrators plus an isolation-control tenant from approved secret injection; it refuses unrelated users and records approval, ticket, and checker attribution.",
+    "bootstrap": "The brokered ownership phase creates only two marked pre-traffic canary administrators plus an isolation-control tenant and a FORCE-RLS green-only read-only-canary control object from approved secret injection; it refuses unrelated users and records approval, ticket, and checker attribution.",
     "sequence": ["platform-admin-invite", "licensee-admin-invite", "password-setup", "email-verification-if-required", "mfa-enrollment", "login", "refresh", "auth-me", "dashboard-stats", "qr-stats", "tenant-isolation", "logout"],
     "credentialSource": "approved-setup-link-or-secret-injection",
     "credentialsPrinted": false,
