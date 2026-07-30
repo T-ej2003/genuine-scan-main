@@ -95,7 +95,6 @@ locals {
     worker           = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-worker-candidate.json"))))
     executor         = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-activation-executor.json"))))
     canary           = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-application-canary.json"))))
-    read_only_canary = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-read-only-rls-canary.json"))))
   }
   broker_images = {
     backendImageDigest  = var.backend_image
