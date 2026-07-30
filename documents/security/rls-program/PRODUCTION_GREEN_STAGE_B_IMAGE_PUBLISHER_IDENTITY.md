@@ -43,7 +43,9 @@ it requires protected `main` deployment branches, no reviewer or wait timer, no 
 access, and only the non-secret `PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE` variable. It needs no AWS
 credential secrets. Protected-main ancestry, exact-SHA validation, GitHub OIDC, the isolated ECR-only
 publisher role and permissions boundary, immutable digests, scanning, signing, SBOM, and provenance remain
-the publication controls. The live GitHub environment must match this source-controlled solo-operator contract.
+the publication controls. Both publisher workflows fail visibly unless `github.actor` is exactly `T-ej2003`
+before they can enter the environment-bound job or request OIDC. The live GitHub environment must match this
+source-controlled solo-operator contract.
 Only the reviewed publisher workflow may reference this environment. Another workflow may
 do so only through a reviewed change merged to protected main; environment approval and
 the exact ECR-only IAM role remain the operational boundary. Existing repository OIDC
