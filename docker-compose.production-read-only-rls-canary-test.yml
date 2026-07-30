@@ -1,0 +1,35 @@
+name: mscqr-prod-read-only-rls-canary-gate2
+
+services:
+  canary-postgres:
+    image: postgres:18.4
+    container_name: mscqr-prod-read-only-rls-canary-gate2-postgres
+    restart: "no"
+    environment:
+      POSTGRES_DB: mscqr_production
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${MSCQR_GATE2_ADMIN_PASSWORD:?required}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+      MSCQR_GATE2_ADMIN_PASSWORD: ${MSCQR_GATE2_ADMIN_PASSWORD:?required}
+      MSCQR_GATE2_INITIAL_PASSWORD: ${MSCQR_GATE2_INITIAL_PASSWORD:?required}
+      MSCQR_GATE2_ROTATED_PASSWORD: ${MSCQR_GATE2_ROTATED_PASSWORD:?required}
+    ports:
+      - "127.0.0.1:55435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d mscqr_production"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+    volumes:
+      - canary-data:/var/lib/postgresql
+    networks:
+      - canary-network
+
+volumes:
+  canary-data:
+    name: mscqr-prod-read-only-rls-canary-gate2-data
+
+networks:
+  canary-network:
+    name: mscqr-prod-read-only-rls-canary-gate2-network

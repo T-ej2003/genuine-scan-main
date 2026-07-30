@@ -57,4 +57,4 @@ DO $$ BEGIN
 END $$;
 COMMIT;
 
--- Rollback never prints or changes the credential: REVOKE EXECUTE ON FUNCTION app_rls.production_read_only_canary_probe() FROM mscqr_prod_rls_canary_read; DROP POLICY IF EXISTS production_read_only_canary_batch_select ON public."Batch"; DROP FUNCTION IF EXISTS app_rls.production_read_only_canary_probe(); REVOKE CONNECT ON DATABASE mscqr_production FROM mscqr_prod_rls_canary_read; DROP ROLE IF EXISTS mscqr_prod_rls_canary_read;
+-- Rollback never prints or changes the credential: REVOKE EXECUTE ON FUNCTION app_rls.production_read_only_canary_probe() FROM mscqr_prod_rls_canary_read; DROP POLICY IF EXISTS production_read_only_canary_batch_select ON public."Batch"; DROP FUNCTION IF EXISTS app_rls.production_read_only_canary_probe(); REVOKE USAGE ON SCHEMA app_rls FROM mscqr_prod_rls_canary_read; REVOKE CONNECT ON DATABASE mscqr_production FROM mscqr_prod_rls_canary_read; DROP ROLE IF EXISTS mscqr_prod_rls_canary_read;
