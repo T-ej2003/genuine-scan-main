@@ -26,7 +26,7 @@ variable "worker_image" { type = string }
 variable "executor_image" { type = string }
 variable "canary_image" { type = string }
 variable "read_only_canary_image" { type = string }
-variable "read_only_canary_database_secret_arn" { type = string }
+variable "stage_a_read_only_canary_database_secret_arn" { type = string }
 variable "log_retention_days" {
   type    = number
   default = 30
@@ -101,7 +101,7 @@ check "immutable_images" {
 
 check "read_only_canary_secret" {
   assert {
-    condition     = can(regex("^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-[A-Za-z0-9]+$", var.read_only_canary_database_secret_arn))
-    error_message = "Phase 4 requires the exact dedicated read-only canary database secret ARN."
+    condition     = can(regex("^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-[A-Za-z0-9]+$", var.stage_a_read_only_canary_database_secret_arn))
+    error_message = "Phase 4 requires the exact dedicated read-only canary database secret ARN from Stage A prerequisites."
   }
 }

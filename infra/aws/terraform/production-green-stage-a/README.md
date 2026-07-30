@@ -36,7 +36,8 @@ DNS paths required by the later Stage B executor.
 
 `manage_master_user_password = true` asks RDS—not Terraform—to create the
 KMS-encrypted administrator secret when the database is created. It is separate
-from the 14 empty application/runtime secret handles. Terraform exposes only
+from the 15 empty application/runtime secret handles, including the dedicated
+Phase 4 read-only-canary database URL handle. Terraform exposes only
 the ARN through `rds_managed_administrator_secret`; neither application runtime
 roles nor plans, logs, Git, or receipts may receive the password value. Only
 the later approved broker/executor administration path may use it.
@@ -48,7 +49,7 @@ green canaries before any backend/worker cutover. Frontend remains
 `mscqr-frontend:20`.
 ## Stage B ownership boundary
 
-Stage A exclusively owns the green database and executor security groups, the executor and broker log groups, the executor and broker roles, approval resources, and runtime-role secret resources. Its `stage_b_prerequisites` output is the only supported handoff to the Production Green Stage B root.
+Stage A exclusively owns the green database and executor security groups, the executor and broker log groups, the executor and broker roles, approval resources, runtime-role secret resources, and the empty Phase 4 read-only-canary database URL handle. Its `stage_b_prerequisites` output is the only supported handoff to the Production Green Stage B root.
 
 The executor security group has no default egress. Stage A permits only PostgreSQL to the green database security group, HTTPS to its private ECR API, ECR Docker, CloudWatch Logs, Secrets Manager, and KMS interface endpoints and the regional S3 prefix list, and TCP/UDP DNS to the exact VPC resolver `/32`. Stage B must consume this group and must not recreate or mutate its network rules.
 
