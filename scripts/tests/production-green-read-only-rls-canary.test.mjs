@@ -46,7 +46,8 @@ test("provisioning and task definition preserve the dedicated read-only boundary
   const terraform = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
   assert.match(sql, /LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS/);
   assert.match(sql, /\\password mscqr_prod_rls_canary_read/); assert.match(sql, /\\if :\{\?canary_credential_rotation\}/);
-  assert.match(sql, /canary_credential_rotation' IN \('true', 'false'\)/); assert.match(sql, /Existing canary credential preserved/);
+  assert.match(sql, /set_config\('mscqr\.canary_credential_rotation', :'canary_credential_rotation', false\)/); assert.match(sql, /RAISE EXCEPTION 'canary_credential_rotation must be true or false'/); assert.match(sql, /Existing canary credential preserved/);
+  assert.doesNotMatch(sql, /1\s*\/\s*0/);
   assert.doesNotMatch(sql, /PASSWORD\s+['"][^'"]+['"]/i);
   assert.match(sql, /default_transaction_read_only = on/); assert.match(sql, /production_read_only_canary_control/);
   assert.doesNotMatch(sql, /\bBatch\b|canary_tenant_id|foreign_tenant_id|fixture/i);
@@ -64,5 +65,7 @@ test("provisioning and task definition preserve the dedicated read-only boundary
   const executor = fs.readFileSync("backend/scripts/full-rls-green-executor-core.mjs", "utf8");
   assert.match(executor, /production_read_only_canary_control/);
   assert.match(executor, /production_read_only_canary_control_select/);
+  assert.match(executor, /RAISE EXCEPTION 'production read-only canary control must contain exactly two approved scopes'/);
+  assert.doesNotMatch(executor, /1\s*\/\s*0/);
   assert.doesNotMatch(executor, /Batch/);
 });

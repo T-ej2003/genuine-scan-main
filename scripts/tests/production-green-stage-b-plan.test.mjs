@@ -90,6 +90,8 @@ test("broker Terraform runtime variables exactly cover runtimeConfig and publish
   assert.match(main, /function_version\s*=\s*aws_lambda_function\.broker\.version/);
   assert.doesNotMatch(main, /function_version\s*=\s*"\$LATEST"/);
   assert.match(main, /qualifier\s*=\s*aws_lambda_alias\.reviewed\.name/);
+  const hashes = main.match(/broker_template_hashes\s*=\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
+  assert.deepEqual([...hashes.matchAll(/^\s*(\w+)\s*=/gm)].map((match) => match[1]), ["backend", "worker", "executor", "canary"]);
 });
 
 test("broker and executor IAM match their exact AWS SDK writes and launch boundary", () => {

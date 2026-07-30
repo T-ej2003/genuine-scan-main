@@ -39,6 +39,21 @@ test("v2 creator rejects unknown or missing fields, invalid bindings, signer equ
   ]) await assert.rejects(() => prepareStageBApproval(candidate, { now }));
 });
 
+test("v2 creator requires complete exact task-definition and template-hash maps", async () => {
+  const templateHashes = stageBTemplateHashes();
+  const missingArn = { ...taskDefinitionArns }; delete missingArn["full-rls-verification"];
+  const missingHash = { ...templateHashes }; delete missingHash.backend;
+  await assert.doesNotReject(() => prepareStageBApproval(input(), { now }));
+  for (const candidate of [
+    input({ taskDefinitionArns: missingArn }),
+    input({ taskDefinitionTemplateHashes: missingHash }),
+    input({ taskDefinitionArns: { ...taskDefinitionArns, extra: taskDefinitionArns["full-rls-verification"] } }),
+    input({ taskDefinitionTemplateHashes: { ...templateHashes, extra: templateHashes.backend } }),
+    input({ taskDefinitionTemplateHashes: { ...Object.fromEntries(Object.entries(templateHashes).filter(([key]) => key !== "backend")), "full-rls-verification": templateHashes.backend } }),
+    input({ taskDefinitionArns: { ...taskDefinitionArns, "full-rls-verification": templateHashes.backend } }),
+  ]) await assert.rejects(() => prepareStageBApproval(candidate, { now }));
+});
+
 test("explicit signing validates the v2 artifact through the broker validator without KMS in tests", async () => {
   const { artifact } = await signStageBApproval(input(), { now, caller: async () => ({ Arn: checkerIdentity }), sign, verifySignature });
   const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: STAGE_B.privateSubnetIds, taskDefinitionArns, templateHashes: stageBTemplateHashes(), approvalExpected: { releaseSha: artifact.releaseSha, sourceContractSha256: artifact.sourceContractSha256, migrationSetDigest: artifact.migrationSetDigest, packageChecksumSha256: artifact.packageChecksumSha256, deploymentId: artifact.deploymentId, approvalId: artifact.approvalId, ticketId: artifact.ticketId, images: { backendImageDigest: artifact.backendImageDigest, workerImageDigest: artifact.workerImageDigest, executorImageDigest: artifact.executorImageDigest, canaryImageDigest: artifact.canaryImageDigest }, taskDefinitionArns }, images: { backendImageDigest: artifact.backendImageDigest, workerImageDigest: artifact.workerImageDigest, executorImageDigest: artifact.executorImageDigest, canaryImageDigest: artifact.canaryImageDigest } };

@@ -102,6 +102,10 @@ test("PostgreSQL 18 password-auth contract isolates, rotates, and rolls back the
   try {
     await compose(env, ["up", "--detach", "--wait", "--wait-timeout", "60"]);
     assert.equal(await compose(env, ["port", SERVICE, "5432"]), `${endpoint.hostname}:${endpoint.port}`);
+    await assert.rejects(
+      () => psql(env, admin, "postgres", provisioningSql(initial), provisionArgs("invalid")),
+      /canary_credential_rotation must be true or false/,
+    );
 
     await psql(env, admin, "postgres", `
       CREATE ROLE mscqr_prd_rls_phase2_auth_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;

@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { canonicalSha256, assertImmutableImage, STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
+import { canonicalSha256, assertImmutableImage, STAGE_B, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS } from "./production-green-stage-b-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b/task-definitions";
-const files = Object.freeze({ executor: "green-activation-executor.json", canary: "green-application-canary.json", backend: "green-backend-candidate.json", worker: "green-worker-candidate.json" });
+const files = Object.freeze(Object.fromEntries(STAGE_B_TASK_TEMPLATE_KEYS.map((key) => [key, {
+  executor: "green-activation-executor.json", canary: "green-application-canary.json", backend: "green-backend-candidate.json", worker: "green-worker-candidate.json",
+}[key]])));
 const imagePatterns = Object.freeze({
   backend: /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/,
   worker: /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-worker@sha256:[a-f0-9]{64}$/,
