@@ -16,6 +16,34 @@ permissions:
   contents: read
 
 jobs:
+  stage-b-publisher-terraform:
+    name: Stage B publisher Terraform validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Validate locked Stage B publisher Terraform roots
+        shell: bash
+        run: |
+          set -euo pipefail
+          roots=(
+            infra/aws/terraform/production-green-stage-b-image-publisher
+            infra/aws/terraform/production-green-stage-b-publisher-bootstrap
+          )
+          terraform version
+          for root in "${roots[@]}"; do
+            test -f "$root/.terraform.lock.hcl"
+            git diff --exit-code -- "$root/.terraform.lock.hcl"
+            terraform -chdir="$root" init -backend=false -input=false -lockfile=readonly
+            terraform -chdir="$root" validate -no-color
+            git diff --exit-code -- "$root/.terraform.lock.hcl"
+          done
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 20

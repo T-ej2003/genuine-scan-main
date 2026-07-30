@@ -38,9 +38,10 @@ claims match:
   `repo:T-ej2003/genuine-scan-main:environment:production-stage-b-image-publish`.
 
 Create the protected `production-stage-b-image-publish` environment outside Terraform.
-Its contract requires protected `main` deployment branches, at least one required reviewer,
-no unprotected branch or tag access, and only the non-secret
+Its contract requires protected `main` deployment branches, required reviewer `T-ej2003`,
+prevent-self-review where GitHub supports it, no unprotected branch or tag access, and only the non-secret
 `PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE` variable. It needs no AWS credential secrets.
+The live GitHub environment must match this source-controlled reviewer contract.
 Only the reviewed publisher workflow may reference this environment. Another workflow may
 do so only through a reviewed change merged to protected main; environment approval and
 the exact ECR-only IAM role remain the operational boundary. Existing repository OIDC
@@ -61,8 +62,8 @@ protected GitHub `production-stage-b-image-publish` environment variable:
 
 `PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE=<publisher_role_arn>`
 
-Do not set a repository-level duplicate, and do not change environment reviewers, wait
-timers, or branch controls. Verify a fixed-SHA dispatch can assume the role only through the
+Do not set a repository-level duplicate, and preserve the source-controlled reviewer, wait
+timer, and branch controls. Verify a fixed-SHA dispatch can assume the role only through the
 reusable job, then inspect all four immutable ECR digest labels and signed attestations.
 
 Rollback is a separately approved destroy of this isolated Terraform role followed by
