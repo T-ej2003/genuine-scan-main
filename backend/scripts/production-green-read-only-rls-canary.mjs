@@ -33,7 +33,7 @@ const validRuntimeEnvironment = (env) =>
 export function validateConfiguration({ env = process.env, argv = process.argv.slice(2) } = {}) {
   if (argv.length || unexpectedEnvironment(env).length || !validRuntimeEnvironment(env)) throw new Error("Canary input is outside the fixed contract.");
   const url = new URL(String(env.RLS_CANARY_DATABASE_URL || ""));
-  if (!/^postgres(?:ql)?:$/.test(url.protocol) || !url.hostname || !url.password || url.username !== ROLE || url.pathname !== "/mscqr_production" || url.hash || url.searchParams.size !== 2 || url.searchParams.get("sslmode") !== "require" || url.searchParams.get("application_name") !== APPLICATION_NAME) {
+  if (!/^postgres(?:ql)?:$/.test(url.protocol) || !url.hostname || !url.password || url.username !== ROLE || url.pathname !== "/mscqr_production_rls_green_phase2" || url.hash || url.searchParams.size !== 2 || url.searchParams.get("sslmode") !== "require" || url.searchParams.get("application_name") !== APPLICATION_NAME) {
     throw new Error("Canary database endpoint is outside the fixed contract.");
   }
   return url.toString();
