@@ -20,6 +20,15 @@ test("Stage B plan wrapper rejects deletes, services, traffic, databases, secret
   ]) assert.throws(() => assertStageBPlan({ resource_changes: [item] }), /rejected|tag/);
 });
 
+test("candidate object-storage policy keeps existing task keys and excludes only the read-only canary", () => {
+  const main = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  const expected = ["backend", "worker", "canary"];
+  assert.match(main, /for_each = \{ for key, role in aws_iam_role\.task : key => role if key != "read_only_canary" \}/);
+  const plan = { resource_changes: expected.map((key) => ({ address: `aws_iam_role_policy.candidate_object_storage[\"${key}\"]`, type: "aws_iam_role_policy", change: { actions: ["no-op"], after: {} } })) };
+  assert.doesNotThrow(() => assertStageBPlan(plan));
+  assert.equal(plan.resource_changes.some(({ address }) => address.includes("read_only_canary")), false);
+});
+
 test("Stage B Terraform root is control-plane-only and binds four digest images", () => {
   const root = "infra/aws/terraform/production-green-stage-b";
   const main = fs.readFileSync(`${root}/main.tf`, "utf8");

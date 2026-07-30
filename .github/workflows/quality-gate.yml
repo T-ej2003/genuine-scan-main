@@ -45,6 +45,9 @@ jobs:
       - name: RF7 application and dependency contracts
         run: npm run test:rf7:static
 
+      - name: Production read-only RLS canary PostgreSQL contract
+        run: npm run test:production-green-read-only-rls-canary:integration
+
       - name: Security and release guardrails
         env:
           REQUIRE_RELEASE_EVIDENCE_REFS: ${{ github.ref == 'refs/heads/main' }}

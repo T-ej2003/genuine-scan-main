@@ -16,24 +16,27 @@ locals {
   }
   modes = toset(keys(local.confirmations))
   stage_b_logs = {
-    backend = "/ecs/mscqr-production/rls-green-backend"
-    worker  = "/ecs/mscqr-production/rls-green-worker"
-    canary  = "/ecs/mscqr-production/rls-green-canary"
+    backend          = "/ecs/mscqr-production/rls-green-backend"
+    worker           = "/ecs/mscqr-production/rls-green-worker"
+    canary           = "/ecs/mscqr-production/rls-green-canary"
+    read_only_canary = "/ecs/mscqr-production/rls-green-read-only-canary"
   }
   logs = merge(local.stage_b_logs, {
     executor = var.stage_a_executor_log_group_name
     broker   = var.stage_a_broker_log_group_name
   })
   image_by_kind = {
-    backend  = var.backend_image
-    worker   = var.worker_image
-    executor = var.executor_image
-    canary   = var.canary_image
+    backend          = var.backend_image
+    worker           = var.worker_image
+    executor         = var.executor_image
+    canary           = var.canary_image
+    read_only_canary = var.read_only_canary_image
   }
   rendered_candidates = {
-    backend = replace(replace(replace(file("${path.module}/task-definitions/green-backend-candidate.json"), "{{BACKEND_IMAGE}}", var.backend_image), "{{RELEASE_SHA}}", var.release_sha), "{{BACKEND_LOG_GROUP}}", local.logs.backend)
-    worker  = replace(replace(replace(file("${path.module}/task-definitions/green-worker-candidate.json"), "{{WORKER_IMAGE}}", var.worker_image), "{{RELEASE_SHA}}", var.release_sha), "{{WORKER_LOG_GROUP}}", local.logs.worker)
-    canary  = replace(replace(replace(replace(replace(file("${path.module}/task-definitions/green-application-canary.json"), "{{CANARY_IMAGE}}", var.canary_image), "{{RELEASE_SHA}}", var.release_sha), "{{SOURCE_CONTRACT_SHA256}}", var.source_contract_sha256), "{{MIGRATION_SET_DIGEST}}", var.migration_set_digest), "{{CANARY_LOG_GROUP}}", local.logs.canary)
+    backend          = replace(replace(replace(file("${path.module}/task-definitions/green-backend-candidate.json"), "{{BACKEND_IMAGE}}", var.backend_image), "{{RELEASE_SHA}}", var.release_sha), "{{BACKEND_LOG_GROUP}}", local.logs.backend)
+    worker           = replace(replace(replace(file("${path.module}/task-definitions/green-worker-candidate.json"), "{{WORKER_IMAGE}}", var.worker_image), "{{RELEASE_SHA}}", var.release_sha), "{{WORKER_LOG_GROUP}}", local.logs.worker)
+    canary           = replace(replace(replace(replace(replace(file("${path.module}/task-definitions/green-application-canary.json"), "{{CANARY_IMAGE}}", var.canary_image), "{{RELEASE_SHA}}", var.release_sha), "{{SOURCE_CONTRACT_SHA256}}", var.source_contract_sha256), "{{MIGRATION_SET_DIGEST}}", var.migration_set_digest), "{{CANARY_LOG_GROUP}}", local.logs.canary)
+    read_only_canary = replace(replace(replace(file("${path.module}/task-definitions/green-read-only-rls-canary.json"), "{{READ_ONLY_CANARY_IMAGE}}", var.read_only_canary_image), "{{READ_ONLY_CANARY_DATABASE_SECRET_ARN}}", var.read_only_canary_database_secret_arn), "{{READ_ONLY_CANARY_LOG_GROUP}}", local.logs.read_only_canary)
   }
   candidate_definitions = {
     for kind, rendered in local.rendered_candidates : kind => jsondecode(rendered)
@@ -64,31 +67,35 @@ locals {
     { executor = var.stage_a_executor_log_group_arn }
   )
   ecr_repository_arns = {
-    backend  = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
-    worker   = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
-    executor = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
-    canary   = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
+    backend          = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
+    worker           = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+    executor         = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
+    canary           = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
+    read_only_canary = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
   }
   task_role_names = {
-    backend = "mscqr-production-rls-green-backend-task"
-    worker  = "mscqr-production-rls-green-worker-task"
-    canary  = "mscqr-production-rls-green-canary-task"
+    backend          = "mscqr-production-rls-green-backend-task"
+    worker           = "mscqr-production-rls-green-worker-task"
+    canary           = "mscqr-production-rls-green-canary-task"
+    read_only_canary = "mscqr-production-full-rls-green-read-only-canary-task"
   }
   execution_role_names = {
-    backend  = "mscqr-production-rls-green-backend-execution"
-    worker   = "mscqr-production-rls-green-worker-execution"
-    executor = "mscqr-production-full-rls-green-executor-execution"
-    canary   = "mscqr-production-rls-green-canary-execution"
+    backend          = "mscqr-production-rls-green-backend-execution"
+    worker           = "mscqr-production-rls-green-worker-execution"
+    executor         = "mscqr-production-full-rls-green-executor-execution"
+    canary           = "mscqr-production-rls-green-canary-execution"
+    read_only_canary = "mscqr-production-full-rls-green-read-only-canary-execution"
   }
   broker_task_definition_arns = merge(
     { for mode, task in aws_ecs_task_definition.executor : mode => task.arn },
     { full-rls-application-canary = aws_ecs_task_definition.candidate["canary"].arn }
   )
   broker_template_hashes = {
-    backend  = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-backend-candidate.json"))))
-    worker   = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-worker-candidate.json"))))
-    executor = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-activation-executor.json"))))
-    canary   = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-application-canary.json"))))
+    backend          = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-backend-candidate.json"))))
+    worker           = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-worker-candidate.json"))))
+    executor         = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-activation-executor.json"))))
+    canary           = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-application-canary.json"))))
+    read_only_canary = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-read-only-rls-canary.json"))))
   }
   broker_images = {
     backendImageDigest  = var.backend_image
@@ -166,7 +173,7 @@ resource "aws_iam_role" "task" {
 }
 
 resource "aws_iam_role_policy" "candidate_object_storage" {
-  for_each = aws_iam_role.task
+  for_each = { for key, role in aws_iam_role.task : key => role if key != "read_only_canary" }
   name     = "stage-b-object-storage"
   role     = each.value.id
   policy = jsonencode({
