@@ -1,12 +1,28 @@
 -- Manual, reviewed production provisioning only. Never run by the canary task.
--- Required psql variables: canary_tenant_id and foreign_tenant_id (UUIDs); no secret values belong in this file.
+-- Required psql variables: canary_tenant_id, foreign_tenant_id (UUIDs), and canary_credential_rotation (true|false).
+-- Run from an administrator-only terminal. psql's hidden \password prompt is deliberate: do not pass a password by CLI, file, Git, Terraform, or logs.
+-- The operator enters the one newly generated dedicated-secret value only when creating this role, or when canary_credential_rotation=true.
 \set ON_ERROR_STOP on
+\if :{?canary_credential_rotation}
+\else
+  \quit 3
+\endif
+SELECT CASE WHEN :'canary_credential_rotation' IN ('true', 'false') THEN 1 ELSE 1 / 0 END;
+SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mscqr_prod_rls_canary_read') THEN 'true' ELSE 'false' END AS canary_role_exists \gset
+\if :canary_role_exists
+  \if :canary_credential_rotation
+    \password mscqr_prod_rls_canary_read
+  \else
+    \echo 'Existing canary credential preserved; set canary_credential_rotation=true only for an approved rotation.'
+  \endif
+\else
+  \if :canary_credential_rotation
+    \quit 3
+  \endif
+  CREATE ROLE mscqr_prod_rls_canary_read LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+  \password mscqr_prod_rls_canary_read
+\endif
 BEGIN;
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mscqr_prod_rls_canary_read') THEN
-    CREATE ROLE mscqr_prod_rls_canary_read LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
-  END IF;
-END $$;
 REVOKE ALL ON DATABASE mscqr_production FROM mscqr_prod_rls_canary_read;
 GRANT CONNECT ON DATABASE mscqr_production TO mscqr_prod_rls_canary_read;
 REVOKE ALL ON SCHEMA public, app_rls FROM mscqr_prod_rls_canary_read;
@@ -41,4 +57,4 @@ DO $$ BEGIN
 END $$;
 COMMIT;
 
--- Rollback: REVOKE EXECUTE ON FUNCTION app_rls.production_read_only_canary_probe() FROM mscqr_prod_rls_canary_read; DROP POLICY IF EXISTS production_read_only_canary_batch_select ON public."Batch"; DROP FUNCTION IF EXISTS app_rls.production_read_only_canary_probe(); REVOKE CONNECT ON DATABASE mscqr_production FROM mscqr_prod_rls_canary_read; DROP ROLE IF EXISTS mscqr_prod_rls_canary_read;
+-- Rollback never prints or changes the credential: REVOKE EXECUTE ON FUNCTION app_rls.production_read_only_canary_probe() FROM mscqr_prod_rls_canary_read; DROP POLICY IF EXISTS production_read_only_canary_batch_select ON public."Batch"; DROP FUNCTION IF EXISTS app_rls.production_read_only_canary_probe(); REVOKE CONNECT ON DATABASE mscqr_production FROM mscqr_prod_rls_canary_read; DROP ROLE IF EXISTS mscqr_prod_rls_canary_read;

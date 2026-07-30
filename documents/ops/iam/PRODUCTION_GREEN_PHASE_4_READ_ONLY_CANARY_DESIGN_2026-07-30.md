@@ -21,7 +21,7 @@ The JSON evidence contains status, deterministic exit code (0 pass, 20 input con
 | `mscqr_prod_rls_canary_read` | LOGIN, CONNECT to `mscqr_production`, USAGE `app_rls`, EXECUTE one zero-argument probe | ownership, membership, CREATE, table write/read grants, BYPASSRLS, role administration |
 | `mscqr_prod_auth_owner` | owns the reviewed stable probe and receives the narrowly scoped RLS policy | task credential, canary role membership |
 
-`production-green-phase-4-read-only-canary-provision.sql` is idempotent, validates negative privileges, sets statement/lock/idle transaction timeouts and `default_transaction_read_only=on`, and ends with its canary-only revoke/drop rollback procedure. It embeds no password or secret.
+`production-green-phase-4-read-only-canary-provision.sql` validates negative privileges, sets statement/lock/idle transaction timeouts and `default_transaction_read_only=on`, and ends with its canary-only revoke/drop rollback procedure. It embeds no password or secret. Before first provisioning, the approved secret process generates one dedicated credential and writes the matching PostgreSQL URL to the dedicated canary secret. A DBA then enters that same generated value only through psql's hidden `\password` prompt. Existing credentials are preserved unless the DBA supplies the explicit `canary_credential_rotation=true` mode under a new approved secret-rotation record; rollback never prints, reuses, or retains a credential. RDS IAM authentication is not configured: the task has no `rds-db:connect` authority, so the static dedicated-secret credential is the only supported authentication method.
 
 ## Approval, launch, stop, and rollback
 

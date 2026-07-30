@@ -173,7 +173,7 @@ resource "aws_iam_role" "task" {
 }
 
 resource "aws_iam_role_policy" "candidate_object_storage" {
-  for_each = { backend = aws_iam_role.task["backend"] }
+  for_each = { for key, role in aws_iam_role.task : key => role if key != "read_only_canary" }
   name     = "stage-b-object-storage"
   role     = each.value.id
   policy = jsonencode({
