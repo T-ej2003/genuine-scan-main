@@ -26,7 +26,7 @@ function assertTaskDefinitionScope(change) {
   if (afterFamily !== undefined && afterFamily !== expectedFamily) throw new Error(`Stage B task-definition family rejected: ${change.address}`);
 }
 
-function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planBytes, planSha256, now) {
+function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planBytes, planSha256, now, terraformConfiguration) {
   if (!audit || !auditBytes || !auditSha256 || !planBytes || !planSha256) throw new Error(`Stage B rollover requires an explicit plan-bound reference audit: ${change.address}`);
   if (sha256(auditBytes) !== auditSha256) throw new Error("Stage B reference audit SHA-256 mismatch.");
   if (sha256(planBytes) !== planSha256) throw new Error("Stage B plan JSON SHA-256 mismatch.");
@@ -48,11 +48,11 @@ function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planB
   const atomicForChange = atomicRollovers.filter((item) => item?.taskDefinitionTerraformAddress === change.address);
   if (brokerModes.length === 0 && atomicForChange.length !== 0) throw new Error(`Stage B atomic broker rollover is unexpected: ${change.address}`);
   if (brokerModes.length !== 0) {
-    assertStageBAtomicBrokerPlan(plan, change.address);
     if (entry.brokerReferenceStatus !== "planned-atomic-broker-rollover-v1" || audit.allOldRevisionsUnreferenced !== false || atomicForChange.length !== 1) {
       throw new Error(`Stage B atomic broker rollover proof is missing: ${change.address}`);
     }
     const atomic = atomicForChange[0];
+    assertStageBAtomicBrokerPlan(plan, change.address, atomic.mode, terraformConfiguration);
     if (JSON.stringify(brokerModes) !== JSON.stringify([atomic.mode])
       || atomic.brokerTerraformAddress !== "aws_lambda_function.broker"
       || atomic.taskDefinitionArnReference !== `${change.address}.arn`
@@ -67,7 +67,7 @@ function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planB
 }
 
 export function assertStageBPlan(plan, options = {}) {
-  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now = new Date() } = options;
+  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now = new Date(), terraformConfiguration } = options;
   for (const change of plan.resource_changes || []) {
     const actions = change.change.actions || [];
     if (forbidden.test(change.type) || !allowed.has(change.type)) throw new Error(`Stage B plan rejected: ${change.address}`);
@@ -75,7 +75,7 @@ export function assertStageBPlan(plan, options = {}) {
       assertTaskDefinitionScope(change);
       if (actions.includes("delete")) {
         if (!exactActions(actions, ["delete", "create"]) || !exactReplacePaths(change.change.replace_paths)) throw new Error(`Stage B task-definition rollover rejected: ${change.address}`);
-        assertBoundRollover(plan, change, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now);
+        assertBoundRollover(plan, change, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
       }
     } else if (actions.includes("delete")) {
       throw new Error(`Stage B plan rejected: ${change.address}`);
@@ -100,11 +100,12 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${out}`], { stdio: "inherit" });
   const planJsonText = execFileSync("terraform", [`-chdir=${root}`, "show", "-json", out], { encoding: "utf8" });
   const plan = JSON.parse(planJsonText);
+  const terraformConfiguration = fs.readFileSync(path.resolve(root, "main.tf"), "utf8");
   const referenceAuditPath = readOption(process.argv.slice(3), "--reference-audit");
   const referenceAuditSha256 = readOption(process.argv.slice(3), "--reference-audit-sha256");
   const planJsonSha256 = readOption(process.argv.slice(3), "--plan-json-sha256");
   const referenceAuditBytes = referenceAuditPath ? fs.readFileSync(path.resolve(referenceAuditPath)) : undefined;
   const referenceAudit = referenceAuditBytes ? JSON.parse(referenceAuditBytes) : undefined;
-  assertStageBPlan(plan, { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes: Buffer.from(planJsonText), planJsonSha256 });
+  assertStageBPlan(plan, { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes: Buffer.from(planJsonText), planJsonSha256, terraformConfiguration });
   process.stdout.write(JSON.stringify({ status: "approved-plan-only", plan: out }) + "\n");
 }

@@ -11,6 +11,8 @@ import {
   parseCli,
 } from "../aws/generate-production-green-stage-b-reference-audit.mjs";
 import {
+  assertStageBAtomicBrokerPlan,
+  assertStageBBrokerTaskDefinitionMapping,
   STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS,
   STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS,
   STAGE_B_TASK_DEFINITION_FAMILIES,
@@ -23,17 +25,21 @@ const callerArn = "arn:aws:sts::368992683803:assumed-role/mscqr-production-relea
 const brokerFunctionArn = "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed";
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
 const now = new Date("2026-07-31T14:05:00.000Z");
+const terraformConfigurationSource = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
 const oldArnFor = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`;
 const newArnFor = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:2`;
 const backendAddress = 'aws_ecs_task_definition.candidate["backend"]';
 const canaryAddress = 'aws_ecs_task_definition.candidate["canary"]';
 const readOnlyCanaryAddress = 'aws_ecs_task_definition.candidate["read_only_canary"]';
+const executorCollectionAddress = "aws_ecs_task_definition.executor";
 const readOnlyCanaryFamily = STAGE_B_TASK_DEFINITION_FAMILIES[readOnlyCanaryAddress];
+const executorAddressForMode = (mode) => `${executorCollectionAddress}["${mode}"]`;
+const taskDefinitionAddressForMode = (mode) => mode === "full-rls-application-canary" ? canaryAddress : executorAddressForMode(mode);
 const familyForMode = (mode) => mode === "full-rls-application-canary"
   ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
   : `mscqr-production-full-rls-green-${mode}`;
 
-function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum } = {}) {
+function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum, terraformConfiguration = terraformConfigurationSource } = {}) {
   const changes = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([address, family]) => ({
     address,
     type: "aws_ecs_task_definition",
@@ -87,6 +93,7 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum 
       brokerFunctionArn,
       expectedPackageChecksumSha256: packageChecksum,
       callerArn,
+      terraformConfiguration,
       auditedAt: "2026-07-31T14:00:00.000Z",
       now,
     },
@@ -117,23 +124,50 @@ function makeCreateOnlyFixture({ mutatePlan, mutateReader } = {}) {
   });
 }
 
-function addBrokerAtomicPlanContract(plan, taskDefinitionAddress = canaryAddress, relevantAddress = taskDefinitionAddress) {
+function addBrokerAtomicPlanContract(plan, taskDefinitionAddress = canaryAddress, relevantAddress = taskDefinitionAddress, { omitExecutorCollectionDependency = false } = {}) {
+  const executorTarget = taskDefinitionAddress.startsWith(`${executorCollectionAddress}[`);
   plan.configuration = {
     root_module: {
-      resources: [{
-        address: "aws_lambda_function.broker",
-        type: "aws_lambda_function",
-        expressions: { environment: [{ variables: { references: ["local.broker_task_definition_arns"] } }] },
-      }],
+      resources: [
+        {
+          address: "aws_lambda_function.broker",
+          type: "aws_lambda_function",
+          expressions: { environment: [{ variables: { references: ["local.broker_task_definition_arns"] } }] },
+        },
+        {
+          address: executorCollectionAddress,
+          type: "aws_ecs_task_definition",
+          for_each_expression: { references: ["local.executor_definitions"] },
+          expressions: { family: { references: ["each.value.family"] } },
+        },
+        {
+          address: canaryAddress,
+          type: "aws_ecs_task_definition",
+        },
+      ],
     },
   };
-  plan.relevant_attributes = [{ resource: relevantAddress, attribute: ["arn"] }];
+  plan.planned_values = {
+    root_module: {
+      resources: Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([address, family]) => ({
+        address,
+        type: "aws_ecs_task_definition",
+        index: address.match(/\["([^"]+)"\]$/)?.[1],
+        values: { family },
+        identity: { family },
+      })),
+    },
+  };
+  plan.relevant_attributes = executorTarget && !omitExecutorCollectionDependency
+    ? [{ resource: executorCollectionAddress, attribute: [] }]
+    : [{ resource: relevantAddress, attribute: ["arn"] }];
 }
 
-function makeAtomicBrokerFixture({ brokerActions = ["update"], includeBrokerChange = true, taskDefinitionAddress = canaryAddress, relevantAddress = taskDefinitionAddress, mutatePlan, mutateReader } = {}) {
+function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", brokerActions = ["update"], includeBrokerChange = true, taskDefinitionAddress = taskDefinitionAddressForMode(mode), relevantAddress = taskDefinitionAddress, omitExecutorCollectionDependency = false, terraformConfiguration = terraformConfigurationSource, mutatePlan, mutateReader } = {}) {
   return makeFixture({
+    terraformConfiguration,
     mutatePlan: (plan) => {
-      addBrokerAtomicPlanContract(plan, taskDefinitionAddress, relevantAddress);
+      addBrokerAtomicPlanContract(plan, taskDefinitionAddress, relevantAddress, { omitExecutorCollectionDependency });
       if (includeBrokerChange) plan.resource_changes.push({ address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: brokerActions, before: {}, after: {} } });
       mutatePlan?.(plan);
     },
@@ -143,13 +177,20 @@ function makeAtomicBrokerFixture({ brokerActions = ["update"], includeBrokerChan
         const config = original();
         const variables = config.Environment.Variables;
         const taskDefinitions = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
-        taskDefinitions["full-rls-application-canary"] = oldArnFor(familyForMode("full-rls-application-canary"));
+        taskDefinitions[mode] = oldArnFor(familyForMode(mode));
         variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
         return config;
       };
       mutateReader?.(reader);
     },
   });
+}
+
+function withBrokerMapping(mapping) {
+  return terraformConfigurationSource.replace(
+    /  broker_task_definition_arns = merge\([\s\S]*?\n  \)\n  broker_template_hashes/,
+    `  broker_task_definition_arns = ${mapping}\n  broker_template_hashes`,
+  );
 }
 
 function makeMixedFixture({ mutatePlan, mutateReader } = {}) {
@@ -482,8 +523,109 @@ test("atomic broker rollover in the same plan passes and is recorded explicitly"
     referenceAuditSha256: sha256(auditBytes),
     planJsonBytes: fixture.planBytes,
     planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
     now,
   }));
+});
+
+test("executor admin-bootstrap atomic rollover passes with a collection dependency", () => {
+  const mode = "full-rls-admin-bootstrap";
+  const fixture = makeAtomicBrokerFixture({ mode });
+  const audit = generate(fixture);
+  assert.deepEqual(audit.plannedAtomicBrokerRollovers.map((item) => item.mode), [mode]);
+});
+
+test("another executor mode passes with the same collection dependency proof", () => {
+  const mode = "full-rls-role-verify";
+  const fixture = makeAtomicBrokerFixture({ mode });
+  const audit = generate(fixture);
+  assert.deepEqual(audit.plannedAtomicBrokerRollovers.map((item) => item.mode), [mode]);
+});
+
+test("executor collection dependency is accepted only for the matching mode", () => {
+  const mode = "full-rls-admin-bootstrap";
+  const fixture = makeAtomicBrokerFixture({ mode });
+  assert.doesNotThrow(() => assertStageBAtomicBrokerPlan(
+    fixture.plan,
+    executorAddressForMode(mode),
+    mode,
+    fixture.options.terraformConfiguration,
+  ));
+  assert.throws(
+    () => assertStageBAtomicBrokerPlan(
+      fixture.plan,
+      executorAddressForMode("full-rls-role-verify"),
+      mode,
+      fixture.options.terraformConfiguration,
+    ),
+    /task-definition mode does not match/,
+  );
+});
+
+test("missing executor collection dependency fails closed", () => {
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap", omitExecutorCollectionDependency: true })),
+    /collection dependency/,
+  );
+});
+
+test("complete broker mode mapping passes", () => {
+  const fixture = makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap" });
+  assert.doesNotThrow(() => assertStageBBrokerTaskDefinitionMapping(fixture.plan, fixture.options.terraformConfiguration));
+});
+
+test("broker mode mapping accepts supported plans without identity metadata", () => {
+  const fixture = makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap" });
+  for (const resource of fixture.plan.planned_values.root_module.resources) delete resource.identity;
+  assert.doesNotThrow(() => assertStageBBrokerTaskDefinitionMapping(fixture.plan, fixture.options.terraformConfiguration));
+});
+
+test("swapped executor mode mappings fail closed", () => {
+  const swapped = `merge(
+    { full-rls-admin-bootstrap = aws_ecs_task_definition.executor["full-rls-role-verify"].arn,
+      full-rls-role-verify = aws_ecs_task_definition.executor["full-rls-admin-bootstrap"].arn },
+    { full-rls-application-canary = aws_ecs_task_definition.candidate["canary"].arn }
+  )`;
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap", terraformConfiguration: withBrokerMapping(swapped) })),
+    /per-mode mapping/,
+  );
+});
+
+test("duplicate executor target mappings fail closed", () => {
+  const duplicate = `merge(
+    { full-rls-admin-bootstrap = aws_ecs_task_definition.executor["full-rls-admin-bootstrap"].arn,
+      full-rls-role-verify = aws_ecs_task_definition.executor["full-rls-admin-bootstrap"].arn },
+    { full-rls-application-canary = aws_ecs_task_definition.candidate["canary"].arn }
+  )`;
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap", terraformConfiguration: withBrokerMapping(duplicate) })),
+    /per-mode mapping/,
+  );
+});
+
+test("missing and unexpected executor modes fail closed", () => {
+  const missing = `merge(
+    { full-rls-admin-bootstrap = aws_ecs_task_definition.executor["full-rls-admin-bootstrap"].arn },
+    { full-rls-application-canary = aws_ecs_task_definition.candidate["canary"].arn }
+  )`;
+  const unexpected = `merge(
+    { unexpected = aws_ecs_task_definition.executor["full-rls-admin-bootstrap"].arn },
+    { full-rls-application-canary = aws_ecs_task_definition.candidate["canary"].arn }
+  )`;
+  assert.throws(() => generate(makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap", terraformConfiguration: withBrokerMapping(missing) })), /per-mode mapping/);
+  assert.throws(() => generate(makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap", terraformConfiguration: withBrokerMapping(unexpected) })), /per-mode mapping/);
+});
+
+test("collection-only executor dependency without the exact mapping fails closed", () => {
+  const collectionOnly = `merge(
+    { for mode, task in aws_ecs_task_definition.executor : mode => task },
+    { full-rls-application-canary = aws_ecs_task_definition.candidate["canary"].arn }
+  )`;
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap", terraformConfiguration: withBrokerMapping(collectionOnly) })),
+    /per-mode mapping/,
+  );
 });
 
 test("broker no-op with a superseded ARN fails closed", () => {
