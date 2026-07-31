@@ -10,6 +10,35 @@
 
 ## Reconciliation
 
+## Permanent reference-audit IAM correction
+
+The post-merge P1 finding is valid: AWS requires
+`ecs:DescribeTaskDefinition` to use `Resource "*"`; ARN-scoped statements are
+implicitly denied for this action. The read is limited to read-only task-
+definition metadata in its own statement. The recorded production result is
+cross-referenced in
+[PRODUCTION_GREEN_STAGE_B_ECS_READBACK_RECOVERY_2026-07-30.md](../../ops/iam/PRODUCTION_GREEN_STAGE_B_ECS_READBACK_RECOVERY_2026-07-30.md).
+
+The exact twelve source-controlled Stage B task-definition families remain
+enforced by the Stage B audit generator and plan validator. The validator
+rejects `mscqr-backend`, `mscqr-frontend`, unknown families, and unknown
+Terraform addresses. Service and task listing remain cluster constrained, and
+the broker Lambda read remains exact-function constrained. The release role is
+not granted task execution or service mutation authority.
+
+PR #161's v2 policy artifact remains immutable history for audit and rollback.
+The [v2 artifact](../../ops/iam/MSCQRProductionGreenStageBProviderRecovery-v2.json)
+is preserved, while the wildcard correction is published in the new
+[v3 artifact](../../ops/iam/MSCQRProductionGreenStageBProviderRecovery-v3.json).
+Any upcoming live-policy command must load v3. The live managed policy remains on the
+pre-correction version until the separately authorized update after the
+corrective PR merges. AWS's actual managed-policy version ID must be discovered
+from the live policy rather than assumed to be a literal `v3`.
+
+This source correction adds no runtime, service, IAM, secret, database,
+networking, ALB, DNS, or traffic authority and does not authorize a fresh audit
+or Terraform operation.
+
 ## Reviewed immutable revision-rollover exception
 
 Normal Terraform destroys remain forbidden. The only permitted exception is a
