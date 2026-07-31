@@ -73,6 +73,8 @@ function planTaskDefinitions(plan) {
   const changes = requireArray(plan?.resource_changes, "Terraform plan resource_changes");
   const seenFamilies = new Set();
   const rolloverByAddress = new Map();
+  const createOnlyByAddress = new Map();
+  const noOpByAddress = new Map();
   for (const change of changes.filter((item) => item?.type === "aws_ecs_task_definition")) {
     const address = change.address;
     const before = change.change?.before || {};
@@ -85,17 +87,36 @@ function planTaskDefinitions(plan) {
     if (STAGE_B_TASK_DEFINITION_FAMILIES[address] !== family) throw new Error(`Terraform plan task-definition address does not match its exact family: ${address}`);
     if (after.family !== family) throw new Error(`Terraform plan proposed task-definition family is unresolved: ${address}`);
     const actions = requireArray(change.change?.actions, `Terraform plan actions for ${address}`);
+    const oldArn = before.arn || before.id;
+    if (JSON.stringify(actions) === JSON.stringify(["create"])) {
+      if (oldArn) throw new Error(`Terraform plan create-only task definition unexpectedly has a prior ARN: ${address}`);
+      createOnlyByAddress.set(address, { address, family, proposedFamily: after.family });
+      continue;
+    }
+    if (JSON.stringify(actions) === JSON.stringify(["no-op"])) {
+      if (!before.arn) throw new Error(`Terraform plan no-op task definition is missing its prior ARN: ${address}`);
+      const prior = familyFromArn(before.arn, `${address} no-op task definition`);
+      if (before.family !== family || prior.family !== family) throw new Error(`Terraform plan no-op task-definition family mismatch: ${address}`);
+      noOpByAddress.set(address, { address, family, priorArn: before.arn, proposedFamily: after.family });
+      continue;
+    }
     if (actions.includes("delete")) {
       if (JSON.stringify(actions) !== JSON.stringify(["delete", "create"]) || !exactReplacePaths(change.change?.replace_paths)) {
         throw new Error(`Terraform plan task-definition rollover is outside the reviewed contract: ${address}`);
       }
-      const oldArn = before.arn || before.id;
+      if (!oldArn) throw new Error(`Terraform plan rollover is missing its prior task-definition ARN: ${address}`);
       const old = familyFromArn(oldArn, `${address} old task definition`);
       if (old.family !== family) throw new Error(`Terraform plan old task-definition family mismatch: ${address}`);
       rolloverByAddress.set(address, { address, family, oldArn, replacePaths: change.change.replace_paths, proposedFamily: after.family });
+      continue;
     }
+    throw new Error(`Terraform plan task-definition change must be create-only or rollover: ${address}`);
   }
-  return rolloverByAddress;
+  if (seenFamilies.size !== STAGE_B_TASK_DEFINITION_FAMILY_NAMES.length) {
+    const missing = STAGE_B_TASK_DEFINITION_FAMILY_NAMES.filter((family) => !seenFamilies.has(family));
+    throw new Error(`Terraform plan is missing exact Stage B task-definition families: ${missing.join(", ")}`);
+  }
+  return { rolloverByAddress, createOnlyByAddress, noOpByAddress };
 }
 
 function ensurePlanHash(planBytes, expectedPlanSha256) {
@@ -121,7 +142,7 @@ function validateTaskDefinitionResponse(response, expectedFamily, label) {
   return { family: expectedFamily, arn: identity.arn, revision: identity.revision, status: taskDefinition.status };
 }
 
-function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns) {
+function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns, createOnlyFamilies) {
   const normalizedConfigArn = String(config?.FunctionArn || "").replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
   const normalizedExpectedArn = String(brokerFunctionArn).replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
   if (!normalizedConfigArn || normalizedConfigArn !== normalizedExpectedArn) throw new Error("Broker Lambda identity does not match the expected function.");
@@ -131,10 +152,13 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
   const expectedModes = [...STAGE_B_MODES].sort();
   if (JSON.stringify(Object.keys(taskDefinitions).sort()) !== JSON.stringify(expectedModes)) throw new Error("Broker task-definition mode set is not exact.");
   const brokerReferences = new Map();
+  const brokerReferencesByFamily = new Map();
   for (const mode of expectedModes) {
     const identity = familyFromArn(taskDefinitions[mode], `broker task definition for ${mode}`);
     if (identity.family !== expectedBrokerFamily(mode)) throw new Error(`Broker task definition family is unexpected for ${mode}.`);
+    if (createOnlyFamilies.has(identity.family)) throw new Error(`Create-only task-definition family is unexpectedly referenced by broker: ${mode}.`);
     brokerReferences.set(identity.arn, mode);
+    brokerReferencesByFamily.set(identity.family, [...(brokerReferencesByFamily.get(identity.family) || []), mode]);
   }
   for (const oldArn of oldArns) {
     if (brokerReferences.has(oldArn)) throw new Error(`Broker Lambda still references superseded task definition ${oldArn}.`);
@@ -142,11 +166,14 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
   const approvalExpected = requireObject(parseJson(variables.BROKER_APPROVAL_EXPECTED_JSON, "BROKER_APPROVAL_EXPECTED_JSON"), "BROKER_APPROVAL_EXPECTED_JSON");
   if (approvalExpected.packageChecksumSha256 !== expectedPackageChecksum) throw new Error("Broker package checksum does not match the expected release package.");
   return {
-    functionArn: normalizedConfigArn,
-    functionVersion: config.Version,
-    aliasArn: brokerFunctionArn,
-    aliasVersion: config.Version,
-    taskDefinitionModes: expectedModes,
+    summary: {
+      functionArn: normalizedConfigArn,
+      functionVersion: config.Version,
+      aliasArn: brokerFunctionArn,
+      aliasVersion: config.Version,
+      taskDefinitionModes: expectedModes,
+    },
+    referencesByFamily: brokerReferencesByFamily,
   };
 }
 
@@ -155,6 +182,15 @@ function referenceNames(items, oldArns, arnKey, nameKey) {
   for (const item of items) {
     const arn = item[arnKey];
     if (references.has(arn)) references.get(arn).push(item[nameKey]);
+  }
+  return references;
+}
+
+function referenceNamesByFamily(items, families, arnKey, nameKey) {
+  const references = new Map([...families].map((family) => [family, []]));
+  for (const item of items) {
+    const family = familyFromArn(item[arnKey], `${nameKey} task definition`).family;
+    if (references.has(family)) references.get(family).push(item[nameKey]);
   }
   return references;
 }
@@ -253,13 +289,11 @@ export function generateReferenceAudit({
   if (!/^[a-f0-9]{64}$/.test(expectedPackageChecksumSha256 || "")) throw new Error("Expected broker package checksum is missing or malformed.");
   assertStageBReferenceAuditFreshness(auditedAt, now);
   const planSha = ensurePlanHash(planBytes, planJsonSha256);
-  const rolloverByAddress = planTaskDefinitions(plan);
+  const { rolloverByAddress, createOnlyByAddress, noOpByAddress } = planTaskDefinitions(plan);
+  const createOnlyFamilies = new Set([...createOnlyByAddress.values()].map((entry) => entry.family));
+  const noOpFamilies = new Set([...noOpByAddress.values()].map((entry) => entry.family));
   const observedCallerArn = validateCaller(callerArn || reader.getCallerIdentity()?.Arn);
 
-  for (const family of STAGE_B_TASK_DEFINITION_FAMILY_NAMES) {
-    const response = reader.describeTaskDefinition(family);
-    validateTaskDefinitionResponse(response, family, `Stage B family ${family}`);
-  }
   const oldDefinitions = [];
   for (const rollover of [...rolloverByAddress.values()].sort((left, right) => left.address.localeCompare(right.address))) {
     const described = validateTaskDefinitionResponse(reader.describeTaskDefinition(rollover.oldArn), rollover.family, `${rollover.address} old task definition`);
@@ -276,10 +310,16 @@ export function generateReferenceAudit({
   };
   const runningTasks = readTasks("RUNNING");
   const pendingTasks = readTasks("PENDING");
-  const broker = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns);
+  const { summary: broker, referencesByFamily: brokerReferencesByFamily } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies);
   const serviceReferences = referenceNames(services, oldArns, "taskDefinition", "serviceName");
   const runningReferences = referenceNames(runningTasks, oldArns, "taskDefinitionArn", "taskArn");
   const pendingReferences = referenceNames(pendingTasks, oldArns, "taskDefinitionArn", "taskArn");
+  const createOnlyServiceReferences = referenceNamesByFamily(services, createOnlyFamilies, "taskDefinition", "serviceName");
+  const createOnlyRunningReferences = referenceNamesByFamily(runningTasks, createOnlyFamilies, "taskDefinitionArn", "taskArn");
+  const createOnlyPendingReferences = referenceNamesByFamily(pendingTasks, createOnlyFamilies, "taskDefinitionArn", "taskArn");
+  const noOpServiceReferences = referenceNamesByFamily(services, noOpFamilies, "taskDefinition", "serviceName");
+  const noOpRunningReferences = referenceNamesByFamily(runningTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
+  const noOpPendingReferences = referenceNamesByFamily(pendingTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
   const brokerReferences = new Map(oldArns.map((arn) => [arn, []]));
 
   const auditedOldDefinitions = oldDefinitions.map((entry) => {
@@ -305,6 +345,40 @@ export function generateReferenceAudit({
     };
   });
 
+  const createOnlyTaskDefinitions = [...createOnlyByAddress.values()]
+    .sort((left, right) => left.address.localeCompare(right.address))
+    .map((entry) => {
+      const serviceRefs = [...(createOnlyServiceReferences.get(entry.family) || [])].sort();
+      const runningRefs = [...(createOnlyRunningReferences.get(entry.family) || [])].sort();
+      const pendingRefs = [...(createOnlyPendingReferences.get(entry.family) || [])].sort();
+      if (serviceRefs.length || runningRefs.length || pendingRefs.length) throw new Error(`Create-only task-definition family remains referenced: ${entry.address}`);
+      return {
+        terraformAddress: entry.address,
+        family: entry.family,
+        proposedFamily: entry.proposedFamily,
+        classification: "create-only",
+        priorTaskDefinitionArn: null,
+        serviceReferences: serviceRefs,
+        runningTaskReferences: runningRefs,
+        pendingTaskReferences: pendingRefs,
+        brokerReferenceModes: [],
+      };
+    });
+
+  const noOpTaskDefinitions = [...noOpByAddress.values()]
+    .sort((left, right) => left.address.localeCompare(right.address))
+    .map((entry) => ({
+      terraformAddress: entry.address,
+      family: entry.family,
+      proposedFamily: entry.proposedFamily,
+      classification: "no-op",
+      priorTaskDefinitionArn: entry.priorArn,
+      serviceReferences: [...(noOpServiceReferences.get(entry.family) || [])].sort(),
+      runningTaskReferences: [...(noOpRunningReferences.get(entry.family) || [])].sort(),
+      pendingTaskReferences: [...(noOpPendingReferences.get(entry.family) || [])].sort(),
+      brokerReferenceModes: [...(brokerReferencesByFamily.get(entry.family) || [])].sort(),
+    }));
+
   return {
     schemaVersion: STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
     auditedAt,
@@ -318,6 +392,8 @@ export function generateReferenceAudit({
     noServiceDeploymentObserved: true,
     noTaskExecutionObserved: true,
     oldTaskDefinitions: auditedOldDefinitions,
+    createOnlyTaskDefinitions,
+    noOpTaskDefinitions,
     planJsonSha256: planSha,
   };
 }
