@@ -10,6 +10,27 @@
 
 ## Reconciliation
 
+## Permanent reference-audit IAM correction
+
+The post-merge P1 finding is valid: AWS requires
+`ecs:DescribeTaskDefinition` to use `Resource "*"`; ARN-scoped statements are
+implicitly denied for this action. The read is limited to read-only task-
+definition metadata in its own statement. The recorded production result is
+cross-referenced in
+[PRODUCTION_GREEN_STAGE_B_ECS_READBACK_RECOVERY_2026-07-30.md](../../ops/iam/PRODUCTION_GREEN_STAGE_B_ECS_READBACK_RECOVERY_2026-07-30.md).
+
+The exact twelve source-controlled Stage B task-definition families remain
+enforced by the Stage B audit generator and plan validator. The validator
+rejects `mscqr-backend`, `mscqr-frontend`, unknown families, and unknown
+Terraform addresses. Service and task listing remain cluster constrained, and
+the broker Lambda read remains exact-function constrained. The release role is
+not granted task execution or service mutation authority.
+
+The live managed policy has not been updated from PR #161 and must not be
+updated until the corrective PR is merged. This source correction adds no
+runtime, service, IAM, secret, database, networking, ALB, DNS, or traffic
+authority and does not authorize a fresh audit or Terraform operation.
+
 ## Reviewed immutable revision-rollover exception
 
 Normal Terraform destroys remain forbidden. The only permitted exception is a

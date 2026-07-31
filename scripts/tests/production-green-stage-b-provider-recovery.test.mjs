@@ -66,8 +66,25 @@ test("permanent release policy contains every read action required for the plan-
     assert.equal(value.Condition.StringEquals["ecs:cluster"], clusterArn);
     assert.equal(value.Resource.includes("mscqr-prod-euw2-main"), true);
   }
-  assert.deepEqual(statement("ecs:DescribeTaskDefinition").Resource, stageBTaskFamilies.map(arn));
+  const taskDefinitionRead = statement("ecs:DescribeTaskDefinition");
+  assert.equal(statements.filter(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("ecs:DescribeTaskDefinition")).length, 1);
+  assert.equal(taskDefinitionRead.Sid, "DescribeStageBTaskDefinitionsReadOnly");
+  assert.equal(taskDefinitionRead.Effect, "Allow");
+  assert.equal(taskDefinitionRead.Action, "ecs:DescribeTaskDefinition");
+  assert.equal(taskDefinitionRead.Resource, "*");
   assert.deepEqual(statement("lambda:GetFunctionConfiguration").Resource, brokerFunctionArns);
+});
+
+test("Stage B task-definition family enforcement remains exact outside the wildcard metadata read", () => {
+  for (const action of ["ecs:TagResource", "ecs:DeregisterTaskDefinition"]) {
+    assert.deepEqual(statement(action).Resource, stageBTaskFamilies.map(arn), action);
+  }
+  for (const action of ["ecs:TagResource", "ecs:DeregisterTaskDefinition", "ecs:RegisterTaskDefinition", "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:DeleteService"]) {
+    const value = statement(action);
+    if (value) assert.notEqual(value.Resource, "*", action);
+  }
+  assert.equal(stageBTaskFamilies.length, 12);
+  assert.ok(stageBTaskFamilies.every((family) => family.startsWith("mscqr-production-")));
 });
 
 test("audit read scope excludes blue services and all runtime mutation authority", () => {
@@ -81,7 +98,7 @@ test("audit read scope excludes blue services and all runtime mutation authority
 
 test("provider recovery policy adds no runtime, service, traffic, secret, database, or wildcard authority", () => {
   for (const forbidden of [
-    "ecs:RegisterTaskDefinition", "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService",
+    "ecs:RegisterTaskDefinition", "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:DeleteService",
     "logs:DeleteLogGroup", "logs:*", "iam:*", "sts:*",
     "secretsmanager:GetSecretValue", "kms:*", "rds:*", "route53:*", "elasticloadbalancing:*",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
@@ -97,6 +114,12 @@ test("existing Stage B provider recovery permissions remain present", () => {
 
 test("recovery runbook requires live policy update before retry", () => {
   const runbook = fs.readFileSync("documents/ops/iam/PRODUCTION_GREEN_STAGE_B_PROVIDER_RECOVERY_2026-07-29.md", "utf8");
+  assert.match(runbook, /DescribeTaskDefinition.*requires.*Resource \"\*\"/is);
+  assert.match(runbook, /PRODUCTION_GREEN_STAGE_B_ECS_READBACK_RECOVERY_2026-07-30/i);
+  assert.match(runbook, /audit generator and validator/i);
+  assert.match(runbook, /not granted task execution or service mutation authority/i);
+  assert.match(runbook, /live managed policy has not been updated from PR #161/i);
+  assert.match(runbook, /must not be\s+updated until this corrective PR is merged/i);
   assert.match(runbook, /merging source alone does not update AWS/i);
   assert.match(runbook, /must be version-updated after merge/i);
   assert.match(runbook, /must not be retried before the live managed policy matches source/i);

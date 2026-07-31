@@ -75,9 +75,11 @@ test("rollover audit and scope failures remain fail-closed", () => {
 test("unknown task-definition address and family are rejected", () => {
   const unknownAddress = { resource_changes: [{ ...rollover(), address: 'aws_ecs_task_definition.other["backend"]' }] };
   assert.throws(() => assertStageBPlan(unknownAddress), /address/);
-  const { plan, options } = validRollover({});
-  plan.resource_changes[0].change.after.family = "mscqr-backend";
-  assert.throws(() => assertStageBPlan(plan, options), /family/);
+  for (const familyName of ["mscqr-backend", "mscqr-frontend", "unknown-stage-b-family"]) {
+    const { plan, options } = validRollover({});
+    plan.resource_changes[0].change.after.family = familyName;
+    assert.throws(() => assertStageBPlan(plan, options), /family/);
+  }
 });
 
 test("mixed rollover plus unrelated destroy remains rejected", () => {

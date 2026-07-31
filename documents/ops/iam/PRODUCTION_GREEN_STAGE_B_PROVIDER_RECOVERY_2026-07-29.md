@@ -1,5 +1,29 @@
 # Production Green Stage B provider recovery — 2026-07-29
 
+## Post-merge P1 correction — pending live update
+
+The post-merge review finding is valid. The permanent Stage B reference-audit
+policy previously scoped `ecs:DescribeTaskDefinition` to task-definition ARN
+patterns, but the recorded CloudTrail/IAM simulation evidence in
+[PRODUCTION_GREEN_STAGE_B_ECS_READBACK_RECOVERY_2026-07-30.md](./PRODUCTION_GREEN_STAGE_B_ECS_READBACK_RECOVERY_2026-07-30.md)
+shows that AWS evaluates this action against `Resource "*"`. ARN-scoped
+statements are implicitly denied, and the current AWS authorization model does
+not support a resource-level ARN restriction for this action.
+In AWS IAM, `ecs:DescribeTaskDefinition` therefore requires `Resource "*"`.
+
+The corrective source change sets only the dedicated read-only
+`ecs:DescribeTaskDefinition` statement to `Resource "*"`. This grants
+read-only task-definition metadata access; it does not grant task execution or
+service mutation authority. The exact twelve source-controlled Stage B task-
+definition families remain enforced by the Stage B audit generator and
+validator, which reject `mscqr-backend`, `mscqr-frontend`, unknown families, and
+unknown Terraform addresses.
+
+The live managed policy has not been updated from PR #161. It must not be
+updated until this corrective PR is merged. No fresh audit, Terraform
+plan/apply, AWS runtime, service, database, broker, ALB, DNS, or traffic action
+is authorized by this correction.
+
 ## Exact correction
 
 MSCQRProductionGreenStageBProviderRecovery default version is now v2. The
@@ -15,10 +39,12 @@ The only changes are:
 
 1. The three exact CloudWatch Logs tagging resources now use the required
    trailing colon-star form.
-2. A separate ecs:TagResource statement permits only the eleven reviewed
+2. A separate ecs:TagResource statement permits only the twelve reviewed
    task-definition family/revision patterns.
 3. Exact Stage B apply recovery permissions now cover only the reviewed log groups
    and task-definition family/revision patterns.
+4. The permanent reference-audit read statement now uses `Resource "*"` for
+   `ecs:DescribeTaskDefinition` as required by AWS IAM.
 
 The global iam:ListAttachedRolePolicies statement and exact DynamoDB replay
 table tagging statement are unchanged.
@@ -71,9 +97,19 @@ The failed Stage B apply must not be retried before the live managed policy matc
 The permanent MFA-backed release-deployer policy includes the read-only ECS and
 broker calls required to produce the rollover audit: `ListServices`,
 `DescribeServices`, `ListTasks`, `DescribeTasks`, `DescribeTaskDefinition`, and
-`lambda:GetFunctionConfiguration`. These calls are restricted to the reviewed
-production cluster, Stage B task-definition families, and approval-broker
-function. No temporary policy is required.
+`lambda:GetFunctionConfiguration`. `ecs:DescribeTaskDefinition` is read-only
+metadata access and must use `Resource "*"`; AWS does not enforce a
+task-definition ARN resource restriction for that action. The exact twelve
+source-controlled Stage B task-definition families are enforced by the Stage B
+audit generator and validator, while service/task listing remains cluster
+constrained and the broker read remains exact-function constrained. No
+temporary policy is required.
+
+The release role is not granted task execution or service mutation authority:
+it has no `ecs:RunTask`, `ecs:StopTask`, `ecs:UpdateService`, or service
+creation/deletion permission. The wildcard is therefore limited to the single
+read-only metadata statement and is compensated by the application-layer audit
+and validator contract.
 
 Whenever the plan JSON changes, the release-deployer must perform a fresh
 read-only audit and bind it to the exact plan SHA-256. Every old revision must
@@ -88,18 +124,19 @@ new task-definition revisions and retained rollback ARNs. No ECS service update,
 task execution, broker invocation, database action, ALB, DNS, or traffic change
 is part of this correction.
 
-## Validation
+## Validation and release boundary
 
-- Access Analyzer policy validation returned zero findings.
-- Exact request-tag context allowed all three log-group and all eleven
-  task-definition tagging requests.
-- Unrelated log groups/task-definition families and missing/wrong tags were
-  denied.
-- ecs:RunTask and ecs:UpdateService remain explicit denies; ECS service
-  creation and task-definition deregistration outside the exact Stage B family
-  list, plus DynamoDB data-plane/destructive actions, remain denied.
-- The attached live v2 document was fetched after creation and its canonical
-  SHA-256 matched the reviewed source.
+- The repository policy tests require a dedicated read-only
+  `ecs:DescribeTaskDefinition` statement with exactly `Resource "*"` and no
+  other action.
+- The audit generator and plan validator accept only the exact twelve
+  source-controlled Stage B task-definition families. Blue service families,
+  unknown families, and unknown addresses remain rejected.
+- The recorded ECS readback evidence confirms the wildcard requirement and the
+  separate read-only policy recovery; it is cross-referenced above.
+- No live managed-policy update, fresh audit, Terraform plan/apply, or runtime
+  operation is claimed until this corrective PR is merged and separately
+  approved for operator execution.
 
 ## Fresh Stage B plan — stop before apply
 
