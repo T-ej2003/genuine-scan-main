@@ -66,6 +66,22 @@ release-deployer after the live update. Do not retry the failed apply until the 
 matches this source document.
 The failed Stage B apply must not be retried before the live managed policy matches source.
 
+## Permanent plan-bound reference audit
+
+The permanent MFA-backed release-deployer policy includes the read-only ECS and
+broker calls required to produce the rollover audit: `ListServices`,
+`DescribeServices`, `ListTasks`, `DescribeTasks`, `DescribeTaskDefinition`, and
+`lambda:GetFunctionConfiguration`. These calls are restricted to the reviewed
+production cluster, Stage B task-definition families, and approval-broker
+function. No temporary policy is required.
+
+Whenever the plan JSON changes, the release-deployer must perform a fresh
+read-only audit and bind it to the exact plan SHA-256. Every old revision must
+have zero service, running-task, and pending-task references, matching family and
+replacement path, and a retained rollback ARN. The validator must accept the
+matching audit and both explicit hashes before any apply; otherwise apply remains
+forbidden.
+
 The recovery sequence is: verify the fresh caller, revalidate the saved plan and
 reference audit, apply that exact full plan without `-target`, then verify the
 new task-definition revisions and retained rollback ARNs. No ECS service update,
