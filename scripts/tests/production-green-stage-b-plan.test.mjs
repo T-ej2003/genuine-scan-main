@@ -9,6 +9,7 @@ const family = "mscqr-production-rls-green-backend-candidate";
 const address = 'aws_ecs_task_definition.candidate["backend"]';
 const oldArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`;
 const validationNow = new Date("2026-07-31T14:05:00.000Z");
+const terraformConfiguration = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
 const change = (type, actions = ["create"], after = {}, before = {}) => ({ address: type === "aws_ecs_task_definition" ? address : `test.${type}`, type, change: { actions, after, before } });
 const rollover = () => {
   const value = change("aws_ecs_task_definition", ["delete", "create"], { family }, { family, arn: oldArn });
@@ -40,7 +41,7 @@ const validRollover = (overrides = {}, planOverrides = {}) => {
   const audit = auditFor(overrides);
   audit.planJsonSha256 = sha256(planBytes);
   const auditBytes = Buffer.from(JSON.stringify(audit));
-  return { plan, options: { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: sha256(auditBytes), planJsonBytes: planBytes, planJsonSha256: sha256(planBytes), now: validationNow } };
+  return { plan, options: { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: sha256(auditBytes), planJsonBytes: planBytes, planJsonSha256: sha256(planBytes), now: validationNow, terraformConfiguration } };
 };
 
 test("Stage B plan wrapper permits only non-destructive control-plane resources", () =>
@@ -102,6 +103,16 @@ test("mixed rollover plus unrelated destroy remains rejected", () => {
   assert.throws(() => assertStageBPlan(plan, options), /rejected/);
 });
 
+test("task-definition replacements require provider retention for both Stage B collections", () => {
+  assert.equal((terraformConfiguration.match(/skip_destroy\s*=\s*true/g) || []).length, 2);
+  const missing = validRollover();
+  missing.options.terraformConfiguration = terraformConfiguration.replace("  skip_destroy             = true\n", "");
+  assert.throws(() => assertStageBPlan(missing.plan, missing.options), /retention contract/);
+  const missingExecutor = validRollover();
+  missingExecutor.options.terraformConfiguration = terraformConfiguration.replace(/(resource "aws_ecs_task_definition" "executor"[\s\S]*?)  skip_destroy             = true\n/, "$1");
+  assert.throws(() => assertStageBPlan(missingExecutor.plan, missingExecutor.options), /executor/);
+});
+
 test("delete-only, extra replacement paths, and alternate actions are rejected", () => {
   const { plan, options } = validRollover();
   plan.resource_changes[0].change.actions = ["delete"];
@@ -117,6 +128,7 @@ test("delete-only, extra replacement paths, and alternate actions are rejected",
 test("Stage B plan wrapper rejects forbidden destroys and mutable images", () => {
   for (const item of [
     change("aws_ecs_service", ["delete"]),
+    change("aws_ecs_service", ["update"]),
     change("aws_lb_listener", ["delete"]),
     change("aws_db_instance", ["delete"]),
     change("aws_secretsmanager_secret", ["delete"]),

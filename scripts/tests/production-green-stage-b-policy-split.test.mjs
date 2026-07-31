@@ -38,7 +38,6 @@ const controlSids = [
   "SetExactStageBLogRetention",
   "TagExactReplayTable",
   "TagExactStageBTaskDefinitions",
-  "DeregisterExactStageBTaskDefinitions",
 ];
 const stageBTaskFamilies = [
   "mscqr-production-rls-green-backend-candidate",
@@ -65,7 +64,6 @@ const logArn = (name) => `arn:aws:logs:eu-west-2:368992683803:log-group:${name}:
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
 const mutationActions = new Set([
   "ecs:TagResource",
-  "ecs:DeregisterTaskDefinition",
   "ecs:RegisterTaskDefinition",
   "ecs:RunTask",
   "ecs:StopTask",
@@ -81,18 +79,16 @@ test("all policy artifacts parse and historical v2/v3 remain byte-stable", () =>
 
 test("v4 and the companion policy fit the AWS managed-policy document limit", () => {
   assert.equal(awsCharacterCount(policies.v3), 6651);
-  assert.equal(awsCharacterCount(policies.v4), 4146);
+  assert.equal(awsCharacterCount(policies.v4), 3962);
   assert.equal(awsCharacterCount(policies.audit), 1785);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.ok(awsCharacterCount(policies.audit) < 6144);
 });
 
-test("v4 plus the companion policy preserves v3 plus the reviewed apply correction", () => {
+test("v4 plus the companion policy preserves v3 recovery permissions without deregistration authority", () => {
   const correctedV3 = {
     Version: policies.v3.Version,
-    Statement: policies.v3.Statement.map((statement) => statement.Action === "ecs:DeregisterTaskDefinition"
-      ? { ...statement, Resource: "*" }
-      : statement),
+    Statement: policies.v3.Statement.filter((statement) => statement.Action !== "ecs:DeregisterTaskDefinition"),
   };
   correctedV3.Statement.push(statementOf(policies.v4, "SetExactStageBLogRetention"));
   assert.deepEqual(canonical(correctedV3), canonical({
@@ -101,14 +97,14 @@ test("v4 plus the companion policy preserves v3 plus the reviewed apply correcti
   }));
 });
 
-test("the split has exactly seven moved statements and six provider-control statements", () => {
+test("the split has exactly seven moved statements and five provider-control statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), movedSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...movedSids, ...controlSids]).size, 13);
+  assert.equal(new Set([...movedSids, ...controlSids]).size, 12);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
-  for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "DeregisterExactStageBTaskDefinitions"].includes(sid))) assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
+  for (const sid of controlSids.filter((sid) => sid !== "SetExactStageBLogRetention")) assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
 });
 
 test("DescribeTaskDefinition is isolated, wildcard-only, and read-only", () => {
@@ -123,17 +119,16 @@ test("DescribeTaskDefinition is isolated, wildcard-only, and read-only", () => {
   });
 });
 
-test("only AWS-required deregistration uses Resource wildcard", () => {
+test("deregistration authority is absent and retention remains resource-scoped", () => {
   for (const policy of [policies.v4, policies.audit]) {
     for (const statement of policy.Statement) {
       if (actionsOf(statement).some((action) => mutationActions.has(action))) {
-        if (actionsOf(statement).includes("ecs:DeregisterTaskDefinition")) assert.equal(statement.Resource, "*");
-        else assert.notEqual(statement.Resource, "*");
+        assert.notEqual(statement.Resource, "*");
       }
     }
   }
-  assert.equal(policies.v4.Statement.some((statement) => actionsOf(statement).some((action) => mutationActions.has(action))), true);
-  assert.equal(statementOf(policies.v4, "DeregisterExactStageBTaskDefinitions").Resource, "*");
+  assert.equal(statementsForAction(policies.v4, "ecs:DeregisterTaskDefinition").length, 0);
+  assert.equal(statementsForAction(policies.audit, "ecs:DeregisterTaskDefinition").length, 0);
   assert.notEqual(statementOf(policies.v4, "SetExactStageBLogRetention").Resource, "*");
   assert.equal(policies.audit.Statement.some((statement) => actionsOf(statement).some((action) => mutationActions.has(action))), false);
 });
@@ -160,10 +155,7 @@ test("cluster, broker, and exact twelve-family restrictions remain unchanged", (
     "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
     "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*",
   ]);
-  for (const sid of ["TagExactStageBTaskDefinitions", "DeregisterExactStageBTaskDefinitions"]) {
-    if (sid === "TagExactStageBTaskDefinitions") assert.deepEqual(statementOf(policies.v4, sid).Resource, stageBTaskFamilies.map(arn));
-    else assert.equal(statementOf(policies.v4, sid).Resource, "*");
-  }
+  assert.deepEqual(statementOf(policies.v4, "TagExactStageBTaskDefinitions").Resource, stageBTaskFamilies.map(arn));
   assert.deepEqual(statementOf(policies.v4, "SetExactStageBLogRetention").Resource, stageBLogGroups.map(logArn));
   assert.equal(stageBTaskFamilies.length, 12);
 });
@@ -202,7 +194,7 @@ test("the runbook targets v4 and the companion policy for the separately authori
 });
 
 test("historical policy bytes remain unchanged while the active v4 correction is explicit", () => {
-  assert.equal(sha256(read(paths.v4)), "566855dc7bca25f8d8a8798e3933d1d023c9a8c3138e5f600955cf432312771f");
+  assert.equal(sha256(read(paths.v4)), "bd08ec2af7870030e76fad3119b98d6ea7bccd0e2c56674ea2605143bce9398f");
   assert.equal(sha256(read(paths.audit)), "56b299c2f21973a3117e89e5147658406d3ba823efab2b5548ac1b0d9f93dde6");
 });
 
