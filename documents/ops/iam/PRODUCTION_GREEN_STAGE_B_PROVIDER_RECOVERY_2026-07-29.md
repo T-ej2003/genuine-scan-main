@@ -3,8 +3,8 @@
 ## Exact correction
 
 MSCQRProductionGreenStageBProviderRecovery default version is now v2. The
-canonical SHA-256 is
-c3f07b334b2dd362112736a6a1d3756bac3a85b3e0c35b00e71ff39e732ae2a7.
+canonical SHA-256 is regenerated from the reviewed source document during the
+live-policy semantic verification below.
 
 The prior live v1 policy is preserved in
 [MSCQRProductionGreenStageBProviderRecovery-v1-live.json](./MSCQRProductionGreenStageBProviderRecovery-v1-live.json).
@@ -17,9 +17,60 @@ The only changes are:
    trailing colon-star form.
 2. A separate ecs:TagResource statement permits only the eleven reviewed
    task-definition family/revision patterns.
+3. Exact Stage B apply recovery permissions now cover only the reviewed log groups
+   and task-definition family/revision patterns.
 
 The global iam:ListAttachedRolePolicies statement and exact DynamoDB replay
 table tagging statement are unchanged.
+
+## Stage B release-deployer apply correction
+
+The Stage B Terraform apply may register immutable revisions for the exact Stage B
+task-definition families and create the four Stage B-owned candidate log groups.
+The source policy therefore also permits `ecs:DeregisterTaskDefinition` only for
+those reviewed family ARN patterns and `logs:CreateLogGroup` only for the backend,
+worker, application-canary, and read-only-canary Stage B log groups. The shared
+`/ecs/mscqr-production/full-rls-green` executor log group remains Stage A-owned
+and is intentionally excluded from Stage B creation authority.
+The existing exact tagging statements include the same read-only-canary log-group
+and task-definition ARNs because Terraform tags both resources during creation.
+
+Merging source alone does not update AWS. The live managed policy must be version-updated after merge. After merge, an authorized IAM
+administrator must create a new default managed-policy version from the exact
+merged document and verify the live document semantically before any retry:
+
+```sh
+set -euo pipefail
+POLICY_NAME='MSCQRProductionGreenStageBProviderRecovery'
+POLICY_DOCUMENT="$PWD/documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v2.json"
+ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+POLICY_ARN="$(aws iam get-policy --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}" --query Policy.Arn --output text)"
+NEW_VERSION_ID="$(aws iam create-policy-version \
+  --policy-arn "$POLICY_ARN" \
+  --policy-document "file://${POLICY_DOCUMENT}" \
+  --set-as-default \
+  --query PolicyVersion.VersionId --output text)"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+aws iam get-policy-version --policy-arn "$POLICY_ARN" --version-id "$NEW_VERSION_ID" \
+  --query PolicyVersion.Document --output json > "$TMP_DIR/live-policy.json"
+cmp <(jq -S . "$POLICY_DOCUMENT") <(jq -S . "$TMP_DIR/live-policy.json")
+```
+
+The update must preserve the single intended release-deployer attachment. If AWS
+reports the five-version limit, delete only an explicitly reviewed non-default
+version. Root may perform only this policy-version update when no approved
+non-root administrator exists; root must not run Terraform and must be logged out
+immediately afterward. Obtain a fresh MFA-backed release session for the
+release-deployer after the live update. Do not retry the failed apply until the live managed policy
+matches this source document.
+The failed Stage B apply must not be retried before the live managed policy matches source.
+
+The recovery sequence is: verify the fresh caller, revalidate the saved plan and
+reference audit, apply that exact full plan without `-target`, then verify the
+new task-definition revisions and retained rollback ARNs. No ECS service update,
+task execution, broker invocation, database action, ALB, DNS, or traffic change
+is part of this correction.
 
 ## Validation
 
@@ -29,8 +80,8 @@ table tagging statement are unchanged.
 - Unrelated log groups/task-definition families and missing/wrong tags were
   denied.
 - ecs:RunTask and ecs:UpdateService remain explicit denies; ECS service
-  creation, task-definition deregistration, and DynamoDB data-plane/destructive
-  actions remain denied.
+  creation and task-definition deregistration outside the exact Stage B family
+  list, plus DynamoDB data-plane/destructive actions, remain denied.
 - The attached live v2 document was fetched after creation and its canonical
   SHA-256 matched the reviewed source.
 
