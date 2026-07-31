@@ -169,3 +169,44 @@ test("the runbook targets v4 and the companion policy for the separately authori
   assert.match(runbook, /6,144/);
   assert.match(runbook, /actual AWS-managed-policy\s+version ID/i);
 });
+
+test("active policy artifact bytes remain unchanged while the runbook is hardened", () => {
+  assert.equal(sha256(read(paths.v4)), "e48aa04b5e5536b5108ff2f605dad87dedb991c646f658eb1699adf32d87757d");
+  assert.equal(sha256(read(paths.audit)), "56b299c2f21973a3117e89e5147658406d3ba823efab2b5548ac1b0d9f93dde6");
+});
+
+test("runbook is companion-first and verifies complete policy attachments before provider mutation", () => {
+  const runbook = read("documents/ops/iam/PRODUCTION_GREEN_STAGE_B_PROVIDER_RECOVERY_2026-07-29.md");
+  const providerUpdate = runbook.indexOf('PROVIDER_VERSION_ID="$(aws iam create-policy-version');
+  assert.ok(providerUpdate > 0);
+  for (const marker of [
+    "# A. Pre-mutation validation",
+    "# B. Companion create/update",
+    "# C. Companion attach and complete verification",
+    "# D. Provider v4 update",
+    "# E. Provider complete verification",
+    "# F. Final two-policy role verification",
+    "G. Root/admin logout and fresh MFA release session",
+  ]) assert.ok(runbook.indexOf(marker) >= 0, marker);
+  for (const marker of [
+    "aws iam create-policy",
+    "AUDIT_VERSION_ID=\"$(aws iam create-policy-version",
+    "aws iam attach-role-policy --role-name \"$ROLE_NAME\" --policy-arn \"$AUDIT_POLICY_ARN\"",
+    "cmp <(jq -S . \"$AUDIT_DOCUMENT\") <(jq -S . \"$TMP_DIR/live-audit-policy.json\")",
+    'reject_unexpected_entities "$PROVIDER_POLICY_ARN" "$TMP_DIR/provider-entities.json" true',
+    'reject_unexpected_entities "$AUDIT_POLICY_ARN" "$TMP_DIR/audit-entities.json" false',
+    'verify_complete_policy_entities "$AUDIT_POLICY_ARN" "$AUDIT_POLICY_NAME"',
+    "simulate_audit_read iam:ListAttachedRolePolicies",
+  ]) assert.ok(runbook.indexOf(marker) >= 0 && runbook.indexOf(marker) < providerUpdate, marker);
+  assert.ok(runbook.indexOf("aws iam list-policy-versions") < providerUpdate);
+  assert.ok(runbook.indexOf("aws iam get-account-summary") < providerUpdate);
+  assert.ok(runbook.indexOf("aws iam list-entities-for-policy") < providerUpdate);
+  assert.ok(runbook.indexOf('verify_complete_policy_entities "$PROVIDER_POLICY_ARN" "$PROVIDER_POLICY_NAME"') > providerUpdate);
+  assert.match(runbook, /\.Policy\.AttachmentCount/);
+  assert.match(runbook, /\.Policy\.PermissionsBoundaryUsageCount/);
+  assert.match(runbook, /\.PolicyRoles \| length/);
+  assert.match(runbook, /\.PolicyGroups \| length/);
+  assert.match(runbook, /\.PolicyUsers \| length/);
+  assert.match(runbook, /mscqr-production-release-deployer/);
+  assert.match(runbook, /do not automatically roll back/i);
+});
