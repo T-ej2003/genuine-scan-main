@@ -19,8 +19,9 @@ final plan and never reuse it after expiry. ECS service descriptions run in batc
 10 and task descriptions in batches of 100. Every describe response must contain valid
 `services`/`tasks` and `failures` arrays, with no failures and an exact ARN set match
 to the preceding list response. Never reuse an audit from another plan or release.
-The plan classifies task definitions with an existing `before.arn` as rollover families;
-create-only families are recorded explicitly and are not sent to `DescribeTaskDefinition`.
+The plan classifies task definitions with an existing `before.arn` as rollover or no-op
+families; create-only families are recorded explicitly and are not sent to
+`DescribeTaskDefinition`. No-op families are observed but are not treated as replacements.
 Any unexpected prior ARN or live service, task, or broker reference for a create-only
 family fails closed; rollover-family reference checks remain unchanged.
 

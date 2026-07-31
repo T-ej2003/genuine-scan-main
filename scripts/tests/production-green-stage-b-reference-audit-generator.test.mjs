@@ -25,6 +25,7 @@ const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-m
 const now = new Date("2026-07-31T14:05:00.000Z");
 const oldArnFor = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`;
 const newArnFor = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:2`;
+const backendAddress = 'aws_ecs_task_definition.candidate["backend"]';
 const readOnlyCanaryAddress = 'aws_ecs_task_definition.candidate["read_only_canary"]';
 const readOnlyCanaryFamily = STAGE_B_TASK_DEFINITION_FAMILIES[readOnlyCanaryAddress];
 const familyForMode = (mode) => mode === "full-rls-application-canary"
@@ -109,6 +110,17 @@ function makeCreateOnlyFixture({ mutatePlan, mutateReader } = {}) {
       change.change.actions = ["create"];
       change.change.before = null;
       delete change.change.replace_paths;
+      mutatePlan?.(plan);
+    },
+    mutateReader,
+  });
+}
+
+function makeMixedFixture({ mutatePlan, mutateReader } = {}) {
+  return makeCreateOnlyFixture({
+    mutatePlan: (plan) => {
+      const change = plan.resource_changes.find((item) => item.address === backendAddress);
+      change.change.actions = ["no-op"];
       mutatePlan?.(plan);
     },
     mutateReader,
@@ -225,6 +237,43 @@ test("create-only family live references fail closed", () => {
     reader.describeServices = () => ({ services: [serviceRecord(serviceArnFor(0), 0, newArnFor(readOnlyCanaryFamily))], failures: [] });
   } });
   assert.throws(() => generate(fixture), /Create-only task-definition family remains referenced/);
+});
+
+test("mixed rollover, create-only, and no-op plan classifications pass", () => {
+  const audit = generate(makeMixedFixture());
+  assert.equal(audit.oldTaskDefinitions.length, 10);
+  assert.equal(audit.createOnlyTaskDefinitions.length, 1);
+  assert.deepEqual(audit.noOpTaskDefinitions, [{
+    terraformAddress: backendAddress,
+    family: STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress],
+    proposedFamily: STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress],
+    classification: "no-op",
+    priorTaskDefinitionArn: oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]),
+    serviceReferences: [],
+    runningTaskReferences: [],
+    pendingTaskReferences: [],
+    brokerReferenceModes: [],
+  }]);
+});
+
+test("no-op with a valid prior ARN passes", () => {
+  assert.doesNotThrow(() => generate(makeMixedFixture()));
+});
+
+test("no-op without a prior ARN fails closed", () => {
+  const fixture = makeMixedFixture({ mutatePlan: (plan) => {
+    const change = plan.resource_changes.find((item) => item.address === backendAddress);
+    change.change.before = { family: change.change.before.family };
+  } });
+  assert.throws(() => generate(fixture), /no-op task definition is missing its prior ARN/);
+});
+
+test("no-op family mismatch fails closed", () => {
+  const fixture = makeMixedFixture({ mutatePlan: (plan) => {
+    const change = plan.resource_changes.find((item) => item.address === backendAddress);
+    change.change.before.family = readOnlyCanaryFamily;
+  } });
+  assert.throws(() => generate(fixture), /no-op task-definition family mismatch/);
 });
 
 test("batching is stable, non-mutating, bounded, and empty-safe", () => {
