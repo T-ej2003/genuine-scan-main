@@ -4,14 +4,14 @@ import fs from "node:fs";
 import test from "node:test";
 
 const historicalPolicyPath = "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v2.json";
-const policyPath = "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v3.json";
+const historicalCorrectedPolicyPath = "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v3.json";
 const historicalPolicy = JSON.parse(fs.readFileSync(historicalPolicyPath, "utf8"));
-const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+const historicalCorrectedPolicy = JSON.parse(fs.readFileSync(historicalCorrectedPolicyPath, "utf8"));
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
-const statements = policy.Statement;
+const statements = historicalCorrectedPolicy.Statement;
 const actions = statements.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
 const statementOf = (candidate, action) => candidate.Statement.find(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes(action));
-const statement = (action) => statementOf(policy, action);
+const statement = (action) => statementOf(historicalCorrectedPolicy, action);
 const stageBTaskFamilies = [
   "mscqr-production-rls-green-backend-candidate",
   "mscqr-production-rls-green-worker-candidate",
@@ -55,7 +55,7 @@ test("v3 changes only the dedicated DescribeTaskDefinition Resource field", () =
   assert.equal(v3Read.Action, "ecs:DescribeTaskDefinition");
   assert.equal(v3Read.Resource, "*");
   const normalize = (candidate) => candidate.Statement.map((value) => value.Sid === "DescribeStageBTaskDefinitionsReadOnly" ? { ...value, Resource: "<reviewed-correction>" } : value);
-  assert.deepEqual(normalize(historicalPolicy), normalize(policy));
+  assert.deepEqual(normalize(historicalPolicy), normalize(historicalCorrectedPolicy));
   assert.notDeepEqual(v2Read.Resource, v3Read.Resource);
 });
 
@@ -145,7 +145,8 @@ test("recovery runbook requires live policy update before retry", () => {
   assert.match(runbook, /v3.*post-merge correction/is);
   assert.match(runbook, /MSCQRProductionGreenStageBProviderRecovery-v2\.json/i);
   assert.match(runbook, /MSCQRProductionGreenStageBProviderRecovery-v3\.json/i);
-  assert.match(runbook, /POLICY_DOCUMENT=.*MSCQRProductionGreenStageBProviderRecovery-v3\.json/);
+  assert.match(runbook, /PROVIDER_DOCUMENT=.*MSCQRProductionGreenStageBProviderRecovery-v4\.json/);
+  assert.match(runbook, /AUDIT_DOCUMENT=.*MSCQRProductionGreenStageBReferenceAuditReadOnly-v1\.json/);
   assert.match(runbook, /managed-policy version IDs?\s+are\s+discovered from the live policy/i);
   assert.match(runbook, /live managed policy remains on the pre-correction version until the\s+separately authorized update/i);
   assert.match(runbook, /merging source alone does not update AWS/i);
