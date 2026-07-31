@@ -1,3 +1,6 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+
 export const STAGE_B_TASK_DEFINITION_FAMILIES = Object.freeze({
   'aws_ecs_task_definition.candidate["backend"]': "mscqr-production-rls-green-backend-candidate",
   'aws_ecs_task_definition.candidate["worker"]': "mscqr-production-rls-green-worker-candidate",
@@ -174,8 +177,8 @@ function brokerApprovalChecksum(environment, label) {
   return parsed.packageChecksumSha256;
 }
 
-export function assertStageBAtomicBrokerPackagePlan(plan, transition, terraformConfiguration) {
-  if (!transition || typeof transition !== "object") throw new Error("Atomic broker package transition proof is missing.");
+export function assertStageBAtomicBrokerPackagePlan(plan, proof, terraformConfiguration) {
+  if (!proof || typeof proof !== "object") throw new Error("Broker package plan proof is missing.");
   if (typeof terraformConfiguration !== "string" || terraformConfiguration.length === 0) {
     throw new Error("Broker package transition Terraform configuration is missing.");
   }
@@ -187,41 +190,52 @@ export function assertStageBAtomicBrokerPackagePlan(plan, transition, terraformC
   const packagePath = plan?.variables?.broker_package_path?.value;
   if (!/^[a-f0-9]{64}$/.test(planChecksum || "")) throw new Error("Atomic broker package transition plan checksum is missing or malformed.");
   if (typeof packagePath !== "string" || !packagePath.startsWith("/")) throw new Error("Atomic broker package transition package path is missing or malformed.");
-  if (transition.plannedPackageChecksumSha256 !== planChecksum || transition.packageFileSha256 !== planChecksum) {
-    throw new Error("Atomic broker package transition checksum does not match the exact plan input.");
+  if (proof.plannedReleasePackageChecksumSha256 !== planChecksum) {
+    throw new Error("Broker release package checksum does not match the exact plan input.");
   }
-  if (transition.packagePath !== packagePath) throw new Error("Atomic broker package transition package path does not match the exact plan input.");
-  if (transition.brokerEnvironmentReference !== STAGE_B_BROKER_APPROVAL_REFERENCE) {
-    throw new Error("Atomic broker package transition broker approval reference is missing.");
+  if (!/^[a-f0-9]{64}$/.test(proof.brokerZipFileSha256 || "")) throw new Error("Broker ZIP checksum is missing or malformed.");
+  if (typeof proof.plannedBrokerSourceCodeHashBase64 !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(proof.plannedBrokerSourceCodeHashBase64)) {
+    throw new Error("Broker planned source_code_hash is missing or malformed.");
   }
-  if (transition.packageInputReference !== STAGE_B_BROKER_APPROVAL_INPUT) {
-    throw new Error("Atomic broker package transition package input reference is missing.");
+  let packageBytes;
+  try {
+    packageBytes = fs.readFileSync(packagePath);
+  } catch {
+    throw new Error("Expected broker package file is missing or unreadable.");
+  }
+  const packageFileSha256 = crypto.createHash("sha256").update(packageBytes).digest("hex");
+  if (packageFileSha256 !== proof.brokerZipFileSha256) throw new Error("Broker ZIP checksum does not match the expected package bytes.");
+  if (Buffer.from(proof.brokerZipFileSha256, "hex").toString("base64") !== proof.plannedBrokerSourceCodeHashBase64) {
+    throw new Error("Broker ZIP checksum does not match the planned source_code_hash.");
+  }
+  if (proof.packagePath !== packagePath) throw new Error("Broker package path does not match the exact plan input.");
+  if (proof.brokerEnvironmentReference !== STAGE_B_BROKER_APPROVAL_REFERENCE) {
+    throw new Error("Broker approval local reference is missing.");
+  }
+  if (proof.packageInputReference !== STAGE_B_BROKER_APPROVAL_INPUT) {
+    throw new Error("Broker release checksum input reference is missing.");
   }
   if (!brokerEnvironmentReferences(plan).includes(STAGE_B_BROKER_APPROVAL_REFERENCE)) {
-    throw new Error("Atomic broker package transition broker approval local reference is missing.");
+    throw new Error("Broker approval local reference is missing from the planned environment.");
   }
   const normalizedConfiguration = terraformConfiguration.replace(/\s+/g, " ");
   if (!/packageChecksumSha256\s*=\s*var\.package_checksum_sha256/.test(normalizedConfiguration)
     || !/BROKER_APPROVAL_EXPECTED_JSON\s*=\s*jsonencode\(local\.broker_approval_expected\)/.test(normalizedConfiguration)
     || !/filename\s*=\s*var\.broker_package_path/.test(normalizedConfiguration)
     || !/source_code_hash\s*=\s*filebase64sha256\(var\.broker_package_path\)/.test(normalizedConfiguration)) {
-    throw new Error("Atomic broker package transition Terraform checksum/package wiring is missing or malformed.");
+    throw new Error("Broker Terraform checksum/package wiring is missing or malformed.");
   }
   const beforeChecksum = brokerApprovalChecksum(brokerChange.change?.before?.environment, "Plan before");
-  if (transition.livePackageChecksumSha256 !== beforeChecksum || transition.planBeforePackageChecksumSha256 !== beforeChecksum) {
-    throw new Error("Atomic broker package transition live checksum does not match the plan before-value.");
+  if (proof.liveReleasePackageChecksumSha256 !== beforeChecksum || proof.planBeforeReleasePackageChecksumSha256 !== beforeChecksum) {
+    throw new Error("Live release checksum does not match the broker plan before-value.");
   }
-  if (transition.plannedPackageChecksumSha256 === beforeChecksum) throw new Error("Atomic broker package transition is not a checksum transition.");
   const after = brokerChange.change?.after || {};
-  if (after.filename !== packagePath) throw new Error("Atomic broker package transition package replacement is not in the same plan.");
-  if (after.source_code_hash !== transition.packageSourceCodeHash) {
-    throw new Error("Atomic broker package transition source_code_hash does not match the expected package bytes.");
+  if (after.filename !== packagePath) throw new Error("Broker package replacement is not in the same plan.");
+  if (after.source_code_hash !== proof.plannedBrokerSourceCodeHashBase64) {
+    throw new Error("Broker source_code_hash does not match the planned ZIP proof.");
   }
-  if (transition.packageSourceCodeHash !== transition.expectedPackageSourceCodeHash) {
-    throw new Error("Atomic broker package transition expected source_code_hash is inconsistent.");
-  }
-  if (transition.planJsonSha256 && !/^[a-f0-9]{64}$/.test(transition.planJsonSha256)) {
-    throw new Error("Atomic broker package transition plan SHA-256 is malformed.");
+  if (proof.planJsonSha256 && !/^[a-f0-9]{64}$/.test(proof.planJsonSha256)) {
+    throw new Error("Broker package plan SHA-256 is malformed.");
   }
 }
 

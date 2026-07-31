@@ -23,8 +23,9 @@ import {
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const planSha256 = "a".repeat(64);
-const packageBytes = Buffer.from("stage-b-broker-package-fixture-v1");
-const packageChecksum = sha256(packageBytes);
+const packageBytes = Buffer.from("stage-b-broker-zip-fixture-v1");
+const packageChecksum = sha256(Buffer.from("stage-b-full-rls-release-package-fixture-v1"));
+const brokerZipFileSha256 = sha256(packageBytes);
 const packageSourceCodeHash = crypto.createHash("sha256").update(packageBytes).digest("base64");
 const packageDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-audit-"));
 const packagePath = path.join(packageDirectory, "broker.zip");
@@ -123,6 +124,19 @@ function generate(fixture, overrides = {}) {
     ...fixture.options,
     ...overrides,
   });
+}
+
+function validateBrokerPlan(fixture, audit) {
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }));
 }
 
 function makeCreateOnlyFixture({ mutatePlan, mutateReader } = {}) {
@@ -504,26 +518,27 @@ test("missing and stale plan SHA values fail closed", () => {
 
 test("broker package checksum mismatch fails closed", () => {
   const fixture = makeFixture({ packageValue: "c".repeat(64) });
-  assert.throws(() => generate(fixture), /before broker approval JSON/);
+  assert.throws(() => generate(fixture), /Stale broker release checksum requires a planned broker update/);
 });
 
 test("valid atomic broker package checksum transition passes and is recorded", () => {
   const staleChecksum = "c".repeat(64);
   const fixture = makeAtomicBrokerFixture({ packageValue: staleChecksum });
   const audit = generate(fixture);
-  assert.equal(audit.broker.packageChecksumSha256, staleChecksum);
+  assert.equal(audit.broker.releasePackageChecksumSha256, staleChecksum);
+  assert.notEqual(audit.broker.brokerZipFileSha256, audit.broker.plannedReleasePackageChecksumSha256);
   assert.deepEqual(audit.plannedAtomicPackageChecksumTransition, {
     brokerTerraformAddress: "aws_lambda_function.broker",
     brokerEnvironmentReference: "local.broker_approval_expected",
     packageInputReference: "var.package_checksum_sha256",
     packagePath,
-    livePackageChecksumSha256: staleChecksum,
-    planBeforePackageChecksumSha256: staleChecksum,
-    plannedPackageChecksumSha256: packageChecksum,
-    packageFileSha256: packageChecksum,
-    packageSourceCodeHash,
-    expectedPackageSourceCodeHash: packageSourceCodeHash,
+    liveReleasePackageChecksumSha256: staleChecksum,
+    planBeforeReleasePackageChecksumSha256: staleChecksum,
+    plannedReleasePackageChecksumSha256: packageChecksum,
+    brokerZipFileSha256,
+    plannedBrokerSourceCodeHashBase64: packageSourceCodeHash,
     planJsonSha256: fixture.planJsonSha256,
+    transition: "plannedAtomicPackageChecksumTransition",
   });
   const auditBytes = Buffer.from(JSON.stringify(audit));
   assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
@@ -635,7 +650,84 @@ test("atomic package transition plan SHA binding remains enforced", () => {
     planJsonSha256: fixture.planJsonSha256,
     terraformConfiguration: fixture.options.terraformConfiguration,
     now,
+  }), /planJsonSha256 does not match broker evidence/);
+});
+
+test("broker update without a reference audit fails closed", () => {
+  const fixture = makeAtomicBrokerFixture();
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }), /explicit plan-bound reference audit/);
+});
+
+test("broker update with audit missing broker evidence fails closed", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  delete audit.broker;
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: Buffer.from(JSON.stringify(audit)),
+    referenceAuditSha256: sha256(Buffer.from(JSON.stringify(audit))),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }), /broker update reference audit evidence is missing/);
+});
+
+test("broker update with stale audit fails closed", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  audit.auditedAt = "2026-07-31T13:00:00.000Z";
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: Buffer.from(JSON.stringify(audit)),
+    referenceAuditSha256: sha256(Buffer.from(JSON.stringify(audit))),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }), /expired/);
+});
+
+test("broker update with wrong audit plan binding fails closed", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  audit.planJsonSha256 = "0".repeat(64);
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: Buffer.from(JSON.stringify(audit)),
+    referenceAuditSha256: sha256(Buffer.from(JSON.stringify(audit))),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
   }), /bound to a different plan JSON/);
+});
+
+test("complete broker update audit evidence passes", () => {
+  const fixture = makeAtomicBrokerFixture();
+  validateBrokerPlan(fixture, generate(fixture));
+});
+
+test("broker ZIP checksum and source_code_hash are independently validated", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  audit.broker.brokerZipFileSha256 = "0".repeat(64);
+  audit.plannedAtomicPackageChecksumTransition = null;
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }), /ZIP checksum/);
 });
 
 test("broker references to superseded revisions and unknown families fail closed", () => {

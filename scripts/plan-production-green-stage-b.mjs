@@ -67,20 +67,46 @@ function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planB
   if (typeof entry.rollbackArn !== "string" || !arnPattern.test(entry.rollbackArn)) throw new Error(`Stage B rollback ARN missing: ${change.address}`);
 }
 
+function assertBrokerAuditBinding(plan, brokerChange, audit, auditBytes, auditSha256, planBytes, planSha256, now, terraformConfiguration) {
+  if (!audit || !auditBytes || !auditSha256 || !planBytes || !planSha256) throw new Error("Stage B broker update requires an explicit plan-bound reference audit.");
+  if (sha256(auditBytes) !== auditSha256) throw new Error("Stage B reference audit SHA-256 mismatch.");
+  if (sha256(planBytes) !== planSha256) throw new Error("Stage B plan JSON SHA-256 mismatch.");
+  assertStageBReferenceAuditFreshness(audit.auditedAt, now);
+  if (audit.planJsonSha256 !== planSha256) throw new Error("Stage B reference audit is bound to a different plan JSON.");
+  const broker = audit.broker;
+  if (!broker || typeof broker !== "object" || Array.isArray(broker)) throw new Error("Stage B broker update reference audit evidence is missing.");
+  const proof = {
+    brokerTerraformAddress: "aws_lambda_function.broker",
+    brokerEnvironmentReference: "local.broker_approval_expected",
+    packageInputReference: "var.package_checksum_sha256",
+    packagePath: broker.brokerPackagePath,
+    liveReleasePackageChecksumSha256: broker.releasePackageChecksumSha256,
+    planBeforeReleasePackageChecksumSha256: broker.planBeforeReleasePackageChecksumSha256,
+    plannedReleasePackageChecksumSha256: broker.plannedReleasePackageChecksumSha256,
+    brokerZipFileSha256: broker.brokerZipFileSha256,
+    plannedBrokerSourceCodeHashBase64: broker.plannedBrokerSourceCodeHashBase64,
+    planJsonSha256: broker.planJsonSha256,
+  };
+  assertStageBAtomicBrokerPackagePlan(plan, proof, terraformConfiguration);
+  const plannedChecksum = plan.variables?.package_checksum_sha256?.value;
+  if (broker.releasePackageChecksumSha256 !== plannedChecksum) {
+    const transition = audit.plannedAtomicPackageChecksumTransition;
+    if (!transition || transition.transition !== "plannedAtomicPackageChecksumTransition") throw new Error("Stage B atomic broker release-checksum transition proof is missing.");
+    for (const field of ["plannedReleasePackageChecksumSha256", "brokerZipFileSha256", "plannedBrokerSourceCodeHashBase64", "planJsonSha256"]) {
+      if (transition[field] !== proof[field]) throw new Error(`Stage B atomic broker release-checksum transition ${field} does not match broker evidence.`);
+    }
+    if (transition.planJsonSha256 !== planSha256) throw new Error("Stage B atomic broker release-checksum transition is bound to a different plan JSON.");
+  } else if (audit.plannedAtomicPackageChecksumTransition !== null && audit.plannedAtomicPackageChecksumTransition !== undefined) {
+    throw new Error("Stage B atomic broker release-checksum transition is unexpected when the live checksum already matches.");
+  }
+}
+
 export function assertStageBPlan(plan, options = {}) {
   const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now = new Date(), terraformConfiguration } = options;
   const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
-  const packageTransition = referenceAudit?.plannedAtomicPackageChecksumTransition;
-  if (brokerChange && referenceAudit?.broker) {
-    const plannedChecksum = plan.variables?.package_checksum_sha256?.value;
-    const liveChecksum = referenceAudit.broker.packageChecksumSha256;
-    if (liveChecksum !== plannedChecksum) {
-      if (!packageTransition) throw new Error("Stage B atomic broker package checksum transition proof is missing.");
-      if (packageTransition.planJsonSha256 !== planJsonSha256) throw new Error("Stage B atomic broker package transition is bound to a different plan JSON.");
-      assertStageBAtomicBrokerPackagePlan(plan, packageTransition, terraformConfiguration);
-    } else if (packageTransition !== null && packageTransition !== undefined) {
-      throw new Error("Stage B atomic broker package transition is unexpected when the live checksum already matches.");
-    }
+  const brokerActions = brokerChange?.change?.actions || [];
+  if (brokerChange && JSON.stringify(brokerActions) !== JSON.stringify(["no-op"])) {
+    assertBrokerAuditBinding(plan, brokerChange, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
   }
   for (const change of plan.resource_changes || []) {
     const actions = change.change.actions || [];
