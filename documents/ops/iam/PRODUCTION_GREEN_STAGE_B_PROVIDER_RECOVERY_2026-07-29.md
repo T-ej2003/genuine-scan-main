@@ -82,13 +82,32 @@ from each live policy and are not assumed to match repository suffixes.
 
 The Stage B Terraform apply may register immutable revisions for the exact Stage B
 task-definition families and create the four Stage B-owned candidate log groups.
-The source policy therefore also permits `ecs:DeregisterTaskDefinition` only for
-those reviewed family ARN patterns and `logs:CreateLogGroup` only for the backend,
+The source policy therefore permits `ecs:DeregisterTaskDefinition` with the
+AWS-required `Resource "*"` model, and `logs:CreateLogGroup` only for the backend,
 worker, application-canary, and read-only-canary Stage B log groups. The shared
 `/ecs/mscqr-production/full-rls-green` executor log group remains Stage A-owned
 and is intentionally excluded from Stage B creation authority.
 The existing exact tagging statements include the same read-only-canary log-group
 and task-definition ARNs because Terraform tags both resources during creation.
+
+## Failed-apply IAM correction — stop before retry
+
+The first apply of the validated plan stopped because the release-deployer's live
+policy did not authorize `logs:PutRetentionPolicy`, and its existing
+`ecs:DeregisterTaskDefinition` statement used ARN resources that AWS did not
+evaluate for this action. The corrective v4 source keeps deregistration as the
+single AWS-required `Resource "*"` exception, constrained to `eu-west-2`; the
+Stage B plan validator remains the compensating exact-family control. It adds
+`logs:PutRetentionPolicy` only for the four exact Stage B log-group ARN patterns,
+also constrained to `eu-west-2`.
+
+After this corrective PR is merged, update the live provider managed policy from
+v4 and verify the complete attachment set before any Terraform retry. Do not
+retry the previous saved plan, manually delete the partial log group, manually
+set retention, manually deregister task definitions, or change any runtime,
+service, database, ALB, DNS, or traffic resource. Refresh the MFA-backed release
+session, reconcile the partial state, create exactly one fresh plan and one
+plan-bound reference audit, and stop for independent review before apply.
 
 Merging source alone does not update AWS. The live provider-recovery policy must be version-updated after merge from v4, and the companion policy must be created
 or updated from `ReferenceAuditReadOnly-v1`. The sequence below is failure-safe:
