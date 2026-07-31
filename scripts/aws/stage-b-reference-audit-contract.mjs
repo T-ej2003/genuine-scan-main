@@ -1,3 +1,6 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+
 export const STAGE_B_TASK_DEFINITION_FAMILIES = Object.freeze({
   'aws_ecs_task_definition.candidate["backend"]': "mscqr-production-rls-green-backend-candidate",
   'aws_ecs_task_definition.candidate["worker"]': "mscqr-production-rls-green-worker-candidate",
@@ -22,6 +25,8 @@ export const STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS = 15 * 60 * 1000;
 export const STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS = 60 * 1000;
 export const STAGE_B_BROKER_TERRAFORM_ADDRESS = "aws_lambda_function.broker";
 export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.broker_task_definition_arns";
+export const STAGE_B_BROKER_APPROVAL_REFERENCE = "local.broker_approval_expected";
+export const STAGE_B_BROKER_APPROVAL_INPUT = "var.package_checksum_sha256";
 export const STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION = "aws_ecs_task_definition.executor";
 
 function configuredResources(module, resources = []) {
@@ -138,6 +143,112 @@ export function assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, broker
   if (!relevant.some((item) => item?.resource === taskDefinitionAddress && JSON.stringify(item.attribute) === JSON.stringify(["arn"]))) {
     throw new Error(`Broker atomic rollover Terraform dependency to ${taskDefinitionAddress}.arn is missing.`);
   }
+}
+
+function brokerResource(plan) {
+  return configuredResources(plan?.configuration?.root_module)
+    .find((resource) => resource.address === STAGE_B_BROKER_TERRAFORM_ADDRESS);
+}
+
+function brokerEnvironmentReferences(plan) {
+  const environment = brokerResource(plan)?.expressions?.environment;
+  const blocks = Array.isArray(environment) ? environment : [environment];
+  return blocks.flatMap((block) => {
+    const references = block?.variables?.references;
+    if (references === undefined) return [];
+    if (!Array.isArray(references) || !references.every((reference) => typeof reference === "string")) {
+      throw new Error("Broker package transition Terraform references are malformed.");
+    }
+    return references;
+  });
+}
+
+function brokerApprovalChecksum(environment, label) {
+  const variables = environment?.[0]?.variables || {};
+  const raw = variables.BROKER_APPROVAL_EXPECTED_JSON;
+  if (typeof raw !== "string" || raw.length === 0) throw new Error(`${label} broker approval JSON is missing.`);
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${label} broker approval JSON is malformed.`);
+  }
+  if (typeof parsed?.packageChecksumSha256 !== "string") throw new Error(`${label} broker package checksum is missing.`);
+  return parsed.packageChecksumSha256;
+}
+
+function assertBrokerPackagePlanCommon(plan, proof, terraformConfiguration, expectedActions) {
+  if (!proof || typeof proof !== "object") throw new Error("Broker package plan proof is missing.");
+  if (typeof terraformConfiguration !== "string" || terraformConfiguration.length === 0) {
+    throw new Error("Broker package transition Terraform configuration is missing.");
+  }
+  const brokerChange = (plan?.resource_changes || []).find((change) => change.address === STAGE_B_BROKER_TERRAFORM_ADDRESS);
+  if (!brokerChange || JSON.stringify(brokerChange.change?.actions) !== JSON.stringify(expectedActions)) {
+    throw new Error(`Broker package plan requires aws_lambda_function.broker actions ${JSON.stringify(expectedActions)}.`);
+  }
+  const planChecksum = plan?.variables?.package_checksum_sha256?.value;
+  const packagePath = plan?.variables?.broker_package_path?.value;
+  if (!/^[a-f0-9]{64}$/.test(planChecksum || "")) throw new Error("Atomic broker package transition plan checksum is missing or malformed.");
+  if (typeof packagePath !== "string" || !packagePath.startsWith("/")) throw new Error("Atomic broker package transition package path is missing or malformed.");
+  if (proof.plannedReleasePackageChecksumSha256 !== planChecksum) {
+    throw new Error("Broker release package checksum does not match the exact plan input.");
+  }
+  if (!/^[a-f0-9]{64}$/.test(proof.brokerZipFileSha256 || "")) throw new Error("Broker ZIP checksum is missing or malformed.");
+  if (typeof proof.plannedBrokerSourceCodeHashBase64 !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(proof.plannedBrokerSourceCodeHashBase64)) {
+    throw new Error("Broker planned source_code_hash is missing or malformed.");
+  }
+  let packageBytes;
+  try {
+    packageBytes = fs.readFileSync(packagePath);
+  } catch {
+    throw new Error("Expected broker package file is missing or unreadable.");
+  }
+  const packageFileSha256 = crypto.createHash("sha256").update(packageBytes).digest("hex");
+  if (packageFileSha256 !== proof.brokerZipFileSha256) throw new Error("Broker ZIP checksum does not match the expected package bytes.");
+  if (Buffer.from(proof.brokerZipFileSha256, "hex").toString("base64") !== proof.plannedBrokerSourceCodeHashBase64) {
+    throw new Error("Broker ZIP checksum does not match the planned source_code_hash.");
+  }
+  if (proof.packagePath !== packagePath) throw new Error("Broker package path does not match the exact plan input.");
+  if (proof.brokerEnvironmentReference !== STAGE_B_BROKER_APPROVAL_REFERENCE) {
+    throw new Error("Broker approval local reference is missing.");
+  }
+  if (proof.packageInputReference !== STAGE_B_BROKER_APPROVAL_INPUT) {
+    throw new Error("Broker release checksum input reference is missing.");
+  }
+  if (!brokerEnvironmentReferences(plan).includes(STAGE_B_BROKER_APPROVAL_REFERENCE)) {
+    throw new Error("Broker approval local reference is missing from the planned environment.");
+  }
+  const normalizedConfiguration = terraformConfiguration.replace(/\s+/g, " ");
+  if (!/packageChecksumSha256\s*=\s*var\.package_checksum_sha256/.test(normalizedConfiguration)
+    || !/BROKER_APPROVAL_EXPECTED_JSON\s*=\s*jsonencode\(local\.broker_approval_expected\)/.test(normalizedConfiguration)
+    || !/filename\s*=\s*var\.broker_package_path/.test(normalizedConfiguration)
+    || !/source_code_hash\s*=\s*filebase64sha256\(var\.broker_package_path\)/.test(normalizedConfiguration)) {
+    throw new Error("Broker Terraform checksum/package wiring is missing or malformed.");
+  }
+  const after = brokerChange.change?.after || {};
+  if (after.filename !== packagePath) throw new Error("Broker package replacement is not in the same plan.");
+  if (after.source_code_hash !== proof.plannedBrokerSourceCodeHashBase64) {
+    throw new Error("Broker source_code_hash does not match the planned ZIP proof.");
+  }
+  if (proof.planJsonSha256 && !/^[a-f0-9]{64}$/.test(proof.planJsonSha256)) {
+    throw new Error("Broker package plan SHA-256 is malformed.");
+  }
+  return { brokerChange, planChecksum };
+}
+
+export function assertStageBAtomicBrokerPackagePlan(plan, proof, terraformConfiguration) {
+  const { brokerChange } = assertBrokerPackagePlanCommon(plan, proof, terraformConfiguration, ["update"]);
+  const beforeChecksum = brokerApprovalChecksum(brokerChange.change?.before?.environment, "Plan before");
+  if (proof.liveReleasePackageChecksumSha256 !== beforeChecksum || proof.planBeforeReleasePackageChecksumSha256 !== beforeChecksum) {
+    throw new Error("Live release checksum does not match the broker plan before-value.");
+  }
+}
+
+export function assertStageBBrokerCreatePlan(plan, proof, terraformConfiguration) {
+  const { brokerChange, planChecksum } = assertBrokerPackagePlanCommon(plan, proof, terraformConfiguration, ["create"]);
+  const afterChecksum = brokerApprovalChecksum(brokerChange.change?.after?.environment, "Planned create");
+  if (afterChecksum !== planChecksum) throw new Error("Planned broker approval JSON does not match the release package checksum input.");
+  assertStageBBrokerTaskDefinitionMapping(plan, terraformConfiguration);
 }
 
 export function assertStageBReferenceAuditFreshness(auditedAt, now = new Date()) {

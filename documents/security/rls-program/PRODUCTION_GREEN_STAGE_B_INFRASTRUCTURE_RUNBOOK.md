@@ -25,6 +25,19 @@ families; create-only families are recorded explicitly and are not sent to
 Any unexpected prior ARN or live service, task, or broker reference for a create-only
 family fails closed; rollover-family reference checks remain unchanged.
 
+An initial broker Lambda create is validated entirely from the plan and Terraform
+configuration; it has no live reference audit requirement. Every non-no-op broker
+Lambda update requires a fresh, plan-bound reference audit. The
+full-RLS release checksum is `var.package_checksum_sha256`, which must flow through
+`local.broker_approval_expected.packageChecksumSha256` into the broker environment.
+The independently built ZIP is `var.broker_package_path`; its raw SHA-256 and
+base64 `source_code_hash` are proved separately. These two artifact digests are
+different contract values and must not be equal. If the live release checksum is
+older, the audit records `plannedAtomicPackageChecksumTransition` only when the same
+exact plan updates it from the broker plan `before` value to the release checksum,
+replaces the ZIP, and binds all evidence to the exact plan SHA. Missing, stale,
+incomplete, or mismatched broker evidence fails closed.
+
 ```sh
 node scripts/aws/generate-production-green-stage-b-reference-audit.mjs \
   --plan-json /absolute/private/production-green-stage-b.plan.json \

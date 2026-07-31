@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { assertStageBPlan } from "../plan-production-green-stage-b.mjs";
 import { STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
@@ -12,6 +14,7 @@ import {
 } from "../aws/generate-production-green-stage-b-reference-audit.mjs";
 import {
   assertStageBAtomicBrokerPlan,
+  assertStageBAtomicBrokerPackagePlan,
   assertStageBBrokerTaskDefinitionMapping,
   STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS,
   STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS,
@@ -20,7 +23,13 @@ import {
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const planSha256 = "a".repeat(64);
-const packageChecksum = "b".repeat(64);
+const packageBytes = Buffer.from("stage-b-broker-zip-fixture-v1");
+const packageChecksum = sha256(Buffer.from("stage-b-full-rls-release-package-fixture-v1"));
+const brokerZipFileSha256 = sha256(packageBytes);
+const packageSourceCodeHash = crypto.createHash("sha256").update(packageBytes).digest("base64");
+const packageDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-audit-"));
+const packagePath = path.join(packageDirectory, "broker.zip");
+fs.writeFileSync(packagePath, packageBytes, { mode: 0o600 });
 const callerArn = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test-session";
 const brokerFunctionArn = "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed";
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
@@ -50,7 +59,13 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
       replace_paths: [["container_definitions"]],
     },
   }));
-  const plan = { resource_changes: changes };
+  const plan = {
+    variables: {
+      package_checksum_sha256: { value: packageChecksum },
+      broker_package_path: { value: packagePath },
+    },
+    resource_changes: changes,
+  };
   mutatePlan?.(plan);
   const planBytes = Buffer.from(JSON.stringify(plan));
   const actualPlanSha = sha256(planBytes);
@@ -111,6 +126,19 @@ function generate(fixture, overrides = {}) {
   });
 }
 
+function validateBrokerPlan(fixture, audit) {
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }));
+}
+
 function makeCreateOnlyFixture({ mutatePlan, mutateReader } = {}) {
   return makeFixture({
     mutatePlan: (plan) => {
@@ -132,7 +160,11 @@ function addBrokerAtomicPlanContract(plan, taskDefinitionAddress = canaryAddress
         {
           address: "aws_lambda_function.broker",
           type: "aws_lambda_function",
-          expressions: { environment: [{ variables: { references: ["local.broker_task_definition_arns"] } }] },
+          expressions: {
+            environment: [{ variables: { references: ["local.broker_task_definition_arns", "local.broker_approval_expected"] } }],
+            filename: { references: ["var.broker_package_path"] },
+            source_code_hash: { references: ["var.broker_package_path"] },
+          },
         },
         {
           address: executorCollectionAddress,
@@ -163,12 +195,32 @@ function addBrokerAtomicPlanContract(plan, taskDefinitionAddress = canaryAddress
     : [{ resource: relevantAddress, attribute: ["arn"] }];
 }
 
-function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", brokerActions = ["update"], includeBrokerChange = true, taskDefinitionAddress = taskDefinitionAddressForMode(mode), relevantAddress = taskDefinitionAddress, omitExecutorCollectionDependency = false, terraformConfiguration = terraformConfigurationSource, mutatePlan, mutateReader } = {}) {
+function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", packageValue = packageChecksum, brokerActions = ["update"], includeBrokerChange = true, taskDefinitionAddress = taskDefinitionAddressForMode(mode), relevantAddress = taskDefinitionAddress, omitExecutorCollectionDependency = false, terraformConfiguration = terraformConfigurationSource, mutatePlan, mutateReader } = {}) {
   return makeFixture({
+    packageValue,
     terraformConfiguration,
     mutatePlan: (plan) => {
       addBrokerAtomicPlanContract(plan, taskDefinitionAddress, relevantAddress, { omitExecutorCollectionDependency });
-      if (includeBrokerChange) plan.resource_changes.push({ address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: brokerActions, before: {}, after: {} } });
+      if (includeBrokerChange) plan.resource_changes.push({
+        address: "aws_lambda_function.broker",
+        type: "aws_lambda_function",
+        change: {
+          actions: brokerActions,
+          before: {
+            filename: "/private/tmp/old-broker.zip",
+            source_code_hash: "old-source-code-hash",
+            environment: [{ variables: { BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify({ packageChecksumSha256: packageValue }) } }],
+          },
+          after: {
+            filename: packagePath,
+            source_code_hash: packageSourceCodeHash,
+            ...(JSON.stringify(brokerActions) === JSON.stringify(["create"])
+              ? { environment: [{ variables: { BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify({ packageChecksumSha256: packageChecksum }) } }] }
+              : {}),
+          },
+          after_unknown: { environment: [{ variables: true }] },
+        },
+      });
       mutatePlan?.(plan);
     },
     mutateReader: (reader) => {
@@ -182,6 +234,20 @@ function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", brokerA
         return config;
       };
       mutateReader?.(reader);
+    },
+  });
+}
+
+function makeInitialBrokerCreateFixture({ mutatePlan } = {}) {
+  return makeAtomicBrokerFixture({
+    brokerActions: ["create"],
+    mutatePlan: (plan) => {
+      for (const change of plan.resource_changes.filter((item) => item.type === "aws_ecs_task_definition")) {
+        change.change.actions = ["create"];
+        change.change.before = null;
+        delete change.change.replace_paths;
+      }
+      mutatePlan?.(plan);
     },
   });
 }
@@ -469,7 +535,265 @@ test("missing and stale plan SHA values fail closed", () => {
 
 test("broker package checksum mismatch fails closed", () => {
   const fixture = makeFixture({ packageValue: "c".repeat(64) });
-  assert.throws(() => generate(fixture), /package checksum/);
+  assert.throws(() => generate(fixture), /Stale broker release checksum requires a planned broker update/);
+});
+
+test("valid atomic broker package checksum transition passes and is recorded", () => {
+  const staleChecksum = "c".repeat(64);
+  const fixture = makeAtomicBrokerFixture({ packageValue: staleChecksum });
+  const audit = generate(fixture);
+  assert.equal(audit.broker.releasePackageChecksumSha256, staleChecksum);
+  assert.notEqual(audit.broker.brokerZipFileSha256, audit.broker.plannedReleasePackageChecksumSha256);
+  assert.deepEqual(audit.plannedAtomicPackageChecksumTransition, {
+    brokerTerraformAddress: "aws_lambda_function.broker",
+    brokerEnvironmentReference: "local.broker_approval_expected",
+    packageInputReference: "var.package_checksum_sha256",
+    packagePath,
+    liveReleasePackageChecksumSha256: staleChecksum,
+    planBeforeReleasePackageChecksumSha256: staleChecksum,
+    plannedReleasePackageChecksumSha256: packageChecksum,
+    brokerZipFileSha256,
+    plannedBrokerSourceCodeHashBase64: packageSourceCodeHash,
+    planJsonSha256: fixture.planJsonSha256,
+    transition: "plannedAtomicPackageChecksumTransition",
+  });
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }));
+});
+
+test("live checksum already matching the planned checksum passes without a transition", () => {
+  const audit = generate(makeAtomicBrokerFixture());
+  assert.equal(audit.plannedAtomicPackageChecksumTransition, null);
+});
+
+test("broker no-op with a stale checksum fails closed", () => {
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({ packageValue: "c".repeat(64), brokerActions: ["no-op"] })),
+    /broker actions/,
+  );
+});
+
+test("broker update with the wrong planned checksum fails closed", () => {
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({
+      packageValue: "c".repeat(64),
+      mutatePlan: (plan) => { plan.variables.package_checksum_sha256.value = "d".repeat(64); },
+    })),
+    /checksum does not match the exact plan input|package bytes|source_code_hash/,
+  );
+});
+
+test("broker update with a missing planned checksum fails closed", () => {
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({
+      packageValue: "c".repeat(64),
+      mutatePlan: (plan) => { delete plan.variables.package_checksum_sha256; },
+    })),
+    /checksum is missing or malformed|exact plan input/,
+  );
+});
+
+test("broker update with the wrong source_code_hash fails closed", () => {
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({
+      packageValue: "c".repeat(64),
+      mutatePlan: (plan) => {
+        plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.after.source_code_hash = "wrong";
+      },
+    })),
+    /source_code_hash/,
+  );
+});
+
+test("broker update with package bytes that do not match the checksum fails closed", () => {
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({
+      packageValue: "c".repeat(64),
+      mutatePlan: (plan) => { plan.variables.package_checksum_sha256.value = "d".repeat(64); },
+    })),
+    /package bytes|checksum does not match/,
+  );
+});
+
+test("live checksum not matching the plan before-value fails closed", () => {
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({
+      packageValue: "c".repeat(64),
+      mutatePlan: (plan) => {
+        const broker = plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker");
+        broker.change.before.environment[0].variables.BROKER_APPROVAL_EXPECTED_JSON = JSON.stringify({ packageChecksumSha256: "d".repeat(64) });
+      },
+    })),
+    /before-value/,
+  );
+});
+
+test("missing broker approval local reference fails closed", () => {
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({
+      packageValue: "c".repeat(64),
+      mutatePlan: (plan) => {
+        plan.configuration.root_module.resources[0].expressions.environment[0].variables.references = ["local.broker_task_definition_arns"];
+      },
+    })),
+    /approval local reference/,
+  );
+});
+
+test("provider-unknown broker environment after-value passes only with the full plan proof", () => {
+  const fixture = makeAtomicBrokerFixture({ packageValue: "c".repeat(64) });
+  assert.deepEqual(fixture.plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.after_unknown, { environment: [{ variables: true }] });
+  assert.doesNotThrow(() => generate(fixture));
+});
+
+test("atomic package transition plan SHA binding remains enforced", () => {
+  const fixture = makeAtomicBrokerFixture({ packageValue: "c".repeat(64) });
+  const audit = generate(fixture);
+  audit.plannedAtomicPackageChecksumTransition.planJsonSha256 = "0".repeat(64);
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }), /planJsonSha256 does not match broker evidence/);
+});
+
+test("broker update without a reference audit fails closed", () => {
+  const fixture = makeAtomicBrokerFixture();
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }), /explicit plan-bound reference audit/);
+});
+
+test("broker update with audit missing broker evidence fails closed", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  delete audit.broker;
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: Buffer.from(JSON.stringify(audit)),
+    referenceAuditSha256: sha256(Buffer.from(JSON.stringify(audit))),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }), /broker update reference audit evidence is missing/);
+});
+
+test("broker update with stale audit fails closed", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  audit.auditedAt = "2026-07-31T13:00:00.000Z";
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: Buffer.from(JSON.stringify(audit)),
+    referenceAuditSha256: sha256(Buffer.from(JSON.stringify(audit))),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }), /expired/);
+});
+
+test("broker update with wrong audit plan binding fails closed", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  audit.planJsonSha256 = "0".repeat(64);
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: Buffer.from(JSON.stringify(audit)),
+    referenceAuditSha256: sha256(Buffer.from(JSON.stringify(audit))),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }), /bound to a different plan JSON/);
+});
+
+test("complete broker update audit evidence passes", () => {
+  const fixture = makeAtomicBrokerFixture();
+  validateBrokerPlan(fixture, generate(fixture));
+});
+
+test("initial broker create passes with plan-only package proof", () => {
+  const fixture = makeInitialBrokerCreateFixture();
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }));
+});
+
+test("initial broker create does not require a reference audit", () => {
+  const fixture = makeInitialBrokerCreateFixture();
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }));
+});
+
+test("initial broker create rejects a wrong ZIP source_code_hash", () => {
+  const fixture = makeInitialBrokerCreateFixture({
+    mutatePlan: (plan) => {
+      plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.after.source_code_hash = "wrong";
+    },
+  });
+  assert.throws(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }), /source_code_hash/);
+});
+
+test("initial broker create rejects a wrong release-package checksum", () => {
+  const fixture = makeInitialBrokerCreateFixture({
+    mutatePlan: (plan) => { plan.variables.package_checksum_sha256.value = "d".repeat(64); },
+  });
+  assert.throws(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }), /approval JSON does not match/);
+});
+
+test("initial broker create rejects a missing broker approval mapping", () => {
+  const fixture = makeInitialBrokerCreateFixture({
+    mutatePlan: (plan) => { plan.configuration.root_module.resources[0].expressions.environment[0].variables.references = ["local.broker_task_definition_arns"]; },
+  });
+  assert.throws(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }), /approval local reference/);
+});
+
+test("broker no-op remains accepted without update-only audit proof", () => {
+  const fixture = makeInitialBrokerCreateFixture({
+    mutatePlan: (plan) => { plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.actions = ["no-op"]; },
+  });
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }));
+});
+
+test("unsupported broker delete and replacement actions fail closed", () => {
+  for (const actions of [["delete"], ["delete", "create"]]) {
+    const fixture = makeAtomicBrokerFixture({ brokerActions: actions });
+    assert.throws(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }), /unsupported/);
+  }
+  const malformed = makeAtomicBrokerFixture({ brokerActions: [] });
+  assert.throws(() => assertStageBPlan(malformed.plan, { terraformConfiguration: malformed.options.terraformConfiguration }), /missing or malformed/);
+});
+
+test("broker ZIP checksum and source_code_hash are independently validated", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  audit.broker.brokerZipFileSha256 = "0".repeat(64);
+  audit.plannedAtomicPackageChecksumTransition = null;
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }), /ZIP checksum/);
 });
 
 test("broker references to superseded revisions and unknown families fail closed", () => {
