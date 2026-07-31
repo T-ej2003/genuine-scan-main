@@ -42,6 +42,7 @@ test("release-deployer Stage B policy scopes log-group creation to Stage B-owned
   assert.deepEqual(value.Resource, stageBLogGroups.map(logArn));
   assert.equal(value.Condition.StringEquals["aws:RequestedRegion"], "eu-west-2");
   assert.ok(!value.Resource.some((resource) => resource.includes("/ecs/mscqr-production/full-rls-green:*")));
+  assert.deepEqual(statement("logs:TagResource").Resource, stageBLogGroups.map(logArn));
 });
 
 test("provider recovery policy adds no runtime, service, traffic, secret, database, or wildcard authority", () => {
@@ -56,8 +57,7 @@ test("provider recovery policy adds no runtime, service, traffic, secret, databa
 
 test("existing Stage B provider recovery permissions remain present", () => {
   assert.ok(actions.includes("iam:ListAttachedRolePolicies"));
-  assert.ok(actions.includes("logs:TagResource"));
-  assert.ok(actions.includes("ecs:TagResource"));
+  assert.deepEqual(statement("ecs:TagResource").Resource, stageBTaskFamilies.map(arn));
   assert.ok(actions.includes("dynamodb:TagResource"));
 });
 

@@ -32,6 +32,8 @@ those reviewed family ARN patterns and `logs:CreateLogGroup` only for the backen
 worker, application-canary, and read-only-canary Stage B log groups. The shared
 `/ecs/mscqr-production/full-rls-green` executor log group remains Stage A-owned
 and is intentionally excluded from Stage B creation authority.
+The existing exact tagging statements include the same read-only-canary log-group
+and task-definition ARNs because Terraform tags both resources during creation.
 
 Merging source alone does not update AWS. The live managed policy must be version-updated after merge. After merge, an authorized IAM
 administrator must create a new default managed-policy version from the exact

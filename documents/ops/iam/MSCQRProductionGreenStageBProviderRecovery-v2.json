@@ -14,7 +14,8 @@
       "Resource": [
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
-        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*"
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:*"
       ],
       "Condition": {
         "StringEquals": {
@@ -76,7 +77,8 @@
         "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-role-verify:*",
         "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-rollback:*",
         "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-runtime-policy:*",
-        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-verification:*"
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-verification:*",
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-read-only-canary:*"
       ],
       "Condition": {
         "StringEquals": {
