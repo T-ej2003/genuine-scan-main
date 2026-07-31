@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
 import {
+  assertStageBReferenceAuditFreshness,
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
@@ -16,6 +17,14 @@ const taskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-defin
 const assumedReleaseRolePattern = /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[A-Za-z0-9+=,.@_-]{2,64}$/;
 const exactReplacePaths = (paths) => JSON.stringify(paths) === JSON.stringify([["container_definitions"]]);
 const sorted = (items, key) => [...items].sort((left, right) => String(key(left)).localeCompare(String(key(right))));
+
+export function batch(items, size) {
+  if (!Array.isArray(items)) throw new TypeError("Batch input must be an array.");
+  if (!Number.isInteger(size) || size < 1) throw new RangeError("Batch size must be a positive integer.");
+  const batches = [];
+  for (let index = 0; index < items.length; index += size) batches.push(items.slice(index, index + size));
+  return batches;
+}
 
 const familyFromArn = (value, label) => {
   const match = taskDefinitionArnPattern.exec(value || "");
@@ -150,6 +159,80 @@ function referenceNames(items, oldArns, arnKey, nameKey) {
   return references;
 }
 
+function validateFailure(failure, label) {
+  if (!failure || typeof failure !== "object" || Array.isArray(failure) || typeof failure.arn !== "string" || !failure.arn || !(typeof failure.reason === "string" || typeof failure.detail === "string") || (!(failure.reason || "") && !(failure.detail || ""))) {
+    throw new Error(`${label} contains a malformed failure.`);
+  }
+}
+
+function validateListedArns(arns, label) {
+  requireArray(arns, label);
+  if (!arns.every((arn) => typeof arn === "string" && arn.startsWith("arn:aws:ecs:"))) throw new Error(`${label} is malformed.`);
+  if (new Set(arns).size !== arns.length) throw new Error(`${label} contains duplicate ARNs.`);
+}
+
+function describeServices(reader, serviceArns) {
+  validateListedArns(serviceArns, "ECS service listing");
+  const described = [];
+  for (const serviceBatch of batch(serviceArns, 10)) {
+    const response = requireObject(reader.describeServices(serviceBatch), "ECS service description");
+    const services = requireArray(response.services, "ECS service description services");
+    const failures = requireArray(response.failures, "ECS service description failures");
+    failures.forEach((failure) => validateFailure(failure, "ECS service description failures"));
+    if (failures.length) throw new Error("ECS service description contains failures.");
+    described.push(...services);
+  }
+  const expected = new Set(serviceArns);
+  const returned = new Set();
+  for (const service of described) {
+    if (!service || typeof service !== "object" || Array.isArray(service) || typeof service.serviceArn !== "string" || typeof service.serviceName !== "string" || typeof service.taskDefinition !== "string") {
+      throw new Error("ECS service description is incomplete.");
+    }
+    if (returned.has(service.serviceArn)) throw new Error("ECS service description contains a duplicate service.");
+    if (!expected.has(service.serviceArn)) throw new Error("ECS service description contains an unexpected service.");
+    returned.add(service.serviceArn);
+  }
+  if (returned.size !== expected.size) throw new Error("ECS service description is incomplete.");
+  return sorted(described, (item) => item.serviceArn).map((service) => {
+    observedFamily(service.taskDefinition, `ECS service ${service.serviceName} task definition`);
+    return {
+      serviceName: service.serviceName,
+      taskDefinition: service.taskDefinition,
+      runningCount: service.runningCount,
+      pendingCount: service.pendingCount,
+      status: service.status,
+    };
+  });
+}
+
+function describeTasks(reader, status, taskArns) {
+  validateListedArns(taskArns, `ECS ${status.toLowerCase()} task listing`);
+  const described = [];
+  for (const taskBatch of batch(taskArns, 100)) {
+    const response = requireObject(reader.describeTasks(taskBatch), `ECS ${status.toLowerCase()} task description`);
+    const tasks = requireArray(response.tasks, `ECS ${status.toLowerCase()} task description tasks`);
+    const failures = requireArray(response.failures, `ECS ${status.toLowerCase()} task description failures`);
+    failures.forEach((failure) => validateFailure(failure, `ECS ${status.toLowerCase()} task description failures`));
+    if (failures.length) throw new Error(`ECS ${status.toLowerCase()} task description contains failures.`);
+    described.push(...tasks);
+  }
+  const expected = new Set(taskArns);
+  const returned = new Set();
+  for (const task of described) {
+    if (!task || typeof task !== "object" || Array.isArray(task) || typeof task.taskArn !== "string" || typeof task.taskDefinitionArn !== "string" || typeof task.lastStatus !== "string" || typeof task.desiredStatus !== "string" || typeof task.group !== "string") {
+      throw new Error(`ECS ${status.toLowerCase()} task description is incomplete.`);
+    }
+    if (returned.has(task.taskArn)) throw new Error(`ECS ${status.toLowerCase()} task description contains a duplicate task.`);
+    if (!expected.has(task.taskArn)) throw new Error(`ECS ${status.toLowerCase()} task description contains an unexpected task.`);
+    returned.add(task.taskArn);
+  }
+  if (returned.size !== expected.size) throw new Error(`ECS ${status.toLowerCase()} task description is incomplete.`);
+  return sorted(described, (item) => item.taskArn).map((task) => {
+    observedFamily(task.taskDefinitionArn, `${status} task ${task.taskArn} task definition`);
+    return { taskArn: task.taskArn, taskDefinitionArn: task.taskDefinitionArn, lastStatus: task.lastStatus, desiredStatus: task.desiredStatus, group: task.group };
+  });
+}
+
 export function generateReferenceAudit({
   plan,
   planBytes,
@@ -161,21 +244,21 @@ export function generateReferenceAudit({
   reader,
   callerArn,
   auditedAt = new Date().toISOString(),
+  now = new Date(),
 }) {
   if (!reader) throw new Error("Read-only AWS reader is required.");
   if (region !== "eu-west-2") throw new Error("Stage B requires AWS region eu-west-2.");
   if (clusterArn !== STAGE_B.clusterArn) throw new Error("ECS cluster ARN is outside the exact Stage B contract.");
   if (brokerFunctionArn !== STAGE_B.brokerAliasArn) throw new Error("Broker Lambda alias ARN is outside the exact Stage B contract.");
   if (!/^[a-f0-9]{64}$/.test(expectedPackageChecksumSha256 || "")) throw new Error("Expected broker package checksum is missing or malformed.");
-  if (!Number.isFinite(Date.parse(auditedAt))) throw new Error("Audit timestamp is malformed.");
+  assertStageBReferenceAuditFreshness(auditedAt, now);
   const planSha = ensurePlanHash(planBytes, planJsonSha256);
   const rolloverByAddress = planTaskDefinitions(plan);
   const observedCallerArn = validateCaller(callerArn || reader.getCallerIdentity()?.Arn);
 
-  const taskDefinitions = new Map();
   for (const family of STAGE_B_TASK_DEFINITION_FAMILY_NAMES) {
     const response = reader.describeTaskDefinition(family);
-    taskDefinitions.set(family, validateTaskDefinitionResponse(response, family, `Stage B family ${family}`));
+    validateTaskDefinitionResponse(response, family, `Stage B family ${family}`);
   }
   const oldDefinitions = [];
   for (const rollover of [...rolloverByAddress.values()].sort((left, right) => left.address.localeCompare(right.address))) {
@@ -185,33 +268,11 @@ export function generateReferenceAudit({
   const oldArns = oldDefinitions.map((entry) => entry.oldArn);
 
   const serviceArns = requireArray(reader.listServices(), "ECS service listing");
-  if (!serviceArns.every((arn) => typeof arn === "string" && arn.startsWith("arn:aws:ecs:"))) throw new Error("ECS service listing is malformed.");
-  const serviceResponse = serviceArns.length ? reader.describeServices(serviceArns) : { services: [] };
-  const services = sorted(requireArray(serviceResponse?.services, "ECS service description"), (item) => item.serviceName).map((service) => {
-    if (typeof service.serviceName !== "string" || typeof service.taskDefinition !== "string") throw new Error("ECS service description is incomplete.");
-    observedFamily(service.taskDefinition, `ECS service ${service.serviceName} task definition`);
-    return {
-      serviceName: service.serviceName,
-      taskDefinition: service.taskDefinition,
-      runningCount: service.runningCount,
-      pendingCount: service.pendingCount,
-      status: service.status,
-    };
-  });
+  const services = describeServices(reader, serviceArns);
 
   const readTasks = (status) => {
     const taskArns = requireArray(reader.listTasks(status), `ECS ${status.toLowerCase()} task listing`);
-    if (!taskArns.every((arn) => typeof arn === "string" && arn.startsWith("arn:aws:ecs:"))) throw new Error(`ECS ${status.toLowerCase()} task listing is malformed.`);
-    const response = taskArns.length ? reader.describeTasks(taskArns) : { tasks: [] };
-    const tasks = requireArray(response?.tasks, `ECS ${status.toLowerCase()} task description`);
-    if (tasks.length !== taskArns.length) throw new Error(`ECS ${status.toLowerCase()} task description is incomplete.`);
-    return sorted(tasks.map((task) => {
-      if (typeof task.taskArn !== "string" || typeof task.taskDefinitionArn !== "string" || typeof task.lastStatus !== "string" || typeof task.desiredStatus !== "string" || typeof task.group !== "string") {
-        throw new Error(`ECS ${status.toLowerCase()} task description is incomplete.`);
-      }
-      observedFamily(task.taskDefinitionArn, `${status} task ${task.taskArn} task definition`);
-      return { taskArn: task.taskArn, taskDefinitionArn: task.taskDefinitionArn, lastStatus: task.lastStatus, desiredStatus: task.desiredStatus, group: task.group };
-    }), (item) => item.taskArn);
+    return describeTasks(reader, status, taskArns);
   };
   const runningTasks = readTasks("RUNNING");
   const pendingTasks = readTasks("PENDING");

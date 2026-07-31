@@ -18,3 +18,14 @@ export const STAGE_B_TASK_DEFINITION_FAMILY_NAMES = Object.freeze(
 );
 
 export const STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION = 1;
+export const STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS = 15 * 60 * 1000;
+export const STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS = 60 * 1000;
+
+export function assertStageBReferenceAuditFreshness(auditedAt, now = new Date()) {
+  const nowMs = now instanceof Date ? now.getTime() : NaN;
+  if (!Number.isFinite(nowMs)) throw new Error("Stage B validation clock is malformed.");
+  const auditedAtMs = Date.parse(auditedAt || "");
+  if (!Number.isFinite(auditedAtMs)) throw new Error("Stage B reference audit timestamp is malformed.");
+  if (auditedAtMs > nowMs + STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS) throw new Error("Stage B reference audit timestamp is in the future.");
+  if (nowMs - auditedAtMs > STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS) throw new Error("Stage B reference audit is expired.");
+}

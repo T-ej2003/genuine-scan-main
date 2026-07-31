@@ -13,7 +13,12 @@ Generate the audit only from the exact `terraform show -json` output for the pla
 being validated. The generator performs read-only ECS and Lambda calls, enforces the
 exact twelve source-controlled task-definition families, and fails closed on missing
 families, unknown families, old service/task/broker references, malformed responses,
-or package and plan-hash mismatches. Never reuse an audit from another plan or release.
+or package and plan-hash mismatches. Audits expire after 15 minutes; timestamps more
+than 60 seconds in the future are rejected. Generate the audit immediately after the
+final plan and never reuse it after expiry. ECS service descriptions run in batches of
+10 and task descriptions in batches of 100. Every describe response must contain valid
+`services`/`tasks` and `failures` arrays, with no failures and an exact ARN set match
+to the preceding list response. Never reuse an audit from another plan or release.
 
 ```sh
 node scripts/aws/generate-production-green-stage-b-reference-audit.mjs \

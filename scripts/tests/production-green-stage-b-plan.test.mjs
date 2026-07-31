@@ -8,6 +8,7 @@ const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex"
 const family = "mscqr-production-rls-green-backend-candidate";
 const address = 'aws_ecs_task_definition.candidate["backend"]';
 const oldArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`;
+const validationNow = new Date("2026-07-31T14:05:00.000Z");
 const change = (type, actions = ["create"], after = {}, before = {}) => ({ address: type === "aws_ecs_task_definition" ? address : `test.${type}`, type, change: { actions, after, before } });
 const rollover = () => {
   const value = change("aws_ecs_task_definition", ["delete", "create"], { family }, { family, arn: oldArn });
@@ -16,6 +17,8 @@ const rollover = () => {
 };
 const auditFor = (overrides = {}) => ({
   schemaVersion: 1,
+  auditedAt: "2026-07-31T14:00:00.000Z",
+  ...overrides,
   planJsonSha256: "",
   oldTaskDefinitions: [{
     terraformAddress: address,
@@ -37,7 +40,7 @@ const validRollover = (overrides = {}, planOverrides = {}) => {
   const audit = auditFor(overrides);
   audit.planJsonSha256 = sha256(planBytes);
   const auditBytes = Buffer.from(JSON.stringify(audit));
-  return { plan, options: { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: sha256(auditBytes), planJsonBytes: planBytes, planJsonSha256: sha256(planBytes) } };
+  return { plan, options: { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: sha256(auditBytes), planJsonBytes: planBytes, planJsonSha256: sha256(planBytes), now: validationNow } };
 };
 
 test("Stage B plan wrapper permits only non-destructive control-plane resources", () =>
@@ -48,6 +51,17 @@ test("safe same-family rollover passes only with a plan-bound reference audit", 
   assert.doesNotThrow(() => assertStageBPlan(plan, options));
   options.referenceAudit.planJsonSha256 = "0".repeat(64);
   assert.throws(() => assertStageBPlan(plan, options), /different plan JSON/);
+});
+
+test("plan validator enforces reference-audit freshness with a trusted clock", () => {
+  const current = validRollover();
+  assert.doesNotThrow(() => assertStageBPlan(current.plan, current.options));
+  const expired = validRollover({ auditedAt: "2026-07-31T13:49:59.999Z" });
+  assert.throws(() => assertStageBPlan(expired.plan, expired.options), /expired/);
+  const future = validRollover({ auditedAt: "2026-07-31T14:06:00.001Z" });
+  assert.throws(() => assertStageBPlan(future.plan, future.options), /future/);
+  const malformed = validRollover({ auditedAt: "not-a-timestamp" });
+  assert.throws(() => assertStageBPlan(malformed.plan, malformed.options), /malformed/);
 });
 
 test("rollover audit and scope failures remain fail-closed", () => {

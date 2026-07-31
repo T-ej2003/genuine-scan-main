@@ -3,7 +3,10 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
-import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./aws/stage-b-reference-audit-contract.mjs";
+import {
+  assertStageBReferenceAuditFreshness,
+  STAGE_B_TASK_DEFINITION_FAMILIES,
+} from "./aws/stage-b-reference-audit-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const allowed = new Set(["aws_cloudwatch_log_group", "aws_iam_role", "aws_iam_role_policy", "aws_ecs_task_definition", "aws_dynamodb_table", "aws_lambda_function", "aws_lambda_alias", "aws_lambda_permission"]);
@@ -22,10 +25,11 @@ function assertTaskDefinitionScope(change) {
   if (afterFamily !== undefined && afterFamily !== expectedFamily) throw new Error(`Stage B task-definition family rejected: ${change.address}`);
 }
 
-function assertBoundRollover(change, audit, auditBytes, auditSha256, planBytes, planSha256) {
+function assertBoundRollover(change, audit, auditBytes, auditSha256, planBytes, planSha256, now) {
   if (!audit || !auditBytes || !auditSha256 || !planBytes || !planSha256) throw new Error(`Stage B rollover requires an explicit plan-bound reference audit: ${change.address}`);
   if (sha256(auditBytes) !== auditSha256) throw new Error("Stage B reference audit SHA-256 mismatch.");
   if (sha256(planBytes) !== planSha256) throw new Error("Stage B plan JSON SHA-256 mismatch.");
+  assertStageBReferenceAuditFreshness(audit.auditedAt, now);
   if (audit.planJsonSha256 !== planSha256) throw new Error("Stage B reference audit is bound to a different plan JSON.");
   const beforeArn = change.change.before?.arn || change.change.before?.id;
   const expectedFamily = taskDefinitionFamilies.get(change.address);
@@ -42,7 +46,7 @@ function assertBoundRollover(change, audit, auditBytes, auditSha256, planBytes, 
 }
 
 export function assertStageBPlan(plan, options = {}) {
-  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256 } = options;
+  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now = new Date() } = options;
   for (const change of plan.resource_changes || []) {
     const actions = change.change.actions || [];
     if (forbidden.test(change.type) || !allowed.has(change.type)) throw new Error(`Stage B plan rejected: ${change.address}`);
@@ -50,7 +54,7 @@ export function assertStageBPlan(plan, options = {}) {
       assertTaskDefinitionScope(change);
       if (actions.includes("delete")) {
         if (!exactActions(actions, ["delete", "create"]) || !exactReplacePaths(change.change.replace_paths)) throw new Error(`Stage B task-definition rollover rejected: ${change.address}`);
-        assertBoundRollover(change, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256);
+        assertBoundRollover(change, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now);
       }
     } else if (actions.includes("delete")) {
       throw new Error(`Stage B plan rejected: ${change.address}`);
