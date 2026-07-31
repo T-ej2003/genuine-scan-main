@@ -18,6 +18,7 @@ const taskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-defin
 const assumedReleaseRolePattern = /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[A-Za-z0-9+=,.@_-]{2,64}$/;
 const exactReplacePaths = (paths) => JSON.stringify(paths) === JSON.stringify([["container_definitions"]]);
 const sorted = (items, key) => [...items].sort((left, right) => String(key(left)).localeCompare(String(key(right))));
+const stageBTerraformConfigurationPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b/main.tf");
 
 export function batch(items, size) {
   if (!Array.isArray(items)) throw new TypeError("Batch input must be an array.");
@@ -146,11 +147,11 @@ function validateTaskDefinitionResponse(response, expectedFamily, label) {
   return { family: expectedFamily, arn: identity.arn, revision: identity.revision, status: taskDefinition.status };
 }
 
-function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256) {
+function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256, terraformConfiguration) {
   const taskDefinitionAddress = brokerTaskDefinitionAddress(mode);
   const rollover = rolloverByAddress.get(taskDefinitionAddress);
   if (!rollover) throw new Error(`Broker atomic rollover target is not a planned rollover: ${taskDefinitionAddress}`);
-  assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, mode);
+  assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, mode, terraformConfiguration);
   return {
     brokerTerraformAddress: "aws_lambda_function.broker",
     taskDefinitionTerraformAddress: taskDefinitionAddress,
@@ -163,7 +164,7 @@ function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256) {
   };
 }
 
-function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns, createOnlyFamilies, plan, rolloverByAddress, planSha256) {
+function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns, createOnlyFamilies, plan, rolloverByAddress, planSha256, terraformConfiguration) {
   const normalizedConfigArn = String(config?.FunctionArn || "").replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
   const normalizedExpectedArn = String(brokerFunctionArn).replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
   if (!normalizedConfigArn || normalizedConfigArn !== normalizedExpectedArn) throw new Error("Broker Lambda identity does not match the expected function.");
@@ -189,7 +190,7 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
     if (!rollover) continue;
     if (arn === rollover.oldArn) {
       try {
-        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256));
+        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256, terraformConfiguration));
       } catch (error) {
         throw new Error(`Broker Lambda still references superseded task definition ${arn}: ${error.message}`);
       }
@@ -320,6 +321,7 @@ export function generateReferenceAudit({
   expectedPackageChecksumSha256,
   reader,
   callerArn,
+  terraformConfiguration,
   auditedAt = new Date().toISOString(),
   now = new Date(),
 }) {
@@ -356,7 +358,7 @@ export function generateReferenceAudit({
     referencesByFamily: brokerReferencesByFamily,
     referencesByArn: brokerReferencesByArn,
     plannedAtomicBrokerRollovers,
-  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, plan, rolloverByAddress, planSha);
+  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, plan, rolloverByAddress, planSha, terraformConfiguration);
   const serviceReferences = referenceNames(services, oldArns, "taskDefinition", "serviceName");
   const runningReferences = referenceNames(runningTasks, oldArns, "taskDefinitionArn", "taskArn");
   const pendingReferences = referenceNames(pendingTasks, oldArns, "taskDefinitionArn", "taskArn");
@@ -502,7 +504,8 @@ export async function runCli(argv = process.argv.slice(2)) {
   const planBytes = fs.readFileSync(options.planJsonPath);
   const plan = parseJson(planBytes.toString("utf8"), "Terraform plan JSON");
   const reader = createAwsReader(options);
-  const audit = generateReferenceAudit({ ...options, plan, planBytes, reader, callerArn: reader.getCallerIdentity().Arn });
+  const terraformConfiguration = fs.readFileSync(stageBTerraformConfigurationPath, "utf8");
+  const audit = generateReferenceAudit({ ...options, plan, planBytes, reader, terraformConfiguration, callerArn: reader.getCallerIdentity().Arn });
   fs.mkdirSync(path.dirname(options.outputPath), { recursive: true, mode: 0o700 });
   fs.writeFileSync(options.outputPath, `${JSON.stringify(audit, null, 2)}\n`, { mode: 0o600 });
   return { outputPath: options.outputPath, auditSha256: sha256(fs.readFileSync(options.outputPath)), planJsonSha256: audit.planJsonSha256 };
