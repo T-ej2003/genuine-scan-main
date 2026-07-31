@@ -10,6 +10,21 @@
 
 ## Reconciliation
 
+## Reviewed immutable revision-rollover exception
+
+Normal Terraform destroys remain forbidden. The only permitted exception is a
+same-family `aws_ecs_task_definition` delete/create revision rollover for an
+allowlisted Stage B address. The plan validator requires a fresh live reference
+audit supplied with explicit SHA-256 values for both the audit file and the
+current `terraform show -json` output. Every old ARN must be present in that
+audit with matching family and `container_definitions` as its only replacement
+path, zero service/running/pending references, and a retained rollback ARN.
+
+This exception does not authorize ECS service updates, task execution, database
+actions, broker invocation, ALB, DNS, or traffic changes. Any non-task-definition
+destroy, unknown address/family, missing or mismatched audit binding, non-zero
+reference, or missing rollback ARN remains fail-closed.
+
 The initial refreshed state contained the seven expected IAM roles and the
 `stage-b-executor-runtime` inline policy. All seven role instances were marked
 `tainted`, which forced replacements and caused the plan-only wrapper to reject
