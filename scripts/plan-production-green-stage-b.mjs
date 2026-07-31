@@ -3,20 +3,12 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
+import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./aws/stage-b-reference-audit-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const allowed = new Set(["aws_cloudwatch_log_group", "aws_iam_role", "aws_iam_role_policy", "aws_ecs_task_definition", "aws_dynamodb_table", "aws_lambda_function", "aws_lambda_alias", "aws_lambda_permission"]);
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
-const taskDefinitionFamilies = new Map([
-  ['aws_ecs_task_definition.candidate["backend"]', "mscqr-production-rls-green-backend-candidate"],
-  ['aws_ecs_task_definition.candidate["worker"]', "mscqr-production-rls-green-worker-candidate"],
-  ['aws_ecs_task_definition.candidate["canary"]', "mscqr-production-full-rls-green-application-canary"],
-  ['aws_ecs_task_definition.candidate["read_only_canary"]', "mscqr-production-full-rls-green-read-only-canary"],
-  ...["admin-bootstrap", "admin-ownership", "capability-preflight", "role-provision", "role-verify", "rollback", "runtime-policy", "verification"].map((mode) => [
-    `aws_ecs_task_definition.executor["full-rls-${mode}"]`,
-    `mscqr-production-full-rls-green-full-rls-${mode}`,
-  ]),
-]);
+const taskDefinitionFamilies = new Map(Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES));
 const exactActions = (actions, expected) => actions.length === expected.length && actions.every((action, index) => action === expected[index]);
 const exactReplacePaths = (paths) => Array.isArray(paths) && paths.length === 1 && Array.isArray(paths[0]) && paths[0].length === 1 && paths[0][0] === "container_definitions";
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
