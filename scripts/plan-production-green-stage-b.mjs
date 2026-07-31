@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import {
   assertStageBAtomicBrokerPlan,
+  assertStageBAtomicBrokerPackagePlan,
   assertStageBReferenceAuditFreshness,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "./aws/stage-b-reference-audit-contract.mjs";
@@ -68,6 +69,19 @@ function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planB
 
 export function assertStageBPlan(plan, options = {}) {
   const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now = new Date(), terraformConfiguration } = options;
+  const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
+  const packageTransition = referenceAudit?.plannedAtomicPackageChecksumTransition;
+  if (brokerChange && referenceAudit?.broker) {
+    const plannedChecksum = plan.variables?.package_checksum_sha256?.value;
+    const liveChecksum = referenceAudit.broker.packageChecksumSha256;
+    if (liveChecksum !== plannedChecksum) {
+      if (!packageTransition) throw new Error("Stage B atomic broker package checksum transition proof is missing.");
+      if (packageTransition.planJsonSha256 !== planJsonSha256) throw new Error("Stage B atomic broker package transition is bound to a different plan JSON.");
+      assertStageBAtomicBrokerPackagePlan(plan, packageTransition, terraformConfiguration);
+    } else if (packageTransition !== null && packageTransition !== undefined) {
+      throw new Error("Stage B atomic broker package transition is unexpected when the live checksum already matches.");
+    }
+  }
   for (const change of plan.resource_changes || []) {
     const actions = change.change.actions || [];
     if (forbidden.test(change.type) || !allowed.has(change.type)) throw new Error(`Stage B plan rejected: ${change.address}`);

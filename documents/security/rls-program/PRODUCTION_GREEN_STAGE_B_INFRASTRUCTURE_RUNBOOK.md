@@ -25,6 +25,15 @@ families; create-only families are recorded explicitly and are not sent to
 Any unexpected prior ARN or live service, task, or broker reference for a create-only
 family fails closed; rollover-family reference checks remain unchanged.
 
+When the live broker approval checksum is older than the release package, the audit
+accepts it only as `plannedAtomicPackageChecksumTransition`: the exact plan must update
+the broker, derive `local.broker_approval_expected.packageChecksumSha256` from
+`var.package_checksum_sha256`, wire that value into the broker environment, replace the
+package from `var.broker_package_path`, and expose a `source_code_hash` matching the
+package bytes. The live checksum must equal the broker plan `before` value, and the
+transition is bound to the exact plan SHA. A stale checksum without this complete
+same-plan proof fails closed.
+
 ```sh
 node scripts/aws/generate-production-green-stage-b-reference-audit.mjs \
   --plan-json /absolute/private/production-green-stage-b.plan.json \

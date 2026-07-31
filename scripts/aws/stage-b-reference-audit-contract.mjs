@@ -22,6 +22,8 @@ export const STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS = 15 * 60 * 1000;
 export const STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS = 60 * 1000;
 export const STAGE_B_BROKER_TERRAFORM_ADDRESS = "aws_lambda_function.broker";
 export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.broker_task_definition_arns";
+export const STAGE_B_BROKER_APPROVAL_REFERENCE = "local.broker_approval_expected";
+export const STAGE_B_BROKER_APPROVAL_INPUT = "var.package_checksum_sha256";
 export const STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION = "aws_ecs_task_definition.executor";
 
 function configuredResources(module, resources = []) {
@@ -137,6 +139,89 @@ export function assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, broker
   }
   if (!relevant.some((item) => item?.resource === taskDefinitionAddress && JSON.stringify(item.attribute) === JSON.stringify(["arn"]))) {
     throw new Error(`Broker atomic rollover Terraform dependency to ${taskDefinitionAddress}.arn is missing.`);
+  }
+}
+
+function brokerResource(plan) {
+  return configuredResources(plan?.configuration?.root_module)
+    .find((resource) => resource.address === STAGE_B_BROKER_TERRAFORM_ADDRESS);
+}
+
+function brokerEnvironmentReferences(plan) {
+  const environment = brokerResource(plan)?.expressions?.environment;
+  const blocks = Array.isArray(environment) ? environment : [environment];
+  return blocks.flatMap((block) => {
+    const references = block?.variables?.references;
+    if (references === undefined) return [];
+    if (!Array.isArray(references) || !references.every((reference) => typeof reference === "string")) {
+      throw new Error("Broker package transition Terraform references are malformed.");
+    }
+    return references;
+  });
+}
+
+function brokerApprovalChecksum(environment, label) {
+  const variables = environment?.[0]?.variables || {};
+  const raw = variables.BROKER_APPROVAL_EXPECTED_JSON;
+  if (typeof raw !== "string" || raw.length === 0) throw new Error(`${label} broker approval JSON is missing.`);
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${label} broker approval JSON is malformed.`);
+  }
+  if (typeof parsed?.packageChecksumSha256 !== "string") throw new Error(`${label} broker package checksum is missing.`);
+  return parsed.packageChecksumSha256;
+}
+
+export function assertStageBAtomicBrokerPackagePlan(plan, transition, terraformConfiguration) {
+  if (!transition || typeof transition !== "object") throw new Error("Atomic broker package transition proof is missing.");
+  if (typeof terraformConfiguration !== "string" || terraformConfiguration.length === 0) {
+    throw new Error("Broker package transition Terraform configuration is missing.");
+  }
+  const brokerChange = (plan?.resource_changes || []).find((change) => change.address === STAGE_B_BROKER_TERRAFORM_ADDRESS);
+  if (!brokerChange || JSON.stringify(brokerChange.change?.actions) !== JSON.stringify(["update"])) {
+    throw new Error("Atomic broker package transition requires aws_lambda_function.broker actions [\"update\"].");
+  }
+  const planChecksum = plan?.variables?.package_checksum_sha256?.value;
+  const packagePath = plan?.variables?.broker_package_path?.value;
+  if (!/^[a-f0-9]{64}$/.test(planChecksum || "")) throw new Error("Atomic broker package transition plan checksum is missing or malformed.");
+  if (typeof packagePath !== "string" || !packagePath.startsWith("/")) throw new Error("Atomic broker package transition package path is missing or malformed.");
+  if (transition.plannedPackageChecksumSha256 !== planChecksum || transition.packageFileSha256 !== planChecksum) {
+    throw new Error("Atomic broker package transition checksum does not match the exact plan input.");
+  }
+  if (transition.packagePath !== packagePath) throw new Error("Atomic broker package transition package path does not match the exact plan input.");
+  if (transition.brokerEnvironmentReference !== STAGE_B_BROKER_APPROVAL_REFERENCE) {
+    throw new Error("Atomic broker package transition broker approval reference is missing.");
+  }
+  if (transition.packageInputReference !== STAGE_B_BROKER_APPROVAL_INPUT) {
+    throw new Error("Atomic broker package transition package input reference is missing.");
+  }
+  if (!brokerEnvironmentReferences(plan).includes(STAGE_B_BROKER_APPROVAL_REFERENCE)) {
+    throw new Error("Atomic broker package transition broker approval local reference is missing.");
+  }
+  const normalizedConfiguration = terraformConfiguration.replace(/\s+/g, " ");
+  if (!/packageChecksumSha256\s*=\s*var\.package_checksum_sha256/.test(normalizedConfiguration)
+    || !/BROKER_APPROVAL_EXPECTED_JSON\s*=\s*jsonencode\(local\.broker_approval_expected\)/.test(normalizedConfiguration)
+    || !/filename\s*=\s*var\.broker_package_path/.test(normalizedConfiguration)
+    || !/source_code_hash\s*=\s*filebase64sha256\(var\.broker_package_path\)/.test(normalizedConfiguration)) {
+    throw new Error("Atomic broker package transition Terraform checksum/package wiring is missing or malformed.");
+  }
+  const beforeChecksum = brokerApprovalChecksum(brokerChange.change?.before?.environment, "Plan before");
+  if (transition.livePackageChecksumSha256 !== beforeChecksum || transition.planBeforePackageChecksumSha256 !== beforeChecksum) {
+    throw new Error("Atomic broker package transition live checksum does not match the plan before-value.");
+  }
+  if (transition.plannedPackageChecksumSha256 === beforeChecksum) throw new Error("Atomic broker package transition is not a checksum transition.");
+  const after = brokerChange.change?.after || {};
+  if (after.filename !== packagePath) throw new Error("Atomic broker package transition package replacement is not in the same plan.");
+  if (after.source_code_hash !== transition.packageSourceCodeHash) {
+    throw new Error("Atomic broker package transition source_code_hash does not match the expected package bytes.");
+  }
+  if (transition.packageSourceCodeHash !== transition.expectedPackageSourceCodeHash) {
+    throw new Error("Atomic broker package transition expected source_code_hash is inconsistent.");
+  }
+  if (transition.planJsonSha256 && !/^[a-f0-9]{64}$/.test(transition.planJsonSha256)) {
+    throw new Error("Atomic broker package transition plan SHA-256 is malformed.");
   }
 }
 

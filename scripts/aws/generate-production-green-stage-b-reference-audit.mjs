@@ -9,6 +9,7 @@ import {
   assertStageBReferenceAuditFreshness,
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
   assertStageBAtomicBrokerPlan,
+  assertStageBAtomicBrokerPackagePlan,
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
 } from "./stage-b-reference-audit-contract.mjs";
@@ -164,6 +165,41 @@ function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256, t
   };
 }
 
+function proveAtomicBrokerPackageChecksumTransition(plan, terraformConfiguration, expectedPackageChecksum, livePackageChecksum, planSha256) {
+  const packagePath = plan?.variables?.broker_package_path?.value;
+  if (typeof packagePath !== "string" || !path.isAbsolute(packagePath)) throw new Error("Broker package path is missing or malformed in the exact plan input.");
+  let packageBytes;
+  try {
+    packageBytes = fs.readFileSync(packagePath);
+  } catch {
+    throw new Error("Expected broker package file is missing or unreadable.");
+  }
+  const packageFileSha256 = sha256(packageBytes);
+  const packageSourceCodeHash = crypto.createHash("sha256").update(packageBytes).digest("base64");
+  const transition = {
+    brokerTerraformAddress: "aws_lambda_function.broker",
+    brokerEnvironmentReference: "local.broker_approval_expected",
+    packageInputReference: "var.package_checksum_sha256",
+    packagePath,
+    livePackageChecksumSha256: livePackageChecksum,
+    planBeforePackageChecksumSha256: undefined,
+    plannedPackageChecksumSha256: expectedPackageChecksum,
+    packageFileSha256,
+    packageSourceCodeHash,
+    expectedPackageSourceCodeHash: packageSourceCodeHash,
+    planJsonSha256: planSha256,
+  };
+  const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
+  const beforeRaw = brokerChange?.change?.before?.environment?.[0]?.variables?.BROKER_APPROVAL_EXPECTED_JSON;
+  try {
+    transition.planBeforePackageChecksumSha256 = JSON.parse(beforeRaw || "").packageChecksumSha256;
+  } catch {
+    throw new Error("Plan before broker approval JSON is malformed.");
+  }
+  assertStageBAtomicBrokerPackagePlan(plan, transition, terraformConfiguration);
+  return transition;
+}
+
 function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns, createOnlyFamilies, plan, rolloverByAddress, planSha256, terraformConfiguration) {
   const normalizedConfigArn = String(config?.FunctionArn || "").replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
   const normalizedExpectedArn = String(brokerFunctionArn).replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
@@ -204,18 +240,22 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
     }
   }
   const approvalExpected = requireObject(parseJson(variables.BROKER_APPROVAL_EXPECTED_JSON, "BROKER_APPROVAL_EXPECTED_JSON"), "BROKER_APPROVAL_EXPECTED_JSON");
-  if (approvalExpected.packageChecksumSha256 !== expectedPackageChecksum) throw new Error("Broker package checksum does not match the expected release package.");
+  const plannedAtomicPackageChecksumTransition = approvalExpected.packageChecksumSha256 === expectedPackageChecksum
+    ? null
+    : proveAtomicBrokerPackageChecksumTransition(plan, terraformConfiguration, expectedPackageChecksum, approvalExpected.packageChecksumSha256, planSha256);
   return {
     summary: {
       functionArn: normalizedConfigArn,
       functionVersion: config.Version,
       aliasArn: brokerFunctionArn,
       aliasVersion: config.Version,
+      packageChecksumSha256: approvalExpected.packageChecksumSha256,
       taskDefinitionModes: expectedModes,
     },
     referencesByFamily: brokerReferencesByFamily,
     referencesByArn: brokerReferences,
     plannedAtomicBrokerRollovers: plannedAtomicBrokerRollovers.sort((left, right) => left.taskDefinitionTerraformAddress.localeCompare(right.taskDefinitionTerraformAddress)),
+    plannedAtomicPackageChecksumTransition,
   };
 }
 
@@ -358,6 +398,7 @@ export function generateReferenceAudit({
     referencesByFamily: brokerReferencesByFamily,
     referencesByArn: brokerReferencesByArn,
     plannedAtomicBrokerRollovers,
+    plannedAtomicPackageChecksumTransition,
   } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, plan, rolloverByAddress, planSha, terraformConfiguration);
   const serviceReferences = referenceNames(services, oldArns, "taskDefinition", "serviceName");
   const runningReferences = referenceNames(runningTasks, oldArns, "taskDefinitionArn", "taskArn");
@@ -442,6 +483,7 @@ export function generateReferenceAudit({
     createOnlyTaskDefinitions,
     noOpTaskDefinitions,
     plannedAtomicBrokerRollovers,
+    plannedAtomicPackageChecksumTransition,
     planJsonSha256: planSha,
   };
 }
