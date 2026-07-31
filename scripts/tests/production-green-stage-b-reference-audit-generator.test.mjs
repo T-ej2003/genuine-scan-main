@@ -25,6 +25,8 @@ const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-m
 const now = new Date("2026-07-31T14:05:00.000Z");
 const oldArnFor = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`;
 const newArnFor = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:2`;
+const readOnlyCanaryAddress = 'aws_ecs_task_definition.candidate["read_only_canary"]';
+const readOnlyCanaryFamily = STAGE_B_TASK_DEFINITION_FAMILIES[readOnlyCanaryAddress];
 const familyForMode = (mode) => mode === "full-rls-application-canary"
   ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
   : `mscqr-production-full-rls-green-${mode}`;
@@ -100,6 +102,19 @@ function generate(fixture, overrides = {}) {
   });
 }
 
+function makeCreateOnlyFixture({ mutatePlan, mutateReader } = {}) {
+  return makeFixture({
+    mutatePlan: (plan) => {
+      const change = plan.resource_changes.find((item) => item.address === readOnlyCanaryAddress);
+      change.change.actions = ["create"];
+      change.change.before = null;
+      delete change.change.replace_paths;
+      mutatePlan?.(plan);
+    },
+    mutateReader,
+  });
+}
+
 test("exact 12-family allowlist passes and output is deterministic", () => {
   const fixture = makeFixture();
   const first = generate(fixture);
@@ -119,12 +134,10 @@ test("unknown 13th family fails closed", () => {
 });
 
 test("missing expected family fails closed", () => {
-  const missing = "mscqr-production-full-rls-green-read-only-canary";
-  const fixture = makeFixture({ mutateReader: (reader) => {
-    const original = reader.describeTaskDefinition;
-    reader.describeTaskDefinition = (reference) => reference === missing ? {} : original(reference);
+  const fixture = makeFixture({ mutatePlan: (plan) => {
+    plan.resource_changes = plan.resource_changes.filter((item) => item.address !== readOnlyCanaryAddress);
   } });
-  assert.throws(() => generate(fixture), /response is malformed/);
+  assert.throws(() => generate(fixture), /missing exact Stage B task-definition families/);
 });
 
 test("duplicate family fails closed", () => {
@@ -150,6 +163,68 @@ test("zero service, running-task, and pending-task references passes", () => {
   assert.deepEqual(audit.runningTasks, []);
   assert.deepEqual(audit.pendingTasks, []);
   assert.equal(audit.allOldRevisionsUnreferenced, true);
+});
+
+test("allowlisted create-only family passes and is recorded explicitly", () => {
+  const audit = generate(makeCreateOnlyFixture());
+  assert.equal(audit.oldTaskDefinitions.length, 11);
+  assert.deepEqual(audit.createOnlyTaskDefinitions, [{
+    terraformAddress: readOnlyCanaryAddress,
+    family: readOnlyCanaryFamily,
+    proposedFamily: readOnlyCanaryFamily,
+    classification: "create-only",
+    priorTaskDefinitionArn: null,
+    serviceReferences: [],
+    runningTaskReferences: [],
+    pendingTaskReferences: [],
+    brokerReferenceModes: [],
+  }]);
+});
+
+test("create-only family is not sent to DescribeTaskDefinition", () => {
+  const fixture = makeCreateOnlyFixture();
+  const calls = [];
+  const original = fixture.reader.describeTaskDefinition;
+  fixture.reader.describeTaskDefinition = (reference) => {
+    calls.push(reference);
+    return original(reference);
+  };
+  generate(fixture);
+  assert.equal(calls.length, 11);
+  assert.equal(calls.some((reference) => reference.includes(readOnlyCanaryFamily)), false);
+});
+
+test("create-only family with an unexpected prior ARN fails closed", () => {
+  const fixture = makeCreateOnlyFixture({ mutatePlan: (plan) => {
+    const change = plan.resource_changes.find((item) => item.address === readOnlyCanaryAddress);
+    change.change.before = { family: readOnlyCanaryFamily, arn: oldArnFor(readOnlyCanaryFamily) };
+  } });
+  assert.throws(() => generate(fixture), /create-only task definition unexpectedly has a prior ARN/);
+});
+
+test("rollover family missing its prior ARN fails closed", () => {
+  const fixture = makeFixture({ mutatePlan: (plan) => {
+    const change = plan.resource_changes.find((item) => item.address !== readOnlyCanaryAddress);
+    change.change.before = { family: change.change.before.family };
+  } });
+  assert.throws(() => generate(fixture), /rollover is missing its prior task-definition ARN/);
+});
+
+test("the 11 rollover live-reference checks remain enforced with a create-only family", () => {
+  const rolloverFamily = Object.values(STAGE_B_TASK_DEFINITION_FAMILIES).find((family) => family !== readOnlyCanaryFamily);
+  const fixture = makeCreateOnlyFixture({ mutateReader: (reader) => {
+    reader.listServices = () => [serviceArnFor(0)];
+    reader.describeServices = () => ({ services: [serviceRecord(serviceArnFor(0), 0, oldArnFor(rolloverFamily))], failures: [] });
+  } });
+  assert.throws(() => generate(fixture), /Superseded task definition remains referenced/);
+});
+
+test("create-only family live references fail closed", () => {
+  const fixture = makeCreateOnlyFixture({ mutateReader: (reader) => {
+    reader.listServices = () => [serviceArnFor(0)];
+    reader.describeServices = () => ({ services: [serviceRecord(serviceArnFor(0), 0, newArnFor(readOnlyCanaryFamily))], failures: [] });
+  } });
+  assert.throws(() => generate(fixture), /Create-only task-definition family remains referenced/);
 });
 
 test("batching is stable, non-mutating, bounded, and empty-safe", () => {
@@ -305,6 +380,20 @@ test("malformed AWS responses fail closed", () => {
 
 test("generated audit is accepted by the existing Stage B plan validator", () => {
   const fixture = makeFixture();
+  const audit = generate(fixture);
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    now,
+  }));
+});
+
+test("create-only audit is accepted by the existing Stage B plan validator", () => {
+  const fixture = makeCreateOnlyFixture();
   const audit = generate(fixture);
   const auditBytes = Buffer.from(JSON.stringify(audit));
   assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
