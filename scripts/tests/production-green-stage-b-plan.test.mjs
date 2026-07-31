@@ -1,20 +1,109 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import { assertStageBPlan } from "../plan-production-green-stage-b.mjs";
 
-const change = (type, actions = ["create"], after = {}) => ({ address: `test.${type}`, type, change: { actions, after } });
+const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+const family = "mscqr-production-rls-green-backend-candidate";
+const address = 'aws_ecs_task_definition.candidate["backend"]';
+const oldArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`;
+const change = (type, actions = ["create"], after = {}, before = {}) => ({ address: type === "aws_ecs_task_definition" ? address : `test.${type}`, type, change: { actions, after, before } });
+const rollover = () => {
+  const value = change("aws_ecs_task_definition", ["delete", "create"], { family }, { family, arn: oldArn });
+  value.change.replace_paths = [["container_definitions"]];
+  return value;
+};
+const auditFor = (overrides = {}) => ({
+  schemaVersion: 1,
+  planJsonSha256: "",
+  oldTaskDefinitions: [{
+    terraformAddress: address,
+    oldTaskDefinitionArn: oldArn,
+    family,
+    proposedFamily: family,
+    replacePaths: [["container_definitions"]],
+    serviceReferences: [],
+    runningTaskReferences: [],
+    pendingTaskReferences: [],
+    rollbackArn: oldArn,
+    sameFamilyAsReplacement: true,
+    ...overrides,
+  }],
+});
+const validRollover = (overrides = {}, planOverrides = {}) => {
+  const plan = { resource_changes: [rollover()], ...planOverrides };
+  const planBytes = Buffer.from(JSON.stringify(plan));
+  const audit = auditFor(overrides);
+  audit.planJsonSha256 = sha256(planBytes);
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  return { plan, options: { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: sha256(auditBytes), planJsonBytes: planBytes, planJsonSha256: sha256(planBytes) } };
+};
 
 test("Stage B plan wrapper permits only non-destructive control-plane resources", () =>
   assert.doesNotThrow(() => assertStageBPlan({ resource_changes: [change("aws_ecs_task_definition"), change("aws_dynamodb_table")] })));
 
-test("Stage B plan wrapper rejects deletes, services, traffic, databases, secrets, networking and tags", () => {
+test("safe same-family rollover passes only with a plan-bound reference audit", () => {
+  const { plan, options } = validRollover();
+  assert.doesNotThrow(() => assertStageBPlan(plan, options));
+  options.referenceAudit.planJsonSha256 = "0".repeat(64);
+  assert.throws(() => assertStageBPlan(plan, options), /different plan JSON/);
+});
+
+test("rollover audit and scope failures remain fail-closed", () => {
+  const cases = [
+    ["missing audit", {}, /reference audit/],
+    ["wrong audit SHA", {}, /reference audit SHA/],
+    ["wrong plan SHA", {}, /plan JSON SHA/],
+    ["service reference", { serviceReferences: ["service"] }, /service reference/],
+    ["running reference", { runningTaskReferences: ["task"] }, /running-task reference/],
+    ["pending reference", { pendingTaskReferences: ["task"] }, /pending-task reference/],
+    ["different family", { family: "other", proposedFamily: "other" }, /family/],
+    ["extra replace path", { replacePaths: [["container_definitions"], ["tags"]] }, /replace path/],
+    ["missing rollback", { rollbackArn: "" }, /rollback/],
+    ["old ARN mismatch", { oldTaskDefinitionArn: `${oldArn}-different` }, /old ARN/],
+  ];
+  for (const [name, auditOverrides, expected] of cases) {
+    const { plan, options } = validRollover(auditOverrides);
+    if (name === "missing audit") delete options.referenceAudit;
+    if (name === "wrong audit SHA") options.referenceAuditSha256 = "0".repeat(64);
+    if (name === "wrong plan SHA") options.planJsonSha256 = "0".repeat(64);
+    assert.throws(() => assertStageBPlan(plan, options), expected, name);
+  }
+});
+
+test("unknown task-definition address and family are rejected", () => {
+  const unknownAddress = { resource_changes: [{ ...rollover(), address: 'aws_ecs_task_definition.other["backend"]' }] };
+  assert.throws(() => assertStageBPlan(unknownAddress), /address/);
+  const { plan, options } = validRollover({});
+  plan.resource_changes[0].change.after.family = "mscqr-backend";
+  assert.throws(() => assertStageBPlan(plan, options), /family/);
+});
+
+test("mixed rollover plus unrelated destroy remains rejected", () => {
+  const { plan, options } = validRollover();
+  plan.resource_changes.push(change("aws_cloudwatch_log_group", ["delete"]));
+  assert.throws(() => assertStageBPlan(plan, options), /rejected/);
+});
+
+test("delete-only, extra replacement paths, and alternate actions are rejected", () => {
+  const { plan, options } = validRollover();
+  plan.resource_changes[0].change.actions = ["delete"];
+  assert.throws(() => assertStageBPlan(plan, options), /rollover/);
+  const alternate = validRollover();
+  alternate.plan.resource_changes[0].change.actions = ["create", "delete"];
+  assert.throws(() => assertStageBPlan(alternate.plan, alternate.options), /rollover/);
+  const extra = validRollover();
+  extra.plan.resource_changes[0].change.replace_paths = [["container_definitions"], ["tags"]];
+  assert.throws(() => assertStageBPlan(extra.plan, extra.options), /rollover/);
+});
+
+test("Stage B plan wrapper rejects forbidden destroys and mutable images", () => {
   for (const item of [
-    change("aws_ecs_task_definition", ["delete"]),
-    change("aws_ecs_service"),
-    change("aws_lb_listener"),
-    change("aws_db_instance"),
-    change("aws_secretsmanager_secret"),
+    change("aws_ecs_service", ["delete"]),
+    change("aws_lb_listener", ["delete"]),
+    change("aws_db_instance", ["delete"]),
+    change("aws_secretsmanager_secret", ["delete"]),
     change("aws_security_group"),
     change("aws_ecs_task_definition", ["create"], { image: "repo:latest" }),
   ]) assert.throws(() => assertStageBPlan({ resource_changes: [item] }), /rejected|tag/);
