@@ -28,6 +28,19 @@ function assertTaskDefinitionScope(change) {
   if (afterFamily !== undefined && afterFamily !== expectedFamily) throw new Error(`Stage B task-definition family rejected: ${change.address}`);
 }
 
+function assertTaskDefinitionRetentionContract(terraformConfiguration) {
+  if (typeof terraformConfiguration !== "string") throw new Error("Stage B task-definition replacement requires Terraform configuration metadata.");
+  for (const resourceName of ["candidate", "executor"]) {
+    const marker = `resource "aws_ecs_task_definition" "${resourceName}"`;
+    const start = terraformConfiguration.indexOf(marker);
+    const end = start === -1 ? -1 : terraformConfiguration.indexOf("\nresource ", start + marker.length);
+    const block = start === -1 ? "" : terraformConfiguration.slice(start, end === -1 ? terraformConfiguration.length : end);
+    if (!/^\s*skip_destroy\s*=\s*true\s*$/m.test(block)) {
+      throw new Error(`Stage B task-definition retention contract missing: ${resourceName}`);
+    }
+  }
+}
+
 function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planBytes, planSha256, now, terraformConfiguration) {
   if (!audit || !auditBytes || !auditSha256 || !planBytes || !planSha256) throw new Error(`Stage B rollover requires an explicit plan-bound reference audit: ${change.address}`);
   if (sha256(auditBytes) !== auditSha256) throw new Error("Stage B reference audit SHA-256 mismatch.");
@@ -149,6 +162,7 @@ export function assertStageBPlan(plan, options = {}) {
       assertTaskDefinitionScope(change);
       if (actions.includes("delete")) {
         if (!exactActions(actions, ["delete", "create"]) || !exactReplacePaths(change.change.replace_paths)) throw new Error(`Stage B task-definition rollover rejected: ${change.address}`);
+        assertTaskDefinitionRetentionContract(terraformConfiguration);
         assertBoundRollover(plan, change, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
       }
     } else if (actions.includes("delete")) {

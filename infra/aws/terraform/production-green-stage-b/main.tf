@@ -216,6 +216,7 @@ resource "aws_iam_role_policy" "executor_runtime" {
 
 resource "aws_ecs_task_definition" "candidate" {
   for_each                 = local.candidate_definitions
+  skip_destroy             = true
   family                   = each.value.family
   network_mode             = each.value.networkMode
   requires_compatibilities = each.value.requiresCompatibilities
@@ -241,6 +242,7 @@ resource "aws_ecs_task_definition" "candidate" {
 
 resource "aws_ecs_task_definition" "executor" {
   for_each                 = local.executor_definitions
+  skip_destroy             = true
   family                   = each.value.family
   network_mode             = each.value.networkMode
   requires_compatibilities = each.value.requiresCompatibilities

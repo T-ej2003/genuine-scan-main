@@ -50,7 +50,9 @@ or Terraform operation.
 
 Normal Terraform destroys remain forbidden. The only permitted exception is a
 same-family `aws_ecs_task_definition` delete/create revision rollover for an
-allowlisted Stage B address. The plan validator requires a fresh live reference
+allowlisted Stage B address with provider `skip_destroy = true`. This registers
+the new revision while retaining the prior revision; the release role has no
+`ecs:DeregisterTaskDefinition` authority. The plan validator requires a fresh live reference
 audit supplied with explicit SHA-256 values for both the audit file and the
 current `terraform show -json` output. Every old ARN must be present in that
 audit with matching family and `container_definitions` as its only replacement

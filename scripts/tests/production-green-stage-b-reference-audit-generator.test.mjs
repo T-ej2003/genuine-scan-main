@@ -1014,6 +1014,7 @@ test("generated audit is accepted by the existing Stage B plan validator", () =>
     planJsonBytes: fixture.planBytes,
     planJsonSha256: fixture.planJsonSha256,
     now,
+    terraformConfiguration: terraformConfigurationSource,
   }));
 });
 
@@ -1028,6 +1029,7 @@ test("create-only audit is accepted by the existing Stage B plan validator", () 
     planJsonBytes: fixture.planBytes,
     planJsonSha256: fixture.planJsonSha256,
     now,
+    terraformConfiguration: terraformConfigurationSource,
   }));
 });
 
