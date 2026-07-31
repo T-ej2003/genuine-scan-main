@@ -77,8 +77,7 @@ export function assertStageBBrokerTaskDefinitionMapping(plan, terraformConfigura
     const resource = matches[0];
     if (resource.type !== "aws_ecs_task_definition"
       || resource.index !== expectedKey
-      || resource.values?.family !== expectedFamily
-      || resource.identity?.family !== expectedFamily) {
+      || resource.values?.family !== expectedFamily) {
       throw new Error(`Broker atomic rollover executor mapping does not match ${address}.`);
     }
   }
@@ -86,8 +85,7 @@ export function assertStageBBrokerTaskDefinitionMapping(plan, terraformConfigura
   const canary = planned.find((resource) => resource.address === canaryAddress);
   if (canary?.type !== "aws_ecs_task_definition"
     || canary.index !== "canary"
-    || canary.values?.family !== STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]
-    || canary.identity?.family !== STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]) {
+    || canary.values?.family !== STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]) {
     throw new Error("Broker atomic rollover application-canary mapping is missing or malformed.");
   }
 }

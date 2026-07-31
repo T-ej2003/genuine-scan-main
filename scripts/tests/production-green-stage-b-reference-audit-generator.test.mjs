@@ -574,6 +574,12 @@ test("complete broker mode mapping passes", () => {
   assert.doesNotThrow(() => assertStageBBrokerTaskDefinitionMapping(fixture.plan, fixture.options.terraformConfiguration));
 });
 
+test("broker mode mapping accepts supported plans without identity metadata", () => {
+  const fixture = makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap" });
+  for (const resource of fixture.plan.planned_values.root_module.resources) delete resource.identity;
+  assert.doesNotThrow(() => assertStageBBrokerTaskDefinitionMapping(fixture.plan, fixture.options.terraformConfiguration));
+});
+
 test("swapped executor mode mappings fail closed", () => {
   const swapped = `merge(
     { full-rls-admin-bootstrap = aws_ecs_task_definition.executor["full-rls-role-verify"].arn,
