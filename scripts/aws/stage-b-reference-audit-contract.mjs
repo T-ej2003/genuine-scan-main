@@ -20,6 +20,41 @@ export const STAGE_B_TASK_DEFINITION_FAMILY_NAMES = Object.freeze(
 export const STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION = 1;
 export const STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS = 15 * 60 * 1000;
 export const STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS = 60 * 1000;
+export const STAGE_B_BROKER_TERRAFORM_ADDRESS = "aws_lambda_function.broker";
+export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.broker_task_definition_arns";
+
+function configuredResources(module, resources = []) {
+  for (const resource of module?.resources || []) resources.push(resource);
+  for (const child of module?.child_modules || []) configuredResources(child, resources);
+  return resources;
+}
+
+export function assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress) {
+  const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
+  const brokerChange = changes.find((change) => change.address === STAGE_B_BROKER_TERRAFORM_ADDRESS);
+  if (!brokerChange || JSON.stringify(brokerChange.change?.actions) !== JSON.stringify(["update"])) {
+    throw new Error("Broker atomic rollover requires aws_lambda_function.broker actions [\"update\"].");
+  }
+  const brokerResource = configuredResources(plan?.configuration?.root_module)
+    .find((resource) => resource.address === STAGE_B_BROKER_TERRAFORM_ADDRESS);
+  const environment = brokerResource?.expressions?.environment;
+  const environmentBlocks = Array.isArray(environment) ? environment : [environment];
+  const variableReferences = environmentBlocks.flatMap((block) => {
+    const references = block?.variables?.references;
+    if (references === undefined) return [];
+    if (!Array.isArray(references) || !references.every((reference) => typeof reference === "string")) {
+      throw new Error("Broker atomic rollover Terraform references are malformed.");
+    }
+    return references;
+  });
+  if (!variableReferences.includes(STAGE_B_BROKER_TASK_DEFINITION_REFERENCE)) {
+    throw new Error("Broker atomic rollover Terraform reference to local.broker_task_definition_arns is missing.");
+  }
+  const relevant = Array.isArray(plan?.relevant_attributes) ? plan.relevant_attributes : [];
+  if (!relevant.some((item) => item?.resource === taskDefinitionAddress && JSON.stringify(item.attribute) === JSON.stringify(["arn"]))) {
+    throw new Error(`Broker atomic rollover Terraform dependency to ${taskDefinitionAddress}.arn is missing.`);
+  }
+}
 
 export function assertStageBReferenceAuditFreshness(auditedAt, now = new Date()) {
   const nowMs = now instanceof Date ? now.getTime() : NaN;
