@@ -284,6 +284,16 @@ audit generator and validator, while service/task listing remains cluster
 constrained and the broker read remains exact-function constrained. No
 temporary policy is required.
 
+When the same plan replaces a rollover task definition and updates the broker,
+the pre-apply audit records a planned atomic broker rollover. This is accepted
+only when Terraform's plan configuration references
+`local.broker_task_definition_arns`, the plan marks the corresponding task
+definition ARN as relevant, the live broker ARN exactly equals the replacement's
+`before.arn`, and both resources are changed by that same plan and plan SHA.
+Unknown broker `after` values are never accepted from strings alone. Create-only
+and no-op task definitions, missing dependencies, mismatched families, and
+unrelated or stale broker references remain rejected.
+
 The release role is not granted task execution or service mutation authority:
 it has no `ecs:RunTask`, `ecs:StopTask`, `ecs:UpdateService`, or service
 creation/deletion permission. The wildcard is therefore limited to the single

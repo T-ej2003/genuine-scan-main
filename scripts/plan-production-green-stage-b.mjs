@@ -4,6 +4,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import {
+  assertStageBAtomicBrokerPlan,
   assertStageBReferenceAuditFreshness,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "./aws/stage-b-reference-audit-contract.mjs";
@@ -25,7 +26,7 @@ function assertTaskDefinitionScope(change) {
   if (afterFamily !== undefined && afterFamily !== expectedFamily) throw new Error(`Stage B task-definition family rejected: ${change.address}`);
 }
 
-function assertBoundRollover(change, audit, auditBytes, auditSha256, planBytes, planSha256, now) {
+function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planBytes, planSha256, now) {
   if (!audit || !auditBytes || !auditSha256 || !planBytes || !planSha256) throw new Error(`Stage B rollover requires an explicit plan-bound reference audit: ${change.address}`);
   if (sha256(auditBytes) !== auditSha256) throw new Error("Stage B reference audit SHA-256 mismatch.");
   if (sha256(planBytes) !== planSha256) throw new Error("Stage B plan JSON SHA-256 mismatch.");
@@ -42,6 +43,26 @@ function assertBoundRollover(change, audit, auditBytes, auditSha256, planBytes, 
   if (!Array.isArray(entry.serviceReferences) || entry.serviceReferences.length !== 0) throw new Error(`Stage B service reference exists: ${change.address}`);
   if (!Array.isArray(entry.runningTaskReferences) || entry.runningTaskReferences.length !== 0) throw new Error(`Stage B running-task reference exists: ${change.address}`);
   if (!Array.isArray(entry.pendingTaskReferences) || entry.pendingTaskReferences.length !== 0) throw new Error(`Stage B pending-task reference exists: ${change.address}`);
+  const brokerModes = Array.isArray(entry.brokerReferenceModes) ? entry.brokerReferenceModes : [];
+  const atomicRollovers = Array.isArray(audit.plannedAtomicBrokerRollovers) ? audit.plannedAtomicBrokerRollovers : [];
+  const atomicForChange = atomicRollovers.filter((item) => item?.taskDefinitionTerraformAddress === change.address);
+  if (brokerModes.length === 0 && atomicForChange.length !== 0) throw new Error(`Stage B atomic broker rollover is unexpected: ${change.address}`);
+  if (brokerModes.length !== 0) {
+    assertStageBAtomicBrokerPlan(plan, change.address);
+    if (entry.brokerReferenceStatus !== "planned-atomic-broker-rollover-v1" || audit.allOldRevisionsUnreferenced !== false || atomicForChange.length !== 1) {
+      throw new Error(`Stage B atomic broker rollover proof is missing: ${change.address}`);
+    }
+    const atomic = atomicForChange[0];
+    if (JSON.stringify(brokerModes) !== JSON.stringify([atomic.mode])
+      || atomic.brokerTerraformAddress !== "aws_lambda_function.broker"
+      || atomic.taskDefinitionArnReference !== `${change.address}.arn`
+      || atomic.brokerEnvironmentReference !== "local.broker_task_definition_arns"
+      || atomic.family !== expectedFamily
+      || atomic.oldTaskDefinitionArn !== beforeArn
+      || atomic.planJsonSha256 !== planSha256) {
+      throw new Error(`Stage B atomic broker rollover proof does not match the plan: ${change.address}`);
+    }
+  }
   if (typeof entry.rollbackArn !== "string" || !arnPattern.test(entry.rollbackArn)) throw new Error(`Stage B rollback ARN missing: ${change.address}`);
 }
 
@@ -54,7 +75,7 @@ export function assertStageBPlan(plan, options = {}) {
       assertTaskDefinitionScope(change);
       if (actions.includes("delete")) {
         if (!exactActions(actions, ["delete", "create"]) || !exactReplacePaths(change.change.replace_paths)) throw new Error(`Stage B task-definition rollover rejected: ${change.address}`);
-        assertBoundRollover(change, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now);
+        assertBoundRollover(plan, change, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now);
       }
     } else if (actions.includes("delete")) {
       throw new Error(`Stage B plan rejected: ${change.address}`);

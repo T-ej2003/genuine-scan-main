@@ -26,6 +26,7 @@ const now = new Date("2026-07-31T14:05:00.000Z");
 const oldArnFor = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`;
 const newArnFor = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:2`;
 const backendAddress = 'aws_ecs_task_definition.candidate["backend"]';
+const canaryAddress = 'aws_ecs_task_definition.candidate["canary"]';
 const readOnlyCanaryAddress = 'aws_ecs_task_definition.candidate["read_only_canary"]';
 const readOnlyCanaryFamily = STAGE_B_TASK_DEFINITION_FAMILIES[readOnlyCanaryAddress];
 const familyForMode = (mode) => mode === "full-rls-application-canary"
@@ -113,6 +114,41 @@ function makeCreateOnlyFixture({ mutatePlan, mutateReader } = {}) {
       mutatePlan?.(plan);
     },
     mutateReader,
+  });
+}
+
+function addBrokerAtomicPlanContract(plan, taskDefinitionAddress = canaryAddress, relevantAddress = taskDefinitionAddress) {
+  plan.configuration = {
+    root_module: {
+      resources: [{
+        address: "aws_lambda_function.broker",
+        type: "aws_lambda_function",
+        expressions: { environment: [{ variables: { references: ["local.broker_task_definition_arns"] } }] },
+      }],
+    },
+  };
+  plan.relevant_attributes = [{ resource: relevantAddress, attribute: ["arn"] }];
+}
+
+function makeAtomicBrokerFixture({ brokerActions = ["update"], includeBrokerChange = true, taskDefinitionAddress = canaryAddress, relevantAddress = taskDefinitionAddress, mutatePlan, mutateReader } = {}) {
+  return makeFixture({
+    mutatePlan: (plan) => {
+      addBrokerAtomicPlanContract(plan, taskDefinitionAddress, relevantAddress);
+      if (includeBrokerChange) plan.resource_changes.push({ address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: brokerActions, before: {}, after: {} } });
+      mutatePlan?.(plan);
+    },
+    mutateReader: (reader) => {
+      const original = reader.getFunctionConfiguration;
+      reader.getFunctionConfiguration = () => {
+        const config = original();
+        const variables = config.Environment.Variables;
+        const taskDefinitions = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
+        taskDefinitions["full-rls-application-canary"] = oldArnFor(familyForMode("full-rls-application-canary"));
+        variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+        return config;
+      };
+      mutateReader?.(reader);
+    },
   });
 }
 
@@ -420,6 +456,80 @@ test("broker references to superseded revisions and unknown families fail closed
     };
   } });
   assert.throws(() => generate(unknown), /unexpected/);
+});
+
+test("atomic broker rollover in the same plan passes and is recorded explicitly", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  assert.equal(audit.allOldRevisionsUnreferenced, false);
+  assert.deepEqual(audit.plannedAtomicBrokerRollovers, [{
+    brokerTerraformAddress: "aws_lambda_function.broker",
+    taskDefinitionTerraformAddress: canaryAddress,
+    mode: "full-rls-application-canary",
+    family: familyForMode("full-rls-application-canary"),
+    oldTaskDefinitionArn: oldArnFor(familyForMode("full-rls-application-canary")),
+    brokerEnvironmentReference: "local.broker_task_definition_arns",
+    taskDefinitionArnReference: `${canaryAddress}.arn`,
+    planJsonSha256: fixture.planJsonSha256,
+  }]);
+  const canary = audit.oldTaskDefinitions.find((entry) => entry.terraformAddress === canaryAddress);
+  assert.deepEqual(canary.brokerReferenceModes, ["full-rls-application-canary"]);
+  assert.equal(canary.brokerReferenceStatus, "planned-atomic-broker-rollover-v1");
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    now,
+  }));
+});
+
+test("broker no-op with a superseded ARN fails closed", () => {
+  assert.throws(() => generate(makeAtomicBrokerFixture({ brokerActions: ["no-op"] })), /requires aws_lambda_function\.broker actions/);
+});
+
+test("broker update without a task-definition reference fails closed", () => {
+  const fixture = makeAtomicBrokerFixture({ mutatePlan: (plan) => { delete plan.configuration; delete plan.relevant_attributes; } });
+  assert.throws(() => generate(fixture), /Terraform reference to local\.broker_task_definition_arns/);
+});
+
+test("broker update referencing the wrong family fails closed", () => {
+  const fixture = makeAtomicBrokerFixture({ mutateReader: (reader) => {
+    const original = reader.getFunctionConfiguration;
+    reader.getFunctionConfiguration = () => {
+      const config = original();
+      const variables = config.Environment.Variables;
+      const taskDefinitions = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
+      taskDefinitions["full-rls-application-canary"] = oldArnFor(familyForMode("full-rls-admin-bootstrap"));
+      variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+      return config;
+    };
+  } });
+  assert.throws(() => generate(fixture), /family is unexpected/);
+});
+
+test("live broker ARN must match the rollover before ARN", () => {
+  const fixture = makeAtomicBrokerFixture({ mutatePlan: (plan) => {
+    plan.resource_changes.find((item) => item.address === canaryAddress).change.before.arn = newArnFor(familyForMode("full-rls-application-canary"));
+  } });
+  assert.throws(() => generate(fixture), /does not match the rollover before ARN/);
+});
+
+test("unrelated superseded broker reference fails closed", () => {
+  const fixture = makeAtomicBrokerFixture({ mutateReader: (reader) => {
+    const original = reader.getFunctionConfiguration;
+    reader.getFunctionConfiguration = () => {
+      const config = original();
+      const variables = config.Environment.Variables;
+      const taskDefinitions = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
+      taskDefinitions["full-rls-application-canary"] = oldArnFor(familyForMode("full-rls-admin-bootstrap"));
+      variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+      return config;
+    };
+  } });
+  assert.throws(() => generate(fixture), /family is unexpected/);
 });
 
 test("malformed AWS responses fail closed", () => {

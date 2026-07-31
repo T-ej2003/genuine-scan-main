@@ -8,6 +8,7 @@ import { STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs"
 import {
   assertStageBReferenceAuditFreshness,
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
+  assertStageBAtomicBrokerPlan,
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
 } from "./stage-b-reference-audit-contract.mjs";
@@ -35,6 +36,9 @@ const familyFromArn = (value, label) => {
 const expectedBrokerFamily = (mode) => mode === "full-rls-application-canary"
   ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
   : `mscqr-production-full-rls-green-${mode}`;
+const brokerTaskDefinitionAddress = (mode) => mode === "full-rls-application-canary"
+  ? 'aws_ecs_task_definition.candidate["canary"]'
+  : `aws_ecs_task_definition.executor["${mode}"]`;
 
 function parseJson(value, label) {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${label} is missing.`);
@@ -142,7 +146,24 @@ function validateTaskDefinitionResponse(response, expectedFamily, label) {
   return { family: expectedFamily, arn: identity.arn, revision: identity.revision, status: taskDefinition.status };
 }
 
-function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns, createOnlyFamilies) {
+function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256) {
+  const taskDefinitionAddress = brokerTaskDefinitionAddress(mode);
+  const rollover = rolloverByAddress.get(taskDefinitionAddress);
+  if (!rollover) throw new Error(`Broker atomic rollover target is not a planned rollover: ${taskDefinitionAddress}`);
+  assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress);
+  return {
+    brokerTerraformAddress: "aws_lambda_function.broker",
+    taskDefinitionTerraformAddress: taskDefinitionAddress,
+    mode,
+    family: rollover.family,
+    oldTaskDefinitionArn: rollover.oldArn,
+    brokerEnvironmentReference: "local.broker_task_definition_arns",
+    taskDefinitionArnReference: `${taskDefinitionAddress}.arn`,
+    planJsonSha256: planSha256,
+  };
+}
+
+function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns, createOnlyFamilies, plan, rolloverByAddress, planSha256) {
   const normalizedConfigArn = String(config?.FunctionArn || "").replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
   const normalizedExpectedArn = String(brokerFunctionArn).replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
   if (!normalizedConfigArn || normalizedConfigArn !== normalizedExpectedArn) throw new Error("Broker Lambda identity does not match the expected function.");
@@ -160,8 +181,26 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
     brokerReferences.set(identity.arn, mode);
     brokerReferencesByFamily.set(identity.family, [...(brokerReferencesByFamily.get(identity.family) || []), mode]);
   }
+  const rolloverByFamily = new Map([...rolloverByAddress.values()].map((entry) => [entry.family, entry]));
+  const plannedAtomicBrokerRollovers = [];
+  for (const [arn, mode] of brokerReferences) {
+    const identity = familyFromArn(arn, `broker task definition for ${mode}`);
+    const rollover = rolloverByFamily.get(identity.family);
+    if (!rollover) continue;
+    if (arn === rollover.oldArn) {
+      try {
+        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256));
+      } catch (error) {
+        throw new Error(`Broker Lambda still references superseded task definition ${arn}: ${error.message}`);
+      }
+    } else if (identity.revision < familyFromArn(rollover.oldArn, `${rollover.address} rollover before task definition`).revision) {
+      throw new Error(`Broker Lambda task-definition ARN does not match the rollover before ARN for ${identity.family}.`);
+    }
+  }
   for (const oldArn of oldArns) {
-    if (brokerReferences.has(oldArn)) throw new Error(`Broker Lambda still references superseded task definition ${oldArn}.`);
+    if (brokerReferences.has(oldArn) && !plannedAtomicBrokerRollovers.some((entry) => entry.oldTaskDefinitionArn === oldArn)) {
+      throw new Error(`Broker Lambda still references superseded task definition ${oldArn}.`);
+    }
   }
   const approvalExpected = requireObject(parseJson(variables.BROKER_APPROVAL_EXPECTED_JSON, "BROKER_APPROVAL_EXPECTED_JSON"), "BROKER_APPROVAL_EXPECTED_JSON");
   if (approvalExpected.packageChecksumSha256 !== expectedPackageChecksum) throw new Error("Broker package checksum does not match the expected release package.");
@@ -174,6 +213,8 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
       taskDefinitionModes: expectedModes,
     },
     referencesByFamily: brokerReferencesByFamily,
+    referencesByArn: brokerReferences,
+    plannedAtomicBrokerRollovers: plannedAtomicBrokerRollovers.sort((left, right) => left.taskDefinitionTerraformAddress.localeCompare(right.taskDefinitionTerraformAddress)),
   };
 }
 
@@ -310,7 +351,12 @@ export function generateReferenceAudit({
   };
   const runningTasks = readTasks("RUNNING");
   const pendingTasks = readTasks("PENDING");
-  const { summary: broker, referencesByFamily: brokerReferencesByFamily } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies);
+  const {
+    summary: broker,
+    referencesByFamily: brokerReferencesByFamily,
+    referencesByArn: brokerReferencesByArn,
+    plannedAtomicBrokerRollovers,
+  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, plan, rolloverByAddress, planSha);
   const serviceReferences = referenceNames(services, oldArns, "taskDefinition", "serviceName");
   const runningReferences = referenceNames(runningTasks, oldArns, "taskDefinitionArn", "taskArn");
   const pendingReferences = referenceNames(pendingTasks, oldArns, "taskDefinitionArn", "taskArn");
@@ -320,14 +366,13 @@ export function generateReferenceAudit({
   const noOpServiceReferences = referenceNamesByFamily(services, noOpFamilies, "taskDefinition", "serviceName");
   const noOpRunningReferences = referenceNamesByFamily(runningTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
   const noOpPendingReferences = referenceNamesByFamily(pendingTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
-  const brokerReferences = new Map(oldArns.map((arn) => [arn, []]));
-
   const auditedOldDefinitions = oldDefinitions.map((entry) => {
     const serviceRefs = [...(serviceReferences.get(entry.oldArn) || [])].sort();
     const runningRefs = [...(runningReferences.get(entry.oldArn) || [])].sort();
     const pendingRefs = [...(pendingReferences.get(entry.oldArn) || [])].sort();
-    const brokerRefs = [...(brokerReferences.get(entry.oldArn) || [])].sort();
-    if (serviceRefs.length || runningRefs.length || pendingRefs.length || brokerRefs.length) throw new Error(`Superseded task definition remains referenced: ${entry.address}`);
+    const brokerRefs = brokerReferencesByArn.has(entry.oldArn) ? [brokerReferencesByArn.get(entry.oldArn)] : [];
+    const atomicBrokerRollovers = plannedAtomicBrokerRollovers.filter((rollover) => rollover.oldTaskDefinitionArn === entry.oldArn);
+    if (serviceRefs.length || runningRefs.length || pendingRefs.length || (brokerRefs.length && !atomicBrokerRollovers.length)) throw new Error(`Superseded task definition remains referenced: ${entry.address}`);
     return {
       terraformAddress: entry.address,
       oldTaskDefinitionArn: entry.oldArn,
@@ -339,7 +384,7 @@ export function generateReferenceAudit({
       runningTaskReferences: runningRefs,
       pendingTaskReferences: pendingRefs,
       brokerReferenceModes: brokerRefs,
-      brokerReferenceStatus: "not-referenced-by-broker-v1",
+      brokerReferenceStatus: atomicBrokerRollovers.length ? "planned-atomic-broker-rollover-v1" : "not-referenced-by-broker-v1",
       rollbackArn: entry.rollbackArn,
       sameFamilyAsReplacement: entry.family === entry.proposedFamily,
     };
@@ -388,12 +433,13 @@ export function generateReferenceAudit({
     services,
     runningTasks,
     pendingTasks,
-    allOldRevisionsUnreferenced: true,
+    allOldRevisionsUnreferenced: plannedAtomicBrokerRollovers.length === 0,
     noServiceDeploymentObserved: true,
     noTaskExecutionObserved: true,
     oldTaskDefinitions: auditedOldDefinitions,
     createOnlyTaskDefinitions,
     noOpTaskDefinitions,
+    plannedAtomicBrokerRollovers,
     planJsonSha256: planSha,
   };
 }
