@@ -1,6 +1,6 @@
 # Production Green Stage B provider recovery — 2026-07-29
 
-## Post-merge P1 correction — v3 pending live update
+## Post-merge P1 correction — historical v3 and deployable split
 
 The post-merge review finding is valid. The permanent Stage B reference-audit
 policy previously scoped `ecs:DescribeTaskDefinition` to task-definition ARN
@@ -58,7 +58,25 @@ table tagging statement are unchanged.
 
 The v3 correction is only the dedicated read-only
 `ecs:DescribeTaskDefinition` statement's `Resource "*"` value; all other v2
-statements, actions, resources, and conditions remain unchanged.
+statements, actions, resources, and conditions remain unchanged. V3 is now
+historical because the combined document is 6,651 AWS-counted characters,
+which exceeds the 6,144 AWS managed-policy limit by 507 characters.
+
+The deployable split is:
+
+- `MSCQRProductionGreenStageBProviderRecovery-v4.json` is v3 minus the seven
+  permanent reference-audit read statements and contains only the reviewed
+  provider-recovery control-plane permissions.
+- `MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json` is the permanent
+  companion containing exactly those seven read-only statements, including the
+  isolated wildcard `ecs:DescribeTaskDefinition` metadata read.
+
+V2 remains the immutable PR #161 artifact, v3 remains the immutable corrected
+wildcard artifact, v4 is the deployable provider-recovery artifact, and
+`ReferenceAuditReadOnly-v1` is the deployable companion. The live managed
+policy remains on its pre-correction version until the separately authorized
+update of both policies. AWS managed-policy version IDs must be discovered
+from each live policy and are not assumed to match repository suffixes.
 
 ## Stage B release-deployer apply correction
 
@@ -72,44 +90,74 @@ and is intentionally excluded from Stage B creation authority.
 The existing exact tagging statements include the same read-only-canary log-group
 and task-definition ARNs because Terraform tags both resources during creation.
 
-Merging source alone does not update AWS. The live managed policy must be version-updated after merge. After merge, an authorized IAM
-administrator must create a new default managed-policy version from the exact
-merged document and verify the live document semantically before any retry:
+Merging source alone does not update AWS. The live provider-recovery policy
+must be version-updated after merge from v4, and the companion policy must be created or
+updated from `ReferenceAuditReadOnly-v1`. The two policies must be attached
+only to `mscqr-production-release-deployer`. After merge, an authorized IAM
+administrator must discover each live policy ARN, create or update its default
+managed-policy version from the exact source artifact, and verify both live
+documents semantically before any retry:
 
 ```sh
 set -euo pipefail
-POLICY_NAME='MSCQRProductionGreenStageBProviderRecovery'
-POLICY_DOCUMENT="$PWD/documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v3.json"
+PROVIDER_POLICY_NAME='MSCQRProductionGreenStageBProviderRecovery'
+AUDIT_POLICY_NAME='MSCQRProductionGreenStageBReferenceAuditReadOnly'
+PROVIDER_DOCUMENT="$PWD/documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json"
+AUDIT_DOCUMENT="$PWD/documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json"
+ROLE_NAME='mscqr-production-release-deployer'
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-POLICY_ARN="$(aws iam get-policy --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}" --query Policy.Arn --output text)"
-NEW_VERSION_ID="$(aws iam create-policy-version \
-  --policy-arn "$POLICY_ARN" \
-  --policy-document "file://${POLICY_DOCUMENT}" \
+PROVIDER_POLICY_ARN="$(aws iam get-policy --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${PROVIDER_POLICY_NAME}" --query Policy.Arn --output text)"
+AUDIT_POLICY_ARN="$(aws iam get-policy --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${AUDIT_POLICY_NAME}" --query Policy.Arn --output text 2>/dev/null || aws iam create-policy \
+  --policy-name "$AUDIT_POLICY_NAME" \
+  --policy-document "file://${AUDIT_DOCUMENT}" \
+  --query Policy.Arn --output text)"
+PROVIDER_VERSION_ID="$(aws iam create-policy-version \
+  --policy-arn "$PROVIDER_POLICY_ARN" \
+  --policy-document "file://${PROVIDER_DOCUMENT}" \
   --set-as-default \
   --query PolicyVersion.VersionId --output text)"
+AUDIT_VERSION_ID="$(aws iam create-policy-version \
+  --policy-arn "$AUDIT_POLICY_ARN" \
+  --policy-document "file://${AUDIT_DOCUMENT}" \
+  --set-as-default \
+  --query PolicyVersion.VersionId --output text)"
+aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "$PROVIDER_POLICY_ARN"
+aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "$AUDIT_POLICY_ARN"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
-aws iam get-policy-version --policy-arn "$POLICY_ARN" --version-id "$NEW_VERSION_ID" \
+aws iam get-policy-version --policy-arn "$PROVIDER_POLICY_ARN" --version-id "$PROVIDER_VERSION_ID" \
   --query PolicyVersion.Document --output json > "$TMP_DIR/live-policy.json"
-cmp <(jq -S . "$POLICY_DOCUMENT") <(jq -S . "$TMP_DIR/live-policy.json")
+aws iam get-policy-version --policy-arn "$AUDIT_POLICY_ARN" --version-id "$AUDIT_VERSION_ID" \
+  --query PolicyVersion.Document --output json > "$TMP_DIR/live-audit-policy.json"
+cmp <(jq -S . "$PROVIDER_DOCUMENT") <(jq -S . "$TMP_DIR/live-policy.json")
+cmp <(jq -S . "$AUDIT_DOCUMENT") <(jq -S . "$TMP_DIR/live-audit-policy.json")
+ATTACHMENTS="$(aws iam list-attached-role-policies --role-name "$ROLE_NAME" \
+  --query "AttachedPolicies[?PolicyName=='${PROVIDER_POLICY_NAME}' || PolicyName=='${AUDIT_POLICY_NAME}']" --output json)"
+test "$(jq 'length' <<<"$ATTACHMENTS")" -eq 2
+test "$(jq -r 'map(.PolicyName) | sort | join(",")' <<<"$ATTACHMENTS")" = "${AUDIT_POLICY_NAME},${PROVIDER_POLICY_NAME}"
 ```
 
-`NEW_VERSION_ID` is the actual AWS-managed-policy version ID returned by AWS;
-do not substitute or assume a literal `v3` identifier when executing this
-update.
+`PROVIDER_VERSION_ID` and `AUDIT_VERSION_ID` are the actual AWS-managed-policy
+version IDs returned by AWS; do not substitute or assume literal `v3`, `v4`, or
+`v1` identifiers when executing this update. If the companion policy does not
+exist, the documented `create-policy` branch creates it from the exact
+source-controlled artifact; otherwise the command updates its default version.
+The final checks require exactly two matching attachments, with the exact two
+policy names, on the exact release-deployer role. Review the complete role
+attachment list for any pre-existing unexpected authority before continuing.
 
-The update must preserve the single intended release-deployer attachment. If AWS
+The update must preserve the single intended release-deployer role boundary. If AWS
 reports the five-version limit, delete only an explicitly reviewed non-default
 version. Root may perform only this policy-version update when no approved
 non-root administrator exists; root must not run Terraform and must be logged out
 immediately afterward. Obtain a fresh MFA-backed release session for the
-release-deployer after the live update. Do not retry the failed apply until the live managed policy
-matches this source document.
+release-deployer after the live update. Do not retry the failed apply until the live
+policies match these source documents.
 The failed Stage B apply must not be retried before the live managed policy matches source.
 
 ## Permanent plan-bound reference audit
 
-The permanent MFA-backed release-deployer policy includes the read-only ECS and
+The permanent MFA-backed release-deployer policy pair includes the read-only ECS and
 broker calls required to produce the rollover audit: `ListServices`,
 `DescribeServices`, `ListTasks`, `DescribeTasks`, `DescribeTaskDefinition`, and
 `lambda:GetFunctionConfiguration`. `ecs:DescribeTaskDefinition` is read-only

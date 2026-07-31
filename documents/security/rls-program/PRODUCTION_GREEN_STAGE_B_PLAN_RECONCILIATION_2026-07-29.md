@@ -28,12 +28,19 @@ not granted task execution or service mutation authority.
 
 PR #161's v2 policy artifact remains immutable history for audit and rollback.
 The [v2 artifact](../../ops/iam/MSCQRProductionGreenStageBProviderRecovery-v2.json)
-is preserved, while the wildcard correction is published in the new
+is preserved, while the wildcard correction is preserved in the historical
 [v3 artifact](../../ops/iam/MSCQRProductionGreenStageBProviderRecovery-v3.json).
-Any upcoming live-policy command must load v3. The live managed policy remains on the
-pre-correction version until the separately authorized update after the
-corrective PR merges. AWS's actual managed-policy version ID must be discovered
-from the live policy rather than assumed to be a literal `v3`.
+The combined v3 document is 6,651 AWS-counted characters, 507 over the 6,144
+managed-policy limit. The upcoming live update therefore loads the deployable
+[v4 provider-recovery artifact](../../ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json)
+and creates or updates the [ReferenceAuditReadOnly-v1 companion](../../ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json).
+V4 retains the reviewed recovery control-plane statements; the companion
+contains exactly the seven permanent read-only audit statements. Both policies
+attach only to `mscqr-production-release-deployer`. The live managed policies
+remain on their pre-correction state until the separately authorized update
+after the corrective PR merges. AWS's actual managed-policy version IDs must
+be discovered from each live policy rather than assumed to be repository
+suffixes.
 
 This source correction adds no runtime, service, IAM, secret, database,
 networking, ALB, DNS, or traffic authority and does not authorize a fresh audit
