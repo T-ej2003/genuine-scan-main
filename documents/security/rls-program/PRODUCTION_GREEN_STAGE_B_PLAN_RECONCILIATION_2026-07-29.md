@@ -26,10 +26,18 @@ Terraform addresses. Service and task listing remain cluster constrained, and
 the broker Lambda read remains exact-function constrained. The release role is
 not granted task execution or service mutation authority.
 
-The live managed policy has not been updated from PR #161 and must not be
-updated until the corrective PR is merged. This source correction adds no
-runtime, service, IAM, secret, database, networking, ALB, DNS, or traffic
-authority and does not authorize a fresh audit or Terraform operation.
+PR #161's v2 policy artifact remains immutable history for audit and rollback.
+The [v2 artifact](../../ops/iam/MSCQRProductionGreenStageBProviderRecovery-v2.json)
+is preserved, while the wildcard correction is published in the new
+[v3 artifact](../../ops/iam/MSCQRProductionGreenStageBProviderRecovery-v3.json).
+Any upcoming live-policy command must load v3. The live managed policy remains on the
+pre-correction version until the separately authorized update after the
+corrective PR merges. AWS's actual managed-policy version ID must be discovered
+from the live policy rather than assumed to be a literal `v3`.
+
+This source correction adds no runtime, service, IAM, secret, database,
+networking, ALB, DNS, or traffic authority and does not authorize a fresh audit
+or Terraform operation.
 
 ## Reviewed immutable revision-rollover exception
 

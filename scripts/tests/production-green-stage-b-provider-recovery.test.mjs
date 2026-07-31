@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 
-const policyPath = "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v2.json";
+const historicalPolicyPath = "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v2.json";
+const policyPath = "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v3.json";
+const historicalPolicy = JSON.parse(fs.readFileSync(historicalPolicyPath, "utf8"));
 const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const statements = policy.Statement;
 const actions = statements.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
-const statement = (action) => statements.find(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes(action));
+const statementOf = (candidate, action) => candidate.Statement.find(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes(action));
+const statement = (action) => statementOf(policy, action);
 const stageBTaskFamilies = [
   "mscqr-production-rls-green-backend-candidate",
   "mscqr-production-rls-green-worker-candidate",
@@ -35,6 +40,24 @@ const brokerFunctionArns = [
   "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
   "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*",
 ];
+const expectedV2Sha256 = "dccfa7c5cf64c266fd9ea1deabd78f6ed1b43b20132f729642cc5e2ceb65bc71";
+
+test("PR #161 v2 remains the immutable historical artifact", () => {
+  assert.equal(sha256(fs.readFileSync(historicalPolicyPath)), expectedV2Sha256);
+  assert.deepEqual(statementOf(historicalPolicy, "ecs:DescribeTaskDefinition").Resource, stageBTaskFamilies.map(arn));
+});
+
+test("v3 changes only the dedicated DescribeTaskDefinition Resource field", () => {
+  const v2Read = statementOf(historicalPolicy, "ecs:DescribeTaskDefinition");
+  const v3Read = statement("ecs:DescribeTaskDefinition");
+  assert.equal(v3Read.Sid, "DescribeStageBTaskDefinitionsReadOnly");
+  assert.equal(v3Read.Effect, "Allow");
+  assert.equal(v3Read.Action, "ecs:DescribeTaskDefinition");
+  assert.equal(v3Read.Resource, "*");
+  const normalize = (candidate) => candidate.Statement.map((value) => value.Sid === "DescribeStageBTaskDefinitionsReadOnly" ? { ...value, Resource: "<reviewed-correction>" } : value);
+  assert.deepEqual(normalize(historicalPolicy), normalize(policy));
+  assert.notDeepEqual(v2Read.Resource, v3Read.Resource);
+});
 
 test("release-deployer Stage B policy scopes deregistration to exact Stage B families", () => {
   const value = statement("ecs:DeregisterTaskDefinition");
@@ -118,8 +141,13 @@ test("recovery runbook requires live policy update before retry", () => {
   assert.match(runbook, /PRODUCTION_GREEN_STAGE_B_ECS_READBACK_RECOVERY_2026-07-30/i);
   assert.match(runbook, /audit generator and validator/i);
   assert.match(runbook, /not granted task execution or service mutation authority/i);
-  assert.match(runbook, /live managed policy has not been updated from PR #161/i);
-  assert.match(runbook, /must not be\s+updated until this corrective PR is merged/i);
+  assert.match(runbook, /v2.*immutable historical\s+artifact/is);
+  assert.match(runbook, /v3.*post-merge correction/is);
+  assert.match(runbook, /MSCQRProductionGreenStageBProviderRecovery-v2\.json/i);
+  assert.match(runbook, /MSCQRProductionGreenStageBProviderRecovery-v3\.json/i);
+  assert.match(runbook, /POLICY_DOCUMENT=.*MSCQRProductionGreenStageBProviderRecovery-v3\.json/);
+  assert.match(runbook, /managed-policy version IDs?\s+are\s+discovered from the live policy/i);
+  assert.match(runbook, /live managed policy remains on the pre-correction version until the\s+separately authorized update/i);
   assert.match(runbook, /merging source alone does not update AWS/i);
   assert.match(runbook, /must be version-updated after merge/i);
   assert.match(runbook, /must not be retried before the live managed policy matches source/i);

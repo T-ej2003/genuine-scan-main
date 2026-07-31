@@ -1,6 +1,6 @@
 # Production Green Stage B provider recovery — 2026-07-29
 
-## Post-merge P1 correction — pending live update
+## Post-merge P1 correction — v3 pending live update
 
 The post-merge review finding is valid. The permanent Stage B reference-audit
 policy previously scoped `ecs:DescribeTaskDefinition` to task-definition ARN
@@ -19,23 +19,32 @@ definition families remain enforced by the Stage B audit generator and
 validator, which reject `mscqr-backend`, `mscqr-frontend`, unknown families, and
 unknown Terraform addresses.
 
-The live managed policy has not been updated from PR #161. It must not be
-updated until this corrective PR is merged. No fresh audit, Terraform
-plan/apply, AWS runtime, service, database, broker, ALB, DNS, or traffic action
-is authorized by this correction.
+The live managed policy remains on the pre-correction version until the
+separately authorized update after this corrective PR is merged. No fresh audit,
+Terraform plan/apply, AWS runtime, service, database, broker, ALB, DNS, or
+traffic action is authorized by this correction.
 
-## Exact correction
+## Version history and exact correction
 
-MSCQRProductionGreenStageBProviderRecovery default version is now v2. The
-canonical SHA-256 is regenerated from the reviewed source document during the
-live-policy semantic verification below.
+`MSCQRProductionGreenStageBProviderRecovery-v2.json` is the immutable historical
+artifact produced by PR #161 and is preserved for audit and rollback. Its byte SHA-256 is
+`dccfa7c5cf64c266fd9ea1deabd78f6ed1b43b20132f729642cc5e2ceb65bc71`.
 
 The prior live v1 policy is preserved in
 [MSCQRProductionGreenStageBProviderRecovery-v1-live.json](./MSCQRProductionGreenStageBProviderRecovery-v1-live.json).
 The reviewed v2 source is
 [MSCQRProductionGreenStageBProviderRecovery-v2.json](./MSCQRProductionGreenStageBProviderRecovery-v2.json).
+V3 is the post-merge correction and its new source artifact is:
+[MSCQRProductionGreenStageBProviderRecovery-v3.json](./MSCQRProductionGreenStageBProviderRecovery-v3.json).
 
-The only changes are:
+V3 equals v2 except for the dedicated read-only
+`DescribeStageBTaskDefinitionsReadOnly` statement: its
+`ecs:DescribeTaskDefinition` `Resource` changes from the original twelve ARN
+patterns to `"*"`, as required by AWS IAM. AWS managed-policy version IDs are
+discovered from the live policy; this runbook does not assume that AWS's next
+version ID will literally be `v3`.
+
+The original v2 recovery changes were:
 
 1. The three exact CloudWatch Logs tagging resources now use the required
    trailing colon-star form.
@@ -43,11 +52,13 @@ The only changes are:
    task-definition family/revision patterns.
 3. Exact Stage B apply recovery permissions now cover only the reviewed log groups
    and task-definition family/revision patterns.
-4. The permanent reference-audit read statement now uses `Resource "*"` for
-   `ecs:DescribeTaskDefinition` as required by AWS IAM.
 
 The global iam:ListAttachedRolePolicies statement and exact DynamoDB replay
 table tagging statement are unchanged.
+
+The v3 correction is only the dedicated read-only
+`ecs:DescribeTaskDefinition` statement's `Resource "*"` value; all other v2
+statements, actions, resources, and conditions remain unchanged.
 
 ## Stage B release-deployer apply correction
 
@@ -68,7 +79,7 @@ merged document and verify the live document semantically before any retry:
 ```sh
 set -euo pipefail
 POLICY_NAME='MSCQRProductionGreenStageBProviderRecovery'
-POLICY_DOCUMENT="$PWD/documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v2.json"
+POLICY_DOCUMENT="$PWD/documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v3.json"
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 POLICY_ARN="$(aws iam get-policy --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}" --query Policy.Arn --output text)"
 NEW_VERSION_ID="$(aws iam create-policy-version \
@@ -82,6 +93,10 @@ aws iam get-policy-version --policy-arn "$POLICY_ARN" --version-id "$NEW_VERSION
   --query PolicyVersion.Document --output json > "$TMP_DIR/live-policy.json"
 cmp <(jq -S . "$POLICY_DOCUMENT") <(jq -S . "$TMP_DIR/live-policy.json")
 ```
+
+`NEW_VERSION_ID` is the actual AWS-managed-policy version ID returned by AWS;
+do not substitute or assume a literal `v3` identifier when executing this
+update.
 
 The update must preserve the single intended release-deployer attachment. If AWS
 reports the five-version limit, delete only an explicitly reviewed non-default
