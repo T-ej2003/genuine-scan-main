@@ -11,6 +11,7 @@ import {
   parseCli,
 } from "../aws/generate-production-green-stage-b-reference-audit.mjs";
 import {
+  assertStageBAtomicBrokerPlan,
   STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS,
   STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS,
   STAGE_B_TASK_DEFINITION_FAMILIES,
@@ -28,7 +29,10 @@ const newArnFor = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definitio
 const backendAddress = 'aws_ecs_task_definition.candidate["backend"]';
 const canaryAddress = 'aws_ecs_task_definition.candidate["canary"]';
 const readOnlyCanaryAddress = 'aws_ecs_task_definition.candidate["read_only_canary"]';
+const executorCollectionAddress = "aws_ecs_task_definition.executor";
 const readOnlyCanaryFamily = STAGE_B_TASK_DEFINITION_FAMILIES[readOnlyCanaryAddress];
+const executorAddressForMode = (mode) => `${executorCollectionAddress}["${mode}"]`;
+const taskDefinitionAddressForMode = (mode) => mode === "full-rls-application-canary" ? canaryAddress : executorAddressForMode(mode);
 const familyForMode = (mode) => mode === "full-rls-application-canary"
   ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
   : `mscqr-production-full-rls-green-${mode}`;
@@ -117,23 +121,33 @@ function makeCreateOnlyFixture({ mutatePlan, mutateReader } = {}) {
   });
 }
 
-function addBrokerAtomicPlanContract(plan, taskDefinitionAddress = canaryAddress, relevantAddress = taskDefinitionAddress) {
+function addBrokerAtomicPlanContract(plan, taskDefinitionAddress = canaryAddress, relevantAddress = taskDefinitionAddress, { omitExecutorCollectionDependency = false } = {}) {
+  const executorTarget = taskDefinitionAddress.startsWith(`${executorCollectionAddress}[`);
   plan.configuration = {
     root_module: {
-      resources: [{
-        address: "aws_lambda_function.broker",
-        type: "aws_lambda_function",
-        expressions: { environment: [{ variables: { references: ["local.broker_task_definition_arns"] } }] },
-      }],
+      resources: [
+        {
+          address: "aws_lambda_function.broker",
+          type: "aws_lambda_function",
+          expressions: { environment: [{ variables: { references: ["local.broker_task_definition_arns"] } }] },
+        },
+        ...(executorTarget ? [{
+          address: executorCollectionAddress,
+          type: "aws_ecs_task_definition",
+          expressions: { family: { references: ["each.value.family"] } },
+        }] : []),
+      ],
     },
   };
-  plan.relevant_attributes = [{ resource: relevantAddress, attribute: ["arn"] }];
+  plan.relevant_attributes = executorTarget && !omitExecutorCollectionDependency
+    ? [{ resource: executorCollectionAddress, attribute: [] }]
+    : [{ resource: relevantAddress, attribute: ["arn"] }];
 }
 
-function makeAtomicBrokerFixture({ brokerActions = ["update"], includeBrokerChange = true, taskDefinitionAddress = canaryAddress, relevantAddress = taskDefinitionAddress, mutatePlan, mutateReader } = {}) {
+function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", brokerActions = ["update"], includeBrokerChange = true, taskDefinitionAddress = taskDefinitionAddressForMode(mode), relevantAddress = taskDefinitionAddress, omitExecutorCollectionDependency = false, mutatePlan, mutateReader } = {}) {
   return makeFixture({
     mutatePlan: (plan) => {
-      addBrokerAtomicPlanContract(plan, taskDefinitionAddress, relevantAddress);
+      addBrokerAtomicPlanContract(plan, taskDefinitionAddress, relevantAddress, { omitExecutorCollectionDependency });
       if (includeBrokerChange) plan.resource_changes.push({ address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: brokerActions, before: {}, after: {} } });
       mutatePlan?.(plan);
     },
@@ -143,7 +157,7 @@ function makeAtomicBrokerFixture({ brokerActions = ["update"], includeBrokerChan
         const config = original();
         const variables = config.Environment.Variables;
         const taskDefinitions = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
-        taskDefinitions["full-rls-application-canary"] = oldArnFor(familyForMode("full-rls-application-canary"));
+        taskDefinitions[mode] = oldArnFor(familyForMode(mode));
         variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
         return config;
       };
@@ -484,6 +498,37 @@ test("atomic broker rollover in the same plan passes and is recorded explicitly"
     planJsonSha256: fixture.planJsonSha256,
     now,
   }));
+});
+
+test("executor admin-bootstrap atomic rollover passes with a collection dependency", () => {
+  const mode = "full-rls-admin-bootstrap";
+  const fixture = makeAtomicBrokerFixture({ mode });
+  const audit = generate(fixture);
+  assert.deepEqual(audit.plannedAtomicBrokerRollovers.map((item) => item.mode), [mode]);
+});
+
+test("another executor mode passes with the same collection dependency proof", () => {
+  const mode = "full-rls-role-verify";
+  const fixture = makeAtomicBrokerFixture({ mode });
+  const audit = generate(fixture);
+  assert.deepEqual(audit.plannedAtomicBrokerRollovers.map((item) => item.mode), [mode]);
+});
+
+test("executor collection dependency is accepted only for the matching mode", () => {
+  const mode = "full-rls-admin-bootstrap";
+  const fixture = makeAtomicBrokerFixture({ mode });
+  assert.doesNotThrow(() => assertStageBAtomicBrokerPlan(fixture.plan, executorAddressForMode(mode), mode));
+  assert.throws(
+    () => assertStageBAtomicBrokerPlan(fixture.plan, executorAddressForMode("full-rls-role-verify"), mode),
+    /task-definition mode does not match/,
+  );
+});
+
+test("missing executor collection dependency fails closed", () => {
+  assert.throws(
+    () => generate(makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap", omitExecutorCollectionDependency: true })),
+    /collection dependency/,
+  );
 });
 
 test("broker no-op with a superseded ARN fails closed", () => {

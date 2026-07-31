@@ -48,11 +48,11 @@ function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planB
   const atomicForChange = atomicRollovers.filter((item) => item?.taskDefinitionTerraformAddress === change.address);
   if (brokerModes.length === 0 && atomicForChange.length !== 0) throw new Error(`Stage B atomic broker rollover is unexpected: ${change.address}`);
   if (brokerModes.length !== 0) {
-    assertStageBAtomicBrokerPlan(plan, change.address);
     if (entry.brokerReferenceStatus !== "planned-atomic-broker-rollover-v1" || audit.allOldRevisionsUnreferenced !== false || atomicForChange.length !== 1) {
       throw new Error(`Stage B atomic broker rollover proof is missing: ${change.address}`);
     }
     const atomic = atomicForChange[0];
+    assertStageBAtomicBrokerPlan(plan, change.address, atomic.mode);
     if (JSON.stringify(brokerModes) !== JSON.stringify([atomic.mode])
       || atomic.brokerTerraformAddress !== "aws_lambda_function.broker"
       || atomic.taskDefinitionArnReference !== `${change.address}.arn`

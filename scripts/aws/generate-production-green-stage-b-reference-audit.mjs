@@ -150,7 +150,7 @@ function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256) {
   const taskDefinitionAddress = brokerTaskDefinitionAddress(mode);
   const rollover = rolloverByAddress.get(taskDefinitionAddress);
   if (!rollover) throw new Error(`Broker atomic rollover target is not a planned rollover: ${taskDefinitionAddress}`);
-  assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress);
+  assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, mode);
   return {
     brokerTerraformAddress: "aws_lambda_function.broker",
     taskDefinitionTerraformAddress: taskDefinitionAddress,
