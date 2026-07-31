@@ -25,6 +25,12 @@ actions, broker invocation, ALB, DNS, or traffic changes. Any non-task-definitio
 destroy, unknown address/family, missing or mismatched audit binding, non-zero
 reference, or missing rollback ARN remains fail-closed.
 
+The permanent release-deployer policy supplies the read-only calls needed for
+this audit; no temporary policy is required. The audit is regenerated whenever
+the plan JSON changes and is accepted only when its file SHA-256, embedded plan
+SHA-256, old ARNs, zero live references, family matches, and rollback ARNs all
+verify.
+
 The initial refreshed state contained the seven expected IAM roles and the
 `stage-b-executor-runtime` inline policy. All seven role instances were marked
 `tainted`, which forced replacements and caused the plan-only wrapper to reject

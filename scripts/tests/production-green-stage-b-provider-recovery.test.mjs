@@ -29,6 +29,12 @@ const stageBLogGroups = [
 ];
 const arn = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:*`;
 const logArn = (name) => `arn:aws:logs:eu-west-2:368992683803:log-group:${name}:*`;
+const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
+const auditActions = ["ecs:ListServices", "ecs:DescribeServices", "ecs:ListTasks", "ecs:DescribeTasks", "ecs:DescribeTaskDefinition", "lambda:GetFunctionConfiguration"];
+const brokerFunctionArns = [
+  "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
+  "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*",
+];
 
 test("release-deployer Stage B policy scopes deregistration to exact Stage B families", () => {
   const value = statement("ecs:DeregisterTaskDefinition");
@@ -43,6 +49,34 @@ test("release-deployer Stage B policy scopes log-group creation to Stage B-owned
   assert.equal(value.Condition.StringEquals["aws:RequestedRegion"], "eu-west-2");
   assert.ok(!value.Resource.some((resource) => resource.includes("/ecs/mscqr-production/full-rls-green:*")));
   assert.deepEqual(statement("logs:TagResource").Resource, stageBLogGroups.map(logArn));
+});
+
+test("permanent release policy contains every read action required for the plan-bound audit", () => {
+  assert.deepEqual(auditActions.filter((action) => actions.includes(action)), auditActions);
+  assert.deepEqual(statement("ecs:ListServices").Resource, "*");
+  assert.deepEqual(statement("ecs:ListTasks").Resource, "*");
+  for (const action of ["ecs:ListServices", "ecs:ListTasks"]) {
+    const value = statement(action);
+    assert.equal(value.Condition.StringEquals["aws:RequestedRegion"], "eu-west-2");
+    assert.equal(value.Condition.StringEquals["ecs:cluster"], clusterArn);
+  }
+  for (const action of ["ecs:DescribeServices", "ecs:DescribeTasks"]) {
+    const value = statement(action);
+    assert.equal(value.Condition.StringEquals["aws:RequestedRegion"], "eu-west-2");
+    assert.equal(value.Condition.StringEquals["ecs:cluster"], clusterArn);
+    assert.equal(value.Resource.includes("mscqr-prod-euw2-main"), true);
+  }
+  assert.deepEqual(statement("ecs:DescribeTaskDefinition").Resource, stageBTaskFamilies.map(arn));
+  assert.deepEqual(statement("lambda:GetFunctionConfiguration").Resource, brokerFunctionArns);
+});
+
+test("audit read scope excludes blue services and all runtime mutation authority", () => {
+  assert.equal(statement("ecs:DescribeServices").Resource.includes("mscqr-backend"), false);
+  assert.equal(statement("ecs:DescribeServices").Resource.includes("mscqr-frontend"), false);
+  for (const forbidden of ["ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:RegisterTaskDefinition", "lambda:InvokeFunction", "lambda:UpdateFunctionCode", "lambda:DeleteFunction"]) {
+    assert.equal(actions.includes(forbidden), false, forbidden);
+  }
+  assert.equal(statement("lambda:GetFunctionConfiguration").Resource.some((resource) => resource.endsWith(":*:*")), false);
 });
 
 test("provider recovery policy adds no runtime, service, traffic, secret, database, or wildcard authority", () => {
