@@ -59,11 +59,20 @@ test("dependent tagging is limited to the generated ARN family and exact tags", 
   });
 });
 
+test("GetResourcePolicy is read-only and limited to the exact generated ARN", () => {
+  const statement = statements.ReadOnlyExactStageAReadOnlyCanaryResourcePolicy;
+  assert.deepEqual(statement.Action, "secretsmanager:GetResourcePolicy");
+  assert.equal(statement.Resource, arnPattern);
+  assert.equal((statement.Resource.match(/\?/g) || []).length, 6);
+  assert.equal(statement.Resource.includes("*"), false);
+  assert.deepEqual(statement.Condition.StringEquals, { "aws:RequestedRegion": "eu-west-2" });
+});
+
 test("no value, lifecycle, KMS, IAM, or broad Secrets Manager authority is granted", () => {
   const actions = policy.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
-  for (const forbidden of ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecret", "secretsmanager:DeleteSecret", "secretsmanager:RestoreSecret", "secretsmanager:RotateSecret", "secretsmanager:ReplicateSecretToRegions", "secretsmanager:ListSecrets", "secretsmanager:DescribeSecret", "kms:*", "iam:*", "sts:*"]) assert.equal(actions.includes(forbidden), false, forbidden);
+  for (const forbidden of ["secretsmanager:GetSecretValue", "secretsmanager:ListSecretVersionIds", "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecret", "secretsmanager:DeleteSecret", "secretsmanager:RestoreSecret", "secretsmanager:RotateSecret", "secretsmanager:ReplicateSecretToRegions", "secretsmanager:ListSecrets", "secretsmanager:DescribeSecret", "kms:*", "iam:*", "sts:*"]) assert.equal(actions.includes(forbidden), false, forbidden);
   assert.equal(actions.some((action) => action === "secretsmanager:*"), false);
-  assert.equal(policy.Statement.length, 2);
+  assert.equal(policy.Statement.length, 3);
 });
 
 test("Terraform remains the empty-handle owner and Stage B remains reference-only", () => {
