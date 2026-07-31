@@ -214,6 +214,9 @@ function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", package
           after: {
             filename: packagePath,
             source_code_hash: packageSourceCodeHash,
+            ...(JSON.stringify(brokerActions) === JSON.stringify(["create"])
+              ? { environment: [{ variables: { BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify({ packageChecksumSha256: packageChecksum }) } }] }
+              : {}),
           },
           after_unknown: { environment: [{ variables: true }] },
         },
@@ -231,6 +234,20 @@ function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", package
         return config;
       };
       mutateReader?.(reader);
+    },
+  });
+}
+
+function makeInitialBrokerCreateFixture({ mutatePlan } = {}) {
+  return makeAtomicBrokerFixture({
+    brokerActions: ["create"],
+    mutatePlan: (plan) => {
+      for (const change of plan.resource_changes.filter((item) => item.type === "aws_ecs_task_definition")) {
+        change.change.actions = ["create"];
+        change.change.before = null;
+        delete change.change.replace_paths;
+      }
+      mutatePlan?.(plan);
     },
   });
 }
@@ -711,6 +728,55 @@ test("broker update with wrong audit plan binding fails closed", () => {
 test("complete broker update audit evidence passes", () => {
   const fixture = makeAtomicBrokerFixture();
   validateBrokerPlan(fixture, generate(fixture));
+});
+
+test("initial broker create passes with plan-only package proof", () => {
+  const fixture = makeInitialBrokerCreateFixture();
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }));
+});
+
+test("initial broker create does not require a reference audit", () => {
+  const fixture = makeInitialBrokerCreateFixture();
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }));
+});
+
+test("initial broker create rejects a wrong ZIP source_code_hash", () => {
+  const fixture = makeInitialBrokerCreateFixture({
+    mutatePlan: (plan) => {
+      plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.after.source_code_hash = "wrong";
+    },
+  });
+  assert.throws(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }), /source_code_hash/);
+});
+
+test("initial broker create rejects a wrong release-package checksum", () => {
+  const fixture = makeInitialBrokerCreateFixture({
+    mutatePlan: (plan) => { plan.variables.package_checksum_sha256.value = "d".repeat(64); },
+  });
+  assert.throws(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }), /approval JSON does not match/);
+});
+
+test("initial broker create rejects a missing broker approval mapping", () => {
+  const fixture = makeInitialBrokerCreateFixture({
+    mutatePlan: (plan) => { plan.configuration.root_module.resources[0].expressions.environment[0].variables.references = ["local.broker_task_definition_arns"]; },
+  });
+  assert.throws(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }), /approval local reference/);
+});
+
+test("broker no-op remains accepted without update-only audit proof", () => {
+  const fixture = makeInitialBrokerCreateFixture({
+    mutatePlan: (plan) => { plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.actions = ["no-op"]; },
+  });
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }));
+});
+
+test("unsupported broker delete and replacement actions fail closed", () => {
+  for (const actions of [["delete"], ["delete", "create"]]) {
+    const fixture = makeAtomicBrokerFixture({ brokerActions: actions });
+    assert.throws(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }), /unsupported/);
+  }
+  const malformed = makeAtomicBrokerFixture({ brokerActions: [] });
+  assert.throws(() => assertStageBPlan(malformed.plan, { terraformConfiguration: malformed.options.terraformConfiguration }), /missing or malformed/);
 });
 
 test("broker ZIP checksum and source_code_hash are independently validated", () => {

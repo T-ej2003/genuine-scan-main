@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   assertStageBAtomicBrokerPlan,
   assertStageBAtomicBrokerPackagePlan,
+  assertStageBBrokerCreatePlan,
   assertStageBReferenceAuditFreshness,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "./aws/stage-b-reference-audit-contract.mjs";
@@ -101,12 +102,45 @@ function assertBrokerAuditBinding(plan, brokerChange, audit, auditBytes, auditSh
   }
 }
 
+function assertInitialBrokerCreatePlan(plan, terraformConfiguration) {
+  const packagePath = plan.variables?.broker_package_path?.value;
+  const releaseChecksum = plan.variables?.package_checksum_sha256?.value;
+  if (typeof packagePath !== "string" || !path.isAbsolute(packagePath)) throw new Error("Stage B broker create package path is missing or malformed.");
+  if (!/^[a-f0-9]{64}$/.test(releaseChecksum || "")) throw new Error("Stage B broker create release package checksum is missing or malformed.");
+  let packageBytes;
+  try {
+    packageBytes = fs.readFileSync(packagePath);
+  } catch {
+    throw new Error("Stage B broker create package file is missing or unreadable.");
+  }
+  const brokerZipFileSha256 = sha256(packageBytes);
+  const proof = {
+    brokerTerraformAddress: "aws_lambda_function.broker",
+    brokerEnvironmentReference: "local.broker_approval_expected",
+    packageInputReference: "var.package_checksum_sha256",
+    packagePath,
+    plannedReleasePackageChecksumSha256: releaseChecksum,
+    brokerZipFileSha256,
+    plannedBrokerSourceCodeHashBase64: crypto.createHash("sha256").update(packageBytes).digest("base64"),
+  };
+  const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
+  if (taskDefinitionChanges.length !== Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length
+    || taskDefinitionChanges.some((change) => !STAGE_B_TASK_DEFINITION_FAMILIES[change.address])) {
+    throw new Error("Stage B broker create task-definition allowlist is not exact.");
+  }
+  for (const change of taskDefinitionChanges) assertTaskDefinitionScope(change);
+  assertStageBBrokerCreatePlan(plan, proof, terraformConfiguration);
+}
+
 export function assertStageBPlan(plan, options = {}) {
   const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now = new Date(), terraformConfiguration } = options;
   const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
-  const brokerActions = brokerChange?.change?.actions || [];
-  if (brokerChange && JSON.stringify(brokerActions) !== JSON.stringify(["no-op"])) {
-    assertBrokerAuditBinding(plan, brokerChange, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
+  if (brokerChange) {
+    const brokerActions = brokerChange.change?.actions;
+    if (!Array.isArray(brokerActions) || brokerActions.length === 0) throw new Error("Stage B broker actions are missing or malformed.");
+    if (exactActions(brokerActions, ["create"])) assertInitialBrokerCreatePlan(plan, terraformConfiguration);
+    else if (exactActions(brokerActions, ["update"])) assertBrokerAuditBinding(plan, brokerChange, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
+    else if (!exactActions(brokerActions, ["no-op"])) throw new Error(`Stage B broker actions are unsupported: ${JSON.stringify(brokerActions)}`);
   }
   for (const change of plan.resource_changes || []) {
     const actions = change.change.actions || [];

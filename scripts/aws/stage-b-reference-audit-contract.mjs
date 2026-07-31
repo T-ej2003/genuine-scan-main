@@ -177,14 +177,14 @@ function brokerApprovalChecksum(environment, label) {
   return parsed.packageChecksumSha256;
 }
 
-export function assertStageBAtomicBrokerPackagePlan(plan, proof, terraformConfiguration) {
+function assertBrokerPackagePlanCommon(plan, proof, terraformConfiguration, expectedActions) {
   if (!proof || typeof proof !== "object") throw new Error("Broker package plan proof is missing.");
   if (typeof terraformConfiguration !== "string" || terraformConfiguration.length === 0) {
     throw new Error("Broker package transition Terraform configuration is missing.");
   }
   const brokerChange = (plan?.resource_changes || []).find((change) => change.address === STAGE_B_BROKER_TERRAFORM_ADDRESS);
-  if (!brokerChange || JSON.stringify(brokerChange.change?.actions) !== JSON.stringify(["update"])) {
-    throw new Error("Atomic broker package transition requires aws_lambda_function.broker actions [\"update\"].");
+  if (!brokerChange || JSON.stringify(brokerChange.change?.actions) !== JSON.stringify(expectedActions)) {
+    throw new Error(`Broker package plan requires aws_lambda_function.broker actions ${JSON.stringify(expectedActions)}.`);
   }
   const planChecksum = plan?.variables?.package_checksum_sha256?.value;
   const packagePath = plan?.variables?.broker_package_path?.value;
@@ -225,10 +225,6 @@ export function assertStageBAtomicBrokerPackagePlan(plan, proof, terraformConfig
     || !/source_code_hash\s*=\s*filebase64sha256\(var\.broker_package_path\)/.test(normalizedConfiguration)) {
     throw new Error("Broker Terraform checksum/package wiring is missing or malformed.");
   }
-  const beforeChecksum = brokerApprovalChecksum(brokerChange.change?.before?.environment, "Plan before");
-  if (proof.liveReleasePackageChecksumSha256 !== beforeChecksum || proof.planBeforeReleasePackageChecksumSha256 !== beforeChecksum) {
-    throw new Error("Live release checksum does not match the broker plan before-value.");
-  }
   const after = brokerChange.change?.after || {};
   if (after.filename !== packagePath) throw new Error("Broker package replacement is not in the same plan.");
   if (after.source_code_hash !== proof.plannedBrokerSourceCodeHashBase64) {
@@ -237,6 +233,22 @@ export function assertStageBAtomicBrokerPackagePlan(plan, proof, terraformConfig
   if (proof.planJsonSha256 && !/^[a-f0-9]{64}$/.test(proof.planJsonSha256)) {
     throw new Error("Broker package plan SHA-256 is malformed.");
   }
+  return { brokerChange, planChecksum };
+}
+
+export function assertStageBAtomicBrokerPackagePlan(plan, proof, terraformConfiguration) {
+  const { brokerChange } = assertBrokerPackagePlanCommon(plan, proof, terraformConfiguration, ["update"]);
+  const beforeChecksum = brokerApprovalChecksum(brokerChange.change?.before?.environment, "Plan before");
+  if (proof.liveReleasePackageChecksumSha256 !== beforeChecksum || proof.planBeforeReleasePackageChecksumSha256 !== beforeChecksum) {
+    throw new Error("Live release checksum does not match the broker plan before-value.");
+  }
+}
+
+export function assertStageBBrokerCreatePlan(plan, proof, terraformConfiguration) {
+  const { brokerChange, planChecksum } = assertBrokerPackagePlanCommon(plan, proof, terraformConfiguration, ["create"]);
+  const afterChecksum = brokerApprovalChecksum(brokerChange.change?.after?.environment, "Planned create");
+  if (afterChecksum !== planChecksum) throw new Error("Planned broker approval JSON does not match the release package checksum input.");
+  assertStageBBrokerTaskDefinitionMapping(plan, terraformConfiguration);
 }
 
 export function assertStageBReferenceAuditFreshness(auditedAt, now = new Date()) {
