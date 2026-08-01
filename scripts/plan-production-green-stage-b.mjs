@@ -12,6 +12,7 @@ import {
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
 } from "./aws/stage-b-reference-audit-contract.mjs";
+import { STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const allowed = new Set(["aws_cloudwatch_log_group", "aws_iam_role", "aws_iam_role_policy", "aws_ecs_task_definition", "aws_dynamodb_table", "aws_lambda_function", "aws_lambda_alias", "aws_lambda_permission"]);
@@ -22,6 +23,12 @@ const exactReplacePaths = (paths) => Array.isArray(paths) && paths.length === 1 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const retainedAddressPattern = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([^"]+)"\]$/;
 const taskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):([1-9][0-9]*)$/;
+const expectedBrokerFamily = (mode) => mode === "full-rls-application-canary"
+  ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
+  : `mscqr-production-full-rls-green-${mode}`;
+const expectedBrokerAddress = (mode) => mode === "full-rls-application-canary"
+  ? 'aws_ecs_task_definition.candidate["canary"]'
+  : `aws_ecs_task_definition.executor["${mode}"]`;
 
 function assertTaskDefinitionScope(change) {
   const expectedFamily = taskDefinitionFamilies.get(change.address);
@@ -406,16 +413,42 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
   if (brokerChange && exactActions(brokerChange.change?.actions || [], ["update"])) {
     const broker = referenceAudit.broker;
     if (!broker || !Array.isArray(broker.liveTaskDefinitionMappings)) throw new Error("Stage B append-only reference audit broker mapping evidence is missing.");
-    if (new Set(broker.liveTaskDefinitionMappings.map((entry) => entry?.mode)).size !== broker.liveTaskDefinitionMappings.length) throw new Error("Stage B append-only reference audit broker mappings contain duplicates.");
+    const expectedModes = [...STAGE_B_MODES].sort();
+    const actualModes = broker.liveTaskDefinitionMappings.map((entry) => entry?.mode);
+    if (actualModes.length !== expectedModes.length
+      || new Set(actualModes).size !== actualModes.length
+      || JSON.stringify([...actualModes].sort()) !== JSON.stringify(expectedModes)) {
+      throw new Error("Stage B append-only reference audit broker mode mapping is incomplete or duplicated.");
+    }
+    const mappingByMode = new Map();
     for (const mapping of broker.liveTaskDefinitionMappings) {
       const identity = taskDefinitionArnPattern.exec(mapping?.taskDefinitionArn || "");
-      if (!identity || !STAGE_B_TASK_DEFINITION_FAMILY_NAMES.includes(identity[1]) || !allowedArnsByFamily.get(identity[1])?.has(identity[0])) throw new Error("Stage B append-only reference audit broker mapping is outside the exact current/retained ARN sets.");
+      if (!identity || identity[1] !== expectedBrokerFamily(mapping.mode) || !allowedArnsByFamily.get(identity[1])?.has(identity[0])) throw new Error("Stage B append-only reference audit broker mapping is outside the exact per-mode current/retained ARN sets.");
+      mappingByMode.set(mapping.mode, { ...mapping, arn: identity[0], family: identity[1] });
     }
     if (!Array.isArray(referenceAudit.plannedAtomicBrokerRollovers)) throw new Error("Stage B append-only reference audit broker rollover evidence is missing.");
+    const atomicByMode = new Map();
     for (const rollover of referenceAudit.plannedAtomicBrokerRollovers) {
       const currentEntry = current.find((entry) => entry.address === rollover?.taskDefinitionTerraformAddress);
       if (!currentEntry || !["create-only", "no-op"].includes(currentEntry.classification)) throw new Error("Stage B append-only reference audit broker rollover classification is not bound to the current plan.");
-      if (!retainedArnsByFamily.get(currentEntry.family)?.has(rollover.oldTaskDefinitionArn) || rollover.taskDefinitionArnReference !== `${currentEntry.address}.arn` || rollover.planJsonSha256 !== planJsonSha256) throw new Error("Stage B append-only reference audit broker rollover is not bound to exact retained/current plan addresses.");
+      if (mappingByMode.get(rollover.mode)?.arn !== rollover.oldTaskDefinitionArn
+        || mappingByMode.get(rollover.mode)?.family !== currentEntry.family
+        || expectedBrokerAddress(rollover.mode) !== currentEntry.address
+        || atomicByMode.has(rollover.mode)
+        || !retainedArnsByFamily.get(currentEntry.family)?.has(rollover.oldTaskDefinitionArn)
+        || rollover.taskDefinitionArnReference !== `${currentEntry.address}.arn`
+        || rollover.planJsonSha256 !== planJsonSha256) {
+        throw new Error("Stage B append-only reference audit broker rollover is not bound to exact per-mode retained/current plan addresses.");
+      }
+      atomicByMode.set(rollover.mode, rollover);
+    }
+    for (const mode of expectedModes) {
+      const mapping = mappingByMode.get(mode);
+      const family = expectedBrokerFamily(mode);
+      if (!mapping || mapping.family !== family) throw new Error(`Stage B append-only reference audit broker mode mapping is missing: ${mode}`);
+      if (retainedArnsByFamily.get(family)?.has(mapping.arn) && (!atomicByMode.has(mode) || atomicByMode.get(mode).oldTaskDefinitionArn !== mapping.arn)) {
+        throw new Error(`Stage B append-only reference audit broker retained mapping lacks atomic rollover evidence: ${mode}`);
+      }
     }
   }
 }

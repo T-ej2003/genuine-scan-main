@@ -1011,6 +1011,28 @@ test("complete broker update audit evidence passes", () => {
   validateBrokerPlan(fixture, generate(fixture));
 });
 
+test("append-only audit requires every broker mode mapping", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  audit.broker.liveTaskDefinitionMappings.pop();
+  assert.throws(() => validateBrokerPlan(fixture, audit), /broker mode mapping is incomplete/);
+});
+
+test("append-only audit rejects a broker mode mapped to the wrong family", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  const mapping = audit.broker.liveTaskDefinitionMappings.find((entry) => entry.mode === "full-rls-admin-bootstrap");
+  mapping.taskDefinitionArn = newArnFor(familyForMode("full-rls-role-verify"));
+  assert.throws(() => validateBrokerPlan(fixture, audit), /per-mode current\/retained ARN sets/);
+});
+
+test("append-only audit requires atomic evidence for every retained broker mapping", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  audit.plannedAtomicBrokerRollovers = [];
+  assert.throws(() => validateBrokerPlan(fixture, audit), /lacks atomic rollover evidence/);
+});
+
 for (const [label, mutate, expected = /append-only reference audit/] of [
   ["missing current task-definition evidence", (audit) => { delete audit.currentTaskDefinitions; }],
   ["missing retained task-definition evidence", (audit) => { delete audit.retainedTaskDefinitions; }],

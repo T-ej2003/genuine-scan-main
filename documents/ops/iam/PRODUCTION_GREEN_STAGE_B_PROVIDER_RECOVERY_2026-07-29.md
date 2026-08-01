@@ -139,7 +139,11 @@ audit records `currentCreates` and `currentNoOps` separately. If the broker
 update failed after a current definition was registered, the retry audit also
 records that current no-op in the atomic broker rollover evidence: the live
 broker ARN must be an exact member of the retained ARN set and the planned
-broker mapping must target that exact current resource address.
+broker mapping must target that exact current resource address. Every broker
+mode must appear exactly once in the audit mapping and must resolve to its
+expected task-definition family; missing, duplicated, swapped, or unrelated
+mode mappings fail closed, as does retained live mapping without its matching
+atomic rollover evidence.
 
 After this corrective PR is merged, update the live provider managed policy from
 v4 and verify the complete attachment set before any Terraform retry. Do not

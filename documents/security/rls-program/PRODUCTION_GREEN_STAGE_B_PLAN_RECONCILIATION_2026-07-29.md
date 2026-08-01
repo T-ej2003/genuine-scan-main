@@ -117,7 +117,10 @@ retained generations remain represented and protected.
 The validator binds append-only audit contents to the exact plan, including all
 current and retained entries, classification counts, newest-revision evidence,
 complete service/RUNNING/PENDING observations, and broker mappings. Missing,
-extra, stale, or unrecorded evidence is rejected.
+extra, stale, or unrecorded evidence is rejected. Broker evidence must contain
+the complete exact mode set once each, with each mode mapped to its expected
+family; swapped, duplicated, missing, or unrelated mappings are rejected, and
+every retained live broker mapping must have matching atomic rollover evidence.
 
 This model does not authorize ECS service updates, task execution, database
 actions, broker invocation, ALB, DNS, or traffic changes. Old inactive revision
