@@ -402,7 +402,10 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
       const identity = taskDefinitionArnPattern.exec(item[arnKey]);
       if (!identity || seen.has(observationKey)) throw new Error(`Stage B append-only reference audit ${name} observation is malformed or duplicated.`);
       seen.add(observationKey);
-      if (!allowedArnsByFamily.get(identity[1])?.has(identity[0])) throw new Error(`Stage B append-only reference audit ${name} contains an unrecorded task-definition ARN.`);
+      const stageBScopedFamily = identity[1].startsWith("mscqr-production-");
+      if (stageBScopedFamily && !allowedArnsByFamily.get(identity[1])?.has(identity[0])) {
+        throw new Error(`Stage B append-only reference audit ${name} contains an unrecorded task-definition ARN.`);
+      }
     }
   };
   checkReferences(referenceAudit.services, "taskDefinition", "service");

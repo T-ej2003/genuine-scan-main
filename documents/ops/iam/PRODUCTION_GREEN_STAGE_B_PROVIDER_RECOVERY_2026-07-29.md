@@ -143,7 +143,10 @@ broker mapping must target that exact current resource address. Every broker
 mode must appear exactly once in the audit mapping and must resolve to its
 expected task-definition family; missing, duplicated, swapped, or unrelated
 mode mappings fail closed, as does retained live mapping without its matching
-atomic rollover evidence.
+atomic rollover evidence. Cluster-wide service and task observations may also
+contain unrelated workloads; those valid non-Stage-B families are recorded and
+left out of Stage B reference decisions, while an unknown `mscqr-production-*`
+family remains a fail-closed error.
 
 After this corrective PR is merged, update the live provider managed policy from
 v4 and verify the complete attachment set before any Terraform retry. Do not

@@ -1033,6 +1033,21 @@ test("append-only audit requires atomic evidence for every retained broker mappi
   assert.throws(() => validateBrokerPlan(fixture, audit), /lacks atomic rollover evidence/);
 });
 
+test("unrelated cluster task-definition families remain recorded but out of Stage B scope", () => {
+  const unrelatedFamily = "mscqr-backend";
+  const fixture = makeAtomicBrokerFixture({ mutateReader: (reader) => {
+    reader.listServices = () => [serviceArnFor(0)];
+    reader.describeServices = () => ({ services: [serviceRecord(serviceArnFor(0), 0, newArnFor(unrelatedFamily))], failures: [] });
+    reader.listTasks = (status) => [taskArnFor(status, 0)];
+    reader.describeTasks = (arns) => ({ tasks: [taskRecord(arns[0], arns[0].includes("running") ? "RUNNING" : "PENDING", newArnFor(unrelatedFamily))], failures: [] });
+  } });
+  const audit = generate(fixture);
+  assert.equal(audit.services[0].taskDefinition, newArnFor(unrelatedFamily));
+  assert.equal(audit.runningTasks[0].taskDefinitionArn, newArnFor(unrelatedFamily));
+  assert.equal(audit.pendingTasks[0].taskDefinitionArn, newArnFor(unrelatedFamily));
+  assert.doesNotThrow(() => validateBrokerPlan(fixture, audit));
+});
+
 for (const [label, mutate, expected = /append-only reference audit/] of [
   ["missing current task-definition evidence", (audit) => { delete audit.currentTaskDefinitions; }],
   ["missing retained task-definition evidence", (audit) => { delete audit.retainedTaskDefinitions; }],
