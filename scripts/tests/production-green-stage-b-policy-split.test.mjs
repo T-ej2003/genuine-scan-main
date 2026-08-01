@@ -36,6 +36,7 @@ const controlSids = [
   "TagExactStageBLogs",
   "CreateExactStageBLogs",
   "SetExactStageBLogRetention",
+  "ListExactStageBLogTagsReadOnly",
   "TagExactReplayTable",
   "TagExactStageBTaskDefinitions",
 ];
@@ -61,6 +62,7 @@ const stageBLogGroups = [
 ];
 const arn = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:*`;
 const logArn = (name) => `arn:aws:logs:eu-west-2:368992683803:log-group:${name}:*`;
+const exactLogArn = (name) => `arn:aws:logs:eu-west-2:368992683803:log-group:${name}`;
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
 const mutationActions = new Set([
   "ecs:TagResource",
@@ -79,7 +81,7 @@ test("all policy artifacts parse and historical v2/v3 remain byte-stable", () =>
 
 test("v4 and the companion policy fit the AWS managed-policy document limit", () => {
   assert.equal(awsCharacterCount(policies.v3), 6651);
-  assert.equal(awsCharacterCount(policies.v4), 3962);
+  assert.equal(awsCharacterCount(policies.v4), 4493);
   assert.equal(awsCharacterCount(policies.audit), 1785);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.ok(awsCharacterCount(policies.audit) < 6144);
@@ -91,20 +93,23 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
     Statement: policies.v3.Statement.filter((statement) => statement.Action !== "ecs:DeregisterTaskDefinition"),
   };
   correctedV3.Statement.push(statementOf(policies.v4, "SetExactStageBLogRetention"));
+  correctedV3.Statement.push(statementOf(policies.v4, "ListExactStageBLogTagsReadOnly"));
   assert.deepEqual(canonical(correctedV3), canonical({
     Version: policies.v3.Version,
     Statement: [...policies.v4.Statement, ...policies.audit.Statement],
   }));
 });
 
-test("the split has exactly seven moved statements and five provider-control statements", () => {
+test("the split has exactly seven moved statements and six provider-control statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), movedSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...movedSids, ...controlSids]).size, 12);
+  assert.equal(new Set([...movedSids, ...controlSids]).size, 13);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
-  for (const sid of controlSids.filter((sid) => sid !== "SetExactStageBLogRetention")) assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
+  for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly"].includes(sid))) {
+    assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
+  }
 });
 
 test("DescribeTaskDefinition is isolated, wildcard-only, and read-only", () => {
@@ -160,6 +165,20 @@ test("cluster, broker, and exact twelve-family restrictions remain unchanged", (
   assert.equal(stageBTaskFamilies.length, 12);
 });
 
+test("ListTagsForResource is read-only and limited to the four exact Stage B log groups", () => {
+  const statement = statementOf(policies.v4, "ListExactStageBLogTagsReadOnly");
+  assert.deepEqual(statement, {
+    Sid: "ListExactStageBLogTagsReadOnly",
+    Effect: "Allow",
+    Action: "logs:ListTagsForResource",
+    Resource: stageBLogGroups.map(exactLogArn),
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
+  assert.equal(statement.Resource.some((resource) => resource.endsWith(":*")), false);
+  assert.equal(statement.Resource.includes(exactLogArn("/ecs/mscqr-production/unrelated")), false);
+  assert.equal(statementsForAction(policies.audit, "logs:ListTagsForResource").length, 0);
+});
+
 test("both policies carry no authority beyond the reviewed read and recovery actions", () => {
   const actions = [...policies.v4.Statement, ...policies.audit.Statement].flatMap(actionsOf);
   for (const forbidden of [
@@ -194,7 +213,7 @@ test("the runbook targets v4 and the companion policy for the separately authori
 });
 
 test("historical policy bytes remain unchanged while the active v4 correction is explicit", () => {
-  assert.equal(sha256(read(paths.v4)), "bd08ec2af7870030e76fad3119b98d6ea7bccd0e2c56674ea2605143bce9398f");
+  assert.equal(sha256(read(paths.v4)), "c9b878d11fbc762f8f605793dfb3962ae51797e7caf96bd13e62dfe6a3e28430");
   assert.equal(sha256(read(paths.audit)), "56b299c2f21973a3117e89e5147658406d3ba823efab2b5548ac1b0d9f93dde6");
 });
 
