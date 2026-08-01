@@ -96,7 +96,12 @@ export function assertStageBCurrentTaskDefinitionNoOp(change, plan, retainedArns
       throw new Error(`Stage B current task-definition no-op planned value drift: ${change.address}.${field}`);
     }
   }
-  return { address: change.address, family: expectedFamily, arn: identity[0] };
+  const plannedArn = after.arn || planned.values.arn || identity[0];
+  const plannedIdentity = currentTaskDefinitionArnPattern.exec(plannedArn || "");
+  if (!plannedIdentity || plannedIdentity[1] !== expectedFamily || plannedIdentity[0] !== identity[0]) {
+    throw new Error(`Stage B current task-definition no-op planned ARN is invalid: ${change.address}`);
+  }
+  return { address: change.address, family: expectedFamily, arn: identity[0], currentArn: plannedIdentity[0] };
 }
 
 function configuredResources(module, resources = []) {

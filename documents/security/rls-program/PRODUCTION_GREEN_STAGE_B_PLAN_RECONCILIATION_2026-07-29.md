@@ -106,10 +106,18 @@ the new current addresses.
 A retry after a partial append-only apply may safely contain a mixture of current
 `create` and current `no-op` actions. The current counts must always total twelve;
 no-op definitions must exactly match the intended release and must not use a
-retained ARN. Services, RUNNING tasks, and PENDING tasks may reference any
+retained ARN. If the broker update lags a partial task-definition registration,
+the no-op current family is included in the atomic broker proof: the live broker
+must reference an exact retained ARN and the plan must target the exact current
+task-definition address. Services, RUNNING tasks, and PENDING tasks may reference any
 explicitly retained full ARN for the exact family. The newest retained revision
 is sequencing evidence only, not the sole permitted live reference; older
 retained generations remain represented and protected.
+
+The validator binds append-only audit contents to the exact plan, including all
+current and retained entries, classification counts, newest-revision evidence,
+complete service/RUNNING/PENDING observations, and broker mappings. Missing,
+extra, stale, or unrecorded evidence is rejected.
 
 This model does not authorize ECS service updates, task execution, database
 actions, broker invocation, ALB, DNS, or traffic changes. Old inactive revision

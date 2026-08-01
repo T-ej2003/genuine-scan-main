@@ -129,7 +129,7 @@ function planTaskDefinitions(plan) {
       if (!before.arn) throw new Error(`Terraform plan no-op task definition is missing its prior ARN: ${address}`);
       const prior = familyFromArn(before.arn, `${address} no-op task definition`);
       if (before.family !== family || prior.family !== family) throw new Error(`Terraform plan no-op task-definition family mismatch: ${address}`);
-      noOpByAddress.set(address, { address, family, priorArn: before.arn, proposedFamily: after.family, change });
+      noOpByAddress.set(address, { address, family, priorArn: before.arn, currentArn: after.arn || before.arn, proposedFamily: after.family, change });
       continue;
     }
     if (actions.includes("delete")) {
@@ -139,7 +139,7 @@ function planTaskDefinitions(plan) {
       if (!oldArn) throw new Error(`Terraform plan rollover is missing its prior task-definition ARN: ${address}`);
       const old = familyFromArn(oldArn, `${address} old task definition`);
       if (old.family !== family) throw new Error(`Terraform plan old task-definition family mismatch: ${address}`);
-      rolloverByAddress.set(address, { address, family, oldArn, replacePaths: change.change.replace_paths, proposedFamily: after.family });
+      rolloverByAddress.set(address, { address, family, oldArn, replacePaths: change.change.replace_paths, proposedFamily: after.family, classification: "rollover" });
       continue;
     }
     throw new Error(`Terraform plan task-definition change must be create-only or rollover: ${address}`);
@@ -165,6 +165,7 @@ function planTaskDefinitions(plan) {
     if (rolloverByAddress.size === 0) {
       const validated = assertStageBCurrentTaskDefinitionNoOp(entry.change, plan, retainedArnSet);
       entry.priorArn = validated.arn;
+      entry.currentArn = validated.currentArn;
     }
   }
   const newestRetainedByFamily = new Map();
@@ -278,8 +279,13 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
   for (const [address, entry] of [...createOnlyFamilies].flatMap((family) => {
     const current = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).find(([, candidateFamily]) => candidateFamily === family)?.[0];
     const newest = newestRetainedByFamily.get(family);
-    return current && newest ? [[current, { address: current, family, oldArn: newest.oldArn, proposedFamily: family }]] : [];
+    return current && newest ? [[current, { address: current, family, oldArn: newest.oldArn, proposedFamily: family, classification: "currentCreate" }]] : [];
   })) atomicByAddress.set(address, entry);
+  for (const [family, currentArns] of currentNoOpByFamily) {
+    const address = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).find(([, candidateFamily]) => candidateFamily === family)?.[0];
+    const currentArn = [...currentArns][0];
+    if (address && currentArn) atomicByAddress.set(address, { address, family, oldArn: currentArn, proposedFamily: family, classification: "currentNoOp" });
+  }
   const rolloverByFamily = new Map([...atomicByAddress.values()].map((entry) => [entry.family, entry]));
   const plannedAtomicBrokerRollovers = [];
   for (const [arn, mode] of brokerReferences) {
@@ -335,6 +341,9 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
       brokerPackagePath: brokerProof?.packagePath,
       planJsonSha256: planSha256,
       taskDefinitionModes: expectedModes,
+      liveTaskDefinitionMappings: [...brokerReferences.entries()]
+        .map(([taskDefinitionArn, mode]) => ({ mode, taskDefinitionArn }))
+        .sort((left, right) => left.mode.localeCompare(right.mode)),
     },
     referencesByFamily: brokerReferencesByFamily,
     referencesByArn: brokerReferences,
@@ -482,7 +491,7 @@ export function generateReferenceAudit({
   const noOpFamilies = new Set([...noOpByAddress.values()].map((entry) => entry.family));
   const retainedArnSetByFamily = new Map([...retainedByFamily].map(([family, entries]) => [family, new Set(entries.map((entry) => entry.oldArn))]));
   const currentNoOpByFamily = new Map();
-  for (const entry of noOpByAddress.values()) currentNoOpByFamily.set(entry.family, new Set([...(currentNoOpByFamily.get(entry.family) || []), entry.priorArn]));
+  for (const entry of noOpByAddress.values()) currentNoOpByFamily.set(entry.family, new Set([...(currentNoOpByFamily.get(entry.family) || []), entry.currentArn]));
   const currentArnSetByFamily = new Map();
   for (const entry of createOnlyByAddress.values()) {
     if (entry.proposedArn) {
@@ -490,6 +499,11 @@ export function generateReferenceAudit({
       if (identity.family !== entry.family) throw new Error(`Planned current task-definition ARN family mismatch: ${entry.address}`);
       currentArnSetByFamily.set(entry.family, new Set([...(currentArnSetByFamily.get(entry.family) || []), identity.arn]));
     }
+  }
+  for (const entry of noOpByAddress.values()) {
+    const identity = familyFromArn(entry.currentArn, `${entry.address} planned current task definition`);
+    if (identity.family !== entry.family) throw new Error(`Planned current task-definition ARN family mismatch: ${entry.address}`);
+    currentArnSetByFamily.set(entry.family, new Set([...(currentArnSetByFamily.get(entry.family) || []), identity.arn]));
   }
   const allowedLiveArnsByFamily = new Map();
   for (const family of STAGE_B_TASK_DEFINITION_FAMILY_NAMES) {

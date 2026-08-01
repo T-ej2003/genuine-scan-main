@@ -10,6 +10,7 @@ import {
   assertStageBReferenceAuditFreshness,
   assertStageBCurrentTaskDefinitionNoOp,
   STAGE_B_TASK_DEFINITION_FAMILIES,
+  STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
 } from "./aws/stage-b-reference-audit-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
@@ -126,6 +127,7 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
     if (descriptor?.invalid) throw new Error(`Stage B retained task-definition address must be revision-keyed: ${change.address}`);
     if (descriptor) {
       const retained = assertRetainedTaskDefinition(change);
+      retained.address = change.address;
       retained.historyKey = descriptor.historyKey;
       retained.generationKey = descriptor.generationKey;
       if (retainedArns.has(retained.arn)) throw new Error(`Stage B retained task-definition ARN is duplicated: ${retained.arn}`);
@@ -148,11 +150,13 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
   if (current.length !== expectedCurrent.size || actualCurrent.size !== expectedCurrent.size || [...expectedCurrent].some((address) => !actualCurrent.has(address))) {
     throw new Error("Stage B append-only plan must contain exactly the twelve current task-definition addresses.");
   }
+  const currentArnByAddress = new Map();
   for (const change of current) {
     assertTaskDefinitionScope(change);
     if (exactActions(change.change?.actions || [], ["create"])) continue;
     if (exactActions(change.change?.actions || [], ["no-op"])) {
-      assertStageBCurrentTaskDefinitionNoOp(change, plan, retainedArns);
+      const validated = assertStageBCurrentTaskDefinitionNoOp(change, plan, retainedArns);
+      currentArnByAddress.set(change.address, validated.arn);
       continue;
     }
     throw new Error(`Stage B append-only current task-definition must be create-only or no-op: ${change.address}`);
@@ -179,7 +183,23 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
   assertTaskDefinitionAppendOnlyContract(terraformConfiguration);
   const currentCreates = current.filter((change) => exactActions(change.change?.actions || [], ["create"])).length;
   const currentNoOps = current.filter((change) => exactActions(change.change?.actions || [], ["no-op"])).length;
-  return { currentCreates, currentNoOps, total: currentCreates + currentNoOps };
+  const classification = {
+    currentCreates,
+    currentNoOps,
+    total: currentCreates + currentNoOps,
+  };
+  const currentEntries = current.map((change) => ({
+      address: change.address,
+      family: taskDefinitionFamilies.get(change.address),
+      classification: exactActions(change.change?.actions || [], ["create"]) ? "create-only" : "no-op",
+      priorTaskDefinitionArn: exactActions(change.change?.actions || [], ["no-op"]) ? currentArnByAddress.get(change.address) : null,
+    }));
+  const retainedEntries = [...retainedByFamily.values()].flat().map((entry) => ({ address: entry.address, historyKey: entry.historyKey, family: entry.family, oldTaskDefinitionArn: entry.arn, revision: entry.revision, classification: "retained-no-op" }));
+  Object.defineProperties(classification, {
+    currentEntries: { value: currentEntries, enumerable: false },
+    retainedEntries: { value: retainedEntries, enumerable: false },
+  });
+  return classification;
 }
 
 export function assertStageBTaskDefinitionStateMigrationPreconditions(stateAddresses, moves) {
@@ -283,6 +303,123 @@ function assertInitialBrokerCreatePlan(plan, terraformConfiguration) {
   assertStageBBrokerCreatePlan(plan, proof, terraformConfiguration);
 }
 
+function assertExactAuditEntries(actual, expected, label, project) {
+  if (!Array.isArray(actual)) throw new Error(`Stage B append-only reference audit ${label} is missing or malformed.`);
+  const actualKeys = actual.map(project);
+  if (new Set(actualKeys).size !== actualKeys.length) throw new Error(`Stage B append-only reference audit ${label} contains duplicates.`);
+  const expectedKeys = expected.map(project);
+  if (actualKeys.length !== expectedKeys.length || actualKeys.some((key) => !expectedKeys.includes(key))) {
+    throw new Error(`Stage B append-only reference audit ${label} does not match the exact plan.`);
+  }
+}
+
+function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAudit, options = {}) {
+  const { referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now = new Date() } = options;
+  if (!referenceAudit || !referenceAuditBytes || !referenceAuditSha256 || !planJsonBytes || !planJsonSha256) {
+    throw new Error("Stage B append-only plan requires an explicit plan-bound reference audit.");
+  }
+  if (sha256(referenceAuditBytes) !== referenceAuditSha256) throw new Error("Stage B append-only reference audit SHA-256 mismatch.");
+  if (sha256(planJsonBytes) !== planJsonSha256) throw new Error("Stage B append-only plan JSON SHA-256 mismatch.");
+  assertStageBReferenceAuditFreshness(referenceAudit.auditedAt, now);
+  if (referenceAudit.planJsonSha256 !== planJsonSha256) throw new Error("Stage B append-only reference audit is bound to a different plan JSON.");
+
+  const current = classification.currentEntries;
+  const retained = classification.retainedEntries;
+  if (!Array.isArray(current) || current.length !== Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length) throw new Error("Stage B append-only plan classification is incomplete.");
+  if (!referenceAudit.currentTaskDefinitions || typeof referenceAudit.currentTaskDefinitions !== "object") throw new Error("Stage B append-only reference audit currentTaskDefinitions evidence is missing.");
+  if (referenceAudit.currentTaskDefinitions.currentCreates !== classification.currentCreates
+    || referenceAudit.currentTaskDefinitions.currentNoOps !== classification.currentNoOps
+    || referenceAudit.currentTaskDefinitions.total !== classification.total) {
+    throw new Error("Stage B append-only reference audit current classification counts do not match the plan.");
+  }
+  const currentExpected = current.map((entry) => ({
+    terraformAddress: entry.address,
+    family: entry.family,
+    proposedFamily: entry.family,
+    classification: entry.classification,
+    priorTaskDefinitionArn: entry.priorTaskDefinitionArn,
+  }));
+  const currentActual = [
+    ...(referenceAudit.createOnlyTaskDefinitions || []),
+    ...(referenceAudit.noOpTaskDefinitions || []),
+  ];
+  assertExactAuditEntries(currentActual, currentExpected, "current task definitions", (entry) => `${entry?.terraformAddress}|${entry?.family}|${entry?.classification}|${entry?.priorTaskDefinitionArn ?? ""}`);
+  for (const expected of currentExpected) {
+    const actual = currentActual.find((entry) => entry?.terraformAddress === expected.terraformAddress);
+    if (!actual || actual.family !== expected.family || actual.proposedFamily !== expected.proposedFamily || actual.classification !== expected.classification || (actual.priorTaskDefinitionArn ?? null) !== expected.priorTaskDefinitionArn) {
+      throw new Error(`Stage B append-only reference audit current task definition does not match the plan: ${expected.terraformAddress}`);
+    }
+  }
+
+  const retainedActual = referenceAudit.retainedTaskDefinitions;
+  assertExactAuditEntries(retainedActual, retained, "retained task definitions", (entry) => `${entry?.terraformAddress ?? entry?.address}|${entry?.family}|${entry?.oldTaskDefinitionArn}|${entry?.classification}`);
+  for (const expected of retained) {
+    const actual = retainedActual.find((entry) => entry?.terraformAddress === expected.address);
+    const arn = actual?.oldTaskDefinitionArn || "";
+    const identity = taskDefinitionArnPattern.exec(arn);
+    const historyKey = /\["([^"]+)"\]$/.exec(expected.address)?.[1];
+    if (!actual || actual.family !== expected.family || actual.classification !== "retained-no-op" || arn !== expected.oldTaskDefinitionArn || !identity || identity[1] !== expected.family || Number(identity[2]) !== expected.revision || historyKey !== expected.historyKey) {
+      throw new Error(`Stage B append-only reference audit retained task definition does not match the plan: ${expected.address}`);
+    }
+  }
+  const retainedByFamily = new Map();
+  for (const entry of retained) retainedByFamily.set(entry.family, [...(retainedByFamily.get(entry.family) || []), entry]);
+  const newestExpected = [...retainedByFamily.values()].map((entries) => [...entries].sort((left, right) => right.revision - left.revision)[0]);
+  assertExactAuditEntries(referenceAudit.newestRetainedTaskDefinitions, newestExpected, "newest retained task definitions", (entry) => `${entry?.terraformAddress ?? entry?.address}|${entry?.family}|${entry?.oldTaskDefinitionArn}`);
+  for (const [family, entries] of retainedByFamily) {
+    const newest = [...entries].sort((left, right) => right.revision - left.revision)[0];
+    const actual = referenceAudit.newestRetainedTaskDefinitions.find((entry) => entry?.family === family);
+    if (!actual || actual.terraformAddress !== newest.address || actual.oldTaskDefinitionArn !== newest.oldTaskDefinitionArn) throw new Error(`Stage B append-only reference audit newest retained revision does not match the plan: ${family}`);
+  }
+
+  const currentArnsByFamily = new Map();
+  for (const change of (plan.resource_changes || []).filter((item) => item.type === "aws_ecs_task_definition")) {
+    const entry = current.find((item) => item.address === change.address);
+    if (!entry) continue;
+    const arn = entry.classification === "no-op" ? entry.priorTaskDefinitionArn : change.change?.after?.arn;
+    if (arn) {
+      const identity = taskDefinitionArnPattern.exec(arn);
+      if (!identity || identity[1] !== entry.family) throw new Error(`Stage B append-only current task-definition ARN is malformed: ${entry.address}`);
+      currentArnsByFamily.set(entry.family, new Set([...(currentArnsByFamily.get(entry.family) || []), identity[0]]));
+    }
+  }
+  const retainedArnsByFamily = new Map();
+  for (const entry of retained) retainedArnsByFamily.set(entry.family, new Set([...(retainedArnsByFamily.get(entry.family) || []), entry.oldTaskDefinitionArn]));
+  const allowedArnsByFamily = new Map(STAGE_B_TASK_DEFINITION_FAMILY_NAMES.map((family) => [family, new Set([...(currentArnsByFamily.get(family) || []), ...(retainedArnsByFamily.get(family) || [])])]));
+  if (!Array.isArray(referenceAudit.services) || !Array.isArray(referenceAudit.runningTasks) || !Array.isArray(referenceAudit.pendingTasks)) throw new Error("Stage B append-only reference audit service/task evidence is missing.");
+  const checkReferences = (items, arnKey, name) => {
+    const seen = new Set();
+    for (const item of items) {
+      const observationKey = name === "service" ? item?.serviceName : item?.taskArn;
+      if (!item || typeof item !== "object" || typeof item[arnKey] !== "string" || typeof observationKey !== "string") throw new Error(`Stage B append-only reference audit ${name} observation is malformed.`);
+      const identity = taskDefinitionArnPattern.exec(item[arnKey]);
+      if (!identity || seen.has(observationKey)) throw new Error(`Stage B append-only reference audit ${name} observation is malformed or duplicated.`);
+      seen.add(observationKey);
+      if (!allowedArnsByFamily.get(identity[1])?.has(identity[0])) throw new Error(`Stage B append-only reference audit ${name} contains an unrecorded task-definition ARN.`);
+    }
+  };
+  checkReferences(referenceAudit.services, "taskDefinition", "service");
+  checkReferences(referenceAudit.runningTasks, "taskDefinitionArn", "RUNNING task");
+  checkReferences(referenceAudit.pendingTasks, "taskDefinitionArn", "PENDING task");
+
+  const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
+  if (brokerChange && exactActions(brokerChange.change?.actions || [], ["update"])) {
+    const broker = referenceAudit.broker;
+    if (!broker || !Array.isArray(broker.liveTaskDefinitionMappings)) throw new Error("Stage B append-only reference audit broker mapping evidence is missing.");
+    if (new Set(broker.liveTaskDefinitionMappings.map((entry) => entry?.mode)).size !== broker.liveTaskDefinitionMappings.length) throw new Error("Stage B append-only reference audit broker mappings contain duplicates.");
+    for (const mapping of broker.liveTaskDefinitionMappings) {
+      const identity = taskDefinitionArnPattern.exec(mapping?.taskDefinitionArn || "");
+      if (!identity || !STAGE_B_TASK_DEFINITION_FAMILY_NAMES.includes(identity[1]) || !allowedArnsByFamily.get(identity[1])?.has(identity[0])) throw new Error("Stage B append-only reference audit broker mapping is outside the exact current/retained ARN sets.");
+    }
+    if (!Array.isArray(referenceAudit.plannedAtomicBrokerRollovers)) throw new Error("Stage B append-only reference audit broker rollover evidence is missing.");
+    for (const rollover of referenceAudit.plannedAtomicBrokerRollovers) {
+      const currentEntry = current.find((entry) => entry.address === rollover?.taskDefinitionTerraformAddress);
+      if (!currentEntry || !["create-only", "no-op"].includes(currentEntry.classification)) throw new Error("Stage B append-only reference audit broker rollover classification is not bound to the current plan.");
+      if (!retainedArnsByFamily.get(currentEntry.family)?.has(rollover.oldTaskDefinitionArn) || rollover.taskDefinitionArnReference !== `${currentEntry.address}.arn` || rollover.planJsonSha256 !== planJsonSha256) throw new Error("Stage B append-only reference audit broker rollover is not bound to exact retained/current plan addresses.");
+    }
+  }
+}
+
 export function assertStageBPlan(plan, options = {}) {
   const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now = new Date(), terraformConfiguration } = options;
   const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
@@ -297,6 +434,10 @@ export function assertStageBPlan(plan, options = {}) {
   const taskDefinitionClassification = taskDefinitionChanges.length
     ? assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration)
     : null;
+  const brokerActions = brokerChange?.change?.actions || [];
+  if (taskDefinitionClassification && (referenceAudit || exactActions(brokerActions, ["update"]))) {
+    assertAppendOnlyReferenceAuditBinding(plan, taskDefinitionClassification, referenceAudit, { referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now });
+  }
   for (const change of plan.resource_changes || []) {
     const actions = change.change.actions || [];
     if (forbidden.test(change.type) || !allowed.has(change.type)) throw new Error(`Stage B plan rejected: ${change.address}`);

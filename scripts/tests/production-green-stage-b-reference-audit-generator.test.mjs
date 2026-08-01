@@ -270,6 +270,42 @@ function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", package
   });
 }
 
+function makeBrokerLagRetryFixture(mode = "full-rls-admin-bootstrap") {
+  const address = taskDefinitionAddressForMode(mode);
+  const fixture = makeAtomicBrokerFixture({ mode, brokerActions: ["update"] });
+  const change = fixture.plan.resource_changes.find((item) => item.address === address);
+  const family = STAGE_B_TASK_DEFINITION_FAMILIES[address];
+  const key = /\["([^"]+)"\]$/.exec(address)?.[1] || mode;
+  const definitions = JSON.stringify([{ image: fixture.plan.variables[address.startsWith(executorCollectionAddress) ? "executor_image" : `${key}_image`].value, environment: [
+    { name: "RELEASE_GIT_SHA", value: releaseSha },
+    { name: "SOURCE_CONTRACT_SHA256", value: sourceContractSha256 },
+    { name: "MIGRATION_SET_DIGEST", value: migrationSetDigest },
+    { name: "PACKAGE_CHECKSUM_SHA256", value: packageChecksum },
+  ] }]);
+  const immutable = {
+    family,
+    network_mode: "awsvpc",
+    requires_compatibilities: ["FARGATE"],
+    cpu: "1024",
+    memory: "2048",
+    execution_role_arn: `arn:aws:iam::368992683803:role/${key}-execution`,
+    task_role_arn: `arn:aws:iam::368992683803:role/${key}-task`,
+    runtime_platform: { operating_system_family: "LINUX", cpu_architecture: "X86_64" },
+    volumes: [],
+    tags: { Environment: "production", ManagedBy: "Terraform", Component: "full-rls-green-stage-b" },
+    container_definitions: definitions,
+    arn: newArnFor(family),
+  };
+  change.change.actions = ["no-op"];
+  change.change.before = { ...immutable };
+  change.change.after = { ...immutable };
+  const planned = fixture.plan.planned_values.root_module.resources.find((item) => item.address === address);
+  planned.values = { ...immutable };
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
 function makeInitialBrokerCreateFixture({ mutatePlan } = {}) {
   return makeAtomicBrokerFixture({
     brokerActions: ["create"],
@@ -975,6 +1011,29 @@ test("complete broker update audit evidence passes", () => {
   validateBrokerPlan(fixture, generate(fixture));
 });
 
+for (const [label, mutate, expected = /append-only reference audit/] of [
+  ["missing current task-definition evidence", (audit) => { delete audit.currentTaskDefinitions; }],
+  ["missing retained task-definition evidence", (audit) => { delete audit.retainedTaskDefinitions; }],
+  ["missing service evidence", (audit) => { delete audit.services; }],
+  ["missing RUNNING-task evidence", (audit) => { delete audit.runningTasks; }],
+  ["missing PENDING-task evidence", (audit) => { delete audit.pendingTasks; }],
+  ["extra current task-definition entry", (audit) => { audit.createOnlyTaskDefinitions.push({ ...audit.createOnlyTaskDefinitions[0], terraformAddress: "aws_ecs_task_definition.candidate[\"unknown\"]" }); }],
+  ["missing retained generation", (audit) => { audit.retainedTaskDefinitions.pop(); }],
+  ["stale retained ARN", (audit) => { audit.retainedTaskDefinitions[0].oldTaskDefinitionArn = oldArnFor("mscqr-production-unknown"); }],
+  ["classification count mismatch", (audit) => { audit.currentTaskDefinitions.currentCreates += 1; }],
+  ["service reference outside the current/retained sets", (audit) => { audit.services.push({ serviceName: "unexpected", taskDefinition: newArnFor("mscqr-production-unknown") }); }],
+  ["RUNNING task reference outside the current/retained sets", (audit) => { audit.runningTasks.push({ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/unknown/running", taskDefinitionArn: newArnFor("mscqr-production-unknown"), lastStatus: "RUNNING", desiredStatus: "RUNNING", group: "service:unknown" }); }],
+  ["PENDING task reference outside the current/retained sets", (audit) => { audit.pendingTasks.push({ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/unknown/pending", taskDefinitionArn: newArnFor("mscqr-production-unknown"), lastStatus: "PENDING", desiredStatus: "PENDING", group: "service:unknown" }); }],
+  ["broker evidence without live mappings", (audit) => { delete audit.broker.liveTaskDefinitionMappings; }],
+]) {
+  test(`append-only audit binding rejects ${label}`, () => {
+    const fixture = makeAtomicBrokerFixture();
+    const audit = generate(fixture);
+    mutate(audit);
+    assert.throws(() => validateBrokerPlan(fixture, audit), expected);
+  });
+}
+
 test("initial broker create passes with plan-only package proof", () => {
   const fixture = makeInitialBrokerCreateFixture();
   assert.doesNotThrow(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }));
@@ -1027,6 +1086,58 @@ test("unsupported broker delete and replacement actions fail closed", () => {
   }
   const malformed = makeAtomicBrokerFixture({ brokerActions: [] });
   assert.throws(() => assertStageBPlan(malformed.plan, { terraformConfiguration: malformed.options.terraformConfiguration }), /missing or malformed/);
+});
+
+test("broker-lag retry includes current no-op in atomic rollover evidence", () => {
+  const fixture = makeBrokerLagRetryFixture();
+  const audit = generate(fixture);
+  assert.equal(audit.noOpTaskDefinitions.some((entry) => entry.terraformAddress === executorAddressForMode("full-rls-admin-bootstrap")), true);
+  assert.equal(audit.plannedAtomicBrokerRollovers.some((entry) => entry.taskDefinitionTerraformAddress === executorAddressForMode("full-rls-admin-bootstrap")), true);
+  validateBrokerPlan(fixture, audit);
+});
+
+test("broker-lag retry rejects a stale current no-op image", () => {
+  const fixture = makeBrokerLagRetryFixture();
+  const change = fixture.plan.resource_changes.find((item) => item.address === executorAddressForMode("full-rls-admin-bootstrap"));
+  const staleDefinitions = JSON.stringify([{ image: imageFor("mscqr-worker"), environment: [
+    { name: "RELEASE_GIT_SHA", value: releaseSha },
+    { name: "SOURCE_CONTRACT_SHA256", value: sourceContractSha256 },
+    { name: "MIGRATION_SET_DIGEST", value: migrationSetDigest },
+    { name: "PACKAGE_CHECKSUM_SHA256", value: packageChecksum },
+  ] }]);
+  change.change.before.container_definitions = staleDefinitions;
+  change.change.after.container_definitions = staleDefinitions;
+  fixture.plan.planned_values.root_module.resources.find((item) => item.address === change.address).values.container_definitions = staleDefinitions;
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  assert.throws(() => generate(fixture), /image digest is stale/);
+});
+
+test("broker-lag retry rejects a current no-op ARN in retained history", () => {
+  const fixture = makeBrokerLagRetryFixture();
+  const change = fixture.plan.resource_changes.find((item) => item.address === executorAddressForMode("full-rls-admin-bootstrap"));
+  const retainedArn = oldArnFor(familyForMode("full-rls-admin-bootstrap"));
+  change.change.before.arn = retainedArn;
+  change.change.after.arn = retainedArn;
+  const planned = fixture.plan.planned_values.root_module.resources.find((item) => item.address === change.address);
+  planned.values.arn = retainedArn;
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  assert.throws(() => generate(fixture), /uses a retained ARN/);
+});
+
+test("broker-lag retry rejects a live broker ARN outside retained history", () => {
+  const fixture = makeBrokerLagRetryFixture();
+  const original = fixture.reader.getFunctionConfiguration;
+  fixture.reader.getFunctionConfiguration = () => {
+    const config = original();
+    const variables = config.Environment.Variables;
+    const mappings = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
+    mappings["full-rls-admin-bootstrap"] = `${newArnFor(familyForMode("full-rls-admin-bootstrap")).slice(0, -1)}99`;
+    variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(mappings);
+    return config;
+  };
+  assert.throws(() => generate(fixture), /superseded|not an explicitly retained or current no-op revision/);
 });
 
 test("broker ZIP checksum and source_code_hash are independently validated", () => {

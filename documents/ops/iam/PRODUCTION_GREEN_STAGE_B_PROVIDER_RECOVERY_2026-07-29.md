@@ -135,7 +135,11 @@ current addresses is either `create` or an exact-release `no-op`, and those two
 counts must sum to twelve. A current no-op must match the intended image,
 release/provenance metadata, package/runtime inputs, immutable task settings,
 tags, and current broker mapping; retained history remains no-op only. The
-audit records `currentCreates` and `currentNoOps` separately.
+audit records `currentCreates` and `currentNoOps` separately. If the broker
+update failed after a current definition was registered, the retry audit also
+records that current no-op in the atomic broker rollover evidence: the live
+broker ARN must be an exact member of the retained ARN set and the planned
+broker mapping must target that exact current resource address.
 
 After this corrective PR is merged, update the live provider managed policy from
 v4 and verify the complete attachment set before any Terraform retry. Do not
@@ -363,7 +367,11 @@ the exact full ARN of any explicitly retained revision for that family, not
 just the newest revision or a same-family revision. The newest numeric ECS
 revision is sequencing evidence only, while all retained generations remain
 evidence. The audit also proves that the broker transition targets the new
-current ARN.
+current ARN. For append-only plans, the validator additionally compares the
+exact current and retained task-definition entries, classification counts,
+newest revision evidence, complete service/RUNNING/PENDING observations, and
+broker mapping evidence against that same plan; missing, extra, stale, or
+unrecorded entries invalidate the audit.
 Any superseded legacy rollover, unknown family, or unrelated reference remains
 fail-closed. The validator must accept the matching audit and both explicit
 hashes before any apply; otherwise apply remains forbidden.
