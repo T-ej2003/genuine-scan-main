@@ -122,9 +122,11 @@ move the eleven current state addresses to those destinations. The exact
 are not run by this PR or automatically. The read-only-canary family has no
 prior state entry and is not moved. After that migration the expected
 task-definition shape is twelve current `create` actions, eleven retained
-`no-op` actions, and zero task-definition deletes or replacements. A later
-release adds a second generation and repeats the same rotation without touching
-the first generation.
+`no-op` actions, and zero task-definition deletes or replacements. Every later
+release adds a unique generation and moves all twelve current addresses,
+including read-only-canary, without touching older generations. Retained
+revision selection is based on the highest numeric ECS revision per family, not
+Terraform map, generation-key, or resource ordering.
 The validator rejects every task-definition delete, destroy, or delete/create
 replacement.
 

@@ -43,9 +43,9 @@ const readOnlyCanaryAddress = 'aws_ecs_task_definition.candidate["read_only_cana
 const executorCollectionAddress = "aws_ecs_task_definition.executor";
 const readOnlyCanaryFamily = STAGE_B_TASK_DEFINITION_FAMILIES[readOnlyCanaryAddress];
 const historyGeneration = "aaaaaaaa";
-const retainedAddressFor = (address) => {
+const retainedAddressFor = (address, generation = historyGeneration) => {
   const match = /^(aws_ecs_task_definition\.(candidate|executor))\["([^"]+)"\]$/.exec(address);
-  return `${match[1]}_retained["${historyGeneration}-${match[3]}"]`;
+  return `${match[1]}_retained["${generation}-${match[3]}"]`;
 };
 const executorAddressForMode = (mode) => `${executorCollectionAddress}["${mode}"]`;
 const taskDefinitionAddressForMode = (mode) => mode === "full-rls-application-canary" ? canaryAddress : executorAddressForMode(mode);
@@ -416,18 +416,91 @@ test("mixed rollover, create-only, and no-op plan classifications pass", () => {
 });
 
 test("revision-keyed retained history supports a second generation", () => {
-  const fixture = makeFixture({
+  const fixture = makeAtomicBrokerFixture({
     appendOnly: true,
     mutatePlan: (plan) => {
-      for (const address of [backendAddress, 'aws_ecs_task_definition.candidate["worker"]']) {
+      for (const address of Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES)) {
         const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(address));
-        plan.resource_changes.push({ ...structuredClone(retained), address: retained.address.replace("aaaaaaaa-", "bbbbbbbb-") });
+        const second = address === readOnlyCanaryAddress
+          ? { address: retainedAddressFor(address, "0000001"), type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family: readOnlyCanaryFamily, arn: oldArnFor(readOnlyCanaryFamily).replace(":1", ":2") }, after: { family: readOnlyCanaryFamily } } }
+          : { ...structuredClone(retained), address: retained.address.replace("aaaaaaaa-", "0000001-") };
+        if (address !== readOnlyCanaryAddress) second.change.before.arn = second.change.before.arn.replace(":1", ":2");
+        plan.resource_changes.push(second);
       }
+      plan.relevant_attributes.push({ resource: executorCollectionAddress, attribute: [] }, { resource: canaryAddress, attribute: ["arn"] });
+    },
+    mutateReader: (reader) => {
+      const original = reader.getFunctionConfiguration;
+      reader.getFunctionConfiguration = () => {
+        const config = original();
+        const variables = config.Environment.Variables;
+        const taskDefinitions = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
+        for (const mode of STAGE_B_MODES) taskDefinitions[mode] = newArnFor(familyForMode(mode));
+        variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+        return config;
+      };
     },
   });
   const audit = generate(fixture);
-  assert.equal(audit.retainedTaskDefinitions.length, 13);
-  assert.equal(new Set(audit.retainedTaskDefinitions.map((entry) => entry.terraformAddress)).size, 13);
+  assert.equal(audit.retainedTaskDefinitions.length, 23);
+  assert.equal(audit.newestRetainedTaskDefinitions.length, 12);
+  assert.equal(new Set(audit.retainedTaskDefinitions.map((entry) => entry.terraformAddress)).size, 23);
+});
+
+test("newest retained revision is selected numerically, independent of generation-key ordering", () => {
+  const fixture = makeAtomicBrokerFixture({
+    mutatePlan: (plan) => {
+      for (const address of Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES)) {
+        const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(address));
+        const second = address === readOnlyCanaryAddress
+          ? { address: retainedAddressFor(address, "0000001"), type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family: readOnlyCanaryFamily, arn: oldArnFor(readOnlyCanaryFamily).replace(":1", ":2") }, after: { family: readOnlyCanaryFamily } } }
+          : { ...structuredClone(retained), address: retained.address.replace("aaaaaaaa-", "0000001-"), change: { ...retained.change, before: { ...retained.change.before, arn: retained.change.before.arn.replace(":1", ":2") } } };
+        plan.resource_changes.push(second);
+      }
+      plan.relevant_attributes.push({ resource: executorCollectionAddress, attribute: [] }, { resource: canaryAddress, attribute: ["arn"] });
+    },
+    mutateReader: (reader) => {
+      const original = reader.getFunctionConfiguration;
+      reader.getFunctionConfiguration = () => {
+        const config = original();
+        const variables = config.Environment.Variables;
+        const taskDefinitions = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
+        taskDefinitions["full-rls-application-canary"] = newArnFor(familyForMode("full-rls-application-canary"));
+        variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+        return config;
+      };
+    },
+  });
+  const audit = generate(fixture);
+  const retained = audit.retainedTaskDefinitions.find((entry) => entry.family === familyForMode("full-rls-application-canary") && entry.oldTaskDefinitionArn.endsWith(":2"));
+  assert.equal(retained.brokerReferenceModes[0], "full-rls-application-canary");
+  assert.equal(retained.brokerReferenceStatus, "planned-atomic-broker-rollover-v1");
+});
+
+test("older numeric revisions cannot satisfy the current rollover contract", () => {
+  const fixture = makeAtomicBrokerFixture({
+    mutatePlan: (plan) => {
+      for (const address of Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES)) {
+        const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(address));
+        const second = address === readOnlyCanaryAddress
+          ? { address: retainedAddressFor(address, "ffffffff"), type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family: readOnlyCanaryFamily, arn: oldArnFor(readOnlyCanaryFamily).replace(":1", ":2") }, after: { family: readOnlyCanaryFamily } } }
+          : { ...structuredClone(retained), address: retained.address.replace("aaaaaaaa-", "ffffffff-"), change: { ...retained.change, before: { ...retained.change.before, arn: retained.change.before.arn.replace(":1", ":2") } } };
+        plan.resource_changes.push(second);
+      }
+    },
+    mutateReader: (reader) => {
+      const original = reader.getFunctionConfiguration;
+      reader.getFunctionConfiguration = () => {
+        const config = original();
+        const variables = config.Environment.Variables;
+        const taskDefinitions = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
+        taskDefinitions["full-rls-application-canary"] = oldArnFor(familyForMode("full-rls-application-canary"));
+        variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+        return config;
+      };
+    },
+  });
+  assert.throws(() => generate(fixture), /superseded task definition|does not match the rollover before ARN/);
 });
 
 test("static retained family addresses fail closed", () => {
@@ -436,6 +509,37 @@ test("static retained family addresses fail closed", () => {
     retained.address = 'aws_ecs_task_definition.candidate_retained["backend"]';
   } });
   assert.throws(() => generate(fixture), /must be revision-keyed/);
+});
+
+test("malformed retained ARN revisions fail closed", () => {
+  const fixture = makeFixture({ appendOnly: true, mutatePlan: (plan) => {
+    const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(backendAddress));
+    retained.change.before.arn = `${retained.change.before.arn.slice(0, -1)}x`;
+  } });
+  assert.throws(() => generate(fixture), /not a valid ECS task-definition ARN/);
+});
+
+test("duplicate retained family revisions fail closed", () => {
+  const fixture = makeFixture({ appendOnly: true, mutatePlan: (plan) => {
+    const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(backendAddress));
+    plan.resource_changes.push({ ...structuredClone(retained), address: retained.address.replace("aaaaaaaa-", "bbbbbbbb-") });
+  } });
+  assert.throws(() => generate(fixture), /duplicate retained task-definition ARN|duplicate retained family and revision/);
+});
+
+test("current rollover before ARN must equal the newest retained revision", () => {
+  const fixture = makeAtomicBrokerFixture({
+    appendOnly: false,
+    mutatePlan: (plan) => {
+      const backendFamily = STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress];
+      plan.resource_changes.push({
+        address: retainedAddressFor(backendAddress, "0000001"),
+        type: "aws_ecs_task_definition",
+        change: { actions: ["no-op"], before: { family: backendFamily, arn: oldArnFor(backendFamily).replace(":1", ":2") }, after: { family: backendFamily } },
+      });
+    },
+  });
+  assert.throws(() => generate(fixture), /newest retained revision/);
 });
 
 test("no-op with a valid prior ARN passes", () => {

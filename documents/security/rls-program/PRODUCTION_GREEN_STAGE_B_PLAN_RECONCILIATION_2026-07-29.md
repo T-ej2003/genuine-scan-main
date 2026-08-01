@@ -91,13 +91,17 @@ this PR, and no import, `state rm`, or `state mv` has been executed here. The
 read-only-canary has no prior state and remains the twelfth current create.
 After the first rollover, the plan contains twelve current creates and eleven
 retained no-ops. For the second rollover, add a second generation to the maps,
-move the current eleven state instances to that generation's unique retained
-addresses, and leave the first generation untouched. The plan then contains
-two retained no-op generations and twelve current creates. Duplicate generation
-keys, occupied destinations, missing sources, static family-only keys, and
-retained creates are rejected. The audit records retained revisions and still
-proves the exact twelve family allowlist, complete service/task reads, and
-plan-bound broker mapping to the new current addresses.
+move all twelve current state instances, including
+`candidate["read_only_canary"]`, to that generation's unique retained
+addresses, and leave the first generation untouched. Every later rollover
+therefore contains all twelve families in its newest retained generation and
+twelve current creates. Duplicate generation keys, occupied destinations,
+missing sources, static family-only keys, and retained creates are rejected.
+The audit keeps every retained generation, groups entries by family, and selects
+the newest retained entry by the highest numeric ECS revision, never by map,
+generation-key, or resource ordering. The audit still proves the exact twelve
+family allowlist, complete service/task reads, and plan-bound broker mapping to
+the new current addresses.
 
 This model does not authorize ECS service updates, task execution, database
 actions, broker invocation, ALB, DNS, or traffic changes. Old inactive revision

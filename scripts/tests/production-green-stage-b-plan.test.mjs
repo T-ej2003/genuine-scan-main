@@ -18,11 +18,13 @@ const rollover = () => {
   return value;
 };
 const retained = (historyKey = "aaaaaaaa-backend", taskFamily = family) => ({ address: `aws_ecs_task_definition.candidate_retained["${historyKey}"]`, type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family: taskFamily, arn: oldArn.replace(family, taskFamily) }, after: { family: taskFamily } } });
-const retainedForAddress = (address, generation = "aaaaaaaa") => {
+const retainedForAddress = (address, generation = "aaaaaaaa", revision = 1) => {
   const match = /^(aws_ecs_task_definition\.(candidate|executor))\["([^"]+)"\]$/.exec(address);
   const taskFamily = STAGE_B_TASK_DEFINITION_FAMILIES[address];
-  return { address: `${match[1]}_retained["${generation}-${match[3]}"]`, type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family: taskFamily, arn: oldArn.replace(family, taskFamily) }, after: { family: taskFamily } } };
+  return { address: `${match[1]}_retained["${generation}-${match[3]}"]`, type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family: taskFamily, arn: oldArn.replace(family, taskFamily).replace(":1", `:${revision}`) }, after: { family: taskFamily } } };
 };
+const currentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
+const firstRolloverAddresses = currentAddresses.filter((taskAddress) => !taskAddress.includes("read_only_canary"));
 const currentCreates = () => Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([taskAddress, taskFamily]) => ({
   address: taskAddress,
   type: "aws_ecs_task_definition",
@@ -30,7 +32,7 @@ const currentCreates = () => Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).ma
 }));
 const appendOnly = () => [
   ...currentCreates(),
-  retained(),
+  ...firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress)),
 ];
 const auditFor = (overrides = {}) => ({
   schemaVersion: 1,
@@ -70,10 +72,28 @@ test("fresh deployment has exactly twelve current creates and no retained create
 });
 
 test("first and second revision-keyed rollovers retain history as no-op", () => {
-  const first = { resource_changes: [...currentCreates(), ...Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).filter((address) => !address.includes("read_only_canary")).map((address) => retainedForAddress(address))] };
+  const first = { resource_changes: [...currentCreates(), ...firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress))] };
   assert.doesNotThrow(() => assertStageBPlan(first, { terraformConfiguration }));
-  const second = { resource_changes: [...first.resource_changes, retained("bbbbbbbb-backend"), retained("bbbbbbbb-worker", STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["worker"]'])] };
+  const secondGeneration = currentAddresses.map((taskAddress) => retainedForAddress(taskAddress, "bbbbbbbb", 2));
+  const second = { resource_changes: [...first.resource_changes, ...secondGeneration] };
   assert.doesNotThrow(() => assertStageBPlan(second, { terraformConfiguration }));
+  const thirdGeneration = currentAddresses.map((taskAddress) => retainedForAddress(taskAddress, "cccccccc", 3));
+  assert.doesNotThrow(() => assertStageBPlan({ resource_changes: [...second.resource_changes, ...thirdGeneration] }, { terraformConfiguration }));
+});
+
+test("a later rollover missing the newest read-only-canary history entry fails", () => {
+  const olderReadOnly = retainedForAddress('aws_ecs_task_definition.candidate["read_only_canary"]', "aaaaaaaa", 1);
+  const laterWithoutReadOnly = firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress, "bbbbbbbb", 2));
+  const plan = { resource_changes: [...currentCreates(), ...firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress)), olderReadOnly, ...laterWithoutReadOnly] };
+  assert.throws(() => assertStageBPlan(plan, { terraformConfiguration }), /later rollover|newest revision/);
+});
+
+test("read-only-canary replacement is rejected", () => {
+  const plan = { resource_changes: currentCreates() };
+  const readOnly = plan.resource_changes.find((change) => change.address.includes("read_only_canary"));
+  readOnly.change.actions = ["no-op"];
+  readOnly.change.before = { family: readOnly.change.after.family, arn: oldArn.replace(family, readOnly.change.after.family) };
+  assert.throws(() => assertStageBPlan(plan, { terraformConfiguration }), /create-only/);
 });
 
 test("static retained keys and duplicate retained generations fail closed", () => {
@@ -84,12 +104,15 @@ test("static retained keys and duplicate retained generations fail closed", () =
 });
 
 test("state migration requires present sources, absent destinations, and explicit addresses", () => {
-  const source = 'aws_ecs_task_definition.candidate["backend"]';
-  const destination = 'aws_ecs_task_definition.candidate_retained["aaaaaaaa-backend"]';
-  assert.doesNotThrow(() => assertStageBTaskDefinitionStateMigrationPreconditions([source], [{ source, destination }]));
-  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions([], [{ source, destination }]), /source is missing/);
-  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions([source, destination], [{ source, destination }]), /destination is occupied/);
-  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions([source], [{ source, destination: 'aws_ecs_task_definition.candidate_retained["backend"]' }]), /revision-keyed/);
+  const firstMoves = firstRolloverAddresses.map((source) => ({ source, destination: retainedForAddress(source) .address }));
+  assert.doesNotThrow(() => assertStageBTaskDefinitionStateMigrationPreconditions(firstRolloverAddresses, firstMoves));
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions(currentAddresses, firstMoves), /eleven existing/);
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions(firstRolloverAddresses.slice(1), firstMoves), /source is missing|eleven existing/);
+  const laterMoves = currentAddresses.map((source) => ({ source, destination: retainedForAddress(source, "bbbbbbbb").address }));
+  assert.doesNotThrow(() => assertStageBTaskDefinitionStateMigrationPreconditions(currentAddresses, laterMoves));
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions(firstRolloverAddresses, laterMoves), /twelve current/);
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions([...firstRolloverAddresses, firstMoves[0].destination], firstMoves), /destination is occupied/);
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions(firstRolloverAddresses, firstMoves.map((move, index) => index === 0 ? { ...move, destination: 'aws_ecs_task_definition.candidate_retained["backend"]' } : move)), /revision-keyed/);
 });
 
 test("Stage B plan wrapper permits only non-destructive control-plane resources", () =>

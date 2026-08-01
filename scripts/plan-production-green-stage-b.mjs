@@ -19,6 +19,7 @@ const exactActions = (actions, expected) => actions.length === expected.length &
 const exactReplacePaths = (paths) => Array.isArray(paths) && paths.length === 1 && Array.isArray(paths[0]) && paths[0].length === 1 && paths[0][0] === "container_definitions";
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const retainedAddressPattern = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([^"]+)"\]$/;
+const taskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):([1-9][0-9]*)$/;
 
 function assertTaskDefinitionScope(change) {
   const expectedFamily = taskDefinitionFamilies.get(change.address);
@@ -34,8 +35,9 @@ function retainedTaskDefinitionDescriptor(address) {
   if (!match) return undefined;
   for (const [currentAddress, family] of taskDefinitionFamilies) {
     const currentKey = /\["([^"]+)"\]$/.exec(currentAddress)?.[1];
-    if (currentAddress.startsWith(`aws_ecs_task_definition.${match[1]}[`) && new RegExp(`^[a-f0-9]{7,40}-${currentKey}$`).test(match[2])) {
-      return { family, historyKey: match[2], currentAddress };
+    const historyMatch = new RegExp(`^([a-f0-9]{7,40})-${currentKey}$`).exec(match[2]);
+    if (currentAddress.startsWith(`aws_ecs_task_definition.${match[1]}[`) && historyMatch) {
+      return { family, historyKey: match[2], generationKey: historyMatch[1], currentAddress };
     }
   }
   return { invalid: true, historyKey: match[2] };
@@ -65,7 +67,9 @@ function assertRetainedTaskDefinition(change) {
   if (!exactActions(actions || [], ["no-op"])) throw new Error(`Stage B retained task-definition must remain no-op: ${change.address}`);
   const before = change.change?.before || {};
   const after = change.change?.after || {};
-  if (before.family !== expectedFamily || after.family !== expectedFamily || typeof before.arn !== "string") throw new Error(`Stage B retained task-definition identity rejected: ${change.address}`);
+  const identity = taskDefinitionArnPattern.exec(before.arn || "");
+  if (before.family !== expectedFamily || after.family !== expectedFamily || !identity || identity[1] !== expectedFamily) throw new Error(`Stage B retained task-definition identity rejected: ${change.address}`);
+  return { family: expectedFamily, arn: before.arn, revision: Number(identity[2]) };
 }
 
 function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planBytes, planSha256, now, terraformConfiguration) {
@@ -113,16 +117,27 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
   const current = [];
   const retainedAddresses = new Set();
   const retainedGenerationFamilies = new Set();
+  const retainedByFamily = new Map();
+  const retainedArns = new Set();
+  const retainedFamilyRevisions = new Set();
   for (const change of changes) {
     const descriptor = retainedTaskDefinitionDescriptor(change.address);
     if (descriptor?.invalid) throw new Error(`Stage B retained task-definition address must be revision-keyed: ${change.address}`);
     if (descriptor) {
-      assertRetainedTaskDefinition(change);
+      const retained = assertRetainedTaskDefinition(change);
+      retained.historyKey = descriptor.historyKey;
+      retained.generationKey = descriptor.generationKey;
+      if (retainedArns.has(retained.arn)) throw new Error(`Stage B retained task-definition ARN is duplicated: ${retained.arn}`);
+      const familyRevision = `${retained.family}:${retained.revision}`;
+      if (retainedFamilyRevisions.has(familyRevision)) throw new Error(`Stage B retained task-definition family and revision are duplicated: ${familyRevision}`);
       if (retainedAddresses.has(change.address)) throw new Error(`Stage B retained task-definition address is duplicated: ${change.address}`);
       const generationFamily = `${descriptor.historyKey}|${descriptor.family}`;
       if (retainedGenerationFamilies.has(generationFamily)) throw new Error(`Stage B retained task-definition family is duplicated in one generation: ${descriptor.historyKey}`);
       retainedAddresses.add(change.address);
       retainedGenerationFamilies.add(generationFamily);
+      retainedArns.add(retained.arn);
+      retainedFamilyRevisions.add(familyRevision);
+      retainedByFamily.set(retained.family, [...(retainedByFamily.get(retained.family) || []), retained]);
     } else {
       current.push(change);
     }
@@ -136,12 +151,46 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
     assertTaskDefinitionScope(change);
     if (!exactActions(change.change?.actions || [], ["create"])) throw new Error(`Stage B append-only current task-definition must be create-only: ${change.address}`);
   }
+  if (retainedAddresses.size > 0) {
+    const newestFamilies = new Set();
+    const newestGenerationKeys = new Set();
+    for (const [family, entries] of retainedByFamily) {
+      const newest = [...entries].sort((left, right) => right.revision - left.revision)[0];
+      newestFamilies.add(family);
+      newestGenerationKeys.add(newest.generationKey);
+      if (entries.some((entry) => entry.revision === newest.revision && entry.arn !== newest.arn)) throw new Error(`Stage B retained task-definition newest revision is ambiguous: ${family}`);
+    }
+    const readOnlyCanaryFamily = taskDefinitionFamilies.get('aws_ecs_task_definition.candidate["read_only_canary"]');
+    const firstRolloverFamilies = new Set([...taskDefinitionFamilies.values()].filter((family) => family !== readOnlyCanaryFamily));
+    if (!newestFamilies.has(readOnlyCanaryFamily)) {
+      if (retainedAddresses.size !== firstRolloverFamilies.size || newestGenerationKeys.size !== 1 || [...firstRolloverFamilies].some((family) => !newestFamilies.has(family))) {
+        throw new Error("Stage B first rollover must retain exactly the eleven existing task-definition families.");
+      }
+    } else if (newestFamilies.size !== taskDefinitionFamilies.size || newestGenerationKeys.size !== 1 || [...taskDefinitionFamilies.values()].some((family) => !newestFamilies.has(family))) {
+      throw new Error("Stage B later rollover must retain the newest revision for all twelve task-definition families.");
+    }
+  }
   assertTaskDefinitionAppendOnlyContract(terraformConfiguration);
 }
 
 export function assertStageBTaskDefinitionStateMigrationPreconditions(stateAddresses, moves) {
   if (!Array.isArray(stateAddresses) || !Array.isArray(moves) || moves.length === 0) throw new Error("Stage B state migration inputs are missing or malformed.");
   const state = new Set(stateAddresses);
+  const currentAddresses = new Set(taskDefinitionFamilies.keys());
+  const readOnlyCanaryAddress = 'aws_ecs_task_definition.candidate["read_only_canary"]';
+  const firstRolloverAddresses = new Set([...currentAddresses].filter((address) => address !== readOnlyCanaryAddress));
+  const moveSources = new Set(moves.map((move) => move?.source));
+  if (moves.length === firstRolloverAddresses.size) {
+    if (state.has(readOnlyCanaryAddress) || moveSources.size !== firstRolloverAddresses.size || [...firstRolloverAddresses].some((address) => !moveSources.has(address))) {
+      throw new Error("Stage B first migration must move exactly the eleven existing task-definition addresses.");
+    }
+  } else if (moves.length === currentAddresses.size) {
+    if (!state.has(readOnlyCanaryAddress) || moveSources.size !== currentAddresses.size || [...currentAddresses].some((address) => !moveSources.has(address))) {
+      throw new Error("Stage B later migration must move all twelve current task-definition addresses.");
+    }
+  } else {
+    throw new Error("Stage B state migration must move exactly eleven first-rollover or twelve later-rollover task definitions.");
+  }
   const sources = new Set();
   const destinations = new Set();
   for (const move of moves) {
