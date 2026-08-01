@@ -43,18 +43,17 @@ be discovered from each live policy rather than assumed to be repository
 suffixes.
 
 This source correction adds one additional read-only IAM permission:
-`iam:GetRole`, scoped exactly to these administrator-created and imported
-read-only-canary role ARNs:
+`iam:ListRolePolicies`, scoped exactly to these administrator-created and
+imported read-only-canary role ARNs:
 
 - `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution`
 - `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task`
 
-It does not allow IAM role or policy
-creation, update, attachment, passing, or deletion, and it uses no wildcard IAM
-resource. The permission is required only for Terraform drift refresh of those
-already imported roles. No runtime, service, secret, database, networking, ALB,
-DNS, or traffic authority is added, and `ecs:DeregisterTaskDefinition` remains
-absent.
+It does not allow IAM role or policy creation, update, attachment, passing, or
+deletion, and it uses no wildcard IAM resource. The permission is required only
+for Terraform drift refresh of those already imported roles. No runtime,
+service, secret, database, networking, ALB, DNS, or traffic authority is added,
+and `ecs:DeregisterTaskDefinition` remains absent.
 
 ## Append-only task-definition registration model
 

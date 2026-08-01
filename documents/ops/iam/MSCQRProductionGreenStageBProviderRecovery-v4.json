@@ -85,6 +85,15 @@
       ]
     },
     {
+      "Sid": "ListExactStageBReadOnlyCanaryRolePolicies",
+      "Effect": "Allow",
+      "Action": "iam:ListRolePolicies",
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
+      ]
+    },
+    {
       "Sid": "TagExactReplayTable",
       "Effect": "Allow",
       "Action": "dynamodb:TagResource",
