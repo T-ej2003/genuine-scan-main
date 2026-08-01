@@ -27,6 +27,38 @@ variable "executor_image" { type = string }
 variable "canary_image" { type = string }
 variable "read_only_canary_image" { type = string }
 variable "stage_a_read_only_canary_database_secret_arn" { type = string }
+variable "retained_candidate_task_definitions" {
+  type = map(object({
+    kind       = string
+    definition = string
+  }))
+  default = {}
+  validation {
+    condition = alltrue([
+      for history_key, entry in var.retained_candidate_task_definitions :
+      can(regex("^[a-f0-9]{7,40}-(backend|worker|canary|read_only_canary)$", history_key)) &&
+      can(regex("^(backend|worker|canary|read_only_canary)$", entry.kind)) &&
+      can(jsondecode(entry.definition).family)
+    ])
+    error_message = "Retained candidate task definitions require revision-keyed history entries and valid JSON definitions."
+  }
+}
+variable "retained_executor_task_definitions" {
+  type = map(object({
+    mode       = string
+    definition = string
+  }))
+  default = {}
+  validation {
+    condition = alltrue([
+      for history_key, entry in var.retained_executor_task_definitions :
+      can(regex("^[a-f0-9]{7,40}-full-rls-(admin-bootstrap|admin-ownership|capability-preflight|role-provision|role-verify|rollback|runtime-policy|verification)$", history_key)) &&
+      can(regex("^full-rls-(admin-bootstrap|admin-ownership|capability-preflight|role-provision|role-verify|rollback|runtime-policy|verification)$", entry.mode)) &&
+      can(jsondecode(entry.definition).family)
+    ])
+    error_message = "Retained executor task definitions require revision-keyed history entries and valid JSON definitions."
+  }
+}
 variable "log_retention_days" {
   type    = number
   default = 30
@@ -103,5 +135,22 @@ check "read_only_canary_secret" {
   assert {
     condition     = can(regex("^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-[A-Za-z0-9]+$", var.stage_a_read_only_canary_database_secret_arn))
     error_message = "Phase 4 requires the exact dedicated read-only canary database secret ARN from Stage A prerequisites."
+  }
+}
+
+check "retained_task_definition_families" {
+  assert {
+    condition = alltrue([
+      for history_key, entry in var.retained_candidate_task_definitions :
+      jsondecode(entry.definition).family == (
+        entry.kind == "canary" ? "mscqr-production-full-rls-green-application-canary" :
+        entry.kind == "read_only_canary" ? "mscqr-production-full-rls-green-read-only-canary" :
+        "mscqr-production-rls-green-${entry.kind}-candidate"
+      )
+      ]) && alltrue([
+      for history_key, entry in var.retained_executor_task_definitions :
+      jsondecode(entry.definition).family == "mscqr-production-full-rls-green-${entry.mode}"
+    ])
+    error_message = "Retained task-definition history must preserve the exact Stage B family for each keyed entry."
   }
 }

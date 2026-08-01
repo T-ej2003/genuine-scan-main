@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
-import { assertStageBPlan } from "../plan-production-green-stage-b.mjs";
+import { assertStageBPlan, assertStageBTaskDefinitionStateMigrationPreconditions } from "../plan-production-green-stage-b.mjs";
+import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const family = "mscqr-production-rls-green-backend-candidate";
@@ -16,6 +17,62 @@ const rollover = () => {
   value.change.replace_paths = [["container_definitions"]];
   return value;
 };
+const retained = (historyKey = "aaaaaaaa-backend", taskFamily = family) => ({ address: `aws_ecs_task_definition.candidate_retained["${historyKey}"]`, type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family: taskFamily, arn: oldArn.replace(family, taskFamily) }, after: { family: taskFamily } } });
+const retainedForAddress = (address, generation = "aaaaaaaa", revision = 1) => {
+  const match = /^(aws_ecs_task_definition\.(candidate|executor))\["([^"]+)"\]$/.exec(address);
+  const taskFamily = STAGE_B_TASK_DEFINITION_FAMILIES[address];
+  return { address: `${match[1]}_retained["${generation}-${match[3]}"]`, type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family: taskFamily, arn: oldArn.replace(family, taskFamily).replace(":1", `:${revision}`) }, after: { family: taskFamily } } };
+};
+const currentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
+const firstRolloverAddresses = currentAddresses.filter((taskAddress) => !taskAddress.includes("read_only_canary"));
+const retryVariables = {
+  release_sha: { value: "a".repeat(40) },
+  source_contract_sha256: { value: "b".repeat(64) },
+  migration_set_digest: { value: "c".repeat(64) },
+  package_checksum_sha256: { value: "d".repeat(64) },
+  backend_image: { value: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"1".repeat(64)}` },
+  worker_image: { value: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker@sha256:${"2".repeat(64)}` },
+  executor_image: { value: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"3".repeat(64)}` },
+  canary_image: { value: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"4".repeat(64)}` },
+  read_only_canary_image: { value: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"5".repeat(64)}` },
+};
+const retryChange = (address, family, actions, revision = 7) => {
+  const key = /\["([^\"]+)"\]$/.exec(address)?.[1];
+  const imageVariable = address.startsWith("aws_ecs_task_definition.executor[") ? "executor_image" : `${key}_image`;
+  const metadata = {
+    family,
+    network_mode: "awsvpc",
+    requires_compatibilities: ["FARGATE"],
+    cpu: "1024",
+    memory: "2048",
+    execution_role_arn: `arn:aws:iam::368992683803:role/${key}-execution`,
+    task_role_arn: `arn:aws:iam::368992683803:role/${key}-task`,
+    runtime_platform: { operating_system_family: "LINUX", cpu_architecture: "X86_64" },
+    volumes: [],
+    tags: { Environment: "production", ManagedBy: "Terraform", Component: "full-rls-green-stage-b" },
+    container_definitions: JSON.stringify([{ image: retryVariables[imageVariable].value, environment: [
+      { name: "RELEASE_GIT_SHA", value: retryVariables.release_sha.value },
+      { name: "SOURCE_CONTRACT_SHA256", value: retryVariables.source_contract_sha256.value },
+      { name: "MIGRATION_SET_DIGEST", value: retryVariables.migration_set_digest.value },
+      { name: "PACKAGE_CHECKSUM_SHA256", value: retryVariables.package_checksum_sha256.value },
+    ] }]),
+  };
+  const arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${revision}`;
+  return { address, type: "aws_ecs_task_definition", change: { actions, before: actions[0] === "no-op" ? { ...metadata, arn } : null, after: metadata } };
+};
+const currentRetryPlan = (noOpCount) => {
+  const resource_changes = currentAddresses.map((address, index) => retryChange(address, STAGE_B_TASK_DEFINITION_FAMILIES[address], index < noOpCount ? ["no-op"] : ["create"]));
+  return { variables: retryVariables, resource_changes, planned_values: { root_module: { resources: resource_changes.map((change) => ({ address: change.address, type: change.type, index: change.address.match(/\["([^\"]+)"\]$/)?.[1], values: change.change.after })) } } };
+};
+const currentCreates = () => Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([taskAddress, taskFamily]) => ({
+  address: taskAddress,
+  type: "aws_ecs_task_definition",
+  change: { actions: ["create"], after: { family: taskFamily }, before: null },
+}));
+const appendOnly = () => [
+  ...currentCreates(),
+  ...firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress)),
+];
 const auditFor = (overrides = {}) => ({
   schemaVersion: 1,
   auditedAt: "2026-07-31T14:00:00.000Z",
@@ -43,86 +100,134 @@ const validRollover = (overrides = {}, planOverrides = {}) => {
   const auditBytes = Buffer.from(JSON.stringify(audit));
   return { plan, options: { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: sha256(auditBytes), planJsonBytes: planBytes, planJsonSha256: sha256(planBytes), now: validationNow, terraformConfiguration } };
 };
+const validAppendOnly = (planOverrides = {}) => {
+  const plan = { resource_changes: appendOnly(), ...planOverrides };
+  return { plan, options: { now: validationNow, terraformConfiguration } };
+};
+
+test("fresh deployment has exactly twelve current creates and no retained creates", () => {
+  assert.doesNotThrow(() => assertStageBPlan({ resource_changes: currentCreates() }, { terraformConfiguration }));
+  assert.equal(currentCreates().filter((change) => change.address.includes("_retained")).length, 0);
+});
+
+test("partial append-only retries accept safe current create/no-op mixtures", () => {
+  assert.deepEqual(assertStageBPlan(currentRetryPlan(0), { terraformConfiguration }).taskDefinitions, { currentCreates: 12, currentNoOps: 0, total: 12 });
+  assert.doesNotThrow(() => assertStageBPlan(currentRetryPlan(1), { terraformConfiguration }));
+  assert.doesNotThrow(() => assertStageBPlan(currentRetryPlan(11), { terraformConfiguration }));
+  assert.doesNotThrow(() => assertStageBPlan(currentRetryPlan(12), { terraformConfiguration }));
+  const missing = currentRetryPlan(11);
+  missing.resource_changes.pop();
+  assert.throws(() => assertStageBPlan(missing, { terraformConfiguration }), /exactly the twelve/);
+});
+
+test("current no-op retry rejects stale image, package, and retained ARN", () => {
+  const staleImage = currentRetryPlan(1);
+  staleImage.variables.backend_image.value = staleImage.variables.backend_image.value.replace(/1{64}$/, `${"9".repeat(64)}`);
+  assert.throws(() => assertStageBPlan(staleImage, { terraformConfiguration }), /image digest is stale/);
+  const stalePackage = currentRetryPlan(12);
+  stalePackage.variables.package_checksum_sha256.value = "e".repeat(64);
+  assert.throws(() => assertStageBPlan(stalePackage, { terraformConfiguration }), /package checksum is stale/);
+  const missingImmutableField = currentRetryPlan(1);
+  delete missingImmutableField.resource_changes[0].change.before.memory;
+  assert.throws(() => assertStageBPlan(missingImmutableField, { terraformConfiguration }), /immutable field is missing|has drift/);
+  const retainedArn = currentRetryPlan(12);
+  const retained = retainedForAddress(address);
+  retainedArn.resource_changes.push(retained);
+  retainedArn.resource_changes[0].change.before.arn = retained.change.before.arn;
+  retainedArn.resource_changes[0].change.after.arn = retained.change.before.arn;
+  assert.throws(() => assertStageBPlan(retainedArn, { terraformConfiguration }), /retained ARN|duplicate/);
+});
+
+test("first and second revision-keyed rollovers retain history as no-op", () => {
+  const first = { resource_changes: [...currentCreates(), ...firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress))] };
+  assert.doesNotThrow(() => assertStageBPlan(first, { terraformConfiguration }));
+  const secondGeneration = currentAddresses.map((taskAddress) => retainedForAddress(taskAddress, "bbbbbbbb", 2));
+  const second = { resource_changes: [...first.resource_changes, ...secondGeneration] };
+  assert.doesNotThrow(() => assertStageBPlan(second, { terraformConfiguration }));
+  const thirdGeneration = currentAddresses.map((taskAddress) => retainedForAddress(taskAddress, "cccccccc", 3));
+  assert.doesNotThrow(() => assertStageBPlan({ resource_changes: [...second.resource_changes, ...thirdGeneration] }, { terraformConfiguration }));
+});
+
+test("a later rollover missing the newest read-only-canary history entry fails", () => {
+  const olderReadOnly = retainedForAddress('aws_ecs_task_definition.candidate["read_only_canary"]', "aaaaaaaa", 1);
+  const laterWithoutReadOnly = firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress, "bbbbbbbb", 2));
+  const plan = { resource_changes: [...currentCreates(), ...firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress)), olderReadOnly, ...laterWithoutReadOnly] };
+  assert.throws(() => assertStageBPlan(plan, { terraformConfiguration }), /later rollover|newest revision/);
+});
+
+test("read-only-canary replacement is rejected", () => {
+  const plan = { resource_changes: currentCreates() };
+  const readOnly = plan.resource_changes.find((change) => change.address.includes("read_only_canary"));
+  readOnly.change.actions = ["no-op"];
+  readOnly.change.before = { family: readOnly.change.after.family, arn: oldArn.replace(family, readOnly.change.after.family) };
+  assert.throws(() => assertStageBPlan(plan, { terraformConfiguration }), /no-op/);
+});
+
+test("static retained keys and duplicate retained generations fail closed", () => {
+  const staticKey = { resource_changes: [...currentCreates(), { ...retained(), address: 'aws_ecs_task_definition.candidate_retained["backend"]' }] };
+  assert.throws(() => assertStageBPlan(staticKey, { terraformConfiguration }), /revision-keyed/);
+  const duplicate = { resource_changes: [...currentCreates(), retained(), retained()] };
+  assert.throws(() => assertStageBPlan(duplicate, { terraformConfiguration }), /duplicated/);
+});
+
+test("state migration requires present sources, absent destinations, and explicit addresses", () => {
+  const firstMoves = firstRolloverAddresses.map((source) => ({ source, destination: retainedForAddress(source) .address }));
+  assert.doesNotThrow(() => assertStageBTaskDefinitionStateMigrationPreconditions(firstRolloverAddresses, firstMoves));
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions(currentAddresses, firstMoves), /eleven existing/);
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions(firstRolloverAddresses.slice(1), firstMoves), /source is missing|eleven existing/);
+  const laterMoves = currentAddresses.map((source) => ({ source, destination: retainedForAddress(source, "bbbbbbbb").address }));
+  assert.doesNotThrow(() => assertStageBTaskDefinitionStateMigrationPreconditions(currentAddresses, laterMoves));
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions(firstRolloverAddresses, laterMoves), /twelve current/);
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions([...firstRolloverAddresses, firstMoves[0].destination], firstMoves), /destination is occupied/);
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions(firstRolloverAddresses, firstMoves.map((move, index) => index === 0 ? { ...move, destination: 'aws_ecs_task_definition.candidate_retained["backend"]' } : move)), /revision-keyed/);
+});
 
 test("Stage B plan wrapper permits only non-destructive control-plane resources", () =>
-  assert.doesNotThrow(() => assertStageBPlan({ resource_changes: [change("aws_ecs_task_definition"), change("aws_dynamodb_table")] })));
+  assert.doesNotThrow(() => assertStageBPlan({ resource_changes: [...appendOnly(), change("aws_dynamodb_table")] }, { terraformConfiguration })));
 
-test("safe same-family rollover passes only with a plan-bound reference audit", () => {
-  const { plan, options } = validRollover();
+test("append-only current create plus retained no-op passes", () => {
+  const { plan, options } = validAppendOnly();
   assert.doesNotThrow(() => assertStageBPlan(plan, options));
-  options.referenceAudit.planJsonSha256 = "0".repeat(64);
-  assert.throws(() => assertStageBPlan(plan, options), /different plan JSON/);
-});
-
-test("plan validator enforces reference-audit freshness with a trusted clock", () => {
-  const current = validRollover();
-  assert.doesNotThrow(() => assertStageBPlan(current.plan, current.options));
-  const expired = validRollover({ auditedAt: "2026-07-31T13:49:59.999Z" });
-  assert.throws(() => assertStageBPlan(expired.plan, expired.options), /expired/);
-  const future = validRollover({ auditedAt: "2026-07-31T14:06:00.001Z" });
-  assert.throws(() => assertStageBPlan(future.plan, future.options), /future/);
-  const malformed = validRollover({ auditedAt: "not-a-timestamp" });
-  assert.throws(() => assertStageBPlan(malformed.plan, malformed.options), /malformed/);
-});
-
-test("rollover audit and scope failures remain fail-closed", () => {
-  const cases = [
-    ["missing audit", {}, /reference audit/],
-    ["wrong audit SHA", {}, /reference audit SHA/],
-    ["wrong plan SHA", {}, /plan JSON SHA/],
-    ["service reference", { serviceReferences: ["service"] }, /service reference/],
-    ["running reference", { runningTaskReferences: ["task"] }, /running-task reference/],
-    ["pending reference", { pendingTaskReferences: ["task"] }, /pending-task reference/],
-    ["different family", { family: "other", proposedFamily: "other" }, /family/],
-    ["extra replace path", { replacePaths: [["container_definitions"], ["tags"]] }, /replace path/],
-    ["missing rollback", { rollbackArn: "" }, /rollback/],
-    ["old ARN mismatch", { oldTaskDefinitionArn: `${oldArn}-different` }, /old ARN/],
-  ];
-  for (const [name, auditOverrides, expected] of cases) {
-    const { plan, options } = validRollover(auditOverrides);
-    if (name === "missing audit") delete options.referenceAudit;
-    if (name === "wrong audit SHA") options.referenceAuditSha256 = "0".repeat(64);
-    if (name === "wrong plan SHA") options.planJsonSha256 = "0".repeat(64);
-    assert.throws(() => assertStageBPlan(plan, options), expected, name);
-  }
+  const replacement = { resource_changes: [rollover()] };
+  assert.throws(() => assertStageBPlan(replacement, options), /append-only/);
 });
 
 test("unknown task-definition address and family are rejected", () => {
-  const unknownAddress = { resource_changes: [{ ...rollover(), address: 'aws_ecs_task_definition.other["backend"]' }] };
-  assert.throws(() => assertStageBPlan(unknownAddress), /address/);
+  const unknownAddress = { resource_changes: [...appendOnly()] };
+  unknownAddress.resource_changes[0].address = 'aws_ecs_task_definition.other["backend"]';
+  assert.throws(() => assertStageBPlan(unknownAddress, { terraformConfiguration }), /address/);
   for (const familyName of ["mscqr-backend", "mscqr-frontend", "unknown-stage-b-family"]) {
-    const { plan, options } = validRollover({});
+    const { plan, options } = validAppendOnly();
     plan.resource_changes[0].change.after.family = familyName;
     assert.throws(() => assertStageBPlan(plan, options), /family/);
   }
 });
 
 test("mixed rollover plus unrelated destroy remains rejected", () => {
-  const { plan, options } = validRollover();
+  const { plan, options } = validAppendOnly();
   plan.resource_changes.push(change("aws_cloudwatch_log_group", ["delete"]));
   assert.throws(() => assertStageBPlan(plan, options), /rejected/);
 });
 
-test("task-definition replacements require provider retention for both Stage B collections", () => {
-  assert.equal((terraformConfiguration.match(/skip_destroy\s*=\s*true/g) || []).length, 2);
-  const missing = validRollover();
-  missing.options.terraformConfiguration = terraformConfiguration.replace("  skip_destroy             = true\n", "");
-  assert.throws(() => assertStageBPlan(missing.plan, missing.options), /retention contract/);
-  const missingExecutor = validRollover();
-  missingExecutor.options.terraformConfiguration = terraformConfiguration.replace(/(resource "aws_ecs_task_definition" "executor"[\s\S]*?)  skip_destroy             = true\n/, "$1");
-  assert.throws(() => assertStageBPlan(missingExecutor.plan, missingExecutor.options), /executor/);
+test("append-only contract covers current and retained task-definition collections", () => {
+  assert.equal((terraformConfiguration.match(/skip_destroy\s*=\s*true/g) || []).length, 4);
+  assert.match(terraformConfiguration, /resource "aws_ecs_task_definition" "candidate_retained"[\s\S]*ignore_changes\s*=\s*all/);
+  assert.match(terraformConfiguration, /resource "aws_ecs_task_definition" "executor_retained"[\s\S]*ignore_changes\s*=\s*all/);
+  const missing = validAppendOnly();
+  missing.options.terraformConfiguration = terraformConfiguration.replace(/resource "aws_ecs_task_definition" "executor_retained"[\s\S]*?ignore_changes\s*=\s*all/, "resource \"aws_ecs_task_definition\" \"executor_retained\"");
+  assert.throws(() => assertStageBPlan(missing.plan, missing.options), /task-definition retention contract/);
 });
 
-test("delete-only, extra replacement paths, and alternate actions are rejected", () => {
-  const { plan, options } = validRollover();
+test("task-definition delete, replacement, and update actions are rejected", () => {
+  const { plan, options } = validAppendOnly();
   plan.resource_changes[0].change.actions = ["delete"];
-  assert.throws(() => assertStageBPlan(plan, options), /rollover/);
-  const alternate = validRollover();
+  assert.throws(() => assertStageBPlan(plan, options), /append-only|create-only/);
+  const alternate = validAppendOnly();
   alternate.plan.resource_changes[0].change.actions = ["create", "delete"];
-  assert.throws(() => assertStageBPlan(alternate.plan, alternate.options), /rollover/);
-  const extra = validRollover();
-  extra.plan.resource_changes[0].change.replace_paths = [["container_definitions"], ["tags"]];
-  assert.throws(() => assertStageBPlan(extra.plan, extra.options), /rollover/);
+  assert.throws(() => assertStageBPlan(alternate.plan, alternate.options), /append-only/);
+  const update = validAppendOnly();
+  update.plan.resource_changes[0].change.actions = ["update"];
+  assert.throws(() => assertStageBPlan(update.plan, update.options), /append-only/);
 });
 
 test("Stage B plan wrapper rejects forbidden destroys and mutable images", () => {
@@ -134,7 +239,7 @@ test("Stage B plan wrapper rejects forbidden destroys and mutable images", () =>
     change("aws_secretsmanager_secret", ["delete"]),
     change("aws_security_group"),
     change("aws_ecs_task_definition", ["create"], { image: "repo:latest" }),
-  ]) assert.throws(() => assertStageBPlan({ resource_changes: [item] }), /rejected|tag/);
+  ]) assert.throws(() => assertStageBPlan({ resource_changes: [item] }, { terraformConfiguration }), /rejected|tag|append-only/);
 });
 
 test("candidate object-storage policy keeps existing task keys and excludes only the read-only canary", () => {
@@ -164,7 +269,7 @@ test("Stage B Terraform root is control-plane-only and binds four digest images"
 test("ECS resources pass one container array and render task-level volumes separately", () => {
   const main = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
   assert.equal((main.match(/container_definitions\s*=\s*jsonencode\(each\.value\.containerDefinitions\)/g) || []).length, 2);
-  assert.equal((main.match(/dynamic "volume"/g) || []).length, 2);
+  assert.equal((main.match(/dynamic "volume"/g) || []).length, 4);
   assert.doesNotMatch(main, /container_definitions\s*=\s*(?:each\.value|replace\(local\.executor)/);
   for (const mode of [
     "full-rls-capability-preflight", "full-rls-admin-bootstrap", "full-rls-role-provision", "full-rls-role-verify",

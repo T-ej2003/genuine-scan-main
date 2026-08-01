@@ -46,22 +46,93 @@ This source correction adds no runtime, service, IAM, secret, database,
 networking, ALB, DNS, or traffic authority and does not authorize a fresh audit
 or Terraform operation.
 
-## Reviewed immutable revision-rollover exception
+## Append-only task-definition registration model
 
-Normal Terraform destroys remain forbidden. The only permitted exception is a
-same-family `aws_ecs_task_definition` delete/create revision rollover for an
-allowlisted Stage B address with provider `skip_destroy = true`. This registers
-the new revision while retaining the prior revision; the release role has no
-`ecs:DeregisterTaskDefinition` authority. The plan validator requires a fresh live reference
-audit supplied with explicit SHA-256 values for both the audit file and the
-current `terraform show -json` output. Every old ARN must be present in that
-audit with matching family and `container_definitions` as its only replacement
-path, zero service/running/pending references, and a retained rollback ARN.
+Normal Terraform destroys remain forbidden, including every
+`aws_ecs_task_definition` `delete`, `destroy`, or `delete,create` replacement.
+`skip_destroy = true` is an AWS provider argument, not Terraform lifecycle
+protection; it does not remove replacement actions from a plan when an existing
+state entry changes. The release role consequently retains no
+`ecs:DeregisterTaskDefinition` authority.
 
-This exception does not authorize ECS service updates, task execution, database
-actions, broker invocation, ALB, DNS, or traffic changes. Any non-task-definition
-destroy, unknown address/family, missing or mismatched audit binding, non-zero
-reference, or missing rollback ARN remains fail-closed.
+The source model takes explicit revision-keyed history maps
+`retained_candidate_task_definitions` and `retained_executor_task_definitions`.
+Both default to `{}`, so a fresh deployment has exactly twelve current task
+definition creates and zero retained resources. Each supplied entry contains a
+generation key such as `<generation>-backend` plus the exact historical task
+definition JSON. Retained resources use `ignore_changes = all`, while current
+`candidate[...]` and `executor[...]` addresses register only the new release.
+
+Before the first rollover, add the eleven existing revision-1 definitions to the
+private history maps under one release generation. Back up state, verify every
+source exists and every destination is absent, then run the separately approved
+commands below. The destination key must match the map entry:
+
+```sh
+generation=<release-sha-prefix>
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state pull > "/private/tmp/mscqr-stage-b-production-${generation}.state.backup.json"
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state list
+
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["backend"]' 'aws_ecs_task_definition.candidate_retained["<generation>-backend"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["canary"]' 'aws_ecs_task_definition.candidate_retained["<generation>-canary"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["worker"]' 'aws_ecs_task_definition.candidate_retained["<generation>-worker"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-admin-bootstrap"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-ownership"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-admin-ownership"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-capability-preflight"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-capability-preflight"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-provision"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-role-provision"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-verify"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-role-verify"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-rollback"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-rollback"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-runtime-policy"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-runtime-policy"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-verification"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-verification"]'
+```
+
+The migration preserves all eleven existing revisions. It is not performed by
+this PR, and no import, `state rm`, or `state mv` has been executed here. The
+read-only-canary has no prior state and remains the twelfth current create.
+After the first rollover, the plan contains twelve current creates and eleven
+retained no-ops. For the second rollover, add a second generation to the maps,
+move all twelve current state instances, including
+`candidate["read_only_canary"]`, to that generation's unique retained
+addresses, and leave the first generation untouched. Every later rollover
+therefore contains all twelve families in its newest retained generation and
+twelve current creates. Duplicate generation keys, occupied destinations,
+missing sources, static family-only keys, and retained creates are rejected.
+The audit keeps every retained generation, groups entries by family, and selects
+the newest retained entry by the highest numeric ECS revision, never by map,
+generation-key, or resource ordering. The audit still proves the exact twelve
+family allowlist, complete service/task reads, and plan-bound broker mapping to
+the new current addresses.
+
+A retry after a partial append-only apply may safely contain a mixture of current
+`create` and current `no-op` actions. The current counts must always total twelve;
+no-op definitions must exactly match the intended release and must not use a
+retained ARN. If the broker update lags a partial task-definition registration,
+the no-op current family is included in the atomic broker proof: the live broker
+must reference an exact retained ARN and the plan must target the exact current
+task-definition address. Services, RUNNING tasks, and PENDING tasks may reference any
+explicitly retained full ARN for the exact family. The newest retained revision
+is sequencing evidence only, not the sole permitted live reference; older
+retained generations remain represented and protected.
+
+The validator binds append-only audit contents to the exact plan, including all
+current and retained entries, classification counts, newest-revision evidence,
+complete service/RUNNING/PENDING observations, and broker mappings. Missing,
+extra, stale, or unrecorded evidence is rejected. Broker evidence must contain
+the complete exact mode set once each, with each mode mapped to its expected
+family; swapped, duplicated, missing, or unrelated mappings are rejected, and
+every retained live broker mapping must have matching atomic rollover evidence.
+The trusted validation process obtains `aws sts get-caller-identity` and
+requires that observed caller ARN to equal the audit `callerArn`; an
+audit-supplied ARN or matching hash is not accepted as caller attestation.
+Cluster-wide ECS observations for unrelated workloads remain recorded but are
+outside the Stage B family decision; unknown `mscqr-production-*` families are
+still rejected.
+The audit consumer also requires the shared schema version, the exact production
+cluster ARN, and the MFA-backed release-deployer caller identity.
+
+This model does not authorize ECS service updates, task execution, database
+actions, broker invocation, ALB, DNS, or traffic changes. Old inactive revision
+cleanup is a separate controlled housekeeping process.
 
 The permanent release-deployer policy supplies the read-only calls needed for
 this audit; no temporary policy is required. The audit is regenerated whenever

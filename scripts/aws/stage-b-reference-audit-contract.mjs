@@ -28,6 +28,81 @@ export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.broker_task_defin
 export const STAGE_B_BROKER_APPROVAL_REFERENCE = "local.broker_approval_expected";
 export const STAGE_B_BROKER_APPROVAL_INPUT = "var.package_checksum_sha256";
 export const STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION = "aws_ecs_task_definition.executor";
+const currentTaskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):([1-9][0-9]*)$/;
+
+const stableTaskDefinitionValue = (value) => {
+  if (Array.isArray(value)) return value.map(stableTaskDefinitionValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !["arn", "id", "revision", "status", "registered_at", "registeredAt"].includes(key))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => [key, stableTaskDefinitionValue(item)]));
+};
+
+const taskDefinitionValues = (value) => {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return value; }
+};
+
+const taskDefinitionImageVariable = (address) => {
+  const key = /\["([^\"]+)"\]$/.exec(address)?.[1];
+  if (!key) return undefined;
+  if (address.startsWith("aws_ecs_task_definition.executor[")) return "executor_image";
+  return `${key}_image`;
+};
+
+export function assertStageBCurrentTaskDefinitionNoOp(change, plan, retainedArns = new Set()) {
+  const expectedFamily = STAGE_B_TASK_DEFINITION_FAMILIES[change?.address];
+  if (!expectedFamily) throw new Error(`Stage B current task-definition address is not allowlisted: ${change?.address}`);
+  if (JSON.stringify(change.change?.actions || []) !== JSON.stringify(["no-op"])) throw new Error(`Stage B current task-definition retry must be no-op: ${change.address}`);
+  const before = change.change?.before;
+  const after = change.change?.after;
+  const identity = currentTaskDefinitionArnPattern.exec(before?.arn || "");
+  if (!identity || identity[1] !== expectedFamily || before.family !== expectedFamily || after?.family !== expectedFamily) throw new Error(`Stage B current task-definition no-op identity is invalid: ${change.address}`);
+  if (retainedArns.has(identity[0])) throw new Error(`Stage B current task-definition no-op uses a retained ARN: ${change.address}`);
+  if (JSON.stringify(stableTaskDefinitionValue(before)) !== JSON.stringify(stableTaskDefinitionValue(after))) throw new Error(`Stage B current task-definition no-op has drift: ${change.address}`);
+
+  const variables = plan?.variables || {};
+  const imageVariable = taskDefinitionImageVariable(change.address);
+  const expectedImage = variables[imageVariable]?.value;
+  if (!/^.+@sha256:[a-f0-9]{64}$/.test(expectedImage || "")) throw new Error(`Stage B current task-definition no-op image input is missing or mutable: ${change.address}`);
+  const definitions = taskDefinitionValues(after.container_definitions);
+  if (!Array.isArray(definitions) || definitions.length === 0 || !definitions.every((definition) => definition && typeof definition.image === "string")) throw new Error(`Stage B current task-definition no-op container definitions are malformed: ${change.address}`);
+  if (!definitions.every((definition) => definition.image === expectedImage)) throw new Error(`Stage B current task-definition no-op image digest is stale: ${change.address}`);
+  for (const [variable, pattern] of [["release_sha", /^[a-f0-9]{40}$/], ["source_contract_sha256", /^[a-f0-9]{64}$/], ["migration_set_digest", /^[a-f0-9]{64}$/], ["package_checksum_sha256", /^[a-f0-9]{64}$/]]) {
+    if (!pattern.test(variables[variable]?.value || "")) throw new Error(`Stage B current task-definition no-op ${variable} input is missing or malformed: ${change.address}`);
+  }
+  const rendered = JSON.stringify(definitions);
+  const key = /\["([^\"]+)"\]$/.exec(change.address)?.[1];
+  if (key !== "read_only_canary" && !rendered.includes(variables.release_sha.value)) throw new Error(`Stage B current task-definition no-op release provenance is stale: ${change.address}`);
+  if (["canary", "executor"].includes(key === undefined ? "executor" : (change.address.startsWith("aws_ecs_task_definition.executor[") ? "executor" : key))
+    && (!rendered.includes(variables.source_contract_sha256.value) || !rendered.includes(variables.migration_set_digest.value))) {
+    throw new Error(`Stage B current task-definition no-op source provenance is stale: ${change.address}`);
+  }
+  if (change.address.startsWith("aws_ecs_task_definition.executor[") && !rendered.includes(variables.package_checksum_sha256.value)) {
+    throw new Error(`Stage B current task-definition no-op package checksum is stale: ${change.address}`);
+  }
+
+  const planned = plannedResources(plan?.planned_values?.root_module).find((resource) => resource.address === change.address);
+  if (!planned?.values || planned.values.family !== expectedFamily) throw new Error(`Stage B current task-definition no-op planned values are missing: ${change.address}`);
+  for (const field of ["family", "network_mode", "requires_compatibilities", "cpu", "memory", "execution_role_arn", "task_role_arn", "runtime_platform", "volumes", "tags", "container_definitions"]) {
+    if (before[field] === undefined || after[field] === undefined || planned.values[field] === undefined) {
+      throw new Error(`Stage B current task-definition no-op immutable field is missing: ${change.address}.${field}`);
+    }
+    if (JSON.stringify(stableTaskDefinitionValue(taskDefinitionValues(before[field]))) !== JSON.stringify(stableTaskDefinitionValue(taskDefinitionValues(after[field])))) {
+      throw new Error(`Stage B current task-definition no-op immutable field drift: ${change.address}.${field}`);
+    }
+    if (JSON.stringify(stableTaskDefinitionValue(taskDefinitionValues(after[field]))) !== JSON.stringify(stableTaskDefinitionValue(taskDefinitionValues(planned.values[field])))) {
+      throw new Error(`Stage B current task-definition no-op planned value drift: ${change.address}.${field}`);
+    }
+  }
+  const plannedArn = after.arn || planned.values.arn || identity[0];
+  const plannedIdentity = currentTaskDefinitionArnPattern.exec(plannedArn || "");
+  if (!plannedIdentity || plannedIdentity[1] !== expectedFamily || plannedIdentity[0] !== identity[0]) {
+    throw new Error(`Stage B current task-definition no-op planned ARN is invalid: ${change.address}`);
+  }
+  return { address: change.address, family: expectedFamily, arn: identity[0], currentArn: plannedIdentity[0] };
+}
 
 function configuredResources(module, resources = []) {
   for (const resource of module?.resources || []) resources.push(resource);

@@ -55,6 +55,18 @@ locals {
       )
     )
   }
+  retained_candidate_definitions = {
+    for history_key, entry in var.retained_candidate_task_definitions : history_key => {
+      kind       = entry.kind
+      definition = jsondecode(entry.definition)
+    }
+  }
+  retained_executor_definitions = {
+    for history_key, entry in var.retained_executor_task_definitions : history_key => {
+      mode       = entry.mode
+      definition = jsondecode(entry.definition)
+    }
+  }
   execution_secret_arns = {
     for kind, definition in merge(local.candidate_definitions, { executor = local.executor_definitions["full-rls-verification"] }) :
     kind => distinct([
@@ -212,6 +224,64 @@ resource "aws_iam_role_policy" "executor_runtime" {
       }
     ]
   })
+}
+
+resource "aws_ecs_task_definition" "candidate_retained" {
+  for_each     = local.retained_candidate_definitions
+  skip_destroy = true
+  lifecycle {
+    ignore_changes = all
+  }
+  family                   = each.value.definition.family
+  network_mode             = each.value.definition.networkMode
+  requires_compatibilities = each.value.definition.requiresCompatibilities
+  cpu                      = each.value.definition.cpu
+  memory                   = each.value.definition.memory
+  execution_role_arn       = aws_iam_role.execution[each.value.kind].arn
+  task_role_arn            = aws_iam_role.task[each.value.kind].arn
+  container_definitions    = jsonencode(each.value.definition.containerDefinitions)
+
+  dynamic "volume" {
+    for_each = try(each.value.definition.volumes, [])
+    content {
+      name = volume.value.name
+    }
+  }
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+  tags = local.tags
+}
+
+resource "aws_ecs_task_definition" "executor_retained" {
+  for_each     = local.retained_executor_definitions
+  skip_destroy = true
+  lifecycle {
+    ignore_changes = all
+  }
+  family                   = each.value.definition.family
+  network_mode             = each.value.definition.networkMode
+  requires_compatibilities = each.value.definition.requiresCompatibilities
+  cpu                      = each.value.definition.cpu
+  memory                   = each.value.definition.memory
+  execution_role_arn       = aws_iam_role.execution["executor"].arn
+  task_role_arn            = var.stage_a_executor_task_role_arn
+  container_definitions    = jsonencode(each.value.definition.containerDefinitions)
+
+  dynamic "volume" {
+    for_each = each.value.definition.volumes
+    content {
+      name = volume.value.name
+    }
+  }
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+  tags = local.tags
 }
 
 resource "aws_ecs_task_definition" "candidate" {
