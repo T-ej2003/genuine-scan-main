@@ -94,6 +94,21 @@
       ]
     },
     {
+      "Sid": "ListAttachedExactStageBReadOnlyCanaryRolePolicies",
+      "Effect": "Allow",
+      "Action": "iam:ListAttachedRolePolicies",
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
+      ]
+    },
+    {
+      "Sid": "ReadExactStageBReadOnlyCanaryExecutionRolePolicy",
+      "Effect": "Allow",
+      "Action": "iam:GetRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution"
+    },
+    {
       "Sid": "TagExactReplayTable",
       "Effect": "Allow",
       "Action": "dynamodb:TagResource",
