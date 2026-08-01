@@ -64,9 +64,17 @@ which exceeds the 6,144 AWS managed-policy limit by 507 characters.
 
 The deployable split is:
 
-- `MSCQRProductionGreenStageBProviderRecovery-v4.json` is v3 minus the seven
-  permanent reference-audit read statements and contains only the reviewed
-  provider-recovery control-plane permissions.
+- `MSCQRProductionGreenStageBProviderRecovery-v4.json` preserves the v3
+  provider-recovery permissions except for the seven permanent reference-audit
+  read statements previously moved to the companion policy. V4 additionally
+  grants the read-only `iam:GetRole` action for exactly these administrator-
+  created and imported Terraform roles:
+  `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution`
+  and
+  `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task`.
+  This grant exists only so Terraform can refresh those imported roles; it adds
+  no IAM mutation authority and uses no wildcard IAM resource. The policy still
+  contains no `ecs:DeregisterTaskDefinition` authority.
 - `MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json` is the permanent
   companion containing exactly those seven read-only statements, including the
   isolated wildcard `ecs:DescribeTaskDefinition` metadata read.
