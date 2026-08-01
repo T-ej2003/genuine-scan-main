@@ -200,7 +200,7 @@ test("all Lambda write manifest entries require the exact four resource-tag cont
     for (const key of ["aws:ResourceTag/Environment", "aws:ResourceTag/ManagedBy", "aws:ResourceTag/Component"]) {
       const broken = structuredClone(manifest);
       broken.required.find((candidate) => candidate.id === entry.id).context = entry.context.filter((item) => item.key !== key);
-      assert.throws(() => validateManifest(broken), new RegExp(`${key.replace(/[/:]/g, "\\$&")}`));
+      assert.throws(() => validateManifest(broken), (error) => error instanceof Error && error.message.includes(key));
     }
   }
 });
