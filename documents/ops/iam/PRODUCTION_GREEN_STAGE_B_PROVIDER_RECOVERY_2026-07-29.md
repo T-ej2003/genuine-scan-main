@@ -130,6 +130,13 @@ Terraform map, generation-key, or resource ordering.
 The validator rejects every task-definition delete, destroy, or delete/create
 replacement.
 
+A partial append-only apply may leave a safe retry shape: each of the twelve
+current addresses is either `create` or an exact-release `no-op`, and those two
+counts must sum to twelve. A current no-op must match the intended image,
+release/provenance metadata, package/runtime inputs, immutable task settings,
+tags, and current broker mapping; retained history remains no-op only. The
+audit records `currentCreates` and `currentNoOps` separately.
+
 After this corrective PR is merged, update the live provider managed policy from
 v4 and verify the complete attachment set before any Terraform retry. Do not
 retry the previous saved plan, manually delete the partial log group, manually
@@ -351,8 +358,12 @@ and validator contract.
 
 Whenever the plan JSON changes, the release-deployer must perform a fresh
 read-only audit and bind it to the exact plan SHA-256. Retained revisions may
-remain referenced by the existing services and tasks; the audit records those
-references and proves that the broker transition targets the new current ARN.
+remain referenced by the existing services and tasks; the audit accepts only
+the exact full ARN of any explicitly retained revision for that family, not
+just the newest revision or a same-family revision. The newest numeric ECS
+revision is sequencing evidence only, while all retained generations remain
+evidence. The audit also proves that the broker transition targets the new
+current ARN.
 Any superseded legacy rollover, unknown family, or unrelated reference remains
 fail-closed. The validator must accept the matching audit and both explicit
 hashes before any apply; otherwise apply remains forbidden.

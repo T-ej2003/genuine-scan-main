@@ -103,6 +103,14 @@ generation-key, or resource ordering. The audit still proves the exact twelve
 family allowlist, complete service/task reads, and plan-bound broker mapping to
 the new current addresses.
 
+A retry after a partial append-only apply may safely contain a mixture of current
+`create` and current `no-op` actions. The current counts must always total twelve;
+no-op definitions must exactly match the intended release and must not use a
+retained ARN. Services, RUNNING tasks, and PENDING tasks may reference any
+explicitly retained full ARN for the exact family. The newest retained revision
+is sequencing evidence only, not the sole permitted live reference; older
+retained generations remain represented and protected.
+
 This model does not authorize ECS service updates, task execution, database
 actions, broker invocation, ALB, DNS, or traffic changes. Old inactive revision
 cleanup is a separate controlled housekeeping process.

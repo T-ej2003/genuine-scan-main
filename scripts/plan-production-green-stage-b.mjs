@@ -8,6 +8,7 @@ import {
   assertStageBAtomicBrokerPackagePlan,
   assertStageBBrokerCreatePlan,
   assertStageBReferenceAuditFreshness,
+  assertStageBCurrentTaskDefinitionNoOp,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "./aws/stage-b-reference-audit-contract.mjs";
 
@@ -149,7 +150,12 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
   }
   for (const change of current) {
     assertTaskDefinitionScope(change);
-    if (!exactActions(change.change?.actions || [], ["create"])) throw new Error(`Stage B append-only current task-definition must be create-only: ${change.address}`);
+    if (exactActions(change.change?.actions || [], ["create"])) continue;
+    if (exactActions(change.change?.actions || [], ["no-op"])) {
+      assertStageBCurrentTaskDefinitionNoOp(change, plan, retainedArns);
+      continue;
+    }
+    throw new Error(`Stage B append-only current task-definition must be create-only or no-op: ${change.address}`);
   }
   if (retainedAddresses.size > 0) {
     const newestFamilies = new Set();
@@ -171,6 +177,9 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
     }
   }
   assertTaskDefinitionAppendOnlyContract(terraformConfiguration);
+  const currentCreates = current.filter((change) => exactActions(change.change?.actions || [], ["create"])).length;
+  const currentNoOps = current.filter((change) => exactActions(change.change?.actions || [], ["no-op"])).length;
+  return { currentCreates, currentNoOps, total: currentCreates + currentNoOps };
 }
 
 export function assertStageBTaskDefinitionStateMigrationPreconditions(stateAddresses, moves) {
@@ -282,7 +291,9 @@ export function assertStageBPlan(plan, options = {}) {
     else if (!exactActions(brokerActions, ["no-op"])) throw new Error(`Stage B broker actions are unsupported: ${JSON.stringify(brokerActions)}`);
   }
   const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
-  if (taskDefinitionChanges.length) assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration);
+  const taskDefinitionClassification = taskDefinitionChanges.length
+    ? assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration)
+    : null;
   for (const change of plan.resource_changes || []) {
     const actions = change.change.actions || [];
     if (forbidden.test(change.type) || !allowed.has(change.type)) throw new Error(`Stage B plan rejected: ${change.address}`);
@@ -291,7 +302,7 @@ export function assertStageBPlan(plan, options = {}) {
         assertRetainedTaskDefinition(change);
       } else {
         assertTaskDefinitionScope(change);
-        if (!exactActions(actions, ["create"])) throw new Error(`Stage B append-only task-definition plan rejected: ${change.address}`);
+        if (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"])) throw new Error(`Stage B append-only task-definition plan rejected: ${change.address}`);
       }
     } else if (actions.includes("delete")) {
       throw new Error(`Stage B plan rejected: ${change.address}`);
@@ -299,6 +310,7 @@ export function assertStageBPlan(plan, options = {}) {
     const after = JSON.stringify(change.change.after || {});
     if ((after.match(/"image":"([^"@]+):[^"@]+"/) || after.match(/"image"\s*:\s*"[^"@]+:[^"@]+"/)) && !after.includes("@sha256:")) throw new Error(`Stage B image tag rejected: ${change.address}`);
   }
+  return { taskDefinitions: taskDefinitionClassification };
 }
 
 function readOption(argv, name) {

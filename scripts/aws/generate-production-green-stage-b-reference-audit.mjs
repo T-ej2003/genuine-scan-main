@@ -10,6 +10,7 @@ import {
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
   assertStageBAtomicBrokerPlan,
   assertStageBAtomicBrokerPackagePlan,
+  assertStageBCurrentTaskDefinitionNoOp,
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
 } from "./stage-b-reference-audit-contract.mjs";
@@ -121,14 +122,14 @@ function planTaskDefinitions(plan) {
     const oldArn = before.arn || before.id;
     if (JSON.stringify(actions) === JSON.stringify(["create"])) {
       if (oldArn) throw new Error(`Terraform plan create-only task definition unexpectedly has a prior ARN: ${address}`);
-      createOnlyByAddress.set(address, { address, family, proposedFamily: after.family });
+      createOnlyByAddress.set(address, { address, family, proposedFamily: after.family, proposedArn: after.arn });
       continue;
     }
     if (JSON.stringify(actions) === JSON.stringify(["no-op"])) {
       if (!before.arn) throw new Error(`Terraform plan no-op task definition is missing its prior ARN: ${address}`);
       const prior = familyFromArn(before.arn, `${address} no-op task definition`);
       if (before.family !== family || prior.family !== family) throw new Error(`Terraform plan no-op task-definition family mismatch: ${address}`);
-      noOpByAddress.set(address, { address, family, priorArn: before.arn, proposedFamily: after.family });
+      noOpByAddress.set(address, { address, family, priorArn: before.arn, proposedFamily: after.family, change });
       continue;
     }
     if (actions.includes("delete")) {
@@ -159,6 +160,13 @@ function planTaskDefinitions(plan) {
     retainedFamilyRevisions.add(familyRevision);
     retainedByFamily.set(identity.family, [...(retainedByFamily.get(identity.family) || []), { ...entry, revision: identity.revision }]);
   }
+  const retainedArnSet = new Set(retainedArns);
+  for (const entry of noOpByAddress.values()) {
+    if (rolloverByAddress.size === 0) {
+      const validated = assertStageBCurrentTaskDefinitionNoOp(entry.change, plan, retainedArnSet);
+      entry.priorArn = validated.arn;
+    }
+  }
   const newestRetainedByFamily = new Map();
   for (const [family, entries] of retainedByFamily) {
     newestRetainedByFamily.set(family, [...entries].sort((left, right) => right.revision - left.revision)[0]);
@@ -167,7 +175,7 @@ function planTaskDefinitions(plan) {
     const newest = newestRetainedByFamily.get(rollover.family);
     if (newest && newest.oldArn !== rollover.oldArn) throw new Error(`Terraform plan rollover does not target the newest retained revision: ${rollover.address}`);
   }
-  return { rolloverByAddress, createOnlyByAddress, noOpByAddress, retainedByAddress, retainedByFamily, newestRetainedByFamily };
+  return { rolloverByAddress, createOnlyByAddress, noOpByAddress, retainedByAddress, retainedByFamily, newestRetainedByFamily, retainedArnSet };
 }
 
 function ensurePlanHash(planBytes, expectedPlanSha256) {
@@ -244,7 +252,7 @@ function proveBrokerPackagePlan(plan, terraformConfiguration, expectedPackageChe
   return proof;
 }
 
-function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns, createOnlyFamilies, retainedByFamily, plan, rolloverByAddress, planSha256, terraformConfiguration) {
+function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha256, terraformConfiguration) {
   const normalizedConfigArn = String(config?.FunctionArn || "").replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
   const normalizedExpectedArn = String(brokerFunctionArn).replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
   if (!normalizedConfigArn || normalizedConfigArn !== normalizedExpectedArn) throw new Error("Broker Lambda identity does not match the expected function.");
@@ -258,29 +266,38 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
   for (const mode of expectedModes) {
     const identity = familyFromArn(taskDefinitions[mode], `broker task definition for ${mode}`);
     if (identity.family !== expectedBrokerFamily(mode)) throw new Error(`Broker task definition family is unexpected for ${mode}.`);
-    if (createOnlyFamilies.has(identity.family) && !retainedByFamily.has(identity.family)) throw new Error(`Create-only task-definition family is unexpectedly referenced by broker: ${mode}.`);
+    const retainedArns = retainedArnSetByFamily.get(identity.family) || new Set();
+    const currentNoOpArns = currentNoOpByFamily.get(identity.family) || new Set();
+    const currentArns = currentArnSetByFamily.get(identity.family) || new Set();
+    if ((retainedArns.size > 0 || currentNoOpArns.size > 0)
+      && !retainedArns.has(identity.arn) && !currentNoOpArns.has(identity.arn) && !currentArns.has(identity.arn)) throw new Error(`Broker task-definition ARN is not an explicitly retained or current no-op revision: ${mode}.`);
     brokerReferences.set(identity.arn, mode);
     brokerReferencesByFamily.set(identity.family, [...(brokerReferencesByFamily.get(identity.family) || []), mode]);
   }
   const atomicByAddress = new Map(rolloverByAddress);
   for (const [address, entry] of [...createOnlyFamilies].flatMap((family) => {
     const current = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).find(([, candidateFamily]) => candidateFamily === family)?.[0];
-    return current && retainedByFamily.has(family) ? [[current, { address: current, family, oldArn: retainedByFamily.get(family).oldArn, proposedFamily: family }]] : [];
+    const newest = newestRetainedByFamily.get(family);
+    return current && newest ? [[current, { address: current, family, oldArn: newest.oldArn, proposedFamily: family }]] : [];
   })) atomicByAddress.set(address, entry);
   const rolloverByFamily = new Map([...atomicByAddress.values()].map((entry) => [entry.family, entry]));
   const plannedAtomicBrokerRollovers = [];
   for (const [arn, mode] of brokerReferences) {
     const identity = familyFromArn(arn, `broker task definition for ${mode}`);
     const rollover = rolloverByFamily.get(identity.family);
+    const retainedArns = retainedArnSetByFamily.get(identity.family) || new Set();
+    const currentNoOpArns = currentNoOpByFamily.get(identity.family) || new Set();
     if (!rollover) continue;
-    if (arn === rollover.oldArn) {
+    if (retainedArns.has(identity.arn)) {
       try {
-        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, atomicByAddress, planSha256, terraformConfiguration));
+        const atomicByLiveArn = new Map(atomicByAddress);
+        atomicByLiveArn.set(rollover.address, { ...rollover, oldArn: identity.arn });
+        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, atomicByLiveArn, planSha256, terraformConfiguration));
       } catch (error) {
         throw new Error(`Broker Lambda still references superseded task definition ${arn}: ${error.message}`);
       }
-    } else if (identity.revision < familyFromArn(rollover.oldArn, `${rollover.address} rollover before task definition`).revision) {
-      throw new Error(`Broker Lambda task-definition ARN does not match the rollover before ARN for ${identity.family}.`);
+    } else if (currentNoOpArns.size > 0 && !currentNoOpArns.has(identity.arn) && !currentArns.has(identity.arn)) {
+      throw new Error(`Broker Lambda task-definition ARN is not an explicitly retained or current no-op revision for ${identity.family}.`);
     }
   }
   for (const oldArn of oldArns) {
@@ -344,12 +361,16 @@ function referenceNamesByFamily(items, families, arnKey, nameKey) {
   return references;
 }
 
-function assertCreateOnlyReferences(items, families, retainedByFamily, arnKey, nameKey) {
+function assertStageBLiveReferences(items, allowedByFamily, createOnlyFamilies, arnKey, nameKey) {
   for (const item of items) {
-    const family = familyFromArn(item[arnKey], `${nameKey} task definition`).family;
-    if (!families.has(family)) continue;
-    const retainedArn = retainedByFamily.get(family);
-    if (!retainedArn || item[arnKey] !== retainedArn.oldArn) throw new Error(`Create-only task-definition family remains referenced: ${family}`);
+    const family = observedFamily(item[arnKey], `${nameKey} task definition`);
+    const allowed = allowedByFamily.get(family);
+    if (createOnlyFamilies.has(family) && (!allowed || !allowed.has(item[arnKey]))) {
+      throw new Error(`Create-only task-definition family remains referenced: ${item[arnKey]}`);
+    }
+    if (allowed?.size > 0 && !allowed.has(item[arnKey])) {
+      throw new Error(`Superseded task definition remains referenced: ${item[arnKey]} (${nameKey} references an unrecorded task-definition ARN)`);
+    }
   }
 }
 
@@ -459,6 +480,25 @@ export function generateReferenceAudit({
   } = planTaskDefinitions(plan);
   const createOnlyFamilies = new Set([...createOnlyByAddress.values()].map((entry) => entry.family));
   const noOpFamilies = new Set([...noOpByAddress.values()].map((entry) => entry.family));
+  const retainedArnSetByFamily = new Map([...retainedByFamily].map(([family, entries]) => [family, new Set(entries.map((entry) => entry.oldArn))]));
+  const currentNoOpByFamily = new Map();
+  for (const entry of noOpByAddress.values()) currentNoOpByFamily.set(entry.family, new Set([...(currentNoOpByFamily.get(entry.family) || []), entry.priorArn]));
+  const currentArnSetByFamily = new Map();
+  for (const entry of createOnlyByAddress.values()) {
+    if (entry.proposedArn) {
+      const identity = familyFromArn(entry.proposedArn, `${entry.address} planned current task definition`);
+      if (identity.family !== entry.family) throw new Error(`Planned current task-definition ARN family mismatch: ${entry.address}`);
+      currentArnSetByFamily.set(entry.family, new Set([...(currentArnSetByFamily.get(entry.family) || []), identity.arn]));
+    }
+  }
+  const allowedLiveArnsByFamily = new Map();
+  for (const family of STAGE_B_TASK_DEFINITION_FAMILY_NAMES) {
+    allowedLiveArnsByFamily.set(family, new Set([
+      ...(retainedArnSetByFamily.get(family) || []),
+      ...(currentNoOpByFamily.get(family) || []),
+      ...(currentArnSetByFamily.get(family) || []),
+    ]));
+  }
   const observedCallerArn = validateCaller(callerArn || reader.getCallerIdentity()?.Arn);
 
   const oldDefinitions = [];
@@ -488,13 +528,13 @@ export function generateReferenceAudit({
     referencesByArn: brokerReferencesByArn,
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
-  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, newestRetainedByFamily, plan, rolloverByAddress, planSha, terraformConfiguration);
+  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha, terraformConfiguration);
   const serviceReferences = referenceNames(services, oldArns, "taskDefinition", "serviceName");
   const runningReferences = referenceNames(runningTasks, oldArns, "taskDefinitionArn", "taskArn");
   const pendingReferences = referenceNames(pendingTasks, oldArns, "taskDefinitionArn", "taskArn");
-  assertCreateOnlyReferences(services, createOnlyFamilies, newestRetainedByFamily, "taskDefinition", "serviceName");
-  assertCreateOnlyReferences(runningTasks, createOnlyFamilies, newestRetainedByFamily, "taskDefinitionArn", "taskArn");
-  assertCreateOnlyReferences(pendingTasks, createOnlyFamilies, newestRetainedByFamily, "taskDefinitionArn", "taskArn");
+  assertStageBLiveReferences(services, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinition", "serviceName");
+  assertStageBLiveReferences(runningTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
+  assertStageBLiveReferences(pendingTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
   const unretainedCreateOnlyFamilies = new Set([...createOnlyFamilies].filter((family) => !newestRetainedByFamily.has(family)));
   const createOnlyServiceReferences = referenceNamesByFamily(services, unretainedCreateOnlyFamilies, "taskDefinition", "serviceName");
   const createOnlyRunningReferences = referenceNamesByFamily(runningTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
@@ -595,6 +635,11 @@ export function generateReferenceAudit({
       .map((entry) => retainedAuditByAddress.get(entry.address)),
     createOnlyTaskDefinitions,
     noOpTaskDefinitions,
+    currentTaskDefinitions: {
+      currentCreates: createOnlyTaskDefinitions.length,
+      currentNoOps: noOpTaskDefinitions.length,
+      total: createOnlyTaskDefinitions.length + noOpTaskDefinitions.length,
+    },
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
     planJsonSha256: planSha,

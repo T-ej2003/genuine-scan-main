@@ -27,6 +27,10 @@ const packageBytes = Buffer.from("stage-b-broker-zip-fixture-v1");
 const packageChecksum = sha256(Buffer.from("stage-b-full-rls-release-package-fixture-v1"));
 const brokerZipFileSha256 = sha256(packageBytes);
 const packageSourceCodeHash = crypto.createHash("sha256").update(packageBytes).digest("base64");
+const releaseSha = "a".repeat(40);
+const sourceContractSha256 = "b".repeat(64);
+const migrationSetDigest = "c".repeat(64);
+const imageFor = (name) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${name}@sha256:${"d".repeat(64)}`;
 const packageDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-audit-"));
 const packagePath = path.join(packageDirectory, "broker.zip");
 fs.writeFileSync(packagePath, packageBytes, { mode: 0o600 });
@@ -65,7 +69,7 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
     },
   }));
   if (appendOnly) {
-    const current = changes.map((change) => ({ ...change, change: { ...change.change, actions: ["create"], before: null, replace_paths: undefined } }));
+    const current = changes.map((change) => ({ ...change, change: { ...change.change, actions: ["create"], before: null, after: { ...change.change.after, arn: newArnFor(change.change.after.family) }, replace_paths: undefined } }));
     const retained = changes.filter(({ address }) => address !== readOnlyCanaryAddress).map((change) => {
       const retainedAddress = retainedAddressFor(change.address);
       return { ...change, address: retainedAddress, change: { actions: ["no-op"], before: change.change.before, after: change.change.after } };
@@ -76,15 +80,26 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
     variables: {
       package_checksum_sha256: { value: packageChecksum },
       broker_package_path: { value: packagePath },
+      release_sha: { value: releaseSha },
+      source_contract_sha256: { value: sourceContractSha256 },
+      migration_set_digest: { value: migrationSetDigest },
+      backend_image: { value: imageFor("mscqr-backend") },
+      worker_image: { value: imageFor("mscqr-worker") },
+      executor_image: { value: imageFor("mscqr-backend") },
+      canary_image: { value: imageFor("mscqr-backend") },
+      read_only_canary_image: { value: imageFor("mscqr-backend") },
     },
     resource_changes: changes,
   };
   mutatePlan?.(plan);
+  if (!plan.planned_values) {
+    plan.planned_values = { root_module: { resources: plan.resource_changes.filter((item) => item.type === "aws_ecs_task_definition").map((item) => ({ address: item.address, type: item.type, index: item.address.match(/\["([^\"]+)"\]$/)?.[1], values: item.change.after })) } };
+  }
   const planBytes = Buffer.from(JSON.stringify(plan));
   const actualPlanSha = sha256(planBytes);
   const brokerTaskDefinitions = Object.fromEntries(STAGE_B_MODES.map((mode) => {
     const family = familyForMode(mode);
-    return [mode, newArnFor(family)];
+    return [mode, appendOnly ? oldArnFor(family) : newArnFor(family)];
   }));
   const baseConfig = {
     FunctionArn: brokerFunctionArn,
@@ -153,7 +168,8 @@ function validateBrokerPlan(fixture, audit) {
 }
 
 function makeCreateOnlyFixture({ mutatePlan, mutateReader, appendOnly = false } = {}) {
-  return makeFixture({
+  const build = appendOnly ? makeAtomicBrokerFixture : makeFixture;
+  return build({
     appendOnly,
     mutatePlan: (plan) => {
       const change = plan.resource_changes.find((item) => item.address === readOnlyCanaryAddress);
@@ -244,6 +260,7 @@ function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", package
         const config = original();
         const variables = config.Environment.Variables;
         const taskDefinitions = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
+        for (const brokerMode of STAGE_B_MODES) taskDefinitions[brokerMode] = newArnFor(familyForMode(brokerMode));
         taskDefinitions[mode] = oldArnFor(familyForMode(mode));
         variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
         return config;
@@ -280,6 +297,9 @@ function makeMixedFixture({ mutatePlan, mutateReader } = {}) {
     mutatePlan: (plan) => {
       const change = plan.resource_changes.find((item) => item.address === backendAddress);
       change.change.actions = ["no-op"];
+      const definition = JSON.stringify([{ image: plan.variables.backend_image.value, environment: [{ name: "RELEASE_GIT_SHA", value: plan.variables.release_sha.value }] }]);
+      change.change.before = { family: change.change.before.family, arn: oldArnFor(change.change.before.family), container_definitions: definition };
+      change.change.after = { family: change.change.after.family, arn: change.change.before.arn, container_definitions: definition };
       mutatePlan?.(plan);
     },
     mutateReader,
@@ -413,6 +433,88 @@ test("mixed rollover, create-only, and no-op plan classifications pass", () => {
     pendingTaskReferences: [],
     brokerReferenceModes: [],
   }]);
+});
+
+test("append-only retry records twelve current create/no-op definitions", () => {
+  const audit = generate(makeCreateOnlyFixture({
+    appendOnly: true,
+    mutatePlan: (plan) => {
+      const change = plan.resource_changes.find((item) => item.address === backendAddress);
+      const family = STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress];
+      const definitions = JSON.stringify([{ image: plan.variables.backend_image.value, environment: [
+        { name: "RELEASE_GIT_SHA", value: releaseSha },
+      ] }]);
+      const immutable = {
+        network_mode: "awsvpc",
+        requires_compatibilities: ["FARGATE"],
+        cpu: "1024",
+        memory: "2048",
+        execution_role_arn: "arn:aws:iam::368992683803:role/backend-execution",
+        task_role_arn: "arn:aws:iam::368992683803:role/backend-task",
+        runtime_platform: { operating_system_family: "LINUX", cpu_architecture: "X86_64" },
+        volumes: [],
+        tags: { Environment: "production", ManagedBy: "Terraform", Component: "full-rls-green-stage-b" },
+      };
+      change.change.actions = ["no-op"];
+      change.change.before = { ...change.change.after, ...immutable, arn: newArnFor(family), container_definitions: definitions };
+      change.change.after = { ...change.change.before };
+      const planned = plan.planned_values.root_module.resources.find((item) => item.address === backendAddress);
+      planned.values = { ...planned.values, ...change.change.after };
+    },
+  }));
+  assert.deepEqual(audit.currentTaskDefinitions, { currentCreates: 11, currentNoOps: 1, total: 12 });
+});
+
+test("all retained revisions are valid live references, but an unrecorded revision fails", () => {
+  const addSecondGeneration = (plan) => {
+    for (const address of Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES)) {
+      const family = STAGE_B_TASK_DEFINITION_FAMILIES[address];
+      let retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(address));
+      if (!retained) {
+        retained = { address: retainedAddressFor(address), type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family, arn: oldArnFor(family) }, after: { family } } };
+        plan.resource_changes.push(retained);
+      }
+      const second = structuredClone(retained);
+      second.address = retainedAddressFor(address, "bbbbbbbb");
+      second.change.before.arn = second.change.before.arn.replace(":1", ":2");
+      plan.resource_changes.push(second);
+    }
+  };
+  const olderService = makeAtomicBrokerFixture({ mutatePlan: addSecondGeneration, mutateReader: (reader) => {
+    reader.listServices = () => [serviceArnFor(0)];
+    reader.describeServices = () => ({ services: [serviceRecord(serviceArnFor(0), 0, oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]))], failures: [] });
+  } });
+  olderService.plan.relevant_attributes.push({ resource: executorCollectionAddress, attribute: [] });
+  assert.doesNotThrow(() => generate(olderService));
+
+  const unrecorded = makeAtomicBrokerFixture({ mutatePlan: addSecondGeneration, mutateReader: (reader) => {
+    reader.listServices = () => [serviceArnFor(0)];
+    reader.describeServices = () => ({ services: [serviceRecord(serviceArnFor(0), 0, `${oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]).slice(0, -1)}99`)], failures: [] });
+  } });
+  unrecorded.plan.relevant_attributes.push({ resource: executorCollectionAddress, attribute: [] });
+  assert.throws(() => generate(unrecorded), /Superseded task definition remains referenced|Create-only task-definition family remains referenced/);
+});
+
+test("running and pending tasks may reference different retained generations", () => {
+  const fixture = makeAtomicBrokerFixture({ mutatePlan: (plan) => {
+    for (const address of Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES)) {
+      const family = STAGE_B_TASK_DEFINITION_FAMILIES[address];
+      let retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(address));
+      if (!retained) {
+        retained = { address: retainedAddressFor(address), type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family, arn: oldArnFor(family) }, after: { family } } };
+        plan.resource_changes.push(retained);
+      }
+      const second = structuredClone(retained);
+      second.address = retainedAddressFor(address, "bbbbbbbb");
+      second.change.before.arn = second.change.before.arn.replace(":1", ":2");
+      plan.resource_changes.push(second);
+    }
+    plan.relevant_attributes.push({ resource: executorCollectionAddress, attribute: [] });
+  }, mutateReader: (reader) => {
+    reader.listTasks = (status) => status === "RUNNING" ? [taskArnFor("RUNNING", 0)] : [taskArnFor("PENDING", 0)];
+    reader.describeTasks = (arns) => ({ tasks: [taskRecord(arns[0], arns[0].includes("running") ? "RUNNING" : "PENDING", arns[0].includes("running") ? oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]) : newArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]))], failures: [] });
+  } });
+  assert.doesNotThrow(() => generate(fixture));
 });
 
 test("revision-keyed retained history supports a second generation", () => {
@@ -1124,7 +1226,7 @@ test("live broker ARN must match the rollover before ARN", () => {
   const fixture = makeAtomicBrokerFixture({ mutatePlan: (plan) => {
     plan.resource_changes.find((item) => item.address === retainedAddressFor(canaryAddress)).change.before.arn = newArnFor(familyForMode("full-rls-application-canary"));
   } });
-  assert.throws(() => generate(fixture), /does not match the rollover before ARN/);
+  assert.throws(() => generate(fixture), /not an explicitly retained|does not match the rollover before ARN/);
 });
 
 test("unrelated superseded broker reference fails closed", () => {
