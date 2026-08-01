@@ -124,6 +124,8 @@ every retained live broker mapping must have matching atomic rollover evidence.
 Cluster-wide ECS observations for unrelated workloads remain recorded but are
 outside the Stage B family decision; unknown `mscqr-production-*` families are
 still rejected.
+The audit consumer also requires the shared schema version, the exact production
+cluster ARN, and the MFA-backed release-deployer caller identity.
 
 This model does not authorize ECS service updates, task execution, database
 actions, broker invocation, ALB, DNS, or traffic changes. Old inactive revision

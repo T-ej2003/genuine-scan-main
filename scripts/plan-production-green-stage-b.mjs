@@ -9,10 +9,11 @@ import {
   assertStageBBrokerCreatePlan,
   assertStageBReferenceAuditFreshness,
   assertStageBCurrentTaskDefinitionNoOp,
+  STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
 } from "./aws/stage-b-reference-audit-contract.mjs";
-import { STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
+import { STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const allowed = new Set(["aws_cloudwatch_log_group", "aws_iam_role", "aws_iam_role_policy", "aws_ecs_task_definition", "aws_dynamodb_table", "aws_lambda_function", "aws_lambda_alias", "aws_lambda_permission"]);
@@ -23,6 +24,7 @@ const exactReplacePaths = (paths) => Array.isArray(paths) && paths.length === 1 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const retainedAddressPattern = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([^"]+)"\]$/;
 const taskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):([1-9][0-9]*)$/;
+const releaseCallerArnPattern = /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[A-Za-z0-9+=,.@_-]{2,64}$/;
 const expectedBrokerFamily = (mode) => mode === "full-rls-application-canary"
   ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
   : `mscqr-production-full-rls-green-${mode}`;
@@ -327,6 +329,9 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
   }
   if (sha256(referenceAuditBytes) !== referenceAuditSha256) throw new Error("Stage B append-only reference audit SHA-256 mismatch.");
   if (sha256(planJsonBytes) !== planJsonSha256) throw new Error("Stage B append-only plan JSON SHA-256 mismatch.");
+  if (referenceAudit.schemaVersion !== STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION) throw new Error("Stage B append-only reference audit schema version is missing or unsupported.");
+  if (referenceAudit.clusterArn !== STAGE_B.clusterArn) throw new Error("Stage B append-only reference audit cluster identity does not match the production cluster.");
+  if (typeof referenceAudit.callerArn !== "string" || !releaseCallerArnPattern.test(referenceAudit.callerArn)) throw new Error("Stage B append-only reference audit caller identity is missing or unauthorized.");
   assertStageBReferenceAuditFreshness(referenceAudit.auditedAt, now);
   if (referenceAudit.planJsonSha256 !== planJsonSha256) throw new Error("Stage B append-only reference audit is bound to a different plan JSON.");
 

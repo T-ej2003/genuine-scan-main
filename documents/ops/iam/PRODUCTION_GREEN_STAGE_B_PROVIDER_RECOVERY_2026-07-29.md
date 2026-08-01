@@ -146,7 +146,9 @@ mode mappings fail closed, as does retained live mapping without its matching
 atomic rollover evidence. Cluster-wide service and task observations may also
 contain unrelated workloads; those valid non-Stage-B families are recorded and
 left out of Stage B reference decisions, while an unknown `mscqr-production-*`
-family remains a fail-closed error.
+family remains a fail-closed error. The validator also requires schema version,
+the exact production cluster ARN, and a caller ARN for the MFA-backed release
+deployer before accepting the audit.
 
 After this corrective PR is merged, update the live provider managed policy from
 v4 and verify the complete attachment set before any Terraform retry. Do not
