@@ -176,6 +176,11 @@ test("mixed pre-canary and post-canary history is valid, but later twelve-family
   assert.doesNotThrow(() => assertStageBPlan(valid, { terraformConfiguration }));
   const missingReadOnly = { resource_changes: [...currentCreates(), ...preCanary("aaaaaaaa", 1), ...postCanary("cccccccc", 3), ...preCanary("dddddddd", 4)] };
   assert.throws(() => assertStageBPlan(missingReadOnly, { terraformConfiguration }), /post-canary|read-only-canary/);
+  const mixedPostCanary = [
+    retainedForAddress('aws_ecs_task_definition.candidate["backend"]', "eeeeeeee", 2),
+    ...firstRolloverAddresses.filter((taskAddress) => !taskAddress.includes('["backend"]')).map((taskAddress) => retainedForAddress(taskAddress, "eeeeeeee", 4)),
+  ];
+  assert.throws(() => assertStageBPlan({ resource_changes: [...currentCreates(), ...preCanary("aaaaaaaa", 1), ...postCanary("cccccccc", 3), ...mixedPostCanary] }, { terraformConfiguration }), /post-canary|revision ordering/);
 });
 
 test("a later rollover missing the newest read-only-canary history entry fails", () => {

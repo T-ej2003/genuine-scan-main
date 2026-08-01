@@ -180,7 +180,7 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
       const newest = [...entries].sort((left, right) => right.revision - left.revision)[0];
       if (entries.some((entry) => entry.revision === newest.revision && entry.arn !== newest.arn)) throw new Error(`Stage B retained task-definition newest revision is ambiguous: ${family}`);
     }
-    const canaryGenerationAnchors = [];
+    const canaryGenerations = [];
     for (const [generationKey, entries] of retainedByGeneration) {
       const families = new Set(entries.map((entry) => entry.family));
       const hasReadOnlyCanary = families.has(readOnlyCanaryFamily);
@@ -190,14 +190,29 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
       }
       const anchor = entries.find((entry) => entry.family === backendFamily);
       if (!anchor) throw new Error(`Stage B retained generation ${generationKey} is missing its backend revision anchor.`);
-      if (hasReadOnlyCanary) canaryGenerationAnchors.push(anchor.revision);
+      if (hasReadOnlyCanary) canaryGenerations.push({ generationKey, entries, anchor });
     }
-    if (canaryGenerationAnchors.length > 0) {
-      const firstCanaryAnchor = Math.min(...canaryGenerationAnchors);
+    if (canaryGenerations.length > 0) {
+      const firstCanaryGeneration = [...canaryGenerations].sort((left, right) => left.anchor.revision - right.anchor.revision)[0];
+      const firstCanaryRevisionByFamily = new Map(firstCanaryGeneration.entries.map((entry) => [entry.family, entry.revision]));
       for (const [generationKey, entries] of retainedByGeneration) {
-        if (entries.some((entry) => entry.family === readOnlyCanaryFamily)) continue;
-        const anchor = entries.find((entry) => entry.family === backendFamily);
-        if (anchor.revision > firstCanaryAnchor) throw new Error(`Stage B post-canary retained generation ${generationKey} must include read-only-canary.`);
+        const hasReadOnlyCanary = entries.some((entry) => entry.family === readOnlyCanaryFamily);
+        if (hasReadOnlyCanary && generationKey !== firstCanaryGeneration.generationKey) {
+          const anchor = entries.find((entry) => entry.family === backendFamily);
+          for (const entry of entries) {
+            if (entry.revision <= firstCanaryRevisionByFamily.get(entry.family)) {
+              throw new Error(`Stage B retained generation ${generationKey} has inconsistent revision ordering for ${entry.family}.`);
+            }
+          }
+          if (anchor.revision <= firstCanaryGeneration.anchor.revision) {
+            throw new Error(`Stage B retained generation ${generationKey} has an invalid canary revision ordering.`);
+          }
+          continue;
+        }
+        if (hasReadOnlyCanary) continue;
+        if (entries.some((entry) => entry.revision >= firstCanaryRevisionByFamily.get(entry.family))) {
+          throw new Error(`Stage B post-canary retained generation ${generationKey} must include read-only-canary.`);
+        }
       }
     }
   }
