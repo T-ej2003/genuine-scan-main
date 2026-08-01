@@ -23,6 +23,20 @@
       }
     },
     {
+      "Sid": "PassExactStageBReadOnlyCanaryRolesToEcsTasks",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "ecs-tasks.amazonaws.com"
+        }
+      }
+    },
+    {
       "Sid": "UpdateExactStageBBrokerFunctionRelease",
       "Effect": "Allow",
       "Action": [

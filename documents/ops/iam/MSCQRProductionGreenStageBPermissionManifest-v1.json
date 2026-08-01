@@ -1,0 +1,267 @@
+{
+  "schemaVersion": 1,
+  "accountId": "368992683803",
+  "region": "eu-west-2",
+  "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+  "provider": {
+    "source": "hashicorp/aws",
+    "version": "6.56.0",
+    "lockFile": "infra/aws/terraform/production-green-stage-b/.terraform.lock.hcl"
+  },
+  "required": [
+    {
+      "id": "refresh-read-only-canary-roles",
+      "phase": "refresh",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
+      ],
+      "context": [],
+      "evidence": "locked hashicorp/aws provider refresh of the two imported aws_iam_role resources"
+    },
+    {
+      "id": "refresh-read-only-canary-role-policy-lists",
+      "phase": "refresh",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
+      ],
+      "context": [],
+      "evidence": "locked hashicorp/aws provider refresh of imported aws_iam_role_policy and role resources"
+    },
+    {
+      "id": "refresh-read-only-canary-attached-policy-lists",
+      "phase": "refresh",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
+      ],
+      "context": [],
+      "evidence": "locked hashicorp/aws provider refresh of imported role policy relationships"
+    },
+    {
+      "id": "refresh-read-only-canary-execution-inline-policy",
+      "phase": "refresh",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution"
+      ],
+      "context": [],
+      "evidence": "locked hashicorp/aws provider refresh of aws_iam_role_policy.execution[read_only_canary]"
+    },
+    {
+      "id": "refresh-stage-b-log-tags",
+      "phase": "refresh",
+      "action": "logs:ListTagsForResource",
+      "resources": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary"
+      ],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws provider refresh of four Stage B log groups"
+    },
+    {
+      "id": "reference-audit-ecs-task-definitions",
+      "phase": "reference-audit",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "AWS authorization evidence: ecs:DescribeTaskDefinition is not resource-scoped"
+    },
+    {
+      "id": "reference-audit-ecs-services",
+      "phase": "reference-audit",
+      "action": "ecs:ListServices",
+      "resources": ["*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "ecs:cluster", "type": "string", "values": ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"]}
+      ],
+      "evidence": "source-controlled reference-audit policy and generator contract"
+    },
+    {
+      "id": "reference-audit-ecs-tasks",
+      "phase": "reference-audit",
+      "action": "ecs:ListTasks",
+      "resources": ["*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "ecs:cluster", "type": "string", "values": ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"]}
+      ],
+      "evidence": "source-controlled reference-audit policy and generator contract"
+    },
+    {
+      "id": "reference-audit-ecs-service-details",
+      "phase": "reference-audit",
+      "action": "ecs:DescribeServices",
+      "resources": ["arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "ecs:cluster", "type": "string", "values": ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"]}
+      ],
+      "evidence": "source-controlled reference-audit policy and generator contract"
+    },
+    {
+      "id": "reference-audit-ecs-task-details",
+      "phase": "reference-audit",
+      "action": "ecs:DescribeTasks",
+      "resources": ["arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "ecs:cluster", "type": "string", "values": ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"]}
+      ],
+      "evidence": "source-controlled reference-audit policy and generator contract"
+    },
+    {
+      "id": "reference-audit-broker-configuration",
+      "phase": "reference-audit",
+      "action": "lambda:GetFunctionConfiguration",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*"
+      ],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "source-controlled reference-audit policy and generator contract"
+    },
+    {
+      "id": "create-stage-b-log-groups",
+      "phase": "apply",
+      "action": "logs:CreateLogGroup",
+      "plan": {"type": "aws_cloudwatch_log_group", "actions": ["create"]},
+      "resources": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:*"
+      ],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "source-controlled CreateExactStageBLogs statement and Terraform log-group create"
+    },
+    {
+      "id": "tag-stage-b-log-groups",
+      "phase": "apply",
+      "action": "logs:TagResource",
+      "plan": {"type": "aws_cloudwatch_log_group", "actions": ["create"]},
+      "resources": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:*"
+      ],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:RequestTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:RequestTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:RequestTag/Component", "type": "string", "values": ["full-rls-green-stage-b"]},
+        {"key": "aws:TagKeys", "type": "stringList", "values": ["Environment", "ManagedBy", "Component"]}
+      ],
+      "evidence": "source-controlled TagExactStageBLogs statement and Terraform log-group create"
+    },
+    {
+      "id": "set-stage-b-log-retention",
+      "phase": "apply",
+      "action": "logs:PutRetentionPolicy",
+      "plan": {"type": "aws_cloudwatch_log_group", "actions": ["create"]},
+      "resources": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:*"
+      ],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "source-controlled SetExactStageBLogRetention statement and Terraform retention contract"
+    },
+    {
+      "id": "register-read-only-canary-task-definition",
+      "phase": "apply",
+      "action": "ecs:RegisterTaskDefinition",
+      "plan": {"type": "aws_ecs_task_definition", "actions": ["create"], "family": "mscqr-production-full-rls-green-read-only-canary"},
+      "resources": ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-read-only-canary:*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:RequestTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:RequestTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:RequestTag/Component", "type": "string", "values": ["full-rls-green-stage-b"]},
+        {"key": "aws:TagKeys", "type": "stringList", "values": ["Environment", "ManagedBy", "Component"]}
+      ],
+      "evidence": "failed apply API and exact Terraform aws_ecs_task_definition.candidate[read_only_canary] create"
+    },
+    {
+      "id": "tag-read-only-canary-task-definition",
+      "phase": "apply",
+      "action": "ecs:TagResource",
+      "plan": {"type": "aws_ecs_task_definition", "actions": ["create"], "family": "mscqr-production-full-rls-green-read-only-canary"},
+      "resources": ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-read-only-canary:*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:RequestTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:RequestTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:RequestTag/Component", "type": "string", "values": ["full-rls-green-stage-b"]},
+        {"key": "aws:TagKeys", "type": "stringList", "values": ["Environment", "ManagedBy", "Component"]}
+      ],
+      "evidence": "successful eleven-family registrations and source-controlled TagExactStageBTaskDefinitions statement"
+    },
+    {
+      "id": "pass-read-only-canary-task-roles",
+      "phase": "apply",
+      "action": "iam:PassRole",
+      "plan": {"type": "aws_ecs_task_definition", "actions": ["create"], "family": "mscqr-production-full-rls-green-read-only-canary"},
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
+      ],
+      "context": [{"key": "iam:PassedToService", "type": "string", "values": ["ecs-tasks.amazonaws.com"]}],
+      "evidence": "ECS RegisterTaskDefinition requires PassRole for both executionRoleArn and taskRoleArn"
+    },
+    {
+      "id": "update-broker-function-code-and-configuration",
+      "phase": "apply",
+      "action": "lambda:UpdateFunctionConfiguration",
+      "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
+      "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "Terraform aws_lambda_function.broker update and prior successful apply"
+    },
+    {
+      "id": "update-broker-function-code",
+      "phase": "apply",
+      "action": "lambda:UpdateFunctionCode",
+      "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
+      "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "Terraform aws_lambda_function.broker source_code_hash transition"
+    },
+    {
+      "id": "publish-broker-version",
+      "phase": "apply",
+      "action": "lambda:PublishVersion",
+      "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
+      "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "Terraform aws_lambda_function.broker version transition"
+    },
+    {
+      "id": "update-reviewed-broker-alias",
+      "phase": "apply",
+      "action": "lambda:UpdateAlias",
+      "plan": {"type": "aws_lambda_alias", "actions": ["update"], "address": "aws_lambda_alias.reviewed"},
+      "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "Terraform aws_lambda_alias.reviewed update and prior successful apply"
+    }
+  ],
+  "forbidden": [
+    {"id": "pass-unrelated-role", "action": "iam:PassRole", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"], "context": [{"key": "iam:PassedToService", "type": "string", "values": ["ecs-tasks.amazonaws.com"]}], "reason": "PassRole is limited to the two read-only-canary roles"},
+    {"id": "pass-to-lambda", "action": "iam:PassRole", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"], "context": [{"key": "iam:PassedToService", "type": "string", "values": ["lambda.amazonaws.com"]}], "reason": "PassRole is limited to ECS tasks"},
+    {"id": "invoke-broker", "action": "lambda:InvokeFunction", "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"], "context": [], "reason": "Release role must not invoke the broker"},
+    {"id": "execute-ecs-task", "action": "ecs:RunTask", "resources": ["*"], "context": [], "reason": "Release role must not execute ECS tasks"},
+    {"id": "update-ecs-service", "action": "ecs:UpdateService", "resources": ["*"], "context": [], "reason": "Release role must not update services"},
+    {"id": "create-iam-role", "action": "iam:CreateRole", "resources": ["*"], "context": [], "reason": "Release role must not mutate IAM"},
+    {"id": "deregister-task-definition", "action": "ecs:DeregisterTaskDefinition", "resources": ["*"], "context": [], "reason": "Append-only release must not deregister revisions"}
+  ]
+}

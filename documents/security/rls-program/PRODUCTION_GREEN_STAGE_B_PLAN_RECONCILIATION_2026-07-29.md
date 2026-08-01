@@ -265,3 +265,17 @@ This split adds no IAM mutation authority, no deregistration authority, no task
 execution, no Lambda invocation, and no service, database, ALB, DNS, or traffic
 authority. The final retry still requires a fresh exact-SHA image set, a new
 plan-bound audit, and a valid validator result before applying the saved plan.
+
+The failed retry also proved the complete ECS role-passing boundary. Registering
+the read-only-canary task definition requires `iam:PassRole` for both its exact
+execution and task role ARNs, conditioned on
+`iam:PassedToService=ecs-tasks.amazonaws.com`. The final-write policy adds only
+that two-ARN statement; no other role, service, IAM mutation, ECS execution,
+service update, Lambda invocation, or deregistration authority is introduced.
+
+The source-controlled permission manifest records the evidence-backed refresh,
+registration, tagging, broker, alias, and PassRole API combinations. A fresh
+permission preflight must simulate every combination and inspect recent
+CloudTrail denials before apply. The apply wrapper requires that report, the
+exact plan SHA, the fresh audit SHA, and a valid validator result to bind to the
+same saved plan; Terraform cannot be invoked without all four gates.

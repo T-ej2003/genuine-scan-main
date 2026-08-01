@@ -580,4 +580,29 @@ The administrator must publish and attach this companion only to
 companion, before the fresh retry plan. No Lambda invocation, ECS task execution,
 service update, IAM mutation, deregistration, database, ALB, DNS, or traffic
 authority is granted. The old saved plan and audit remain stale and must not be
-reused.
+ reused.
+
+## Final partial-retry PassRole correction and preflight
+
+The later partial apply proved that ECS task-definition registration needs
+`iam:PassRole` for both the configured execution role and task role. The final
+write companion therefore grants `iam:PassRole` only for:
+
+- `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution`
+- `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task`
+
+The statement requires `iam:PassedToService=ecs-tasks.amazonaws.com`. It does
+not permit passing either role to Lambda, EC2, or another service, and adds no
+role or policy creation, update, attachment, invocation, task execution,
+service update, or task-definition deregistration authority.
+
+Before any later apply, run
+`scripts/aws/validate-production-green-stage-b-permissions.mjs` against the
+exact plan and `MSCQRProductionGreenStageBPermissionManifest-v1.json`. The
+preflight simulates every refresh, registration, tagging, Lambda-update,
+alias-update, and PassRole combination derived from that plan and checks recent
+CloudTrail denials after administrator publication. Its report is bound to the
+plan SHA and must be supplied to
+`scripts/apply-production-green-stage-b.mjs` with the plan-bound audit and valid
+Stage B validator result. Missing, stale, denied, unscoped, or unreviewed
+permission evidence blocks apply before Terraform is invoked.
