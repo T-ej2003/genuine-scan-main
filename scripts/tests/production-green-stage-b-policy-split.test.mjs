@@ -47,7 +47,12 @@ const controlSids = [
 ];
 const finalWriteSids = [
   "RegisterExactStageBReadOnlyCanaryTaskDefinition",
+  "PassExactStageBReadOnlyCanaryRolesToEcsTasks",
   "UpdateExactStageBBrokerFunctionRelease",
+];
+const readOnlyCanaryRoles = [
+  "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+  "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
 ];
 const stageBTaskFamilies = [
   "mscqr-production-rls-green-backend-candidate",
@@ -120,7 +125,7 @@ test("the split has exactly seven moved statements, ten provider-control stateme
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), finalWriteSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...movedSids, ...controlSids, ...finalWriteSids]).size, 19);
+  assert.equal(new Set([...movedSids, ...controlSids, ...finalWriteSids]).size, 20);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
   for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
@@ -191,6 +196,21 @@ test("retry write companion is exact and tag-constrained", () => {
   assert.equal(statementsForAction(policies.finalWrite, "lambda:AddPermission").length, 0);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:InvokeFunction").length, 0);
   assert.equal(policies.finalWrite.Statement.some((statement) => actionsOf(statement).some((action) => action.startsWith("lambda:") && statement.Resource === "*")), false);
+});
+
+test("final-write PassRole is limited to both canary roles and ECS tasks", () => {
+  const statement = statementOf(policies.finalWrite, "PassExactStageBReadOnlyCanaryRolesToEcsTasks");
+  assert.deepEqual(statement, {
+    Sid: "PassExactStageBReadOnlyCanaryRolesToEcsTasks",
+    Effect: "Allow",
+    Action: "iam:PassRole",
+    Resource: readOnlyCanaryRoles,
+    Condition: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } },
+  });
+  assert.equal(statementsForAction(policies.finalWrite, "iam:PassRole").length, 1);
+  assert.equal(statement.Resource.includes("*"), false);
+  assert.equal(statement.Resource.includes("mscqr-production-rls-green-backend-task"), false);
+  assert.equal(statement.Condition.StringEquals["iam:PassedToService"], "ecs-tasks.amazonaws.com");
 });
 
 test("unrelated ECS and CloudWatch Logs mutations remain denied", () => {
@@ -299,7 +319,7 @@ test("the three source-controlled policies carry only the reviewed read, recover
   for (const forbidden of [
     "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:DeleteService", "lambda:InvokeFunction",
     "iam:CreateRole", "iam:UpdateAssumeRolePolicy", "iam:PutRolePolicy",
-    "iam:AttachRolePolicy", "iam:PassRole", "sts:AssumeRole",
+    "iam:AttachRolePolicy", "sts:AssumeRole",
     "secretsmanager:GetSecretValue", "kms:Decrypt", "rds:Connect", "route53:ChangeResourceRecordSets",
     "elasticloadbalancing:ModifyListener",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
@@ -313,6 +333,7 @@ test("the three source-controlled policies carry only the reviewed read, recover
   assert.equal(actions.includes("lambda:UpdateFunctionCode"), true);
   assert.equal(actions.includes("lambda:PublishVersion"), true);
   assert.equal(actions.includes("lambda:UpdateAlias"), true);
+  assert.equal(actions.includes("iam:PassRole"), true);
 });
 
 test("validator rejects blue and unknown task-definition families and addresses", () => {

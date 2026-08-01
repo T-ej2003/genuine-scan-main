@@ -581,3 +581,41 @@ companion, before the fresh retry plan. No Lambda invocation, ECS task execution
 service update, IAM mutation, deregistration, database, ALB, DNS, or traffic
 authority is granted. The old saved plan and audit remain stale and must not be
 reused.
+
+The preflight consumes the AWS CLI simulator schema exactly as returned by IAM:
+`EvaluationResults`, `EvalActionName`, `EvalResourceName`, `EvalDecision`,
+`MatchedStatements`, and `MissingContextValues`. CamelCase substitutes are not
+accepted. The trusted caller must be the STS assumed-role ARN
+`arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/<session>`;
+the IAM role ARN is not sufficient.
+
+The apply wrapper runs `terraform show -json` against the exact saved binary plan,
+hashes the binary as `savedPlanSha256`, canonicalizes the generated JSON with
+stable key ordering, and verifies `canonicalPlanJsonSha256` against the approved
+plan and permission report. Lambda write simulations include RequestedRegion and
+all three exact ResourceTag contexts required by the final-write policy.
+
+## Final partial-retry PassRole correction and preflight
+
+The later partial apply proved that ECS task-definition registration needs
+`iam:PassRole` for both the configured execution role and task role. The final
+write companion therefore grants `iam:PassRole` only for:
+
+- `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution`
+- `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task`
+
+The statement requires `iam:PassedToService=ecs-tasks.amazonaws.com`. It does
+not permit passing either role to Lambda, EC2, or another service, and adds no
+role or policy creation, update, attachment, invocation, task execution,
+service update, or task-definition deregistration authority.
+
+Before any later apply, run
+`scripts/aws/validate-production-green-stage-b-permissions.mjs` against the
+exact plan and `MSCQRProductionGreenStageBPermissionManifest-v1.json`. The
+preflight simulates every refresh, registration, tagging, Lambda-update,
+alias-update, and PassRole combination derived from that plan and checks recent
+CloudTrail denials after administrator publication. Its report is bound to the
+plan SHA and must be supplied to
+`scripts/apply-production-green-stage-b.mjs` with the plan-bound audit and valid
+Stage B validator result. Missing, stale, denied, unscoped, or unreviewed
+permission evidence blocks apply before Terraform is invoked.
