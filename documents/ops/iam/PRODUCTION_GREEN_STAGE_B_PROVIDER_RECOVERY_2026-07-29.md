@@ -580,7 +580,20 @@ The administrator must publish and attach this companion only to
 companion, before the fresh retry plan. No Lambda invocation, ECS task execution,
 service update, IAM mutation, deregistration, database, ALB, DNS, or traffic
 authority is granted. The old saved plan and audit remain stale and must not be
- reused.
+reused.
+
+The preflight consumes the AWS CLI simulator schema exactly as returned by IAM:
+`EvaluationResults`, `EvalActionName`, `EvalResourceName`, `EvalDecision`,
+`MatchedStatements`, and `MissingContextValues`. CamelCase substitutes are not
+accepted. The trusted caller must be the STS assumed-role ARN
+`arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/<session>`;
+the IAM role ARN is not sufficient.
+
+The apply wrapper runs `terraform show -json` against the exact saved binary plan,
+hashes the binary as `savedPlanSha256`, canonicalizes the generated JSON with
+stable key ordering, and verifies `canonicalPlanJsonSha256` against the approved
+plan and permission report. Lambda write simulations include RequestedRegion and
+all three exact ResourceTag contexts required by the final-write policy.
 
 ## Final partial-retry PassRole correction and preflight
 

@@ -279,3 +279,11 @@ permission preflight must simulate every combination and inspect recent
 CloudTrail denials before apply. The apply wrapper requires that report, the
 exact plan SHA, the fresh audit SHA, and a valid validator result to bind to the
 same saved plan; Terraform cannot be invoked without all four gates.
+
+The permission gate uses the real PascalCase IAM simulator response contract and
+rejects missing or nonempty `MissingContextValues`. Caller evidence must be the
+exact STS assumed-role ARN. The saved binary plan is verified with both
+`savedPlanSha256` and a stable-key `canonicalPlanJsonSha256` derived from
+`terraform show -json`; an approved JSON file cannot be paired with another
+binary plan. Lambda write checks supply `aws:RequestedRegion` plus the exact
+Environment, ManagedBy, and Component ResourceTag contexts.

@@ -34,12 +34,19 @@ export function parseCli(argv) {
     planJsonPath: requireOption(argv, "--plan-json"),
     manifestPath: requireOption(argv, "--manifest"),
     outputPath: requireOption(argv, "--output"),
+    savedPlanPath: requireOption(argv, "--saved-plan"),
     expectedAccount: requireOption(argv, "--expected-account"),
     expectedRegion: requireOption(argv, "--expected-region"),
     generatedAt: readOption(argv, "--generated-at") || new Date().toISOString(),
     policyPublishedAt: requireOption(argv, "--policy-published-at"),
     cloudTrailSessionName: requireOption(argv, "--cloudtrail-session-name"),
   };
+}
+
+export function canonicalizeJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalizeJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalizeJson(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
 }
 
 function assertContext(context, label) {
@@ -50,6 +57,29 @@ function assertContext(context, label) {
     }
     if (!Array.isArray(entry.values) || entry.values.length === 0 || entry.values.some((value) => typeof value !== "string")) {
       throw new Error(`${label} has malformed context values.`);
+    }
+  }
+}
+
+const lambdaWriteActions = new Set([
+  "lambda:UpdateFunctionConfiguration",
+  "lambda:UpdateFunctionCode",
+  "lambda:PublishVersion",
+  "lambda:UpdateAlias",
+]);
+const requiredLambdaContext = new Map([
+  ["aws:RequestedRegion", ["eu-west-2"]],
+  ["aws:ResourceTag/Environment", ["production"]],
+  ["aws:ResourceTag/ManagedBy", ["Terraform"]],
+  ["aws:ResourceTag/Component", ["full-rls-green-stage-b"]],
+]);
+
+function assertExactContextValues(context, expected, label) {
+  const actual = new Map(context.map((entry) => [entry.key, entry]));
+  for (const [key, values] of expected) {
+    const entry = actual.get(key);
+    if (!entry || entry.type !== "string" || JSON.stringify(entry.values) !== JSON.stringify(values)) {
+      throw new Error(`${label} must include exact ${key} context.`);
     }
   }
 }
@@ -67,6 +97,15 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION 
       throw new Error(`Permission manifest resources are invalid: ${entry.id}.`);
     }
     assertContext(entry.context, entry.id);
+    if (lambdaWriteActions.has(entry.action)) {
+      const expectedResource = entry.action === "lambda:UpdateAlias"
+        ? "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"
+        : "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker";
+      if (entry.resources.length !== 1 || entry.resources[0] !== expectedResource) {
+        throw new Error(`${entry.id} must target only the reviewed broker function.`);
+      }
+      assertExactContextValues(entry.context, requiredLambdaContext, entry.id);
+    }
     if (entry.action === "iam:PassRole") {
       if (entry.resources.some((resource) => resource === "*" || resource.includes("*"))) throw new Error("PassRole may not use wildcard resources.");
       const service = entry.context.find((context) => context.key === "iam:PassedToService");
@@ -136,11 +175,18 @@ export function simulatePrincipalPolicy({ roleArn, evaluation: item, run = (args
   ];
   if (item.context.length > 0) args.push("--context-entries", ...contextArgs(item.context));
   const response = JSON.parse(run(args));
-  const result = response.evaluationResults?.[0];
-  if (!result || !["allowed", "explicitDeny", "implicitDeny"].includes(result.evalDecision)) {
+  if (!Array.isArray(response.EvaluationResults) || response.EvaluationResults.length !== 1) {
+    throw new Error(`IAM simulation returned malformed EvaluationResults for ${item.id}.`);
+  }
+  const result = response.EvaluationResults[0];
+  if (!result || result.EvalActionName !== item.action || result.EvalResourceName !== item.resource) {
+    throw new Error(`IAM simulation action or resource mismatch for ${item.id}.`);
+  }
+  if (!Array.isArray(result.MatchedStatements) || !Array.isArray(result.MissingContextValues) || result.MissingContextValues.length > 0
+    || !["allowed", "explicitDeny", "implicitDeny"].includes(result.EvalDecision)) {
     throw new Error(`IAM simulation returned malformed output for ${item.id}.`);
   }
-  return { decision: result.evalDecision, matchedStatements: result.matchedStatements?.length || 0 };
+  return { decision: result.EvalDecision, matchedStatements: result.MatchedStatements.length, missingContextValues: result.MissingContextValues };
 }
 
 export function inspectCloudTrailDenials({ sessionName, startTime, requiredActions, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
@@ -174,6 +220,7 @@ export function runPermissionPreflight({
   roleArn,
   plan,
   planBytes,
+  savedPlanBytes,
   manifest,
   expectedAccount = ACCOUNT,
   expectedRegion = REGION,
@@ -185,6 +232,7 @@ export function runPermissionPreflight({
   cloudTrail = ({ sessionName, startTime, requiredActions }) => inspectCloudTrailDenials({ sessionName, startTime, requiredActions }),
 } = {}) {
   if (expectedAccount !== ACCOUNT || expectedRegion !== REGION) throw new Error("Expected account or region is wrong.");
+  if (!Buffer.isBuffer(savedPlanBytes) || savedPlanBytes.length === 0) throw new Error("Saved binary plan bytes are required for permission preflight.");
   if (roleArn !== RELEASE_ROLE_ARN) throw new Error("Permission preflight role ARN is not the production release role.");
   validateManifest(manifest, { account: expectedAccount, region: expectedRegion });
   if (!plan?.variables || plan.variables.account_id?.value !== expectedAccount || plan.variables.aws_region?.value !== expectedRegion) throw new Error("Plan account or region is wrong.");
@@ -202,6 +250,8 @@ export function runPermissionPreflight({
     schemaVersion: PERMISSION_PREFLIGHT_SCHEMA_VERSION,
     roleArn,
     planSha256: sha256(planBytes),
+    savedPlanSha256: sha256(savedPlanBytes),
+    canonicalPlanJsonSha256: sha256(Buffer.from(canonicalizeJson(plan))),
     generatedAt,
     requiredEvaluations: requiredResults,
     forbiddenEvaluations: forbiddenResults,
@@ -216,9 +266,10 @@ export function runPermissionPreflight({
 export function runCli(argv = process.argv.slice(2)) {
   const options = parseCli(argv);
   const planBytes = fs.readFileSync(path.resolve(options.planJsonPath));
+  const savedPlanBytes = fs.readFileSync(path.resolve(options.savedPlanPath));
   const plan = JSON.parse(planBytes);
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
-  const report = runPermissionPreflight({ ...options, plan, planBytes });
+  const report = runPermissionPreflight({ ...options, plan, planBytes, savedPlanBytes });
   fs.writeFileSync(path.resolve(options.outputPath), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
   process.stdout.write(`${JSON.stringify({ status: report.status, outputPath: options.outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
   if (report.status !== "valid") process.exitCode = 1;

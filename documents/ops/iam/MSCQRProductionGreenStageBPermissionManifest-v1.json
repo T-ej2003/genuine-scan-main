@@ -62,7 +62,9 @@
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker",
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary"
       ],
-      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}
+      ],
       "evidence": "locked hashicorp/aws provider refresh of four Stage B log groups"
     },
     {
@@ -70,7 +72,9 @@
       "phase": "reference-audit",
       "action": "ecs:DescribeTaskDefinition",
       "resources": ["*"],
-      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}
+      ],
       "evidence": "AWS authorization evidence: ecs:DescribeTaskDefinition is not resource-scoped"
     },
     {
@@ -125,7 +129,9 @@
         "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
         "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*"
       ],
-      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}
+      ],
       "evidence": "source-controlled reference-audit policy and generator contract"
     },
     {
@@ -139,7 +145,9 @@
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*",
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:*"
       ],
-      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}
+      ],
       "evidence": "source-controlled CreateExactStageBLogs statement and Terraform log-group create"
     },
     {
@@ -224,7 +232,12 @@
       "action": "lambda:UpdateFunctionConfiguration",
       "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
-      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:ResourceTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-b"]}
+      ],
       "evidence": "Terraform aws_lambda_function.broker update and prior successful apply"
     },
     {
@@ -233,7 +246,12 @@
       "action": "lambda:UpdateFunctionCode",
       "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
-      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:ResourceTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-b"]}
+      ],
       "evidence": "Terraform aws_lambda_function.broker source_code_hash transition"
     },
     {
@@ -242,7 +260,12 @@
       "action": "lambda:PublishVersion",
       "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
-      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:ResourceTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-b"]}
+      ],
       "evidence": "Terraform aws_lambda_function.broker version transition"
     },
     {
@@ -251,7 +274,12 @@
       "action": "lambda:UpdateAlias",
       "plan": {"type": "aws_lambda_alias", "actions": ["update"], "address": "aws_lambda_alias.reviewed"},
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"],
-      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:ResourceTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-b"]}
+      ],
       "evidence": "Terraform aws_lambda_alias.reviewed update and prior successful apply"
     }
   ],
