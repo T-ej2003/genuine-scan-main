@@ -586,6 +586,46 @@ test("revision-keyed retained history supports a second generation", () => {
   assert.equal(new Set(audit.retainedTaskDefinitions.map((entry) => entry.terraformAddress)).size, 23);
 });
 
+test("retained task definitions require ACTIVE status", () => {
+  assert.doesNotThrow(() => generate(makeAtomicBrokerFixture()));
+  for (const status of ["INACTIVE", "DELETE_IN_PROGRESS", undefined, "UNKNOWN"]) {
+    const fixture = makeAtomicBrokerFixture({ mutateReader: (reader) => {
+      const original = reader.describeTaskDefinition;
+      reader.describeTaskDefinition = (reference) => {
+        const response = original(reference);
+        if (reference.includes("task-definition/")) response.taskDefinition.status = status;
+        return response;
+      };
+    } });
+    assert.throws(() => generate(fixture), new RegExp(`retained task definition.*family.*${status || "undefined"}`));
+  }
+});
+
+test("multiple retained generations require every retained revision to be ACTIVE", () => {
+  const addSecondGeneration = (plan) => {
+    for (const address of Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES)) {
+      const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(address));
+      const family = STAGE_B_TASK_DEFINITION_FAMILIES[address];
+      const second = retained
+        ? { ...structuredClone(retained), address: retainedAddressFor(address, "bbbbbbbb") }
+        : { address: retainedAddressFor(address, "bbbbbbbb"), type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family, arn: oldArnFor(family).replace(":1", ":2") }, after: { family } } };
+      if (retained) second.change.before.arn = second.change.before.arn.replace(":1", ":2");
+      plan.resource_changes.push(second);
+    }
+    plan.relevant_attributes.push({ resource: executorCollectionAddress, attribute: [] });
+  };
+  assert.doesNotThrow(() => generate(makeAtomicBrokerFixture({ mutatePlan: addSecondGeneration })));
+  const inactive = makeAtomicBrokerFixture({ mutatePlan: addSecondGeneration, mutateReader: (reader) => {
+    const original = reader.describeTaskDefinition;
+    reader.describeTaskDefinition = (reference) => {
+      const response = original(reference);
+      if (reference.endsWith(":2")) response.taskDefinition.status = "INACTIVE";
+      return response;
+    };
+  } });
+  assert.throws(() => generate(inactive), /retained task definition.*family.*INACTIVE/);
+});
+
 test("newest retained revision is selected numerically, independent of generation-key ordering", () => {
   const fixture = makeAtomicBrokerFixture({
     mutatePlan: (plan) => {

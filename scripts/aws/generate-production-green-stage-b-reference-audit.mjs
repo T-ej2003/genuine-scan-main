@@ -202,6 +202,14 @@ function validateTaskDefinitionResponse(response, expectedFamily, label) {
   return { family: expectedFamily, arn: identity.arn, revision: identity.revision, status: taskDefinition.status };
 }
 
+function validateRetainedTaskDefinitionResponse(response, expectedFamily, label) {
+  const status = response?.taskDefinition?.status;
+  if (status !== "ACTIVE") {
+    throw new Error(`${label} for family ${expectedFamily} has unsupported status ${String(status)}; expected ACTIVE.`);
+  }
+  return validateTaskDefinitionResponse(response, expectedFamily, label);
+}
+
 function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256, terraformConfiguration) {
   const taskDefinitionAddress = brokerTaskDefinitionAddress(mode);
   const rollover = rolloverByAddress.get(taskDefinitionAddress);
@@ -522,7 +530,7 @@ export function generateReferenceAudit({
   }
   const retainedDefinitions = [];
   for (const retained of [...retainedByAddress.values()].sort((left, right) => left.address.localeCompare(right.address))) {
-    const described = validateTaskDefinitionResponse(reader.describeTaskDefinition(retained.oldArn), retained.family, `${retained.address} retained task definition`);
+    const described = validateRetainedTaskDefinitionResponse(reader.describeTaskDefinition(retained.oldArn), retained.family, `${retained.address} retained task definition`);
     retainedDefinitions.push({ ...retained, currentStatus: described.status });
   }
   const oldArns = [...oldDefinitions, ...retainedDefinitions].map((entry) => entry.oldArn);
