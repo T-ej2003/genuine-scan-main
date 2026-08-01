@@ -91,6 +91,8 @@ and `logs:PutRetentionPolicy` remain limited to the backend, worker,
 application-canary, and read-only-canary Stage B log groups. The shared
 `/ecs/mscqr-production/full-rls-green` executor log group remains Stage A-owned
 and is intentionally excluded from Stage B creation authority.
+Terraform refresh also requires the read-only `logs:ListTagsForResource` action;
+it is limited to those same four exact log-group ARNs without a trailing `:*`.
 The existing exact tagging statements include the same read-only-canary log-group
 and task-definition ARNs because Terraform tags both resources during creation.
 

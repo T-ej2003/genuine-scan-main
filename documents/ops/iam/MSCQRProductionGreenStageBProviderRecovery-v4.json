@@ -60,6 +60,22 @@
       }
     },
     {
+      "Sid": "ListExactStageBLogTagsReadOnly",
+      "Effect": "Allow",
+      "Action": "logs:ListTagsForResource",
+      "Resource": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
       "Sid": "TagExactReplayTable",
       "Effect": "Allow",
       "Action": "dynamodb:TagResource",
