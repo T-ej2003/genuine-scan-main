@@ -67,14 +67,14 @@ The deployable split is:
 - `MSCQRProductionGreenStageBProviderRecovery-v4.json` preserves the v3
   provider-recovery permissions except for the seven permanent reference-audit
   read statements previously moved to the companion policy. V4 additionally
-  grants the read-only `iam:GetRole` action for exactly these administrator-
-  created and imported Terraform roles:
+  grants the read-only `iam:GetRole` and `iam:ListRolePolicies` actions for
+  exactly these administrator-created and imported Terraform roles:
   `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution`
   and
   `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task`.
-  This grant exists only so Terraform can refresh those imported roles; it adds
-  no IAM mutation authority and uses no wildcard IAM resource. The policy still
-  contains no `ecs:DeregisterTaskDefinition` authority.
+  These grants exist only so Terraform can refresh those imported roles; they
+  add no IAM mutation authority and use no wildcard IAM resource. The policy
+  still contains no `ecs:DeregisterTaskDefinition` authority.
 - `MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json` is the permanent
   companion containing exactly those seven read-only statements, including the
   isolated wildcard `ecs:DescribeTaskDefinition` metadata read.

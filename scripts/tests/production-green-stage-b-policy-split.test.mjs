@@ -38,6 +38,7 @@ const controlSids = [
   "SetExactStageBLogRetention",
   "ListExactStageBLogTagsReadOnly",
   "ReadExactStageBReadOnlyCanaryRoles",
+  "ListExactStageBReadOnlyCanaryRolePolicies",
   "TagExactReplayTable",
   "TagExactStageBTaskDefinitions",
 ];
@@ -82,7 +83,7 @@ test("all policy artifacts parse and historical v2/v3 remain byte-stable", () =>
 
 test("v4 and the companion policy fit the AWS managed-policy document limit", () => {
   assert.equal(awsCharacterCount(policies.v3), 6651);
-  assert.equal(awsCharacterCount(policies.v4), 4770);
+  assert.equal(awsCharacterCount(policies.v4), 5063);
   assert.equal(awsCharacterCount(policies.audit), 1785);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.ok(awsCharacterCount(policies.audit) < 6144);
@@ -96,20 +97,21 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   correctedV3.Statement.push(statementOf(policies.v4, "SetExactStageBLogRetention"));
   correctedV3.Statement.push(statementOf(policies.v4, "ListExactStageBLogTagsReadOnly"));
   correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBReadOnlyCanaryRoles"));
+  correctedV3.Statement.push(statementOf(policies.v4, "ListExactStageBReadOnlyCanaryRolePolicies"));
   assert.deepEqual(canonical(correctedV3), canonical({
     Version: policies.v3.Version,
     Statement: [...policies.v4.Statement, ...policies.audit.Statement],
   }));
 });
 
-test("the split has exactly seven moved statements and seven provider-control statements", () => {
+test("the split has exactly seven moved statements and eight provider-control statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), movedSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...movedSids, ...controlSids]).size, 14);
+  assert.equal(new Set([...movedSids, ...controlSids]).size, 15);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
-  for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles"].includes(sid))) {
+  for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
   }
 });
@@ -199,6 +201,24 @@ test("iam:GetRole is limited to the two imported read-only-canary roles", () => 
   assert.equal(policies.v4.Statement.some((candidate) => actionsOf(candidate).some((action) => action.startsWith("iam:") && candidate.Resource === "*")), false);
 });
 
+test("iam:ListRolePolicies is limited to the two imported read-only-canary roles", () => {
+  const statement = statementOf(policies.v4, "ListExactStageBReadOnlyCanaryRolePolicies");
+  assert.deepEqual(statement, {
+    Sid: "ListExactStageBReadOnlyCanaryRolePolicies",
+    Effect: "Allow",
+    Action: "iam:ListRolePolicies",
+    Resource: [
+      "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+      "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
+    ],
+  });
+  assert.equal(statementsForAction(policies.v4, "iam:ListRolePolicies").length, 1);
+  assert.equal(statement.Resource.includes("arn:aws:iam::368992683803:role/Unrelated"), false);
+  assert.equal(statement.Resource.includes("*"), false);
+  assert.equal(statementsForAction(policies.audit, "iam:ListRolePolicies").length, 0);
+  assert.equal(policies.v4.Statement.some((candidate) => actionsOf(candidate).some((action) => action.startsWith("iam:") && candidate.Resource === "*")), false);
+});
+
 test("both policies carry no authority beyond the reviewed read and recovery actions", () => {
   const actions = [...policies.v4.Statement, ...policies.audit.Statement].flatMap(actionsOf);
   for (const forbidden of [
@@ -209,6 +229,7 @@ test("both policies carry no authority beyond the reviewed read and recovery act
     "elasticloadbalancing:ModifyListener",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
   assert.equal(actions.includes("iam:GetRole"), true);
+  assert.equal(actions.includes("iam:ListRolePolicies"), true);
   assert.equal(actions.includes("iam:ListAttachedRolePolicies"), true);
   assert.equal(actions.includes("lambda:GetFunctionConfiguration"), true);
 });
@@ -235,7 +256,7 @@ test("the runbook targets v4 and the companion policy for the separately authori
 });
 
 test("historical policy bytes remain unchanged while the active v4 correction is explicit", () => {
-  assert.equal(sha256(read(paths.v4)), "9437bf637685d0f84de129e0b7e75cb81b7da9b327efdc8b62d4f6467aa4cacf");
+  assert.equal(sha256(read(paths.v4)), "eeb4f9db5d6d46926ceac052dbe728c8bb5c6cb38cb03dcac207159bba967a6f");
   assert.equal(sha256(read(paths.audit)), "56b299c2f21973a3117e89e5147658406d3ba823efab2b5548ac1b0d9f93dde6");
 });
 
