@@ -314,36 +314,34 @@ simulate_audit_read ecs:DescribeTaskDefinition '*'
 simulate_audit_read lambda:GetFunctionConfiguration 'arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker'
 simulate_audit_read lambda:GetFunctionConfiguration 'arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*'
 
-# D. Provider v4 update — reached only after every companion check above passes
-PROVIDER_VERSION_ID="$(aws iam create-policy-version \
-  --policy-arn "$PROVIDER_POLICY_ARN" \
-  --policy-document "file://${PROVIDER_DOCUMENT}" \
-  --set-as-default \
-  --query PolicyVersion.VersionId --output text)"
-
-# E. Provider complete verification
-aws iam get-policy-version --policy-arn "$PROVIDER_POLICY_ARN" --version-id "$PROVIDER_VERSION_ID" \
-  --query PolicyVersion.Document --output json > "$TMP_DIR/live-provider-policy.json"
-cmp <(jq -S . "$PROVIDER_DOCUMENT") <(jq -S . "$TMP_DIR/live-provider-policy.json")
-verify_complete_policy_entities "$PROVIDER_POLICY_ARN" "$PROVIDER_POLICY_NAME"
-
-# F. Final two-policy role verification
-FINAL_ATTACHMENTS="$(aws iam list-attached-role-policies --role-name "$ROLE_NAME" --output json)"
-jq -e --arg provider "$PROVIDER_POLICY_NAME" --arg audit "$AUDIT_POLICY_NAME" --arg final_write "$FINAL_WRITE_POLICY_NAME" \
-  '([.AttachedPolicies[].PolicyName] | index($provider)) != null and ([.AttachedPolicies[].PolicyName] | index($audit)) != null and ([.AttachedPolicies[].PolicyName] | index($final_write)) != null' \
-  <<<"$FINAL_ATTACHMENTS" >/dev/null
-```
-
-The same administrator-controlled session must also create or update and attach
-the final-write companion before the retry plan. Its policy document is kept
-separate from v4 to remain below the AWS managed-policy size limit:
-
-```sh
+# D. Final-write companion create/update, attach, and complete verification
+# This block is reached before any provider-policy mutation.
+validate_final_write_entities() {
+  local entities_file="$1"
+  aws iam list-entities-for-policy --policy-arn "$FINAL_WRITE_POLICY_ARN" --output json > "$entities_file"
+  test "$(jq '.PolicyUsers | length' "$entities_file")" -eq 0
+  test "$(jq '.PolicyGroups | length' "$entities_file")" -eq 0
+  test "$(jq '.PolicyRoles | length' "$entities_file")" -le 1
+  if [[ "$(jq '.PolicyRoles | length' "$entities_file")" -eq 1 ]]; then
+    test "$(jq -r '.PolicyRoles[0].RoleName' "$entities_file")" = "$ROLE_NAME"
+  fi
+}
 FINAL_WRITE_EXISTS=true
-if aws iam get-policy --policy-arn "$FINAL_WRITE_POLICY_ARN" >/dev/null 2>"$TMP_DIR/final-write-policy.error"; then
-  FINAL_WRITE_VERSION_ID="$(aws iam create-policy-version --policy-arn "$FINAL_WRITE_POLICY_ARN" \
-    --policy-document "file://${FINAL_WRITE_DOCUMENT}" --set-as-default \
-    --query PolicyVersion.VersionId --output text)"
+if aws iam get-policy --policy-arn "$FINAL_WRITE_POLICY_ARN" --output json > "$TMP_DIR/final-write-policy.json" 2>"$TMP_DIR/final-write-policy.error"; then
+  test "$(jq -r '.Policy.PolicyName' "$TMP_DIR/final-write-policy.json")" = "$FINAL_WRITE_POLICY_NAME"
+  FINAL_WRITE_DEFAULT_VERSION_ID="$(jq -r '.Policy.DefaultVersionId' "$TMP_DIR/final-write-policy.json")"
+  FINAL_WRITE_VERSION_COUNT="$(aws iam list-policy-versions --policy-arn "$FINAL_WRITE_POLICY_ARN" --query 'Versions | length(@)' --output text)"
+  test "$FINAL_WRITE_VERSION_COUNT" -lt 5
+  validate_final_write_entities "$TMP_DIR/final-write-entities-before.json"
+  aws iam get-policy-version --policy-arn "$FINAL_WRITE_POLICY_ARN" --version-id "$FINAL_WRITE_DEFAULT_VERSION_ID" \
+    --query PolicyVersion.Document --output json > "$TMP_DIR/live-final-write-policy.json"
+  if cmp <(jq -S . "$FINAL_WRITE_DOCUMENT") <(jq -S . "$TMP_DIR/live-final-write-policy.json"); then
+    FINAL_WRITE_VERSION_ID="$FINAL_WRITE_DEFAULT_VERSION_ID"
+  else
+    FINAL_WRITE_VERSION_ID="$(aws iam create-policy-version --policy-arn "$FINAL_WRITE_POLICY_ARN" \
+      --policy-document "file://${FINAL_WRITE_DOCUMENT}" --set-as-default \
+      --query PolicyVersion.VersionId --output text)"
+  fi
 else
   grep -q 'NoSuchEntity' "$TMP_DIR/final-write-policy.error"
   FINAL_WRITE_EXISTS=false
@@ -353,12 +351,41 @@ else
   FINAL_WRITE_VERSION_ID="$(aws iam get-policy --policy-arn "$FINAL_WRITE_POLICY_ARN" \
     --query Policy.DefaultVersionId --output text)"
 fi
-aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "$FINAL_WRITE_POLICY_ARN"
+
+# Reject users, groups, or another role before attachment. An empty entity set
+# is valid for a newly created policy; the exact role is required afterward.
+FINAL_WRITE_ENTITIES="$TMP_DIR/final-write-entities.json"
+validate_final_write_entities "$FINAL_WRITE_ENTITIES"
+ROLE_ATTACHMENTS="$(aws iam list-attached-role-policies --role-name "$ROLE_NAME" --output json)"
+FINAL_WRITE_ATTACHED="$(jq -r --arg name "$FINAL_WRITE_POLICY_NAME" 'any(.AttachedPolicies[]; .PolicyName == $name)' <<<"$ROLE_ATTACHMENTS")"
+if [[ "$FINAL_WRITE_ATTACHED" = false ]]; then
+  test "$ROLE_ATTACHMENT_COUNT" -lt "$ROLE_POLICY_LIMIT"
+  aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "$FINAL_WRITE_POLICY_ARN"
+fi
 aws iam get-policy-version --policy-arn "$FINAL_WRITE_POLICY_ARN" \
   --version-id "$FINAL_WRITE_VERSION_ID" --query PolicyVersion.Document --output json \
   > "$TMP_DIR/live-final-write-policy.json"
 cmp <(jq -S . "$FINAL_WRITE_DOCUMENT") <(jq -S . "$TMP_DIR/live-final-write-policy.json")
 verify_complete_policy_entities "$FINAL_WRITE_POLICY_ARN" "$FINAL_WRITE_POLICY_NAME"
+
+# E. Provider v4 update — reached only after final-write setup succeeds
+PROVIDER_VERSION_ID="$(aws iam create-policy-version \
+  --policy-arn "$PROVIDER_POLICY_ARN" \
+  --policy-document "file://${PROVIDER_DOCUMENT}" \
+  --set-as-default \
+  --query PolicyVersion.VersionId --output text)"
+
+# F. Provider and unchanged audit verification
+aws iam get-policy-version --policy-arn "$PROVIDER_POLICY_ARN" --version-id "$PROVIDER_VERSION_ID" \
+  --query PolicyVersion.Document --output json > "$TMP_DIR/live-provider-policy.json"
+cmp <(jq -S . "$PROVIDER_DOCUMENT") <(jq -S . "$TMP_DIR/live-provider-policy.json")
+verify_complete_policy_entities "$PROVIDER_POLICY_ARN" "$PROVIDER_POLICY_NAME"
+aws iam get-policy-version --policy-arn "$AUDIT_POLICY_ARN" --version-id "$AUDIT_VERSION_ID" \
+  --query PolicyVersion.Document --output json > "$TMP_DIR/live-audit-policy-final.json"
+cmp <(jq -S . "$AUDIT_DOCUMENT") <(jq -S . "$TMP_DIR/live-audit-policy-final.json")
+verify_complete_policy_entities "$AUDIT_POLICY_ARN" "$AUDIT_POLICY_NAME"
+
+# G. Final three-policy role verification
 FINAL_ATTACHMENTS="$(aws iam list-attached-role-policies --role-name "$ROLE_NAME" --output json)"
 jq -e --arg provider "$PROVIDER_POLICY_NAME" --arg audit "$AUDIT_POLICY_NAME" --arg final_write "$FINAL_WRITE_POLICY_NAME" \
   '([.AttachedPolicies[].PolicyName] | index($provider)) != null and ([.AttachedPolicies[].PolicyName] | index($audit)) != null and ([.AttachedPolicies[].PolicyName] | index($final_write)) != null' \
@@ -385,7 +412,7 @@ The update must preserve the single intended release-deployer role boundary. If 
 reports the five-version limit, delete only an explicitly reviewed non-default
 version. Root may perform only this policy-version update when no approved
 non-root administrator exists; root must not run Terraform and must be logged out
-immediately afterward. **G. Root/admin logout and fresh MFA release session:**
+immediately afterward. **H. Root/admin logout and fresh MFA release session:**
 log the root or administrator session out immediately, then obtain a fresh MFA-backed release session for `mscqr-production-release-deployer`. Do not retry the
 failed apply until both live policies match these source documents.
 The failed Stage B apply must not be retried before both live policies match source.

@@ -346,15 +346,24 @@ test("historical policy bytes remain unchanged while the active v4 correction is
 test("runbook is companion-first and verifies complete policy attachments before provider mutation", () => {
   const runbook = read("documents/ops/iam/PRODUCTION_GREEN_STAGE_B_PROVIDER_RECOVERY_2026-07-29.md");
   const providerUpdate = runbook.indexOf('PROVIDER_VERSION_ID="$(aws iam create-policy-version');
+  const finalWriteSetup = runbook.indexOf("# D. Final-write companion create/update");
+  const finalWriteAttach = runbook.indexOf('aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "$FINAL_WRITE_POLICY_ARN"');
+  const finalWriteVerify = runbook.indexOf('verify_complete_policy_entities "$FINAL_WRITE_POLICY_ARN" "$FINAL_WRITE_POLICY_NAME"');
+  const finalAttachmentCheck = runbook.lastIndexOf("# G. Final three-policy role verification");
   assert.ok(providerUpdate > 0);
+  assert.ok(finalWriteSetup > 0 && finalWriteSetup < providerUpdate);
+  assert.ok(finalWriteAttach > finalWriteSetup && finalWriteAttach < providerUpdate);
+  assert.ok(finalWriteVerify > finalWriteAttach && finalWriteVerify < providerUpdate);
+  assert.ok(finalAttachmentCheck > providerUpdate);
   for (const marker of [
     "# A. Pre-mutation validation",
     "# B. Companion create/update",
     "# C. Companion attach and complete verification",
-    "# D. Provider v4 update",
-    "# E. Provider complete verification",
-    "# F. Final two-policy role verification",
-    "G. Root/admin logout and fresh MFA release session",
+    "# D. Final-write companion create/update",
+    "# E. Provider v4 update",
+    "# F. Provider and unchanged audit verification",
+    "# G. Final three-policy role verification",
+    "H. Root/admin logout and fresh MFA release session",
   ]) assert.ok(runbook.indexOf(marker) >= 0, marker);
   for (const marker of [
     "aws iam create-policy",
@@ -366,6 +375,14 @@ test("runbook is companion-first and verifies complete policy attachments before
     'verify_complete_policy_entities "$AUDIT_POLICY_ARN" "$AUDIT_POLICY_NAME"',
     "simulate_audit_read iam:ListAttachedRolePolicies",
   ]) assert.ok(runbook.indexOf(marker) >= 0 && runbook.indexOf(marker) < providerUpdate, marker);
+  for (const marker of [
+    "FINAL_WRITE_VERSION_COUNT",
+    "FINAL_WRITE_DEFAULT_VERSION_ID",
+    "if cmp <(jq -S . \"$FINAL_WRITE_DOCUMENT\")",
+    "if [[ \"$FINAL_WRITE_ATTACHED\" = false ]]",
+    "aws iam create-policy --policy-name \"$FINAL_WRITE_POLICY_NAME\"",
+    'verify_complete_policy_entities "$FINAL_WRITE_POLICY_ARN" "$FINAL_WRITE_POLICY_NAME"',
+  ]) assert.ok(runbook.indexOf(marker) > finalWriteSetup && runbook.indexOf(marker) < providerUpdate, marker);
   assert.ok(runbook.indexOf("aws iam list-policy-versions") < providerUpdate);
   assert.ok(runbook.indexOf("aws iam get-account-summary") < providerUpdate);
   assert.ok(runbook.indexOf("aws iam list-entities-for-policy") < providerUpdate);
