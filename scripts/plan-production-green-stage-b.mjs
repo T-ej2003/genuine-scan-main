@@ -28,17 +28,33 @@ function assertTaskDefinitionScope(change) {
   if (afterFamily !== undefined && afterFamily !== expectedFamily) throw new Error(`Stage B task-definition family rejected: ${change.address}`);
 }
 
-function assertTaskDefinitionRetentionContract(terraformConfiguration) {
-  if (typeof terraformConfiguration !== "string") throw new Error("Stage B task-definition replacement requires Terraform configuration metadata.");
-  for (const resourceName of ["candidate", "executor"]) {
+function retainedTaskDefinitionFamily(address) {
+  const match = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([^"]+)"\]$/.exec(address || "");
+  if (!match) return undefined;
+  const currentAddress = `aws_ecs_task_definition.${match[1]}["${match[2]}"]`;
+  return taskDefinitionFamilies.get(currentAddress);
+}
+
+function assertTaskDefinitionAppendOnlyContract(terraformConfiguration) {
+  if (typeof terraformConfiguration !== "string") throw new Error("Stage B append-only task-definition plan requires Terraform configuration metadata.");
+  for (const resourceName of ["candidate", "executor", "candidate_retained", "executor_retained"]) {
     const marker = `resource "aws_ecs_task_definition" "${resourceName}"`;
     const start = terraformConfiguration.indexOf(marker);
     const end = start === -1 ? -1 : terraformConfiguration.indexOf("\nresource ", start + marker.length);
     const block = start === -1 ? "" : terraformConfiguration.slice(start, end === -1 ? terraformConfiguration.length : end);
-    if (!/^\s*skip_destroy\s*=\s*true\s*$/m.test(block)) {
-      throw new Error(`Stage B task-definition retention contract missing: ${resourceName}`);
-    }
+    if (!/^\s*skip_destroy\s*=\s*true\s*$/m.test(block)) throw new Error(`Stage B task-definition retention contract missing: ${resourceName}`);
+    if (resourceName.endsWith("_retained") && !/ignore_changes\s*=\s*all/.test(block)) throw new Error(`Stage B retained task-definition contract missing: ${resourceName}`);
   }
+}
+
+function assertRetainedTaskDefinition(change) {
+  const expectedFamily = retainedTaskDefinitionFamily(change.address);
+  if (!expectedFamily) throw new Error(`Stage B retained task-definition address rejected: ${change.address}`);
+  const actions = change.change?.actions;
+  if (!exactActions(actions || [], ["no-op"])) throw new Error(`Stage B retained task-definition must remain no-op: ${change.address}`);
+  const before = change.change?.before || {};
+  const after = change.change?.after || {};
+  if (before.family !== expectedFamily || after.family !== expectedFamily || typeof before.arn !== "string") throw new Error(`Stage B retained task-definition identity rejected: ${change.address}`);
 }
 
 function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planBytes, planSha256, now, terraformConfiguration) {
@@ -155,15 +171,17 @@ export function assertStageBPlan(plan, options = {}) {
     else if (exactActions(brokerActions, ["update"])) assertBrokerAuditBinding(plan, brokerChange, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
     else if (!exactActions(brokerActions, ["no-op"])) throw new Error(`Stage B broker actions are unsupported: ${JSON.stringify(brokerActions)}`);
   }
+  const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
+  if (taskDefinitionChanges.length) assertTaskDefinitionAppendOnlyContract(terraformConfiguration);
   for (const change of plan.resource_changes || []) {
     const actions = change.change.actions || [];
     if (forbidden.test(change.type) || !allowed.has(change.type)) throw new Error(`Stage B plan rejected: ${change.address}`);
-    if (change.type === "aws_ecs_task_definition" && actions.some((action) => action !== "no-op")) {
-      assertTaskDefinitionScope(change);
-      if (actions.includes("delete")) {
-        if (!exactActions(actions, ["delete", "create"]) || !exactReplacePaths(change.change.replace_paths)) throw new Error(`Stage B task-definition rollover rejected: ${change.address}`);
-        assertTaskDefinitionRetentionContract(terraformConfiguration);
-        assertBoundRollover(plan, change, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
+    if (change.type === "aws_ecs_task_definition") {
+      if (retainedTaskDefinitionFamily(change.address)) {
+        assertRetainedTaskDefinition(change);
+      } else {
+        assertTaskDefinitionScope(change);
+        if (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"])) throw new Error(`Stage B append-only task-definition plan rejected: ${change.address}`);
       }
     } else if (actions.includes("delete")) {
       throw new Error(`Stage B plan rejected: ${change.address}`);

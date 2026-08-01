@@ -81,10 +81,14 @@ from each live policy and are not assumed to match repository suffixes.
 ## Stage B release-deployer apply correction
 
 The Stage B Terraform apply registers immutable revisions for the exact Stage B
-task-definition families and retains prior revisions. Both Stage B
-`aws_ecs_task_definition` collections set the AWS provider's `skip_destroy = true`
-retention behavior, so replacement registers the new revision without calling
-`ecs:DeregisterTaskDefinition`. The general release-deployer policy contains no
+task-definition families and retains prior revisions. The AWS provider supports
+`skip_destroy`, but it is not Terraform lifecycle protection: an old state entry
+with a changed `container_definitions` value still plans `delete,create`, and the
+provider can call `ecs:DeregisterTaskDefinition` before registration. The release
+model therefore uses append-only addresses. The current `candidate` and
+`executor` collections are create-only; `candidate_retained` and
+`executor_retained` hold historical revisions with `ignore_changes = all` and
+`skip_destroy = true`. The general release-deployer policy contains no
 deregistration authority. Old inactive revisions are retained for a separate,
 reviewed housekeeping process outside this release role. `logs:CreateLogGroup`
 and `logs:PutRetentionPolicy` remain limited to the backend, worker,
@@ -107,6 +111,16 @@ setting is the correction: old revisions remain registered and cleanup is
 deferred to a separate controlled housekeeping path. `logs:PutRetentionPolicy`
 is limited to the four exact Stage B log-group ARN patterns, also constrained to
 `eu-west-2`.
+
+Before the first append-only plan, the operator must separately and explicitly
+move the eleven existing stable task-definition state addresses into the retained
+collections. The exact `terraform state mv` commands are recorded in the
+reconciliation document; they are not run by this PR or automatically. The
+read-only-canary family has no prior state entry and is not moved. After that
+migration the expected task-definition shape is twelve current `create` actions,
+eleven retained `no-op` actions, and zero task-definition deletes or replacements.
+The validator rejects every task-definition delete, destroy, or delete/create
+replacement.
 
 After this corrective PR is merged, update the live provider managed policy from
 v4 and verify the complete attachment set before any Terraform retry. Do not
@@ -310,12 +324,13 @@ audit generator and validator, while service/task listing remains cluster
 constrained and the broker read remains exact-function constrained. No
 temporary policy is required.
 
-When the same plan replaces a rollover task definition and updates the broker,
+When the same plan registers a current task definition and updates the broker,
 the pre-apply audit records a planned atomic broker rollover. This is accepted
 only when Terraform's plan configuration references
 `local.broker_task_definition_arns`, the plan marks the corresponding task
-definition ARN as relevant, the live broker ARN exactly equals the replacement's
-`before.arn`, and both resources are changed by that same plan and plan SHA.
+definition ARN as relevant, the live broker ARN exactly equals the matching
+retained revision's `before.arn`, and both resources are changed by that same
+plan and plan SHA.
 Unknown broker `after` values are never accepted from strings alone. Create-only
 and no-op task definitions, missing dependencies, mismatched families, and
 unrelated or stale broker references remain rejected.
@@ -327,11 +342,12 @@ read-only metadata statement and is compensated by the application-layer audit
 and validator contract.
 
 Whenever the plan JSON changes, the release-deployer must perform a fresh
-read-only audit and bind it to the exact plan SHA-256. Every old revision must
-have zero service, running-task, and pending-task references, matching family and
-replacement path, and a retained rollback ARN. The validator must accept the
-matching audit and both explicit hashes before any apply; otherwise apply remains
-forbidden.
+read-only audit and bind it to the exact plan SHA-256. Retained revisions may
+remain referenced by the existing services and tasks; the audit records those
+references and proves that the broker transition targets the new current ARN.
+Any superseded legacy rollover, unknown family, or unrelated reference remains
+fail-closed. The validator must accept the matching audit and both explicit
+hashes before any apply; otherwise apply remains forbidden.
 
 The recovery sequence is: verify the fresh caller, revalidate the saved plan and
 reference audit, apply that exact full plan without `-target`, then verify the

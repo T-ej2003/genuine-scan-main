@@ -48,8 +48,8 @@ const familyForMode = (mode) => mode === "full-rls-application-canary"
   ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
   : `mscqr-production-full-rls-green-${mode}`;
 
-function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum, terraformConfiguration = terraformConfigurationSource } = {}) {
-  const changes = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([address, family]) => ({
+function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum, terraformConfiguration = terraformConfigurationSource, appendOnly = false } = {}) {
+  let changes = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([address, family]) => ({
     address,
     type: "aws_ecs_task_definition",
     change: {
@@ -59,6 +59,14 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
       replace_paths: [["container_definitions"]],
     },
   }));
+  if (appendOnly) {
+    const current = changes.map((change) => ({ ...change, change: { ...change.change, actions: ["create"], before: null, replace_paths: undefined } }));
+    const retained = changes.filter(({ address }) => address !== readOnlyCanaryAddress).map((change) => {
+      const retainedAddress = change.address.replace("aws_ecs_task_definition.candidate", "aws_ecs_task_definition.candidate_retained").replace("aws_ecs_task_definition.executor", "aws_ecs_task_definition.executor_retained");
+      return { ...change, address: retainedAddress, change: { actions: ["no-op"], before: change.change.before, after: change.change.after } };
+    });
+    changes = [...current, ...retained];
+  }
   const plan = {
     variables: {
       package_checksum_sha256: { value: packageChecksum },
@@ -139,8 +147,9 @@ function validateBrokerPlan(fixture, audit) {
   }));
 }
 
-function makeCreateOnlyFixture({ mutatePlan, mutateReader } = {}) {
+function makeCreateOnlyFixture({ mutatePlan, mutateReader, appendOnly = false } = {}) {
   return makeFixture({
+    appendOnly,
     mutatePlan: (plan) => {
       const change = plan.resource_changes.find((item) => item.address === readOnlyCanaryAddress);
       change.change.actions = ["create"];
@@ -195,10 +204,11 @@ function addBrokerAtomicPlanContract(plan, taskDefinitionAddress = canaryAddress
     : [{ resource: relevantAddress, attribute: ["arn"] }];
 }
 
-function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", packageValue = packageChecksum, brokerActions = ["update"], includeBrokerChange = true, taskDefinitionAddress = taskDefinitionAddressForMode(mode), relevantAddress = taskDefinitionAddress, omitExecutorCollectionDependency = false, terraformConfiguration = terraformConfigurationSource, mutatePlan, mutateReader } = {}) {
+function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", packageValue = packageChecksum, brokerActions = ["update"], includeBrokerChange = true, taskDefinitionAddress = taskDefinitionAddressForMode(mode), relevantAddress = taskDefinitionAddress, omitExecutorCollectionDependency = false, terraformConfiguration = terraformConfigurationSource, appendOnly = true, mutatePlan, mutateReader } = {}) {
   return makeFixture({
     packageValue,
     terraformConfiguration,
+    appendOnly,
     mutatePlan: (plan) => {
       addBrokerAtomicPlanContract(plan, taskDefinitionAddress, relevantAddress, { omitExecutorCollectionDependency });
       if (includeBrokerChange) plan.resource_changes.push({
@@ -241,6 +251,7 @@ function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", package
 function makeInitialBrokerCreateFixture({ mutatePlan } = {}) {
   return makeAtomicBrokerFixture({
     brokerActions: ["create"],
+    appendOnly: false,
     mutatePlan: (plan) => {
       for (const change of plan.resource_changes.filter((item) => item.type === "aws_ecs_task_definition")) {
         change.change.actions = ["create"];
@@ -837,7 +848,8 @@ test("atomic broker rollover in the same plan passes and is recorded explicitly"
     taskDefinitionArnReference: `${canaryAddress}.arn`,
     planJsonSha256: fixture.planJsonSha256,
   }]);
-  const canary = audit.oldTaskDefinitions.find((entry) => entry.terraformAddress === canaryAddress);
+  const canaryRetainedAddress = canaryAddress.replace("aws_ecs_task_definition.candidate", "aws_ecs_task_definition.candidate_retained");
+  const canary = audit.retainedTaskDefinitions.find((entry) => entry.terraformAddress === canaryRetainedAddress);
   assert.deepEqual(canary.brokerReferenceModes, ["full-rls-application-canary"]);
   assert.equal(canary.brokerReferenceStatus, "planned-atomic-broker-rollover-v1");
   const auditBytes = Buffer.from(JSON.stringify(audit));
@@ -978,7 +990,7 @@ test("broker update referencing the wrong family fails closed", () => {
 
 test("live broker ARN must match the rollover before ARN", () => {
   const fixture = makeAtomicBrokerFixture({ mutatePlan: (plan) => {
-    plan.resource_changes.find((item) => item.address === canaryAddress).change.before.arn = newArnFor(familyForMode("full-rls-application-canary"));
+    plan.resource_changes.find((item) => item.address === canaryAddress.replace("aws_ecs_task_definition.candidate", "aws_ecs_task_definition.candidate_retained")).change.before.arn = newArnFor(familyForMode("full-rls-application-canary"));
   } });
   assert.throws(() => generate(fixture), /does not match the rollover before ARN/);
 });
@@ -1004,7 +1016,7 @@ test("malformed AWS responses fail closed", () => {
 });
 
 test("generated audit is accepted by the existing Stage B plan validator", () => {
-  const fixture = makeFixture();
+  const fixture = makeAtomicBrokerFixture();
   const audit = generate(fixture);
   const auditBytes = Buffer.from(JSON.stringify(audit));
   assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
@@ -1019,7 +1031,7 @@ test("generated audit is accepted by the existing Stage B plan validator", () =>
 });
 
 test("create-only audit is accepted by the existing Stage B plan validator", () => {
-  const fixture = makeCreateOnlyFixture();
+  const fixture = makeCreateOnlyFixture({ appendOnly: true });
   const audit = generate(fixture);
   const auditBytes = Buffer.from(JSON.stringify(audit));
   assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {

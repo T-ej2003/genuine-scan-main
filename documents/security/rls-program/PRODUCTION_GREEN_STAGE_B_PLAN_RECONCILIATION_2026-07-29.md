@@ -46,22 +46,48 @@ This source correction adds no runtime, service, IAM, secret, database,
 networking, ALB, DNS, or traffic authority and does not authorize a fresh audit
 or Terraform operation.
 
-## Reviewed immutable revision-rollover exception
+## Append-only task-definition registration model
 
-Normal Terraform destroys remain forbidden. The only permitted exception is a
-same-family `aws_ecs_task_definition` delete/create revision rollover for an
-allowlisted Stage B address with provider `skip_destroy = true`. This registers
-the new revision while retaining the prior revision; the release role has no
-`ecs:DeregisterTaskDefinition` authority. The plan validator requires a fresh live reference
-audit supplied with explicit SHA-256 values for both the audit file and the
-current `terraform show -json` output. Every old ARN must be present in that
-audit with matching family and `container_definitions` as its only replacement
-path, zero service/running/pending references, and a retained rollback ARN.
+Normal Terraform destroys remain forbidden, including every
+`aws_ecs_task_definition` `delete`, `destroy`, or `delete,create` replacement.
+`skip_destroy = true` is an AWS provider argument, not Terraform lifecycle
+protection; it does not remove replacement actions from a plan when an existing
+state entry changes. The release role consequently retains no
+`ecs:DeregisterTaskDefinition` authority.
 
-This exception does not authorize ECS service updates, task execution, database
-actions, broker invocation, ALB, DNS, or traffic changes. Any non-task-definition
-destroy, unknown address/family, missing or mismatched audit binding, non-zero
-reference, or missing rollback ARN remains fail-closed.
+The source model keeps historical revisions at
+`aws_ecs_task_definition.candidate_retained[...]` and
+`aws_ecs_task_definition.executor_retained[...]` with `ignore_changes = all`,
+while the current `candidate[...]` and `executor[...]` addresses register the
+new release revisions. The first migration from the old stable addresses must
+be separately approved and run exactly as follows:
+
+```sh
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["backend"]' 'aws_ecs_task_definition.candidate_retained["backend"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["canary"]' 'aws_ecs_task_definition.candidate_retained["canary"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["worker"]' 'aws_ecs_task_definition.candidate_retained["worker"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]' 'aws_ecs_task_definition.executor_retained["full-rls-admin-bootstrap"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-ownership"]' 'aws_ecs_task_definition.executor_retained["full-rls-admin-ownership"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-capability-preflight"]' 'aws_ecs_task_definition.executor_retained["full-rls-capability-preflight"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-provision"]' 'aws_ecs_task_definition.executor_retained["full-rls-role-provision"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-verify"]' 'aws_ecs_task_definition.executor_retained["full-rls-role-verify"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-rollback"]' 'aws_ecs_task_definition.executor_retained["full-rls-rollback"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-runtime-policy"]' 'aws_ecs_task_definition.executor_retained["full-rls-runtime-policy"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-verification"]' 'aws_ecs_task_definition.executor_retained["full-rls-verification"]'
+```
+
+The migration preserves all eleven existing revisions. It is not performed by
+this PR, and no import, `state rm`, or `state mv` has been executed here. The
+post-migration plan must contain twelve current `create` actions, eleven
+retained `no-op` actions, no task-definition delete actions, and no ECS service
+update. The audit records retained revisions and still proves the exact twelve
+family allowlist, complete service/task reads, and plan-bound atomic broker
+mapping to the new current addresses. Unknown families, blue families, broad
+destruction, and unproven broker or reference relationships remain fail-closed.
+
+This model does not authorize ECS service updates, task execution, database
+actions, broker invocation, ALB, DNS, or traffic changes. Old inactive revision
+cleanup is a separate controlled housekeeping process.
 
 The permanent release-deployer policy supplies the read-only calls needed for
 this audit; no temporary policy is required. The audit is regenerated whenever

@@ -214,6 +214,67 @@ resource "aws_iam_role_policy" "executor_runtime" {
   })
 }
 
+resource "aws_ecs_task_definition" "candidate_retained" {
+  for_each = {
+    for kind, definition in local.candidate_definitions : kind => definition
+    if kind != "read_only_canary"
+  }
+  skip_destroy = true
+  lifecycle {
+    ignore_changes = all
+  }
+  family                   = each.value.family
+  network_mode             = each.value.networkMode
+  requires_compatibilities = each.value.requiresCompatibilities
+  cpu                      = each.value.cpu
+  memory                   = each.value.memory
+  execution_role_arn       = aws_iam_role.execution[each.key].arn
+  task_role_arn            = aws_iam_role.task[each.key].arn
+  container_definitions    = jsonencode(each.value.containerDefinitions)
+
+  dynamic "volume" {
+    for_each = try(each.value.volumes, [])
+    content {
+      name = volume.value.name
+    }
+  }
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+  tags = local.tags
+}
+
+resource "aws_ecs_task_definition" "executor_retained" {
+  for_each     = local.executor_definitions
+  skip_destroy = true
+  lifecycle {
+    ignore_changes = all
+  }
+  family                   = each.value.family
+  network_mode             = each.value.networkMode
+  requires_compatibilities = each.value.requiresCompatibilities
+  cpu                      = each.value.cpu
+  memory                   = each.value.memory
+  execution_role_arn       = aws_iam_role.execution["executor"].arn
+  task_role_arn            = var.stage_a_executor_task_role_arn
+  container_definitions    = jsonencode(each.value.containerDefinitions)
+
+  dynamic "volume" {
+    for_each = each.value.volumes
+    content {
+      name = volume.value.name
+    }
+  }
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+  tags = local.tags
+}
+
 resource "aws_ecs_task_definition" "candidate" {
   for_each                 = local.candidate_definitions
   skip_destroy             = true

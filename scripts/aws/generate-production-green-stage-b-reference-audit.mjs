@@ -41,6 +41,11 @@ const expectedBrokerFamily = (mode) => mode === "full-rls-application-canary"
 const brokerTaskDefinitionAddress = (mode) => mode === "full-rls-application-canary"
   ? 'aws_ecs_task_definition.candidate["canary"]'
   : `aws_ecs_task_definition.executor["${mode}"]`;
+const retainedTaskDefinitionAddressPattern = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([^"]+)"\]$/;
+const currentAddressForRetained = (address) => {
+  const match = retainedTaskDefinitionAddressPattern.exec(address || "");
+  return match ? `aws_ecs_task_definition.${match[1]}["${match[2]}"]` : undefined;
+};
 
 function parseJson(value, label) {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${label} is missing.`);
@@ -81,6 +86,7 @@ function planTaskDefinitions(plan) {
   const rolloverByAddress = new Map();
   const createOnlyByAddress = new Map();
   const noOpByAddress = new Map();
+  const retainedByAddress = new Map();
   for (const change of changes.filter((item) => item?.type === "aws_ecs_task_definition")) {
     const address = change.address;
     const before = change.change?.before || {};
@@ -88,6 +94,17 @@ function planTaskDefinitions(plan) {
     const family = after.family || before.family;
     if (typeof family !== "string" || !family) throw new Error(`Terraform plan task-definition family is missing: ${address}`);
     if (!Object.values(STAGE_B_TASK_DEFINITION_FAMILIES).includes(family)) throw new Error(`Terraform plan contains an unknown Stage B task-definition family: ${family}`);
+    const currentAddress = currentAddressForRetained(address);
+    if (currentAddress) {
+      if (STAGE_B_TASK_DEFINITION_FAMILIES[currentAddress] !== family) throw new Error(`Terraform plan retained task-definition address does not match its exact family: ${address}`);
+      const actions = requireArray(change.change?.actions, `Terraform plan actions for ${address}`);
+      if (JSON.stringify(actions) !== JSON.stringify(["no-op"]) || !before.arn) throw new Error(`Terraform plan retained task definition must be an exact no-op with a prior ARN: ${address}`);
+      const prior = familyFromArn(before.arn, `${address} retained task definition`);
+      if (before.family !== family || prior.family !== family) throw new Error(`Terraform plan retained task-definition family mismatch: ${address}`);
+      if (retainedByAddress.has(address)) throw new Error(`Terraform plan contains a duplicate retained task-definition address: ${address}`);
+      retainedByAddress.set(address, { address, family, oldArn: before.arn, proposedFamily: after.family || family });
+      continue;
+    }
     if (seenFamilies.has(family)) throw new Error(`Terraform plan contains a duplicate Stage B task-definition family: ${family}`);
     seenFamilies.add(family);
     if (STAGE_B_TASK_DEFINITION_FAMILIES[address] !== family) throw new Error(`Terraform plan task-definition address does not match its exact family: ${address}`);
@@ -122,7 +139,7 @@ function planTaskDefinitions(plan) {
     const missing = STAGE_B_TASK_DEFINITION_FAMILY_NAMES.filter((family) => !seenFamilies.has(family));
     throw new Error(`Terraform plan is missing exact Stage B task-definition families: ${missing.join(", ")}`);
   }
-  return { rolloverByAddress, createOnlyByAddress, noOpByAddress };
+  return { rolloverByAddress, createOnlyByAddress, noOpByAddress, retainedByAddress };
 }
 
 function ensurePlanHash(planBytes, expectedPlanSha256) {
@@ -199,7 +216,7 @@ function proveBrokerPackagePlan(plan, terraformConfiguration, expectedPackageChe
   return proof;
 }
 
-function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns, createOnlyFamilies, plan, rolloverByAddress, planSha256, terraformConfiguration) {
+function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns, createOnlyFamilies, retainedByFamily, plan, rolloverByAddress, planSha256, terraformConfiguration) {
   const normalizedConfigArn = String(config?.FunctionArn || "").replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
   const normalizedExpectedArn = String(brokerFunctionArn).replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
   if (!normalizedConfigArn || normalizedConfigArn !== normalizedExpectedArn) throw new Error("Broker Lambda identity does not match the expected function.");
@@ -213,11 +230,16 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
   for (const mode of expectedModes) {
     const identity = familyFromArn(taskDefinitions[mode], `broker task definition for ${mode}`);
     if (identity.family !== expectedBrokerFamily(mode)) throw new Error(`Broker task definition family is unexpected for ${mode}.`);
-    if (createOnlyFamilies.has(identity.family)) throw new Error(`Create-only task-definition family is unexpectedly referenced by broker: ${mode}.`);
+    if (createOnlyFamilies.has(identity.family) && !retainedByFamily.has(identity.family)) throw new Error(`Create-only task-definition family is unexpectedly referenced by broker: ${mode}.`);
     brokerReferences.set(identity.arn, mode);
     brokerReferencesByFamily.set(identity.family, [...(brokerReferencesByFamily.get(identity.family) || []), mode]);
   }
-  const rolloverByFamily = new Map([...rolloverByAddress.values()].map((entry) => [entry.family, entry]));
+  const atomicByAddress = new Map(rolloverByAddress);
+  for (const [address, entry] of [...createOnlyFamilies].flatMap((family) => {
+    const current = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).find(([, candidateFamily]) => candidateFamily === family)?.[0];
+    return current && retainedByFamily.has(family) ? [[current, { address: current, family, oldArn: retainedByFamily.get(family).oldArn, proposedFamily: family }]] : [];
+  })) atomicByAddress.set(address, entry);
+  const rolloverByFamily = new Map([...atomicByAddress.values()].map((entry) => [entry.family, entry]));
   const plannedAtomicBrokerRollovers = [];
   for (const [arn, mode] of brokerReferences) {
     const identity = familyFromArn(arn, `broker task definition for ${mode}`);
@@ -225,7 +247,7 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
     if (!rollover) continue;
     if (arn === rollover.oldArn) {
       try {
-        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256, terraformConfiguration));
+        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, atomicByAddress, planSha256, terraformConfiguration));
       } catch (error) {
         throw new Error(`Broker Lambda still references superseded task definition ${arn}: ${error.message}`);
       }
@@ -292,6 +314,15 @@ function referenceNamesByFamily(items, families, arnKey, nameKey) {
     if (references.has(family)) references.get(family).push(item[nameKey]);
   }
   return references;
+}
+
+function assertCreateOnlyReferences(items, families, retainedByFamily, arnKey, nameKey) {
+  for (const item of items) {
+    const family = familyFromArn(item[arnKey], `${nameKey} task definition`).family;
+    if (!families.has(family)) continue;
+    const retainedArn = retainedByFamily.get(family);
+    if (!retainedArn || item[arnKey] !== retainedArn.oldArn) throw new Error(`Create-only task-definition family remains referenced: ${family}`);
+  }
 }
 
 function validateFailure(failure, label) {
@@ -390,9 +421,10 @@ export function generateReferenceAudit({
   if (plan?.variables?.package_checksum_sha256?.value !== expectedPackageChecksumSha256) throw new Error("Expected release package checksum does not match the exact plan input.");
   assertStageBReferenceAuditFreshness(auditedAt, now);
   const planSha = ensurePlanHash(planBytes, planJsonSha256);
-  const { rolloverByAddress, createOnlyByAddress, noOpByAddress } = planTaskDefinitions(plan);
+  const { rolloverByAddress, createOnlyByAddress, noOpByAddress, retainedByAddress } = planTaskDefinitions(plan);
   const createOnlyFamilies = new Set([...createOnlyByAddress.values()].map((entry) => entry.family));
   const noOpFamilies = new Set([...noOpByAddress.values()].map((entry) => entry.family));
+  const retainedByFamily = new Map([...retainedByAddress.values()].map((entry) => [entry.family, entry]));
   const observedCallerArn = validateCaller(callerArn || reader.getCallerIdentity()?.Arn);
 
   const oldDefinitions = [];
@@ -400,7 +432,12 @@ export function generateReferenceAudit({
     const described = validateTaskDefinitionResponse(reader.describeTaskDefinition(rollover.oldArn), rollover.family, `${rollover.address} old task definition`);
     oldDefinitions.push({ ...rollover, currentStatus: described.status, rollbackArn: described.arn });
   }
-  const oldArns = oldDefinitions.map((entry) => entry.oldArn);
+  const retainedDefinitions = [];
+  for (const retained of [...retainedByAddress.values()].sort((left, right) => left.address.localeCompare(right.address))) {
+    const described = validateTaskDefinitionResponse(reader.describeTaskDefinition(retained.oldArn), retained.family, `${retained.address} retained task definition`);
+    retainedDefinitions.push({ ...retained, currentStatus: described.status });
+  }
+  const oldArns = [...oldDefinitions, ...retainedDefinitions].map((entry) => entry.oldArn);
 
   const serviceArns = requireArray(reader.listServices(), "ECS service listing");
   const services = describeServices(reader, serviceArns);
@@ -417,13 +454,17 @@ export function generateReferenceAudit({
     referencesByArn: brokerReferencesByArn,
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
-  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, plan, rolloverByAddress, planSha, terraformConfiguration);
+  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, retainedByFamily, plan, rolloverByAddress, planSha, terraformConfiguration);
   const serviceReferences = referenceNames(services, oldArns, "taskDefinition", "serviceName");
   const runningReferences = referenceNames(runningTasks, oldArns, "taskDefinitionArn", "taskArn");
   const pendingReferences = referenceNames(pendingTasks, oldArns, "taskDefinitionArn", "taskArn");
-  const createOnlyServiceReferences = referenceNamesByFamily(services, createOnlyFamilies, "taskDefinition", "serviceName");
-  const createOnlyRunningReferences = referenceNamesByFamily(runningTasks, createOnlyFamilies, "taskDefinitionArn", "taskArn");
-  const createOnlyPendingReferences = referenceNamesByFamily(pendingTasks, createOnlyFamilies, "taskDefinitionArn", "taskArn");
+  assertCreateOnlyReferences(services, createOnlyFamilies, retainedByFamily, "taskDefinition", "serviceName");
+  assertCreateOnlyReferences(runningTasks, createOnlyFamilies, retainedByFamily, "taskDefinitionArn", "taskArn");
+  assertCreateOnlyReferences(pendingTasks, createOnlyFamilies, retainedByFamily, "taskDefinitionArn", "taskArn");
+  const unretainedCreateOnlyFamilies = new Set([...createOnlyFamilies].filter((family) => !retainedByFamily.has(family)));
+  const createOnlyServiceReferences = referenceNamesByFamily(services, unretainedCreateOnlyFamilies, "taskDefinition", "serviceName");
+  const createOnlyRunningReferences = referenceNamesByFamily(runningTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
+  const createOnlyPendingReferences = referenceNamesByFamily(pendingTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
   const noOpServiceReferences = referenceNamesByFamily(services, noOpFamilies, "taskDefinition", "serviceName");
   const noOpRunningReferences = referenceNamesByFamily(runningTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
   const noOpPendingReferences = referenceNamesByFamily(pendingTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
@@ -485,6 +526,21 @@ export function generateReferenceAudit({
       brokerReferenceModes: [...(brokerReferencesByFamily.get(entry.family) || [])].sort(),
     }));
 
+  const retainedTaskDefinitions = retainedDefinitions.map((entry) => ({
+    terraformAddress: entry.address,
+    oldTaskDefinitionArn: entry.oldArn,
+    family: entry.family,
+    classification: "retained-no-op",
+    currentStatus: entry.currentStatus,
+    serviceReferences: [...(referenceNames(services, [entry.oldArn], "taskDefinition", "serviceName").get(entry.oldArn) || [])].sort(),
+    runningTaskReferences: [...(referenceNames(runningTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort(),
+    pendingTaskReferences: [...(referenceNames(pendingTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort(),
+    brokerReferenceModes: [...(brokerReferencesByArn.has(entry.oldArn) ? [brokerReferencesByArn.get(entry.oldArn)] : [])].sort(),
+    brokerReferenceStatus: plannedAtomicBrokerRollovers.some((rollover) => rollover.oldTaskDefinitionArn === entry.oldArn)
+      ? "planned-atomic-broker-rollover-v1"
+      : "not-referenced-by-broker-v1",
+  }));
+
   return {
     schemaVersion: STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
     auditedAt,
@@ -498,6 +554,7 @@ export function generateReferenceAudit({
     noServiceDeploymentObserved: true,
     noTaskExecutionObserved: true,
     oldTaskDefinitions: auditedOldDefinitions,
+    retainedTaskDefinitions,
     createOnlyTaskDefinitions,
     noOpTaskDefinitions,
     plannedAtomicBrokerRollovers,
