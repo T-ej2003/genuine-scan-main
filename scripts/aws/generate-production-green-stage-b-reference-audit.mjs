@@ -44,7 +44,12 @@ const brokerTaskDefinitionAddress = (mode) => mode === "full-rls-application-can
 const retainedTaskDefinitionAddressPattern = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([^"]+)"\]$/;
 const currentAddressForRetained = (address) => {
   const match = retainedTaskDefinitionAddressPattern.exec(address || "");
-  return match ? `aws_ecs_task_definition.${match[1]}["${match[2]}"]` : undefined;
+  if (!match) return undefined;
+  for (const currentAddress of Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES)) {
+    const currentKey = /\["([^"]+)"\]$/.exec(currentAddress)?.[1];
+    if (currentAddress.startsWith(`aws_ecs_task_definition.${match[1]}[`) && new RegExp(`^[a-f0-9]{7,40}-${currentKey}$`).test(match[2])) return currentAddress;
+  }
+  return null;
 };
 
 function parseJson(value, label) {
@@ -95,14 +100,17 @@ function planTaskDefinitions(plan) {
     if (typeof family !== "string" || !family) throw new Error(`Terraform plan task-definition family is missing: ${address}`);
     if (!Object.values(STAGE_B_TASK_DEFINITION_FAMILIES).includes(family)) throw new Error(`Terraform plan contains an unknown Stage B task-definition family: ${family}`);
     const currentAddress = currentAddressForRetained(address);
-    if (currentAddress) {
+    if (currentAddress !== undefined) {
+      if (currentAddress === null) throw new Error(`Terraform plan retained task-definition address must be revision-keyed: ${address}`);
       if (STAGE_B_TASK_DEFINITION_FAMILIES[currentAddress] !== family) throw new Error(`Terraform plan retained task-definition address does not match its exact family: ${address}`);
       const actions = requireArray(change.change?.actions, `Terraform plan actions for ${address}`);
       if (JSON.stringify(actions) !== JSON.stringify(["no-op"]) || !before.arn) throw new Error(`Terraform plan retained task definition must be an exact no-op with a prior ARN: ${address}`);
       const prior = familyFromArn(before.arn, `${address} retained task definition`);
       if (before.family !== family || prior.family !== family) throw new Error(`Terraform plan retained task-definition family mismatch: ${address}`);
       if (retainedByAddress.has(address)) throw new Error(`Terraform plan contains a duplicate retained task-definition address: ${address}`);
-      retainedByAddress.set(address, { address, family, oldArn: before.arn, proposedFamily: after.family || family });
+      const historyKey = /\["([^"]+)"\]$/.exec(address)?.[1];
+      if ([...retainedByAddress.values()].some((entry) => entry.historyKey === historyKey && entry.family === family)) throw new Error(`Terraform plan contains a duplicate retained family in one generation: ${historyKey}`);
+      retainedByAddress.set(address, { address, historyKey, family, oldArn: before.arn, proposedFamily: after.family || family });
       continue;
     }
     if (seenFamilies.has(family)) throw new Error(`Terraform plan contains a duplicate Stage B task-definition family: ${family}`);

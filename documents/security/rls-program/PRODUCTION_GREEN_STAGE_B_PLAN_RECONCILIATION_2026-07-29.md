@@ -55,35 +55,49 @@ protection; it does not remove replacement actions from a plan when an existing
 state entry changes. The release role consequently retains no
 `ecs:DeregisterTaskDefinition` authority.
 
-The source model keeps historical revisions at
-`aws_ecs_task_definition.candidate_retained[...]` and
-`aws_ecs_task_definition.executor_retained[...]` with `ignore_changes = all`,
-while the current `candidate[...]` and `executor[...]` addresses register the
-new release revisions. The first migration from the old stable addresses must
-be separately approved and run exactly as follows:
+The source model takes explicit revision-keyed history maps
+`retained_candidate_task_definitions` and `retained_executor_task_definitions`.
+Both default to `{}`, so a fresh deployment has exactly twelve current task
+definition creates and zero retained resources. Each supplied entry contains a
+generation key such as `<generation>-backend` plus the exact historical task
+definition JSON. Retained resources use `ignore_changes = all`, while current
+`candidate[...]` and `executor[...]` addresses register only the new release.
+
+Before the first rollover, add the eleven existing revision-1 definitions to the
+private history maps under one release generation. Back up state, verify every
+source exists and every destination is absent, then run the separately approved
+commands below. The destination key must match the map entry:
 
 ```sh
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["backend"]' 'aws_ecs_task_definition.candidate_retained["backend"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["canary"]' 'aws_ecs_task_definition.candidate_retained["canary"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["worker"]' 'aws_ecs_task_definition.candidate_retained["worker"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]' 'aws_ecs_task_definition.executor_retained["full-rls-admin-bootstrap"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-ownership"]' 'aws_ecs_task_definition.executor_retained["full-rls-admin-ownership"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-capability-preflight"]' 'aws_ecs_task_definition.executor_retained["full-rls-capability-preflight"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-provision"]' 'aws_ecs_task_definition.executor_retained["full-rls-role-provision"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-verify"]' 'aws_ecs_task_definition.executor_retained["full-rls-role-verify"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-rollback"]' 'aws_ecs_task_definition.executor_retained["full-rls-rollback"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-runtime-policy"]' 'aws_ecs_task_definition.executor_retained["full-rls-runtime-policy"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-verification"]' 'aws_ecs_task_definition.executor_retained["full-rls-verification"]'
+generation=<release-sha-prefix>
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state pull > "/private/tmp/mscqr-stage-b-production-${generation}.state.backup.json"
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state list
+
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["backend"]' 'aws_ecs_task_definition.candidate_retained["<generation>-backend"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["canary"]' 'aws_ecs_task_definition.candidate_retained["<generation>-canary"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["worker"]' 'aws_ecs_task_definition.candidate_retained["<generation>-worker"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-admin-bootstrap"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-ownership"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-admin-ownership"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-capability-preflight"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-capability-preflight"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-provision"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-role-provision"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-verify"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-role-verify"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-rollback"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-rollback"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-runtime-policy"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-runtime-policy"]'
+TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-verification"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-verification"]'
 ```
 
 The migration preserves all eleven existing revisions. It is not performed by
 this PR, and no import, `state rm`, or `state mv` has been executed here. The
-post-migration plan must contain twelve current `create` actions, eleven
-retained `no-op` actions, no task-definition delete actions, and no ECS service
-update. The audit records retained revisions and still proves the exact twelve
-family allowlist, complete service/task reads, and plan-bound atomic broker
-mapping to the new current addresses. Unknown families, blue families, broad
-destruction, and unproven broker or reference relationships remain fail-closed.
+read-only-canary has no prior state and remains the twelfth current create.
+After the first rollover, the plan contains twelve current creates and eleven
+retained no-ops. For the second rollover, add a second generation to the maps,
+move the current eleven state instances to that generation's unique retained
+addresses, and leave the first generation untouched. The plan then contains
+two retained no-op generations and twelve current creates. Duplicate generation
+keys, occupied destinations, missing sources, static family-only keys, and
+retained creates are rejected. The audit records retained revisions and still
+proves the exact twelve family allowlist, complete service/task reads, and
+plan-bound broker mapping to the new current addresses.
 
 This model does not authorize ECS service updates, task execution, database
 actions, broker invocation, ALB, DNS, or traffic changes. Old inactive revision

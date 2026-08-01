@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
-import { assertStageBPlan } from "../plan-production-green-stage-b.mjs";
+import { assertStageBPlan, assertStageBTaskDefinitionStateMigrationPreconditions } from "../plan-production-green-stage-b.mjs";
+import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const family = "mscqr-production-rls-green-backend-candidate";
 const address = 'aws_ecs_task_definition.candidate["backend"]';
-const retainedAddress = 'aws_ecs_task_definition.candidate_retained["backend"]';
 const oldArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`;
 const validationNow = new Date("2026-07-31T14:05:00.000Z");
 const terraformConfiguration = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
@@ -17,8 +17,21 @@ const rollover = () => {
   value.change.replace_paths = [["container_definitions"]];
   return value;
 };
-const retained = () => ({ address: retainedAddress, type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family, arn: oldArn }, after: { family } } });
-const appendOnly = () => [change("aws_ecs_task_definition", ["create"], { family }), retained()];
+const retained = (historyKey = "aaaaaaaa-backend", taskFamily = family) => ({ address: `aws_ecs_task_definition.candidate_retained["${historyKey}"]`, type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family: taskFamily, arn: oldArn.replace(family, taskFamily) }, after: { family: taskFamily } } });
+const retainedForAddress = (address, generation = "aaaaaaaa") => {
+  const match = /^(aws_ecs_task_definition\.(candidate|executor))\["([^"]+)"\]$/.exec(address);
+  const taskFamily = STAGE_B_TASK_DEFINITION_FAMILIES[address];
+  return { address: `${match[1]}_retained["${generation}-${match[3]}"]`, type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: { family: taskFamily, arn: oldArn.replace(family, taskFamily) }, after: { family: taskFamily } } };
+};
+const currentCreates = () => Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([taskAddress, taskFamily]) => ({
+  address: taskAddress,
+  type: "aws_ecs_task_definition",
+  change: { actions: ["create"], after: { family: taskFamily }, before: null },
+}));
+const appendOnly = () => [
+  ...currentCreates(),
+  retained(),
+];
 const auditFor = (overrides = {}) => ({
   schemaVersion: 1,
   auditedAt: "2026-07-31T14:00:00.000Z",
@@ -50,6 +63,34 @@ const validAppendOnly = (planOverrides = {}) => {
   const plan = { resource_changes: appendOnly(), ...planOverrides };
   return { plan, options: { now: validationNow, terraformConfiguration } };
 };
+
+test("fresh deployment has exactly twelve current creates and no retained creates", () => {
+  assert.doesNotThrow(() => assertStageBPlan({ resource_changes: currentCreates() }, { terraformConfiguration }));
+  assert.equal(currentCreates().filter((change) => change.address.includes("_retained")).length, 0);
+});
+
+test("first and second revision-keyed rollovers retain history as no-op", () => {
+  const first = { resource_changes: [...currentCreates(), ...Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).filter((address) => !address.includes("read_only_canary")).map((address) => retainedForAddress(address))] };
+  assert.doesNotThrow(() => assertStageBPlan(first, { terraformConfiguration }));
+  const second = { resource_changes: [...first.resource_changes, retained("bbbbbbbb-backend"), retained("bbbbbbbb-worker", STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["worker"]'])] };
+  assert.doesNotThrow(() => assertStageBPlan(second, { terraformConfiguration }));
+});
+
+test("static retained keys and duplicate retained generations fail closed", () => {
+  const staticKey = { resource_changes: [...currentCreates(), { ...retained(), address: 'aws_ecs_task_definition.candidate_retained["backend"]' }] };
+  assert.throws(() => assertStageBPlan(staticKey, { terraformConfiguration }), /revision-keyed/);
+  const duplicate = { resource_changes: [...currentCreates(), retained(), retained()] };
+  assert.throws(() => assertStageBPlan(duplicate, { terraformConfiguration }), /duplicated/);
+});
+
+test("state migration requires present sources, absent destinations, and explicit addresses", () => {
+  const source = 'aws_ecs_task_definition.candidate["backend"]';
+  const destination = 'aws_ecs_task_definition.candidate_retained["aaaaaaaa-backend"]';
+  assert.doesNotThrow(() => assertStageBTaskDefinitionStateMigrationPreconditions([source], [{ source, destination }]));
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions([], [{ source, destination }]), /source is missing/);
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions([source, destination], [{ source, destination }]), /destination is occupied/);
+  assert.throws(() => assertStageBTaskDefinitionStateMigrationPreconditions([source], [{ source, destination: 'aws_ecs_task_definition.candidate_retained["backend"]' }]), /revision-keyed/);
+});
 
 test("Stage B plan wrapper permits only non-destructive control-plane resources", () =>
   assert.doesNotThrow(() => assertStageBPlan({ resource_changes: [...appendOnly(), change("aws_dynamodb_table")] }, { terraformConfiguration })));
@@ -90,7 +131,7 @@ test("append-only contract covers current and retained task-definition collectio
 test("task-definition delete, replacement, and update actions are rejected", () => {
   const { plan, options } = validAppendOnly();
   plan.resource_changes[0].change.actions = ["delete"];
-  assert.throws(() => assertStageBPlan(plan, options), /append-only/);
+  assert.throws(() => assertStageBPlan(plan, options), /append-only|create-only/);
   const alternate = validAppendOnly();
   alternate.plan.resource_changes[0].change.actions = ["create", "delete"];
   assert.throws(() => assertStageBPlan(alternate.plan, alternate.options), /append-only/);
@@ -137,7 +178,7 @@ test("Stage B Terraform root is control-plane-only and binds four digest images"
 
 test("ECS resources pass one container array and render task-level volumes separately", () => {
   const main = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
-  assert.equal((main.match(/container_definitions\s*=\s*jsonencode\(each\.value\.containerDefinitions\)/g) || []).length, 4);
+  assert.equal((main.match(/container_definitions\s*=\s*jsonencode\(each\.value\.containerDefinitions\)/g) || []).length, 2);
   assert.equal((main.match(/dynamic "volume"/g) || []).length, 4);
   assert.doesNotMatch(main, /container_definitions\s*=\s*(?:each\.value|replace\(local\.executor)/);
   for (const mode of [

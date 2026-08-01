@@ -86,9 +86,11 @@ task-definition families and retains prior revisions. The AWS provider supports
 with a changed `container_definitions` value still plans `delete,create`, and the
 provider can call `ecs:DeregisterTaskDefinition` before registration. The release
 model therefore uses append-only addresses. The current `candidate` and
-`executor` collections are create-only; `candidate_retained` and
-`executor_retained` hold historical revisions with `ignore_changes = all` and
-`skip_destroy = true`. The general release-deployer policy contains no
+`executor` collections are create-only; revision-keyed entries in the explicit
+`retained_candidate_task_definitions` and `retained_executor_task_definitions`
+maps create historical resources with `ignore_changes = all` and
+`skip_destroy = true`. Both maps default to `{}`, so fresh deployments do not
+create duplicate task-definition revisions. The general release-deployer policy contains no
 deregistration authority. Old inactive revisions are retained for a separate,
 reviewed housekeeping process outside this release role. `logs:CreateLogGroup`
 and `logs:PutRetentionPolicy` remain limited to the backend, worker,
@@ -113,12 +115,16 @@ is limited to the four exact Stage B log-group ARN patterns, also constrained to
 `eu-west-2`.
 
 Before the first append-only plan, the operator must separately and explicitly
-move the eleven existing stable task-definition state addresses into the retained
-collections. The exact `terraform state mv` commands are recorded in the
-reconciliation document; they are not run by this PR or automatically. The
-read-only-canary family has no prior state entry and is not moved. After that
-migration the expected task-definition shape is twelve current `create` actions,
-eleven retained `no-op` actions, and zero task-definition deletes or replacements.
+add the eleven deployed revision-1 definitions to the private revision-keyed
+history maps, back up state, verify source presence and destination absence, and
+move the eleven current state addresses to those destinations. The exact
+`terraform state mv` commands are recorded in the reconciliation document; they
+are not run by this PR or automatically. The read-only-canary family has no
+prior state entry and is not moved. After that migration the expected
+task-definition shape is twelve current `create` actions, eleven retained
+`no-op` actions, and zero task-definition deletes or replacements. A later
+release adds a second generation and repeats the same rotation without touching
+the first generation.
 The validator rejects every task-definition delete, destroy, or delete/create
 replacement.
 

@@ -18,6 +18,7 @@ const taskDefinitionFamilies = new Map(Object.entries(STAGE_B_TASK_DEFINITION_FA
 const exactActions = (actions, expected) => actions.length === expected.length && actions.every((action, index) => action === expected[index]);
 const exactReplacePaths = (paths) => Array.isArray(paths) && paths.length === 1 && Array.isArray(paths[0]) && paths[0].length === 1 && paths[0][0] === "container_definitions";
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+const retainedAddressPattern = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([^"]+)"\]$/;
 
 function assertTaskDefinitionScope(change) {
   const expectedFamily = taskDefinitionFamilies.get(change.address);
@@ -28,11 +29,20 @@ function assertTaskDefinitionScope(change) {
   if (afterFamily !== undefined && afterFamily !== expectedFamily) throw new Error(`Stage B task-definition family rejected: ${change.address}`);
 }
 
-function retainedTaskDefinitionFamily(address) {
-  const match = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([^"]+)"\]$/.exec(address || "");
+function retainedTaskDefinitionDescriptor(address) {
+  const match = retainedAddressPattern.exec(address || "");
   if (!match) return undefined;
-  const currentAddress = `aws_ecs_task_definition.${match[1]}["${match[2]}"]`;
-  return taskDefinitionFamilies.get(currentAddress);
+  for (const [currentAddress, family] of taskDefinitionFamilies) {
+    const currentKey = /\["([^"]+)"\]$/.exec(currentAddress)?.[1];
+    if (currentAddress.startsWith(`aws_ecs_task_definition.${match[1]}[`) && new RegExp(`^[a-f0-9]{7,40}-${currentKey}$`).test(match[2])) {
+      return { family, historyKey: match[2], currentAddress };
+    }
+  }
+  return { invalid: true, historyKey: match[2] };
+}
+
+function retainedTaskDefinitionFamily(address) {
+  return retainedTaskDefinitionDescriptor(address)?.family;
 }
 
 function assertTaskDefinitionAppendOnlyContract(terraformConfiguration) {
@@ -48,8 +58,9 @@ function assertTaskDefinitionAppendOnlyContract(terraformConfiguration) {
 }
 
 function assertRetainedTaskDefinition(change) {
-  const expectedFamily = retainedTaskDefinitionFamily(change.address);
-  if (!expectedFamily) throw new Error(`Stage B retained task-definition address rejected: ${change.address}`);
+  const descriptor = retainedTaskDefinitionDescriptor(change.address);
+  if (!descriptor || descriptor.invalid) throw new Error(`Stage B retained task-definition address must be revision-keyed: ${change.address}`);
+  const expectedFamily = descriptor.family;
   const actions = change.change?.actions;
   if (!exactActions(actions || [], ["no-op"])) throw new Error(`Stage B retained task-definition must remain no-op: ${change.address}`);
   const before = change.change?.before || {};
@@ -95,6 +106,56 @@ function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planB
     }
   }
   if (typeof entry.rollbackArn !== "string" || !arnPattern.test(entry.rollbackArn)) throw new Error(`Stage B rollback ARN missing: ${change.address}`);
+}
+
+function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
+  const changes = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
+  const current = [];
+  const retainedAddresses = new Set();
+  const retainedGenerationFamilies = new Set();
+  for (const change of changes) {
+    const descriptor = retainedTaskDefinitionDescriptor(change.address);
+    if (descriptor?.invalid) throw new Error(`Stage B retained task-definition address must be revision-keyed: ${change.address}`);
+    if (descriptor) {
+      assertRetainedTaskDefinition(change);
+      if (retainedAddresses.has(change.address)) throw new Error(`Stage B retained task-definition address is duplicated: ${change.address}`);
+      const generationFamily = `${descriptor.historyKey}|${descriptor.family}`;
+      if (retainedGenerationFamilies.has(generationFamily)) throw new Error(`Stage B retained task-definition family is duplicated in one generation: ${descriptor.historyKey}`);
+      retainedAddresses.add(change.address);
+      retainedGenerationFamilies.add(generationFamily);
+    } else {
+      current.push(change);
+    }
+  }
+  const expectedCurrent = new Set(taskDefinitionFamilies.keys());
+  const actualCurrent = new Set(current.map((change) => change.address));
+  if (current.length !== expectedCurrent.size || actualCurrent.size !== expectedCurrent.size || [...expectedCurrent].some((address) => !actualCurrent.has(address))) {
+    throw new Error("Stage B append-only plan must contain exactly the twelve current task-definition addresses.");
+  }
+  for (const change of current) {
+    assertTaskDefinitionScope(change);
+    if (!exactActions(change.change?.actions || [], ["create"])) throw new Error(`Stage B append-only current task-definition must be create-only: ${change.address}`);
+  }
+  assertTaskDefinitionAppendOnlyContract(terraformConfiguration);
+}
+
+export function assertStageBTaskDefinitionStateMigrationPreconditions(stateAddresses, moves) {
+  if (!Array.isArray(stateAddresses) || !Array.isArray(moves) || moves.length === 0) throw new Error("Stage B state migration inputs are missing or malformed.");
+  const state = new Set(stateAddresses);
+  const sources = new Set();
+  const destinations = new Set();
+  for (const move of moves) {
+    if (!move || typeof move.source !== "string" || typeof move.destination !== "string" || move.source.includes("*") || move.destination.includes("*")) throw new Error("Stage B state migration addresses must be explicit.");
+    if (!taskDefinitionFamilies.has(move.source)) throw new Error(`Stage B state migration source is not a current task-definition address: ${move.source}`);
+    const destination = retainedTaskDefinitionDescriptor(move.destination);
+    if (!destination || destination.invalid) throw new Error(`Stage B state migration destination is not revision-keyed: ${move.destination}`);
+    if (sources.has(move.source) || destinations.has(move.destination)) throw new Error("Stage B state migration contains a duplicate source or destination.");
+    if (!state.has(move.source)) throw new Error(`Stage B state migration source is missing: ${move.source}`);
+    if (state.has(move.destination)) throw new Error(`Stage B state migration destination is occupied: ${move.destination}`);
+    if (taskDefinitionFamilies.get(move.source) !== destination.family) throw new Error(`Stage B state migration family mismatch: ${move.destination}`);
+    sources.add(move.source);
+    destinations.add(move.destination);
+  }
 }
 
 function assertBrokerAuditBinding(plan, brokerChange, audit, auditBytes, auditSha256, planBytes, planSha256, now, terraformConfiguration) {
@@ -172,16 +233,16 @@ export function assertStageBPlan(plan, options = {}) {
     else if (!exactActions(brokerActions, ["no-op"])) throw new Error(`Stage B broker actions are unsupported: ${JSON.stringify(brokerActions)}`);
   }
   const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
-  if (taskDefinitionChanges.length) assertTaskDefinitionAppendOnlyContract(terraformConfiguration);
+  if (taskDefinitionChanges.length) assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration);
   for (const change of plan.resource_changes || []) {
     const actions = change.change.actions || [];
     if (forbidden.test(change.type) || !allowed.has(change.type)) throw new Error(`Stage B plan rejected: ${change.address}`);
     if (change.type === "aws_ecs_task_definition") {
-      if (retainedTaskDefinitionFamily(change.address)) {
+      if (retainedTaskDefinitionDescriptor(change.address)) {
         assertRetainedTaskDefinition(change);
       } else {
         assertTaskDefinitionScope(change);
-        if (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"])) throw new Error(`Stage B append-only task-definition plan rejected: ${change.address}`);
+        if (!exactActions(actions, ["create"])) throw new Error(`Stage B append-only task-definition plan rejected: ${change.address}`);
       }
     } else if (actions.includes("delete")) {
       throw new Error(`Stage B plan rejected: ${change.address}`);

@@ -42,6 +42,11 @@ const canaryAddress = 'aws_ecs_task_definition.candidate["canary"]';
 const readOnlyCanaryAddress = 'aws_ecs_task_definition.candidate["read_only_canary"]';
 const executorCollectionAddress = "aws_ecs_task_definition.executor";
 const readOnlyCanaryFamily = STAGE_B_TASK_DEFINITION_FAMILIES[readOnlyCanaryAddress];
+const historyGeneration = "aaaaaaaa";
+const retainedAddressFor = (address) => {
+  const match = /^(aws_ecs_task_definition\.(candidate|executor))\["([^"]+)"\]$/.exec(address);
+  return `${match[1]}_retained["${historyGeneration}-${match[3]}"]`;
+};
 const executorAddressForMode = (mode) => `${executorCollectionAddress}["${mode}"]`;
 const taskDefinitionAddressForMode = (mode) => mode === "full-rls-application-canary" ? canaryAddress : executorAddressForMode(mode);
 const familyForMode = (mode) => mode === "full-rls-application-canary"
@@ -62,7 +67,7 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
   if (appendOnly) {
     const current = changes.map((change) => ({ ...change, change: { ...change.change, actions: ["create"], before: null, replace_paths: undefined } }));
     const retained = changes.filter(({ address }) => address !== readOnlyCanaryAddress).map((change) => {
-      const retainedAddress = change.address.replace("aws_ecs_task_definition.candidate", "aws_ecs_task_definition.candidate_retained").replace("aws_ecs_task_definition.executor", "aws_ecs_task_definition.executor_retained");
+      const retainedAddress = retainedAddressFor(change.address);
       return { ...change, address: retainedAddress, change: { actions: ["no-op"], before: change.change.before, after: change.change.after } };
     });
     changes = [...current, ...retained];
@@ -408,6 +413,29 @@ test("mixed rollover, create-only, and no-op plan classifications pass", () => {
     pendingTaskReferences: [],
     brokerReferenceModes: [],
   }]);
+});
+
+test("revision-keyed retained history supports a second generation", () => {
+  const fixture = makeFixture({
+    appendOnly: true,
+    mutatePlan: (plan) => {
+      for (const address of [backendAddress, 'aws_ecs_task_definition.candidate["worker"]']) {
+        const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(address));
+        plan.resource_changes.push({ ...structuredClone(retained), address: retained.address.replace("aaaaaaaa-", "bbbbbbbb-") });
+      }
+    },
+  });
+  const audit = generate(fixture);
+  assert.equal(audit.retainedTaskDefinitions.length, 13);
+  assert.equal(new Set(audit.retainedTaskDefinitions.map((entry) => entry.terraformAddress)).size, 13);
+});
+
+test("static retained family addresses fail closed", () => {
+  const fixture = makeFixture({ appendOnly: true, mutatePlan: (plan) => {
+    const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(backendAddress));
+    retained.address = 'aws_ecs_task_definition.candidate_retained["backend"]';
+  } });
+  assert.throws(() => generate(fixture), /must be revision-keyed/);
 });
 
 test("no-op with a valid prior ARN passes", () => {
@@ -848,7 +876,7 @@ test("atomic broker rollover in the same plan passes and is recorded explicitly"
     taskDefinitionArnReference: `${canaryAddress}.arn`,
     planJsonSha256: fixture.planJsonSha256,
   }]);
-  const canaryRetainedAddress = canaryAddress.replace("aws_ecs_task_definition.candidate", "aws_ecs_task_definition.candidate_retained");
+  const canaryRetainedAddress = retainedAddressFor(canaryAddress);
   const canary = audit.retainedTaskDefinitions.find((entry) => entry.terraformAddress === canaryRetainedAddress);
   assert.deepEqual(canary.brokerReferenceModes, ["full-rls-application-canary"]);
   assert.equal(canary.brokerReferenceStatus, "planned-atomic-broker-rollover-v1");
@@ -990,7 +1018,7 @@ test("broker update referencing the wrong family fails closed", () => {
 
 test("live broker ARN must match the rollover before ARN", () => {
   const fixture = makeAtomicBrokerFixture({ mutatePlan: (plan) => {
-    plan.resource_changes.find((item) => item.address === canaryAddress.replace("aws_ecs_task_definition.candidate", "aws_ecs_task_definition.candidate_retained")).change.before.arn = newArnFor(familyForMode("full-rls-application-canary"));
+    plan.resource_changes.find((item) => item.address === retainedAddressFor(canaryAddress)).change.before.arn = newArnFor(familyForMode("full-rls-application-canary"));
   } });
   assert.throws(() => generate(fixture), /does not match the rollover before ARN/);
 });
