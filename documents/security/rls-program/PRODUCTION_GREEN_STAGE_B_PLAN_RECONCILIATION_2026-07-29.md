@@ -42,18 +42,23 @@ after the corrective PR merges. AWS's actual managed-policy version IDs must
 be discovered from each live policy rather than assumed to be repository
 suffixes.
 
-This source correction adds one additional read-only IAM permission:
-`iam:ListRolePolicies`, scoped exactly to these administrator-created and
-imported read-only-canary role ARNs:
+The final refresh-contract correction adds two additional read-only IAM
+permissions to the provider policy. `iam:ListAttachedRolePolicies` is scoped
+to both administrator-created and imported read-only-canary role ARNs, while
+`iam:GetRolePolicy` is scoped only to the execution role because it owns the
+imported inline policy:
 
 - `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution`
 - `arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task`
 
-It does not allow IAM role or policy creation, update, attachment, passing, or
-deletion, and it uses no wildcard IAM resource. The permission is required only
-for Terraform drift refresh of those already imported roles. No runtime,
-service, secret, database, networking, ALB, DNS, or traffic authority is added,
-and `ecs:DeregisterTaskDefinition` remains absent.
+The already-merged `iam:GetRole` and `iam:ListRolePolicies` grants remain
+scoped to those same two roles. The execution-role-only `iam:GetRolePolicy`
+grant is required to refresh the imported inline policy; no inline-policy read
+is granted for the task role. These read-only refresh permissions do not allow
+IAM role or policy creation, update, attachment, passing, or deletion, and use
+no wildcard IAM resource. No runtime, service, secret, database, networking,
+ALB, DNS, or traffic authority is added, and `ecs:DeregisterTaskDefinition`
+remains absent.
 
 ## Append-only task-definition registration model
 
