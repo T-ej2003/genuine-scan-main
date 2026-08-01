@@ -985,6 +985,11 @@ test("initial broker create does not require a reference audit", () => {
   assert.doesNotThrow(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }));
 });
 
+test("initial broker create permits retained no-ops during append-only recovery", () => {
+  const fixture = makeAtomicBrokerFixture({ brokerActions: ["create"] });
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }));
+});
+
 test("initial broker create rejects a wrong ZIP source_code_hash", () => {
   const fixture = makeInitialBrokerCreateFixture({
     mutatePlan: (plan) => {

@@ -272,11 +272,14 @@ function assertInitialBrokerCreatePlan(plan, terraformConfiguration) {
     plannedBrokerSourceCodeHashBase64: crypto.createHash("sha256").update(packageBytes).digest("base64"),
   };
   const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
-  if (taskDefinitionChanges.length !== Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length
-    || taskDefinitionChanges.some((change) => !STAGE_B_TASK_DEFINITION_FAMILIES[change.address])) {
+  const currentTaskDefinitionChanges = taskDefinitionChanges.filter((change) => !retainedTaskDefinitionDescriptor(change.address));
+  if (currentTaskDefinitionChanges.length !== Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length
+    || new Set(currentTaskDefinitionChanges.map((change) => change.address)).size !== currentTaskDefinitionChanges.length
+    || currentTaskDefinitionChanges.some((change) => !STAGE_B_TASK_DEFINITION_FAMILIES[change.address])) {
     throw new Error("Stage B broker create task-definition allowlist is not exact.");
   }
-  for (const change of taskDefinitionChanges) assertTaskDefinitionScope(change);
+  for (const change of currentTaskDefinitionChanges) assertTaskDefinitionScope(change);
+  for (const change of taskDefinitionChanges.filter((item) => !currentTaskDefinitionChanges.includes(item))) assertRetainedTaskDefinition(change);
   assertStageBBrokerCreatePlan(plan, proof, terraformConfiguration);
 }
 
