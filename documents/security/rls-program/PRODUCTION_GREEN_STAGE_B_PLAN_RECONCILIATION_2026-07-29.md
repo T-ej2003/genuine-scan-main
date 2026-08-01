@@ -234,3 +234,25 @@ policy was broadened and no retry, re-plan, task run, RLS command, service,
 database, secret-value, ALB, DNS, or traffic operation was performed after the
 failure. Post-apply cloud verification was deliberately not run because the
 operator instruction requires an immediate stop on AccessDenied.
+
+## Final retry permission boundary
+
+The partial apply completed eleven current task-definition registrations at
+revision 2, but did not register the read-only-canary definition and did not
+update the broker. The retry plan therefore permits eleven current no-ops plus
+one exact read-only-canary create, with all eleven revision-1 retained entries
+remaining no-op and no task-definition deletion.
+
+The remaining write APIs are isolated in the source-controlled
+`MSCQRProductionGreenStageBFinalApplyWrite-v1.json` companion because placing
+them in v4 would exceed AWS's managed-policy document limit. The companion is
+limited to exact read-only-canary registration with the three required request
+tags and tag-key allowlist, plus the four Lambda update/release actions for the
+exact approval broker function. It is attached only to the release-deployer
+role. v4 continues to carry the bounded refresh/read and previously reviewed
+recovery permissions; the audit companion remains read-only.
+
+This split adds no IAM mutation authority, no deregistration authority, no task
+execution, no Lambda invocation, and no service, database, ALB, DNS, or traffic
+authority. The final retry still requires a fresh exact-SHA image set, a new
+plan-bound audit, and a valid validator result before applying the saved plan.

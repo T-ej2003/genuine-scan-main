@@ -9,6 +9,7 @@ const paths = {
   v3: "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v3.json",
   v4: "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
   audit: "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+  finalWrite: "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
 };
 const read = (path) => fs.readFileSync(path, "utf8");
 const parse = (path) => JSON.parse(read(path));
@@ -43,6 +44,10 @@ const controlSids = [
   "ReadExactStageBReadOnlyCanaryExecutionRolePolicy",
   "TagExactReplayTable",
   "TagExactStageBTaskDefinitions",
+];
+const finalWriteSids = [
+  "RegisterExactStageBReadOnlyCanaryTaskDefinition",
+  "UpdateExactStageBBrokerFunctionRelease",
 ];
 const stageBTaskFamilies = [
   "mscqr-production-rls-green-backend-candidate",
@@ -87,6 +92,7 @@ test("v4 and the companion policy fit the AWS managed-policy document limit", ()
   assert.equal(awsCharacterCount(policies.v3), 6651);
   assert.equal(awsCharacterCount(policies.v4), 5580);
   assert.equal(awsCharacterCount(policies.audit), 1785);
+  assert.ok(awsCharacterCount(policies.finalWrite) < 6144);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.ok(awsCharacterCount(policies.audit) < 6144);
 });
@@ -108,12 +114,13 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   }));
 });
 
-test("the split has exactly seven moved statements and ten provider-control statements", () => {
+test("the split has exactly seven moved statements, ten provider-control statements, and two final-write statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), movedSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
+  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), finalWriteSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...movedSids, ...controlSids]).size, 17);
+  assert.equal(new Set([...movedSids, ...controlSids, ...finalWriteSids]).size, 19);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
   for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
@@ -146,10 +153,50 @@ test("deregistration authority is absent and retention remains resource-scoped",
   assert.equal(policies.audit.Statement.some((statement) => actionsOf(statement).some((action) => mutationActions.has(action))), false);
 });
 
+test("retry write companion is exact and tag-constrained", () => {
+  const taskDefinition = statementOf(policies.finalWrite, "RegisterExactStageBReadOnlyCanaryTaskDefinition");
+  assert.deepEqual(taskDefinition, {
+    Sid: "RegisterExactStageBReadOnlyCanaryTaskDefinition",
+    Effect: "Allow",
+    Action: "ecs:RegisterTaskDefinition",
+    Resource: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-read-only-canary:*",
+    Condition: {
+      StringEquals: {
+        "aws:RequestedRegion": "eu-west-2",
+        "aws:RequestTag/Environment": "production",
+        "aws:RequestTag/ManagedBy": "Terraform",
+        "aws:RequestTag/Component": "full-rls-green-stage-b",
+      },
+      "ForAllValues:StringEquals": { "aws:TagKeys": ["Environment", "ManagedBy", "Component"] },
+    },
+  });
+  assert.equal(taskDefinition.Resource.includes("mscqr-backend"), false);
+  assert.equal(taskDefinition.Resource.includes("mscqr-frontend"), false);
+
+  const broker = "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker";
+  const brokerStatement = statementOf(policies.finalWrite, "UpdateExactStageBBrokerFunctionRelease");
+  assert.deepEqual(brokerStatement.Action, [
+    "lambda:UpdateFunctionConfiguration",
+    "lambda:UpdateFunctionCode",
+    "lambda:PublishVersion",
+    "lambda:UpdateAlias",
+  ]);
+  assert.equal(brokerStatement.Resource, broker);
+  assert.deepEqual(brokerStatement.Condition.StringEquals, {
+    "aws:RequestedRegion": "eu-west-2",
+    "aws:ResourceTag/Environment": "production",
+    "aws:ResourceTag/ManagedBy": "Terraform",
+    "aws:ResourceTag/Component": "full-rls-green-stage-b",
+  });
+  assert.equal(statementsForAction(policies.finalWrite, "lambda:AddPermission").length, 0);
+  assert.equal(statementsForAction(policies.finalWrite, "lambda:InvokeFunction").length, 0);
+  assert.equal(policies.finalWrite.Statement.some((statement) => actionsOf(statement).some((action) => action.startsWith("lambda:") && statement.Resource === "*")), false);
+});
+
 test("unrelated ECS and CloudWatch Logs mutations remain denied", () => {
   const actions = [...policies.v4.Statement, ...policies.audit.Statement].flatMap(actionsOf);
   for (const forbidden of [
-    "ecs:RegisterTaskDefinition", "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:DeleteService",
+    "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:DeleteService",
     "logs:DeleteLogGroup", "logs:PutResourcePolicy", "logs:DeleteResourcePolicy", "logs:AssociateKmsKey",
     "logs:DisassociateKmsKey", "logs:CreateExportTask", "logs:StartQuery", "logs:StopQuery",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
@@ -247,11 +294,11 @@ test("Terraform role refresh reads are complete and narrowly scoped", () => {
   assert.equal(policies.v4.Statement.some((candidate) => actionsOf(candidate).some((action) => action.startsWith("iam:") && candidate.Resource === "*")), false);
 });
 
-test("both policies carry no authority beyond the reviewed read and recovery actions", () => {
-  const actions = [...policies.v4.Statement, ...policies.audit.Statement].flatMap(actionsOf);
+test("the three source-controlled policies carry only the reviewed read, recovery, and retry actions", () => {
+  const actions = [...policies.v4.Statement, ...policies.audit.Statement, ...policies.finalWrite.Statement].flatMap(actionsOf);
   for (const forbidden of [
     "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:DeleteService", "lambda:InvokeFunction",
-    "lambda:UpdateFunctionCode", "iam:CreateRole", "iam:UpdateAssumeRolePolicy", "iam:PutRolePolicy",
+    "iam:CreateRole", "iam:UpdateAssumeRolePolicy", "iam:PutRolePolicy",
     "iam:AttachRolePolicy", "iam:PassRole", "sts:AssumeRole",
     "secretsmanager:GetSecretValue", "kms:Decrypt", "rds:Connect", "route53:ChangeResourceRecordSets",
     "elasticloadbalancing:ModifyListener",
@@ -261,6 +308,11 @@ test("both policies carry no authority beyond the reviewed read and recovery act
   assert.equal(actions.includes("iam:ListAttachedRolePolicies"), true);
   assert.equal(actions.includes("iam:GetRolePolicy"), true);
   assert.equal(actions.includes("lambda:GetFunctionConfiguration"), true);
+  assert.equal(actions.includes("ecs:RegisterTaskDefinition"), true);
+  assert.equal(actions.includes("lambda:UpdateFunctionConfiguration"), true);
+  assert.equal(actions.includes("lambda:UpdateFunctionCode"), true);
+  assert.equal(actions.includes("lambda:PublishVersion"), true);
+  assert.equal(actions.includes("lambda:UpdateAlias"), true);
 });
 
 test("validator rejects blue and unknown task-definition families and addresses", () => {
@@ -277,6 +329,8 @@ test("the runbook targets v4 and the companion policy for the separately authori
   const runbook = read("documents/ops/iam/PRODUCTION_GREEN_STAGE_B_PROVIDER_RECOVERY_2026-07-29.md");
   assert.match(runbook, /MSCQRProductionGreenStageBProviderRecovery-v4\.json/);
   assert.match(runbook, /MSCQRProductionGreenStageBReferenceAuditReadOnly-v1\.json/);
+  assert.match(runbook, /MSCQRProductionGreenStageBFinalApplyWrite-v1\.json/);
+  assert.match(runbook, /FINAL_WRITE_POLICY_NAME/);
   assert.match(runbook, /mscqr-production-release-deployer/);
   assert.match(runbook, /attach-role-policy/);
   assert.match(runbook, /507/);
@@ -292,15 +346,24 @@ test("historical policy bytes remain unchanged while the active v4 correction is
 test("runbook is companion-first and verifies complete policy attachments before provider mutation", () => {
   const runbook = read("documents/ops/iam/PRODUCTION_GREEN_STAGE_B_PROVIDER_RECOVERY_2026-07-29.md");
   const providerUpdate = runbook.indexOf('PROVIDER_VERSION_ID="$(aws iam create-policy-version');
+  const finalWriteSetup = runbook.indexOf("# D. Final-write companion create/update");
+  const finalWriteAttach = runbook.indexOf('aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "$FINAL_WRITE_POLICY_ARN"');
+  const finalWriteVerify = runbook.indexOf('verify_complete_policy_entities "$FINAL_WRITE_POLICY_ARN" "$FINAL_WRITE_POLICY_NAME"');
+  const finalAttachmentCheck = runbook.lastIndexOf("# G. Final three-policy role verification");
   assert.ok(providerUpdate > 0);
+  assert.ok(finalWriteSetup > 0 && finalWriteSetup < providerUpdate);
+  assert.ok(finalWriteAttach > finalWriteSetup && finalWriteAttach < providerUpdate);
+  assert.ok(finalWriteVerify > finalWriteAttach && finalWriteVerify < providerUpdate);
+  assert.ok(finalAttachmentCheck > providerUpdate);
   for (const marker of [
     "# A. Pre-mutation validation",
     "# B. Companion create/update",
     "# C. Companion attach and complete verification",
-    "# D. Provider v4 update",
-    "# E. Provider complete verification",
-    "# F. Final two-policy role verification",
-    "G. Root/admin logout and fresh MFA release session",
+    "# D. Final-write companion create/update",
+    "# E. Provider v4 update",
+    "# F. Provider and unchanged audit verification",
+    "# G. Final three-policy role verification",
+    "H. Root/admin logout and fresh MFA release session",
   ]) assert.ok(runbook.indexOf(marker) >= 0, marker);
   for (const marker of [
     "aws iam create-policy",
@@ -312,6 +375,14 @@ test("runbook is companion-first and verifies complete policy attachments before
     'verify_complete_policy_entities "$AUDIT_POLICY_ARN" "$AUDIT_POLICY_NAME"',
     "simulate_audit_read iam:ListAttachedRolePolicies",
   ]) assert.ok(runbook.indexOf(marker) >= 0 && runbook.indexOf(marker) < providerUpdate, marker);
+  for (const marker of [
+    "FINAL_WRITE_VERSION_COUNT",
+    "FINAL_WRITE_DEFAULT_VERSION_ID",
+    "if cmp <(jq -S . \"$FINAL_WRITE_DOCUMENT\")",
+    "if [[ \"$FINAL_WRITE_ATTACHED\" = false ]]",
+    "aws iam create-policy --policy-name \"$FINAL_WRITE_POLICY_NAME\"",
+    'verify_complete_policy_entities "$FINAL_WRITE_POLICY_ARN" "$FINAL_WRITE_POLICY_NAME"',
+  ]) assert.ok(runbook.indexOf(marker) > finalWriteSetup && runbook.indexOf(marker) < providerUpdate, marker);
   assert.ok(runbook.indexOf("aws iam list-policy-versions") < providerUpdate);
   assert.ok(runbook.indexOf("aws iam get-account-summary") < providerUpdate);
   assert.ok(runbook.indexOf("aws iam list-entities-for-policy") < providerUpdate);

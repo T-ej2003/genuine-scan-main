@@ -184,6 +184,8 @@ PROVIDER_POLICY_NAME='MSCQRProductionGreenStageBProviderRecovery'
 AUDIT_POLICY_NAME='MSCQRProductionGreenStageBReferenceAuditReadOnly'
 PROVIDER_DOCUMENT="$PWD/documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json"
 AUDIT_DOCUMENT="$PWD/documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json"
+FINAL_WRITE_POLICY_NAME='MSCQRProductionGreenStageBFinalApplyWrite'
+FINAL_WRITE_DOCUMENT="$PWD/documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json"
 ROLE_NAME='mscqr-production-release-deployer'
 EXPECTED_ACCOUNT_ID='368992683803'
 EXPECTED_ROLE_ARN="arn:aws:iam::${EXPECTED_ACCOUNT_ID}:role/${ROLE_NAME}"
@@ -197,6 +199,7 @@ ROLE_ARN="$(aws iam get-role --role-name "$ROLE_NAME" --query Role.Arn --output 
 test "$ROLE_ARN" = "$EXPECTED_ROLE_ARN"
 PROVIDER_POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${PROVIDER_POLICY_NAME}"
 AUDIT_POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${AUDIT_POLICY_NAME}"
+FINAL_WRITE_POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${FINAL_WRITE_POLICY_NAME}"
 aws iam get-policy --policy-arn "$PROVIDER_POLICY_ARN" --output json > "$TMP_DIR/provider-policy.json"
 test "$(jq -r '.Policy.PolicyName' "$TMP_DIR/provider-policy.json")" = "$PROVIDER_POLICY_NAME"
 test "$(jq -r '.Policy.Arn' "$TMP_DIR/provider-policy.json")" = "$PROVIDER_POLICY_ARN"
@@ -311,25 +314,88 @@ simulate_audit_read ecs:DescribeTaskDefinition '*'
 simulate_audit_read lambda:GetFunctionConfiguration 'arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker'
 simulate_audit_read lambda:GetFunctionConfiguration 'arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*'
 
-# D. Provider v4 update — reached only after every companion check above passes
+# D. Final-write companion create/update, attach, and complete verification
+# This block is reached before any provider-policy mutation.
+validate_final_write_entities() {
+  local entities_file="$1"
+  aws iam list-entities-for-policy --policy-arn "$FINAL_WRITE_POLICY_ARN" --output json > "$entities_file"
+  test "$(jq '.PolicyUsers | length' "$entities_file")" -eq 0
+  test "$(jq '.PolicyGroups | length' "$entities_file")" -eq 0
+  test "$(jq '.PolicyRoles | length' "$entities_file")" -le 1
+  if [[ "$(jq '.PolicyRoles | length' "$entities_file")" -eq 1 ]]; then
+    test "$(jq -r '.PolicyRoles[0].RoleName' "$entities_file")" = "$ROLE_NAME"
+  fi
+}
+FINAL_WRITE_EXISTS=true
+if aws iam get-policy --policy-arn "$FINAL_WRITE_POLICY_ARN" --output json > "$TMP_DIR/final-write-policy.json" 2>"$TMP_DIR/final-write-policy.error"; then
+  test "$(jq -r '.Policy.PolicyName' "$TMP_DIR/final-write-policy.json")" = "$FINAL_WRITE_POLICY_NAME"
+  FINAL_WRITE_DEFAULT_VERSION_ID="$(jq -r '.Policy.DefaultVersionId' "$TMP_DIR/final-write-policy.json")"
+  FINAL_WRITE_VERSION_COUNT="$(aws iam list-policy-versions --policy-arn "$FINAL_WRITE_POLICY_ARN" --query 'Versions | length(@)' --output text)"
+  test "$FINAL_WRITE_VERSION_COUNT" -lt 5
+  validate_final_write_entities "$TMP_DIR/final-write-entities-before.json"
+  aws iam get-policy-version --policy-arn "$FINAL_WRITE_POLICY_ARN" --version-id "$FINAL_WRITE_DEFAULT_VERSION_ID" \
+    --query PolicyVersion.Document --output json > "$TMP_DIR/live-final-write-policy.json"
+  if cmp <(jq -S . "$FINAL_WRITE_DOCUMENT") <(jq -S . "$TMP_DIR/live-final-write-policy.json"); then
+    FINAL_WRITE_VERSION_ID="$FINAL_WRITE_DEFAULT_VERSION_ID"
+  else
+    FINAL_WRITE_VERSION_ID="$(aws iam create-policy-version --policy-arn "$FINAL_WRITE_POLICY_ARN" \
+      --policy-document "file://${FINAL_WRITE_DOCUMENT}" --set-as-default \
+      --query PolicyVersion.VersionId --output text)"
+  fi
+else
+  grep -q 'NoSuchEntity' "$TMP_DIR/final-write-policy.error"
+  FINAL_WRITE_EXISTS=false
+  aws iam create-policy --policy-name "$FINAL_WRITE_POLICY_NAME" \
+    --policy-document "file://${FINAL_WRITE_DOCUMENT}" \
+    --query Policy.Arn --output text | grep -Fx "$FINAL_WRITE_POLICY_ARN"
+  FINAL_WRITE_VERSION_ID="$(aws iam get-policy --policy-arn "$FINAL_WRITE_POLICY_ARN" \
+    --query Policy.DefaultVersionId --output text)"
+fi
+
+# Reject users, groups, or another role before attachment. An empty entity set
+# is valid for a newly created policy; the exact role is required afterward.
+FINAL_WRITE_ENTITIES="$TMP_DIR/final-write-entities.json"
+validate_final_write_entities "$FINAL_WRITE_ENTITIES"
+ROLE_ATTACHMENTS="$(aws iam list-attached-role-policies --role-name "$ROLE_NAME" --output json)"
+FINAL_WRITE_ATTACHED="$(jq -r --arg name "$FINAL_WRITE_POLICY_NAME" 'any(.AttachedPolicies[]; .PolicyName == $name)' <<<"$ROLE_ATTACHMENTS")"
+if [[ "$FINAL_WRITE_ATTACHED" = false ]]; then
+  test "$ROLE_ATTACHMENT_COUNT" -lt "$ROLE_POLICY_LIMIT"
+  aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "$FINAL_WRITE_POLICY_ARN"
+fi
+aws iam get-policy-version --policy-arn "$FINAL_WRITE_POLICY_ARN" \
+  --version-id "$FINAL_WRITE_VERSION_ID" --query PolicyVersion.Document --output json \
+  > "$TMP_DIR/live-final-write-policy.json"
+cmp <(jq -S . "$FINAL_WRITE_DOCUMENT") <(jq -S . "$TMP_DIR/live-final-write-policy.json")
+verify_complete_policy_entities "$FINAL_WRITE_POLICY_ARN" "$FINAL_WRITE_POLICY_NAME"
+
+# E. Provider v4 update — reached only after final-write setup succeeds
 PROVIDER_VERSION_ID="$(aws iam create-policy-version \
   --policy-arn "$PROVIDER_POLICY_ARN" \
   --policy-document "file://${PROVIDER_DOCUMENT}" \
   --set-as-default \
   --query PolicyVersion.VersionId --output text)"
 
-# E. Provider complete verification
+# F. Provider and unchanged audit verification
 aws iam get-policy-version --policy-arn "$PROVIDER_POLICY_ARN" --version-id "$PROVIDER_VERSION_ID" \
   --query PolicyVersion.Document --output json > "$TMP_DIR/live-provider-policy.json"
 cmp <(jq -S . "$PROVIDER_DOCUMENT") <(jq -S . "$TMP_DIR/live-provider-policy.json")
 verify_complete_policy_entities "$PROVIDER_POLICY_ARN" "$PROVIDER_POLICY_NAME"
+aws iam get-policy-version --policy-arn "$AUDIT_POLICY_ARN" --version-id "$AUDIT_VERSION_ID" \
+  --query PolicyVersion.Document --output json > "$TMP_DIR/live-audit-policy-final.json"
+cmp <(jq -S . "$AUDIT_DOCUMENT") <(jq -S . "$TMP_DIR/live-audit-policy-final.json")
+verify_complete_policy_entities "$AUDIT_POLICY_ARN" "$AUDIT_POLICY_NAME"
 
-# F. Final two-policy role verification
+# G. Final three-policy role verification
 FINAL_ATTACHMENTS="$(aws iam list-attached-role-policies --role-name "$ROLE_NAME" --output json)"
-jq -e --arg provider "$PROVIDER_POLICY_NAME" --arg audit "$AUDIT_POLICY_NAME" \
-  '([.AttachedPolicies[].PolicyName] | index($provider)) != null and ([.AttachedPolicies[].PolicyName] | index($audit)) != null' \
+jq -e --arg provider "$PROVIDER_POLICY_NAME" --arg audit "$AUDIT_POLICY_NAME" --arg final_write "$FINAL_WRITE_POLICY_NAME" \
+  '([.AttachedPolicies[].PolicyName] | index($provider)) != null and ([.AttachedPolicies[].PolicyName] | index($audit)) != null and ([.AttachedPolicies[].PolicyName] | index($final_write)) != null' \
   <<<"$FINAL_ATTACHMENTS" >/dev/null
 ```
+
+Final attachment verification must include `FINAL_WRITE_POLICY_NAME`; all three
+managed policies must have exactly one role attachment, zero user/group
+attachments, and zero permissions-boundary usage. The administrator must then
+log out before the release-deployer session is refreshed.
 
 `PROVIDER_VERSION_ID` and `AUDIT_VERSION_ID` are the actual AWS-managed-policy
 version IDs returned by AWS; do not substitute or assume literal `v3`, `v4`, or
@@ -346,7 +412,7 @@ The update must preserve the single intended release-deployer role boundary. If 
 reports the five-version limit, delete only an explicitly reviewed non-default
 version. Root may perform only this policy-version update when no approved
 non-root administrator exists; root must not run Terraform and must be logged out
-immediately afterward. **G. Root/admin logout and fresh MFA release session:**
+immediately afterward. **H. Root/admin logout and fresh MFA release session:**
 log the root or administrator session out immediately, then obtain a fresh MFA-backed release session for `mscqr-production-release-deployer`. Do not retry the
 failed apply until both live policies match these source documents.
 The failed Stage B apply must not be retried before both live policies match source.
@@ -486,3 +552,32 @@ permission change request. Per the stop rule, no retry, re-plan, IAM change, or
 post-apply cloud inspection was performed. The final registration/state status
 of the eleven task definitions and all downstream resources is therefore
 unverified.
+
+## Final partial-apply retry write contract
+
+The failed retry registered the eleven existing current task-definition families
+as revision 2, while the read-only-canary task definition was not registered.
+The broker update was also denied, so its package, checksum, alias, and mappings
+remain on the previous release. The next plan must treat the eleven revision-2
+definitions as current same-release no-ops and the read-only-canary definition as
+the sole current create.
+
+The complete remaining write contract is source-controlled in
+`MSCQRProductionGreenStageBFinalApplyWrite-v1.json`. It is a separate managed
+policy because adding the retry writes to the already bounded v4 provider policy
+would exceed AWS's 6,144-character managed-policy limit. It contains only:
+
+- `ecs:RegisterTaskDefinition` for
+  `mscqr-production-full-rls-green-read-only-canary:*`, requiring the exact
+  production, Terraform, and `full-rls-green-stage-b` request tags and the exact
+  permitted tag-key set (`Environment`, `ManagedBy`, `Component`);
+- `lambda:UpdateFunctionConfiguration`, `lambda:UpdateFunctionCode`,
+  `lambda:PublishVersion`, and `lambda:UpdateAlias` for the exact approval-broker
+  function, constrained by its production/component resource tags.
+
+The administrator must publish and attach this companion only to
+`mscqr-production-release-deployer`, alongside v4 and the read-only audit
+companion, before the fresh retry plan. No Lambda invocation, ECS task execution,
+service update, IAM mutation, deregistration, database, ALB, DNS, or traffic
+authority is granted. The old saved plan and audit remain stale and must not be
+reused.
