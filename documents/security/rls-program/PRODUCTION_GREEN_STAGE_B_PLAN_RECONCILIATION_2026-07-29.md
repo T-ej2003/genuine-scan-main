@@ -121,6 +121,9 @@ extra, stale, or unrecorded evidence is rejected. Broker evidence must contain
 the complete exact mode set once each, with each mode mapped to its expected
 family; swapped, duplicated, missing, or unrelated mappings are rejected, and
 every retained live broker mapping must have matching atomic rollover evidence.
+The trusted validation process obtains `aws sts get-caller-identity` and
+requires that observed caller ARN to equal the audit `callerArn`; an
+audit-supplied ARN or matching hash is not accepted as caller attestation.
 Cluster-wide ECS observations for unrelated workloads remain recorded but are
 outside the Stage B family decision; unknown `mscqr-production-*` families are
 still rejected.

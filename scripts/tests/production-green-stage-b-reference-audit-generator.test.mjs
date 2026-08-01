@@ -163,6 +163,7 @@ function validateBrokerPlan(fixture, audit) {
     planJsonBytes: fixture.planBytes,
     planJsonSha256: fixture.planJsonSha256,
     terraformConfiguration: fixture.options.terraformConfiguration,
+    trustedCallerArn: callerArn,
     now,
   }));
 }
@@ -846,6 +847,7 @@ test("valid atomic broker package checksum transition passes and is recorded", (
     planJsonBytes: fixture.planBytes,
     planJsonSha256: fixture.planJsonSha256,
     terraformConfiguration: fixture.options.terraformConfiguration,
+    trustedCallerArn: callerArn,
     now,
   }));
 });
@@ -947,6 +949,7 @@ test("atomic package transition plan SHA binding remains enforced", () => {
     planJsonBytes: fixture.planBytes,
     planJsonSha256: fixture.planJsonSha256,
     terraformConfiguration: fixture.options.terraformConfiguration,
+    trustedCallerArn: callerArn,
     now,
   }), /planJsonSha256 does not match broker evidence/);
 });
@@ -957,6 +960,7 @@ test("broker update without a reference audit fails closed", () => {
     planJsonBytes: fixture.planBytes,
     planJsonSha256: fixture.planJsonSha256,
     terraformConfiguration: fixture.options.terraformConfiguration,
+    trustedCallerArn: callerArn,
     now,
   }), /explicit plan-bound reference audit/);
 });
@@ -972,6 +976,7 @@ test("broker update with audit missing broker evidence fails closed", () => {
     planJsonBytes: fixture.planBytes,
     planJsonSha256: fixture.planJsonSha256,
     terraformConfiguration: fixture.options.terraformConfiguration,
+    trustedCallerArn: callerArn,
     now,
   }), /broker update reference audit evidence is missing/);
 });
@@ -987,6 +992,7 @@ test("broker update with stale audit fails closed", () => {
     planJsonBytes: fixture.planBytes,
     planJsonSha256: fixture.planJsonSha256,
     terraformConfiguration: fixture.options.terraformConfiguration,
+    trustedCallerArn: callerArn,
     now,
   }), /expired/);
 });
@@ -1009,6 +1015,21 @@ test("broker update with wrong audit plan binding fails closed", () => {
 test("complete broker update audit evidence passes", () => {
   const fixture = makeAtomicBrokerFixture();
   validateBrokerPlan(fixture, generate(fixture));
+});
+
+test("append-only audit without trusted caller attestation fails closed", () => {
+  const fixture = makeAtomicBrokerFixture();
+  const audit = generate(fixture);
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.throws(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    now,
+  }), /not attested/);
 });
 
 test("append-only audit requires every broker mode mapping", () => {
@@ -1062,6 +1083,7 @@ for (const [label, mutate, expected = /append-only reference audit/] of [
   ["wrong audit cluster identity", (audit) => { audit.clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/unrelated"; }],
   ["missing audit caller identity", (audit) => { delete audit.callerArn; }],
   ["wrong audit caller identity", (audit) => { audit.callerArn = "arn:aws:iam::368992683803:user/untrusted"; }],
+  ["forged audit caller identity", (audit) => { audit.callerArn = callerArn.replace("test-session", "forged-session"); }, /not attested/],
   ["service reference outside the current/retained sets", (audit) => { audit.services.push({ serviceName: "unexpected", taskDefinition: newArnFor("mscqr-production-unknown") }); }],
   ["RUNNING task reference outside the current/retained sets", (audit) => { audit.runningTasks.push({ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/unknown/running", taskDefinitionArn: newArnFor("mscqr-production-unknown"), lastStatus: "RUNNING", desiredStatus: "RUNNING", group: "service:unknown" }); }],
   ["PENDING task reference outside the current/retained sets", (audit) => { audit.pendingTasks.push({ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/unknown/pending", taskDefinitionArn: newArnFor("mscqr-production-unknown"), lastStatus: "PENDING", desiredStatus: "PENDING", group: "service:unknown" }); }],
@@ -1194,6 +1216,7 @@ test("broker ZIP checksum and source_code_hash are independently validated", () 
     planJsonBytes: fixture.planBytes,
     planJsonSha256: fixture.planJsonSha256,
     terraformConfiguration: fixture.options.terraformConfiguration,
+    trustedCallerArn: callerArn,
     now,
   }), /ZIP checksum/);
 });
@@ -1251,6 +1274,7 @@ test("atomic broker rollover in the same plan passes and is recorded explicitly"
     planJsonBytes: fixture.planBytes,
     planJsonSha256: fixture.planJsonSha256,
     terraformConfiguration: fixture.options.terraformConfiguration,
+    trustedCallerArn: callerArn,
     now,
   }));
 });
@@ -1418,6 +1442,7 @@ test("generated audit is accepted by the existing Stage B plan validator", () =>
     planJsonSha256: fixture.planJsonSha256,
     now,
     terraformConfiguration: terraformConfigurationSource,
+    trustedCallerArn: callerArn,
   }));
 });
 
@@ -1433,6 +1458,7 @@ test("create-only audit is accepted by the existing Stage B plan validator", () 
     planJsonSha256: fixture.planJsonSha256,
     now,
     terraformConfiguration: terraformConfigurationSource,
+    trustedCallerArn: callerArn,
   }));
 });
 

@@ -323,7 +323,7 @@ function assertExactAuditEntries(actual, expected, label, project) {
 }
 
 function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAudit, options = {}) {
-  const { referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now = new Date() } = options;
+  const { referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date() } = options;
   if (!referenceAudit || !referenceAuditBytes || !referenceAuditSha256 || !planJsonBytes || !planJsonSha256) {
     throw new Error("Stage B append-only plan requires an explicit plan-bound reference audit.");
   }
@@ -332,6 +332,7 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
   if (referenceAudit.schemaVersion !== STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION) throw new Error("Stage B append-only reference audit schema version is missing or unsupported.");
   if (referenceAudit.clusterArn !== STAGE_B.clusterArn) throw new Error("Stage B append-only reference audit cluster identity does not match the production cluster.");
   if (typeof referenceAudit.callerArn !== "string" || !releaseCallerArnPattern.test(referenceAudit.callerArn)) throw new Error("Stage B append-only reference audit caller identity is missing or unauthorized.");
+  if (typeof trustedCallerArn !== "string" || trustedCallerArn !== referenceAudit.callerArn || !releaseCallerArnPattern.test(trustedCallerArn)) throw new Error("Stage B append-only reference audit caller identity is not attested by the trusted validation caller.");
   assertStageBReferenceAuditFreshness(referenceAudit.auditedAt, now);
   if (referenceAudit.planJsonSha256 !== planJsonSha256) throw new Error("Stage B append-only reference audit is bound to a different plan JSON.");
 
@@ -462,7 +463,7 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
 }
 
 export function assertStageBPlan(plan, options = {}) {
-  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now = new Date(), terraformConfiguration } = options;
+  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration } = options;
   const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
   if (brokerChange) {
     const brokerActions = brokerChange.change?.actions;
@@ -477,7 +478,7 @@ export function assertStageBPlan(plan, options = {}) {
     : null;
   const brokerActions = brokerChange?.change?.actions || [];
   if (taskDefinitionClassification && (referenceAudit || exactActions(brokerActions, ["update"]))) {
-    assertAppendOnlyReferenceAuditBinding(plan, taskDefinitionClassification, referenceAudit, { referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now });
+    assertAppendOnlyReferenceAuditBinding(plan, taskDefinitionClassification, referenceAudit, { referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now });
   }
   for (const change of plan.resource_changes || []) {
     const actions = change.change.actions || [];
@@ -519,6 +520,12 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const planJsonSha256 = readOption(process.argv.slice(3), "--plan-json-sha256");
   const referenceAuditBytes = referenceAuditPath ? fs.readFileSync(path.resolve(referenceAuditPath)) : undefined;
   const referenceAudit = referenceAuditBytes ? JSON.parse(referenceAuditBytes) : undefined;
-  assertStageBPlan(plan, { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes: Buffer.from(planJsonText), planJsonSha256, terraformConfiguration });
+  let trustedCallerArn;
+  try {
+    trustedCallerArn = JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn;
+  } catch {
+    throw new Error("Stage B trusted caller attestation failed: aws sts get-caller-identity did not return valid identity JSON.");
+  }
+  assertStageBPlan(plan, { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes: Buffer.from(planJsonText), planJsonSha256, trustedCallerArn, terraformConfiguration });
   process.stdout.write(JSON.stringify({ status: "approved-plan-only", plan: out }) + "\n");
 }

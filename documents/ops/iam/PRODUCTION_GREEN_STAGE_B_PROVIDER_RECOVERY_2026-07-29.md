@@ -381,6 +381,10 @@ exact current and retained task-definition entries, classification counts,
 newest revision evidence, complete service/RUNNING/PENDING observations, and
 broker mapping evidence against that same plan; missing, extra, stale, or
 unrecorded entries invalidate the audit.
+The validator also obtains the caller identity through the read-only
+`aws sts get-caller-identity` check in its trusted validation process and
+requires that observed ARN to equal the audit's `callerArn`; a caller-supplied
+ARN or matching audit hash alone is not an attestation.
 Any superseded legacy rollover, unknown family, or unrelated reference remains
 fail-closed. The validator must accept the matching audit and both explicit
 hashes before any apply; otherwise apply remains forbidden.
