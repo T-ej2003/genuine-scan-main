@@ -129,6 +129,7 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
   const retainedAddresses = new Set();
   const retainedGenerationFamilies = new Set();
   const retainedByFamily = new Map();
+  const retainedByGeneration = new Map();
   const retainedArns = new Set();
   const retainedFamilyRevisions = new Set();
   for (const change of changes) {
@@ -150,6 +151,7 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
       retainedArns.add(retained.arn);
       retainedFamilyRevisions.add(familyRevision);
       retainedByFamily.set(retained.family, [...(retainedByFamily.get(retained.family) || []), retained]);
+      retainedByGeneration.set(retained.generationKey, [...(retainedByGeneration.get(retained.generationKey) || []), retained]);
     } else {
       current.push(change);
     }
@@ -171,22 +173,32 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
     throw new Error(`Stage B append-only current task-definition must be create-only or no-op: ${change.address}`);
   }
   if (retainedAddresses.size > 0) {
-    const newestFamilies = new Set();
-    const newestGenerationKeys = new Set();
-    for (const [family, entries] of retainedByFamily) {
-      const newest = [...entries].sort((left, right) => right.revision - left.revision)[0];
-      newestFamilies.add(family);
-      newestGenerationKeys.add(newest.generationKey);
-      if (entries.some((entry) => entry.revision === newest.revision && entry.arn !== newest.arn)) throw new Error(`Stage B retained task-definition newest revision is ambiguous: ${family}`);
-    }
     const readOnlyCanaryFamily = taskDefinitionFamilies.get('aws_ecs_task_definition.candidate["read_only_canary"]');
     const firstRolloverFamilies = new Set([...taskDefinitionFamilies.values()].filter((family) => family !== readOnlyCanaryFamily));
-    if (!newestFamilies.has(readOnlyCanaryFamily)) {
-      if (retainedAddresses.size !== firstRolloverFamilies.size || newestGenerationKeys.size !== 1 || [...firstRolloverFamilies].some((family) => !newestFamilies.has(family))) {
-        throw new Error("Stage B first rollover must retain exactly the eleven existing task-definition families.");
+    const backendFamily = taskDefinitionFamilies.get('aws_ecs_task_definition.candidate["backend"]');
+    for (const [family, entries] of retainedByFamily) {
+      const newest = [...entries].sort((left, right) => right.revision - left.revision)[0];
+      if (entries.some((entry) => entry.revision === newest.revision && entry.arn !== newest.arn)) throw new Error(`Stage B retained task-definition newest revision is ambiguous: ${family}`);
+    }
+    const canaryGenerationAnchors = [];
+    for (const [generationKey, entries] of retainedByGeneration) {
+      const families = new Set(entries.map((entry) => entry.family));
+      const hasReadOnlyCanary = families.has(readOnlyCanaryFamily);
+      const expectedFamilies = hasReadOnlyCanary ? new Set(taskDefinitionFamilies.values()) : firstRolloverFamilies;
+      if (entries.length !== expectedFamilies.size || families.size !== entries.length || [...expectedFamilies].some((family) => !families.has(family))) {
+        throw new Error(`Stage B retained generation ${generationKey} must contain exactly ${expectedFamilies.size} complete task-definition families.`);
       }
-    } else if (newestFamilies.size !== taskDefinitionFamilies.size || newestGenerationKeys.size !== 1 || [...taskDefinitionFamilies.values()].some((family) => !newestFamilies.has(family))) {
-      throw new Error("Stage B later rollover must retain the newest revision for all twelve task-definition families.");
+      const anchor = entries.find((entry) => entry.family === backendFamily);
+      if (!anchor) throw new Error(`Stage B retained generation ${generationKey} is missing its backend revision anchor.`);
+      if (hasReadOnlyCanary) canaryGenerationAnchors.push(anchor.revision);
+    }
+    if (canaryGenerationAnchors.length > 0) {
+      const firstCanaryAnchor = Math.min(...canaryGenerationAnchors);
+      for (const [generationKey, entries] of retainedByGeneration) {
+        if (entries.some((entry) => entry.family === readOnlyCanaryFamily)) continue;
+        const anchor = entries.find((entry) => entry.family === backendFamily);
+        if (anchor.revision > firstCanaryAnchor) throw new Error(`Stage B post-canary retained generation ${generationKey} must include read-only-canary.`);
+      }
     }
   }
   assertTaskDefinitionAppendOnlyContract(terraformConfiguration);

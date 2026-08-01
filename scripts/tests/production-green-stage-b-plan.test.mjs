@@ -148,11 +148,41 @@ test("first and second revision-keyed rollovers retain history as no-op", () => 
   assert.doesNotThrow(() => assertStageBPlan({ resource_changes: [...second.resource_changes, ...thirdGeneration] }, { terraformConfiguration }));
 });
 
+test("multiple complete pre-canary generations are validated independently", () => {
+  const generation = (key, revision) => firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress, key, revision));
+  for (const generations of [
+    [generation("aaaaaaaa", 1)],
+    [generation("aaaaaaaa", 1), generation("bbbbbbbb", 2)],
+    [generation("aaaaaaaa", 1), generation("bbbbbbbb", 2), generation("cccccccc", 3)],
+  ]) {
+    assert.doesNotThrow(() => assertStageBPlan({ resource_changes: [...currentCreates(), ...generations.flat()] }, { terraformConfiguration }));
+  }
+});
+
+test("incomplete or mixed pre-canary generations fail closed", () => {
+  const generation = (key, revision) => firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress, key, revision));
+  const missingFamily = { resource_changes: [...currentCreates(), ...generation("aaaaaaaa", 1), ...generation("bbbbbbbb", 2).slice(1)] };
+  assert.throws(() => assertStageBPlan(missingFamily, { terraformConfiguration }), /complete task-definition families/);
+  const mixedFamilies = { resource_changes: [...currentCreates(), ...generation("aaaaaaaa", 1), ...generation("bbbbbbbb", 2).slice(0, -1), retainedForAddress('aws_ecs_task_definition.candidate["read_only_canary"]', "bbbbbbbb", 1)] };
+  assert.throws(() => assertStageBPlan(mixedFamilies, { terraformConfiguration }), /complete task-definition families/);
+  const duplicate = { resource_changes: [...currentCreates(), ...generation("aaaaaaaa", 1), retainedForAddress('aws_ecs_task_definition.candidate["backend"]', "aaaaaaaa", 1)] };
+  assert.throws(() => assertStageBPlan(duplicate, { terraformConfiguration }), /duplicated/);
+});
+
+test("mixed pre-canary and post-canary history is valid, but later twelve-family history is mandatory", () => {
+  const preCanary = (key, revision) => firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress, key, revision));
+  const postCanary = (key, revision) => currentAddresses.map((taskAddress) => retainedForAddress(taskAddress, key, revision));
+  const valid = { resource_changes: [...currentCreates(), ...preCanary("aaaaaaaa", 1), ...preCanary("bbbbbbbb", 2), ...postCanary("cccccccc", 3), ...postCanary("dddddddd", 4)] };
+  assert.doesNotThrow(() => assertStageBPlan(valid, { terraformConfiguration }));
+  const missingReadOnly = { resource_changes: [...currentCreates(), ...preCanary("aaaaaaaa", 1), ...postCanary("cccccccc", 3), ...preCanary("dddddddd", 4)] };
+  assert.throws(() => assertStageBPlan(missingReadOnly, { terraformConfiguration }), /post-canary|read-only-canary/);
+});
+
 test("a later rollover missing the newest read-only-canary history entry fails", () => {
   const olderReadOnly = retainedForAddress('aws_ecs_task_definition.candidate["read_only_canary"]', "aaaaaaaa", 1);
   const laterWithoutReadOnly = firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress, "bbbbbbbb", 2));
   const plan = { resource_changes: [...currentCreates(), ...firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress)), olderReadOnly, ...laterWithoutReadOnly] };
-  assert.throws(() => assertStageBPlan(plan, { terraformConfiguration }), /later rollover|newest revision/);
+  assert.throws(() => assertStageBPlan(plan, { terraformConfiguration }), /post-canary|read-only-canary|newest revision/);
 });
 
 test("read-only-canary replacement is rejected", () => {

@@ -103,11 +103,20 @@ TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-st
 The migration preserves all eleven existing revisions. It is not performed by
 this PR, and no import, `state rm`, or `state mv` has been executed here. The
 read-only-canary has no prior state and remains the twelfth current create.
+Before the first successful read-only-canary creation, every retained generation
+must independently contain exactly the same eleven families: backend, worker,
+application-canary, and the eight executor modes. Multiple complete eleven-family
+generations are valid; validation groups entries by immutable generation key and
+does not infer validity from one global retained count. A generation with ten or
+twelve entries, a missing family, a duplicate family, or a read-only-canary entry
+is rejected in this pre-canary history.
 After the first rollover, the plan contains twelve current creates and eleven
 retained no-ops. For the second rollover, add a second generation to the maps,
 move all twelve current state instances, including
 `candidate["read_only_canary"]`, to that generation's unique retained
-addresses, and leave the first generation untouched. Every later rollover
+addresses, and leave the first generation untouched. Once read-only-canary has
+been created, each newly rotated generation must contain all twelve families;
+older eleven-family generations remain valid permanently. Every later rollover
 therefore contains all twelve families in its newest retained generation and
 twelve current creates. Duplicate generation keys, occupied destinations,
 missing sources, static family-only keys, and retained creates are rejected.

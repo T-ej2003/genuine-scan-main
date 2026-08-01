@@ -25,6 +25,12 @@ families; create-only families are recorded explicitly and are not sent to
 Any unexpected prior ARN or live service, task, or broker reference for a create-only
 family fails closed; rollover-family reference checks remain unchanged.
 
+Retained history is validated per immutable generation key. Before the first successful
+read-only-canary creation, every retained generation contains exactly the eleven existing
+families; multiple complete eleven-family generations are valid. After read-only-canary
+exists, each newly rotated generation contains all twelve families, while older
+eleven-family generations remain preserved and valid.
+
 An initial broker Lambda create is validated entirely from the plan and Terraform
 configuration; it has no live reference audit requirement. Every non-no-op broker
 Lambda update requires a fresh, plan-bound reference audit. The
