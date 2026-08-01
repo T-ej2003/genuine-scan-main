@@ -1,0 +1,45 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RegisterExactStageBReadOnlyCanaryTaskDefinition",
+      "Effect": "Allow",
+      "Action": "ecs:RegisterTaskDefinition",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-read-only-canary:*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Component": "full-rls-green-stage-b"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "Environment",
+            "ManagedBy",
+            "Component"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "UpdateExactStageBBrokerFunctionRelease",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:UpdateFunctionCode",
+        "lambda:PublishVersion",
+        "lambda:UpdateAlias"
+      ],
+      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "aws:ResourceTag/Environment": "production",
+          "aws:ResourceTag/ManagedBy": "Terraform",
+          "aws:ResourceTag/Component": "full-rls-green-stage-b"
+        }
+      }
+    }
+  ]
+}
