@@ -18,7 +18,7 @@ import {
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
-import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
+import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenceSha256 as canonicalImageEvidenceSha256, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -97,7 +97,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
   if (sha256(planBytes) !== planSha256) throw new Error("Plan JSON SHA256 does not match the approved digest.");
   if (sha256(auditBytes) !== auditSha256) throw new Error("Reference audit SHA256 does not match the approved digest.");
   if (!/^[a-f0-9]{64}$/.test(permissionReportSha256) || sha256(permissionReportBytes) !== permissionReportSha256) throw new Error("Permission-preflight report SHA256 does not match the approved digest.");
-  if (!/^[a-f0-9]{64}$/.test(imageEvidenceSha256) || sha256(imageEvidenceBytes) !== imageEvidenceSha256) throw new Error("Image evidence SHA256 does not match the approved digest.");
+  if (!/^[a-f0-9]{64}$/.test(imageEvidenceSha256) || canonicalImageEvidenceSha256(imageEvidence) !== imageEvidenceSha256) throw new Error("Image evidence canonical SHA256 does not match the approved digest.");
   try { assertStageBReleaseCallerArn(callerArn); } catch { throw new Error("Current caller is not the production release-deployer STS assumed-role."); }
   const plan = JSON.parse(planBytes); const audit = JSON.parse(auditBytes);
   const expectedReleaseSha = plan.variables?.release_sha?.value;
