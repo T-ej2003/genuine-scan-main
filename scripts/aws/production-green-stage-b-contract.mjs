@@ -47,17 +47,45 @@ export function assertStageBBrokerAliasArn(value) {
   ].join("\n"));
 }
 
-export function assertStageBBrokerFunctionArn(value, version) {
-  const received = String(value || "");
-  if (received === STAGE_B.brokerFunctionArn) return received;
-  if (!received.startsWith(STAGE_B.brokerFunctionArn)) {
-    throw new Error(`Broker Lambda function ARN does not match the canonical function. Expected: ${STAGE_B.brokerFunctionArn} or its numeric version; Received: ${received}`);
+export function assertStageBBrokerConfigurationIdentity({ configuration, alias }) {
+  const configurationFunctionArn = String(configuration?.FunctionArn || "");
+  const configurationVersion = String(configuration?.Version || "");
+  if (!/^[1-9][0-9]*$/.test(configurationVersion)) {
+    throw new Error(`Broker Lambda configuration Version is missing or malformed: ${configurationVersion || "<empty>"}`);
   }
-  const suffix = received.slice(STAGE_B.brokerFunctionArn.length);
-  if (!/^:[1-9][0-9]*$/.test(suffix) || typeof version !== "string" || !/^[1-9][0-9]*$/.test(version) || suffix.slice(1) !== version) {
-    throw new Error(`Broker Lambda function ARN version does not match config.Version. Expected: ${STAGE_B.brokerFunctionArn} or its numeric version; Received: ${received}; Version: ${String(version)}`);
+
+  const isBaseArn = configurationFunctionArn === STAGE_B.brokerFunctionArn;
+  const isNumericVersionArn = configurationFunctionArn === `${STAGE_B.brokerFunctionArn}:${configurationVersion}`;
+  const isReviewedAliasArn = configurationFunctionArn === STAGE_B.brokerAliasArn;
+  if (!isBaseArn && !isNumericVersionArn && !isReviewedAliasArn) {
+    throw new Error(`Broker Lambda configuration FunctionArn is outside the exact Stage B identity contract. Expected: ${STAGE_B.brokerFunctionArn}, ${STAGE_B.brokerFunctionArn}:<matching-version>, or ${STAGE_B.brokerAliasArn}; Received: ${configurationFunctionArn}; Version: ${configurationVersion}`);
   }
-  return received;
+
+  if (!alias || typeof alias !== "object" || Array.isArray(alias)) {
+    throw new Error("Broker Lambda reviewed alias evidence is missing or malformed.");
+  }
+  try {
+    assertStageBBrokerAliasArn(alias.AliasArn);
+  } catch (error) {
+    throw new Error(`Broker Lambda reviewed alias identity does not match the exact Stage B contract. ${error.message}`);
+  }
+  if (alias.Name !== STAGE_B.brokerAliasQualifier) {
+    throw new Error(`Broker Lambda reviewed alias name does not match the exact Stage B contract. Expected: ${STAGE_B.brokerAliasQualifier}; Received: ${String(alias.Name)}`);
+  }
+  const aliasFunctionVersion = String(alias.FunctionVersion || "");
+  if (!/^[1-9][0-9]*$/.test(aliasFunctionVersion) || aliasFunctionVersion !== configurationVersion) {
+    throw new Error(`Broker Lambda reviewed alias version does not match configuration Version. Alias version: ${aliasFunctionVersion || "<empty>"}; Configuration Version: ${configurationVersion}`);
+  }
+
+  return {
+    functionArn: STAGE_B.brokerFunctionArn,
+    aliasArn: STAGE_B.brokerAliasArn,
+    aliasName: STAGE_B.brokerAliasQualifier,
+    aliasFunctionVersion,
+    configurationFunctionArn,
+    configurationVersion,
+    resolvedVersionArn: `${STAGE_B.brokerFunctionArn}:${configurationVersion}`,
+  };
 }
 
 export const STAGE_B_MODES = Object.freeze([

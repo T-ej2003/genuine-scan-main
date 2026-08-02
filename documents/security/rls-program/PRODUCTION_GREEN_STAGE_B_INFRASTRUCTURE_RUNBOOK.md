@@ -61,6 +61,14 @@ This is a permanent invariant: executable Stage B consumers import the shared
 contract, and no wrapper, helper, validator, or test may construct, strip, or
 accept an alternate broker function or alias ARN.
 
+When `GetFunctionConfiguration` is queried through `reviewed`, AWS may return the
+canonical alias-qualified `FunctionArn`. The audit records the base function ARN,
+stable alias ARN, and resolved numeric version ARN separately. It accepts the
+unqualified base ARN, a matching numeric version ARN, or the exact reviewed alias
+ARN only when an independent `GetAlias` read proves `AliasArn`, alias name, and
+`FunctionVersion` match the configuration version. Other qualifiers remain
+invalid.
+
 Bind both SHA-256 values when invoking `scripts/plan-production-green-stage-b.mjs`.
 The generator and validator accept only these families: backend candidate, worker
 candidate, application canary, read-only canary, and the eight fixed full-RLS

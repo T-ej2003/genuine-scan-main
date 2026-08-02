@@ -34,6 +34,7 @@ const movedSids = [
   "DescribeStageBTaskDefinitionsReadOnly",
   "ReadStageBBrokerConfiguration",
 ];
+const auditAdditionSids = ["ReadStageBBrokerReviewedAlias"];
 const controlSids = [
   "TagExactStageBLogs",
   "CreateExactStageBLogs",
@@ -101,7 +102,7 @@ test("all policy artifacts parse and historical v2/v3 remain byte-stable", () =>
 test("v4 and the companion policy fit the AWS managed-policy document limit", () => {
   assert.equal(awsCharacterCount(policies.v3), 6651);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
-  assert.equal(awsCharacterCount(policies.audit), 1785);
+  assert.equal(awsCharacterCount(policies.audit), 2040);
   assert.ok(awsCharacterCount(policies.finalWrite) < 6144);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.ok(awsCharacterCount(policies.audit) < 6144);
@@ -119,19 +120,20 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   correctedV3.Statement.push(statementOf(policies.v4, "ListAttachedExactStageBReadOnlyCanaryRolePolicies"));
   correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBReadOnlyCanaryExecutionRolePolicy"));
   correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBBrokerManagedPolicy"));
+  correctedV3.Statement.push(statementOf(policies.audit, "ReadStageBBrokerReviewedAlias"));
   assert.deepEqual(canonical(correctedV3), canonical({
     Version: policies.v3.Version,
     Statement: [...policies.v4.Statement, ...policies.audit.Statement],
   }));
 });
 
-test("the split has exactly seven moved statements, eleven provider-control statements, and six final-write statements", () => {
-  assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), movedSids);
+test("the split has seven moved statements, one audit-only addition, eleven provider-control statements, and six final-write statements", () => {
+  assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...movedSids, ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), finalWriteSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...movedSids, ...controlSids, ...finalWriteSids]).size, 24);
+  assert.equal(new Set([...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids]).size, 25);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
   for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "ReadExactStageBBrokerManagedPolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
@@ -267,6 +269,13 @@ test("cluster, broker, and exact twelve-family restrictions remain unchanged", (
     STAGE_B.brokerFunctionArn,
     STAGE_B.brokerFunctionArnWildcard,
   ]);
+  assert.deepEqual(statementOf(policies.audit, "ReadStageBBrokerReviewedAlias"), {
+    Sid: "ReadStageBBrokerReviewedAlias",
+    Effect: "Allow",
+    Action: "lambda:GetAlias",
+    Resource: STAGE_B.brokerAliasArn,
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
   assert.deepEqual(statementOf(policies.v4, "TagExactStageBTaskDefinitions").Resource, stageBTaskFamilies.map(arn));
   assert.deepEqual(statementOf(policies.v4, "SetExactStageBLogRetention").Resource, stageBLogGroups.map(logArn));
   assert.equal(stageBTaskFamilies.length, 12);
@@ -378,6 +387,7 @@ test("the source-controlled policies carry only the reviewed read, recovery, ret
   assert.equal(actions.includes("iam:ListAttachedRolePolicies"), true);
   assert.equal(actions.includes("iam:GetRolePolicy"), true);
   assert.equal(actions.includes("lambda:GetFunctionConfiguration"), true);
+  assert.equal(actions.includes("lambda:GetAlias"), true);
   assert.equal(actions.includes("ecs:RegisterTaskDefinition"), true);
   assert.equal(actions.includes("lambda:UpdateFunctionConfiguration"), true);
   assert.equal(actions.includes("lambda:UpdateFunctionCode"), true);
@@ -415,7 +425,7 @@ test("the runbook targets v4 and the companion policy for the separately authori
 });
 
 test("historical policy bytes remain unchanged while the active v4 correction is explicit", () => {
-  assert.equal(sha256(read(paths.audit)), "56b299c2f21973a3117e89e5147658406d3ba823efab2b5548ac1b0d9f93dde6");
+  assert.equal(sha256(read(paths.audit)), "8ae0343dfbfbbe34736bb9b9496e212b77849f809e44ef3fb360aa407653e16b");
 });
 
 test("runbook is companion-first and verifies complete policy attachments before provider mutation", () => {

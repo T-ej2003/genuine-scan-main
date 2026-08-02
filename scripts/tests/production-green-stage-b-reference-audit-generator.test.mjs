@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertStageBPlan } from "../plan-production-green-stage-b.mjs";
-import { assertStageBBrokerAliasArn, STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import {
   createAwsReader,
   generateReferenceAudit,
@@ -111,6 +111,11 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
       },
     },
   };
+  const baseAlias = {
+    AliasArn: STAGE_B.brokerAliasArn,
+    Name: STAGE_B.brokerAliasQualifier,
+    FunctionVersion: "2",
+  };
   const reader = {
     getCallerIdentity: () => ({ Arn: callerArn }),
     listServices: () => [],
@@ -123,6 +128,7 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
       return { taskDefinition: { taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${revision}`, family, revision, status: "ACTIVE" } };
     },
     getFunctionConfiguration: () => structuredClone(baseConfig),
+    getAlias: () => structuredClone(baseAlias),
   };
   mutateReader?.(reader);
   return {
@@ -774,22 +780,70 @@ test("Stage B broker alias identity has one canonical qualified source", () => {
   assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn.replace(/:[^:]+$/, ":v2")), /Difference: alias, qualifier/);
 });
 
-test("broker configuration accepts only the canonical function ARN or matching numeric version", () => {
-  const withFunctionArn = (functionArn, version) => makeFixture({
-    mutateReader: (reader) => {
-      const original = reader.getFunctionConfiguration;
-      reader.getFunctionConfiguration = () => ({ ...original(), FunctionArn: functionArn, Version: version });
-    },
+test("broker configuration identity accepts base, matching numeric, and resolved reviewed-alias forms", () => {
+  const alias = { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "2" };
+  for (const FunctionArn of [STAGE_B.brokerFunctionArn, `${STAGE_B.brokerFunctionArn}:2`, STAGE_B.brokerAliasArn]) {
+    const identity = assertStageBBrokerConfigurationIdentity({ configuration: { FunctionArn, Version: "2" }, alias });
+    assert.equal(identity.aliasArn, STAGE_B.brokerAliasArn);
+    assert.equal(identity.resolvedVersionArn, `${STAGE_B.brokerFunctionArn}:2`);
+  }
+  assert.doesNotThrow(() => assertStageBBrokerConfigurationIdentity({
+    configuration: { FunctionArn: `${STAGE_B.brokerFunctionArn}:15`, Version: "15" },
+    alias: { ...alias, FunctionVersion: "15" },
+  }));
+  assert.doesNotThrow(() => generate(makeFixture({ mutateReader: (reader) => {
+    const original = reader.getFunctionConfiguration;
+    reader.getFunctionConfiguration = () => ({ ...original(), FunctionArn: STAGE_B.brokerAliasArn, Version: "2" });
+    reader.getAlias = () => ({ ...alias });
+  }})));
+});
+
+test("broker configuration identity rejects missing or inconsistent alias evidence", () => {
+  const configuration = { FunctionArn: STAGE_B.brokerAliasArn, Version: "2" };
+  const validAlias = { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "2" };
+  assert.throws(() => assertStageBBrokerConfigurationIdentity({ configuration, alias: undefined }), /alias evidence/);
+  assert.throws(() => assertStageBBrokerConfigurationIdentity({ configuration, alias: { ...validAlias, FunctionVersion: "3" } }), /version/);
+  assert.throws(() => assertStageBBrokerConfigurationIdentity({ configuration, alias: { ...validAlias, AliasArn: `${STAGE_B.brokerFunctionArn}:live` } }), /identity/);
+  assert.throws(() => assertStageBBrokerConfigurationIdentity({ configuration, alias: { ...validAlias, Name: "live" } }), /alias name/);
+  assert.throws(() => assertStageBBrokerConfigurationIdentity({ configuration, alias: { ...validAlias, FunctionVersion: "$LATEST" } }), /version/);
+  assert.throws(() => assertStageBBrokerConfigurationIdentity({ configuration: { ...configuration, Version: "foo" }, alias: validAlias }), /malformed/);
+  assert.throws(() => assertStageBBrokerConfigurationIdentity({ configuration: { ...configuration, FunctionArn: `${STAGE_B.brokerFunctionArn}:3` }, alias: validAlias }), /outside/);
+  for (const FunctionArn of [
+    `${STAGE_B.brokerFunctionArn}:live`,
+    `${STAGE_B.brokerFunctionArn}:foo`,
+    `${STAGE_B.brokerFunctionArn}:`,
+    `${STAGE_B.brokerFunctionArn}:$LATEST`,
+    STAGE_B.brokerAliasArn.replace(/:reviewed$/, ":live"),
+    STAGE_B.brokerFunctionArn.replace(STAGE_B.account, "000000000000"),
+    STAGE_B.brokerFunctionArn.replace(STAGE_B.region, "us-east-1"),
+    STAGE_B.brokerFunctionArn.replace(/broker$/, "other"),
+  ]) assert.throws(() => assertStageBBrokerConfigurationIdentity({ configuration: { FunctionArn, Version: "2" }, alias: validAlias }), /outside/);
+});
+
+test("reference audit records base, alias, configuration, and resolved broker identities separately", () => {
+  const fixture = makeFixture({ mutateReader: (reader) => {
+    const original = reader.getFunctionConfiguration;
+    reader.getFunctionConfiguration = () => ({ ...original(), FunctionArn: STAGE_B.brokerAliasArn, Version: "2" });
+    reader.getAlias = () => ({ AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "2" });
+  }});
+  const audit = generate(fixture);
+  assert.deepEqual({
+    functionArn: audit.broker.functionArn,
+    aliasArn: audit.broker.aliasArn,
+    aliasName: audit.broker.aliasName,
+    aliasFunctionVersion: audit.broker.aliasFunctionVersion,
+    configurationFunctionArn: audit.broker.configurationFunctionArn,
+    configurationVersion: audit.broker.configurationVersion,
+    resolvedVersionArn: audit.broker.resolvedVersionArn,
+  }, {
+    functionArn: STAGE_B.brokerFunctionArn,
+    aliasArn: STAGE_B.brokerAliasArn,
+    aliasName: STAGE_B.brokerAliasQualifier,
+    aliasFunctionVersion: "2",
+    configurationFunctionArn: STAGE_B.brokerAliasArn,
+    configurationVersion: "2",
+    resolvedVersionArn: `${STAGE_B.brokerFunctionArn}:2`,
   });
-  assert.doesNotThrow(() => generate(withFunctionArn(STAGE_B.brokerFunctionArn, "2")));
-  assert.doesNotThrow(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":2"), "2")));
-  assert.doesNotThrow(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":15"), "15")));
-  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":3"), "2")), /version does not match/);
-  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerAliasArn, "2")), /version does not match/);
-  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerAliasArn.replace(/function:[^:]+/, "function:other"), "2")), /canonical function/);
-  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArn.replace(STAGE_B.account, "000000000000"), "2")), /canonical function/);
-  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArn.replace(STAGE_B.region, "us-east-1"), "2")), /canonical function/);
-  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":foo"), "2")), /version does not match/);
 });
 
 test("audit CLI derives the canonical broker alias and rejects broker overrides", () => {
@@ -1574,13 +1628,14 @@ test("AWS reader uses argv arrays and only read-only commands", () => {
     "ecs describe-tasks": { tasks: [], failures: [] },
     "ecs describe-task-definition": { taskDefinition: { taskDefinitionArn: oldArnFor("x"), family: "x", revision: 1, status: "ACTIVE" } },
     "lambda get-function-configuration": {},
+    "lambda get-alias": {},
   };
   const reader = createAwsReader({
     region: "eu-west-2",
     clusterArn,
     run: (args) => { calls.push(args); return JSON.stringify(responses[args.slice(0, 2).join(" ")] || {}); },
   });
-  reader.getCallerIdentity(); reader.listServices(); reader.describeServices([]); reader.listTasks("RUNNING"); reader.describeTasks([]); reader.describeTaskDefinition("safe"); reader.getFunctionConfiguration(brokerAliasArn);
+  reader.getCallerIdentity(); reader.listServices(); reader.describeServices([]); reader.listTasks("RUNNING"); reader.describeTasks([]); reader.describeTaskDefinition("safe"); reader.getFunctionConfiguration(brokerAliasArn); reader.getAlias();
   assert.deepEqual(new Set(calls.map((args) => args.slice(0, 2).join(" "))), new Set(Object.keys(responses)));
   assert.ok(calls.every((args) => args.every((value) => !/[;&|`$()]/.test(value))));
   const source = fs.readFileSync("scripts/aws/generate-production-green-stage-b-reference-audit.mjs", "utf8");

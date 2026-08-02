@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertStageBBrokerAliasArn, assertStageBBrokerFunctionArn, STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
+import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
 import {
   assertStageBReferenceAuditFreshness,
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
@@ -255,9 +255,8 @@ function proveBrokerPackagePlan(plan, terraformConfiguration, expectedPackageChe
   return proof;
 }
 
-function validateBrokerConfiguration(config, brokerAliasArn, expectedPackageChecksum, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha256, terraformConfiguration) {
-  if (typeof config.Version !== "string" || !/^[1-9][0-9]*$/.test(config.Version)) throw new Error("Broker Lambda version is missing or malformed.");
-  assertStageBBrokerFunctionArn(config?.FunctionArn, config.Version);
+function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPackageChecksum, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha256, terraformConfiguration) {
+  const brokerIdentity = assertStageBBrokerConfigurationIdentity({ configuration: config, alias });
   const variables = normalizeEnvironment(config);
   const taskDefinitions = requireObject(parseJson(variables.BROKER_TASK_DEFINITIONS_JSON, "BROKER_TASK_DEFINITIONS_JSON"), "BROKER_TASK_DEFINITIONS_JSON");
   const expectedModes = [...STAGE_B_MODES].sort();
@@ -330,9 +329,14 @@ function validateBrokerConfiguration(config, brokerAliasArn, expectedPackageChec
   return {
     summary: {
       functionArn: STAGE_B.brokerFunctionArn,
-      functionVersion: config.Version,
-      aliasArn: brokerAliasArn,
-      aliasVersion: config.Version,
+      functionVersion: brokerIdentity.configurationVersion,
+      aliasArn: brokerIdentity.aliasArn,
+      aliasVersion: brokerIdentity.aliasFunctionVersion,
+      aliasName: brokerIdentity.aliasName,
+      aliasFunctionVersion: brokerIdentity.aliasFunctionVersion,
+      configurationFunctionArn: brokerIdentity.configurationFunctionArn,
+      configurationVersion: brokerIdentity.configurationVersion,
+      resolvedVersionArn: brokerIdentity.resolvedVersionArn,
       releasePackageChecksumSha256: approvalExpected.packageChecksumSha256,
       plannedReleasePackageChecksumSha256: expectedPackageChecksum,
       planBeforeReleasePackageChecksumSha256: brokerProof?.planBeforeReleasePackageChecksumSha256,
@@ -463,7 +467,7 @@ export function generateReferenceAudit({
     referencesByArn: brokerReferencesByArn,
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
-  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerAliasArn), brokerAliasArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha, terraformConfiguration);
+  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerAliasArn), reader.getAlias(STAGE_B.brokerFunctionArn, STAGE_B.brokerAliasQualifier), brokerAliasArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha, terraformConfiguration);
   const serviceReferences = referenceNames(stageBServices, oldArns, "taskDefinition", "serviceName");
   const runningReferences = referenceNames(stageBRunningTasks, oldArns, "taskDefinitionArn", "taskArn");
   const pendingReferences = referenceNames(stageBPendingTasks, oldArns, "taskDefinitionArn", "taskArn");

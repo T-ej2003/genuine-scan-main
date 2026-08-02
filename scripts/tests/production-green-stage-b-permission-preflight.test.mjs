@@ -415,7 +415,14 @@ function wrapperFixture({ approvedPlan = plan, shownPlan = approvedPlan, savedBy
   const permissionPath = path.join(directory, "approved.permission.json");
   fs.writeFileSync(planPath, savedBytes);
   fs.writeFileSync(planJsonPath, approvedBytes);
-  const auditBytes = Buffer.from(JSON.stringify({ audit: true, broker: { aliasArn: STAGE_B.brokerAliasArn } }));
+  const auditBytes = Buffer.from(JSON.stringify({ audit: true, broker: {
+    aliasArn: STAGE_B.brokerAliasArn,
+    aliasName: "reviewed",
+    aliasFunctionVersion: "2",
+    configurationFunctionArn: STAGE_B.brokerAliasArn,
+    configurationVersion: "2",
+    resolvedVersionArn: `${STAGE_B.brokerFunctionArn}:2`,
+  } }));
   fs.writeFileSync(auditPath, auditBytes);
   const savedHash = crypto.createHash("sha256").update(savedBytes).digest("hex");
   const planHash = crypto.createHash("sha256").update(approvedBytes).digest("hex");
@@ -461,7 +468,14 @@ test("exact binary plan and derived JSON reach the ready-to-apply boundary witho
 
 test("apply wrapper rejects an unqualified broker target before apply", () => {
   const fixture = wrapperFixture();
-  const audit = { audit: true, broker: { aliasArn: STAGE_B.brokerFunctionArn } };
+  const audit = { audit: true, broker: {
+    aliasArn: STAGE_B.brokerFunctionArn,
+    aliasName: "reviewed",
+    aliasFunctionVersion: "2",
+    configurationFunctionArn: STAGE_B.brokerAliasArn,
+    configurationVersion: "2",
+    resolvedVersionArn: `${STAGE_B.brokerFunctionArn}:2`,
+  } };
   const auditBytes = Buffer.from(JSON.stringify(audit));
   fs.writeFileSync(fixture.auditPath, auditBytes);
   assert.throws(() => assertApplyArtifacts({
@@ -489,7 +503,14 @@ test("apply wrapper validates the canonical alias for any broker mutation regard
   });
   const run = (approvedPlan, aliasArn) => {
     const fixture = wrapperFixture({ approvedPlan });
-    const auditBytes = Buffer.from(JSON.stringify({ audit: true, broker: { aliasArn } }));
+    const auditBytes = Buffer.from(JSON.stringify({ audit: true, broker: {
+      aliasArn,
+      aliasName: "reviewed",
+      aliasFunctionVersion: "2",
+      configurationFunctionArn: STAGE_B.brokerAliasArn,
+      configurationVersion: "2",
+      resolvedVersionArn: `${STAGE_B.brokerFunctionArn}:2`,
+    } }));
     fs.writeFileSync(fixture.auditPath, auditBytes);
     return () => assertApplyArtifacts({
       ...fixture,
