@@ -16,6 +16,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      - name: Require the workflow definition to come from protected main
+        env:
+          EXPECTED_WORKFLOW_REF: refs/heads/main
+        run: test "$GITHUB_REF" = "$EXPECTED_WORKFLOW_REF"
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.release_sha }}
