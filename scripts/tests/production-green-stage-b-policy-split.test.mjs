@@ -49,6 +49,7 @@ const finalWriteSids = [
   "RegisterExactStageBReadOnlyCanaryTaskDefinition",
   "PassExactStageBReadOnlyCanaryRolesToEcsTasks",
   "UpdateExactStageBBrokerFunctionRelease",
+  "VerifyExactStageBPermissionReportSignature",
 ];
 const readOnlyCanaryRoles = [
   "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
@@ -119,13 +120,13 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   }));
 });
 
-test("the split has exactly seven moved statements, ten provider-control statements, and two final-write statements", () => {
+test("the split has exactly seven moved statements, ten provider-control statements, and four final-write statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), movedSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), finalWriteSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...movedSids, ...controlSids, ...finalWriteSids]).size, 20);
+  assert.equal(new Set([...movedSids, ...controlSids, ...finalWriteSids]).size, 21);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
   for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
@@ -145,7 +146,7 @@ test("DescribeTaskDefinition is isolated, wildcard-only, and read-only", () => {
 });
 
 test("deregistration authority is absent and retention remains resource-scoped", () => {
-  for (const policy of [policies.v4, policies.audit]) {
+  for (const policy of [policies.v4, policies.audit, policies.finalWrite]) {
     for (const statement of policy.Statement) {
       if (actionsOf(statement).some((action) => mutationActions.has(action))) {
         assert.notEqual(statement.Resource, "*");
@@ -154,6 +155,7 @@ test("deregistration authority is absent and retention remains resource-scoped",
   }
   assert.equal(statementsForAction(policies.v4, "ecs:DeregisterTaskDefinition").length, 0);
   assert.equal(statementsForAction(policies.audit, "ecs:DeregisterTaskDefinition").length, 0);
+  assert.equal(statementsForAction(policies.finalWrite, "ecs:DeregisterTaskDefinition").length, 0);
   assert.notEqual(statementOf(policies.v4, "SetExactStageBLogRetention").Resource, "*");
   assert.equal(policies.audit.Statement.some((statement) => actionsOf(statement).some((action) => mutationActions.has(action))), false);
 });
@@ -196,6 +198,16 @@ test("retry write companion is exact and tag-constrained", () => {
   assert.equal(statementsForAction(policies.finalWrite, "lambda:AddPermission").length, 0);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:InvokeFunction").length, 0);
   assert.equal(policies.finalWrite.Statement.some((statement) => actionsOf(statement).some((action) => action.startsWith("lambda:") && statement.Resource === "*")), false);
+});
+
+test("permission-report verification is limited to the fixed Stage B KMS key", () => {
+  assert.deepEqual(statementOf(policies.finalWrite, "VerifyExactStageBPermissionReportSignature"), {
+    Sid: "VerifyExactStageBPermissionReportSignature",
+    Effect: "Allow",
+    Action: "kms:Verify",
+    Resource: "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",
+  });
+  assert.equal(statementsForAction(policies.finalWrite, "kms:Sign").length, 0);
 });
 
 test("final-write PassRole is limited to both canary roles and ECS tasks", () => {
@@ -314,7 +326,7 @@ test("Terraform role refresh reads are complete and narrowly scoped", () => {
   assert.equal(policies.v4.Statement.some((candidate) => actionsOf(candidate).some((action) => action.startsWith("iam:") && candidate.Resource === "*")), false);
 });
 
-test("the three source-controlled policies carry only the reviewed read, recovery, and retry actions", () => {
+test("the source-controlled policies carry only the reviewed read, recovery, retry, and signature-verification actions", () => {
   const actions = [...policies.v4.Statement, ...policies.audit.Statement, ...policies.finalWrite.Statement].flatMap(actionsOf);
   for (const forbidden of [
     "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:DeleteService", "lambda:InvokeFunction",
@@ -334,6 +346,8 @@ test("the three source-controlled policies carry only the reviewed read, recover
   assert.equal(actions.includes("lambda:PublishVersion"), true);
   assert.equal(actions.includes("lambda:UpdateAlias"), true);
   assert.equal(actions.includes("iam:PassRole"), true);
+  assert.equal(actions.includes("kms:Verify"), true);
+  assert.equal(actions.includes("kms:Sign"), false);
 });
 
 test("validator rejects blue and unknown task-definition families and addresses", () => {

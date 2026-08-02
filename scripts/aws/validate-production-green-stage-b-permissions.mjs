@@ -2,8 +2,10 @@
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_PREFLIGHT_MAX_AGE_MS = 15 * 60 * 1000;
@@ -13,6 +15,8 @@ export const REGION = "eu-west-2";
 export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
 export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${ACCOUNT}:root`]);
 export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
+export const PERMISSION_REPORT_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
+export const PERMISSION_REPORT_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
 const TASK_DEFINITION_TAG_CONTEXT = Object.freeze([
   { key: "aws:RequestedRegion", type: "string", values: [REGION] },
   { key: "aws:RequestTag/Environment", type: "string", values: ["production"] },
@@ -58,6 +62,7 @@ export function parseCli(argv) {
     planJsonPath: requireOption(argv, "--plan-json"),
     manifestPath: requireOption(argv, "--manifest"),
     outputPath: requireOption(argv, "--output"),
+    signatureOutputPath: requireOption(argv, "--signature-output"),
     savedPlanPath: requireOption(argv, "--saved-plan"),
     expectedAccount: requireOption(argv, "--expected-account"),
     expectedRegion: requireOption(argv, "--expected-region"),
@@ -104,6 +109,38 @@ function assertExactContextValues(context, expected, label) {
     const entry = actual.get(key);
     if (!entry || entry.type !== "string" || JSON.stringify(entry.values) !== JSON.stringify(values)) {
       throw new Error(`${label} must include exact ${key} context.`);
+    }
+  }
+}
+
+export function normalizeEvaluationTuple(entry, resource) {
+  return JSON.stringify({
+    action: entry.action,
+    resource,
+    context: [...entry.context]
+      .map(({ key, type, values }) => ({ key, type, values: [...values].sort() }))
+      .sort((left, right) => `${left.key}\u0000${left.type}\u0000${left.values.join("\u0000")}`.localeCompare(`${right.key}\u0000${right.type}\u0000${right.values.join("\u0000")}`)),
+  });
+}
+
+function assertNoDuplicateOrOverlap(requiredEntries, forbiddenEntries) {
+  const requiredByTuple = new Map();
+  for (const entry of requiredEntries) {
+    for (const resource of entry.resources) {
+      const tuple = normalizeEvaluationTuple(entry, resource);
+      if (!entry.generated && requiredByTuple.has(tuple)) throw new Error(`Permission manifest duplicate required evaluation tuple: ${requiredByTuple.get(tuple)} and ${entry.id}.`);
+      if (!requiredByTuple.has(tuple)) requiredByTuple.set(tuple, entry.id);
+    }
+  }
+  const forbiddenByTuple = new Map();
+  for (const entry of forbiddenEntries) {
+    for (const resource of entry.resources) {
+      const tuple = normalizeEvaluationTuple(entry, resource);
+      if (forbiddenByTuple.has(tuple)) throw new Error(`Permission manifest duplicate forbidden evaluation tuple: ${forbiddenByTuple.get(tuple)} and ${entry.id}.`);
+      forbiddenByTuple.set(tuple, entry.id);
+      if (requiredByTuple.has(tuple)) {
+        throw new Error(`Permission manifest required/forbidden overlap: required ${requiredByTuple.get(tuple)}, forbidden ${entry.id}, action ${entry.action}, resource ${resource}, context ${tuple}.`);
+      }
     }
   }
 }
@@ -165,6 +202,13 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION 
     if (!service || service.type !== "string" || JSON.stringify(service.values) !== JSON.stringify(["ecs-tasks.amazonaws.com"])) throw new Error(`Permission manifest PassRole context is invalid: ${mapping.address}.`);
   }
   if (mappingAddresses.size !== expectedMappings.size) throw new Error("Permission manifest task-definition mapping set is incomplete.");
+  const generatedRequired = manifest.taskDefinitionMappings.flatMap((mapping) => [
+    { id: `${mapping.id}-register`, action: "ecs:RegisterTaskDefinition", resources: [mapping.resource], context: mapping.registerContext, generated: true },
+    { id: `${mapping.id}-tag`, action: "ecs:TagResource", resources: [mapping.resource], context: mapping.registerContext, generated: true },
+    { id: `${mapping.id}-pass-execution`, action: "iam:PassRole", resources: [mapping.executionRoleArn], context: mapping.passRoleContext, generated: true },
+    { id: `${mapping.id}-pass-task`, action: "iam:PassRole", resources: [mapping.taskRoleArn], context: mapping.passRoleContext, generated: true },
+  ]);
+  assertNoDuplicateOrOverlap([...manifest.required, ...generatedRequired], manifest.forbidden);
   return true;
 }
 
@@ -270,6 +314,49 @@ export function inspectCloudTrailDenials({ sessionName, startTime, endTime, requ
   return { status: unresolvedDenials.length === 0 ? "clear" : "unresolved-denial", eventsChecked: (response.Events || []).length, unresolvedDenials };
 }
 
+function withTempBytes(prefix, files, callback) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  try {
+    const paths = Object.fromEntries(Object.entries(files).map(([name, bytes]) => {
+      const filePath = path.join(directory, name);
+      fs.writeFileSync(filePath, bytes, { mode: 0o600, flag: "wx" });
+      return [name, filePath];
+    }));
+    return callback(paths);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+export function signPermissionReport(report, {
+  now = new Date().toISOString(),
+  keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN,
+  signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM,
+  sign = ({ digest }) => withTempBytes("mscqr-stage-b-permission-sign-", { digest }, ({ digest: digestPath }) => JSON.parse(execFileSync("aws", [
+    "kms", "sign", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signing-algorithm", signingAlgorithm, "--output", "json",
+  ], { encoding: "utf8" })).Signature),
+} = {}) {
+  if (report?.schemaVersion !== PERMISSION_PREFLIGHT_SCHEMA_VERSION || report.status !== "valid") throw new Error("Only a valid permission report may be signed.");
+  if (keyArn !== PERMISSION_REPORT_SIGNING_KEY_ARN || signingAlgorithm !== PERMISSION_REPORT_SIGNING_ALGORITHM) throw new Error("Permission report signing contract is wrong.");
+  const reportSha256 = sha256(Buffer.from(canonicalizeJson(report)));
+  const signatureBase64 = String(sign({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), reportSha256 }) || "");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureBase64)) throw new Error("Permission report signing returned an invalid signature.");
+  return { schemaVersion: 1, keyId: keyArn, keyArn, signingAlgorithm, reportSha256, signatureBase64, signedAt: now };
+}
+
+export function verifyPermissionReportSignature({ report, signatureArtifact, now = new Date().toISOString(), keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM, verify = ({ digest, signature }) => withTempBytes("mscqr-stage-b-permission-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(execFileSync("aws", [
+  "kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json",
+], { encoding: "utf8" })).SignatureValid === true) }) {
+  if (!signatureArtifact || signatureArtifact.schemaVersion !== 1 || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm) throw new Error("Permission report signature identity or algorithm is wrong.");
+  const reportSha256 = sha256(Buffer.from(canonicalizeJson(report)));
+  if (signatureArtifact.reportSha256 !== reportSha256) throw new Error("Permission report signature is bound to a different report.");
+  const signedAtMs = Date.parse(signatureArtifact.signedAt); const nowMs = Date.parse(now);
+  if (!Number.isFinite(signedAtMs) || signedAtMs > nowMs + PERMISSION_PREFLIGHT_CLOCK_SKEW_MS || nowMs - signedAtMs > PERMISSION_PREFLIGHT_MAX_AGE_MS) throw new Error("Permission report signature is stale or malformed.");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureArtifact.signatureBase64 || "")) throw new Error("Permission report signature is malformed.");
+  if (!verify({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), reportSha256 })) throw new Error("Permission report signature verification failed.");
+  return true;
+}
+
 function validateFreshness(timestamp, now) {
   const timestampMs = Date.parse(timestamp); const nowMs = Date.parse(now);
   if (!Number.isFinite(timestampMs)) throw new Error("Permission report generatedAt is malformed.");
@@ -337,7 +424,7 @@ export function runPermissionPreflight({
   return report;
 }
 
-export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn, runPreflight = runPermissionPreflight } = {}) {
+export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn, runPreflight = runPermissionPreflight, signReport = signPermissionReport } = {}) {
   const options = parseCli(argv);
   const observedCallerArn = getCaller();
   if (observedCallerArn !== options.reportGeneratorCallerArn) throw new Error("Report generator caller does not match the current AWS identity.");
@@ -346,7 +433,9 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   const plan = JSON.parse(planBytes);
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
   const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, savedPlanBytes });
+  const signatureArtifact = signReport(report, { now: options.generatedAt });
   fs.writeFileSync(path.resolve(options.outputPath), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
+  fs.writeFileSync(path.resolve(options.signatureOutputPath), `${JSON.stringify(signatureArtifact, null, 2)}\n`, { mode: 0o600 });
   process.stdout.write(`${JSON.stringify({ status: report.status, outputPath: options.outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
   if (report.status !== "valid") process.exitCode = 1;
   return report;

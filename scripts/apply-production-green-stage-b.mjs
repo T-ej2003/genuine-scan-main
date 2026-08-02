@@ -11,6 +11,7 @@ import {
   APPROVED_PREFLIGHT_GENERATOR_ARNS,
   PERMISSION_PREFLIGHT_CLOCK_SKEW_MS,
   PERMISSION_PREFLIGHT_MAX_AGE_MS,
+  verifyPermissionReportSignature,
   RELEASE_CALLER_PATTERN,
   RELEASE_ROLE_ARN,
   canonicalizeJson,
@@ -44,6 +45,7 @@ export function parseCli(argv) {
     auditPath: requireOption(argv, "--reference-audit"),
     permissionReportPath: requireOption(argv, "--permission-report"),
     permissionReportSha256: requireOption(argv, "--permission-report-sha256"),
+    permissionReportSignaturePath: requireOption(argv, "--permission-report-signature"),
     planSha256: requireOption(argv, "--plan-sha256"),
     auditSha256: requireOption(argv, "--audit-sha256"),
     savedPlanSha256: requireOption(argv, "--saved-plan-sha256"),
@@ -52,7 +54,8 @@ export function parseCli(argv) {
   };
 }
 
-export function assertPermissionReport(report, { planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, now = new Date().toISOString() } = {}) {
+export function assertPermissionReport(report, { signatureArtifact, verifySignature = verifyPermissionReportSignature, planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, now = new Date().toISOString() } = {}) {
+  if (!verifySignature({ report, signatureArtifact, now })) throw new Error("Permission report signature verification failed.");
   if (report?.schemaVersion !== 1 || report.status !== "valid") throw new Error("A valid permission-preflight report is required.");
   if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(report.reportGeneratorCallerArn)) throw new Error("Permission-preflight report generator is not approved.");
   if (report.simulatedRoleArn !== RELEASE_ROLE_ARN || report.applyRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission-preflight report role contract is wrong.");
@@ -74,11 +77,12 @@ export function assertPermissionReport(report, { planSha256, savedPlanSha256, ca
   return true;
 }
 
-export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan }) {
-  if (!path.isAbsolute(planPath) || !path.isAbsolute(planJsonPath) || !path.isAbsolute(auditPath) || !path.isAbsolute(permissionReportPath)) throw new Error("All Stage B apply artifacts must use absolute paths.");
+export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature }) {
+  if (!path.isAbsolute(planPath) || !path.isAbsolute(planJsonPath) || !path.isAbsolute(auditPath) || !path.isAbsolute(permissionReportPath) || !path.isAbsolute(permissionReportSignaturePath)) throw new Error("All Stage B apply artifacts must use absolute paths.");
   if (!fs.existsSync(planPath)) throw new Error("Saved Terraform plan is missing.");
   if (!fs.existsSync(permissionReportPath)) throw new Error("Permission-preflight report is missing.");
-  const planBytes = fs.readFileSync(planJsonPath); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReportBytes = fs.readFileSync(permissionReportPath); const permissionReport = JSON.parse(permissionReportBytes);
+  if (!fs.existsSync(permissionReportSignaturePath)) throw new Error("Permission-preflight report signature is missing.");
+  const planBytes = fs.readFileSync(planJsonPath); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReportBytes = fs.readFileSync(permissionReportPath); const permissionReport = JSON.parse(permissionReportBytes); const signatureArtifact = JSON.parse(fs.readFileSync(permissionReportSignaturePath, "utf8"));
   if (!/^[a-f0-9]{64}$/.test(savedPlanSha256) || sha256(savedPlanBytes) !== savedPlanSha256) throw new Error("Saved Terraform plan SHA256 does not match the approved digest.");
   if (!/^[a-f0-9]{64}$/.test(canonicalPlanJsonSha256)) throw new Error("Canonical plan JSON SHA256 is missing or malformed.");
   if (sha256(planBytes) !== planSha256) throw new Error("Plan JSON SHA256 does not match the approved digest.");
@@ -96,7 +100,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
   const derivedCanonical = canonicalizeJson(derivedPlan);
   const derivedCanonicalPlanJsonSha256 = sha256(Buffer.from(derivedCanonical));
   if (derivedCanonical !== approvedCanonical || derivedCanonicalPlanJsonSha256 !== canonicalPlanJsonSha256) throw new Error("Saved binary Terraform plan does not match the approved plan JSON.");
-  assertPermissionReport(permissionReport, { planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, now });
+  assertPermissionReport(permissionReport, { signatureArtifact, verifySignature: ({ report, signatureArtifact: artifact }) => verifyPermissionSignature({ report, signatureArtifact: artifact, now }), planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, now });
   validatePlan(plan, {
     referenceAudit: audit,
     referenceAuditBytes: auditBytes,
@@ -125,7 +129,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const artifacts = parseCli(argv); const callerArn = deps.getCaller();
   const defaultDeps = { getCaller: currentCaller, showPlan: showSavedPlan, validatePlan: assertStageBPlan, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) };
   const effectiveDeps = { ...defaultDeps, ...deps };
-  const verified = assertApplyArtifacts({ ...artifacts, callerArn, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan });
+  const verified = assertApplyArtifacts({ ...artifacts, callerArn, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature });
   if (artifacts.verifyOnly) return { status: "ready-to-apply", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
   const result = effectiveDeps.apply(artifacts.planPath);
   if (result?.status !== undefined && result.status !== 0) throw new Error("Terraform apply failed; stop without retry.");
