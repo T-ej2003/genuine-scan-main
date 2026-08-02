@@ -619,3 +619,43 @@ plan SHA and must be supplied to
 `scripts/apply-production-green-stage-b.mjs` with the plan-bound audit and valid
 Stage B validator result. Missing, stale, denied, unscoped, or unreviewed
 permission evidence blocks apply before Terraform is invoked.
+
+Preflight generation and Terraform apply use separate identities. No reviewed
+non-root Stage B audit principal exists, so the approved generator is the
+administrator/root identity `arn:aws:iam::368992683803:root`; it simulates the
+exact release role and performs the supplemental CloudTrail lookup. The
+release-deployer is never granted `iam:SimulatePrincipalPolicy` or
+`cloudtrail:LookupEvents`, and the apply wrapper never calls either API. The
+report records `reportGeneratorCallerArn`, `simulatedRoleArn`, `applyRoleArn`,
+the manifest SHA256, both plan hashes, the policy-publication window, and the
+CloudTrail result. The administrator logs out immediately after generation;
+the fresh MFA-backed release session only consumes the report.
+
+The manifest explicitly enumerates all twelve possible current task-definition
+create addresses: backend, worker, application-canary, read-only-canary, and
+the eight executor modes. Each address independently proves
+`ecs:RegisterTaskDefinition`, `ecs:TagResource`, PassRole for its exact
+execution role, and PassRole for its exact task role with
+`iam:PassedToService=ecs-tasks.amazonaws.com`. Unknown, duplicate, missing,
+or family/address-mismatched entries fail before simulation.
+
+The permission report is authenticated, not merely checksummed. The approved
+administrator/root generator signs the canonical report digest with the existing
+source-controlled Stage B asymmetric KMS key
+`arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478`,
+using `MessageType=DIGEST` and `RSASSA_PSS_SHA_256`. It publishes the report and
+detached signature together with the key ARN, algorithm, canonical report hash,
+and signing timestamp. The release-deployer has only `kms:Verify` for that exact
+key; it cannot sign reports. The apply wrapper performs the same key, algorithm,
+hash, freshness, and signature checks in verification-only and real-apply modes.
+A report SHA256 supplied by the release caller is integrity evidence only and is
+never treated as authenticity. Missing, modified, stale, wrong-key, wrong-
+algorithm, or self-asserted reports fail closed. No KMS key is created by this
+contract or by the correction PR.
+
+The manifest normalizes every required and forbidden evaluation as an exact
+action/resource/context tuple and rejects any intersection at load time. The
+exact ECS task-role PassRole tuples are therefore never also listed as forbidden;
+forbidden examples use unrelated roles or a different `iam:PassedToService`
+context. This keeps the twelve required mappings simulatable without weakening
+the unrelated-role, wrong-service, wildcard, and wrong-account denials.

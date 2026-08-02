@@ -54,6 +54,12 @@
           "aws:ResourceTag/Component": "full-rls-green-stage-b"
         }
       }
+    },
+    {
+      "Sid": "VerifyExactStageBPermissionReportSignature",
+      "Effect": "Allow",
+      "Action": "kms:Verify",
+      "Resource": "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
     }
   ]
 }

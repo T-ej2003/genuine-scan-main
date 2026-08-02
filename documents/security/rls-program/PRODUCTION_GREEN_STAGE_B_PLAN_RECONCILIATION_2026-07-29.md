@@ -280,6 +280,16 @@ CloudTrail denials before apply. The apply wrapper requires that report, the
 exact plan SHA, the fresh audit SHA, and a valid validator result to bind to the
 same saved plan; Terraform cannot be invoked without all four gates.
 
+Preflight generation is administrator-operated and apply is
+release-operated. Because no reviewed non-root audit principal exists, the
+approved root/admin generator simulates the release-deployer policy and runs
+the supplemental CloudTrail lookup; the release-deployer receives neither
+permission and the wrapper never calls those APIs. The report binds the
+generator identity, simulated role, exact manifest hash, binary/canonical plan
+hashes, and CloudTrail query window. The manifest explicitly covers all twelve
+current task-definition create addresses and their exact registration, tagging,
+execution-role PassRole, and task-role PassRole evaluations.
+
 The permission gate uses the real PascalCase IAM simulator response contract and
 rejects missing or nonempty `MissingContextValues`. Caller evidence must be the
 exact STS assumed-role ARN. The saved binary plan is verified with both
@@ -287,3 +297,20 @@ exact STS assumed-role ARN. The saved binary plan is verified with both
 `terraform show -json`; an approved JSON file cannot be paired with another
 binary plan. Lambda write checks supply `aws:RequestedRegion` plus the exact
 Environment, ManagedBy, and Component ResourceTag contexts.
+
+Permission-preflight reports are administrator-authenticated detached artifacts.
+The root/admin generator signs the canonical report digest with the existing
+source-controlled Stage B asymmetric KMS key
+`arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478`
+using `RSASSA_PSS_SHA_256` and `MessageType=DIGEST`. The release-deployer may
+verify only that exact key and cannot sign or replace a report. The apply wrapper
+requires the trusted key ARN, algorithm, report hash, detached signature,
+timestamp, exact plan bindings, manifest binding, generator identity, and
+CloudTrail window before either verification-only or real apply. A report hash
+alone is not an authenticity proof, and no KMS key is created by this contract.
+
+The permission manifest also requires the normalized required/forbidden
+action-resource-context tuple sets to be disjoint. The twelve exact task-role
+PassRole tuples are required only with `iam:PassedToService=ecs-tasks.amazonaws.com`;
+forbidden cases use unrelated roles or a different service context, so the same
+decision is never required to be both allowed and denied.
