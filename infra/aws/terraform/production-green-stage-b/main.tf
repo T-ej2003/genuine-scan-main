@@ -33,15 +33,15 @@ locals {
     read_only_canary = var.read_only_canary_image
   }
   rendered_candidates = {
-    backend          = replace(replace(replace(file("${path.module}/task-definitions/green-backend-candidate.json"), "{{BACKEND_IMAGE}}", var.backend_image), "{{RELEASE_SHA}}", var.release_sha), "{{BACKEND_LOG_GROUP}}", local.logs.backend)
-    worker           = replace(replace(replace(file("${path.module}/task-definitions/green-worker-candidate.json"), "{{WORKER_IMAGE}}", var.worker_image), "{{RELEASE_SHA}}", var.release_sha), "{{WORKER_LOG_GROUP}}", local.logs.worker)
-    canary           = replace(replace(replace(replace(replace(file("${path.module}/task-definitions/green-application-canary.json"), "{{CANARY_IMAGE}}", var.canary_image), "{{RELEASE_SHA}}", var.release_sha), "{{SOURCE_CONTRACT_SHA256}}", var.source_contract_sha256), "{{MIGRATION_SET_DIGEST}}", var.migration_set_digest), "{{CANARY_LOG_GROUP}}", local.logs.canary)
+    backend          = replace(replace(replace(file("${path.module}/task-definitions/green-backend-candidate.json"), "{{BACKEND_IMAGE}}", var.backend_image), "{{RELEASE_SHA}}", var.image_release_sha), "{{BACKEND_LOG_GROUP}}", local.logs.backend)
+    worker           = replace(replace(replace(file("${path.module}/task-definitions/green-worker-candidate.json"), "{{WORKER_IMAGE}}", var.worker_image), "{{RELEASE_SHA}}", var.image_release_sha), "{{WORKER_LOG_GROUP}}", local.logs.worker)
+    canary           = replace(replace(replace(replace(replace(file("${path.module}/task-definitions/green-application-canary.json"), "{{CANARY_IMAGE}}", var.canary_image), "{{RELEASE_SHA}}", var.image_release_sha), "{{SOURCE_CONTRACT_SHA256}}", var.source_contract_sha256), "{{MIGRATION_SET_DIGEST}}", var.migration_set_digest), "{{CANARY_LOG_GROUP}}", local.logs.canary)
     read_only_canary = replace(replace(replace(file("${path.module}/task-definitions/green-read-only-rls-canary.json"), "{{READ_ONLY_CANARY_IMAGE}}", var.read_only_canary_image), "{{READ_ONLY_CANARY_DATABASE_SECRET_ARN}}", var.stage_a_read_only_canary_database_secret_arn), "{{READ_ONLY_CANARY_LOG_GROUP}}", local.logs.read_only_canary)
   }
   candidate_definitions = {
     for kind, rendered in local.rendered_candidates : kind => jsondecode(rendered)
   }
-  executor_template = replace(replace(replace(replace(replace(replace(file("${path.module}/task-definitions/green-activation-executor.json"), "{{EXECUTOR_IMAGE}}", var.executor_image), "{{RELEASE_SHA}}", var.release_sha), "{{SOURCE_CONTRACT_SHA256}}", var.source_contract_sha256), "{{MIGRATION_SET_DIGEST}}", var.migration_set_digest), "{{PACKAGE_CHECKSUM_SHA256}}", var.package_checksum_sha256), "{{RECEIPT_BUCKET}}", trimprefix(var.receipt_bucket_arn, "arn:aws:s3:::"))
+  executor_template = replace(replace(replace(replace(replace(replace(file("${path.module}/task-definitions/green-activation-executor.json"), "{{EXECUTOR_IMAGE}}", var.executor_image), "{{RELEASE_SHA}}", var.image_release_sha), "{{SOURCE_CONTRACT_SHA256}}", var.source_contract_sha256), "{{MIGRATION_SET_DIGEST}}", var.migration_set_digest), "{{PACKAGE_CHECKSUM_SHA256}}", var.package_checksum_sha256), "{{RECEIPT_BUCKET}}", trimprefix(var.receipt_bucket_arn, "arn:aws:s3:::"))
   executor_definitions = {
     for mode, confirmation in local.confirmations : mode => jsondecode(
       replace(
@@ -198,7 +198,7 @@ locals {
     canaryImageDigest   = var.canary_image
   }
   broker_approval_expected = {
-    releaseSha              = var.release_sha
+    releaseSha              = var.image_release_sha
     sourceContractSha256    = var.source_contract_sha256
     migrationSetDigest      = var.migration_set_digest
     packageChecksumSha256   = var.package_checksum_sha256

@@ -9,7 +9,7 @@ import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from "./production
 import { APPROVED_PREFLIGHT_GENERATOR_ARNS } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 
-export const IMAGE_EVIDENCE_SCHEMA_VERSION = 1;
+export const IMAGE_EVIDENCE_SCHEMA_VERSION = 2;
 export const IMAGE_EVIDENCE_MAX_AGE_MS = 15 * 60 * 1000;
 export const IMAGE_EVIDENCE_CLOCK_SKEW_MS = 60 * 1000;
 export const IMAGE_EVIDENCE_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
@@ -113,8 +113,8 @@ const withTempBytes = (prefix, files, callback) => {
   }
 };
 
-function requireReleaseSha(value) {
-  if (!/^[a-f0-9]{40}$/.test(String(value || ""))) throw new Error("Image evidence release SHA must be a full 40-character SHA.");
+function requireImageReleaseSha(value) {
+  if (!/^[a-f0-9]{40}$/.test(String(value || ""))) throw new Error("Image evidence image-release SHA must be a full 40-character SHA.");
   return value;
 }
 
@@ -128,7 +128,7 @@ function requireVerifier(callerArn) {
   return callerArn;
 }
 
-function parseArtifact(artifactBytes, { releaseSha, artifactSha256 }) {
+function parseArtifact(artifactBytes, { imageReleaseSha, artifactSha256 }) {
   if (sha256(artifactBytes) !== artifactSha256) throw new Error("Canonical image artifact SHA256 does not match the approved digest.");
   const records = artifactBytes.toString("utf8").trim().split(/\n/).filter(Boolean).map((line) => JSON.parse(line));
   if (records.length !== Object.keys(SERVICES).length || new Set(records.map((record) => record.service)).size !== records.length) {
@@ -136,7 +136,7 @@ function parseArtifact(artifactBytes, { releaseSha, artifactSha256 }) {
   }
   return Object.entries(SERVICES).map(([service, contract]) => {
     const record = records.find((candidate) => candidate.service === service);
-    const tag = contract.tag(releaseSha);
+    const tag = contract.tag(imageReleaseSha);
     const expectedImageUri = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${contract.repository}:${tag}`;
     const expectedImageRef = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${contract.repository}@${record?.image_digest || ""}`;
     if (!record || record.repository !== contract.repository || record.image_tag !== tag || record.image_uri !== expectedImageUri || record.image_ref !== expectedImageRef) {
@@ -157,13 +157,13 @@ function describeImage(repository, tag, describe = (repo, imageTag) => JSON.pars
   return { digest: requireDigest(image.imageDigest, `${repository}:${tag} digest`), imagePushedAt: image.imagePushedAt };
 }
 
-export function generateImageEvidence({ artifactBytes, releaseSha, workflowRunId, artifactSha256, verifierCallerArn, observedAt = new Date().toISOString(), describe = describeImage }) {
-  requireReleaseSha(releaseSha);
+export function generateImageEvidence({ artifactBytes, imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, observedAt = new Date().toISOString(), describe = describeImage }) {
+  requireImageReleaseSha(imageReleaseSha);
   if (!/^\d+$/.test(String(workflowRunId || ""))) throw new Error("Canonical workflow run ID is required.");
   requireVerifier(verifierCallerArn);
   const observedAtMs = Date.parse(observedAt);
   if (!Number.isFinite(observedAtMs)) throw new Error("Image evidence observation timestamp is malformed.");
-  const artifactImages = parseArtifact(artifactBytes, { releaseSha, artifactSha256 });
+  const artifactImages = parseArtifact(artifactBytes, { imageReleaseSha, artifactSha256 });
   const images = artifactImages.map((image) => {
     const live = describe(image.repository, image.tag);
     if (live.digest !== image.digest) throw new Error(`ECR digest does not match canonical artifact for ${image.service}.`);
@@ -171,7 +171,7 @@ export function generateImageEvidence({ artifactBytes, releaseSha, workflowRunId
   }).sort((a, b) => a.service.localeCompare(b.service));
   return {
     schemaVersion: IMAGE_EVIDENCE_SCHEMA_VERSION,
-    releaseSha,
+    imageReleaseSha,
     workflowRunId: String(workflowRunId),
     canonicalArtifactSha256: artifactSha256,
     verifierCallerArn,
@@ -188,11 +188,11 @@ export function signImageEvidence(report, { now = new Date().toISOString(), keyA
   const reportSha256 = imageEvidenceSha256(report);
   const signatureBase64 = String(sign({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), reportSha256 }) || "");
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureBase64)) throw new Error("Image evidence signing returned an invalid signature.");
-  return { schemaVersion: 1, keyId: keyArn, keyArn, signingAlgorithm, reportSha256, signatureBase64, signedAt: now };
+  return { schemaVersion: 2, keyId: keyArn, keyArn, signingAlgorithm, reportSha256, imageReleaseSha: report.imageReleaseSha, workflowRunId: report.workflowRunId, canonicalArtifactSha256: report.canonicalArtifactSha256, signatureBase64, signedAt: now };
 }
 
 export function verifyImageEvidenceSignature({ report, signatureArtifact, now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, verify = ({ digest, signature }) => withTempBytes("stage-b-image-evidence-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(execFileSync("aws", ["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json"], { encoding: "utf8" })).SignatureValid === true) }) {
-  if (!signatureArtifact || signatureArtifact.schemaVersion !== 1 || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm) throw new Error("Image evidence signature identity or algorithm is wrong.");
+  if (!signatureArtifact || signatureArtifact.schemaVersion !== 2 || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm || signatureArtifact.imageReleaseSha !== report?.imageReleaseSha || String(signatureArtifact.workflowRunId) !== String(report?.workflowRunId) || signatureArtifact.canonicalArtifactSha256 !== report?.canonicalArtifactSha256) throw new Error("Image evidence signature identity or algorithm is wrong.");
   const reportSha256 = imageEvidenceSha256(report);
   if (signatureArtifact.reportSha256 !== reportSha256) throw new Error("Image evidence signature is bound to a different report.");
   const signedAtMs = Date.parse(signatureArtifact.signedAt); const nowMs = Date.parse(now);
@@ -202,9 +202,9 @@ export function verifyImageEvidenceSignature({ report, signatureArtifact, now = 
   return true;
 }
 
-export function assertImageEvidence(report, { signatureArtifact, verifySignature = verifyImageEvidenceSignature, releaseSha, workflowRunId, artifactSha256, now = new Date().toISOString() } = {}) {
+export function assertImageEvidence(report, { signatureArtifact, verifySignature = verifyImageEvidenceSignature, imageReleaseSha, workflowRunId, artifactSha256, now = new Date().toISOString() } = {}) {
   if (!verifySignature({ report, signatureArtifact, now })) throw new Error("Authenticated image evidence signature verification failed.");
-  if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.releaseSha !== releaseSha || String(report.workflowRunId) !== String(workflowRunId) || report.canonicalArtifactSha256 !== artifactSha256) throw new Error("Image evidence is bound to a different release, workflow, or canonical artifact.");
+  if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.imageReleaseSha !== imageReleaseSha || String(report.workflowRunId) !== String(workflowRunId) || report.canonicalArtifactSha256 !== artifactSha256) throw new Error("Image evidence is bound to a different image release, workflow, or canonical artifact.");
   requireVerifier(report.verifierCallerArn);
   if (report.account !== STAGE_B.account || report.region !== STAGE_B.region) throw new Error("Image evidence account or region is wrong.");
   const observedAtMs = Date.parse(report.observedAt); const nowMs = Date.parse(now);
@@ -212,7 +212,7 @@ export function assertImageEvidence(report, { signatureArtifact, verifySignature
   if (!Array.isArray(report.images) || report.images.length !== Object.keys(SERVICES).length || new Set(report.images.map((image) => image.service)).size !== report.images.length) throw new Error("Image evidence does not contain all four Stage B images.");
   for (const [service, contract] of Object.entries(SERVICES)) {
     const image = report.images.find((candidate) => candidate.service === service);
-    if (!image || image.repository !== contract.repository || image.tag !== contract.tag(releaseSha) || !/^sha256:[a-f0-9]{64}$/.test(image.digest) || !image.imagePushedAt) throw new Error(`Image evidence is incomplete for ${service}.`);
+    if (!image || image.repository !== contract.repository || image.tag !== contract.tag(imageReleaseSha) || !/^sha256:[a-f0-9]{64}$/.test(image.digest) || !image.imagePushedAt) throw new Error(`Image evidence is incomplete for ${service}.`);
   }
   return true;
 }
@@ -220,9 +220,9 @@ export function assertImageEvidence(report, { signatureArtifact, verifySignature
 function requiredOption(argv, option) { const index = argv.indexOf(option); const value = index === -1 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${option} is required.`); return value; }
 
 export function runCli(argv = process.argv.slice(2), deps = {}) {
-  const artifactPath = requiredOption(argv, "--artifact"); const releaseSha = requiredOption(argv, "--release-sha"); const workflowRunId = requiredOption(argv, "--workflow-run-id"); const artifactSha256 = requiredOption(argv, "--artifact-sha256"); const outputPath = requiredOption(argv, "--output"); const signaturePath = requiredOption(argv, "--signature-output");
+  const artifactPath = requiredOption(argv, "--artifact"); const imageReleaseSha = requiredOption(argv, "--image-release-sha"); const workflowRunId = requiredOption(argv, "--workflow-run-id"); const artifactSha256 = requiredOption(argv, "--artifact-sha256"); const outputPath = requiredOption(argv, "--output"); const signaturePath = requiredOption(argv, "--signature-output");
   const verifierCallerArn = deps.getCaller ? deps.getCaller() : JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"], { encoding: "utf8" })).Arn;
-  const report = generateImageEvidence({ artifactBytes: fs.readFileSync(artifactPath), releaseSha, workflowRunId, artifactSha256, verifierCallerArn, describe: deps.describe || describeImage, observedAt: deps.observedAt });
+  const report = generateImageEvidence({ artifactBytes: fs.readFileSync(artifactPath), imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, describe: deps.describe || describeImage, observedAt: deps.observedAt });
   const signature = (deps.sign || signImageEvidence)(report, deps.sign ? { sign: deps.sign, now: deps.now } : {});
   fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   fs.writeFileSync(signaturePath, `${JSON.stringify(signature, null, 2)}\n`, { mode: 0o600, flag: "wx" });

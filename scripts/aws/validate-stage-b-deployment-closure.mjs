@@ -22,6 +22,9 @@ assert.equal(matrix.schemaVersion, 1, "Stage B closure matrix schema is unsuppor
 assert.equal(matrix.account, "368992683803");
 assert.equal(matrix.region, "eu-west-2");
 assert.equal(matrix.zeroDestroy, true);
+assert.equal(matrix.deploymentIdentity?.schemaVersion, 1);
+assert.equal(matrix.deploymentIdentity?.splitSupported, true);
+assert.deepEqual(matrix.deploymentIdentity?.requiredPlanVariables, ["tooling_sha", "image_release_sha", "canonical_image_evidence_sha256"]);
 for (const entry of matrix.resources) for (const action of entry.actions) assert(Array.isArray(matrix.actionLifecycle[action]), `Matrix action has no lifecycle contract: ${action}`);
 assert.deepEqual(matrix.actionLifecycle.delete, []);
 assert.deepEqual(matrix.actionLifecycle.replacement, []);
@@ -41,6 +44,7 @@ const classified = classifyStageBPlan(fixture, { strict: false });
 assert.deepEqual(classified.actionCounts, { "no-op": 58, create: 12, update: 3 });
 assert.deepEqual(classified.unclassifiedResources, []);
 assert.equal(fixture.resource_changes.length, 73);
+for (const variable of matrix.deploymentIdentity.requiredPlanVariables) assert.match(fixture.variables?.[variable]?.value || "", variable === "canonical_image_evidence_sha256" ? /^[a-f0-9]{64}$/ : /^[a-f0-9]{40}$/);
 assert(!fixture.resource_changes.some((change) => (change.change?.actions || []).some((action) => ["delete", "create-delete", "replace"].includes(action))), "Closure fixture contains a destructive action.");
 assert.equal(matrix.resources.every((entry) => entry.layers.includes("plan-validator") && entry.layers.includes("apply-wrapper")), true);
 

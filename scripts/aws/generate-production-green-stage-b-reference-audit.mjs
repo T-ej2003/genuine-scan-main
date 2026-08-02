@@ -15,6 +15,7 @@ import {
 } from "./stage-b-reference-audit-contract.mjs";
 import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
 import { classifyStageBPlan } from "./stage-b-deployment-contract.mjs";
+import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 
 export { batch, createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 
@@ -410,6 +411,7 @@ export function generateReferenceAudit({
   if (plan?.variables?.package_checksum_sha256?.value !== expectedPackageChecksumSha256) throw new Error("Expected release package checksum does not match the exact plan input.");
   assertStageBReferenceAuditFreshness(auditedAt, now);
   classifyStageBPlan(plan, { strict: false, validateActions: false, terraformConfiguration });
+  const deploymentIdentity = assertStageBDeploymentIdentity({ plan });
   const planSha = ensurePlanHash(planBytes, planJsonSha256);
   const {
     rolloverByAddress,
@@ -559,6 +561,9 @@ export function generateReferenceAudit({
 
   return {
     schemaVersion: STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
+    toolingSha: deploymentIdentity.toolingSha,
+    imageReleaseSha: deploymentIdentity.imageReleaseSha,
+    canonicalImageEvidenceSha256: deploymentIdentity.canonicalImageEvidenceSha256,
     auditedAt,
     callerArn: observedCallerArn,
     clusterArn,

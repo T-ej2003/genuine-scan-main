@@ -69,12 +69,12 @@ export function assertStageBCurrentTaskDefinitionNoOp(change, plan, retainedArns
   const definitions = taskDefinitionValues(after.container_definitions);
   if (!Array.isArray(definitions) || definitions.length === 0 || !definitions.every((definition) => definition && typeof definition.image === "string")) throw new Error(`Stage B current task-definition no-op container definitions are malformed: ${change.address}`);
   if (!definitions.every((definition) => definition.image === expectedImage)) throw new Error(`Stage B current task-definition no-op image digest is stale: ${change.address}`);
-  for (const [variable, pattern] of [["release_sha", /^[a-f0-9]{40}$/], ["source_contract_sha256", /^[a-f0-9]{64}$/], ["migration_set_digest", /^[a-f0-9]{64}$/], ["package_checksum_sha256", /^[a-f0-9]{64}$/]]) {
+  for (const [variable, pattern] of [["image_release_sha", /^[a-f0-9]{40}$/], ["source_contract_sha256", /^[a-f0-9]{64}$/], ["migration_set_digest", /^[a-f0-9]{64}$/], ["package_checksum_sha256", /^[a-f0-9]{64}$/]]) {
     if (!pattern.test(variables[variable]?.value || "")) throw new Error(`Stage B current task-definition no-op ${variable} input is missing or malformed: ${change.address}`);
   }
   const rendered = JSON.stringify(definitions);
   const key = /\["([^\"]+)"\]$/.exec(change.address)?.[1];
-  if (key !== "read_only_canary" && !rendered.includes(variables.release_sha.value)) throw new Error(`Stage B current task-definition no-op release provenance is stale: ${change.address}`);
+  if (key !== "read_only_canary" && !rendered.includes(variables.image_release_sha.value)) throw new Error(`Stage B current task-definition no-op image-release provenance is stale: ${change.address}`);
   if (["canary", "executor"].includes(key === undefined ? "executor" : (change.address.startsWith("aws_ecs_task_definition.executor[") ? "executor" : key))
     && (!rendered.includes(variables.source_contract_sha256.value) || !rendered.includes(variables.migration_set_digest.value))) {
     throw new Error(`Stage B current task-definition no-op source provenance is stale: ${change.address}`);

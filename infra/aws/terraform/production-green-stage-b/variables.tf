@@ -17,7 +17,9 @@ variable "approval_secret_arn" { type = string }
 variable "approval_kms_key_arn" { type = string }
 variable "receipt_bucket_arn" { type = string }
 variable "broker_package_path" { type = string }
-variable "release_sha" { type = string }
+variable "tooling_sha" { type = string }
+variable "image_release_sha" { type = string }
+variable "canonical_image_evidence_sha256" { type = string }
 variable "source_contract_sha256" { type = string }
 variable "migration_set_digest" { type = string }
 variable "package_checksum_sha256" { type = string }
@@ -119,8 +121,8 @@ check "stage_a_release_resources" {
 
 check "release_bindings" {
   assert {
-    condition     = can(regex("^[a-f0-9]{40}$", var.release_sha)) && can(regex("^[a-f0-9]{64}$", var.source_contract_sha256)) && can(regex("^[a-f0-9]{64}$", var.migration_set_digest)) && can(regex("^[a-f0-9]{64}$", var.package_checksum_sha256))
-    error_message = "Stage B requires complete release and sealed-package digests."
+    condition     = can(regex("^[a-f0-9]{40}$", var.tooling_sha)) && can(regex("^[a-f0-9]{40}$", var.image_release_sha)) && can(regex("^[a-f0-9]{64}$", var.canonical_image_evidence_sha256)) && can(regex("^[a-f0-9]{64}$", var.source_contract_sha256)) && can(regex("^[a-f0-9]{64}$", var.migration_set_digest)) && can(regex("^[a-f0-9]{64}$", var.package_checksum_sha256))
+    error_message = "Stage B requires tooling, image-release, image-evidence, and sealed-package digests."
   }
 }
 

@@ -81,7 +81,9 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
     variables: {
       package_checksum_sha256: { value: packageChecksum },
       broker_package_path: { value: packagePath },
-      release_sha: { value: releaseSha },
+      tooling_sha: { value: "e".repeat(40) },
+      image_release_sha: { value: releaseSha },
+      canonical_image_evidence_sha256: { value: "f".repeat(64) },
       source_contract_sha256: { value: sourceContractSha256 },
       migration_set_digest: { value: migrationSetDigest },
       backend_image: { value: imageFor("mscqr-backend") },
@@ -343,7 +345,7 @@ function makeMixedFixture({ mutatePlan, mutateReader } = {}) {
     mutatePlan: (plan) => {
       const change = plan.resource_changes.find((item) => item.address === backendAddress);
       change.change.actions = ["no-op"];
-      const definition = JSON.stringify([{ image: plan.variables.backend_image.value, environment: [{ name: "RELEASE_GIT_SHA", value: plan.variables.release_sha.value }] }]);
+      const definition = JSON.stringify([{ image: plan.variables.backend_image.value, environment: [{ name: "RELEASE_GIT_SHA", value: plan.variables.image_release_sha.value }] }]);
       change.change.before = { family: change.change.before.family, arn: oldArnFor(change.change.before.family), container_definitions: definition };
       change.change.after = { family: change.change.after.family, arn: change.change.before.arn, container_definitions: definition };
       mutatePlan?.(plan);

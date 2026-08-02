@@ -13,15 +13,15 @@ import {
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 
-const releaseSha = "7245a6036492f875654c414473737e33c1422f3c";
+const imageReleaseSha = "7245a6036492f875654c414473737e33c1422f3c";
 const workflowRunId = "30760789616";
 const observedAt = "2026-08-02T18:30:00.000Z";
 const verifierCallerArn = `arn:aws:iam::${STAGE_B.account}:root`;
 const records = [
-  ["backend", "mscqr-backend", releaseSha],
-  ["worker", "mscqr-worker", releaseSha],
-  ["rls-executor", "mscqr-backend", `${releaseSha}-rls-executor`],
-  ["rls-canary", "mscqr-backend", `${releaseSha}-rls-canary`],
+  ["backend", "mscqr-backend", imageReleaseSha],
+  ["worker", "mscqr-worker", imageReleaseSha],
+  ["rls-executor", "mscqr-backend", `${imageReleaseSha}-rls-executor`],
+  ["rls-canary", "mscqr-backend", `${imageReleaseSha}-rls-canary`],
 ].map(([service, repository, tag], index) => {
   const digest = `sha256:${String(index + 1).repeat(64)}`;
   return {
@@ -64,7 +64,7 @@ const imagePlan = (overrides = {}) => {
 };
 
 function reportFixture(overrides = {}) {
-  return generateImageEvidence({ artifactBytes, releaseSha, workflowRunId, artifactSha256, verifierCallerArn, observedAt, describe, ...overrides });
+  return generateImageEvidence({ artifactBytes, imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, observedAt, describe, ...overrides });
 }
 
 function signatureFixture(report, overrides = {}) {
@@ -75,7 +75,7 @@ function assertValid(report = reportFixture(), signatureArtifact = signatureFixt
   return assertImageEvidence(report, {
     signatureArtifact,
     verifySignature: ({ report: evidence, signatureArtifact: signature, now }) => verifyImageEvidenceSignature({ report: evidence, signatureArtifact: signature, now, verify: () => true }),
-    releaseSha,
+    imageReleaseSha,
     workflowRunId,
     artifactSha256,
     now: observedAt,
@@ -87,10 +87,10 @@ test("administrator evidence proves all four exact release tag-to-digest binding
   const report = reportFixture();
   assert.equal(assertValid(report), true);
   assert.deepEqual(report.images.map(({ service, repository, tag, digest }) => ({ service, repository, tag, digest })), [
-    { service: "backend", repository: "mscqr-backend", tag: releaseSha, digest: `sha256:${"1".repeat(64)}` },
-    { service: "rls-canary", repository: "mscqr-backend", tag: `${releaseSha}-rls-canary`, digest: `sha256:${"4".repeat(64)}` },
-    { service: "rls-executor", repository: "mscqr-backend", tag: `${releaseSha}-rls-executor`, digest: `sha256:${"3".repeat(64)}` },
-    { service: "worker", repository: "mscqr-worker", tag: releaseSha, digest: `sha256:${"2".repeat(64)}` },
+    { service: "backend", repository: "mscqr-backend", tag: imageReleaseSha, digest: `sha256:${"1".repeat(64)}` },
+    { service: "rls-canary", repository: "mscqr-backend", tag: `${imageReleaseSha}-rls-canary`, digest: `sha256:${"4".repeat(64)}` },
+    { service: "rls-executor", repository: "mscqr-backend", tag: `${imageReleaseSha}-rls-executor`, digest: `sha256:${"3".repeat(64)}` },
+    { service: "worker", repository: "mscqr-worker", tag: imageReleaseSha, digest: `sha256:${"2".repeat(64)}` },
   ]);
 });
 
@@ -115,8 +115,8 @@ test("signed evidence is independently bound to key, report, freshness, and rele
   assert.equal(assertValid(report, signature), true);
   assert.throws(() => assertValid(report, { ...signature, reportSha256: imageEvidenceSha256({ changed: true }) }), /different report/);
   assert.throws(() => assertValid(report, { ...signature, keyArn: "arn:aws:kms:eu-west-2:368992683803:key/other" }), /identity or algorithm/);
-  assert.throws(() => assertValid(report, signature, { releaseSha: "a".repeat(40) }), /different release/);
-  assert.throws(() => assertValid(report, signature, { workflowRunId: "30760808821" }), /different release/);
+  assert.throws(() => assertValid(report, signature, { imageReleaseSha: "a".repeat(40) }), /different image release|different release/);
+  assert.throws(() => assertValid(report, signature, { workflowRunId: "30760808821" }), /different release|different image release/);
   assert.throws(() => assertValid(report, signature, { now: "2026-08-02T19:00:01.000Z" }), /stale/);
 });
 

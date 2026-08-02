@@ -31,7 +31,9 @@ const plan = {
   variables: {
     account_id: { value: "368992683803" },
     aws_region: { value: "eu-west-2" },
-    release_sha: { value: "a".repeat(40) },
+    tooling_sha: { value: "b".repeat(40) },
+    image_release_sha: { value: "a".repeat(40) },
+    canonical_image_evidence_sha256: { value: "c".repeat(64) },
   },
   resource_changes: [{
     address: 'aws_ecs_task_definition.candidate["read_only_canary"]',
@@ -258,7 +260,7 @@ test("saved-plan apply wrapper refuses to run without a permission report", () =
   const planPath = path.join(directory, "plan.tfplan");
   fs.writeFileSync(planPath, "saved-plan");
   assert.throws(() => runApply({
-    argv: ["--plan", planPath, "--plan-json", path.join(directory, "plan.json"), "--reference-audit", path.join(directory, "audit.json"), "--permission-report", path.join(directory, "permission.json"), "--permission-report-sha256", "0".repeat(64), "--permission-report-signature", path.join(directory, "permission.signature.json"), "--image-evidence", path.join(directory, "image-evidence.json"), "--image-evidence-sha256", "0".repeat(64), "--image-evidence-signature", path.join(directory, "image-evidence.signature.json"), "--image-evidence-workflow-run-id", "30760789616", "--image-evidence-artifact-sha256", "0".repeat(64), "--plan-sha256", "0".repeat(64), "--audit-sha256", "0".repeat(64), "--saved-plan-sha256", "0".repeat(64), "--canonical-plan-json-sha256", "0".repeat(64)],
+    argv: ["--plan", planPath, "--plan-json", path.join(directory, "plan.json"), "--reference-audit", path.join(directory, "audit.json"), "--permission-report", path.join(directory, "permission.json"), "--permission-report-sha256", "0".repeat(64), "--permission-report-signature", path.join(directory, "permission.signature.json"), "--image-evidence", path.join(directory, "image-evidence.json"), "--image-evidence-sha256", "0".repeat(64), "--image-evidence-signature", path.join(directory, "image-evidence.signature.json"), "--image-evidence-workflow-run-id", "30760789616", "--image-evidence-artifact-sha256", "0".repeat(64), "--tooling-sha", "b".repeat(40), "--image-release-sha", "a".repeat(40), "--plan-sha256", "0".repeat(64), "--audit-sha256", "0".repeat(64), "--saved-plan-sha256", "0".repeat(64), "--canonical-plan-json-sha256", "0".repeat(64)],
     env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
     deps: { getCaller: () => `${roleArn}/test-session`, apply: () => { throw new Error("apply must not be reached"); } },
   }), /Permission-preflight report is missing/);
@@ -434,11 +436,11 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     if (change) change.change.after.container_definitions = JSON.stringify([{ image: effectivePlan.variables[planImageVariable(address)].value }]);
     else effectivePlan.resource_changes.push({ address, type: "aws_ecs_task_definition", change: { actions: ["create"], after: { family, container_definitions: JSON.stringify([{ image: effectivePlan.variables[planImageVariable(address)].value }]) } } });
   }
-  const effectiveShownPlan = shownPlan || effectivePlan;
-  const effectiveApprovedBytes = approvedBytes || Buffer.from(JSON.stringify(effectivePlan));
+  let effectiveShownPlan = structuredClone(shownPlan || effectivePlan);
+  let effectiveApprovedBytes = approvedBytes || Buffer.from(JSON.stringify(effectivePlan));
   fs.writeFileSync(planPath, savedBytes);
   fs.writeFileSync(planJsonPath, effectiveApprovedBytes);
-  const auditBytes = Buffer.from(JSON.stringify({ audit: true, broker: {
+  let auditBytes = Buffer.from(JSON.stringify({ audit: true, toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), canonicalImageEvidenceSha256: "c".repeat(64), broker: {
     aliasArn: STAGE_B.brokerAliasArn,
     aliasName: "reviewed",
     aliasFunctionVersion: "2",
@@ -448,10 +450,13 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   } }));
   fs.writeFileSync(auditPath, auditBytes);
   const savedHash = crypto.createHash("sha256").update(savedBytes).digest("hex");
-  const planHash = crypto.createHash("sha256").update(effectiveApprovedBytes).digest("hex");
-  const canonicalHash = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(JSON.parse(JSON.stringify(effectiveShownPlan))))).digest("hex");
+  let planHash = crypto.createHash("sha256").update(effectiveApprovedBytes).digest("hex");
+  let canonicalHash = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(JSON.parse(JSON.stringify(effectiveShownPlan))))).digest("hex");
   const report = {
     schemaVersion: 1,
+    toolingSha: "b".repeat(40),
+    imageReleaseSha: "a".repeat(40),
+    canonicalImageEvidenceSha256: "c".repeat(64),
     reportGeneratorCallerArn: generatorArn,
     simulatedRoleArn: roleArn,
     applyRoleArn: roleArn,
@@ -484,10 +489,33 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   ].map(([service, repository, digest, tag]) => ({ service, repository, image_uri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}:${tag}`, image_tag: tag, image_digest: `sha256:${digest}`, image_ref: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}@sha256:${digest}` }));
   const imageArtifactBytes = Buffer.from(`${imageRecords.map((record) => JSON.stringify(record)).join("\n")}\n`);
   const imageArtifactSha256 = crypto.createHash("sha256").update(imageArtifactBytes).digest("hex");
-  const imageEvidence = generateImageEvidence({ artifactBytes: imageArtifactBytes, releaseSha, workflowRunId: "30760789616", artifactSha256: imageArtifactSha256, verifierCallerArn: generatorArn, observedAt: new Date().toISOString(), describe: (repository, tag) => ({ digest: `sha256:${imageRecords.find((record) => record.repository === repository && record.image_tag === tag).image_digest.slice(7)}`, imagePushedAt: "2026-08-02T18:26:34.000Z" }) });
+  const imageEvidence = generateImageEvidence({ artifactBytes: imageArtifactBytes, imageReleaseSha: releaseSha, workflowRunId: "30760789616", artifactSha256: imageArtifactSha256, verifierCallerArn: generatorArn, observedAt: new Date().toISOString(), describe: (repository, tag) => ({ digest: `sha256:${imageRecords.find((record) => record.repository === repository && record.image_tag === tag).image_digest.slice(7)}`, imagePushedAt: "2026-08-02T18:26:34.000Z" }) });
+  const canonicalImageEvidenceSha256 = imageEvidenceSha256(imageEvidence);
+  effectivePlan.variables.canonical_image_evidence_sha256 = { value: canonicalImageEvidenceSha256 };
+  const approvedPlanObject = approvedBytes ? JSON.parse(effectiveApprovedBytes) : effectivePlan;
+  approvedPlanObject.variables.canonical_image_evidence_sha256 = { value: canonicalImageEvidenceSha256 };
+  effectiveApprovedBytes = Buffer.from(JSON.stringify(approvedPlanObject));
+  effectiveShownPlan.variables = { ...effectiveShownPlan.variables, canonical_image_evidence_sha256: { value: canonicalImageEvidenceSha256 } };
+  fs.writeFileSync(planJsonPath, effectiveApprovedBytes);
+  planHash = crypto.createHash("sha256").update(effectiveApprovedBytes).digest("hex");
+  canonicalHash = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(JSON.parse(JSON.stringify(effectiveShownPlan))))).digest("hex");
+  auditBytes = Buffer.from(JSON.stringify({ audit: true, toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), canonicalImageEvidenceSha256, broker: {
+    aliasArn: STAGE_B.brokerAliasArn,
+    aliasName: "reviewed",
+    aliasFunctionVersion: "2",
+    configurationFunctionArn: STAGE_B.brokerAliasArn,
+    configurationVersion: "2",
+    resolvedVersionArn: `${STAGE_B.brokerFunctionArn}:2`,
+  } }));
+  fs.writeFileSync(auditPath, auditBytes);
+  report.canonicalImageEvidenceSha256 = canonicalImageEvidenceSha256;
+  report.planSha256 = planHash;
+  report.canonicalPlanJsonSha256 = canonicalHash;
+  fs.writeFileSync(permissionPath, JSON.stringify(report));
+  fs.writeFileSync(permissionSignaturePath, JSON.stringify(reportSignature(report)));
   fs.writeFileSync(imageEvidencePath, `${JSON.stringify(imageEvidence, null, 2)}\n`);
   fs.writeFileSync(imageEvidenceSignaturePath, JSON.stringify(signImageEvidence(imageEvidence, { sign: () => "AQ==" })));
-  return { directory, planPath, planJsonPath, auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256: imageEvidenceSha256(imageEvidence), imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true };
+  return { directory, planPath, planJsonPath, auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true };
 }
 
 const wrapperArgs = (fixture, verifyOnly = false) => [
@@ -495,6 +523,7 @@ const wrapperArgs = (fixture, verifyOnly = false) => [
   "--plan", fixture.planPath, "--plan-json", fixture.planJsonPath, "--reference-audit", fixture.auditPath,
   "--permission-report", fixture.permissionReportPath, "--permission-report-sha256", fixture.permissionReportSha256, "--permission-report-signature", fixture.permissionReportSignaturePath,
   "--image-evidence", fixture.imageEvidencePath, "--image-evidence-sha256", fixture.imageEvidenceSha256, "--image-evidence-signature", fixture.imageEvidenceSignaturePath, "--image-evidence-workflow-run-id", fixture.imageEvidenceWorkflowRunId, "--image-evidence-artifact-sha256", fixture.imageEvidenceArtifactSha256,
+  "--tooling-sha", "b".repeat(40), "--image-release-sha", "a".repeat(40),
   "--plan-sha256", fixture.planHash, "--audit-sha256", fixture.auditHash, "--saved-plan-sha256", fixture.savedHash, "--canonical-plan-json-sha256", fixture.canonicalHash,
 ];
 
@@ -503,14 +532,14 @@ test("exact binary plan and derived JSON reach the ready-to-apply boundary witho
   const result = runApply({
     argv: wrapperArgs(fixture, true),
     env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
-    deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { throw new Error("apply must not be reached"); } },
+    deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { throw new Error("apply must not be reached"); } },
   });
   assert.equal(result.status, "ready-to-apply");
 });
 
 test("apply wrapper rejects an unqualified broker target before apply", () => {
   const fixture = wrapperFixture();
-  const audit = { audit: true, broker: {
+  const audit = { audit: true, toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), canonicalImageEvidenceSha256: fixture.imageEvidenceSha256, broker: {
     aliasArn: STAGE_B.brokerFunctionArn,
     aliasName: "reviewed",
     aliasFunctionVersion: "2",
@@ -545,7 +574,7 @@ test("apply wrapper validates the canonical alias for any broker mutation regard
   });
   const run = (approvedPlan, aliasArn) => {
     const fixture = wrapperFixture({ approvedPlan });
-    const auditBytes = Buffer.from(JSON.stringify({ audit: true, broker: {
+    const auditBytes = Buffer.from(JSON.stringify({ audit: true, toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), canonicalImageEvidenceSha256: fixture.imageEvidenceSha256, broker: {
       aliasArn,
       aliasName: "reviewed",
       aliasFunctionVersion: "2",
@@ -604,7 +633,7 @@ test("verification-only and real apply paths reject an invalid report signature 
     assert.throws(() => runApply({
       argv: wrapperArgs(fixture, verifyOnly),
       env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
-      deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => false, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { throw new Error("apply must not be reached"); } },
+      deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => false, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { throw new Error("apply must not be reached"); } },
     }), /signature verification failed/);
   }
 });
@@ -639,7 +668,7 @@ test("wrapper rejects a plan digest mismatch before invoking apply", () => {
     assert.throws(() => runApply({
       argv: wrapperArgs(fixture, verifyOnly),
       env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
-      deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { applied = true; } },
+      deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { applied = true; } },
     }), /Terraform image variable backend_image/);
     assert.equal(applied, false);
   }
@@ -650,6 +679,6 @@ test("apply wrapper rejects a non-STS caller during verification-only mode", () 
   assert.throws(() => runApply({
     argv: wrapperArgs(fixture, true),
     env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
-    deps: { getCaller: () => roleArn, showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, apply: () => { throw new Error("apply must not be reached"); } },
+    deps: { getCaller: () => roleArn, currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, apply: () => { throw new Error("apply must not be reached"); } },
   }), /STS assumed-role/);
 });

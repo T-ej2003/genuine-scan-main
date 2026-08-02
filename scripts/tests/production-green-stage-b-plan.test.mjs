@@ -26,7 +26,9 @@ const retainedForAddress = (address, generation = "aaaaaaaa", revision = 1) => {
 const currentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
 const firstRolloverAddresses = currentAddresses.filter((taskAddress) => !taskAddress.includes("read_only_canary"));
 const retryVariables = {
-  release_sha: { value: "a".repeat(40) },
+  tooling_sha: { value: "e".repeat(40) },
+  image_release_sha: { value: "a".repeat(40) },
+  canonical_image_evidence_sha256: { value: "f".repeat(64) },
   source_contract_sha256: { value: "b".repeat(64) },
   migration_set_digest: { value: "c".repeat(64) },
   package_checksum_sha256: { value: "d".repeat(64) },
@@ -51,7 +53,7 @@ const retryChange = (address, family, actions, revision = 7) => {
     volumes: [],
     tags: { Environment: "production", ManagedBy: "Terraform", Component: "full-rls-green-stage-b" },
     container_definitions: JSON.stringify([{ image: retryVariables[imageVariable].value, environment: [
-      { name: "RELEASE_GIT_SHA", value: retryVariables.release_sha.value },
+      { name: "RELEASE_GIT_SHA", value: retryVariables.image_release_sha.value },
       { name: "SOURCE_CONTRACT_SHA256", value: retryVariables.source_contract_sha256.value },
       { name: "MIGRATION_SET_DIGEST", value: retryVariables.migration_set_digest.value },
       { name: "PACKAGE_CHECKSUM_SHA256", value: retryVariables.package_checksum_sha256.value },

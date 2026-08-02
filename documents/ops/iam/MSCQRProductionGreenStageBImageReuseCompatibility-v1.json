@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "toolingSha": "cfffbb8df9e57b7eef6906ef614313a3eed4f495",
+  "imageReleaseSha": "7245a6036492f875654c414473737e33c1422f3c",
+  "comparison": "7245a6036492f875654c414473737e33c1422f3c..cfffbb8df9e57b7eef6906ef614313a3eed4f495",
+  "imageReuseCompatible": true,
+  "reason": "Intervening commits contain deployment tooling, closure validation, tests, documentation, CI, and a Terraform provider lock checksum only.",
+  "imageBuildInputsChanged": false,
+  "classifiedChangedFiles": {
+    "imageBuildInput": [],
+    "runtimeApplicationSource": [],
+    "dependencyLockfile": [],
+    "dockerBuildConfiguration": [],
+    "generatedRuntimePackage": [],
+    "terraformOnly": ["infra/aws/terraform/production-green-stage-b/.terraform.lock.hcl"],
+    "toolingOnly": [
+      "scripts/apply-production-green-stage-b.mjs",
+      "scripts/aws/production-green-stage-b-image-evidence.mjs",
+      "scripts/aws/stage-b-deployment-contract.mjs",
+      "scripts/aws/stage-b-reference-audit-contract.mjs",
+      "scripts/aws/validate-production-green-stage-b-permissions.mjs",
+      "scripts/aws/validate-stage-b-deployment-closure.mjs",
+      "scripts/plan-production-green-stage-b.mjs",
+      "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json",
+      "scripts/tests/production-green-stage-b-deployment-closure.test.mjs",
+      "scripts/tests/production-green-stage-b-image-evidence.test.mjs",
+      "scripts/tests/production-green-stage-b-permission-preflight.test.mjs",
+      "scripts/tests/production-green-stage-b-plan.test.mjs",
+      "scripts/tests/production-green-stage-b-reference-audit-generator.test.mjs"
+    ],
+    "ciOnly": [".github/workflows/quality-gate.yml", "package.json"],
+    "documentationOnly": [
+      "documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.json",
+      "documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.md",
+      "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_ECR_IMAGE_EVIDENCE.md",
+      "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_IMAGE_PUBLISHER_IDENTITY.md",
+      "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_PLAN_RECONCILIATION_2026-07-29.md"
+    ]
+  },
+  "requiredRebuildIfChanged": [
+    "backend/Dockerfile",
+    "backend/package-lock.json",
+    "package-lock.json",
+    ".github/workflows/production-green-stage-b-image-build.yml",
+    "scripts/rls/sql/generated",
+    "runtime application source"
+  ]
+}

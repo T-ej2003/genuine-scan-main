@@ -4,6 +4,21 @@
   "region": "eu-west-2",
   "terraformRoot": "infra/aws/terraform/production-green-stage-b",
   "zeroDestroy": true,
+  "deploymentIdentity": {
+    "schemaVersion": 1,
+    "toolingSha": "the exact clean origin/main commit running Terraform, audit, validator, preflight, and apply tooling",
+    "imageReleaseSha": "the exact workflow checkout/source commit used to build immutable images",
+    "canonicalImageEvidenceSha256": "SHA256 of canonical image-evidence JSON bytes",
+    "imageEvidenceExcludesToolingSha": true,
+    "splitSupported": true,
+    "requiredPlanVariables": ["tooling_sha", "image_release_sha", "canonical_image_evidence_sha256"],
+    "joinRequirements": [
+      "tooling_sha equals the checked-out tooling HEAD",
+      "image_release_sha equals signed image evidence imageReleaseSha and workflow checkout SHA",
+      "canonical_image_evidence_sha256 equals the signed report digest",
+      "all plan image variables and current task-definition images equal signed evidence"
+    ]
+  },
   "supportedDeploymentStates": {
     "initial-stage-b": "bootstrap resources and create the twelve current task definitions",
     "partial-apply-retry": "current task definitions may be create or no-op; retained history is no-op",

@@ -34,3 +34,21 @@ npm run stage-b:deployment-closure
 The command verifies the generated RLS package, formats and validates the Stage B Terraform root without a backend, checks all Terraform declarations against the matrix, validates the 73-resource fixture, runs the full Stage B control-plane suite, and runs the plan, audit, preflight, and wrapper regression suites.
 
 This gate is offline and does not publish images, call mutating AWS APIs, generate a production plan, mutate state, or apply Terraform.
+
+## Two-SHA deployment identity
+
+The deployment intentionally separates the tooling/source commit from the image source
+commit. `tooling_sha` identifies the clean `origin/main` checkout running Terraform,
+audit, permission preflight, validation, and the apply wrapper. `image_release_sha`
+identifies the exact workflow checkout that built the immutable images.
+
+Signed image evidence authenticates `imageReleaseSha`, the canonical workflow artifact,
+and the four repository/tag/digest bindings; it does not contain `toolingSha`. The plan,
+reference audit, permission report, and wrapper join both chains through the three required
+plan variables: `tooling_sha`, `image_release_sha`, and
+`canonical_image_evidence_sha256`. The wrapper also requires the checked-out tooling HEAD
+to equal `tooling_sha`.
+
+Image reuse is permitted only when the intervening commit diff contains no Dockerfile,
+dependency lockfile, runtime source, generated runtime package, or other image-build
+input change. Any such change requires a new exact-SHA image publication.
