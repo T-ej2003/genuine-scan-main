@@ -126,8 +126,10 @@ export function assertStageBBrokerTaskDefinitionMapping(plan, terraformConfigura
     throw new Error("Broker atomic rollover Terraform configuration is missing.");
   }
   const normalizedConfiguration = terraformConfiguration.replace(/\s+/g, " ");
-  const brokerMappingExpression = /broker_task_definition_arns\s*=\s*merge\s*\(\s*\{\s*for mode, task in aws_ecs_task_definition\.executor\s*:\s*mode\s*=>\s*task\.arn\s*\}\s*,\s*\{\s*full-rls-application-canary\s*=\s*aws_ecs_task_definition\.candidate\["canary"\]\.arn\s*\}\s*\)/;
-  if (!brokerMappingExpression.test(normalizedConfiguration)
+  const currentCandidateMappingExpression = /current_candidate_task_definition_arns\s*=\s*\{\s*for kind in keys\(local\.candidate_definitions\)\s*:\s*kind\s*=>\s*try\(aws_ecs_task_definition\.candidate\[kind\]\.arn, null\)\s*if try\(aws_ecs_task_definition\.candidate\[kind\]\.arn, null\) != null\s*\}/;
+  const brokerMappingExpression = /broker_task_definition_arns\s*=\s*merge\s*\(\s*local\.current_executor_task_definition_arns\s*,\s*\{\s*for kind, arn in local\.current_candidate_task_definition_arns\s*:\s*"full-rls-application-canary"\s*=>\s*arn if kind == "canary"\s*\}\s*,?\s*\)/;
+  if (!currentCandidateMappingExpression.test(normalizedConfiguration)
+    || !brokerMappingExpression.test(normalizedConfiguration)
     || [...terraformConfiguration.matchAll(/^\s*broker_task_definition_arns\s*=/gm)].length !== 1) {
     throw new Error("Broker atomic rollover Terraform per-mode mapping is missing or malformed.");
   }
@@ -144,6 +146,18 @@ export function assertStageBBrokerTaskDefinitionMapping(plan, terraformConfigura
     throw new Error("Broker atomic rollover executor for_each metadata is missing or malformed.");
   }
   const planned = plannedResources(plan?.planned_values?.root_module);
+  const expectedCurrentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
+  const currentResources = planned.filter((resource) => expectedCurrentAddresses.includes(resource?.address));
+  if (currentResources.length !== expectedCurrentAddresses.length) {
+    throw new Error("Broker mutation requires all twelve current task-definition mappings.");
+  }
+  for (const address of expectedCurrentAddresses) {
+    const matches = currentResources.filter((resource) => resource.address === address);
+    if (matches.length !== 1 || matches[0].type !== "aws_ecs_task_definition"
+      || matches[0].values?.family !== STAGE_B_TASK_DEFINITION_FAMILIES[address]) {
+      throw new Error(`Broker mutation current task-definition mapping is not exact: ${address}.`);
+    }
+  }
   const expectedAddresses = expectedExecutorAddresses();
   const executorResources = planned.filter((resource) => resource?.address?.startsWith(`${STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION}[`));
   if (executorResources.length !== expectedAddresses.length) throw new Error("Broker atomic rollover executor mapping is incomplete or duplicated.");

@@ -1,8 +1,8 @@
 output "task_definition_arns" {
   value = merge(
     {
-      backend = aws_ecs_task_definition.candidate["backend"].arn
-      worker  = aws_ecs_task_definition.candidate["worker"].arn
+      for kind, arn in local.current_candidate_task_definition_arns : kind => arn
+      if contains(["backend", "worker"], kind)
     },
     local.broker_task_definition_arns
   )
