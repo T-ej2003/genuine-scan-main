@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +13,9 @@ import {
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
 } from "./stage-b-reference-audit-contract.mjs";
+import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
+
+export { batch, createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const taskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([A-Za-z0-9_-]+):([1-9][0-9]*)$/;
@@ -21,14 +23,6 @@ const assumedReleaseRolePattern = /^arn:aws:sts::368992683803:assumed-role\/mscq
 const exactReplacePaths = (paths) => JSON.stringify(paths) === JSON.stringify([["container_definitions"]]);
 const sorted = (items, key) => [...items].sort((left, right) => String(key(left)).localeCompare(String(key(right))));
 const stageBTerraformConfigurationPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b/main.tf");
-
-export function batch(items, size) {
-  if (!Array.isArray(items)) throw new TypeError("Batch input must be an array.");
-  if (!Number.isInteger(size) || size < 1) throw new RangeError("Batch size must be a positive integer.");
-  const batches = [];
-  for (let index = 0; index < items.length; index += size) batches.push(items.slice(index, index + size));
-  return batches;
-}
 
 const familyFromArn = (value, label) => {
   const match = taskDefinitionArnPattern.exec(value || "");
@@ -389,80 +383,6 @@ function assertStageBLiveReferences(items, allowedByFamily, createOnlyFamilies, 
   }
 }
 
-function validateFailure(failure, label) {
-  if (!failure || typeof failure !== "object" || Array.isArray(failure) || typeof failure.arn !== "string" || !failure.arn || !(typeof failure.reason === "string" || typeof failure.detail === "string") || (!(failure.reason || "") && !(failure.detail || ""))) {
-    throw new Error(`${label} contains a malformed failure.`);
-  }
-}
-
-function validateListedArns(arns, label) {
-  requireArray(arns, label);
-  if (!arns.every((arn) => typeof arn === "string" && arn.startsWith("arn:aws:ecs:"))) throw new Error(`${label} is malformed.`);
-  if (new Set(arns).size !== arns.length) throw new Error(`${label} contains duplicate ARNs.`);
-}
-
-function describeServices(reader, serviceArns) {
-  validateListedArns(serviceArns, "ECS service listing");
-  const described = [];
-  for (const serviceBatch of batch(serviceArns, 10)) {
-    const response = requireObject(reader.describeServices(serviceBatch), "ECS service description");
-    const services = requireArray(response.services, "ECS service description services");
-    const failures = requireArray(response.failures, "ECS service description failures");
-    failures.forEach((failure) => validateFailure(failure, "ECS service description failures"));
-    if (failures.length) throw new Error("ECS service description contains failures.");
-    described.push(...services);
-  }
-  const expected = new Set(serviceArns);
-  const returned = new Set();
-  for (const service of described) {
-    if (!service || typeof service !== "object" || Array.isArray(service) || typeof service.serviceArn !== "string" || typeof service.serviceName !== "string" || typeof service.taskDefinition !== "string") {
-      throw new Error("ECS service description is incomplete.");
-    }
-    if (returned.has(service.serviceArn)) throw new Error("ECS service description contains a duplicate service.");
-    if (!expected.has(service.serviceArn)) throw new Error("ECS service description contains an unexpected service.");
-    returned.add(service.serviceArn);
-  }
-  if (returned.size !== expected.size) throw new Error("ECS service description is incomplete.");
-  return sorted(described, (item) => item.serviceArn).map((service) => {
-    observedFamily(service.taskDefinition, `ECS service ${service.serviceName} task definition`);
-    return {
-      serviceName: service.serviceName,
-      taskDefinition: service.taskDefinition,
-      runningCount: service.runningCount,
-      pendingCount: service.pendingCount,
-      status: service.status,
-    };
-  });
-}
-
-function describeTasks(reader, status, taskArns) {
-  validateListedArns(taskArns, `ECS ${status.toLowerCase()} task listing`);
-  const described = [];
-  for (const taskBatch of batch(taskArns, 100)) {
-    const response = requireObject(reader.describeTasks(taskBatch), `ECS ${status.toLowerCase()} task description`);
-    const tasks = requireArray(response.tasks, `ECS ${status.toLowerCase()} task description tasks`);
-    const failures = requireArray(response.failures, `ECS ${status.toLowerCase()} task description failures`);
-    failures.forEach((failure) => validateFailure(failure, `ECS ${status.toLowerCase()} task description failures`));
-    if (failures.length) throw new Error(`ECS ${status.toLowerCase()} task description contains failures.`);
-    described.push(...tasks);
-  }
-  const expected = new Set(taskArns);
-  const returned = new Set();
-  for (const task of described) {
-    if (!task || typeof task !== "object" || Array.isArray(task) || typeof task.taskArn !== "string" || typeof task.taskDefinitionArn !== "string" || typeof task.lastStatus !== "string" || typeof task.desiredStatus !== "string" || typeof task.group !== "string") {
-      throw new Error(`ECS ${status.toLowerCase()} task description is incomplete.`);
-    }
-    if (returned.has(task.taskArn)) throw new Error(`ECS ${status.toLowerCase()} task description contains a duplicate task.`);
-    if (!expected.has(task.taskArn)) throw new Error(`ECS ${status.toLowerCase()} task description contains an unexpected task.`);
-    returned.add(task.taskArn);
-  }
-  if (returned.size !== expected.size) throw new Error(`ECS ${status.toLowerCase()} task description is incomplete.`);
-  return sorted(described, (item) => item.taskArn).map((task) => {
-    observedFamily(task.taskDefinitionArn, `${status} task ${task.taskArn} task definition`);
-    return { taskArn: task.taskArn, taskDefinitionArn: task.taskDefinitionArn, lastStatus: task.lastStatus, desiredStatus: task.desiredStatus, group: task.group };
-  });
-}
-
 export function generateReferenceAudit({
   plan,
   planBytes,
@@ -533,15 +453,10 @@ export function generateReferenceAudit({
   }
   const oldArns = [...oldDefinitions, ...retainedDefinitions].map((entry) => entry.oldArn);
 
-  const serviceArns = requireArray(reader.listServices(), "ECS service listing");
-  const services = describeServices(reader, serviceArns);
-
-  const readTasks = (status) => {
-    const taskArns = requireArray(reader.listTasks(status), `ECS ${status.toLowerCase()} task listing`);
-    return describeTasks(reader, status, taskArns);
-  };
-  const runningTasks = readTasks("RUNNING");
-  const pendingTasks = readTasks("PENDING");
+  const { services, runningTasks, pendingTasks, transitionalTasks, taskDefinitions } = observeStageBEcs({ reader, region, clusterArn });
+  const stageBServices = services.filter((service) => service.stageBScoped);
+  const stageBRunningTasks = runningTasks.filter((task) => task.stageBScoped);
+  const stageBPendingTasks = pendingTasks.filter((task) => task.stageBScoped);
   const {
     summary: broker,
     referencesByFamily: brokerReferencesByFamily,
@@ -549,19 +464,19 @@ export function generateReferenceAudit({
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
   } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerAliasArn), brokerAliasArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha, terraformConfiguration);
-  const serviceReferences = referenceNames(services, oldArns, "taskDefinition", "serviceName");
-  const runningReferences = referenceNames(runningTasks, oldArns, "taskDefinitionArn", "taskArn");
-  const pendingReferences = referenceNames(pendingTasks, oldArns, "taskDefinitionArn", "taskArn");
-  assertStageBLiveReferences(services, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinition", "serviceName");
-  assertStageBLiveReferences(runningTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
-  assertStageBLiveReferences(pendingTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
+  const serviceReferences = referenceNames(stageBServices, oldArns, "taskDefinition", "serviceName");
+  const runningReferences = referenceNames(stageBRunningTasks, oldArns, "taskDefinitionArn", "taskArn");
+  const pendingReferences = referenceNames(stageBPendingTasks, oldArns, "taskDefinitionArn", "taskArn");
+  assertStageBLiveReferences(stageBServices, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinition", "serviceName");
+  assertStageBLiveReferences(stageBRunningTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
+  assertStageBLiveReferences(stageBPendingTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
   const unretainedCreateOnlyFamilies = new Set([...createOnlyFamilies].filter((family) => !newestRetainedByFamily.has(family)));
-  const createOnlyServiceReferences = referenceNamesByFamily(services, unretainedCreateOnlyFamilies, "taskDefinition", "serviceName");
-  const createOnlyRunningReferences = referenceNamesByFamily(runningTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
-  const createOnlyPendingReferences = referenceNamesByFamily(pendingTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
-  const noOpServiceReferences = referenceNamesByFamily(services, noOpFamilies, "taskDefinition", "serviceName");
-  const noOpRunningReferences = referenceNamesByFamily(runningTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
-  const noOpPendingReferences = referenceNamesByFamily(pendingTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
+  const createOnlyServiceReferences = referenceNamesByFamily(stageBServices, unretainedCreateOnlyFamilies, "taskDefinition", "serviceName");
+  const createOnlyRunningReferences = referenceNamesByFamily(stageBRunningTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
+  const createOnlyPendingReferences = referenceNamesByFamily(stageBPendingTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
+  const noOpServiceReferences = referenceNamesByFamily(stageBServices, noOpFamilies, "taskDefinition", "serviceName");
+  const noOpRunningReferences = referenceNamesByFamily(stageBRunningTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
+  const noOpPendingReferences = referenceNamesByFamily(stageBPendingTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
   const auditedOldDefinitions = oldDefinitions.map((entry) => {
     const serviceRefs = [...(serviceReferences.get(entry.oldArn) || [])].sort();
     const runningRefs = [...(runningReferences.get(entry.oldArn) || [])].sort();
@@ -626,9 +541,9 @@ export function generateReferenceAudit({
     family: entry.family,
     classification: "retained-no-op",
     currentStatus: entry.currentStatus,
-    serviceReferences: [...(referenceNames(services, [entry.oldArn], "taskDefinition", "serviceName").get(entry.oldArn) || [])].sort(),
-    runningTaskReferences: [...(referenceNames(runningTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort(),
-    pendingTaskReferences: [...(referenceNames(pendingTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort(),
+    serviceReferences: [...(referenceNames(stageBServices, [entry.oldArn], "taskDefinition", "serviceName").get(entry.oldArn) || [])].sort(),
+    runningTaskReferences: [...(referenceNames(stageBRunningTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort(),
+    pendingTaskReferences: [...(referenceNames(stageBPendingTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort(),
     brokerReferenceModes: [...(brokerReferencesByArn.has(entry.oldArn) ? [brokerReferencesByArn.get(entry.oldArn)] : [])].sort(),
     brokerReferenceStatus: plannedAtomicBrokerRollovers.some((rollover) => rollover.oldTaskDefinitionArn === entry.oldArn)
       ? "planned-atomic-broker-rollover-v1"
@@ -645,6 +560,8 @@ export function generateReferenceAudit({
     services,
     runningTasks,
     pendingTasks,
+    transitionalTasks,
+    taskDefinitions,
     allOldRevisionsUnreferenced: plannedAtomicBrokerRollovers.length === 0,
     noServiceDeploymentObserved: true,
     noTaskExecutionObserved: true,
@@ -663,36 +580,6 @@ export function generateReferenceAudit({
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
     planJsonSha256: planSha,
-  };
-}
-
-const COMMANDS = Object.freeze({
-  caller: ["sts", "get-caller-identity"],
-  listServices: ["ecs", "list-services"],
-  describeServices: ["ecs", "describe-services"],
-  listTasks: ["ecs", "list-tasks"],
-  describeTasks: ["ecs", "describe-tasks"],
-  describeTaskDefinition: ["ecs", "describe-task-definition"],
-  getFunctionConfiguration: ["lambda", "get-function-configuration"],
-});
-
-export function createAwsReader({ region, clusterArn, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
-  const call = (name, args) => {
-    try {
-      return parseJson(run([...COMMANDS[name], ...args, "--region", region, "--output", "json"]), `AWS ${name}`);
-    } catch (error) {
-      if (error instanceof Error && /malformed|missing/.test(error.message)) throw error;
-      throw new Error(`AWS read failed: ${name}`);
-    }
-  };
-  return {
-    getCallerIdentity: () => call("caller", []),
-    listServices: () => call("listServices", ["--cluster", clusterArn]).serviceArns,
-    describeServices: (serviceArns) => call("describeServices", ["--cluster", clusterArn, "--services", ...serviceArns]),
-    listTasks: (status) => call("listTasks", ["--cluster", clusterArn, "--desired-status", status]).taskArns,
-    describeTasks: (taskArns) => call("describeTasks", ["--cluster", clusterArn, "--tasks", ...taskArns]),
-    describeTaskDefinition: (taskDefinition) => call("describeTaskDefinition", ["--task-definition", taskDefinition]),
-    getFunctionConfiguration: (functionArn) => call("getFunctionConfiguration", ["--function-name", functionArn]),
   };
 }
 
