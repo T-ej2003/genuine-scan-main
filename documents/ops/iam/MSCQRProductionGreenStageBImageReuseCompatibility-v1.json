@@ -1,48 +1,178 @@
 {
-  "schemaVersion": 1,
-  "toolingSha": "cfffbb8df9e57b7eef6906ef614313a3eed4f495",
+  "schemaVersion": 2,
+  "identityModel": "tooling-input-tree-sha256",
   "imageReleaseSha": "7245a6036492f875654c414473737e33c1422f3c",
-  "comparison": "7245a6036492f875654c414473737e33c1422f3c..cfffbb8df9e57b7eef6906ef614313a3eed4f495",
+  "comparisonBaseSha": "7245a6036492f875654c414473737e33c1422f3c",
+  "comparisonHeadIdentity": "tooling-input-tree-sha256",
+  "comparisonHeadSha256": "c3191630448f5a27a9c0501881030909903a2507a60c3fcc4ed1161d0703a60a",
+  "toolingInputTreeSha256": "c3191630448f5a27a9c0501881030909903a2507a60c3fcc4ed1161d0703a60a",
   "imageReuseCompatible": true,
-  "reason": "Intervening commits contain deployment tooling, closure validation, tests, documentation, CI, and a Terraform provider lock checksum only.",
   "imageBuildInputsChanged": false,
-  "classifiedChangedFiles": {
-    "imageBuildInput": [],
-    "runtimeApplicationSource": [],
-    "dependencyLockfile": [],
-    "dockerBuildConfiguration": [],
-    "generatedRuntimePackage": [],
-    "terraformOnly": ["infra/aws/terraform/production-green-stage-b/.terraform.lock.hcl"],
-    "toolingOnly": [
-      "scripts/apply-production-green-stage-b.mjs",
-      "scripts/aws/production-green-stage-b-image-evidence.mjs",
-      "scripts/aws/stage-b-deployment-contract.mjs",
-      "scripts/aws/stage-b-reference-audit-contract.mjs",
-      "scripts/aws/validate-production-green-stage-b-permissions.mjs",
-      "scripts/aws/validate-stage-b-deployment-closure.mjs",
-      "scripts/plan-production-green-stage-b.mjs",
-      "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json",
-      "scripts/tests/production-green-stage-b-deployment-closure.test.mjs",
-      "scripts/tests/production-green-stage-b-image-evidence.test.mjs",
-      "scripts/tests/production-green-stage-b-permission-preflight.test.mjs",
-      "scripts/tests/production-green-stage-b-plan.test.mjs",
-      "scripts/tests/production-green-stage-b-reference-audit-generator.test.mjs"
-    ],
-    "ciOnly": [".github/workflows/quality-gate.yml", "package.json"],
-    "documentationOnly": [
-      "documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.json",
-      "documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.md",
-      "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_ECR_IMAGE_EVIDENCE.md",
-      "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_IMAGE_PUBLISHER_IDENTITY.md",
-      "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_PLAN_RECONCILIATION_2026-07-29.md"
-    ]
-  },
-  "requiredRebuildIfChanged": [
-    "backend/Dockerfile",
-    "backend/package-lock.json",
-    "package-lock.json",
-    ".github/workflows/production-green-stage-b-image-build.yml",
-    "scripts/rls/sql/generated",
-    "runtime application source"
-  ]
+  "classificationRulesVersion": "stage-b-image-reuse-v2",
+  "generatedAt": "2026-08-03T00:30:11+01:00",
+  "generatorVersion": "validate-stage-b-image-reuse@2",
+  "classifiedChangedFiles": [
+    {
+      "file": ".github/workflows/quality-gate.yml",
+      "category": "ciOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_ECR_IMAGE_EVIDENCE.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_IMAGE_PUBLISHER_IDENTITY.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_PLAN_RECONCILIATION_2026-07-29.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_TWO_SHA_IDENTITY.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "infra/aws/terraform/production-green-stage-b/.terraform.lock.hcl",
+      "category": "terraformOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "category": "terraformOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "infra/aws/terraform/production-green-stage-b/variables.tf",
+      "category": "terraformOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "package.json",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/apply-production-green-stage-b.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/production-green-stage-b-image-evidence.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/production-green-stage-b-task-definitions.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-deployment-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-deployment-identity.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-reference-audit-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/validate-stage-b-deployment-closure.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/validate-stage-b-image-reuse.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/plan-production-green-stage-b.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-control-plane.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-deployment-closure.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-deployment-identity.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-image-evidence.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-permission-preflight.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-plan.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-reference-audit-generator.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    }
+  ],
+  "imageAffectingFiles": [],
+  "reason": "The reviewed tooling input tree contains no image-affecting changes relative to the image release."
 }
