@@ -324,8 +324,8 @@ function makeInitialBrokerCreateFixture({ mutatePlan } = {}) {
 
 function withBrokerMapping(mapping) {
   return terraformConfigurationSource.replace(
-    /  broker_task_definition_arns = merge\([\s\S]*?\n  \)\n  broker_template_hashes/,
-    `  broker_task_definition_arns = ${mapping}\n  broker_template_hashes`,
+    /  broker_task_definition_arns = merge\([\s\S]*?\n  \)/,
+    `  broker_task_definition_arns = ${mapping}`,
   );
 }
 

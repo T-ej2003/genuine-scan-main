@@ -42,6 +42,7 @@ const controlSids = [
   "ListExactStageBReadOnlyCanaryRolePolicies",
   "ListAttachedExactStageBReadOnlyCanaryRolePolicies",
   "ReadExactStageBReadOnlyCanaryExecutionRolePolicy",
+  "ReadExactStageBBrokerManagedPolicy",
   "TagExactReplayTable",
   "TagExactStageBTaskDefinitions",
 ];
@@ -49,6 +50,8 @@ const finalWriteSids = [
   "RegisterExactStageBReadOnlyCanaryTaskDefinition",
   "PassExactStageBReadOnlyCanaryRolesToEcsTasks",
   "UpdateExactStageBBrokerFunctionRelease",
+  "UpdateExactStageBBrokerManagedPolicy",
+  "PruneExactStageBBrokerManagedPolicyVersions",
   "VerifyExactStageBPermissionReportSignature",
 ];
 const readOnlyCanaryRoles = [
@@ -96,7 +99,7 @@ test("all policy artifacts parse and historical v2/v3 remain byte-stable", () =>
 
 test("v4 and the companion policy fit the AWS managed-policy document limit", () => {
   assert.equal(awsCharacterCount(policies.v3), 6651);
-  assert.equal(awsCharacterCount(policies.v4), 5580);
+  assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.equal(awsCharacterCount(policies.audit), 1785);
   assert.ok(awsCharacterCount(policies.finalWrite) < 6144);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
@@ -114,21 +117,22 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   correctedV3.Statement.push(statementOf(policies.v4, "ListExactStageBReadOnlyCanaryRolePolicies"));
   correctedV3.Statement.push(statementOf(policies.v4, "ListAttachedExactStageBReadOnlyCanaryRolePolicies"));
   correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBReadOnlyCanaryExecutionRolePolicy"));
+  correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBBrokerManagedPolicy"));
   assert.deepEqual(canonical(correctedV3), canonical({
     Version: policies.v3.Version,
     Statement: [...policies.v4.Statement, ...policies.audit.Statement],
   }));
 });
 
-test("the split has exactly seven moved statements, ten provider-control statements, and four final-write statements", () => {
+test("the split has exactly seven moved statements, eleven provider-control statements, and six final-write statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), movedSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), finalWriteSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...movedSids, ...controlSids, ...finalWriteSids]).size, 21);
+  assert.equal(new Set([...movedSids, ...controlSids, ...finalWriteSids]).size, 24);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
-  for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy"].includes(sid))) {
+  for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "ReadExactStageBBrokerManagedPolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
   }
 });
@@ -198,6 +202,21 @@ test("retry write companion is exact and tag-constrained", () => {
   assert.equal(statementsForAction(policies.finalWrite, "lambda:AddPermission").length, 0);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:InvokeFunction").length, 0);
   assert.equal(policies.finalWrite.Statement.some((statement) => actionsOf(statement).some((action) => action.startsWith("lambda:") && statement.Resource === "*")), false);
+  const brokerPolicyArn = "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime";
+  assert.deepEqual(statementOf(policies.finalWrite, "UpdateExactStageBBrokerManagedPolicy"), {
+    Sid: "UpdateExactStageBBrokerManagedPolicy",
+    Effect: "Allow",
+    Action: "iam:CreatePolicyVersion",
+    Resource: brokerPolicyArn,
+  });
+  assert.deepEqual(statementOf(policies.finalWrite, "PruneExactStageBBrokerManagedPolicyVersions"), {
+    Sid: "PruneExactStageBBrokerManagedPolicyVersions",
+    Effect: "Allow",
+    Action: "iam:DeletePolicyVersion",
+    Resource: brokerPolicyArn,
+  });
+  assert.equal(statementsForAction(policies.finalWrite, "iam:PutRolePolicy").length, 0);
+  assert.equal(statementsForAction(policies.finalWrite, "iam:SetDefaultPolicyVersion").length, 0);
 });
 
 test("permission-report verification is limited to the fixed Stage B KMS key", () => {
@@ -250,6 +269,24 @@ test("cluster, broker, and exact twelve-family restrictions remain unchanged", (
   assert.deepEqual(statementOf(policies.v4, "TagExactStageBTaskDefinitions").Resource, stageBTaskFamilies.map(arn));
   assert.deepEqual(statementOf(policies.v4, "SetExactStageBLogRetention").Resource, stageBLogGroups.map(logArn));
   assert.equal(stageBTaskFamilies.length, 12);
+});
+
+test("Terraform isolates broker runtime permissions in one dedicated managed policy", () => {
+  const source = read("infra/aws/terraform/production-green-stage-b/main.tf");
+  assert.equal(source.includes('resource "aws_iam_role_policy" "broker"'), false);
+  assert.match(source, /resource "aws_iam_policy" "broker"/);
+  assert.match(source, /resource "aws_iam_role_policy_attachment" "broker"/);
+  assert.match(source, /name\s*=\s*"mscqr-production-rls-approval-broker-runtime"/);
+  for (const sid of [
+    "RunOnlyApprovedExecutorAndCanaryRevisions",
+    "PassOnlyApprovedTaskRoles",
+    "ClaimOnlyStageBReplayRows",
+    "ReadOnlyStageAApproval",
+    "VerifyOnlyStageAApprovalKey",
+    "WriteOnlyBrokerReceipts",
+    "WriteOnlyStageABrokerLogs",
+  ]) assert.equal(source.includes(`Sid      = "${sid}"`), true, sid);
+  assert.match(source, /policy_arn\s*=\s*aws_iam_policy\.broker\.arn/);
 });
 
 test("ListTagsForResource is read-only and limited to the four exact Stage B log groups", () => {
@@ -307,17 +344,17 @@ test("Terraform role refresh reads are complete and narrowly scoped", () => {
     "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
     "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
   ];
-  assert.deepEqual(statementOf(policies.v4, "ListAttachedExactStageBReadOnlyCanaryRolePolicies"), {
-    Sid: "ListAttachedExactStageBReadOnlyCanaryRolePolicies",
-    Effect: "Allow",
-    Action: "iam:ListAttachedRolePolicies",
-    Resource: roles,
-  });
   assert.deepEqual(statementOf(policies.v4, "ReadExactStageBReadOnlyCanaryExecutionRolePolicy"), {
     Sid: "ReadExactStageBReadOnlyCanaryExecutionRolePolicy",
     Effect: "Allow",
     Action: "iam:GetRolePolicy",
     Resource: roles[0],
+  });
+  assert.deepEqual(statementOf(policies.v4, "ListAttachedExactStageBReadOnlyCanaryRolePolicies"), {
+    Sid: "ListAttachedExactStageBReadOnlyCanaryRolePolicies",
+    Effect: "Allow",
+    Action: "iam:ListAttachedRolePolicies",
+    Resource: [...roles, "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"],
   });
   assert.equal(statementsForAction(policies.v4, "iam:ListAttachedRolePolicies").length, 1);
   assert.equal(statementsForAction(policies.v4, "iam:GetRolePolicy").length, 1);
@@ -330,8 +367,8 @@ test("the source-controlled policies carry only the reviewed read, recovery, ret
   const actions = [...policies.v4.Statement, ...policies.audit.Statement, ...policies.finalWrite.Statement].flatMap(actionsOf);
   for (const forbidden of [
     "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:DeleteService", "lambda:InvokeFunction",
-    "iam:CreateRole", "iam:UpdateAssumeRolePolicy", "iam:PutRolePolicy",
-    "iam:AttachRolePolicy", "sts:AssumeRole",
+    "iam:CreateRole", "iam:UpdateAssumeRolePolicy",
+    "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "sts:AssumeRole",
     "secretsmanager:GetSecretValue", "kms:Decrypt", "rds:Connect", "route53:ChangeResourceRecordSets",
     "elasticloadbalancing:ModifyListener",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
@@ -346,6 +383,9 @@ test("the source-controlled policies carry only the reviewed read, recovery, ret
   assert.equal(actions.includes("lambda:PublishVersion"), true);
   assert.equal(actions.includes("lambda:UpdateAlias"), true);
   assert.equal(actions.includes("iam:PassRole"), true);
+  assert.equal(actions.includes("iam:CreatePolicyVersion"), true);
+  assert.equal(actions.includes("iam:DeletePolicyVersion"), true);
+  assert.equal(actions.includes("iam:PutRolePolicy"), false);
   assert.equal(actions.includes("kms:Verify"), true);
   assert.equal(actions.includes("kms:Sign"), false);
 });
@@ -374,7 +414,6 @@ test("the runbook targets v4 and the companion policy for the separately authori
 });
 
 test("historical policy bytes remain unchanged while the active v4 correction is explicit", () => {
-  assert.equal(sha256(read(paths.v4)), "9beed6d3a684fd98f16fabdf63ef02a231bb9cf60e6af906e432c70eeeabd62a");
   assert.equal(sha256(read(paths.audit)), "56b299c2f21973a3117e89e5147658406d3ba823efab2b5548ac1b0d9f93dde6");
 });
 

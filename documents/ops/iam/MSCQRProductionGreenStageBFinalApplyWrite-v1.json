@@ -56,6 +56,18 @@
       }
     },
     {
+      "Sid": "UpdateExactStageBBrokerManagedPolicy",
+      "Effect": "Allow",
+      "Action": "iam:CreatePolicyVersion",
+      "Resource": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+    },
+    {
+      "Sid": "PruneExactStageBBrokerManagedPolicyVersions",
+      "Effect": "Allow",
+      "Action": "iam:DeletePolicyVersion",
+      "Resource": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+    },
+    {
       "Sid": "VerifyExactStageBPermissionReportSignature",
       "Effect": "Allow",
       "Action": "kms:Verify",

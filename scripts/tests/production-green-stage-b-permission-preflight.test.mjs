@@ -21,6 +21,8 @@ import { assertStageBReleaseCallerArn } from "../plan-production-green-stage-b.m
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const roleArn = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
+const brokerPolicyArn = "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime";
+const brokerRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker";
 const generatorArn = "arn:aws:iam::368992683803:root";
 const plan = {
   variables: {
@@ -31,6 +33,14 @@ const plan = {
     address: 'aws_ecs_task_definition.candidate["read_only_canary"]',
     type: "aws_ecs_task_definition",
     change: { actions: ["create"], after: { family: "mscqr-production-full-rls-green-read-only-canary" } },
+  }, {
+    address: "aws_iam_policy.broker",
+    type: "aws_iam_policy",
+    change: { actions: ["update"], after: { name: "mscqr-production-rls-approval-broker-runtime" }, after_unknown: { policy: true } },
+  }, {
+    address: "aws_iam_role_policy_attachment.broker",
+    type: "aws_iam_role_policy_attachment",
+    change: { actions: ["no-op"], after: { role: "mscqr-production-rls-approval-broker", policy_arn: brokerPolicyArn } },
   }],
 };
 const planBytes = Buffer.from(JSON.stringify(plan));
@@ -77,6 +87,64 @@ test("exact canary create derives Register, TagResource, and both PassRole evalu
   ]);
   assert.ok(derived.required.some((item) => item.action === "ecs:RegisterTaskDefinition"));
   assert.ok(derived.required.some((item) => item.action === "ecs:TagResource"));
+});
+
+test("exact broker managed-policy update derives version actions for the exact policy", () => {
+  const derived = deriveRequiredEvaluations({ ...plan, resource_changes: [plan.resource_changes[1]] }, manifest);
+  assert.deepEqual(derived.required.filter((item) => ["update-broker-managed-policy", "prune-broker-managed-policy-versions"].includes(item.manifestId)), [{
+    id: "prune-broker-managed-policy-versions:arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime",
+    manifestId: "prune-broker-managed-policy-versions",
+    action: "iam:DeletePolicyVersion",
+    resource: brokerPolicyArn,
+    context: [],
+    phase: "apply",
+  }, {
+    id: "update-broker-managed-policy:arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime",
+    manifestId: "update-broker-managed-policy",
+    action: "iam:CreatePolicyVersion",
+    resource: brokerPolicyArn,
+    context: [],
+    phase: "apply",
+  }]);
+});
+
+test("broker managed-policy coverage fails for missing, wrong, wildcard, unrelated, create, delete, or replacement mappings", () => {
+  const brokerChange = plan.resource_changes[1];
+  const withoutBroker = structuredClone(manifest);
+  withoutBroker.required = withoutBroker.required.filter((entry) => !entry.id.includes("broker-managed-policy"));
+  assert.throws(() => deriveRequiredEvaluations({ ...plan, resource_changes: [brokerChange] }, withoutBroker), /No permission manifest entry/);
+
+  for (const mutate of [
+    (broken) => { broken.required.find((entry) => entry.id === "update-broker-managed-policy").resources = ["arn:aws:iam::368992683803:policy/other"]; },
+    (broken) => { broken.required.find((entry) => entry.id === "update-broker-managed-policy").resources = ["*"]; },
+  ]) {
+    const broken = structuredClone(manifest); mutate(broken);
+    assert.throws(() => validateManifest(broken), /Broker managed-policy permission mapping is not exact/);
+  }
+
+  for (const actions of [["create"], ["delete"], ["delete", "create"]]) {
+    assert.throws(() => deriveRequiredEvaluations({ ...plan, resource_changes: [{ ...brokerChange, change: { ...brokerChange.change, actions } }] }, manifest), /No permission manifest entry/);
+  }
+  assert.throws(() => deriveRequiredEvaluations({ ...plan, resource_changes: [{ ...brokerChange, address: "aws_iam_policy.other" }] }, manifest), /No permission manifest entry/);
+  assert.throws(() => deriveRequiredEvaluations({ ...plan, resource_changes: [{ address: "aws_iam_role_policy.broker", type: "aws_iam_role_policy", change: { actions: ["update"], after: { name: "stage-b-broker" } } }] }, manifest), /aws_iam_role_policy\.broker is forbidden/);
+  assert.throws(() => deriveRequiredEvaluations({ ...plan, resource_changes: [{ ...plan.resource_changes[2], change: { ...plan.resource_changes[2].change, actions: ["update"] } }] }, manifest), /attachment must be the exact imported no-op/);
+  assert.throws(() => deriveRequiredEvaluations({ ...plan, resource_changes: [{ ...plan.resource_changes[2], change: { ...plan.resource_changes[2].change, after: { role: "mscqr-production-unrelated-role", policy_arn: brokerPolicyArn } } }] }, manifest), /attachment must be the exact imported no-op/);
+  assert.throws(() => deriveRequiredEvaluations({ ...plan, resource_changes: [{ ...brokerChange, change: { ...brokerChange.change, after: { name: "mscqr-production-rls-approval-broker-runtime", policy: JSON.stringify({ Version: "2012-10-17", Statement: [] }) }, after_unknown: {} } }] }, manifest), /document differs/);
+});
+
+test("broker managed-policy simulation allows the exact update and rejects implicit or explicit deny", () => {
+  const brokerPlan = { ...plan, resource_changes: [plan.resource_changes[1]] };
+  const evaluate = (decision) => runPermissionPreflight({
+    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: brokerPlan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session",
+    simulate: ({ evaluation }) => evaluation.action.startsWith("iam:") ? { decision } : allowRequiredDenyForbidden({ evaluation }),
+    cloudTrail: clearCloudTrail,
+  });
+  assert.equal(evaluate("allowed").requiredEvaluations.find((item) => item.action === "iam:CreatePolicyVersion").decision, "allowed");
+  for (const decision of ["implicitDeny", "explicitDeny"]) {
+    const report = evaluate(decision);
+    assert.equal(report.status, "invalid");
+    assert.equal(report.requiredEvaluations.find((item) => item.action === "iam:CreatePolicyVersion").decision, decision);
+  }
 });
 
 test("complete mocked preflight passes and binds the exact plan SHA", () => {
@@ -244,13 +312,13 @@ test("all Lambda write manifest entries require the exact four resource-tag cont
 });
 
 test("the exact twelve task-definition creates expand to registration, tagging, and both PassRole evaluations", () => {
-  const fullPlan = { ...plan, resource_changes: manifest.taskDefinitionMappings.map((mapping) => ({
+  const fullPlan = { ...plan, resource_changes: [...manifest.taskDefinitionMappings.map((mapping) => ({
     address: mapping.address,
     type: "aws_ecs_task_definition",
     change: { actions: ["create"], after: { family: mapping.family } },
-  })) };
+  })), plan.resource_changes[1]] };
   const derived = deriveRequiredEvaluations(fullPlan, manifest);
-  assert.equal(derived.coveredChanges.length, 12);
+  assert.equal(derived.coveredChanges.length, 13);
   assert.equal(derived.required.filter((item) => item.action === "ecs:RegisterTaskDefinition").length, 12);
   assert.equal(derived.required.filter((item) => item.action === "ecs:TagResource").length, 12);
   assert.equal(derived.required.filter((item) => item.action === "iam:PassRole").length, 24);
