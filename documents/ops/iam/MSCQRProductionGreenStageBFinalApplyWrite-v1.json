@@ -56,6 +56,12 @@
       }
     },
     {
+      "Sid": "UpdateExactStageBBrokerInlinePolicy",
+      "Effect": "Allow",
+      "Action": "iam:PutRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
+    },
+    {
       "Sid": "VerifyExactStageBPermissionReportSignature",
       "Effect": "Allow",
       "Action": "kms:Verify",

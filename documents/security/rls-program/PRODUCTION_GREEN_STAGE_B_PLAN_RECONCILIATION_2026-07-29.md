@@ -60,6 +60,16 @@ no wildcard IAM resource. No runtime, service, secret, database, networking,
 ALB, DNS, or traffic authority is added, and `ecs:DeregisterTaskDefinition`
 remains absent.
 
+The exact current plan also changes the broker inline policy resource
+`aws_iam_role_policy.broker` in place. Its required write is
+`iam:PutRolePolicy`, scoped only to
+`arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker`, for the
+`stage-b-broker` inline policy. The permission preflight maps and simulates
+that exact address/type/action/resource tuple and rejects any other IAM role
+policy update, create, delete, replacement, wildcard, or role mismatch. The
+grant introduces no broader IAM mutation authority. The prior plan and audit
+are stale after this merge and must not be reused.
+
 ## Append-only task-definition registration model
 
 Normal Terraform destroys remain forbidden, including every

@@ -49,6 +49,7 @@ const finalWriteSids = [
   "RegisterExactStageBReadOnlyCanaryTaskDefinition",
   "PassExactStageBReadOnlyCanaryRolesToEcsTasks",
   "UpdateExactStageBBrokerFunctionRelease",
+  "UpdateExactStageBBrokerInlinePolicy",
   "VerifyExactStageBPermissionReportSignature",
 ];
 const readOnlyCanaryRoles = [
@@ -120,13 +121,13 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   }));
 });
 
-test("the split has exactly seven moved statements, ten provider-control statements, and four final-write statements", () => {
+test("the split has exactly seven moved statements, ten provider-control statements, and five final-write statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), movedSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), finalWriteSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...movedSids, ...controlSids, ...finalWriteSids]).size, 21);
+  assert.equal(new Set([...movedSids, ...controlSids, ...finalWriteSids]).size, 22);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
   for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
@@ -198,6 +199,13 @@ test("retry write companion is exact and tag-constrained", () => {
   assert.equal(statementsForAction(policies.finalWrite, "lambda:AddPermission").length, 0);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:InvokeFunction").length, 0);
   assert.equal(policies.finalWrite.Statement.some((statement) => actionsOf(statement).some((action) => action.startsWith("lambda:") && statement.Resource === "*")), false);
+  assert.deepEqual(statementOf(policies.finalWrite, "UpdateExactStageBBrokerInlinePolicy"), {
+    Sid: "UpdateExactStageBBrokerInlinePolicy",
+    Effect: "Allow",
+    Action: "iam:PutRolePolicy",
+    Resource: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+  });
+  assert.equal(statementsForAction(policies.finalWrite, "iam:PutRolePolicy").length, 1);
 });
 
 test("permission-report verification is limited to the fixed Stage B KMS key", () => {
@@ -330,7 +338,7 @@ test("the source-controlled policies carry only the reviewed read, recovery, ret
   const actions = [...policies.v4.Statement, ...policies.audit.Statement, ...policies.finalWrite.Statement].flatMap(actionsOf);
   for (const forbidden of [
     "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:DeleteService", "lambda:InvokeFunction",
-    "iam:CreateRole", "iam:UpdateAssumeRolePolicy", "iam:PutRolePolicy",
+    "iam:CreateRole", "iam:UpdateAssumeRolePolicy",
     "iam:AttachRolePolicy", "sts:AssumeRole",
     "secretsmanager:GetSecretValue", "kms:Decrypt", "rds:Connect", "route53:ChangeResourceRecordSets",
     "elasticloadbalancing:ModifyListener",

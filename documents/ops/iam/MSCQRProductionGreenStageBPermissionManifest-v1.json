@@ -239,6 +239,22 @@
         {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-b"]}
       ],
       "evidence": "Terraform aws_lambda_alias.reviewed update and prior successful apply"
+    },
+    {
+      "id": "update-broker-inline-policy",
+      "phase": "apply",
+      "action": "iam:PutRolePolicy",
+      "plan": {
+        "type": "aws_iam_role_policy",
+        "actions": ["update"],
+        "address": "aws_iam_role_policy.broker",
+        "roleName": "mscqr-production-rls-approval-broker",
+        "inlinePolicyName": "stage-b-broker",
+        "coverageRequired": true
+      },
+      "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"],
+      "context": [],
+      "evidence": "Terraform aws_iam_role_policy.broker in-place update uses iam:PutRolePolicy for the exact broker role and stage-b-broker inline policy"
     }
   ],
   "taskDefinitionMappings": [

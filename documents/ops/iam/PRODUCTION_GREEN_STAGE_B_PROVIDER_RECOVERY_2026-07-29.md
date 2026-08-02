@@ -91,6 +91,17 @@ policy remains on its pre-correction version until the separately authorized
 update of both policies. AWS managed-policy version IDs must be discovered
 from each live policy and are not assumed to match repository suffixes.
 
+The current exact Stage B plan also updates the `stage-b-broker` inline policy
+through `aws_iam_role_policy.broker`. That in-place Terraform update requires
+`iam:PutRolePolicy`, scoped only to the broker role
+`arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker`.
+The permission manifest binds that write to the exact Terraform address,
+resource type, `update` action, role name, and inline policy name; no other
+inline policy or IAM role is covered. This is the only additional IAM write in
+the reviewed plan and does not add role creation, attachment, passing, or
+deletion authority. After this merge, the previously saved plan and audit are
+stale and must not be reused; a new plan-bound permission report is required.
+
 ## Stage B release-deployer apply correction
 
 The Stage B Terraform apply registers immutable revisions for the exact Stage B

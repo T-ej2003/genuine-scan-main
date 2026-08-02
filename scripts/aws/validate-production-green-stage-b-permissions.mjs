@@ -17,6 +17,9 @@ export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${
 export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
 export const PERMISSION_REPORT_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
 export const PERMISSION_REPORT_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
+const BROKER_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-rls-approval-broker`;
+const BROKER_ROLE_NAME = "mscqr-production-rls-approval-broker";
+const BROKER_INLINE_POLICY_NAME = "stage-b-broker";
 const TASK_DEFINITION_TAG_CONTEXT = Object.freeze([
   { key: "aws:RequestedRegion", type: "string", values: [REGION] },
   { key: "aws:RequestTag/Environment", type: "string", values: ["production"] },
@@ -178,6 +181,18 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION 
     if (entry.plan) {
       if (!entry.plan.type || !Array.isArray(entry.plan.actions)) throw new Error(`Permission manifest plan selector is malformed: ${entry.id}.`);
       if (entry.plan.address && typeof entry.plan.address !== "string") throw new Error(`Permission manifest plan address is malformed: ${entry.id}.`);
+      for (const key of ["roleName", "inlinePolicyName"]) {
+        if (entry.plan[key] !== undefined && typeof entry.plan[key] !== "string") throw new Error(`Permission manifest plan ${key} is malformed: ${entry.id}.`);
+      }
+      if (entry.plan.coverageRequired !== undefined && typeof entry.plan.coverageRequired !== "boolean") throw new Error(`Permission manifest plan coverage flag is malformed: ${entry.id}.`);
+    }
+    if (entry.id === "update-broker-inline-policy") {
+      if (!entry.plan || entry.action !== "iam:PutRolePolicy" || entry.resources.length !== 1 || entry.resources[0] !== BROKER_ROLE_ARN
+        || entry.plan.type !== "aws_iam_role_policy" || !exactActions(entry.plan.actions, ["update"])
+        || entry.plan.address !== "aws_iam_role_policy.broker" || entry.plan.roleName !== BROKER_ROLE_NAME
+        || entry.plan.inlinePolicyName !== BROKER_INLINE_POLICY_NAME || entry.plan.coverageRequired !== true) {
+        throw new Error("Broker inline-policy permission mapping is not exact.");
+      }
     }
   }
   if (!Array.isArray(manifest.taskDefinitionMappings) || manifest.taskDefinitionMappings.length !== TASK_DEFINITION_MAPPINGS.length) throw new Error("Permission manifest must contain exactly twelve task-definition mappings.");
@@ -216,6 +231,8 @@ function planMatches(selector, change) {
   if (!selector || change.type !== selector.type || !exactActions(change.change?.actions, selector.actions)) return false;
   if (selector.address && change.address !== selector.address) return false;
   if (selector.family && change.change?.after?.family !== selector.family) return false;
+  if (selector.roleName && change.change?.after?.role !== selector.roleName) return false;
+  if (selector.inlinePolicyName && change.change?.after?.name !== selector.inlinePolicyName) return false;
   return true;
 }
 
@@ -235,6 +252,7 @@ export function deriveRequiredEvaluations(plan, manifest) {
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
   const required = manifest.required.filter((entry) => !entry.plan).flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource)));
   const coveredChanges = new Set();
+  const matchedPlanEntries = new Set();
   for (const change of changes) {
     const actions = change.change?.actions || [];
     if (exactActions(actions, ["no-op"])) continue;
@@ -253,7 +271,13 @@ export function deriveRequiredEvaluations(plan, manifest) {
     const matches = manifest.required.filter((entry) => entry.plan && planMatches(entry.plan, change));
     if (matches.length === 0) throw new Error(`No permission manifest entry covers ${change.address} ${JSON.stringify(actions)}.`);
     coveredChanges.add(change.address);
-    for (const entry of matches) for (const resource of entry.resources) required.push(evaluation(entry, resource));
+    for (const entry of matches) {
+      matchedPlanEntries.add(entry.id);
+      for (const resource of entry.resources) required.push(evaluation(entry, resource));
+    }
+  }
+  for (const entry of manifest.required.filter((candidate) => candidate.plan?.coverageRequired)) {
+    if (!matchedPlanEntries.has(entry.id)) throw new Error(`Permission manifest mapping has no matching plan change: ${entry.id}.`);
   }
   const forbidden = manifest.forbidden.flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource)));
   return {
