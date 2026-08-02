@@ -453,7 +453,10 @@ export function generateReferenceAudit({
   }
   const oldArns = [...oldDefinitions, ...retainedDefinitions].map((entry) => entry.oldArn);
 
-  const { services, runningTasks, pendingTasks } = observeStageBEcs({ reader, region, clusterArn });
+  const { services, runningTasks, pendingTasks, transitionalTasks, taskDefinitions } = observeStageBEcs({ reader, region, clusterArn });
+  const stageBServices = services.filter((service) => service.stageBScoped);
+  const stageBRunningTasks = runningTasks.filter((task) => task.stageBScoped);
+  const stageBPendingTasks = pendingTasks.filter((task) => task.stageBScoped);
   const {
     summary: broker,
     referencesByFamily: brokerReferencesByFamily,
@@ -461,19 +464,19 @@ export function generateReferenceAudit({
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
   } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerAliasArn), brokerAliasArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha, terraformConfiguration);
-  const serviceReferences = referenceNames(services, oldArns, "taskDefinition", "serviceName");
-  const runningReferences = referenceNames(runningTasks, oldArns, "taskDefinitionArn", "taskArn");
-  const pendingReferences = referenceNames(pendingTasks, oldArns, "taskDefinitionArn", "taskArn");
-  assertStageBLiveReferences(services, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinition", "serviceName");
-  assertStageBLiveReferences(runningTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
-  assertStageBLiveReferences(pendingTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
+  const serviceReferences = referenceNames(stageBServices, oldArns, "taskDefinition", "serviceName");
+  const runningReferences = referenceNames(stageBRunningTasks, oldArns, "taskDefinitionArn", "taskArn");
+  const pendingReferences = referenceNames(stageBPendingTasks, oldArns, "taskDefinitionArn", "taskArn");
+  assertStageBLiveReferences(stageBServices, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinition", "serviceName");
+  assertStageBLiveReferences(stageBRunningTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
+  assertStageBLiveReferences(stageBPendingTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
   const unretainedCreateOnlyFamilies = new Set([...createOnlyFamilies].filter((family) => !newestRetainedByFamily.has(family)));
-  const createOnlyServiceReferences = referenceNamesByFamily(services, unretainedCreateOnlyFamilies, "taskDefinition", "serviceName");
-  const createOnlyRunningReferences = referenceNamesByFamily(runningTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
-  const createOnlyPendingReferences = referenceNamesByFamily(pendingTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
-  const noOpServiceReferences = referenceNamesByFamily(services, noOpFamilies, "taskDefinition", "serviceName");
-  const noOpRunningReferences = referenceNamesByFamily(runningTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
-  const noOpPendingReferences = referenceNamesByFamily(pendingTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
+  const createOnlyServiceReferences = referenceNamesByFamily(stageBServices, unretainedCreateOnlyFamilies, "taskDefinition", "serviceName");
+  const createOnlyRunningReferences = referenceNamesByFamily(stageBRunningTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
+  const createOnlyPendingReferences = referenceNamesByFamily(stageBPendingTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
+  const noOpServiceReferences = referenceNamesByFamily(stageBServices, noOpFamilies, "taskDefinition", "serviceName");
+  const noOpRunningReferences = referenceNamesByFamily(stageBRunningTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
+  const noOpPendingReferences = referenceNamesByFamily(stageBPendingTasks, noOpFamilies, "taskDefinitionArn", "taskArn");
   const auditedOldDefinitions = oldDefinitions.map((entry) => {
     const serviceRefs = [...(serviceReferences.get(entry.oldArn) || [])].sort();
     const runningRefs = [...(runningReferences.get(entry.oldArn) || [])].sort();
@@ -538,9 +541,9 @@ export function generateReferenceAudit({
     family: entry.family,
     classification: "retained-no-op",
     currentStatus: entry.currentStatus,
-    serviceReferences: [...(referenceNames(services, [entry.oldArn], "taskDefinition", "serviceName").get(entry.oldArn) || [])].sort(),
-    runningTaskReferences: [...(referenceNames(runningTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort(),
-    pendingTaskReferences: [...(referenceNames(pendingTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort(),
+    serviceReferences: [...(referenceNames(stageBServices, [entry.oldArn], "taskDefinition", "serviceName").get(entry.oldArn) || [])].sort(),
+    runningTaskReferences: [...(referenceNames(stageBRunningTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort(),
+    pendingTaskReferences: [...(referenceNames(stageBPendingTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort(),
     brokerReferenceModes: [...(brokerReferencesByArn.has(entry.oldArn) ? [brokerReferencesByArn.get(entry.oldArn)] : [])].sort(),
     brokerReferenceStatus: plannedAtomicBrokerRollovers.some((rollover) => rollover.oldTaskDefinitionArn === entry.oldArn)
       ? "planned-atomic-broker-rollover-v1"
@@ -557,6 +560,8 @@ export function generateReferenceAudit({
     services,
     runningTasks,
     pendingTasks,
+    transitionalTasks,
+    taskDefinitions,
     allOldRevisionsUnreferenced: plannedAtomicBrokerRollovers.length === 0,
     noServiceDeploymentObserved: true,
     noTaskExecutionObserved: true,

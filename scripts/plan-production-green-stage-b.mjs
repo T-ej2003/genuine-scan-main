@@ -434,7 +434,7 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
   const retainedArnsByFamily = new Map();
   for (const entry of retained) retainedArnsByFamily.set(entry.family, new Set([...(retainedArnsByFamily.get(entry.family) || []), entry.oldTaskDefinitionArn]));
   const allowedArnsByFamily = new Map(STAGE_B_TASK_DEFINITION_FAMILY_NAMES.map((family) => [family, new Set([...(currentArnsByFamily.get(family) || []), ...(retainedArnsByFamily.get(family) || [])])]));
-  if (!Array.isArray(referenceAudit.services) || !Array.isArray(referenceAudit.runningTasks) || !Array.isArray(referenceAudit.pendingTasks)) throw new Error("Stage B append-only reference audit service/task evidence is missing.");
+  if (!Array.isArray(referenceAudit.services) || !Array.isArray(referenceAudit.runningTasks) || !Array.isArray(referenceAudit.pendingTasks) || !Array.isArray(referenceAudit.transitionalTasks) || !Array.isArray(referenceAudit.taskDefinitions)) throw new Error("Stage B append-only reference audit service/task evidence is missing.");
   const checkReferences = (items, arnKey, name) => {
     const seen = new Set();
     for (const item of items) {
@@ -442,9 +442,10 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
       if (!item || typeof item !== "object" || typeof item[arnKey] !== "string" || typeof observationKey !== "string") throw new Error(`Stage B append-only reference audit ${name} observation is malformed.`);
       const identity = taskDefinitionArnPattern.exec(item[arnKey]);
       if (!identity || seen.has(observationKey)) throw new Error(`Stage B append-only reference audit ${name} observation is malformed or duplicated.`);
+      const expectedStageBScoped = identity[1].startsWith("mscqr-production-");
+      if (item.stageBScoped !== expectedStageBScoped) throw new Error(`Stage B append-only reference audit ${name} classification is invalid.`);
       seen.add(observationKey);
-      const stageBScopedFamily = identity[1].startsWith("mscqr-production-");
-      if (stageBScopedFamily && !allowedArnsByFamily.get(identity[1])?.has(identity[0])) {
+      if (expectedStageBScoped && !allowedArnsByFamily.get(identity[1])?.has(identity[0])) {
         throw new Error(`Stage B append-only reference audit ${name} contains an unrecorded task-definition ARN.`);
       }
     }
@@ -452,6 +453,7 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
   checkReferences(referenceAudit.services, "taskDefinition", "service");
   checkReferences(referenceAudit.runningTasks, "taskDefinitionArn", "RUNNING task");
   checkReferences(referenceAudit.pendingTasks, "taskDefinitionArn", "PENDING task");
+  checkReferences(referenceAudit.transitionalTasks, "taskDefinitionArn", "transitional task");
 
   const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
   if (brokerChange && exactActions(brokerChange.change?.actions || [], ["update"])) {

@@ -178,8 +178,8 @@ requires that observed caller ARN to equal the audit `callerArn`; an
 audit-supplied ARN or matching hash is not accepted as caller attestation.
 The ECS observation contract is implemented once in
 `scripts/aws/production-green-stage-b-ecs-observations.mjs` and is shared by
-reference-audit and post-apply readback. Complete service discovery and both
-RUNNING/PENDING task lists are required; `ecs:ListServices` and
+reference-audit and post-apply readback. Complete service discovery and active
+task discovery are required; `ecs:ListServices` and
 `ecs:ListTasks` therefore remain unavoidable. The companion policy scopes those
 List calls with the exact production cluster condition and region, while the
 Describe calls use exact Stage B service/task ARN patterns; the AWS-required
@@ -187,9 +187,15 @@ wildcard for `ecs:DescribeTaskDefinition` is isolated to that read-only action.
 Cluster discovery is not needed because the exact production cluster ARN is
 already part of the Stage B contract.
 The helper consumes pagination, describes every observed reference, and fails
-closed on AccessDenied, missing pages, duplicate/unknown ARNs, or any unknown
-task-definition family. A List failure must never be converted into an empty
-observation.
+closed on AccessDenied, missing pages, duplicate/unknown ARNs, reserved unknown
+families, or response identity mismatches. The production cluster is shared:
+valid unrelated workloads such as `mscqr-backend` remain visible with
+`stageBScoped=false` but are excluded from Stage B reference decisions and
+cannot satisfy a missing Stage B mapping. A List failure must never be
+converted into an empty observation.
+The active task set is discovered with `ListTasks(desiredStatus=RUNNING)` and
+partitioned from `DescribeTasks.lastStatus` into `runningTasks`, `pendingTasks`,
+and explicit `transitionalTasks`; `desiredStatus=PENDING` is never requested.
 The audit consumer also requires the shared schema version, the exact production
 cluster ARN, and the MFA-backed release-deployer caller identity.
 

@@ -376,7 +376,7 @@ test("duplicate family fails closed", () => {
 for (const [label, mutateReader, expected] of [
   ["service", (reader, oldArn) => { reader.listServices = () => ["arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/stage-b"]; reader.describeServices = () => ({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/stage-b", serviceName: "stage-b", taskDefinition: oldArn, runningCount: 0, pendingCount: 0, status: "ACTIVE" }], failures: [] }); }, /Superseded task definition remains referenced/],
   ["running task", (reader, oldArn) => { reader.listTasks = (status) => status === "RUNNING" ? ["arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/run"] : []; reader.describeTasks = () => ({ tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/run", taskDefinitionArn: oldArn, lastStatus: "RUNNING", desiredStatus: "RUNNING", group: "service:stage-b" }], failures: [] }); }, /Superseded task definition remains referenced/],
-  ["pending task", (reader, oldArn) => { reader.listTasks = (status) => status === "PENDING" ? ["arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/pending"] : []; reader.describeTasks = () => ({ tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/pending", taskDefinitionArn: oldArn, lastStatus: "PENDING", desiredStatus: "PENDING", group: "service:stage-b" }], failures: [] }); }, /Superseded task definition remains referenced/],
+  ["pending task", (reader, oldArn) => { reader.listTasks = () => ["arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/pending"]; reader.describeTasks = () => ({ tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/pending", taskDefinitionArn: oldArn, lastStatus: "PENDING", desiredStatus: "RUNNING", group: "service:stage-b" }], failures: [] }); }, /Superseded task definition remains referenced/],
 ]) {
   test(`${label} reference to an old revision fails`, () => {
     const oldArn = oldArnFor(Object.values(STAGE_B_TASK_DEFINITION_FAMILIES)[0]);
@@ -548,8 +548,8 @@ test("running and pending tasks may reference different retained generations", (
     }
     plan.relevant_attributes.push({ resource: executorCollectionAddress, attribute: [] });
   }, mutateReader: (reader) => {
-    reader.listTasks = (status) => status === "RUNNING" ? [taskArnFor("RUNNING", 0)] : [taskArnFor("PENDING", 0)];
-    reader.describeTasks = (arns) => ({ tasks: [taskRecord(arns[0], arns[0].includes("running") ? "RUNNING" : "PENDING", arns[0].includes("running") ? oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]) : newArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]))], failures: [] });
+    reader.listTasks = () => [taskArnFor("RUNNING", 0), taskArnFor("PENDING", 0)];
+    reader.describeTasks = (arns) => ({ tasks: arns.map((arn) => taskRecord(arn, arn.includes("running") ? "RUNNING" : "PENDING", arn.includes("running") ? oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]) : newArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]))), failures: [] });
   } });
   assert.doesNotThrow(() => generate(fixture));
 });
@@ -822,7 +822,7 @@ const serviceArnFor = (index) => `arn:aws:ecs:eu-west-2:368992683803:service/msc
 const taskArnFor = (status, index) => `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${status.toLowerCase()}-${index}`;
 const currentTaskDefinition = newArnFor(Object.values(STAGE_B_TASK_DEFINITION_FAMILIES)[0]);
 const serviceRecord = (arn, index, taskDefinition = currentTaskDefinition) => ({ serviceArn: arn, serviceName: `stage-b-${index}`, taskDefinition, runningCount: 0, pendingCount: 0, status: "ACTIVE" });
-const taskRecord = (arn, status, taskDefinitionArn = currentTaskDefinition) => ({ taskArn: arn, taskDefinitionArn, lastStatus: status, desiredStatus: status, group: "service:stage-b" });
+const taskRecord = (arn, status, taskDefinitionArn = currentTaskDefinition) => ({ taskArn: arn, taskDefinitionArn, lastStatus: status, desiredStatus: "RUNNING", group: "service:stage-b" });
 
 test("DescribeServices uses batches of at most 10 and accepts an exact complete multi-batch response", () => {
   const fixture = makeFixture();
@@ -860,22 +860,20 @@ for (const [name, response, expected] of [
   });
 }
 
-test("DescribeTasks uses batches of at most 100 for running and pending tasks", () => {
+test("DescribeTasks uses batches of at most 100 for the active desired-RUNNING task set", () => {
   const fixture = makeFixture();
-  const listed = {
-    RUNNING: Array.from({ length: 101 }, (_, index) => taskArnFor("RUNNING", index)),
-    PENDING: Array.from({ length: 101 }, (_, index) => taskArnFor("PENDING", index)),
-  };
-  const calls = { RUNNING: [], PENDING: [] };
-  fixture.reader.listTasks = (status) => listed[status];
+  const listed = [
+    ...Array.from({ length: 101 }, (_, index) => taskArnFor("RUNNING", index)),
+    ...Array.from({ length: 101 }, (_, index) => taskArnFor("PENDING", index)),
+  ];
+  const calls = [];
+  fixture.reader.listTasks = () => listed;
   fixture.reader.describeTasks = (arns) => {
-    const status = arns[0].includes("running") ? "RUNNING" : "PENDING";
-    calls[status].push([...arns]);
-    return { tasks: arns.map((arn) => taskRecord(arn, status)), failures: [] };
+    calls.push([...arns]);
+    return { tasks: arns.map((arn) => taskRecord(arn, arn.includes("running") ? "RUNNING" : "PENDING")), failures: [] };
   };
   const audit = generate(fixture);
-  assert.deepEqual(calls.RUNNING.map((items) => items.length), [100, 1]);
-  assert.deepEqual(calls.PENDING.map((items) => items.length), [100, 1]);
+  assert.deepEqual(calls.map((items) => items.length), [100, 100, 2]);
   assert.equal(audit.runningTasks.length, 101);
   assert.equal(audit.pendingTasks.length, 101);
 });
@@ -892,7 +890,7 @@ for (const [name, response, expected] of [
   ["malformed failures", { tasks: [], failures: [{}] }, /malformed failure/],
   ["duplicate", { tasks: [taskRecord(taskArnFor("RUNNING", 0), "RUNNING"), taskRecord(taskArnFor("RUNNING", 0), "RUNNING")], failures: [] }, /duplicate task/],
   ["unexpected", { tasks: [taskRecord(taskArnFor("RUNNING", 1), "RUNNING")], failures: [] }, /unexpected task/],
-  ["malformed task-definition reference", { tasks: [taskRecord(taskArnFor("RUNNING", 0), "RUNNING", "not-an-arn")], failures: [] }, /not a valid ECS task-definition ARN/],
+  ["malformed task-definition reference", { tasks: [taskRecord(taskArnFor("RUNNING", 0), "RUNNING", "not-an-arn")], failures: [] }, /invalid task-definition ARN/],
 ]) {
   test(`DescribeTasks rejects ${name} responses`, () => {
     const fixture = makeFixture();
@@ -1147,15 +1145,20 @@ test("append-only audit requires atomic evidence for every retained broker mappi
   assert.throws(() => validateBrokerPlan(fixture, audit), /lacks atomic rollover evidence/);
 });
 
-test("unknown cluster task-definition families fail closed", () => {
+test("unrelated shared-cluster task-definition families remain visible and excluded from Stage B decisions", () => {
   const unrelatedFamily = "mscqr-backend";
   const fixture = makeAtomicBrokerFixture({ mutateReader: (reader) => {
     reader.listServices = () => [serviceArnFor(0)];
     reader.describeServices = () => ({ services: [serviceRecord(serviceArnFor(0), 0, newArnFor(unrelatedFamily))], failures: [] });
-    reader.listTasks = (status) => [taskArnFor(status, 0)];
-    reader.describeTasks = (arns) => ({ tasks: [taskRecord(arns[0], arns[0].includes("running") ? "RUNNING" : "PENDING", newArnFor(unrelatedFamily))], failures: [] });
+    reader.listTasks = () => [taskArnFor("RUNNING", 0), taskArnFor("PENDING", 0)];
+    reader.describeTasks = (arns) => ({ tasks: arns.map((arn) => taskRecord(arn, arn.includes("running") ? "RUNNING" : "PENDING", newArnFor(unrelatedFamily))), failures: [] });
   } });
-  assert.throws(() => generate(fixture), /outside the Stage B contract/);
+  const audit = generate(fixture);
+  assert.equal(audit.services.length, 1);
+  assert.equal(audit.services[0].stageBScoped, false);
+  assert.equal(audit.runningTasks[0].stageBScoped, false);
+  assert.equal(audit.pendingTasks[0].stageBScoped, false);
+  assert.doesNotThrow(() => validateBrokerPlan(fixture, audit));
 });
 
 for (const [label, mutate, expected = /append-only reference audit/] of [

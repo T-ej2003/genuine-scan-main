@@ -18,8 +18,8 @@ function reader(overrides = {}) {
   const base = {
     listServices: () => [serviceArn],
     describeServices: () => ({ services: [{ serviceArn, serviceName: "stage-b", taskDefinition: definitionArn, runningCount: 1, pendingCount: 0, status: "ACTIVE" }], failures: [] }),
-    listTasks: (status) => [taskArn(status)],
-    describeTasks: (arns) => ({ tasks: arns.map((arn) => ({ taskArn: arn, taskDefinitionArn: definitionArn, lastStatus: arn.includes("running") ? "RUNNING" : "PENDING", desiredStatus: arn.includes("running") ? "RUNNING" : "PENDING", group: "service:stage-b" })), failures: [] }),
+    listTasks: () => [taskArn("RUNNING")],
+    describeTasks: (arns) => ({ tasks: arns.map((arn) => ({ taskArn: arn, taskDefinitionArn: definitionArn, lastStatus: "RUNNING", desiredStatus: "RUNNING", group: "service:stage-b" })), failures: [] }),
     describeTaskDefinition: () => ({ taskDefinition: { taskDefinitionArn: definitionArn, family, revision: 1, status: "ACTIVE" } }),
   };
   return { ...base, ...overrides };
@@ -32,15 +32,37 @@ test("the source-controlled audit policy contains the complete ECS read set and 
   assert.equal(actions.some((action) => /RunTask|StartTask|StopTask|UpdateService|RegisterTaskDefinition|DeregisterTaskDefinition/.test(action)), false);
 });
 
-test("the canonical helper completes service, RUNNING, PENDING, and referenced definition observations", () => {
+test("the canonical helper completes service and RUNNING observations", () => {
   const calls = [];
   const observations = observeStageBEcs({ reader: reader({
     describeTaskDefinition: (arn) => { calls.push(arn); return { taskDefinition: { taskDefinitionArn: arn, family, revision: 1, status: "ACTIVE" } }; },
   }) });
   assert.equal(observations.services.length, 1);
   assert.equal(observations.runningTasks.length, 1);
-  assert.equal(observations.pendingTasks.length, 1);
+  assert.equal(observations.pendingTasks.length, 0);
+  assert.equal(observations.transitionalTasks.length, 0);
   assert.deepEqual(calls, [definitionArn]);
+});
+
+test("PENDING is partitioned from the active desired-RUNNING discovery set", () => {
+  const pending = taskArn("PENDING");
+  const observations = observeStageBEcs({ reader: reader({
+    listTasks: () => [pending],
+    describeTasks: () => ({ tasks: [{ taskArn: pending, taskDefinitionArn: definitionArn, lastStatus: "PENDING", desiredStatus: "RUNNING", group: "service:stage-b" }], failures: [] }),
+  }) });
+  assert.deepEqual(observations.runningTasks, []);
+  assert.equal(observations.pendingTasks.length, 1);
+  assert.equal(observations.pendingTasks[0].taskArn, pending);
+});
+
+test("transitional active tasks remain explicitly recorded", () => {
+  const activating = taskArn("ACTIVATING");
+  const observations = observeStageBEcs({ reader: reader({
+    listTasks: () => [activating],
+    describeTasks: () => ({ tasks: [{ taskArn: activating, taskDefinitionArn: definitionArn, lastStatus: "ACTIVATING", desiredStatus: "RUNNING", group: "service:stage-b" }], failures: [] }),
+  }) });
+  assert.equal(observations.transitionalTasks.length, 1);
+  assert.equal(observations.transitionalTasks[0].lastStatus, "ACTIVATING");
 });
 
 test("a missing ListServices permission fails before DescribeServices", () => {
@@ -95,15 +117,46 @@ test("AccessDenied is not converted into an empty observation", () => {
 });
 
 test("unknown services, task-definition families, regions, and clusters fail closed", () => {
-  assert.throws(() => observeStageBEcs({ reader: reader({ listServices: () => ["arn:aws:ecs:eu-west-2:368992683803:service/other-cluster/service"] }) }), /unknown Stage B ARN/);
+  assert.throws(() => observeStageBEcs({ reader: reader({ listServices: () => ["arn:aws:ecs:eu-west-2:368992683803:service/other-cluster/service"] }) }), /unknown Stage B\/production ARN/);
   const unknownDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-unknown:1";
   assert.throws(() => observeStageBEcs({ reader: reader({
     describeServices: () => ({ services: [{ serviceArn, serviceName: "stage-b", taskDefinition: unknownDefinitionArn, runningCount: 0, pendingCount: 0, status: "ACTIVE" }], failures: [] }),
     listTasks: () => [],
     describeTaskDefinition: () => ({ taskDefinition: { taskDefinitionArn: unknownDefinitionArn, family: "mscqr-production-unknown", revision: 1, status: "ACTIVE" } }),
-  }) }), /outside the Stage B contract/);
+  }) }), /unknown reserved Stage B family/);
   assert.throws(() => createAwsReader({ region: "us-east-1", clusterArn: STAGE_B.clusterArn, run: () => "{}" }), /exact production region and cluster/);
   assert.throws(() => createAwsReader({ region: STAGE_B.region, clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/other", run: () => "{}" }), /exact production region and cluster/);
+});
+
+test("unrelated shared-cluster workloads remain visible but are not Stage B scoped", () => {
+  const unrelatedFamily = "mscqr-backend";
+  const unrelatedDefinitionArn = `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${unrelatedFamily}:46`;
+  const unrelatedServiceArn = `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:service/mscqr-prod-euw2-main/mscqr-backend-servie-euw2`;
+  const unrelatedTaskArn = `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/blue-task`;
+  const observations = observeStageBEcs({ reader: reader({
+    listServices: () => [unrelatedServiceArn],
+    describeServices: () => ({ services: [{ serviceArn: unrelatedServiceArn, serviceName: "mscqr-backend-servie-euw2", taskDefinition: unrelatedDefinitionArn, runningCount: 1, pendingCount: 0, status: "ACTIVE" }], failures: [] }),
+    listTasks: () => [unrelatedTaskArn],
+    describeTasks: () => ({ tasks: [{ taskArn: unrelatedTaskArn, taskDefinitionArn: unrelatedDefinitionArn, lastStatus: "RUNNING", desiredStatus: "RUNNING", group: "service:mscqr-backend" }], failures: [] }),
+    describeTaskDefinition: () => ({ taskDefinition: { taskDefinitionArn: unrelatedDefinitionArn, family: unrelatedFamily, revision: 46, status: "ACTIVE" } }),
+  }) });
+  assert.equal(observations.services[0].stageBScoped, false);
+  assert.equal(observations.runningTasks[0].stageBScoped, false);
+  assert.equal(observations.taskDefinitions[0].stageBScoped, false);
+});
+
+test("unknown reserved Stage B families fail closed", () => {
+  const unknownDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-unknown:1";
+  assert.throws(() => observeStageBEcs({ reader: reader({
+    describeServices: () => ({ services: [{ serviceArn, serviceName: "stage-b", taskDefinition: unknownDefinitionArn, runningCount: 0, pendingCount: 0, status: "ACTIVE" }], failures: [] }),
+    listTasks: () => [],
+    describeTaskDefinition: () => ({ taskDefinition: { taskDefinitionArn: unknownDefinitionArn, family: "mscqr-production-unknown", revision: 1, status: "ACTIVE" } }),
+  }) }), /unknown reserved Stage B family/);
+});
+
+test("the AWS reader never issues a PENDING desired-status request", () => {
+  const readerInstance = createAwsReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn, run: () => JSON.stringify({ taskArns: [] }) });
+  assert.throws(() => readerInstance.listTasks("PENDING"), /only permits desiredStatus=RUNNING/);
 });
 
 test("reference audit imports the canonical helper", () => {
