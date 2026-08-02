@@ -18,7 +18,7 @@ import {
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
-import { assertStageBDeploymentIdentity, assertStageBToolingCheckout } from "./aws/stage-b-deployment-identity.mjs";
+import { assertStageBDeploymentIdentity, assertStageBProtectedMainCheckout, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenceSha256 as canonicalImageEvidenceSha256, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -89,7 +89,7 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   return true;
 }
 
-export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, imageReleaseSha, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
+export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, imageReleaseSha, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
   if (!path.isAbsolute(planPath) || !path.isAbsolute(planJsonPath) || !path.isAbsolute(auditPath) || !path.isAbsolute(permissionReportPath) || !path.isAbsolute(permissionReportSignaturePath) || !path.isAbsolute(imageEvidencePath) || !path.isAbsolute(imageEvidenceSignaturePath)) throw new Error("All Stage B apply artifacts must use absolute paths.");
   if (!fs.existsSync(planPath)) throw new Error("Saved Terraform plan is missing.");
   if (!fs.existsSync(permissionReportPath)) throw new Error("Permission-preflight report is missing.");
@@ -108,7 +108,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
   const deploymentIdentity = assertStageBDeploymentIdentity({ plan, expectedToolingSha: toolingSha, expectedImageReleaseSha: imageReleaseSha, imageEvidence });
   const boundToolingSha = toolingSha || deploymentIdentity.toolingSha;
   const boundImageReleaseSha = imageReleaseSha || deploymentIdentity.imageReleaseSha;
-  assertStageBToolingCheckout(boundToolingSha, currentHead || boundToolingSha);
+  assertStageBProtectedMainCheckout(protectedMainCheckout || { toolingSha: boundToolingSha, currentHead: currentHead || boundToolingSha, originMainHead: boundToolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false }, mode: "production" });
   if (deploymentIdentity.canonicalImageEvidenceSha256 !== imageEvidenceSha256) throw new Error("Stage B plan canonical image-evidence digest does not match the authenticated report.");
   if (audit.toolingSha !== deploymentIdentity.toolingSha || audit.imageReleaseSha !== deploymentIdentity.imageReleaseSha || audit.canonicalImageEvidenceSha256 !== deploymentIdentity.canonicalImageEvidenceSha256) throw new Error("Reference audit is bound to a different Stage B deployment identity.");
   assertImageEvidence(imageEvidence, { signatureArtifact: imageEvidenceSignatureArtifact, verifySignature: ({ report, signatureArtifact: artifact, now: signatureNow }) => verifyImageEvidence({ report, signatureArtifact: artifact, now: signatureNow }), imageReleaseSha: boundImageReleaseSha, workflowRunId: imageEvidenceWorkflowRunId, artifactSha256: imageEvidenceArtifactSha256, now });
@@ -143,6 +143,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
     trustedCallerArn: callerArn,
     terraformConfiguration: fs.readFileSync(path.join(root, terraformRoot, "main.tf"), "utf8"),
     strictResourceContract: true,
+    protectedMainCheckout,
     now: new Date(now),
   });
   if ((plan.resource_changes || []).some((change) => (change.change?.actions || []).includes("delete"))) throw new Error("Stage B apply plan contains a delete action.");
@@ -151,10 +152,6 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
 
 function currentCaller() {
   return JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn;
-}
-
-function currentToolingHead() {
-  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
 }
 
 function showSavedPlan(planPath) {
@@ -167,8 +164,19 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const artifacts = parseCli(argv); const callerArn = deps.getCaller();
   const defaultDeps = { getCaller: currentCaller, showPlan: showSavedPlan, validatePlan: assertStageBPlan, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) };
   const effectiveDeps = { ...defaultDeps, ...deps };
-  const verified = assertApplyArtifacts({ ...artifacts, callerArn, currentHead: effectiveDeps.currentHead ? effectiveDeps.currentHead() : currentToolingHead(), showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature, verifyImageEvidence: effectiveDeps.verifyImageEvidence });
+  const protectedMainCheckout = effectiveDeps.getProtectedMainCheckout
+    ? effectiveDeps.getProtectedMainCheckout()
+    : effectiveDeps.currentHead
+      ? { toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false }, mode: "production" }
+      : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
+  const verified = assertApplyArtifacts({ ...artifacts, callerArn, protectedMainCheckout, currentHead: protectedMainCheckout.currentHead, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature, verifyImageEvidence: effectiveDeps.verifyImageEvidence });
   if (artifacts.verifyOnly) return { status: "ready-to-apply", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
+  const applyCheckout = effectiveDeps.getProtectedMainCheckout
+    ? effectiveDeps.getProtectedMainCheckout()
+    : effectiveDeps.currentHead
+      ? { toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false }, mode: "production" }
+      : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
+  assertStageBProtectedMainCheckout({ ...applyCheckout, toolingSha: verified.deploymentIdentity.toolingSha, mode: "production" });
   const result = effectiveDeps.apply(artifacts.planPath);
   if (result?.status !== undefined && result.status !== 0) throw new Error("Terraform apply failed; stop without retry.");
   return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };

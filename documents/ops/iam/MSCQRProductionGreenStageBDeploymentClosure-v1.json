@@ -11,6 +11,10 @@
     "canonicalImageEvidenceSha256": "SHA256 of canonical image-evidence JSON bytes",
     "imageEvidenceExcludesToolingSha": true,
     "splitSupported": true,
+    "imageReuseReportIdentity": "tooling-input-tree-sha256",
+    "imageReuseReportExcludesSelfFromInputTree": true,
+    "productionToolingCheckout": "HEAD == tooling_sha == origin/main with fetched complete history and clean worktree",
+    "ciToolingCheckoutMode": "review; proposed tree may differ from origin/main",
     "requiredPlanVariables": ["tooling_sha", "image_release_sha", "canonical_image_evidence_sha256"],
     "joinRequirements": [
       "tooling_sha equals the checked-out tooling HEAD",

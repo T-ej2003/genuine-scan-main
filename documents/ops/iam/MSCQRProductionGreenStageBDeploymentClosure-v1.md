@@ -49,6 +49,13 @@ plan variables: `tooling_sha`, `image_release_sha`, and
 `canonical_image_evidence_sha256`. The wrapper also requires the checked-out tooling HEAD
 to equal `tooling_sha`.
 
-Image reuse is permitted only when the intervening commit diff contains no Dockerfile,
-dependency lockfile, runtime source, generated runtime package, or other image-build
-input change. Any such change requires a new exact-SHA image publication.
+Image reuse is permitted only when the reviewed compatibility report for the exact image
+release and tooling-input tree contains no Dockerfile, dependency lockfile, runtime
+source, generated runtime package, or other image-build input change. Runtime validation
+recomputes the complete diff and input-tree digest and compares it with that report; it
+never replaces the reviewed classification dynamically. The report excludes only its own
+JSON bytes from the input-tree digest, so its identity is deterministic and
+non-self-referential. The production wrapper separately requires
+`HEAD == tooling_sha == origin/main`, a fetched protected-main ref, complete history, and
+a clean worktree. CI closure uses review mode and does not require a pull-request head to
+equal origin/main.

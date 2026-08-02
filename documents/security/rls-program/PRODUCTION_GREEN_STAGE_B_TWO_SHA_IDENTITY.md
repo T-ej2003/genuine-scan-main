@@ -30,7 +30,15 @@ requires exact equality across the plan, audit, permission report, signed image 
 and checked-out tooling HEAD. Missing or legacy single-`releaseSha` deployment identity
 is rejected.
 
-Image reuse is compatible only when the complete diff from `image_release_sha` to
-`tooling_sha` contains no image build input: no Dockerfile, runtime source, dependency
-lockfile, generated runtime package, or build configuration. Tooling-only changes may
-reuse immutable signed images; image-affecting changes require a new image release.
+Image reuse uses the reviewed compatibility report's non-self-referential tooling-input
+tree identity. The report records `comparisonBaseSha` as `image_release_sha`,
+`comparisonHeadIdentity` as `tooling-input-tree-sha256`, the complete classified diff,
+classification-rules version, and the input-tree digest. The input-tree digest includes
+all tracked tooling-tree content except the report JSON itself; excluding that one
+artifact prevents a commit/report hash cycle. Runtime validation recomputes both the
+complete diff and the tree digest for the requested pair and requires exact equality with
+the checked-in report. The production checkout still independently requires
+`HEAD == tooling_sha == origin/main`, fetched complete history, the protected remote
+default branch `main`, and a clean worktree. Therefore a report is not transferable to a
+different tooling content tree, while CI review mode can validate a proposed tree without
+pretending it is already protected main.
