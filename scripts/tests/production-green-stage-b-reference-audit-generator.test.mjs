@@ -16,6 +16,7 @@ import {
   assertStageBAtomicBrokerPlan,
   assertStageBAtomicBrokerPackagePlan,
   assertStageBBrokerTaskDefinitionMapping,
+  assertTerraformDependencyCoversAddress,
   STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS,
   STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS,
   STAGE_B_TASK_DEFINITION_FAMILIES,
@@ -210,8 +211,10 @@ function addBrokerAtomicPlanContract(plan, taskDefinitionAddress = canaryAddress
           expressions: { family: { references: ["each.value.family"] } },
         },
         {
-          address: canaryAddress,
+          address: "aws_ecs_task_definition.candidate",
           type: "aws_ecs_task_definition",
+          for_each_expression: { references: ["local.candidate_definitions"] },
+          expressions: { family: { references: ["each.value.family"] } },
         },
       ],
     },
@@ -227,8 +230,8 @@ function addBrokerAtomicPlanContract(plan, taskDefinitionAddress = canaryAddress
       })),
     },
   };
-  plan.relevant_attributes = executorTarget && !omitExecutorCollectionDependency
-    ? [{ resource: executorCollectionAddress, attribute: [] }]
+  plan.relevant_attributes = executorTarget
+    ? (omitExecutorCollectionDependency ? [] : [{ resource: executorCollectionAddress, attribute: [] }])
     : [{ resource: relevantAddress, attribute: ["arn"] }];
 }
 
@@ -1462,7 +1465,78 @@ test("executor collection dependency is accepted only for the matching mode", ()
 test("missing executor collection dependency fails closed", () => {
   assert.throws(
     () => generate(makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap", omitExecutorCollectionDependency: true })),
-    /collection dependency/,
+    /Terraform dependency/,
+  );
+});
+
+test("collection dependency covers the exact candidate canary instance", () => {
+  const fixture = makeAtomicBrokerFixture({ mutatePlan: (plan) => {
+    plan.relevant_attributes = [{ resource: "aws_ecs_task_definition.candidate", attribute: [] }];
+  } });
+  assert.doesNotThrow(() => assertStageBAtomicBrokerPlan(
+    fixture.plan,
+    canaryAddress,
+    "full-rls-application-canary",
+    fixture.options.terraformConfiguration,
+  ));
+  assert.doesNotThrow(() => assertTerraformDependencyCoversAddress({
+    relevantAttributes: fixture.plan.relevant_attributes,
+    expectedResourceAddress: canaryAddress,
+  }));
+});
+
+test("collection dependency does not cover an executor instance", () => {
+  assert.throws(
+    () => assertTerraformDependencyCoversAddress({
+      relevantAttributes: [{ resource: "aws_ecs_task_definition.candidate", attribute: [] }],
+      expectedResourceAddress: executorAddressForMode("full-rls-verification"),
+    }),
+    /Terraform dependency to/,
+  );
+});
+
+test("indexed dependencies accept attribute and instance-level Terraform forms", () => {
+  assert.doesNotThrow(() => assertTerraformDependencyCoversAddress({
+    relevantAttributes: [{ resource: canaryAddress, attribute: ["arn"] }],
+    expectedResourceAddress: canaryAddress,
+  }));
+  assert.doesNotThrow(() => assertTerraformDependencyCoversAddress({
+    relevantAttributes: [{ resource: canaryAddress, attribute: [] }],
+    expectedResourceAddress: canaryAddress,
+  }));
+  assert.throws(() => assertTerraformDependencyCoversAddress({
+    relevantAttributes: [{ resource: 'aws_ecs_task_definition.candidate["backend"]', attribute: ["arn"] }],
+    expectedResourceAddress: canaryAddress,
+  }), /Terraform dependency to/);
+});
+
+test("structured dependency matching rejects unrelated or retained collections", () => {
+  for (const resource of [
+    "aws_ecs_task_definition.executor",
+    "aws_ecs_task_definition.candidate_retained",
+    "aws_lambda_function.broker",
+  ]) {
+    assert.throws(
+      () => assertTerraformDependencyCoversAddress({
+        relevantAttributes: [{ resource, attribute: [] }],
+        expectedResourceAddress: canaryAddress,
+      }),
+      /Terraform dependency to/,
+    );
+  }
+  assert.throws(
+    () => assertTerraformDependencyCoversAddress({
+      relevantAttributes: [{ resource: "aws_ecs_task_definition.candidate", attribute: [] }],
+      expectedResourceAddress: 'aws_ecs_task_definition.candidate_retained["aaaaaaaa-canary"]',
+    }),
+    /Terraform dependency to/,
+  );
+  assert.throws(
+    () => assertTerraformDependencyCoversAddress({
+      relevantAttributes: [{ resource: "aws_lambda_function.candidate", attribute: [] }],
+      expectedResourceAddress: canaryAddress,
+    }),
+    /Terraform dependency to/,
   );
 });
 
