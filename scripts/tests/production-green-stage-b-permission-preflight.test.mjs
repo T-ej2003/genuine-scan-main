@@ -478,6 +478,63 @@ test("apply wrapper rejects an unqualified broker target before apply", () => {
   }), (error) => error instanceof Error && error.message.includes("Difference: alias, qualifier"));
 });
 
+test("apply wrapper validates the canonical alias for any broker mutation regardless of ordering", () => {
+  const brokerChange = (address, type, actions) => ({ address, type, change: { actions, after: {} } });
+  const planWithBrokerChanges = (changes) => ({
+    ...plan,
+    resource_changes: [
+      ...plan.resource_changes.filter((change) => !["aws_lambda_function.broker", "aws_lambda_alias.reviewed", "aws_iam_policy.broker"].includes(change.address)),
+      ...changes,
+    ],
+  });
+  const run = (approvedPlan, aliasArn) => {
+    const fixture = wrapperFixture({ approvedPlan });
+    const auditBytes = Buffer.from(JSON.stringify({ audit: true, broker: { aliasArn } }));
+    fs.writeFileSync(fixture.auditPath, auditBytes);
+    return () => assertApplyArtifacts({
+      ...fixture,
+      planSha256: fixture.planHash,
+      auditSha256: crypto.createHash("sha256").update(auditBytes).digest("hex"),
+      savedPlanSha256: fixture.savedHash,
+      canonicalPlanJsonSha256: fixture.canonicalHash,
+      permissionReportSha256: fixture.permissionReportSha256,
+      callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
+      showPlan: () => fixture.shownBytes,
+      validatePlan: () => {},
+      verifyPermissionSignature: () => true,
+    });
+  };
+  const policyNoOpAliasUpdate = planWithBrokerChanges([
+    brokerChange("aws_iam_policy.broker", "aws_iam_policy", ["no-op"]),
+    brokerChange("aws_lambda_alias.reviewed", "aws_lambda_alias", ["update"]),
+  ]);
+  const policyUpdateAliasNoOp = planWithBrokerChanges([
+    brokerChange("aws_iam_policy.broker", "aws_iam_policy", ["update"]),
+    brokerChange("aws_lambda_alias.reviewed", "aws_lambda_alias", ["no-op"]),
+  ]);
+  const multipleResources = planWithBrokerChanges([
+    brokerChange("aws_lambda_alias.reviewed", "aws_lambda_alias", ["no-op"]),
+    brokerChange("aws_lambda_function.broker", "aws_lambda_function", ["update"]),
+    brokerChange("aws_iam_policy.broker", "aws_iam_policy", ["no-op"]),
+  ]);
+  const allNoOp = planWithBrokerChanges([
+    brokerChange("aws_iam_policy.broker", "aws_iam_policy", ["no-op"]),
+    brokerChange("aws_lambda_alias.reviewed", "aws_lambda_alias", ["no-op"]),
+  ]);
+  const unqualified = STAGE_B.brokerFunctionArn;
+  for (const candidate of [policyNoOpAliasUpdate, policyUpdateAliasNoOp, multipleResources]) {
+    assert.throws(run(candidate, unqualified), (error) => error instanceof Error && error.message.includes("Difference: alias, qualifier"));
+  }
+  assert.doesNotThrow(run(allNoOp, unqualified));
+  const forward = run(policyNoOpAliasUpdate, unqualified);
+  const reverse = run(planWithBrokerChanges([
+    brokerChange("aws_lambda_alias.reviewed", "aws_lambda_alias", ["update"]),
+    brokerChange("aws_iam_policy.broker", "aws_iam_policy", ["no-op"]),
+  ]), unqualified);
+  assert.throws(forward, /Stage B broker alias ARN mismatch/);
+  assert.throws(reverse, /Stage B broker alias ARN mismatch/);
+});
+
 test("verification-only and real apply paths reject an invalid report signature before apply", () => {
   const fixture = wrapperFixture();
   for (const verifyOnly of [true, false]) {

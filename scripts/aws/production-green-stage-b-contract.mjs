@@ -47,6 +47,19 @@ export function assertStageBBrokerAliasArn(value) {
   ].join("\n"));
 }
 
+export function assertStageBBrokerFunctionArn(value, version) {
+  const received = String(value || "");
+  if (received === STAGE_B.brokerFunctionArn) return received;
+  if (!received.startsWith(STAGE_B.brokerFunctionArn)) {
+    throw new Error(`Broker Lambda function ARN does not match the canonical function. Expected: ${STAGE_B.brokerFunctionArn} or its numeric version; Received: ${received}`);
+  }
+  const suffix = received.slice(STAGE_B.brokerFunctionArn.length);
+  if (!/^:[1-9][0-9]*$/.test(suffix) || typeof version !== "string" || !/^[1-9][0-9]*$/.test(version) || suffix.slice(1) !== version) {
+    throw new Error(`Broker Lambda function ARN version does not match config.Version. Expected: ${STAGE_B.brokerFunctionArn} or its numeric version; Received: ${received}; Version: ${String(version)}`);
+  }
+  return received;
+}
+
 export const STAGE_B_MODES = Object.freeze([
   "full-rls-capability-preflight", "full-rls-admin-bootstrap", "full-rls-role-provision",
   "full-rls-role-verify", "full-rls-admin-ownership", "full-rls-runtime-policy",

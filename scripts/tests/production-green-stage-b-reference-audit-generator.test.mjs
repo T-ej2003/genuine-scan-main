@@ -774,6 +774,24 @@ test("Stage B broker alias identity has one canonical qualified source", () => {
   assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn.replace(/:[^:]+$/, ":v2")), /Difference: alias, qualifier/);
 });
 
+test("broker configuration accepts only the canonical function ARN or matching numeric version", () => {
+  const withFunctionArn = (functionArn, version) => makeFixture({
+    mutateReader: (reader) => {
+      const original = reader.getFunctionConfiguration;
+      reader.getFunctionConfiguration = () => ({ ...original(), FunctionArn: functionArn, Version: version });
+    },
+  });
+  assert.doesNotThrow(() => generate(withFunctionArn(STAGE_B.brokerFunctionArn, "2")));
+  assert.doesNotThrow(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":2"), "2")));
+  assert.doesNotThrow(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":15"), "15")));
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":3"), "2")), /version does not match/);
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerAliasArn, "2")), /version does not match/);
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerAliasArn.replace(/function:[^:]+/, "function:other"), "2")), /canonical function/);
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArn.replace(STAGE_B.account, "000000000000"), "2")), /canonical function/);
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArn.replace(STAGE_B.region, "us-east-1"), "2")), /canonical function/);
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":foo"), "2")), /version does not match/);
+});
+
 test("audit CLI derives the canonical broker alias and rejects broker overrides", () => {
   const base = ["--plan-json", "/tmp/plan.json", "--plan-sha256", planSha256, "--output", "/tmp/audit.json", "--region", "eu-west-2", "--cluster-arn", clusterArn, "--expected-package-checksum-sha256", packageChecksum];
   assert.equal(parseCli(base).brokerAliasArn, STAGE_B.brokerAliasArn);

@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertStageBBrokerAliasArn, STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
+import { assertStageBBrokerAliasArn, assertStageBBrokerFunctionArn, STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
 import {
   assertStageBReferenceAuditFreshness,
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
@@ -262,8 +262,8 @@ function proveBrokerPackagePlan(plan, terraformConfiguration, expectedPackageChe
 }
 
 function validateBrokerConfiguration(config, brokerAliasArn, expectedPackageChecksum, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha256, terraformConfiguration) {
-  if (config?.FunctionArn !== STAGE_B.brokerFunctionArn) throw new Error("Broker Lambda identity does not match the canonical function ARN.");
   if (typeof config.Version !== "string" || !/^[1-9][0-9]*$/.test(config.Version)) throw new Error("Broker Lambda version is missing or malformed.");
+  assertStageBBrokerFunctionArn(config?.FunctionArn, config.Version);
   const variables = normalizeEnvironment(config);
   const taskDefinitions = requireObject(parseJson(variables.BROKER_TASK_DEFINITIONS_JSON, "BROKER_TASK_DEFINITIONS_JSON"), "BROKER_TASK_DEFINITIONS_JSON");
   const expectedModes = [...STAGE_B_MODES].sort();
