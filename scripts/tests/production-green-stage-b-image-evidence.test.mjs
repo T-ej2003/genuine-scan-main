@@ -8,8 +8,10 @@ import {
   imageEvidenceSha256,
   signImageEvidence,
   verifyImageEvidenceSignature,
+  assertStageBPlanImageEvidenceBinding,
 } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 
 const releaseSha = "7245a6036492f875654c414473737e33c1422f3c";
 const workflowRunId = "30760789616";
@@ -36,6 +38,29 @@ const artifactSha256 = crypto.createHash("sha256").update(artifactBytes).digest(
 const describe = (repository, tag) => {
   const record = records.find((candidate) => candidate.repository === repository && candidate.image_tag === tag);
   return { digest: record.image_digest, imagePushedAt: observedAt };
+};
+const planReferences = {
+  backend: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"1".repeat(64)}`,
+  worker: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker@sha256:${"2".repeat(64)}`,
+  executor: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"3".repeat(64)}`,
+  canary: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"4".repeat(64)}`,
+};
+const planReferenceForAddress = (address) => address.startsWith("aws_ecs_task_definition.executor[") ? planReferences.executor : address.includes('["backend"]') ? planReferences.backend : address.includes('["worker"]') ? planReferences.worker : planReferences.canary;
+const imagePlan = (overrides = {}) => {
+  const variables = {
+    backend_image: { value: planReferences.backend },
+    worker_image: { value: planReferences.worker },
+    executor_image: { value: planReferences.executor },
+    canary_image: { value: planReferences.canary },
+    read_only_canary_image: { value: planReferences.canary },
+    ...overrides.variables,
+  };
+  const resource_changes = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([address, family]) => ({
+    address,
+    type: "aws_ecs_task_definition",
+    change: { actions: ["create"], after: { family, container_definitions: JSON.stringify([{ image: planReferenceForAddress(address) }]) } },
+  }));
+  return { ...overrides, variables, resource_changes: overrides.resource_changes || resource_changes };
 };
 
 function reportFixture(overrides = {}) {
@@ -101,4 +126,45 @@ test("the release wrapper has no ECR read or mutation path", () => {
   assert.equal(wrapper.includes("ecr:DescribeImages"), false);
   assert.equal(wrapper.includes("ecr:PutImage"), false);
   assert.equal(wrapper.includes("BatchDeleteImage"), false);
+});
+
+test("exact production-shaped plan variables and all twelve task definitions bind to signed evidence", () => {
+  const bindings = assertStageBPlanImageEvidenceBinding({ plan: imagePlan(), imageEvidence: reportFixture() });
+  assert.deepEqual(bindings, {
+    backend: { repository: "mscqr-backend", digest: `sha256:${"1".repeat(64)}`, imageReference: planReferences.backend },
+    worker: { repository: "mscqr-worker", digest: `sha256:${"2".repeat(64)}`, imageReference: planReferences.worker },
+    executor: { repository: "mscqr-backend", digest: `sha256:${"3".repeat(64)}`, imageReference: planReferences.executor },
+    applicationCanary: { repository: "mscqr-backend", digest: `sha256:${"4".repeat(64)}`, imageReference: planReferences.canary },
+    readOnlyCanary: { repository: "mscqr-backend", digest: `sha256:${"4".repeat(64)}`, imageReference: planReferences.canary },
+  });
+});
+
+test("every plan variable must equal its signed repository and digest", () => {
+  for (const variable of ["backend_image", "worker_image", "executor_image", "canary_image", "read_only_canary_image"]) {
+    const plan = imagePlan({ variables: { [variable]: { value: `${planReferences.backend}:wrong` } } });
+    assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan, imageEvidence: reportFixture() }), new RegExp(`Terraform image variable ${variable}`));
+  }
+  for (const value of [
+    "mscqr-backend:latest",
+    `000000000000.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"1".repeat(64)}`,
+    `368992683803.dkr.ecr.us-east-1.amazonaws.com/mscqr-backend@sha256:${"1".repeat(64)}`,
+  ]) {
+    assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: imagePlan({ variables: { backend_image: { value } } }), imageEvidence: reportFixture() }), /Terraform image variable backend_image/);
+  }
+});
+
+test("missing or duplicate signed image records fail closed", () => {
+  const missing = reportFixture(); missing.images = missing.images.filter((image) => image.service !== "worker");
+  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: imagePlan(), imageEvidence: missing }), /exactly four image records/);
+  const duplicate = reportFixture(); duplicate.images.push({ ...duplicate.images[0] });
+  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: imagePlan(), imageEvidence: duplicate }), /exactly four image records/);
+});
+
+test("planned current task-definition images must match, while retained history may remain old", () => {
+  const changed = imagePlan();
+  changed.resource_changes.find((change) => change.address.includes('executor["full-rls-verification"]')).change.after.container_definitions = JSON.stringify([{ image: planReferences.canary }]);
+  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: changed, imageEvidence: reportFixture() }), /task-definition image does not match/);
+  const retained = imagePlan();
+  retained.resource_changes.push({ address: 'aws_ecs_task_definition.executor_retained["old-full-rls-verification"]', type: "aws_ecs_task_definition", change: { actions: ["no-op"], after: { family: "mscqr-production-full-rls-green-full-rls-verification", container_definitions: JSON.stringify([{ image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"9".repeat(64)}` }]) } } });
+  assert.doesNotThrow(() => assertStageBPlanImageEvidenceBinding({ plan: retained, imageEvidence: reportFixture() }));
 });

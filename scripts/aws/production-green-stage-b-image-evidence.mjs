@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { APPROVED_PREFLIGHT_GENERATOR_ARNS } from "./validate-production-green-stage-b-permissions.mjs";
+import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 
 export const IMAGE_EVIDENCE_SCHEMA_VERSION = 1;
 export const IMAGE_EVIDENCE_MAX_AGE_MS = 15 * 60 * 1000;
@@ -21,6 +22,78 @@ const SERVICES = Object.freeze({
   "rls-executor": { repository: "mscqr-backend", tag: (sha) => `${sha}-rls-executor` },
   "rls-canary": { repository: "mscqr-backend", tag: (sha) => `${sha}-rls-canary` },
 });
+
+export const STAGE_B_PLAN_IMAGE_BINDINGS = Object.freeze({
+  backend_image: { service: "backend", repository: "mscqr-backend" },
+  worker_image: { service: "worker", repository: "mscqr-worker" },
+  executor_image: { service: "rls-executor", repository: "mscqr-backend" },
+  canary_image: { service: "rls-canary", repository: "mscqr-backend" },
+  read_only_canary_image: { service: "rls-canary", repository: "mscqr-backend" },
+});
+
+const currentTaskImageService = (address) => {
+  if (address.startsWith("aws_ecs_task_definition.executor[")) return "rls-executor";
+  const key = /\["([^"]+)"\]$/.exec(address)?.[1];
+  return key === "backend" ? "backend" : key === "worker" ? "worker" : key === "canary" || key === "read_only_canary" ? "rls-canary" : undefined;
+};
+
+const currentTaskImageVariable = (address) => {
+  if (address.startsWith("aws_ecs_task_definition.executor[")) return "executor_image";
+  const key = /\["([^"]+)"\]$/.exec(address)?.[1];
+  return key === "backend" ? "backend_image" : key === "worker" ? "worker_image" : key === "canary" ? "canary_image" : key === "read_only_canary" ? "read_only_canary_image" : undefined;
+};
+
+const taskDefinitionsFromPlan = (value, address) => {
+  let definitions = value;
+  if (typeof definitions === "string") {
+    try { definitions = JSON.parse(definitions); } catch { throw new Error(`Stage B planned task-definition container definitions are malformed: ${address}`); }
+  }
+  if (!Array.isArray(definitions) || definitions.length !== 1 || typeof definitions[0]?.image !== "string") throw new Error(`Stage B planned task-definition image contract is malformed: ${address}`);
+  return definitions;
+};
+
+export function assertStageBPlanImageEvidenceBinding({ plan, imageEvidence } = {}) {
+  if (!plan || !imageEvidence) throw new Error("Stage B signed image evidence and Terraform plan are required for image binding.");
+  const reportImages = new Map();
+  if (!Array.isArray(imageEvidence.images) || imageEvidence.images.length !== Object.keys(SERVICES).length) throw new Error("Stage B signed image evidence must contain exactly four image records.");
+  for (const image of imageEvidence.images) {
+    if (reportImages.has(image.service)) throw new Error(`Stage B signed image evidence contains duplicate service records: ${image.service}`);
+    if (!Object.values(SERVICES).some((contract) => contract.repository === image.repository) || !/^sha256:[a-f0-9]{64}$/.test(image.digest || "")) throw new Error(`Stage B signed image evidence contains an invalid image record: ${image.service}`);
+    reportImages.set(image.service, image);
+  }
+  const bindings = {};
+  for (const [variable, contract] of Object.entries(STAGE_B_PLAN_IMAGE_BINDINGS)) {
+    const record = reportImages.get(contract.service);
+    if (!record || record.repository !== contract.repository) throw new Error(`Stage B signed image evidence is missing the required ${contract.service} binding.`);
+    const expectedReference = `${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/${contract.repository}@${record.digest}`;
+    const actual = plan.variables?.[variable]?.value;
+    if (typeof actual !== "string") throw new Error(`Stage B Terraform image variable is missing: ${variable}`);
+    if (actual !== expectedReference) throw new Error(`Stage B Terraform image variable ${variable} does not match authenticated ${contract.service} digest.`);
+    bindings[variable] = Object.freeze({ repository: contract.repository, digest: record.digest, imageReference: expectedReference });
+  }
+
+  const currentChanges = (plan.resource_changes || []).filter((change) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address));
+  const currentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
+  if (currentChanges.length !== currentAddresses.length || new Set(currentChanges.map((change) => change.address)).size !== currentAddresses.length) throw new Error("Stage B plan image binding requires exactly the twelve current task-definition addresses.");
+  for (const change of currentChanges) {
+    if (change.type !== "aws_ecs_task_definition") throw new Error(`Stage B current task-definition resource type is invalid: ${change.address}`);
+    const actions = change.change?.actions || [];
+    if (!actions.length || !actions.every((action) => action === "create" || action === "no-op")) throw new Error(`Stage B current task-definition actions are invalid: ${change.address}`);
+    const service = currentTaskImageService(change.address);
+    const variable = currentTaskImageVariable(change.address);
+    const expected = bindings[variable];
+    if (!expected) throw new Error(`Stage B task-definition image mapping is unsupported: ${change.address}`);
+    const definitions = taskDefinitionsFromPlan(change.change?.after?.container_definitions, change.address);
+    if (definitions[0].image !== expected.imageReference) throw new Error(`Stage B task-definition image does not match authenticated ${service} digest: ${change.address}`);
+  }
+  return Object.freeze({
+    backend: bindings.backend_image,
+    worker: bindings.worker_image,
+    executor: bindings.executor_image,
+    applicationCanary: bindings.canary_image,
+    readOnlyCanary: bindings.read_only_canary_image,
+  });
+}
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 export const canonicalizeImageEvidence = (value) => canonicalJson(value);
