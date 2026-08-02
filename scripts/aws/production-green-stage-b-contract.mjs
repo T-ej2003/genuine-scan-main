@@ -16,7 +16,9 @@ export const STAGE_B = Object.freeze({
   executorRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
   executorExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
   brokerFunctionArn: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
+  brokerFunctionArnWildcard: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*",
   brokerAliasArn: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
+  brokerAliasQualifier: "reviewed",
   frontendTaskDefinition: "mscqr-frontend:20",
 });
 

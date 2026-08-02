@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
+import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
 const historicalPolicyPath = "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v2.json";
 const historicalCorrectedPolicyPath = "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v3.json";
@@ -37,8 +38,8 @@ const logArn = (name) => `arn:aws:logs:eu-west-2:368992683803:log-group:${name}:
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
 const auditActions = ["ecs:ListServices", "ecs:DescribeServices", "ecs:ListTasks", "ecs:DescribeTasks", "ecs:DescribeTaskDefinition", "lambda:GetFunctionConfiguration"];
 const brokerFunctionArns = [
-  "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
-  "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*",
+  STAGE_B.brokerFunctionArn,
+  STAGE_B.brokerFunctionArnWildcard,
 ];
 const expectedV2Sha256 = "dccfa7c5cf64c266fd9ea1deabd78f6ed1b43b20132f729642cc5e2ceb65bc71";
 

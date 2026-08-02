@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
+import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlan } from "../plan-production-green-stage-b.mjs";
 
 const paths = {
@@ -184,7 +185,7 @@ test("retry write companion is exact and tag-constrained", () => {
   assert.equal(taskDefinition.Resource.includes("mscqr-backend"), false);
   assert.equal(taskDefinition.Resource.includes("mscqr-frontend"), false);
 
-  const broker = "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker";
+  const broker = STAGE_B.brokerFunctionArn;
   const brokerStatement = statementOf(policies.finalWrite, "UpdateExactStageBBrokerFunctionRelease");
   assert.deepEqual(brokerStatement.Action, [
     "lambda:UpdateFunctionConfiguration",
@@ -263,8 +264,8 @@ test("cluster, broker, and exact twelve-family restrictions remain unchanged", (
     assert.equal(statement.Condition.StringEquals["ecs:cluster"], clusterArn);
   }
   assert.deepEqual(statementOf(policies.audit, "ReadStageBBrokerConfiguration").Resource, [
-    "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
-    "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*",
+    STAGE_B.brokerFunctionArn,
+    STAGE_B.brokerFunctionArnWildcard,
   ]);
   assert.deepEqual(statementOf(policies.v4, "TagExactStageBTaskDefinitions").Resource, stageBTaskFamilies.map(arn));
   assert.deepEqual(statementOf(policies.v4, "SetExactStageBLogRetention").Resource, stageBLogGroups.map(logArn));

@@ -708,13 +708,14 @@ function requireOption(argv, option) {
 }
 
 export function parseCli(argv) {
+  if (argv.includes("--broker-function")) {
+    throw new Error("--broker-function is not accepted; Stage B broker identity is canonical.");
+  }
   const planJsonPath = requireOption(argv, "--plan-json");
   const planJsonSha256 = requireOption(argv, "--plan-sha256");
   const outputPath = requireOption(argv, "--output");
   const region = requireOption(argv, "--region");
   const clusterArn = requireOption(argv, "--cluster-arn");
-  const suppliedBrokerAliasArn = readOption(argv, "--broker-function");
-  if (suppliedBrokerAliasArn !== undefined) assertStageBBrokerAliasArn(suppliedBrokerAliasArn);
   const expectedPackageChecksumSha256 = requireOption(argv, "--expected-package-checksum-sha256");
   if (!path.isAbsolute(planJsonPath) || !path.isAbsolute(outputPath)) throw new Error("Plan and output paths must be absolute.");
   return { planJsonPath, planJsonSha256, outputPath, region, clusterArn, brokerAliasArn: STAGE_B.brokerAliasArn, expectedPackageChecksumSha256, auditedAt: readOption(argv, "--audited-at") || new Date().toISOString() };

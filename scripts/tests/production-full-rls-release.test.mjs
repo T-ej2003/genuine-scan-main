@@ -19,6 +19,7 @@ import {
   provisionProductionGreenCanaries,
   validateCanaryEnvironment,
 } from "../../backend/scripts/production-green-canary-provision.mjs";
+import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
 const releaseSha = "a".repeat(40);
 const sourceContractSha256 = "b".repeat(64);
@@ -33,7 +34,7 @@ const env = {
   MSCQR_FULL_RLS_MIGRATION_SET_DIGEST: migrationSetDigest,
   MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256: packageChecksumSha256,
   PRODUCTION_RLS_APPROVAL_ID: approvalId,
-  PRODUCTION_RLS_BROKER_ARN: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
+  PRODUCTION_RLS_BROKER_ARN: STAGE_B.brokerAliasArn,
   PRODUCTION_RLS_EXECUTOR_IMAGE: image("mscqr-backend", "1"),
   PRODUCTION_BACKEND_IMAGE: image("mscqr-backend", "2"),
   PRODUCTION_WORKER_IMAGE: image("mscqr-worker", "3"),

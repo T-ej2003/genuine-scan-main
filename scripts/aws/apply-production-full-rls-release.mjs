@@ -7,11 +7,12 @@ import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { PRODUCTION_GREEN } from "../../backend/scripts/production-full-rls-green-executor.mjs";
+import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 
-const ACCOUNT = "368992683803";
-const REGION = "eu-west-2";
-const CLUSTER_ARN = `arn:aws:ecs:${REGION}:${ACCOUNT}:cluster/mscqr-prod-euw2-main`;
-const BROKER_ARN = `arn:aws:lambda:${REGION}:${ACCOUNT}:function:mscqr-production-rls-approval-broker:reviewed`;
+const ACCOUNT = STAGE_B.account;
+const REGION = STAGE_B.region;
+const CLUSTER_ARN = STAGE_B.clusterArn;
+const BROKER_ARN = STAGE_B.brokerAliasArn;
 const APPLY_MODES = Object.freeze([
   "full-rls-capability-preflight",
   "full-rls-admin-bootstrap",
@@ -70,8 +71,8 @@ const invokeBroker = (mode, config, aws, directory) => {
   fs.writeFileSync(requestPath, JSON.stringify({ mode, approvalId: config.approvalId }), { mode: 0o600, flag: "wx" });
   const invoked = aws([
     "lambda", "invoke",
-    "--function-name", config.brokerArn.replace(/:reviewed$/, ""),
-    "--qualifier", "reviewed",
+    "--function-name", STAGE_B.brokerFunctionArn,
+    "--qualifier", STAGE_B.brokerAliasQualifier,
     "--cli-binary-format", "raw-in-base64-out",
     "--payload", `fileb://${requestPath}`,
     responsePath,

@@ -767,17 +767,37 @@ test("generator enforces current, maximum-age, and future-skew timestamps", () =
 
 test("Stage B broker alias identity has one canonical qualified source", () => {
   assert.equal(assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn), STAGE_B.brokerAliasArn);
-  assert.throws(() => assertStageBBrokerAliasArn("arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"), /Expected: .*:reviewed[\s\S]*Difference: alias, qualifier/);
-  assert.throws(() => assertStageBBrokerAliasArn("arn:aws:lambda:eu-west-2:368992683803:function:other:reviewed"), /Difference: function/);
-  assert.throws(() => assertStageBBrokerAliasArn("arn:aws:lambda:us-east-1:368992683803:function:mscqr-production-rls-approval-broker:reviewed"), /Difference: region/);
-  assert.throws(() => assertStageBBrokerAliasArn("arn:aws:lambda:eu-west-2:000000000000:function:mscqr-production-rls-approval-broker:reviewed"), /Difference: account/);
-  assert.throws(() => assertStageBBrokerAliasArn("arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:v2"), /Difference: alias, qualifier/);
+  assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerFunctionArn), /Difference: alias, qualifier/);
+  assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn.replace(/function:[^:]+/, "function:other")), /Difference: function/);
+  assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn.replace(STAGE_B.region, "us-east-1")), /Difference: region/);
+  assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn.replace(STAGE_B.account, "000000000000")), /Difference: account/);
+  assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn.replace(/:[^:]+$/, ":v2")), /Difference: alias, qualifier/);
 });
 
-test("audit CLI derives the canonical broker alias and rejects an unqualified override", () => {
+test("audit CLI derives the canonical broker alias and rejects broker overrides", () => {
   const base = ["--plan-json", "/tmp/plan.json", "--plan-sha256", planSha256, "--output", "/tmp/audit.json", "--region", "eu-west-2", "--cluster-arn", clusterArn, "--expected-package-checksum-sha256", packageChecksum];
   assert.equal(parseCli(base).brokerAliasArn, STAGE_B.brokerAliasArn);
-  assert.throws(() => parseCli([...base, "--broker-function", "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"]), /Expected: .*:reviewed/);
+  assert.throws(() => parseCli([...base, "--broker-function", STAGE_B.brokerAliasArn]), /not accepted; Stage B broker identity is canonical/);
+});
+
+test("Stage B broker Lambda identities have one executable source", () => {
+  const canonicalPath = path.resolve("scripts/aws/production-green-stage-b-contract.mjs");
+  const sourceFiles = [];
+  const visit = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(entryPath);
+      else if (entry.name.endsWith(".mjs") && path.resolve(entryPath) !== canonicalPath) sourceFiles.push(entryPath);
+    }
+  };
+  visit(path.resolve("scripts"));
+  const duplicateLiterals = sourceFiles.flatMap((file) => {
+    const source = fs.readFileSync(file, "utf8");
+    return [STAGE_B.brokerAliasArn, STAGE_B.brokerFunctionArn, STAGE_B.brokerFunctionArnWildcard]
+      .filter((literal) => source.includes(literal))
+      .map((literal) => `${file}:${literal}`);
+  });
+  assert.deepEqual(duplicateLiterals, []);
 });
 
 const serviceArnFor = (index) => `arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/stage-b-${index}`;
