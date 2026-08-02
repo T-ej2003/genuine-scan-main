@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertStageBDeploymentIdentity,
+  assertStageBProtectedCheckoutMatchesDeploymentIdentity,
   assertStageBProtectedMainCheckout,
   assertStageBToolingCheckout,
 } from "../aws/stage-b-deployment-identity.mjs";
@@ -63,6 +64,15 @@ test("protected-main checkout is exact, complete, and clean", () => {
   assert.throws(() => assertStageBProtectedMainCheckout({ ...valid, originMainHead: undefined }), /unavailable/);
   assert.doesNotThrow(() => assertStageBProtectedMainCheckout({ ...valid, originMainHead: imageReleaseSha, mode: "review" }));
   assert.throws(() => assertStageBProtectedMainCheckout({ ...valid, mode: "unsupported" }), /mode/);
+});
+
+test("strict protected-main validation is joined to the plan tooling identity", () => {
+  const identity = { toolingSha };
+  const checkout = { toolingSha, currentHead: toolingSha, originMainHead: toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false } };
+  assert.doesNotThrow(() => assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout: checkout, deploymentIdentity: identity }));
+  assert.throws(() => assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout: { ...checkout, toolingSha: imageReleaseSha }, deploymentIdentity: identity }), /does not match the approved plan tooling SHA/);
+  assert.throws(() => assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout: { ...checkout, currentHead: imageReleaseSha }, deploymentIdentity: identity }), /tooling HEAD/);
+  assert.throws(() => assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout: undefined, deploymentIdentity: identity }), /requires protected-main/);
 });
 
 test("image reuse compatibility binds the reviewed tooling input tree and exact classification", () => {

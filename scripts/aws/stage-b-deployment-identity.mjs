@@ -75,6 +75,15 @@ export function assertStageBProtectedMainCheckout({
   return Object.freeze({ toolingSha, currentHead, originMainHead, mode });
 }
 
+export function assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity } = {}) {
+  const expectedToolingSha = requireSha(deploymentIdentity?.toolingSha, "deploymentIdentity.toolingSha");
+  if (!protectedMainCheckout) throw new Error("Strict Stage B validation requires protected-main checkout evidence.");
+  if (protectedMainCheckout.toolingSha !== undefined && protectedMainCheckout.toolingSha !== expectedToolingSha) {
+    throw new Error("Stage B protected-main checkout tooling SHA does not match the approved plan tooling SHA.");
+  }
+  return assertStageBProtectedMainCheckout({ ...protectedMainCheckout, toolingSha: expectedToolingSha });
+}
+
 export function assertStageBToolingCheckout(toolingSha, currentHead, checkout = {}) {
   return assertStageBProtectedMainCheckout({ toolingSha, currentHead, ...checkout });
 }

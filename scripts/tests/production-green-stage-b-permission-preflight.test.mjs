@@ -263,7 +263,7 @@ test("saved-plan apply wrapper refuses an unreviewed tooling checkout before art
     argv: ["--plan", planPath, "--plan-json", path.join(directory, "plan.json"), "--reference-audit", path.join(directory, "audit.json"), "--permission-report", path.join(directory, "permission.json"), "--permission-report-sha256", "0".repeat(64), "--permission-report-signature", path.join(directory, "permission.signature.json"), "--image-evidence", path.join(directory, "image-evidence.json"), "--image-evidence-sha256", "0".repeat(64), "--image-evidence-signature", path.join(directory, "image-evidence.signature.json"), "--image-evidence-workflow-run-id", "30760789616", "--image-evidence-artifact-sha256", "0".repeat(64), "--tooling-sha", "b".repeat(40), "--image-release-sha", "a".repeat(40), "--plan-sha256", "0".repeat(64), "--audit-sha256", "0".repeat(64), "--saved-plan-sha256", "0".repeat(64), "--canonical-plan-json-sha256", "0".repeat(64)],
     env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
     deps: { getCaller: () => `${roleArn}/test-session`, apply: () => { throw new Error("apply must not be reached"); } },
-  }), /origin\/main/);
+  }), /origin\/main|tracked modifications|untracked file/);
 });
 
 test("AWS simulator accepts the hand-reviewed PascalCase CLI fixture", () => {

@@ -17,7 +17,7 @@ import {
 import { assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-stage-b-image-evidence.mjs";
 import { classifyStageBPlan } from "./aws/stage-b-deployment-contract.mjs";
-import { assertStageBDeploymentIdentity, assertStageBProtectedMainCheckout, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
+import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
@@ -508,8 +508,8 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
 
 export function assertStageBPlan(plan, options = {}) {
   const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence, strictResourceContract = false, protectedMainCheckout } = options;
-  if (strictResourceContract && protectedMainCheckout) assertStageBProtectedMainCheckout(protectedMainCheckout);
   const deploymentIdentity = strictResourceContract || imageEvidence ? assertStageBDeploymentIdentity({ plan, imageEvidence }) : undefined;
+  if (strictResourceContract) assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity });
   const resourceClassification = classifyStageBPlan(plan, { strict: strictResourceContract, terraformConfiguration });
   const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence }) : undefined;
   const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
