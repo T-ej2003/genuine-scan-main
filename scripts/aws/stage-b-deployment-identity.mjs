@@ -99,7 +99,9 @@ export function readStageBProtectedMainCheckout({ cwd = process.cwd(), fetchOrig
   let remoteDefaultBranch;
   try {
     remoteDefaultBranch = git(cwd, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]).replace(/^refs\/remotes\/origin\//, "");
-  } catch { remoteDefaultBranch = undefined; }
+  } catch {
+    try { remoteDefaultBranch = /^ref: refs\/heads\/([^\s]+)\s+HEAD$/m.exec(git(cwd, ["ls-remote", "--symref", "origin", "HEAD"]))?.[1]; } catch { remoteDefaultBranch = undefined; }
+  }
   const isAncestor = originMainHead === undefined ? false : (() => {
     try { git(cwd, ["merge-base", "--is-ancestor", currentHead, "refs/remotes/origin/main"]); return true; } catch { return false; }
   })();
