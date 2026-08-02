@@ -116,6 +116,41 @@ function plannedResources(module, resources = []) {
   return resources;
 }
 
+function parseTerraformResourceAddress(address) {
+  if (typeof address !== "string") return undefined;
+  const parts = address.split(".");
+  if (parts.length !== 2 || parts.some((part) => part.length === 0)) return undefined;
+  const [type, name] = parts;
+  const instance = /^(?<name>[A-Za-z0-9_-]+)\[\"(?<key>[A-Za-z0-9_-]+)\"\]$/.exec(name);
+  if (instance) return { type, name: instance.groups.name, instanceKey: instance.groups.key };
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) return undefined;
+  return { type, name, instanceKey: undefined };
+}
+
+const samePath = (left, right) => Array.isArray(left)
+  && Array.isArray(right)
+  && left.length === right.length
+  && left.every((value, index) => value === right[index]);
+
+export function assertTerraformDependencyCoversAddress({ relevantAttributes, expectedResourceAddress, expectedAttribute = ["arn"] } = {}) {
+  const expected = parseTerraformResourceAddress(expectedResourceAddress);
+  if (!expected || !Array.isArray(expectedAttribute)) {
+    throw new Error(`Terraform dependency address is malformed: ${expectedResourceAddress}`);
+  }
+  const match = (Array.isArray(relevantAttributes) ? relevantAttributes : []).find((item) => {
+    if (!item || !Array.isArray(item.attribute)) return false;
+    const observed = parseTerraformResourceAddress(item.resource);
+    if (!observed || observed.type !== expected.type || observed.name !== expected.name) return false;
+    if (observed.instanceKey !== undefined) {
+      return observed.instanceKey === expected.instanceKey
+        && (item.attribute.length === 0 || samePath(item.attribute, expectedAttribute));
+    }
+    return expected.instanceKey !== undefined && item.attribute.length === 0;
+  });
+  if (!match) throw new Error(`Terraform dependency to ${expectedResourceAddress}.${expectedAttribute.join(".")} is missing.`);
+  return match;
+}
+
 function expectedExecutorAddresses() {
   return Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES)
     .filter((address) => address.startsWith(`${STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION}[`));
@@ -222,16 +257,28 @@ export function assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, broker
     const hasForEachExecutor = executorResource?.type === "aws_ecs_task_definition"
       && Array.isArray(executorFamilyReference)
       && executorFamilyReference.includes("each.value.family");
-    const hasCollectionDependency = relevant.some((item) => item?.resource === STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION
-      && Array.isArray(item.attribute) && item.attribute.length === 0);
-    if (!hasForEachExecutor || !hasCollectionDependency) {
+    if (!hasForEachExecutor) {
       throw new Error(`Broker atomic rollover Terraform collection dependency to ${taskDefinitionAddress}.arn is missing.`);
     }
+    assertTerraformDependencyCoversAddress({ relevantAttributes: relevant, expectedResourceAddress: taskDefinitionAddress });
     return;
   }
-  if (!relevant.some((item) => item?.resource === taskDefinitionAddress && JSON.stringify(item.attribute) === JSON.stringify(["arn"]))) {
-    throw new Error(`Broker atomic rollover Terraform dependency to ${taskDefinitionAddress}.arn is missing.`);
+  const configuredCandidate = configuredResources(plan?.configuration?.root_module)
+    .find((resource) => resource.address === "aws_ecs_task_definition.candidate");
+  const candidateForEachReferences = configuredCandidate?.for_each_expression?.references;
+  const candidateFamilyReferences = configuredCandidate?.expressions?.family?.references;
+  const hasForEachCandidate = configuredCandidate?.type === "aws_ecs_task_definition"
+    && Array.isArray(candidateForEachReferences)
+    && candidateForEachReferences.length === 1
+    && candidateForEachReferences[0] === "local.candidate_definitions"
+    && Array.isArray(candidateFamilyReferences)
+    && candidateFamilyReferences.includes("each.value.family");
+  if (relevant.some((item) => item?.resource === "aws_ecs_task_definition.candidate")) {
+    if (!hasForEachCandidate) {
+      throw new Error(`Broker atomic rollover Terraform collection dependency to ${taskDefinitionAddress}.arn is missing.`);
+    }
   }
+  assertTerraformDependencyCoversAddress({ relevantAttributes: relevant, expectedResourceAddress: taskDefinitionAddress });
 }
 
 function brokerResource(plan) {
