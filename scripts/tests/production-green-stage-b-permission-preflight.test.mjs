@@ -20,7 +20,7 @@ import simulatorAllowed from "./fixtures/aws-iam-simulate-principal-policy-allow
 import { assertStageBReleaseCallerArn } from "../plan-production-green-stage-b.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
-import { generateImageEvidence, signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
+import { generateImageEvidence, imageEvidenceSha256, signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const roleArn = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
@@ -485,9 +485,9 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   const imageArtifactBytes = Buffer.from(`${imageRecords.map((record) => JSON.stringify(record)).join("\n")}\n`);
   const imageArtifactSha256 = crypto.createHash("sha256").update(imageArtifactBytes).digest("hex");
   const imageEvidence = generateImageEvidence({ artifactBytes: imageArtifactBytes, releaseSha, workflowRunId: "30760789616", artifactSha256: imageArtifactSha256, verifierCallerArn: generatorArn, observedAt: new Date().toISOString(), describe: (repository, tag) => ({ digest: `sha256:${imageRecords.find((record) => record.repository === repository && record.image_tag === tag).image_digest.slice(7)}`, imagePushedAt: "2026-08-02T18:26:34.000Z" }) });
-  fs.writeFileSync(imageEvidencePath, JSON.stringify(imageEvidence));
+  fs.writeFileSync(imageEvidencePath, `${JSON.stringify(imageEvidence, null, 2)}\n`);
   fs.writeFileSync(imageEvidenceSignaturePath, JSON.stringify(signImageEvidence(imageEvidence, { sign: () => "AQ==" })));
-  return { directory, planPath, planJsonPath, auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256: crypto.createHash("sha256").update(fs.readFileSync(imageEvidencePath)).digest("hex"), imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true };
+  return { directory, planPath, planJsonPath, auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256: imageEvidenceSha256(imageEvidence), imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true };
 }
 
 const wrapperArgs = (fixture, verifyOnly = false) => [

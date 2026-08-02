@@ -90,6 +90,13 @@ the exact `release_sha` before dependency installation or OIDC credentials. A fa
 stops publication; no separate identity-probe workflow is required or accepted as a substitute
 for those source and release checks.
 
+The signed image-evidence `reportSha256` and the wrapper's
+`--image-evidence-sha256` value are the SHA-256 of the canonical JSON report produced by
+`canonicalizeImageEvidence`, not the raw pretty-printed file bytes. The wrapper parses the
+report and recomputes that canonical digest before signature and plan-image verification;
+formatting changes therefore cannot alter the authenticated identity, while any semantic
+report change invalidates the signature binding.
+
 Rollback is a separately approved destroy of this isolated Terraform role followed by
 removal of the one environment variable. It does not delete published images or alter any
 application infrastructure.
