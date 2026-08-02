@@ -8,9 +8,32 @@ import { fileURLToPath } from "node:url";
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_PREFLIGHT_MAX_AGE_MS = 15 * 60 * 1000;
 export const PERMISSION_PREFLIGHT_CLOCK_SKEW_MS = 60 * 1000;
-const ACCOUNT = "368992683803";
-const REGION = "eu-west-2";
-const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
+export const ACCOUNT = "368992683803";
+export const REGION = "eu-west-2";
+export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
+export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${ACCOUNT}:root`]);
+export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
+const TASK_DEFINITION_TAG_CONTEXT = Object.freeze([
+  { key: "aws:RequestedRegion", type: "string", values: [REGION] },
+  { key: "aws:RequestTag/Environment", type: "string", values: ["production"] },
+  { key: "aws:RequestTag/ManagedBy", type: "string", values: ["Terraform"] },
+  { key: "aws:RequestTag/Component", type: "string", values: ["full-rls-green-stage-b"] },
+  { key: "aws:TagKeys", type: "stringList", values: ["Environment", "ManagedBy", "Component"] },
+]);
+const TASK_DEFINITION_MAPPINGS = Object.freeze([
+  ["backend", 'aws_ecs_task_definition.candidate["backend"]', "mscqr-production-rls-green-backend-candidate", "mscqr-production-rls-green-backend-execution", "mscqr-production-rls-green-backend-task"],
+  ["worker", 'aws_ecs_task_definition.candidate["worker"]', "mscqr-production-rls-green-worker-candidate", "mscqr-production-rls-green-worker-execution", "mscqr-production-rls-green-worker-task"],
+  ["application-canary", 'aws_ecs_task_definition.candidate["canary"]', "mscqr-production-full-rls-green-application-canary", "mscqr-production-rls-green-canary-execution", "mscqr-production-rls-green-canary-task"],
+  ["read-only-canary", 'aws_ecs_task_definition.candidate["read_only_canary"]', "mscqr-production-full-rls-green-read-only-canary", "mscqr-production-full-rls-green-read-only-canary-execution", "mscqr-production-full-rls-green-read-only-canary-task"],
+  ["full-rls-admin-bootstrap", 'aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]', "mscqr-production-full-rls-green-full-rls-admin-bootstrap", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
+  ["full-rls-admin-ownership", 'aws_ecs_task_definition.executor["full-rls-admin-ownership"]', "mscqr-production-full-rls-green-full-rls-admin-ownership", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
+  ["full-rls-capability-preflight", 'aws_ecs_task_definition.executor["full-rls-capability-preflight"]', "mscqr-production-full-rls-green-full-rls-capability-preflight", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
+  ["full-rls-role-provision", 'aws_ecs_task_definition.executor["full-rls-role-provision"]', "mscqr-production-full-rls-green-full-rls-role-provision", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
+  ["full-rls-role-verify", 'aws_ecs_task_definition.executor["full-rls-role-verify"]', "mscqr-production-full-rls-green-full-rls-role-verify", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
+  ["full-rls-rollback", 'aws_ecs_task_definition.executor["full-rls-rollback"]', "mscqr-production-full-rls-green-full-rls-rollback", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
+  ["full-rls-runtime-policy", 'aws_ecs_task_definition.executor["full-rls-runtime-policy"]', "mscqr-production-full-rls-green-full-rls-runtime-policy", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
+  ["full-rls-verification", 'aws_ecs_task_definition.executor["full-rls-verification"]', "mscqr-production-full-rls-green-full-rls-verification", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
+].map(([id, address, family, executionRoleName, taskRoleName]) => Object.freeze({ id, address, family, resource: `arn:aws:ecs:${REGION}:${ACCOUNT}:task-definition/${family}:*`, executionRoleArn: `arn:aws:iam::${ACCOUNT}:role/${executionRoleName}`, taskRoleArn: `arn:aws:iam::${ACCOUNT}:role/${taskRoleName}` })));
 const stageBRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const arnPattern = /^arn:aws:[^:]+:[^:]*:368992683803:.+$/;
 
@@ -30,7 +53,8 @@ function requireOption(argv, option) {
 
 export function parseCli(argv) {
   return {
-    roleArn: requireOption(argv, "--role-arn"),
+    reportGeneratorCallerArn: requireOption(argv, "--report-generator-caller-arn"),
+    simulatedRoleArn: requireOption(argv, "--simulated-role-arn"),
     planJsonPath: requireOption(argv, "--plan-json"),
     manifestPath: requireOption(argv, "--manifest"),
     outputPath: requireOption(argv, "--output"),
@@ -85,6 +109,7 @@ function assertExactContextValues(context, expected, label) {
 }
 
 export function validateManifest(manifest, { account = ACCOUNT, region = REGION } = {}) {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) throw new Error("Permission manifest is required.");
   if (manifest?.schemaVersion !== PERMISSION_PREFLIGHT_SCHEMA_VERSION) throw new Error("Permission manifest schema version is unsupported.");
   if (manifest.accountId !== account || manifest.region !== region) throw new Error("Permission manifest account or region is wrong.");
   if (!Array.isArray(manifest.required) || !Array.isArray(manifest.forbidden)) throw new Error("Permission manifest sections are malformed.");
@@ -118,6 +143,28 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION 
       if (entry.plan.address && typeof entry.plan.address !== "string") throw new Error(`Permission manifest plan address is malformed: ${entry.id}.`);
     }
   }
+  if (!Array.isArray(manifest.taskDefinitionMappings) || manifest.taskDefinitionMappings.length !== TASK_DEFINITION_MAPPINGS.length) throw new Error("Permission manifest must contain exactly twelve task-definition mappings.");
+  const expectedMappings = new Map(TASK_DEFINITION_MAPPINGS.map((mapping) => [mapping.address, mapping]));
+  const mappingAddresses = new Set();
+  for (const mapping of manifest.taskDefinitionMappings) {
+    if (!mapping || typeof mapping !== "object" || mappingAddresses.has(mapping.address)) throw new Error("Permission manifest task-definition mapping is missing or duplicated.");
+    mappingAddresses.add(mapping.address);
+    const expected = expectedMappings.get(mapping.address);
+    if (!expected || mapping.id !== expected.id || mapping.family !== expected.family || mapping.resource !== expected.resource
+      || mapping.executionRoleArn !== expected.executionRoleArn || mapping.taskRoleArn !== expected.taskRoleArn) {
+      throw new Error(`Permission manifest task-definition mapping is outside the exact Stage B allowlist: ${mapping.address || "missing"}.`);
+    }
+    if (JSON.stringify(mapping.actions) !== JSON.stringify(["create"])) throw new Error(`Permission manifest task-definition actions are invalid: ${mapping.address}.`);
+    assertContext(mapping.registerContext, mapping.address);
+    assertContext(mapping.passRoleContext, mapping.address);
+    for (const expectedContext of TASK_DEFINITION_TAG_CONTEXT) {
+      const actualContext = mapping.registerContext.find((entry) => entry.key === expectedContext.key);
+      if (!actualContext || actualContext.type !== expectedContext.type || JSON.stringify(actualContext.values) !== JSON.stringify(expectedContext.values)) throw new Error(`${mapping.address} must include exact ${expectedContext.key} context.`);
+    }
+    const service = mapping.passRoleContext.find((entry) => entry.key === "iam:PassedToService");
+    if (!service || service.type !== "string" || JSON.stringify(service.values) !== JSON.stringify(["ecs-tasks.amazonaws.com"])) throw new Error(`Permission manifest PassRole context is invalid: ${mapping.address}.`);
+  }
+  if (mappingAddresses.size !== expectedMappings.size) throw new Error("Permission manifest task-definition mapping set is incomplete.");
   return true;
 }
 
@@ -140,12 +187,25 @@ function evaluation(entry, resource) {
 }
 
 export function deriveRequiredEvaluations(plan, manifest) {
+  validateManifest(manifest);
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
   const required = manifest.required.filter((entry) => !entry.plan).flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource)));
   const coveredChanges = new Set();
   for (const change of changes) {
     const actions = change.change?.actions || [];
     if (exactActions(actions, ["no-op"])) continue;
+    const taskMapping = change.type === "aws_ecs_task_definition" && exactActions(actions, ["create"])
+      ? manifest.taskDefinitionMappings.find((mapping) => mapping.address === change.address)
+      : undefined;
+    if (change.type === "aws_ecs_task_definition" && !taskMapping) throw new Error(`No permission manifest entry covers ${change.address} ${JSON.stringify(actions)}.`);
+    if (taskMapping) {
+      required.push(evaluation({ id: `${taskMapping.id}-register`, action: "ecs:RegisterTaskDefinition", context: taskMapping.registerContext, phase: "apply" }, taskMapping.resource));
+      required.push(evaluation({ id: `${taskMapping.id}-tag`, action: "ecs:TagResource", context: taskMapping.registerContext, phase: "apply" }, taskMapping.resource));
+      required.push(evaluation({ id: `${taskMapping.id}-pass-execution`, action: "iam:PassRole", context: taskMapping.passRoleContext, phase: "apply" }, taskMapping.executionRoleArn));
+      required.push(evaluation({ id: `${taskMapping.id}-pass-task`, action: "iam:PassRole", context: taskMapping.passRoleContext, phase: "apply" }, taskMapping.taskRoleArn));
+      coveredChanges.add(change.address);
+      continue;
+    }
     const matches = manifest.required.filter((entry) => entry.plan && planMatches(entry.plan, change));
     if (matches.length === 0) throw new Error(`No permission manifest entry covers ${change.address} ${JSON.stringify(actions)}.`);
     coveredChanges.add(change.address);
@@ -189,11 +249,12 @@ export function simulatePrincipalPolicy({ roleArn, evaluation: item, run = (args
   return { decision: result.EvalDecision, matchedStatements: result.MatchedStatements.length, missingContextValues: result.MissingContextValues };
 }
 
-export function inspectCloudTrailDenials({ sessionName, startTime, requiredActions, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
+export function inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
   const response = JSON.parse(run([
     "cloudtrail", "lookup-events",
     "--lookup-attributes", `AttributeKey=Username,AttributeValue=${sessionName}`,
     "--start-time", startTime,
+    "--end-time", endTime,
     "--max-results", "50",
     "--output", "json",
   ]));
@@ -217,11 +278,12 @@ function validateFreshness(timestamp, now) {
 }
 
 export function runPermissionPreflight({
-  roleArn,
+  reportGeneratorCallerArn,
+  simulatedRoleArn = RELEASE_ROLE_ARN,
+  manifest,
   plan,
   planBytes,
   savedPlanBytes,
-  manifest,
   expectedAccount = ACCOUNT,
   expectedRegion = REGION,
   generatedAt = new Date().toISOString(),
@@ -229,33 +291,45 @@ export function runPermissionPreflight({
   cloudTrailSessionName,
   now = new Date().toISOString(),
   simulate = ({ roleArn: sourceArn, evaluation: item }) => simulatePrincipalPolicy({ roleArn: sourceArn, evaluation: item }),
-  cloudTrail = ({ sessionName, startTime, requiredActions }) => inspectCloudTrailDenials({ sessionName, startTime, requiredActions }),
+  cloudTrail = ({ sessionName, startTime, endTime, requiredActions }) => inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions }),
 } = {}) {
   if (expectedAccount !== ACCOUNT || expectedRegion !== REGION) throw new Error("Expected account or region is wrong.");
   if (!Buffer.isBuffer(savedPlanBytes) || savedPlanBytes.length === 0) throw new Error("Saved binary plan bytes are required for permission preflight.");
-  if (roleArn !== RELEASE_ROLE_ARN) throw new Error("Permission preflight role ARN is not the production release role.");
+  if (!reportGeneratorCallerArn || !APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(reportGeneratorCallerArn)) throw new Error("Permission preflight generator is not an approved audit/admin principal.");
+  if (simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission preflight simulated role ARN is not the production release role.");
   validateManifest(manifest, { account: expectedAccount, region: expectedRegion });
   if (!plan?.variables || plan.variables.account_id?.value !== expectedAccount || plan.variables.aws_region?.value !== expectedRegion) throw new Error("Plan account or region is wrong.");
   validateFreshness(generatedAt, now);
   if (!policyPublishedAt || !Number.isFinite(Date.parse(policyPublishedAt))) throw new Error("Policy publication timestamp is required and must be valid.");
   if (!cloudTrailSessionName) throw new Error("CloudTrail session name is required.");
   const derived = deriveRequiredEvaluations(plan, manifest);
-  const requiredResults = derived.required.map((item) => ({ ...item, ...simulate({ roleArn, evaluation: item }) }));
-  const forbiddenResults = derived.forbidden.map((item) => ({ ...item, ...simulate({ roleArn, evaluation: item }) }));
-  const cloudTrailResult = cloudTrail({ sessionName: cloudTrailSessionName, startTime: policyPublishedAt, requiredActions: derived.required.map((item) => item.action) });
+  const requiredResults = derived.required.map((item) => ({ ...item, ...simulate({ roleArn: simulatedRoleArn, evaluation: item }) }));
+  const forbiddenResults = derived.forbidden.map((item) => ({ ...item, ...simulate({ roleArn: simulatedRoleArn, evaluation: item }) }));
+  const cloudTrailResult = cloudTrail({ sessionName: cloudTrailSessionName, startTime: policyPublishedAt, endTime: generatedAt, requiredActions: derived.required.map((item) => item.action) });
   const deniedRequired = requiredResults.filter((item) => item.decision !== "allowed");
   const allowedForbidden = forbiddenResults.filter((item) => item.decision === "allowed");
   const unresolved = cloudTrailResult.unresolvedDenials || [];
   const report = {
     schemaVersion: PERMISSION_PREFLIGHT_SCHEMA_VERSION,
-    roleArn,
+    reportGeneratorCallerArn,
+    simulatedRoleArn,
+    applyRoleArn: RELEASE_ROLE_ARN,
+    applyCallerArn: null,
+    applyCallerArnPattern: RELEASE_CALLER_PATTERN,
+    manifestSha256: sha256(Buffer.from(canonicalizeJson(manifest))),
     planSha256: sha256(planBytes),
     savedPlanSha256: sha256(savedPlanBytes),
     canonicalPlanJsonSha256: sha256(Buffer.from(canonicalizeJson(plan))),
     generatedAt,
+    policyPublishedAt,
+    cloudTrailWindow: { startTime: policyPublishedAt, endTime: generatedAt, sessionName: cloudTrailSessionName },
     requiredEvaluations: requiredResults,
     forbiddenEvaluations: forbiddenResults,
     cloudTrail: cloudTrailResult,
+    requiredAllowedCount: requiredResults.filter((item) => item.decision === "allowed").length,
+    requiredDeniedCount: deniedRequired.length,
+    forbiddenAllowedCount: allowedForbidden.length,
+    forbiddenDeniedCount: forbiddenResults.filter((item) => item.decision !== "allowed").length,
     allowedCount: requiredResults.filter((item) => item.decision === "allowed").length,
     deniedCount: deniedRequired.length + allowedForbidden.length + unresolved.length,
     status: deniedRequired.length === 0 && allowedForbidden.length === 0 && unresolved.length === 0 ? "valid" : "invalid",
@@ -263,13 +337,15 @@ export function runPermissionPreflight({
   return report;
 }
 
-export function runCli(argv = process.argv.slice(2)) {
+export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn, runPreflight = runPermissionPreflight } = {}) {
   const options = parseCli(argv);
+  const observedCallerArn = getCaller();
+  if (observedCallerArn !== options.reportGeneratorCallerArn) throw new Error("Report generator caller does not match the current AWS identity.");
   const planBytes = fs.readFileSync(path.resolve(options.planJsonPath));
   const savedPlanBytes = fs.readFileSync(path.resolve(options.savedPlanPath));
   const plan = JSON.parse(planBytes);
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
-  const report = runPermissionPreflight({ ...options, plan, planBytes, savedPlanBytes });
+  const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, savedPlanBytes });
   fs.writeFileSync(path.resolve(options.outputPath), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
   process.stdout.write(`${JSON.stringify({ status: report.status, outputPath: options.outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
   if (report.status !== "valid") process.exitCode = 1;

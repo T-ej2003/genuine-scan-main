@@ -619,3 +619,22 @@ plan SHA and must be supplied to
 `scripts/apply-production-green-stage-b.mjs` with the plan-bound audit and valid
 Stage B validator result. Missing, stale, denied, unscoped, or unreviewed
 permission evidence blocks apply before Terraform is invoked.
+
+Preflight generation and Terraform apply use separate identities. No reviewed
+non-root Stage B audit principal exists, so the approved generator is the
+administrator/root identity `arn:aws:iam::368992683803:root`; it simulates the
+exact release role and performs the supplemental CloudTrail lookup. The
+release-deployer is never granted `iam:SimulatePrincipalPolicy` or
+`cloudtrail:LookupEvents`, and the apply wrapper never calls either API. The
+report records `reportGeneratorCallerArn`, `simulatedRoleArn`, `applyRoleArn`,
+the manifest SHA256, both plan hashes, the policy-publication window, and the
+CloudTrail result. The administrator logs out immediately after generation;
+the fresh MFA-backed release session only consumes the report.
+
+The manifest explicitly enumerates all twelve possible current task-definition
+create addresses: backend, worker, application-canary, read-only-canary, and
+the eight executor modes. Each address independently proves
+`ecs:RegisterTaskDefinition`, `ecs:TagResource`, PassRole for its exact
+execution role, and PassRole for its exact task role with
+`iam:PassedToService=ecs-tasks.amazonaws.com`. Unknown, duplicate, missing,
+or family/address-mismatched entries fail before simulation.

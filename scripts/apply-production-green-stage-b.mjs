@@ -8,8 +8,11 @@ import {
   assertStageBPlan,
 } from "./plan-production-green-stage-b.mjs";
 import {
+  APPROVED_PREFLIGHT_GENERATOR_ARNS,
   PERMISSION_PREFLIGHT_CLOCK_SKEW_MS,
   PERMISSION_PREFLIGHT_MAX_AGE_MS,
+  RELEASE_CALLER_PATTERN,
+  RELEASE_ROLE_ARN,
   canonicalizeJson,
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
@@ -40,6 +43,7 @@ export function parseCli(argv) {
     planJsonPath: requireOption(argv, "--plan-json"),
     auditPath: requireOption(argv, "--reference-audit"),
     permissionReportPath: requireOption(argv, "--permission-report"),
+    permissionReportSha256: requireOption(argv, "--permission-report-sha256"),
     planSha256: requireOption(argv, "--plan-sha256"),
     auditSha256: requireOption(argv, "--audit-sha256"),
     savedPlanSha256: requireOption(argv, "--saved-plan-sha256"),
@@ -48,9 +52,14 @@ export function parseCli(argv) {
   };
 }
 
-export function assertPermissionReport(report, { planSha256, savedPlanSha256, canonicalPlanJsonSha256, now = new Date().toISOString() } = {}) {
+export function assertPermissionReport(report, { planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, now = new Date().toISOString() } = {}) {
   if (report?.schemaVersion !== 1 || report.status !== "valid") throw new Error("A valid permission-preflight report is required.");
-  if (report.roleArn !== releaseRoleArn) throw new Error("Permission-preflight report role ARN is wrong.");
+  if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(report.reportGeneratorCallerArn)) throw new Error("Permission-preflight report generator is not approved.");
+  if (report.simulatedRoleArn !== RELEASE_ROLE_ARN || report.applyRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission-preflight report role contract is wrong.");
+  if (report.applyCallerArn !== null && report.applyCallerArn !== callerArn) throw new Error("Permission-preflight report apply caller is wrong.");
+  if (report.applyCallerArnPattern !== RELEASE_CALLER_PATTERN) throw new Error("Permission-preflight report caller pattern is wrong.");
+  if (!/^[a-f0-9]{64}$/.test(report.manifestSha256)) throw new Error("Permission-preflight report manifest hash is missing or malformed.");
+  if (manifestSha256 && report.manifestSha256 !== manifestSha256) throw new Error("Permission-preflight report is bound to a different permission manifest.");
   if (report.planSha256 !== planSha256) throw new Error("Permission-preflight report is bound to a different plan.");
   if (report.savedPlanSha256 !== savedPlanSha256) throw new Error("Permission-preflight report is bound to a different saved binary plan.");
   if (report.canonicalPlanJsonSha256 !== canonicalPlanJsonSha256) throw new Error("Permission-preflight report is bound to a different canonical plan JSON.");
@@ -61,21 +70,23 @@ export function assertPermissionReport(report, { planSha256, savedPlanSha256, ca
   if (!Array.isArray(report.requiredEvaluations) || report.requiredEvaluations.some((item) => item.decision !== "allowed")) throw new Error("Permission-preflight report has a denied required evaluation.");
   if (!Array.isArray(report.forbiddenEvaluations) || report.forbiddenEvaluations.some((item) => item.decision === "allowed")) throw new Error("Permission-preflight report allowed a forbidden evaluation.");
   if (report.cloudTrail?.status !== "clear" || report.cloudTrail.unresolvedDenials?.length !== 0) throw new Error("Permission-preflight report contains an unresolved CloudTrail denial.");
-  if (report.deniedCount !== 0) throw new Error("Permission-preflight report has denied evaluations.");
+  if (report.requiredDeniedCount !== 0 || report.forbiddenAllowedCount !== 0 || report.deniedCount !== 0) throw new Error("Permission-preflight report has denied evaluations.");
   return true;
 }
 
-export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan }) {
+export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan }) {
   if (!path.isAbsolute(planPath) || !path.isAbsolute(planJsonPath) || !path.isAbsolute(auditPath) || !path.isAbsolute(permissionReportPath)) throw new Error("All Stage B apply artifacts must use absolute paths.");
   if (!fs.existsSync(planPath)) throw new Error("Saved Terraform plan is missing.");
   if (!fs.existsSync(permissionReportPath)) throw new Error("Permission-preflight report is missing.");
-  const planBytes = fs.readFileSync(planJsonPath); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReport = JSON.parse(fs.readFileSync(permissionReportPath, "utf8"));
+  const planBytes = fs.readFileSync(planJsonPath); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReportBytes = fs.readFileSync(permissionReportPath); const permissionReport = JSON.parse(permissionReportBytes);
   if (!/^[a-f0-9]{64}$/.test(savedPlanSha256) || sha256(savedPlanBytes) !== savedPlanSha256) throw new Error("Saved Terraform plan SHA256 does not match the approved digest.");
   if (!/^[a-f0-9]{64}$/.test(canonicalPlanJsonSha256)) throw new Error("Canonical plan JSON SHA256 is missing or malformed.");
   if (sha256(planBytes) !== planSha256) throw new Error("Plan JSON SHA256 does not match the approved digest.");
   if (sha256(auditBytes) !== auditSha256) throw new Error("Reference audit SHA256 does not match the approved digest.");
+  if (!/^[a-f0-9]{64}$/.test(permissionReportSha256) || sha256(permissionReportBytes) !== permissionReportSha256) throw new Error("Permission-preflight report SHA256 does not match the approved digest.");
   try { assertStageBReleaseCallerArn(callerArn); } catch { throw new Error("Current caller is not the production release-deployer STS assumed-role."); }
   const plan = JSON.parse(planBytes); const audit = JSON.parse(auditBytes);
+  const manifestSha256 = sha256(Buffer.from(canonicalizeJson(readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"))));
   if (typeof showPlan !== "function") throw new Error("Terraform show dependency is required to bind the saved plan.");
   const shown = showPlan(planPath);
   const derivedPlanBytes = Buffer.isBuffer(shown) ? shown : Buffer.from(shown);
@@ -85,7 +96,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
   const derivedCanonical = canonicalizeJson(derivedPlan);
   const derivedCanonicalPlanJsonSha256 = sha256(Buffer.from(derivedCanonical));
   if (derivedCanonical !== approvedCanonical || derivedCanonicalPlanJsonSha256 !== canonicalPlanJsonSha256) throw new Error("Saved binary Terraform plan does not match the approved plan JSON.");
-  assertPermissionReport(permissionReport, { planSha256, savedPlanSha256, canonicalPlanJsonSha256, now });
+  assertPermissionReport(permissionReport, { planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, now });
   validatePlan(plan, {
     referenceAudit: audit,
     referenceAuditBytes: auditBytes,
