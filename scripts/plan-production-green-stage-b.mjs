@@ -17,6 +17,7 @@ import {
 import { assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-stage-b-image-evidence.mjs";
 import { classifyStageBPlan } from "./aws/stage-b-deployment-contract.mjs";
+import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
@@ -506,7 +507,9 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
 }
 
 export function assertStageBPlan(plan, options = {}) {
-  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence, strictResourceContract = false } = options;
+  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence, strictResourceContract = false, protectedMainCheckout } = options;
+  const deploymentIdentity = strictResourceContract || imageEvidence ? assertStageBDeploymentIdentity({ plan, imageEvidence }) : undefined;
+  if (strictResourceContract) assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity });
   const resourceClassification = classifyStageBPlan(plan, { strict: strictResourceContract, terraformConfiguration });
   const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence }) : undefined;
   const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
@@ -545,7 +548,7 @@ export function assertStageBPlan(plan, options = {}) {
     const after = JSON.stringify(change.change.after || {});
     if ((after.match(/"image":"([^"@]+):[^"@]+"/) || after.match(/"image"\s*:\s*"[^"@]+:[^"@]+"/)) && !after.includes("@sha256:")) throw new Error(`Stage B image tag rejected: ${change.address}`);
   }
-  return { taskDefinitions: taskDefinitionClassification, imageBindings, ...resourceClassification };
+  return { taskDefinitions: taskDefinitionClassification, deploymentIdentity, imageBindings, ...resourceClassification };
 }
 
 function readOption(argv, name) {
@@ -575,6 +578,7 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   } catch {
     throw new Error("Stage B trusted caller attestation failed: aws sts get-caller-identity did not return valid identity JSON.");
   }
-  assertStageBPlan(plan, { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes: Buffer.from(planJsonText), planJsonSha256, trustedCallerArn, terraformConfiguration, strictResourceContract: true });
+  const protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true });
+  assertStageBPlan(plan, { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes: Buffer.from(planJsonText), planJsonSha256, trustedCallerArn, terraformConfiguration, strictResourceContract: true, protectedMainCheckout });
   process.stdout.write(JSON.stringify({ status: "approved-plan-only", plan: out }) + "\n");
 }

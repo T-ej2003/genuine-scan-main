@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS } from "./stage-b-deployment-contract.mjs";
+import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_PREFLIGHT_MAX_AGE_MS = 15 * 60 * 1000;
@@ -441,6 +442,7 @@ export function runPermissionPreflight({
   if (simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission preflight simulated role ARN is not the production release role.");
   validateManifest(manifest, { account: expectedAccount, region: expectedRegion });
   if (!plan?.variables || plan.variables.account_id?.value !== expectedAccount || plan.variables.aws_region?.value !== expectedRegion) throw new Error("Plan account or region is wrong.");
+  const deploymentIdentity = assertStageBDeploymentIdentity({ plan });
   validateFreshness(generatedAt, now);
   if (!policyPublishedAt || !Number.isFinite(Date.parse(policyPublishedAt))) throw new Error("Policy publication timestamp is required and must be valid.");
   if (!cloudTrailSessionName) throw new Error("CloudTrail session name is required.");
@@ -453,6 +455,9 @@ export function runPermissionPreflight({
   const unresolved = cloudTrailResult.unresolvedDenials || [];
   const report = {
     schemaVersion: PERMISSION_PREFLIGHT_SCHEMA_VERSION,
+    toolingSha: deploymentIdentity.toolingSha,
+    imageReleaseSha: deploymentIdentity.imageReleaseSha,
+    canonicalImageEvidenceSha256: deploymentIdentity.canonicalImageEvidenceSha256,
     reportGeneratorCallerArn,
     simulatedRoleArn,
     applyRoleArn: RELEASE_ROLE_ARN,

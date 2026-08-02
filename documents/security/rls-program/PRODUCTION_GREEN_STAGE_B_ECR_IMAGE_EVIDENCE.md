@@ -16,7 +16,7 @@ The executor and canary images use the backend repository, so the four bindings 
 - RLS executor: `<release-sha>-rls-executor` in `mscqr-backend`
 - read-only canary: `<release-sha>-rls-canary` in `mscqr-backend`
 
-The administrator generates a report containing the release SHA, canonical workflow run, canonical artifact SHA, exact repository/tag/digest records, observation time, account, region, and verifier ARN. The report is signed with the existing Stage B KMS signing contract. The apply wrapper verifies the detached signature and all four bindings; it does not call ECR.
+The administrator generates a schema-versioned report containing `imageReleaseSha`, the canonical workflow run, canonical artifact SHA, exact repository/tag/digest records, observation time, account, region, and verifier ARN. The report is signed with the existing Stage B KMS signing contract. The apply wrapper verifies the detached signature and all four bindings; it does not call ECR.
 
 The canonical workflow artifact is authoritative. A failed duplicate workflow cannot become authoritative because it has no accepted artifact and its immutable-tag collision does not alter the canonical tag-to-digest binding.
 

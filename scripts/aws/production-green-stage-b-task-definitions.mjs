@@ -74,7 +74,7 @@ export function assertFixedTaskDefinition(definition) {
 }
 
 export function renderStageBTaskDefinition(kind, bindings) {
-  const base = { RELEASE_SHA: bindings.releaseSha, SOURCE_CONTRACT_SHA256: bindings.sourceContractSha256, MIGRATION_SET_DIGEST: bindings.migrationSetDigest, PACKAGE_CHECKSUM_SHA256: bindings.packageChecksumSha256, RECEIPT_BUCKET: bindings.receiptBucket, EXECUTOR_LOG_GROUP: bindings.executorLogGroup, CANARY_LOG_GROUP: bindings.canaryLogGroup, BACKEND_LOG_GROUP: bindings.backendLogGroup, WORKER_LOG_GROUP: bindings.workerLogGroup };
+  const base = { RELEASE_SHA: bindings.imageReleaseSha, SOURCE_CONTRACT_SHA256: bindings.sourceContractSha256, MIGRATION_SET_DIGEST: bindings.migrationSetDigest, PACKAGE_CHECKSUM_SHA256: bindings.packageChecksumSha256, RECEIPT_BUCKET: bindings.receiptBucket, EXECUTOR_LOG_GROUP: bindings.executorLogGroup, CANARY_LOG_GROUP: bindings.canaryLogGroup, BACKEND_LOG_GROUP: bindings.backendLogGroup, WORKER_LOG_GROUP: bindings.workerLogGroup };
   if (!/^[a-f0-9]{40}$/.test(base.RELEASE_SHA || "") || !/^[a-f0-9]{64}$/.test(base.SOURCE_CONTRACT_SHA256 || "") || !/^[a-f0-9]{64}$/.test(base.MIGRATION_SET_DIGEST || "") || !/^[a-f0-9]{64}$/.test(base.PACKAGE_CHECKSUM_SHA256 || "")) throw new Error("Stage B task release binding is invalid.");
   const imageField = `${kind.toUpperCase()}_IMAGE`;
   const image = bindings[`${kind}Image`];

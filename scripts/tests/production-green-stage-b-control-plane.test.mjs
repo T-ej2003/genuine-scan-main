@@ -55,7 +55,7 @@ test("Stage B permits only an explicitly requested rollback inside the 24-hour g
 });
 
 test("Stage B templates require immutable images, private executor networking, and no administrator secret outside executor", () => {
-  const common = { releaseSha, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: "/ecs/executor", canaryLogGroup: "/ecs/canary", backendLogGroup: "/ecs/backend", workerLogGroup: "/ecs/worker" };
+  const common = { imageReleaseSha: releaseSha, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: "/ecs/executor", canaryLogGroup: "/ecs/canary", backendLogGroup: "/ecs/backend", workerLogGroup: "/ecs/worker" };
   const confirmations = {
     "full-rls-capability-preflight": "",
     "full-rls-admin-bootstrap": "MSCQR_PRODUCTION_GREEN_CREATE_AND_BOOTSTRAP_DATABASE",
