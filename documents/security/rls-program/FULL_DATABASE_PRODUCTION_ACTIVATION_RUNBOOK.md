@@ -50,6 +50,11 @@ terraform -chdir=infra/aws/terraform fmt -check
 terraform -chdir=infra/aws/terraform validate
 ```
 
+`npm run rls:full-verify` is also a required pull-request quality gate. A source-contract
+or generated-output mismatch blocks merge; it is not an ignorable pre-existing failure.
+Regenerate only with `npm run rls:full-generate`, then rerun verification and confirm a
+second generation produces no diff before release approval.
+
 For the disposable PostgreSQL 18 production-target package proof:
 
 ```sh

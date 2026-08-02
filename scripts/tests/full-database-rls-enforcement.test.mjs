@@ -11,6 +11,7 @@ import {
   certificationEvidencePath,
   FullRlsCertificationSafetyError,
 } from "../rls/certify-full-database.mjs";
+import { calculateCleanRoomSourceContract } from "../rls/lib/clean-room-source-contract.mjs";
 import { validateGeneratedPackage } from "../rls/verify-full-rls-package.mjs";
 
 const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -22,6 +23,14 @@ const packageInputs = () => ({
   commandSemantics: readJson("command-semantics.json"),
 });
 const clone = (value) => structuredClone(value);
+
+test("generated package is bound to the current source contract", () => {
+  const checksums = readJson("generated/checksums.json");
+  const source = calculateCleanRoomSourceContract(root);
+  assert.equal(checksums.sourceContractSha256, source.sourceContractSha256);
+  assert.deepEqual(checksums.sourceContractInputs, source.inputs);
+  assert.equal(checksums.migrationSetDigest, source.migrationSetDigest);
+});
 
 test("focused certification writes a family artifact without replacing full evidence", () => {
   assert.match(certificationEvidencePath({}), /disposable-certification-result\.json$/);
