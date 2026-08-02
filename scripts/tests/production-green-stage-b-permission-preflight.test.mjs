@@ -18,6 +18,7 @@ import {
 } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import simulatorAllowed from "./fixtures/aws-iam-simulate-principal-policy-allowed.mjs";
 import { assertStageBReleaseCallerArn } from "../plan-production-green-stage-b.mjs";
+import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const roleArn = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
@@ -414,7 +415,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan = approvedPlan, savedBy
   const permissionPath = path.join(directory, "approved.permission.json");
   fs.writeFileSync(planPath, savedBytes);
   fs.writeFileSync(planJsonPath, approvedBytes);
-  const auditBytes = Buffer.from("{\"audit\":true}");
+  const auditBytes = Buffer.from(JSON.stringify({ audit: true, broker: { aliasArn: STAGE_B.brokerAliasArn } }));
   fs.writeFileSync(auditPath, auditBytes);
   const savedHash = crypto.createHash("sha256").update(savedBytes).digest("hex");
   const planHash = crypto.createHash("sha256").update(approvedBytes).digest("hex");
@@ -456,6 +457,25 @@ test("exact binary plan and derived JSON reach the ready-to-apply boundary witho
     deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, apply: () => { throw new Error("apply must not be reached"); } },
   });
   assert.equal(result.status, "ready-to-apply");
+});
+
+test("apply wrapper rejects an unqualified broker target before apply", () => {
+  const fixture = wrapperFixture();
+  const audit = { audit: true, broker: { aliasArn: STAGE_B.brokerFunctionArn } };
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  fs.writeFileSync(fixture.auditPath, auditBytes);
+  assert.throws(() => assertApplyArtifacts({
+    ...fixture,
+    planSha256: fixture.planHash,
+    auditSha256: crypto.createHash("sha256").update(auditBytes).digest("hex"),
+    savedPlanSha256: fixture.savedHash,
+    canonicalPlanJsonSha256: fixture.canonicalHash,
+    permissionReportSha256: fixture.permissionReportSha256,
+    callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
+    showPlan: () => fixture.shownBytes,
+    validatePlan: () => {},
+    verifyPermissionSignature: () => true,
+  }), (error) => error instanceof Error && error.message.includes("Difference: alias, qualifier"));
 });
 
 test("verification-only and real apply paths reject an invalid report signature before apply", () => {

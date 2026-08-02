@@ -12,7 +12,6 @@ import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
 const CLUSTER_ARN = STAGE_B.clusterArn;
-const BROKER_ARN = STAGE_B.brokerAliasArn;
 const APPLY_MODES = Object.freeze([
   "full-rls-capability-preflight",
   "full-rls-admin-bootstrap",
@@ -31,7 +30,7 @@ export function validateProductionReleaseEnvironment(env = process.env) {
     migrationSetDigest: env.MSCQR_FULL_RLS_MIGRATION_SET_DIGEST,
     packageChecksumSha256: env.MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256,
     approvalId: env.PRODUCTION_RLS_APPROVAL_ID,
-    brokerArn: env.PRODUCTION_RLS_BROKER_ARN,
+    brokerAliasArn: env.PRODUCTION_RLS_BROKER_ARN,
     executorImage: env.PRODUCTION_RLS_EXECUTOR_IMAGE,
     backendImage: env.PRODUCTION_BACKEND_IMAGE,
     workerImage: env.PRODUCTION_WORKER_IMAGE,
@@ -46,7 +45,7 @@ export function validateProductionReleaseEnvironment(env = process.env) {
       || !/^[a-f0-9]{64}$/.test(config.packageChecksumSha256 || "")
       || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(config.approvalId || "")
       || config.clusterArn !== CLUSTER_ARN
-      || config.brokerArn !== BROKER_ARN
+      || config.brokerAliasArn !== STAGE_B.brokerAliasArn
       || config.frontendTaskDefinition !== "mscqr-frontend:20"
       || !PRODUCTION_GREEN.receiptBucketPattern.test(config.receiptBucket || "")) {
     throw new Error("Production release binding is incomplete or outside the reviewed identity.");

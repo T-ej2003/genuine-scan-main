@@ -57,6 +57,9 @@ node scripts/aws/generate-production-green-stage-b-reference-audit.mjs \
 The reference-audit generator derives the broker identity from the shared
 `STAGE_B.brokerAliasArn` contract. Do not pass or reconstruct a broker ARN in
 the operator command; the required identity is the qualified `reviewed` alias.
+This is a permanent invariant: executable Stage B consumers import the shared
+contract, and no wrapper, helper, validator, or test may construct, strip, or
+accept an alternate broker function or alias ARN.
 
 Bind both SHA-256 values when invoking `scripts/plan-production-green-stage-b.mjs`.
 The generator and validator accept only these families: backend candidate, worker
