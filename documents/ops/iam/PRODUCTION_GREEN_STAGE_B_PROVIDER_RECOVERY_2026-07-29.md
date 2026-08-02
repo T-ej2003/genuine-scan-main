@@ -191,10 +191,11 @@ broker mapping must target that exact current resource address. Every broker
 mode must appear exactly once in the audit mapping and must resolve to its
 expected task-definition family; missing, duplicated, swapped, or unrelated
 mode mappings fail closed, as does retained live mapping without its matching
-atomic rollover evidence. Cluster-wide service and task observations may also
-contain unrelated workloads; those valid non-Stage-B families are recorded and
-left out of Stage B reference decisions, while an unknown `mscqr-production-*`
-family remains a fail-closed error. The validator also requires schema version,
+atomic rollover evidence. ECS observation is centralized and complete: the
+shared helper discovers all services and RUNNING/PENDING tasks in the exact
+production cluster, consumes all pages, describes every reference, and rejects
+unknown services, task ARNs, task-definition families, duplicate entries,
+incomplete responses, or AccessDenied. The validator also requires schema version,
 the exact production cluster ARN, and a caller ARN for the MFA-backed release
 deployer before accepting the audit.
 
@@ -205,6 +206,45 @@ set retention, manually deregister task definitions, or change any runtime,
 service, database, ALB, DNS, or traffic resource. Refresh the MFA-backed release
 session, reconcile the partial state, create exactly one fresh plan and one
 plan-bound reference audit, and stop for independent review before apply.
+
+### Canonical ECS read-only observation contract
+
+The reference-audit companion is the single source-controlled home for the
+ECS observation contract. It contains exactly these read actions:
+
+- `ecs:ListServices`
+- `ecs:DescribeServices`
+- `ecs:ListTasks`
+- `ecs:DescribeTasks`
+- `ecs:DescribeTaskDefinition`
+
+`ListServices` and `ListTasks` are unavoidable because the audit must discover
+the complete service set and both RUNNING and PENDING task sets before it can
+prove that no reference was omitted. AWS evaluates those List operations with
+`Resource: "*"`; the companion policy restricts them with the exact
+`aws:RequestedRegion=eu-west-2` and `ecs:cluster=arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main`
+conditions. `DescribeServices` and `DescribeTasks` use the exact production
+service/task ARN patterns plus the same conditions. AWS does not provide a
+resource-level scope for `ecs:DescribeTaskDefinition`, so that read uses the
+isolated `Resource: "*"` statement with only the exact region condition.
+`ListClusters` and `DescribeClusters` are not required: the exact production
+cluster ARN is already a source-controlled Stage B contract value.
+
+All five reads are performed by the shared
+`scripts/aws/production-green-stage-b-ecs-observations.mjs` helper. It consumes
+the exact cluster, fully consumes list pagination, describes every returned
+service/task and referenced task definition, rejects AccessDenied, incomplete
+pages, duplicate/unknown ARNs, unknown task-definition families, and omitted
+RUNNING/PENDING evidence. The read-only post-apply command
+`scripts/aws/verify-production-green-stage-b-ecs-observations.mjs` uses the same
+helper and writes deterministic evidence.
+RUNNING/PENDING evidence. The reference-audit path and any post-apply ECS
+readback must use this helper; they must not issue ad hoc List/Describe calls.
+
+The companion policy must be attached to the exact
+`mscqr-production-release-deployer` role before Phase 0 verification or audit
+generation. A failed List call is an authorization blocker, not an empty ECS
+observation, and must stop the release before any plan or runtime action.
 
 Merging source alone does not update AWS. The live provider-recovery policy must be version-updated after merge from v4, and the companion policy must be created
 or updated from `ReferenceAuditReadOnly-v1`. The sequence below is failure-safe:

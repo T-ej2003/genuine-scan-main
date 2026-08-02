@@ -529,7 +529,7 @@ test("all retained revisions are valid live references, but an unrecorded revisi
     reader.describeServices = () => ({ services: [serviceRecord(serviceArnFor(0), 0, `${oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]).slice(0, -1)}99`)], failures: [] });
   } });
   unrecorded.plan.relevant_attributes.push({ resource: executorCollectionAddress, attribute: [] });
-  assert.throws(() => generate(unrecorded), /Superseded task definition remains referenced|Create-only task-definition family remains referenced/);
+  assert.throws(() => generate(unrecorded), /ECS task-definition observation is incomplete|Superseded task definition remains referenced|Create-only task-definition family remains referenced/);
 });
 
 test("running and pending tasks may reference different retained generations", () => {
@@ -1147,7 +1147,7 @@ test("append-only audit requires atomic evidence for every retained broker mappi
   assert.throws(() => validateBrokerPlan(fixture, audit), /lacks atomic rollover evidence/);
 });
 
-test("unrelated cluster task-definition families remain recorded but out of Stage B scope", () => {
+test("unknown cluster task-definition families fail closed", () => {
   const unrelatedFamily = "mscqr-backend";
   const fixture = makeAtomicBrokerFixture({ mutateReader: (reader) => {
     reader.listServices = () => [serviceArnFor(0)];
@@ -1155,11 +1155,7 @@ test("unrelated cluster task-definition families remain recorded but out of Stag
     reader.listTasks = (status) => [taskArnFor(status, 0)];
     reader.describeTasks = (arns) => ({ tasks: [taskRecord(arns[0], arns[0].includes("running") ? "RUNNING" : "PENDING", newArnFor(unrelatedFamily))], failures: [] });
   } });
-  const audit = generate(fixture);
-  assert.equal(audit.services[0].taskDefinition, newArnFor(unrelatedFamily));
-  assert.equal(audit.runningTasks[0].taskDefinitionArn, newArnFor(unrelatedFamily));
-  assert.equal(audit.pendingTasks[0].taskDefinitionArn, newArnFor(unrelatedFamily));
-  assert.doesNotThrow(() => validateBrokerPlan(fixture, audit));
+  assert.throws(() => generate(fixture), /outside the Stage B contract/);
 });
 
 for (const [label, mutate, expected = /append-only reference audit/] of [
@@ -1588,13 +1584,9 @@ test("AWS reader uses argv arrays and only read-only commands", () => {
   assert.equal(source.includes("shell: true"), false);
   assert.equal(source.includes("child_process.exec("), false);
   assert.doesNotMatch(source, /iam\s+(?:put|create|delete|attach|detach)|ecs\s+(?:run|stop|update|delete|register)|lambda\s+(?:update|publish|delete|invoke)/);
-  const injectedCluster = `${clusterArn};touch /tmp/should-not-run`;
-  const injectedCalls = [];
-  createAwsReader({
+  assert.throws(() => createAwsReader({
     region: "eu-west-2",
-    clusterArn: injectedCluster,
-    run: (args) => { injectedCalls.push(args); return JSON.stringify({ serviceArns: [] }); },
-  }).listServices();
-  assert.equal(injectedCalls[0].includes(injectedCluster), true);
-  assert.equal(injectedCalls[0].includes("touch"), false);
+    clusterArn: `${clusterArn};touch /tmp/should-not-run`,
+    run: () => JSON.stringify({ serviceArns: [] }),
+  }), /exact production region and cluster/);
 });
