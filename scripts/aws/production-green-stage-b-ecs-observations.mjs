@@ -187,6 +187,7 @@ const COMMANDS = Object.freeze({
   describeTasks: ["ecs", "describe-tasks"],
   describeTaskDefinition: ["ecs", "describe-task-definition"],
   getFunctionConfiguration: ["lambda", "get-function-configuration"],
+  getAlias: ["lambda", "get-alias"],
 });
 
 function parseJson(value, label) {
@@ -227,6 +228,7 @@ function createAwsReader({ region, clusterArn, run = (args) => execFileSync("aws
     describeTasks: (taskArns) => call("describeTasks", ["--cluster", clusterArn, "--tasks", ...taskArns]),
     describeTaskDefinition: (taskDefinition) => call("describeTaskDefinition", ["--task-definition", taskDefinition]),
     getFunctionConfiguration: (functionArn) => call("getFunctionConfiguration", ["--function-name", functionArn]),
+    getAlias: (functionArn = STAGE_B.brokerFunctionArn, aliasName = STAGE_B.brokerAliasQualifier) => call("getAlias", ["--function-name", functionArn, "--name", aliasName]),
   };
 }
 

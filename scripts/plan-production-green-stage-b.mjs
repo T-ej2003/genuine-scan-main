@@ -14,7 +14,7 @@ import {
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
 } from "./aws/stage-b-reference-audit-contract.mjs";
-import { STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
+import { assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const allowed = new Set(["aws_cloudwatch_log_group", "aws_iam_role", "aws_iam_role_policy", "aws_ecs_task_definition", "aws_dynamodb_table", "aws_lambda_function", "aws_lambda_alias", "aws_lambda_permission"]);
@@ -287,6 +287,11 @@ function assertBrokerAuditBinding(plan, brokerChange, audit, auditBytes, auditSh
   if (audit.planJsonSha256 !== planSha256) throw new Error("Stage B reference audit is bound to a different plan JSON.");
   const broker = audit.broker;
   if (!broker || typeof broker !== "object" || Array.isArray(broker)) throw new Error("Stage B broker update reference audit evidence is missing.");
+  const brokerIdentity = assertStageBBrokerConfigurationIdentity({
+    configuration: { FunctionArn: broker.configurationFunctionArn, Version: broker.configurationVersion },
+    alias: { AliasArn: broker.aliasArn, Name: broker.aliasName, FunctionVersion: broker.aliasFunctionVersion },
+  });
+  if (broker.resolvedVersionArn !== brokerIdentity.resolvedVersionArn) throw new Error("Stage B broker resolved version identity does not match the configuration evidence.");
   const proof = {
     brokerTerraformAddress: "aws_lambda_function.broker",
     brokerEnvironmentReference: "local.broker_approval_expected",

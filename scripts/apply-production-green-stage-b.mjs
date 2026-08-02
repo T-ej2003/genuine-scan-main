@@ -16,7 +16,7 @@ import {
   RELEASE_ROLE_ARN,
   canonicalizeJson,
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
-import { assertStageBBrokerAliasArn } from "./aws/production-green-stage-b-contract.mjs";
+import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -93,7 +93,12 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
   const plan = JSON.parse(planBytes); const audit = JSON.parse(auditBytes);
   const brokerChanges = (plan.resource_changes || []).filter((change) => ["aws_lambda_function.broker", "aws_lambda_alias.reviewed", "aws_iam_policy.broker"].includes(change.address));
   if (brokerChanges.some((change) => (change.change?.actions || []).some((action) => action !== "no-op"))) {
-    assertStageBBrokerAliasArn(audit.broker?.aliasArn);
+    const broker = audit.broker;
+    const brokerIdentity = assertStageBBrokerConfigurationIdentity({
+      configuration: { FunctionArn: broker?.configurationFunctionArn, Version: broker?.configurationVersion },
+      alias: { AliasArn: broker?.aliasArn, Name: broker?.aliasName, FunctionVersion: broker?.aliasFunctionVersion },
+    });
+    if (broker.resolvedVersionArn !== brokerIdentity.resolvedVersionArn) throw new Error("Stage B broker resolved version identity does not match the configuration evidence.");
   }
   const manifestSha256 = sha256(Buffer.from(canonicalizeJson(readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"))));
   if (typeof showPlan !== "function") throw new Error("Terraform show dependency is required to bind the saved plan.");
