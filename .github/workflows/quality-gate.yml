@@ -83,6 +83,28 @@ jobs:
             git diff --exit-code -- "$root/.terraform.lock.hcl"
           done
 
+  stage-b-deployment-closure:
+    name: Stage B deployment closure
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate complete Stage B deployment closure
+        run: npm run stage-b:deployment-closure
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 20
