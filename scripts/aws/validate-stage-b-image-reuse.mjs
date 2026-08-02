@@ -56,8 +56,8 @@ function normalizeClassifiedFiles(files) {
     .sort((left, right) => left.file.localeCompare(right.file));
 }
 
-export function computeStageBToolingInputTreeSha256({ files, readFile }) {
-  const entries = files.filter((file) => file !== COMPATIBILITY_REPORT_REPO_PATH).sort().map((file) => ({ file, sha256: sha256(readFile(file)) }));
+export function computeStageBToolingInputTreeSha256({ files, readFile, blobSha256 }) {
+  const entries = files.filter((file) => file !== COMPATIBILITY_REPORT_REPO_PATH).sort().map((file) => ({ file, sha256: blobSha256 ? blobSha256(file) : sha256(readFile(file)) }));
   return sha256(Buffer.from(canonicalJson(entries)));
 }
 
@@ -122,7 +122,10 @@ function reportFor({ imageReleaseSha, toolingSha, changedFiles, toolingInputTree
 }
 
 function trackedFiles(toolingSha) {
-  return git(["ls-tree", "-r", "--name-only", toolingSha]).split("\n").filter(Boolean);
+  return git(["ls-tree", "-r", "--format=%(objectname) %(path)", toolingSha]).split("\n").filter(Boolean).map((line) => {
+    const separator = line.indexOf(" ");
+    return { blobSha: line.slice(0, separator), file: line.slice(separator + 1) };
+  });
 }
 
 function changedFiles(imageReleaseSha, toolingSha) {
@@ -132,8 +135,9 @@ function changedFiles(imageReleaseSha, toolingSha) {
 }
 
 function toolingInputTreeSha256(toolingSha) {
-  const files = trackedFiles(toolingSha);
-  return computeStageBToolingInputTreeSha256({ files, readFile: (file) => execFileSync("git", ["show", `${toolingSha}:${file}`]) });
+  const entries = trackedFiles(toolingSha);
+  const blobByFile = new Map(entries.map(({ file, blobSha }) => [file, blobSha]));
+  return computeStageBToolingInputTreeSha256({ files: entries.map(({ file }) => file), blobSha256: (file) => blobByFile.get(file) });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
