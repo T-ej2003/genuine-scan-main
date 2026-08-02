@@ -157,6 +157,14 @@ explicitly retained full ARN for the exact family. The newest retained revision
 is sequencing evidence only, not the sole permitted live reference; older
 retained generations remain represented and protected.
 
+At an append-only checkpoint with no current task-definition state addresses,
+refresh-only evaluation omits current broker mappings rather than dereferencing a
+missing current resource or substituting retained ARNs. Broker policy or function
+updates have Terraform-native preconditions requiring all twelve current
+task-definition ARNs and the exact nine broker mode mappings; a normal deployment
+therefore fails with `Stage B broker update requires all current task-definition
+mappings.` if any current definition is missing.
+
 The validator binds append-only audit contents to the exact plan, including all
 current and retained entries, classification counts, newest-revision evidence,
 complete service/RUNNING/PENDING observations, and broker mappings. Missing,

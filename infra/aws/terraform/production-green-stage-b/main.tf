@@ -98,9 +98,42 @@ locals {
     canary           = "mscqr-production-rls-green-canary-execution"
     read_only_canary = "mscqr-production-full-rls-green-read-only-canary-execution"
   }
+  current_candidate_task_definition_arns = {
+    for kind in keys(local.candidate_definitions) : kind => try(aws_ecs_task_definition.candidate[kind].arn, null)
+    if try(aws_ecs_task_definition.candidate[kind].arn, null) != null
+  }
+  current_executor_task_definition_arns = {
+    for mode, task in aws_ecs_task_definition.executor : mode => task.arn
+  }
+  current_task_definition_arns = merge(local.current_candidate_task_definition_arns, local.current_executor_task_definition_arns)
+  expected_current_task_definition_families = merge(
+    { for kind, definition in local.candidate_definitions : kind => definition.family },
+    { for mode, definition in local.executor_definitions : mode => definition.family },
+  )
+  broker_expected_task_definition_families = merge(
+    { for mode, definition in local.executor_definitions : mode => definition.family },
+    { full-rls-application-canary = local.candidate_definitions.canary.family },
+  )
   broker_task_definition_arns = merge(
-    { for mode, task in aws_ecs_task_definition.executor : mode => task.arn },
-    { full-rls-application-canary = aws_ecs_task_definition.candidate["canary"].arn }
+    local.current_executor_task_definition_arns,
+    {
+      for kind, arn in local.current_candidate_task_definition_arns :
+      "full-rls-application-canary" => arn if kind == "canary"
+    },
+  )
+  current_task_definition_mappings_complete = (
+    length(local.current_task_definition_arns) == length(local.expected_current_task_definition_families) &&
+    alltrue([
+      for key, family in local.expected_current_task_definition_families :
+      can(regex("^arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/${family}:[1-9][0-9]*$", try(local.current_task_definition_arns[key], "")))
+    ])
+  )
+  broker_task_definition_mappings_complete = (
+    length(local.broker_task_definition_arns) == length(local.broker_expected_task_definition_families) &&
+    alltrue([
+      for mode, family in local.broker_expected_task_definition_families :
+      can(regex("^arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/${family}:[1-9][0-9]*$", try(local.broker_task_definition_arns[mode], "")))
+    ])
   )
   broker_runtime_policy = {
     Version = "2012-10-17"
@@ -409,6 +442,11 @@ resource "aws_iam_policy" "broker" {
 
   lifecycle {
     create_before_destroy = true
+
+    precondition {
+      condition     = local.current_task_definition_mappings_complete && local.broker_task_definition_mappings_complete
+      error_message = "Stage B broker update requires all current task-definition mappings."
+    }
   }
 }
 
@@ -430,6 +468,14 @@ resource "aws_lambda_function" "broker" {
   source_code_hash = filebase64sha256(var.broker_package_path)
   timeout          = 30
   publish          = true
+
+  lifecycle {
+    precondition {
+      condition     = local.current_task_definition_mappings_complete && local.broker_task_definition_mappings_complete
+      error_message = "Stage B broker update requires all current task-definition mappings."
+    }
+  }
+
   environment {
     variables = {
       BROKER_REPLAY_TABLE               = aws_dynamodb_table.replay.name
