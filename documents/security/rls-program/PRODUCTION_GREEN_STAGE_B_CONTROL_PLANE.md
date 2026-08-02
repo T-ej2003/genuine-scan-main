@@ -5,8 +5,11 @@ connect to PostgreSQL, execute SQL, register an ECS task definition, or switch t
 
 ## Immutable images
 
-The SHA-only dispatcher `.github/workflows/production-green-stage-b-images.yml` verifies
-the exact merged release SHA before it calls
+The Stage B image dispatcher is loaded from protected `main`; its `release_sha` input is
+the independent, canonical build source. Use
+`node scripts/aws/dispatch-production-green-stage-b-images.mjs <release_sha>`, which
+dispatches with `--ref main -f release_sha=<release_sha>` and rejects nonexistent or
+commit-valued workflow refs. The workflow verifies the exact merged release SHA before it calls
 `.github/workflows/production-green-stage-b-image-build.yml`. The reusable workflow is
 the only job with GitHub OIDC publication authority: it verifies the generated RLS package,
 builds backend, worker, executor, and canary images for `linux/amd64`, requires immutable

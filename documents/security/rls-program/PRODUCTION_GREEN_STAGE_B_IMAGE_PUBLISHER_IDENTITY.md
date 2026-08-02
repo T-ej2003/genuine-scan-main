@@ -8,8 +8,22 @@ a task, invoke the broker, deploy a service, or change traffic.
 ## Workflow boundary
 
 `.github/workflows/production-green-stage-b-images.yml` is the sole manual dispatcher. It
-accepts exactly one value, `release_sha`, checks that it is the checked-out 40-character
-commit merged into `origin/main`, and calls the fixed reusable workflow
+is loaded from protected `main` and accepts exactly one value, `release_sha`. The
+workflow definition ref and release source are deliberately separate: the dispatcher
+checks out and builds the exact 40-character release commit, while the workflow itself
+is loaded from `main`.
+
+Use the checked-in dispatcher wrapper, which rejects commit-valued workflow refs and
+nonexistent release commits:
+
+`node scripts/aws/dispatch-production-green-stage-b-images.mjs <release_sha>`
+
+The wrapper dispatches exactly:
+
+`gh workflow run production-green-stage-b-images.yml --ref main -f release_sha=<release_sha>`
+
+The workflow checks that its definition ref is `refs/heads/main`, verifies the checked-out
+HEAD equals `release_sha`, and calls the fixed reusable workflow
 `.github/workflows/production-green-stage-b-image-build.yml`.
 
 The reusable job runs in the protected `production-stage-b-image-publish` environment. It
@@ -69,6 +83,12 @@ protected GitHub `production-stage-b-image-publish` environment variable:
 Do not set a repository-level duplicate, and preserve the source-controlled no-reviewer, no-wait-timer,
 and branch controls. Verify a fixed-SHA dispatch can assume the role only through the
 reusable job, then inspect all four immutable ECR digest labels and signed attestations.
+
+Before image publication, use the canonical dispatcher and reusable image workflow. The
+workflow-definition gate must verify `refs/heads/main`, then the release gate must verify
+the exact `release_sha` before dependency installation or OIDC credentials. A failed gate
+stops publication; no separate identity-probe workflow is required or accepted as a substitute
+for those source and release checks.
 
 Rollback is a separately approved destroy of this isolated Terraform role followed by
 removal of the one environment variable. It does not delete published images or alter any
