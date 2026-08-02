@@ -16,6 +16,45 @@ permissions:
   contents: read
 
 jobs:
+  full-rls-package:
+    name: Full RLS package verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify source/package binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import { calculateCleanRoomSourceContract } from "./scripts/rls/lib/clean-room-source-contract.mjs";
+          const checksums = JSON.parse(fs.readFileSync("documents/security/rls-program/generated/checksums.json", "utf8"));
+          const source = calculateCleanRoomSourceContract();
+          if (checksums.sourceContractSha256 !== source.sourceContractSha256 || JSON.stringify(checksums.sourceContractInputs) !== JSON.stringify(source.inputs)) {
+            console.error(JSON.stringify({
+              error: "generated RLS package source contract is stale",
+              generatedSourceContractSha256: checksums.sourceContractSha256,
+              authoritativeSourceContractSha256: source.sourceContractSha256,
+              generatedInputs: checksums.sourceContractInputs,
+              authoritativeInputs: source.inputs,
+            }, null, 2));
+            process.exit(1);
+          }
+          NODE
+
+      - name: Full RLS verification
+        run: npm run rls:full-verify
+
   stage-b-publisher-terraform:
     name: Stage B publisher Terraform validation
     runs-on: ubuntu-latest
