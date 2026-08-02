@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "account": "368992683803",
+  "region": "eu-west-2",
+  "terraformRoot": "infra/aws/terraform/production-green-stage-b",
+  "zeroDestroy": true,
+  "supportedDeploymentStates": {
+    "initial-stage-b": "bootstrap resources and create the twelve current task definitions",
+    "partial-apply-retry": "current task definitions may be create or no-op; retained history is no-op",
+    "pre-canary-retained-rollover": "create-only current definitions plus revision-keyed retained no-ops",
+    "post-canary-rollover": "create-only current definitions plus retained canary history and broker rollover",
+    "broker-policy-migrated": "managed broker policy and exact attachment; legacy inline policy rejected",
+    "zero-current-refresh-checkpoint": "retained definitions and persistent broker resources refresh as no-op",
+    "normal-subsequent-release": "append-only current creates/no-ops with broker mutation when mappings change",
+    "current-production-shaped-plan": "58 no-ops, 12 creates, 3 updates, zero deletes/replacements"
+  },
+  "actionLifecycle": {
+    "create": ["initial-stage-b", "partial-apply-retry", "pre-canary-retained-rollover", "post-canary-rollover", "zero-current-refresh-checkpoint", "normal-subsequent-release"],
+    "update": ["post-canary-rollover", "broker-policy-migrated", "normal-subsequent-release"],
+    "no-op": ["initial-stage-b", "partial-apply-retry", "pre-canary-retained-rollover", "post-canary-rollover", "broker-policy-migrated", "zero-current-refresh-checkpoint", "normal-subsequent-release", "current-production-shaped-plan"],
+    "delete": [],
+    "replacement": []
+  },
+  "resources": [
+    {"addressPattern":"aws_cloudwatch_log_group.stage_b[\"backend|worker|canary|read_only_canary\"]","type":"aws_cloudwatch_log_group","actions":["create","no-op"],"identity":"exact Stage B log-group name","layers":["plan-validator","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_iam_role.execution[\"backend|worker|executor|canary|read_only_canary\"]","type":"aws_iam_role","actions":["create","no-op"],"identity":"exact Stage B execution-role ARN","layers":["plan-validator","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_iam_role.task[\"backend|worker|canary|read_only_canary\"]","type":"aws_iam_role","actions":["create","no-op"],"identity":"exact Stage B task-role ARN","layers":["plan-validator","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_iam_role_policy.execution[\"backend|worker|executor|canary|read_only_canary\"]","type":"aws_iam_role_policy","actions":["create","no-op"],"identity":"exact role and stage-b-exact-image-logs-and-secrets policy","layers":["plan-validator","permission-manifest","apply-wrapper"]},
+    {"addressPattern":"aws_iam_role_policy.candidate_object_storage[\"backend|worker|canary\"]","type":"aws_iam_role_policy","actions":["create","no-op"],"identity":"exact task role and stage-b-object-storage policy","layers":["plan-validator","permission-manifest","apply-wrapper"]},
+    {"addressPattern":"aws_iam_role_policy.executor_runtime","type":"aws_iam_role_policy","actions":["create","no-op"],"identity":"exact Stage A executor task role and stage-b-executor-runtime policy","layers":["plan-validator","permission-manifest","apply-wrapper"]},
+    {"addressPattern":"aws_ecs_task_definition.candidate[\"backend|worker|canary|read_only_canary\"]","type":"aws_ecs_task_definition","actions":["create","no-op"],"identity":"exact current candidate family and image binding","layers":["plan-validator","reference-audit","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_ecs_task_definition.executor[\"full-rls-*\"]","type":"aws_ecs_task_definition","actions":["create","no-op"],"identity":"exact current executor family and image binding","layers":["plan-validator","reference-audit","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_ecs_task_definition.candidate_retained[\"<generation>-backend|worker|canary\"]","type":"aws_ecs_task_definition","actions":["no-op"],"identity":"exact pre-canary revision-keyed retained family","layers":["plan-validator","reference-audit","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_ecs_task_definition.executor_retained[\"<generation>-full-rls-*\"]","type":"aws_ecs_task_definition","actions":["no-op"],"identity":"exact revision-keyed retained executor family","layers":["plan-validator","reference-audit","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_dynamodb_table.replay","type":"aws_dynamodb_table","actions":["create","no-op"],"identity":"arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay","layers":["plan-validator","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_iam_policy.broker","type":"aws_iam_policy","actions":["no-op","update"],"identity":"arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime","layers":["plan-validator","reference-audit","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_iam_role_policy_attachment.broker","type":"aws_iam_role_policy_attachment","actions":["no-op"],"identity":"mscqr-production-rls-approval-broker to the exact managed policy ARN","layers":["plan-validator","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_lambda_function.broker","type":"aws_lambda_function","actions":["create","update","no-op"],"identity":"mscqr-production-rls-approval-broker base function","layers":["plan-validator","reference-audit","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_lambda_alias.reviewed","type":"aws_lambda_alias","actions":["create","update","no-op"],"identity":"exact reviewed alias ARN and version resolution","layers":["plan-validator","reference-audit","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_lambda_permission.release_deployer","type":"aws_lambda_permission","actions":["create","no-op"],"identity":"exact release-deployer principal and reviewed qualifier","layers":["plan-validator","permission-manifest","apply-wrapper","post-apply"]}
+  ],
+  "rejected": [
+    "aws_iam_role_policy.broker",
+    "aws_iam_policy.* except aws_iam_policy.broker",
+    "aws_iam_role_policy_attachment.* except aws_iam_role_policy_attachment.broker",
+    "all delete and replacement actions",
+    "aws_ecs_service, aws_ecs_cluster, aws_ecs_run_task, aws_db_*, aws_rds_*, aws_lb_*, aws_route53_*"
+  ]
+}

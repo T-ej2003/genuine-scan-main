@@ -14,6 +14,7 @@ import {
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
 } from "./stage-b-reference-audit-contract.mjs";
 import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
+import { classifyStageBPlan } from "./stage-b-deployment-contract.mjs";
 
 export { batch, createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 
@@ -408,6 +409,7 @@ export function generateReferenceAudit({
   if (!/^[a-f0-9]{64}$/.test(expectedPackageChecksumSha256 || "")) throw new Error("Expected broker package checksum is missing or malformed.");
   if (plan?.variables?.package_checksum_sha256?.value !== expectedPackageChecksumSha256) throw new Error("Expected release package checksum does not match the exact plan input.");
   assertStageBReferenceAuditFreshness(auditedAt, now);
+  classifyStageBPlan(plan, { strict: false, validateActions: false, terraformConfiguration });
   const planSha = ensurePlanHash(planBytes, planJsonSha256);
   const {
     rolloverByAddress,

@@ -1,0 +1,861 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.8",
+  "metadata": {
+    "fixture": "sanitized-production-shaped-stage-b-plan",
+    "expected": {
+      "create": 12,
+      "update": 3,
+      "no-op": 58,
+      "delete": 0,
+      "replacement": 0
+    }
+  },
+  "variables": {},
+  "resource_changes": [
+    {
+      "address": "aws_cloudwatch_log_group.stage_b[\"backend\"]",
+      "type": "aws_cloudwatch_log_group",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_cloudwatch_log_group.stage_b[\"worker\"]",
+      "type": "aws_cloudwatch_log_group",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_cloudwatch_log_group.stage_b[\"canary\"]",
+      "type": "aws_cloudwatch_log_group",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_cloudwatch_log_group.stage_b[\"read_only_canary\"]",
+      "type": "aws_cloudwatch_log_group",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.execution[\"backend\"]",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.execution[\"worker\"]",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.execution[\"executor\"]",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.execution[\"canary\"]",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.execution[\"read_only_canary\"]",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.task[\"backend\"]",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.task[\"worker\"]",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.task[\"canary\"]",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.task[\"read_only_canary\"]",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.execution[\"backend\"]",
+      "type": "aws_iam_role_policy",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.execution[\"worker\"]",
+      "type": "aws_iam_role_policy",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.execution[\"executor\"]",
+      "type": "aws_iam_role_policy",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.execution[\"canary\"]",
+      "type": "aws_iam_role_policy",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.execution[\"read_only_canary\"]",
+      "type": "aws_iam_role_policy",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.candidate_object_storage[\"backend\"]",
+      "type": "aws_iam_role_policy",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.candidate_object_storage[\"worker\"]",
+      "type": "aws_iam_role_policy",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.candidate_object_storage[\"canary\"]",
+      "type": "aws_iam_role_policy",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.executor_runtime",
+      "type": "aws_iam_role_policy",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate[\"backend\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-rls-green-backend-candidate"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate[\"worker\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-rls-green-worker-candidate"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate[\"canary\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-full-rls-green-application-canary"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate[\"read_only_canary\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-full-rls-green-read-only-canary"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor[\"full-rls-capability-preflight\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-full-rls-green-full-rls-capability-preflight"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor[\"full-rls-admin-bootstrap\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-full-rls-green-full-rls-admin-bootstrap"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor[\"full-rls-role-provision\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-full-rls-green-full-rls-role-provision"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor[\"full-rls-role-verify\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-full-rls-green-full-rls-role-verify"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor[\"full-rls-admin-ownership\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-full-rls-green-full-rls-admin-ownership"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor[\"full-rls-runtime-policy\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-full-rls-green-full-rls-runtime-policy"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor[\"full-rls-verification\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-full-rls-green-full-rls-verification"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor[\"full-rls-rollback\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "family": "mscqr-production-full-rls-green-full-rls-rollback"
+        }
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"60b782b-backend\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"60b782b-worker\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"60b782b-canary\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"760df83-backend\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"760df83-worker\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"760df83-canary\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"7029425-backend\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"7029425-worker\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"7029425-canary\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"60b782b-full-rls-capability-preflight\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"60b782b-full-rls-admin-bootstrap\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"60b782b-full-rls-role-provision\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"60b782b-full-rls-role-verify\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"60b782b-full-rls-admin-ownership\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"60b782b-full-rls-runtime-policy\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"60b782b-full-rls-verification\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"60b782b-full-rls-rollback\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"760df83-full-rls-capability-preflight\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"760df83-full-rls-admin-bootstrap\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"760df83-full-rls-role-provision\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"760df83-full-rls-role-verify\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"760df83-full-rls-admin-ownership\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"760df83-full-rls-runtime-policy\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"760df83-full-rls-verification\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"760df83-full-rls-rollback\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"7029425-full-rls-capability-preflight\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"7029425-full-rls-admin-bootstrap\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"7029425-full-rls-role-provision\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"7029425-full-rls-role-verify\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"7029425-full-rls-admin-ownership\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"7029425-full-rls-runtime-policy\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"7029425-full-rls-verification\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"7029425-full-rls-rollback\"]",
+      "type": "aws_ecs_task_definition",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_dynamodb_table.replay",
+      "type": "aws_dynamodb_table",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_policy.broker",
+      "type": "aws_iam_policy",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {
+          "name": "mscqr-production-rls-approval-broker-runtime",
+          "path": "/",
+          "arn": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+        },
+        "after": {
+          "name": "mscqr-production-rls-approval-broker-runtime",
+          "path": "/",
+          "arn": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+        },
+        "after_unknown": {
+          "policy": true
+        }
+      }
+    },
+    {
+      "address": "aws_iam_role_policy_attachment.broker",
+      "type": "aws_iam_role_policy_attachment",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {
+          "role": "mscqr-production-rls-approval-broker",
+          "policy_arn": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+        },
+        "after": {
+          "role": "mscqr-production-rls-approval-broker",
+          "policy_arn": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+        }
+      }
+    },
+    {
+      "address": "aws_lambda_function.broker",
+      "type": "aws_lambda_function",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_lambda_alias.reviewed",
+      "type": "aws_lambda_alias",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_lambda_permission.release_deployer",
+      "type": "aws_lambda_permission",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    }
+  ]
+}

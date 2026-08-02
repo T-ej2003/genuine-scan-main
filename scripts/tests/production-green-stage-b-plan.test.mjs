@@ -218,7 +218,7 @@ test("state migration requires present sources, absent destinations, and explici
 });
 
 test("Stage B plan wrapper permits only non-destructive control-plane resources", () =>
-  assert.doesNotThrow(() => assertStageBPlan({ resource_changes: [...appendOnly(), change("aws_dynamodb_table")] }, { terraformConfiguration })));
+  assert.doesNotThrow(() => assertStageBPlan({ resource_changes: [...appendOnly(), { address: "aws_dynamodb_table.replay", type: "aws_dynamodb_table", change: { actions: ["create"], after: {} } }] }, { terraformConfiguration })));
 
 test("append-only current create plus retained no-op passes", () => {
   const { plan, options } = validAppendOnly();

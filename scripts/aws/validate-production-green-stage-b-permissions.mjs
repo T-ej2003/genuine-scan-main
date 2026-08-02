@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
+import { STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS } from "./stage-b-deployment-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_PREFLIGHT_MAX_AGE_MS = 15 * 60 * 1000;
@@ -17,18 +18,10 @@ export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${
 export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
 export const PERMISSION_REPORT_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
 export const PERMISSION_REPORT_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
-const BROKER_ROLE_NAME = "mscqr-production-rls-approval-broker";
-const BROKER_MANAGED_POLICY_ARN = `arn:aws:iam::${ACCOUNT}:policy/mscqr-production-rls-approval-broker-runtime`;
-const BROKER_MANAGED_POLICY_NAME = "mscqr-production-rls-approval-broker-runtime";
-const BROKER_POLICY_STATEMENTS = Object.freeze([
-  ["RunOnlyApprovedExecutorAndCanaryRevisions", ["ecs:RunTask"]],
-  ["PassOnlyApprovedTaskRoles", ["iam:PassRole"]],
-  ["ClaimOnlyStageBReplayRows", ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem"]],
-  ["ReadOnlyStageAApproval", ["secretsmanager:GetSecretValue"]],
-  ["VerifyOnlyStageAApprovalKey", ["kms:Verify"]],
-  ["WriteOnlyBrokerReceipts", ["s3:PutObject"]],
-  ["WriteOnlyStageABrokerLogs", ["logs:CreateLogStream", "logs:PutLogEvents"]],
-]);
+const BROKER_ROLE_NAME = STAGE_B_BROKER_POLICY.roleName;
+const BROKER_MANAGED_POLICY_ARN = STAGE_B_BROKER_POLICY.arn;
+const BROKER_MANAGED_POLICY_NAME = STAGE_B_BROKER_POLICY.name;
+const BROKER_POLICY_STATEMENTS = STAGE_B_BROKER_POLICY_STATEMENTS;
 const TASK_DEFINITION_TAG_CONTEXT = Object.freeze([
   { key: "aws:RequestedRegion", type: "string", values: [REGION] },
   { key: "aws:RequestTag/Environment", type: "string", values: ["production"] },
