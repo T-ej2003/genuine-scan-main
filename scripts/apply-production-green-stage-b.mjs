@@ -18,7 +18,7 @@ import {
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
-import { assertStageBDeploymentIdentity, assertStageBProtectedMainCheckout, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
+import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenceSha256 as canonicalImageEvidenceSha256, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -108,7 +108,10 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
   const deploymentIdentity = assertStageBDeploymentIdentity({ plan, expectedToolingSha: toolingSha, expectedImageReleaseSha: imageReleaseSha, imageEvidence });
   const boundToolingSha = toolingSha || deploymentIdentity.toolingSha;
   const boundImageReleaseSha = imageReleaseSha || deploymentIdentity.imageReleaseSha;
-  assertStageBProtectedMainCheckout(protectedMainCheckout || { toolingSha: boundToolingSha, currentHead: currentHead || boundToolingSha, originMainHead: boundToolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false }, mode: "production" });
+  assertStageBProtectedCheckoutMatchesDeploymentIdentity({
+    protectedMainCheckout: protectedMainCheckout || { toolingSha: boundToolingSha, currentHead: currentHead || boundToolingSha, originMainHead: boundToolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false }, mode: "production" },
+    deploymentIdentity,
+  });
   if (deploymentIdentity.canonicalImageEvidenceSha256 !== imageEvidenceSha256) throw new Error("Stage B plan canonical image-evidence digest does not match the authenticated report.");
   if (audit.toolingSha !== deploymentIdentity.toolingSha || audit.imageReleaseSha !== deploymentIdentity.imageReleaseSha || audit.canonicalImageEvidenceSha256 !== deploymentIdentity.canonicalImageEvidenceSha256) throw new Error("Reference audit is bound to a different Stage B deployment identity.");
   assertImageEvidence(imageEvidence, { signatureArtifact: imageEvidenceSignatureArtifact, verifySignature: ({ report, signatureArtifact: artifact, now: signatureNow }) => verifyImageEvidence({ report, signatureArtifact: artifact, now: signatureNow }), imageReleaseSha: boundImageReleaseSha, workflowRunId: imageEvidenceWorkflowRunId, artifactSha256: imageEvidenceArtifactSha256, now });
@@ -176,7 +179,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
     : effectiveDeps.currentHead
       ? { toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false }, mode: "production" }
       : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
-  assertStageBProtectedMainCheckout({ ...applyCheckout, toolingSha: verified.deploymentIdentity.toolingSha, mode: "production" });
+  assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout: { ...applyCheckout, mode: "production" }, deploymentIdentity: verified.deploymentIdentity });
   const result = effectiveDeps.apply(artifacts.planPath);
   if (result?.status !== undefined && result.status !== 0) throw new Error("Terraform apply failed; stop without retry.");
   return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
