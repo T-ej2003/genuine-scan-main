@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertStageBPlan } from "../plan-production-green-stage-b.mjs";
-import { STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBBrokerAliasArn, STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import {
   createAwsReader,
   generateReferenceAudit,
@@ -35,7 +35,7 @@ const packageDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-au
 const packagePath = path.join(packageDirectory, "broker.zip");
 fs.writeFileSync(packagePath, packageBytes, { mode: 0o600 });
 const callerArn = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test-session";
-const brokerFunctionArn = "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed";
+const brokerAliasArn = STAGE_B.brokerAliasArn;
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
 const now = new Date("2026-07-31T14:05:00.000Z");
 const terraformConfigurationSource = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
@@ -102,7 +102,7 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
     return [mode, appendOnly ? oldArnFor(family) : newArnFor(family)];
   }));
   const baseConfig = {
-    FunctionArn: brokerFunctionArn,
+    FunctionArn: STAGE_B.brokerFunctionArn,
     Version: "2",
     Environment: {
       Variables: {
@@ -133,7 +133,7 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
     options: {
       region: "eu-west-2",
       clusterArn,
-      brokerFunctionArn,
+      brokerAliasArn,
       expectedPackageChecksumSha256: packageChecksum,
       callerArn,
       terraformConfiguration,
@@ -759,10 +759,25 @@ test("generator enforces current, maximum-age, and future-skew timestamps", () =
   assert.throws(() => generate(fixture, { auditedAt: "not-a-timestamp" }), /malformed/);
   const staleCliValue = parseCli([
     "--plan-json", "/tmp/plan.json", "--plan-sha256", planSha256, "--output", "/tmp/audit.json",
-    "--region", "eu-west-2", "--cluster-arn", clusterArn, "--broker-function", brokerFunctionArn,
+    "--region", "eu-west-2", "--cluster-arn", clusterArn,
     "--expected-package-checksum-sha256", packageChecksum, "--audited-at", "2026-07-31T13:00:00.000Z",
   ]).auditedAt;
   assert.throws(() => generate(fixture, { auditedAt: staleCliValue }), /expired/);
+});
+
+test("Stage B broker alias identity has one canonical qualified source", () => {
+  assert.equal(assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn), STAGE_B.brokerAliasArn);
+  assert.throws(() => assertStageBBrokerAliasArn("arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"), /Expected: .*:reviewed[\s\S]*Difference: alias, qualifier/);
+  assert.throws(() => assertStageBBrokerAliasArn("arn:aws:lambda:eu-west-2:368992683803:function:other:reviewed"), /Difference: function/);
+  assert.throws(() => assertStageBBrokerAliasArn("arn:aws:lambda:us-east-1:368992683803:function:mscqr-production-rls-approval-broker:reviewed"), /Difference: region/);
+  assert.throws(() => assertStageBBrokerAliasArn("arn:aws:lambda:eu-west-2:000000000000:function:mscqr-production-rls-approval-broker:reviewed"), /Difference: account/);
+  assert.throws(() => assertStageBBrokerAliasArn("arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:v2"), /Difference: alias, qualifier/);
+});
+
+test("audit CLI derives the canonical broker alias and rejects an unqualified override", () => {
+  const base = ["--plan-json", "/tmp/plan.json", "--plan-sha256", planSha256, "--output", "/tmp/audit.json", "--region", "eu-west-2", "--cluster-arn", clusterArn, "--expected-package-checksum-sha256", packageChecksum];
+  assert.equal(parseCli(base).brokerAliasArn, STAGE_B.brokerAliasArn);
+  assert.throws(() => parseCli([...base, "--broker-function", "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"]), /Expected: .*:reviewed/);
 });
 
 const serviceArnFor = (index) => `arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/stage-b-${index}`;
@@ -1528,7 +1543,7 @@ test("AWS reader uses argv arrays and only read-only commands", () => {
     clusterArn,
     run: (args) => { calls.push(args); return JSON.stringify(responses[args.slice(0, 2).join(" ")] || {}); },
   });
-  reader.getCallerIdentity(); reader.listServices(); reader.describeServices([]); reader.listTasks("RUNNING"); reader.describeTasks([]); reader.describeTaskDefinition("safe"); reader.getFunctionConfiguration(brokerFunctionArn);
+  reader.getCallerIdentity(); reader.listServices(); reader.describeServices([]); reader.listTasks("RUNNING"); reader.describeTasks([]); reader.describeTaskDefinition("safe"); reader.getFunctionConfiguration(brokerAliasArn);
   assert.deepEqual(new Set(calls.map((args) => args.slice(0, 2).join(" "))), new Set(Object.keys(responses)));
   assert.ok(calls.every((args) => args.every((value) => !/[;&|`$()]/.test(value))));
   const source = fs.readFileSync("scripts/aws/generate-production-green-stage-b-reference-audit.mjs", "utf8");

@@ -15,9 +15,35 @@ export const STAGE_B = Object.freeze({
   checkerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
   executorRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
   executorExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
+  brokerFunctionArn: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
   brokerAliasArn: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
   frontendTaskDefinition: "mscqr-frontend:20",
 });
+
+const brokerAliasParts = (value) => {
+  const match = /^arn:aws:lambda:([^:]+):([^:]+):function:([^:]+)(?::([^:]+))?$/.exec(String(value || ""));
+  return match ? { region: match[1], account: match[2], functionName: match[3], qualifier: match[4] || "" } : null;
+};
+
+export function assertStageBBrokerAliasArn(value) {
+  const expected = STAGE_B.brokerAliasArn;
+  if (value === expected) return expected;
+  const expectedParts = brokerAliasParts(expected);
+  const receivedParts = brokerAliasParts(value);
+  const differences = [
+    expectedParts?.functionName !== receivedParts?.functionName ? "function" : null,
+    expectedParts?.qualifier !== receivedParts?.qualifier ? "alias" : null,
+    expectedParts?.account !== receivedParts?.account ? "account" : null,
+    expectedParts?.region !== receivedParts?.region ? "region" : null,
+    expectedParts?.qualifier !== receivedParts?.qualifier ? "qualifier" : null,
+  ].filter(Boolean);
+  throw new Error([
+    "Stage B broker alias ARN mismatch.",
+    `Expected: ${expected}`,
+    `Received: ${String(value)}`,
+    `Difference: ${differences.length ? differences.join(", ") : "ARN shape"}`,
+  ].join("\n"));
+}
 
 export const STAGE_B_MODES = Object.freeze([
   "full-rls-capability-preflight", "full-rls-admin-bootstrap", "full-rls-role-provision",

@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
+import { assertStageBBrokerAliasArn, STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
 import {
   assertStageBReferenceAuditFreshness,
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
@@ -261,10 +261,8 @@ function proveBrokerPackagePlan(plan, terraformConfiguration, expectedPackageChe
   return proof;
 }
 
-function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageChecksum, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha256, terraformConfiguration) {
-  const normalizedConfigArn = String(config?.FunctionArn || "").replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
-  const normalizedExpectedArn = String(brokerFunctionArn).replace(/:(?:reviewed|[1-9][0-9]*)$/, "");
-  if (!normalizedConfigArn || normalizedConfigArn !== normalizedExpectedArn) throw new Error("Broker Lambda identity does not match the expected function.");
+function validateBrokerConfiguration(config, brokerAliasArn, expectedPackageChecksum, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha256, terraformConfiguration) {
+  if (config?.FunctionArn !== STAGE_B.brokerFunctionArn) throw new Error("Broker Lambda identity does not match the canonical function ARN.");
   if (typeof config.Version !== "string" || !/^[1-9][0-9]*$/.test(config.Version)) throw new Error("Broker Lambda version is missing or malformed.");
   const variables = normalizeEnvironment(config);
   const taskDefinitions = requireObject(parseJson(variables.BROKER_TASK_DEFINITIONS_JSON, "BROKER_TASK_DEFINITIONS_JSON"), "BROKER_TASK_DEFINITIONS_JSON");
@@ -337,9 +335,9 @@ function validateBrokerConfiguration(config, brokerFunctionArn, expectedPackageC
     : { ...brokerProof, transition: "plannedAtomicPackageChecksumTransition" };
   return {
     summary: {
-      functionArn: normalizedConfigArn,
+      functionArn: STAGE_B.brokerFunctionArn,
       functionVersion: config.Version,
-      aliasArn: brokerFunctionArn,
+      aliasArn: brokerAliasArn,
       aliasVersion: config.Version,
       releasePackageChecksumSha256: approvalExpected.packageChecksumSha256,
       plannedReleasePackageChecksumSha256: expectedPackageChecksum,
@@ -471,7 +469,7 @@ export function generateReferenceAudit({
   planJsonSha256,
   region,
   clusterArn,
-  brokerFunctionArn,
+  brokerAliasArn,
   expectedPackageChecksumSha256,
   reader,
   callerArn,
@@ -482,7 +480,7 @@ export function generateReferenceAudit({
   if (!reader) throw new Error("Read-only AWS reader is required.");
   if (region !== "eu-west-2") throw new Error("Stage B requires AWS region eu-west-2.");
   if (clusterArn !== STAGE_B.clusterArn) throw new Error("ECS cluster ARN is outside the exact Stage B contract.");
-  if (brokerFunctionArn !== STAGE_B.brokerAliasArn) throw new Error("Broker Lambda alias ARN is outside the exact Stage B contract.");
+  assertStageBBrokerAliasArn(brokerAliasArn);
   if (!/^[a-f0-9]{64}$/.test(expectedPackageChecksumSha256 || "")) throw new Error("Expected broker package checksum is missing or malformed.");
   if (plan?.variables?.package_checksum_sha256?.value !== expectedPackageChecksumSha256) throw new Error("Expected release package checksum does not match the exact plan input.");
   assertStageBReferenceAuditFreshness(auditedAt, now);
@@ -550,7 +548,7 @@ export function generateReferenceAudit({
     referencesByArn: brokerReferencesByArn,
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
-  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerFunctionArn), brokerFunctionArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha, terraformConfiguration);
+  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerAliasArn), brokerAliasArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha, terraformConfiguration);
   const serviceReferences = referenceNames(services, oldArns, "taskDefinition", "serviceName");
   const runningReferences = referenceNames(runningTasks, oldArns, "taskDefinitionArn", "taskArn");
   const pendingReferences = referenceNames(pendingTasks, oldArns, "taskDefinitionArn", "taskArn");
@@ -715,10 +713,11 @@ export function parseCli(argv) {
   const outputPath = requireOption(argv, "--output");
   const region = requireOption(argv, "--region");
   const clusterArn = requireOption(argv, "--cluster-arn");
-  const brokerFunctionArn = requireOption(argv, "--broker-function");
+  const suppliedBrokerAliasArn = readOption(argv, "--broker-function");
+  if (suppliedBrokerAliasArn !== undefined) assertStageBBrokerAliasArn(suppliedBrokerAliasArn);
   const expectedPackageChecksumSha256 = requireOption(argv, "--expected-package-checksum-sha256");
   if (!path.isAbsolute(planJsonPath) || !path.isAbsolute(outputPath)) throw new Error("Plan and output paths must be absolute.");
-  return { planJsonPath, planJsonSha256, outputPath, region, clusterArn, brokerFunctionArn, expectedPackageChecksumSha256, auditedAt: readOption(argv, "--audited-at") || new Date().toISOString() };
+  return { planJsonPath, planJsonSha256, outputPath, region, clusterArn, brokerAliasArn: STAGE_B.brokerAliasArn, expectedPackageChecksumSha256, auditedAt: readOption(argv, "--audited-at") || new Date().toISOString() };
 }
 
 export async function runCli(argv = process.argv.slice(2)) {
@@ -727,7 +726,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   const plan = parseJson(planBytes.toString("utf8"), "Terraform plan JSON");
   const reader = createAwsReader(options);
   const terraformConfiguration = fs.readFileSync(stageBTerraformConfigurationPath, "utf8");
-  const audit = generateReferenceAudit({ ...options, plan, planBytes, reader, terraformConfiguration, callerArn: reader.getCallerIdentity().Arn });
+  const audit = generateReferenceAudit({ ...options, plan, planBytes, reader, terraformConfiguration });
   fs.mkdirSync(path.dirname(options.outputPath), { recursive: true, mode: 0o700 });
   fs.writeFileSync(options.outputPath, `${JSON.stringify(audit, null, 2)}\n`, { mode: 0o600 });
   return { outputPath: options.outputPath, auditSha256: sha256(fs.readFileSync(options.outputPath)), planJsonSha256: audit.planJsonSha256 };
