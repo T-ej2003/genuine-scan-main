@@ -84,11 +84,11 @@ Do not set a repository-level duplicate, and preserve the source-controlled no-r
 and branch controls. Verify a fixed-SHA dispatch can assume the role only through the
 reusable job, then inspect all four immutable ECR digest labels and signed attestations.
 
-Before image publication, dispatch
-`.github/workflows/production-green-stage-b-publisher-oidc-verify.yml`. It has no inputs,
-uses the same protected environment and role variable, and performs only
-`sts:GetCallerIdentity`. A failed identity check stops publication; it must not be replaced
-with the image workflow as a probe.
+Before image publication, use the canonical dispatcher and reusable image workflow. The
+workflow-definition gate must verify `refs/heads/main`, then the release gate must verify
+the exact `release_sha` before dependency installation or OIDC credentials. A failed gate
+stops publication; no separate identity-probe workflow is required or accepted as a substitute
+for those source and release checks.
 
 Rollback is a separately approved destroy of this isolated Terraform role followed by
 removal of the one environment variable. It does not delete published images or alter any
