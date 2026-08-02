@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertStageBPlan } from "../plan-production-green-stage-b.mjs";
-import { STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBBrokerAliasArn, STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import {
   createAwsReader,
   generateReferenceAudit,
@@ -35,7 +35,7 @@ const packageDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-au
 const packagePath = path.join(packageDirectory, "broker.zip");
 fs.writeFileSync(packagePath, packageBytes, { mode: 0o600 });
 const callerArn = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test-session";
-const brokerFunctionArn = "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed";
+const brokerAliasArn = STAGE_B.brokerAliasArn;
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
 const now = new Date("2026-07-31T14:05:00.000Z");
 const terraformConfigurationSource = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
@@ -102,7 +102,7 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
     return [mode, appendOnly ? oldArnFor(family) : newArnFor(family)];
   }));
   const baseConfig = {
-    FunctionArn: brokerFunctionArn,
+    FunctionArn: STAGE_B.brokerFunctionArn,
     Version: "2",
     Environment: {
       Variables: {
@@ -133,7 +133,7 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
     options: {
       region: "eu-west-2",
       clusterArn,
-      brokerFunctionArn,
+      brokerAliasArn,
       expectedPackageChecksumSha256: packageChecksum,
       callerArn,
       terraformConfiguration,
@@ -759,10 +759,63 @@ test("generator enforces current, maximum-age, and future-skew timestamps", () =
   assert.throws(() => generate(fixture, { auditedAt: "not-a-timestamp" }), /malformed/);
   const staleCliValue = parseCli([
     "--plan-json", "/tmp/plan.json", "--plan-sha256", planSha256, "--output", "/tmp/audit.json",
-    "--region", "eu-west-2", "--cluster-arn", clusterArn, "--broker-function", brokerFunctionArn,
+    "--region", "eu-west-2", "--cluster-arn", clusterArn,
     "--expected-package-checksum-sha256", packageChecksum, "--audited-at", "2026-07-31T13:00:00.000Z",
   ]).auditedAt;
   assert.throws(() => generate(fixture, { auditedAt: staleCliValue }), /expired/);
+});
+
+test("Stage B broker alias identity has one canonical qualified source", () => {
+  assert.equal(assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn), STAGE_B.brokerAliasArn);
+  assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerFunctionArn), /Difference: alias, qualifier/);
+  assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn.replace(/function:[^:]+/, "function:other")), /Difference: function/);
+  assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn.replace(STAGE_B.region, "us-east-1")), /Difference: region/);
+  assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn.replace(STAGE_B.account, "000000000000")), /Difference: account/);
+  assert.throws(() => assertStageBBrokerAliasArn(STAGE_B.brokerAliasArn.replace(/:[^:]+$/, ":v2")), /Difference: alias, qualifier/);
+});
+
+test("broker configuration accepts only the canonical function ARN or matching numeric version", () => {
+  const withFunctionArn = (functionArn, version) => makeFixture({
+    mutateReader: (reader) => {
+      const original = reader.getFunctionConfiguration;
+      reader.getFunctionConfiguration = () => ({ ...original(), FunctionArn: functionArn, Version: version });
+    },
+  });
+  assert.doesNotThrow(() => generate(withFunctionArn(STAGE_B.brokerFunctionArn, "2")));
+  assert.doesNotThrow(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":2"), "2")));
+  assert.doesNotThrow(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":15"), "15")));
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":3"), "2")), /version does not match/);
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerAliasArn, "2")), /version does not match/);
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerAliasArn.replace(/function:[^:]+/, "function:other"), "2")), /canonical function/);
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArn.replace(STAGE_B.account, "000000000000"), "2")), /canonical function/);
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArn.replace(STAGE_B.region, "us-east-1"), "2")), /canonical function/);
+  assert.throws(() => generate(withFunctionArn(STAGE_B.brokerFunctionArnWildcard.replace(/:\*$/, ":foo"), "2")), /version does not match/);
+});
+
+test("audit CLI derives the canonical broker alias and rejects broker overrides", () => {
+  const base = ["--plan-json", "/tmp/plan.json", "--plan-sha256", planSha256, "--output", "/tmp/audit.json", "--region", "eu-west-2", "--cluster-arn", clusterArn, "--expected-package-checksum-sha256", packageChecksum];
+  assert.equal(parseCli(base).brokerAliasArn, STAGE_B.brokerAliasArn);
+  assert.throws(() => parseCli([...base, "--broker-function", STAGE_B.brokerAliasArn]), /not accepted; Stage B broker identity is canonical/);
+});
+
+test("Stage B broker Lambda identities have one executable source", () => {
+  const canonicalPath = path.resolve("scripts/aws/production-green-stage-b-contract.mjs");
+  const sourceFiles = [];
+  const visit = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(entryPath);
+      else if (entry.name.endsWith(".mjs") && path.resolve(entryPath) !== canonicalPath) sourceFiles.push(entryPath);
+    }
+  };
+  visit(path.resolve("scripts"));
+  const duplicateLiterals = sourceFiles.flatMap((file) => {
+    const source = fs.readFileSync(file, "utf8");
+    return [STAGE_B.brokerAliasArn, STAGE_B.brokerFunctionArn, STAGE_B.brokerFunctionArnWildcard]
+      .filter((literal) => source.includes(literal))
+      .map((literal) => `${file}:${literal}`);
+  });
+  assert.deepEqual(duplicateLiterals, []);
 });
 
 const serviceArnFor = (index) => `arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/stage-b-${index}`;
@@ -1528,7 +1581,7 @@ test("AWS reader uses argv arrays and only read-only commands", () => {
     clusterArn,
     run: (args) => { calls.push(args); return JSON.stringify(responses[args.slice(0, 2).join(" ")] || {}); },
   });
-  reader.getCallerIdentity(); reader.listServices(); reader.describeServices([]); reader.listTasks("RUNNING"); reader.describeTasks([]); reader.describeTaskDefinition("safe"); reader.getFunctionConfiguration(brokerFunctionArn);
+  reader.getCallerIdentity(); reader.listServices(); reader.describeServices([]); reader.listTasks("RUNNING"); reader.describeTasks([]); reader.describeTaskDefinition("safe"); reader.getFunctionConfiguration(brokerAliasArn);
   assert.deepEqual(new Set(calls.map((args) => args.slice(0, 2).join(" "))), new Set(Object.keys(responses)));
   assert.ok(calls.every((args) => args.every((value) => !/[;&|`$()]/.test(value))));
   const source = fs.readFileSync("scripts/aws/generate-production-green-stage-b-reference-audit.mjs", "utf8");

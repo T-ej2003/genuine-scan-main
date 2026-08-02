@@ -16,6 +16,7 @@ import {
   RELEASE_ROLE_ARN,
   canonicalizeJson,
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
+import { assertStageBBrokerAliasArn } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -90,6 +91,10 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
   if (!/^[a-f0-9]{64}$/.test(permissionReportSha256) || sha256(permissionReportBytes) !== permissionReportSha256) throw new Error("Permission-preflight report SHA256 does not match the approved digest.");
   try { assertStageBReleaseCallerArn(callerArn); } catch { throw new Error("Current caller is not the production release-deployer STS assumed-role."); }
   const plan = JSON.parse(planBytes); const audit = JSON.parse(auditBytes);
+  const brokerChanges = (plan.resource_changes || []).filter((change) => ["aws_lambda_function.broker", "aws_lambda_alias.reviewed", "aws_iam_policy.broker"].includes(change.address));
+  if (brokerChanges.some((change) => (change.change?.actions || []).some((action) => action !== "no-op"))) {
+    assertStageBBrokerAliasArn(audit.broker?.aliasArn);
+  }
   const manifestSha256 = sha256(Buffer.from(canonicalizeJson(readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"))));
   if (typeof showPlan !== "function") throw new Error("Terraform show dependency is required to bind the saved plan.");
   const shown = showPlan(planPath);

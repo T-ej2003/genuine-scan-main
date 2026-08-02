@@ -7,11 +7,11 @@ import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { PRODUCTION_GREEN } from "../../backend/scripts/production-full-rls-green-executor.mjs";
+import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 
-const ACCOUNT = "368992683803";
-const REGION = "eu-west-2";
-const CLUSTER_ARN = `arn:aws:ecs:${REGION}:${ACCOUNT}:cluster/mscqr-prod-euw2-main`;
-const BROKER_ARN = `arn:aws:lambda:${REGION}:${ACCOUNT}:function:mscqr-production-rls-approval-broker:reviewed`;
+const ACCOUNT = STAGE_B.account;
+const REGION = STAGE_B.region;
+const CLUSTER_ARN = STAGE_B.clusterArn;
 const APPLY_MODES = Object.freeze([
   "full-rls-capability-preflight",
   "full-rls-admin-bootstrap",
@@ -30,7 +30,7 @@ export function validateProductionReleaseEnvironment(env = process.env) {
     migrationSetDigest: env.MSCQR_FULL_RLS_MIGRATION_SET_DIGEST,
     packageChecksumSha256: env.MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256,
     approvalId: env.PRODUCTION_RLS_APPROVAL_ID,
-    brokerArn: env.PRODUCTION_RLS_BROKER_ARN,
+    brokerAliasArn: env.PRODUCTION_RLS_BROKER_ARN,
     executorImage: env.PRODUCTION_RLS_EXECUTOR_IMAGE,
     backendImage: env.PRODUCTION_BACKEND_IMAGE,
     workerImage: env.PRODUCTION_WORKER_IMAGE,
@@ -45,7 +45,7 @@ export function validateProductionReleaseEnvironment(env = process.env) {
       || !/^[a-f0-9]{64}$/.test(config.packageChecksumSha256 || "")
       || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(config.approvalId || "")
       || config.clusterArn !== CLUSTER_ARN
-      || config.brokerArn !== BROKER_ARN
+      || config.brokerAliasArn !== STAGE_B.brokerAliasArn
       || config.frontendTaskDefinition !== "mscqr-frontend:20"
       || !PRODUCTION_GREEN.receiptBucketPattern.test(config.receiptBucket || "")) {
     throw new Error("Production release binding is incomplete or outside the reviewed identity.");
@@ -70,8 +70,8 @@ const invokeBroker = (mode, config, aws, directory) => {
   fs.writeFileSync(requestPath, JSON.stringify({ mode, approvalId: config.approvalId }), { mode: 0o600, flag: "wx" });
   const invoked = aws([
     "lambda", "invoke",
-    "--function-name", config.brokerArn.replace(/:reviewed$/, ""),
-    "--qualifier", "reviewed",
+    "--function-name", STAGE_B.brokerFunctionArn,
+    "--qualifier", STAGE_B.brokerAliasQualifier,
     "--cli-binary-format", "raw-in-base64-out",
     "--payload", `fileb://${requestPath}`,
     responsePath,

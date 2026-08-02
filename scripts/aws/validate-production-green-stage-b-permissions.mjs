@@ -173,8 +173,8 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION 
     assertContext(entry.context, entry.id);
     if (lambdaWriteActions.has(entry.action)) {
       const expectedResource = entry.action === "lambda:UpdateAlias"
-        ? "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"
-        : "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker";
+        ? STAGE_B.brokerAliasArn
+        : STAGE_B.brokerFunctionArn;
       if (entry.resources.length !== 1 || entry.resources[0] !== expectedResource) {
         throw new Error(`${entry.id} must target only the reviewed broker function.`);
       }
