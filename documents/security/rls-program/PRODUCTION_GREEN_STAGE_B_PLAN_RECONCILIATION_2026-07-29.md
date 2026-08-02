@@ -159,11 +159,12 @@ retained generations remain represented and protected.
 
 At an append-only checkpoint with no current task-definition state addresses,
 refresh-only evaluation omits current broker mappings rather than dereferencing a
-missing current resource or substituting retained ARNs. Broker policy or function
-updates have Terraform-native preconditions requiring all twelve current
-task-definition ARNs and the exact nine broker mode mappings; a normal deployment
-therefore fails with `Stage B broker update requires all current task-definition
-mappings.` if any current definition is missing.
+missing current resource or substituting retained ARNs. Existing broker resources
+remain refreshable when they are no-op. The plan validator and apply wrapper enforce
+the exact twelve current task-definition mappings only when a broker Lambda, alias,
+or managed-policy mutation is present; such a deployment fails with
+`Broker mutation requires all twelve current task-definition mappings.` if any
+current definition is missing.
 
 The validator binds append-only audit contents to the exact plan, including all
 current and retained entries, classification counts, newest-revision evidence,

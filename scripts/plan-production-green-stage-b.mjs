@@ -7,6 +7,7 @@ import {
   assertStageBAtomicBrokerPlan,
   assertStageBAtomicBrokerPackagePlan,
   assertStageBBrokerCreatePlan,
+  assertStageBBrokerTaskDefinitionMapping,
   assertStageBReferenceAuditFreshness,
   assertStageBCurrentTaskDefinitionNoOp,
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
@@ -499,6 +500,10 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
 export function assertStageBPlan(plan, options = {}) {
   const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration } = options;
   const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
+  const brokerMutationAddresses = new Set(["aws_lambda_function.broker", "aws_lambda_alias.reviewed", "aws_iam_policy.broker"]);
+  const brokerMutation = (plan.resource_changes || []).find((change) => brokerMutationAddresses.has(change.address)
+    && !exactActions(change.change?.actions || [], ["no-op"]));
+  if (brokerMutation) assertStageBBrokerTaskDefinitionMapping(plan, terraformConfiguration);
   if (brokerChange) {
     const brokerActions = brokerChange.change?.actions;
     if (!Array.isArray(brokerActions) || brokerActions.length === 0) throw new Error("Stage B broker actions are missing or malformed.");

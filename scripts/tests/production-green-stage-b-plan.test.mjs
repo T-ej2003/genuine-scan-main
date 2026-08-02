@@ -373,9 +373,8 @@ test("broker and executor IAM match their exact AWS SDK writes and launch bounda
   assert.doesNotMatch(runTaskPolicy, /candidate\["(?:backend|worker)"\]/);
   const brokerPolicy = main.match(/resource "aws_iam_policy" "broker" \{[\s\S]*?\n}/)?.[0] || "";
   const brokerFunction = main.match(/resource "aws_lambda_function" "broker" \{[\s\S]*?\n}/)?.[0] || "";
-  for (const resource of [brokerPolicy, brokerFunction]) {
-    assert.match(resource, /precondition\s*\{[\s\S]*current_task_definition_mappings_complete\s*&&\s*local\.broker_task_definition_mappings_complete[\s\S]*Stage B broker update requires all current task-definition mappings\./);
-  }
+  assert.doesNotMatch(brokerPolicy, /precondition\s*\{/);
+  assert.doesNotMatch(brokerFunction, /precondition\s*\{/);
   assert.match(main, /iam:PassedToService/);
   assert.match(main, /Sid\s*=\s*"ReadWriteOnlyProductionArtifactObjects"[\s\S]*s3:GetObject[\s\S]*s3:PutObject[\s\S]*Resource\s*=\s*"\$\{var\.receipt_bucket_arn\}\/\*"/);
   assert.doesNotMatch(main, /Action\s*=\s*\[[^\]]*iam:(?:Create|Update|Delete|Attach|Put)/);
@@ -393,8 +392,16 @@ test("broker current mappings are safe at a zero-current append-only checkpoint 
   assert.match(brokerMappings, /local\.current_executor_task_definition_arns/);
   assert.match(brokerMappings, /local\.current_candidate_task_definition_arns/);
   assert.doesNotMatch(brokerMappings, /retained/);
-  for (const expression of ["current_task_definition_mappings_complete", "broker_task_definition_mappings_complete"]) {
-    assert.match(main, new RegExp(`local\\.${expression}`));
-  }
-  assert.match(main, /Stage B broker update requires all current task-definition mappings\./);
+  assert.match(main, /current_task_definition_mappings_complete/);
+  assert.match(main, /broker_task_definition_mappings_complete/);
+  assert.match(fs.readFileSync("scripts/plan-production-green-stage-b.mjs", "utf8"), /brokerMutationAddresses/);
+  assert.match(fs.readFileSync("scripts/aws/stage-b-reference-audit-contract.mjs", "utf8"), /Broker mutation requires all twelve current task-definition mappings/);
+});
+
+test("zero-current checkpoint does not fail broker no-op refresh validation", () => {
+  const main = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  const planValidator = fs.readFileSync("scripts/plan-production-green-stage-b.mjs", "utf8");
+  assert.doesNotMatch(main, /resource "aws_(?:iam_policy|lambda_function)" "(?:broker)"[\s\S]*?precondition/);
+  assert.match(planValidator, /!exactActions\(change\.change\?\.actions \|\| \[\], \["no-op"\]\)/);
+  assert.match(planValidator, /assertStageBBrokerTaskDefinitionMapping\(plan, terraformConfiguration\)/);
 });

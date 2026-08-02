@@ -146,6 +146,18 @@ export function assertStageBBrokerTaskDefinitionMapping(plan, terraformConfigura
     throw new Error("Broker atomic rollover executor for_each metadata is missing or malformed.");
   }
   const planned = plannedResources(plan?.planned_values?.root_module);
+  const expectedCurrentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
+  const currentResources = planned.filter((resource) => expectedCurrentAddresses.includes(resource?.address));
+  if (currentResources.length !== expectedCurrentAddresses.length) {
+    throw new Error("Broker mutation requires all twelve current task-definition mappings.");
+  }
+  for (const address of expectedCurrentAddresses) {
+    const matches = currentResources.filter((resource) => resource.address === address);
+    if (matches.length !== 1 || matches[0].type !== "aws_ecs_task_definition"
+      || matches[0].values?.family !== STAGE_B_TASK_DEFINITION_FAMILIES[address]) {
+      throw new Error(`Broker mutation current task-definition mapping is not exact: ${address}.`);
+    }
+  }
   const expectedAddresses = expectedExecutorAddresses();
   const executorResources = planned.filter((resource) => resource?.address?.startsWith(`${STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION}[`));
   if (executorResources.length !== expectedAddresses.length) throw new Error("Broker atomic rollover executor mapping is incomplete or duplicated.");

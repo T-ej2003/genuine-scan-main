@@ -1428,6 +1428,16 @@ test("broker update without a task-definition reference fails closed", () => {
   assert.throws(() => generate(fixture), /Terraform reference to local\.broker_task_definition_arns/);
 });
 
+test("broker mutation fails when a current task-definition mapping is absent", () => {
+  const fixture = makeAtomicBrokerFixture({
+    mutatePlan: (plan) => {
+      plan.planned_values.root_module.resources = plan.planned_values.root_module.resources
+        .filter((resource) => resource.address !== backendAddress);
+    },
+  });
+  assert.throws(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }), /Broker mutation requires all twelve current task-definition mappings/);
+});
+
 test("broker update referencing the wrong family fails closed", () => {
   const fixture = makeAtomicBrokerFixture({ mutateReader: (reader) => {
     const original = reader.getFunctionConfiguration;

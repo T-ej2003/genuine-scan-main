@@ -442,11 +442,6 @@ resource "aws_iam_policy" "broker" {
 
   lifecycle {
     create_before_destroy = true
-
-    precondition {
-      condition     = local.current_task_definition_mappings_complete && local.broker_task_definition_mappings_complete
-      error_message = "Stage B broker update requires all current task-definition mappings."
-    }
   }
 }
 
@@ -468,13 +463,6 @@ resource "aws_lambda_function" "broker" {
   source_code_hash = filebase64sha256(var.broker_package_path)
   timeout          = 30
   publish          = true
-
-  lifecycle {
-    precondition {
-      condition     = local.current_task_definition_mappings_complete && local.broker_task_definition_mappings_complete
-      error_message = "Stage B broker update requires all current task-definition mappings."
-    }
-  }
 
   environment {
     variables = {
