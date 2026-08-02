@@ -49,6 +49,42 @@ export const STAGE_B_BROKER_POLICY = Object.freeze({
   arn: "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime",
 });
 
+const brokerTaskDefinitionFamilies = Object.freeze(Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES)
+  .filter(([address]) => address.includes(".executor[") || address.endsWith('candidate["canary"]'))
+  .map(([, family]) => family));
+const sortedBrokerTaskDefinitionFamilies = Object.freeze([...brokerTaskDefinitionFamilies].sort());
+const brokerTaskDefinitionPattern = new RegExp(`^arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/(?:${brokerTaskDefinitionFamilies.join("|")}):[1-9][0-9]*$`);
+
+const brokerPassRoleArns = Object.freeze([
+  STAGE_B.executorRoleArn,
+  STAGE_B.executorExecutionRoleArn,
+  `arn:aws:iam::${STAGE_B.account}:role/${executionRoleNames.canary}`,
+  `arn:aws:iam::${STAGE_B.account}:role/${taskRoleNames.canary}`,
+]);
+
+const brokerPolicyResources = Object.freeze({
+  RunOnlyApprovedExecutorAndCanaryRevisions: (resource) => Array.isArray(resource)
+    && resource.length === brokerTaskDefinitionFamilies.length
+    && [...resource].sort().every((arn, index) => arn === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${sortedBrokerTaskDefinitionFamilies[index]}:${String(arn).split(":").pop()}`
+      && brokerTaskDefinitionPattern.test(arn)),
+  PassOnlyApprovedTaskRoles: (resource) => Array.isArray(resource) && JSON.stringify([...resource].sort()) === JSON.stringify([...brokerPassRoleArns].sort()),
+  ClaimOnlyStageBReplayRows: (resource) => resource === `arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/mscqr-production-rls-stage-b-replay`,
+  ReadOnlyStageAApproval: (resource) => resource === STAGE_B.approvalSecretArn,
+  VerifyOnlyStageAApprovalKey: (resource) => resource === STAGE_B.approvalKmsKeyArn,
+  WriteOnlyBrokerReceipts: (resource) => resource === `arn:aws:s3:::${STAGE_B.receiptBucket}/rls-broker-receipts/*`,
+  WriteOnlyStageABrokerLogs: (resource) => resource === `arn:aws:logs:${STAGE_B.region}:${STAGE_B.account}:log-group:/aws/lambda/mscqr-production-rls-approval-broker:log-stream:*`,
+});
+
+const brokerPolicyConditions = Object.freeze({
+  RunOnlyApprovedExecutorAndCanaryRevisions: null,
+  PassOnlyApprovedTaskRoles: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } },
+  ClaimOnlyStageBReplayRows: null,
+  ReadOnlyStageAApproval: null,
+  VerifyOnlyStageAApprovalKey: null,
+  WriteOnlyBrokerReceipts: null,
+  WriteOnlyStageABrokerLogs: null,
+});
+
 export const STAGE_B_RESOURCE_ACTION_MATRIX = Object.freeze({
   "aws_cloudwatch_log_group.stage_b[*]": Object.freeze({ type: "aws_cloudwatch_log_group", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact Stage B log-group name" }),
   "aws_iam_role.execution[*]": Object.freeze({ type: "aws_iam_role", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact execution-role name and account" }),
@@ -97,6 +133,8 @@ function normalizedPolicyShape(document) {
     const actions = [...statement.Action].sort();
     const expectedActions = expected.get(statement.Sid);
     if (!expectedActions || JSON.stringify(actions) !== JSON.stringify([...expectedActions].sort())) throw new Error("Broker managed-policy document differs from the canonical runtime contract.");
+    if (!brokerPolicyResources[statement.Sid]?.(statement.Resource)) throw new Error(`Broker managed-policy resource differs from the canonical runtime contract: ${statement.Sid}`);
+    if (canonicalJson(statement.Condition ?? null) !== canonicalJson(brokerPolicyConditions[statement.Sid])) throw new Error(`Broker managed-policy condition differs from the canonical runtime contract: ${statement.Sid}`);
     expected.delete(statement.Sid);
     return { Sid: statement.Sid, Effect: statement.Effect, Action: actions, Resource: statement.Resource, Condition: statement.Condition };
   });
@@ -122,6 +160,25 @@ function assertTerraformPolicySource(terraformConfiguration, strict) {
     const statement = statementStart >= 0 ? source.slice(statementStart, nextStatement >= 0 ? nextStatement : source.length) : "";
     const actionValues = statement.match(/Action\s*=\s*\[([^\]]+)\]/)?.[1].match(/"([^"]+)"/g)?.map((value) => value.slice(1, -1)).sort();
     if (!statement.includes('Effect   = "Allow"') || JSON.stringify(actionValues) !== JSON.stringify([...actions].sort())) throw new Error(`Broker managed-policy source statement is not canonical: ${sid}`);
+  }
+  const sourceResourceExpressions = {
+    RunOnlyApprovedExecutorAndCanaryRevisions: "Resource = values(local.broker_task_definition_arns)",
+    PassOnlyApprovedTaskRoles: "Resource = [var.stage_a_executor_task_role_arn, aws_iam_role.execution[\"executor\"].arn, aws_iam_role.task[\"canary\"].arn, aws_iam_role.execution[\"canary\"].arn]",
+    ClaimOnlyStageBReplayRows: "Resource = aws_dynamodb_table.replay.arn",
+    ReadOnlyStageAApproval: "Resource = var.approval_secret_arn",
+    VerifyOnlyStageAApprovalKey: "Resource = var.approval_kms_key_arn",
+    WriteOnlyBrokerReceipts: "Resource = \"${var.receipt_bucket_arn}/rls-broker-receipts/*\"",
+    WriteOnlyStageABrokerLogs: "Resource = \"${trimsuffix(var.stage_a_broker_log_group_arn, \":*\")}:log-stream:*\"",
+  };
+  for (const [sid, expression] of Object.entries(sourceResourceExpressions)) {
+    const statementStart = source.indexOf(`Sid      = "${sid}"`);
+    const nextSid = STAGE_B_BROKER_POLICY_STATEMENTS[STAGE_B_BROKER_POLICY_STATEMENTS.findIndex(([candidate]) => candidate === sid) + 1]?.[0];
+    const nextStatement = nextSid ? source.indexOf(`Sid      = "${nextSid}"`, statementStart) : source.length;
+    const statement = source.slice(statementStart, nextStatement >= 0 ? nextStatement : source.length).replace(/\s+/g, " ");
+    if (!statement.includes(expression.replace(/\s+/g, " "))) throw new Error(`Broker managed-policy source resource is not canonical: ${sid}`);
+    const expectedCondition = brokerPolicyConditions[sid];
+    if (expectedCondition && !statement.includes('Condition = { StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" } }')) throw new Error(`Broker managed-policy source condition is not canonical: ${sid}`);
+    if (!expectedCondition && /\bCondition\s*=/.test(statement)) throw new Error(`Broker managed-policy source contains an unexpected condition: ${sid}`);
   }
   if (/NotAction|NotResource|Resource\s*=\s*"\*"/.test(source)) throw new Error("Broker managed-policy source contains an unsupported wildcard contract.");
 }
