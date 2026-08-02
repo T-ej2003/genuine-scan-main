@@ -102,6 +102,56 @@ locals {
     { for mode, task in aws_ecs_task_definition.executor : mode => task.arn },
     { full-rls-application-canary = aws_ecs_task_definition.candidate["canary"].arn }
   )
+  broker_runtime_policy = {
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "RunOnlyApprovedExecutorAndCanaryRevisions"
+        Effect   = "Allow"
+        Action   = ["ecs:RunTask"]
+        Resource = values(local.broker_task_definition_arns)
+      },
+      {
+        Sid      = "PassOnlyApprovedTaskRoles"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = [var.stage_a_executor_task_role_arn, aws_iam_role.execution["executor"].arn, aws_iam_role.task["canary"].arn, aws_iam_role.execution["canary"].arn]
+        Condition = {
+          StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
+        }
+      },
+      {
+        Sid      = "ClaimOnlyStageBReplayRows"
+        Effect   = "Allow"
+        Action   = ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem"]
+        Resource = aws_dynamodb_table.replay.arn
+      },
+      {
+        Sid      = "ReadOnlyStageAApproval"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = var.approval_secret_arn
+      },
+      {
+        Sid      = "VerifyOnlyStageAApprovalKey"
+        Effect   = "Allow"
+        Action   = ["kms:Verify"]
+        Resource = var.approval_kms_key_arn
+      },
+      {
+        Sid      = "WriteOnlyBrokerReceipts"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${var.receipt_bucket_arn}/rls-broker-receipts/*"
+      },
+      {
+        Sid      = "WriteOnlyStageABrokerLogs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${trimsuffix(var.stage_a_broker_log_group_arn, ":*")}:log-stream:*"
+      }
+    ]
+  }
   broker_template_hashes = {
     backend  = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-backend-candidate.json"))))
     worker   = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-worker-candidate.json"))))
@@ -351,59 +401,24 @@ resource "aws_dynamodb_table" "replay" {
   tags = local.tags
 }
 
-resource "aws_iam_role_policy" "broker" {
-  name = "stage-b-broker"
-  role = split("/", var.stage_a_broker_role_arn)[1]
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid      = "RunOnlyApprovedExecutorAndCanaryRevisions"
-        Effect   = "Allow"
-        Action   = ["ecs:RunTask"]
-        Resource = values(local.broker_task_definition_arns)
-      },
-      {
-        Sid      = "PassOnlyApprovedTaskRoles"
-        Effect   = "Allow"
-        Action   = ["iam:PassRole"]
-        Resource = [var.stage_a_executor_task_role_arn, aws_iam_role.execution["executor"].arn, aws_iam_role.task["canary"].arn, aws_iam_role.execution["canary"].arn]
-        Condition = {
-          StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
-        }
-      },
-      {
-        Sid      = "ClaimOnlyStageBReplayRows"
-        Effect   = "Allow"
-        Action   = ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem"]
-        Resource = aws_dynamodb_table.replay.arn
-      },
-      {
-        Sid      = "ReadOnlyStageAApproval"
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = var.approval_secret_arn
-      },
-      {
-        Sid      = "VerifyOnlyStageAApprovalKey"
-        Effect   = "Allow"
-        Action   = ["kms:Verify"]
-        Resource = var.approval_kms_key_arn
-      },
-      {
-        Sid      = "WriteOnlyBrokerReceipts"
-        Effect   = "Allow"
-        Action   = ["s3:PutObject"]
-        Resource = "${var.receipt_bucket_arn}/rls-broker-receipts/*"
-      },
-      {
-        Sid      = "WriteOnlyStageABrokerLogs"
-        Effect   = "Allow"
-        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = "${trimsuffix(var.stage_a_broker_log_group_arn, ":*")}:log-stream:*"
-      }
-    ]
-  })
+resource "aws_iam_policy" "broker" {
+  name   = "mscqr-production-rls-approval-broker-runtime"
+  path   = "/"
+  policy = jsonencode(local.broker_runtime_policy)
+  tags   = local.tags
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "broker" {
+  role       = split("/", var.stage_a_broker_role_arn)[1]
+  policy_arn = aws_iam_policy.broker.arn
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_lambda_function" "broker" {

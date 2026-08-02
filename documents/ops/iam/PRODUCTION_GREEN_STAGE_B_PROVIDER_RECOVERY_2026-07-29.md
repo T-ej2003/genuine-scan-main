@@ -91,10 +91,34 @@ policy remains on its pre-correction version until the separately authorized
 update of both policies. AWS managed-policy version IDs must be discovered
 from each live policy and are not assumed to match repository suffixes.
 
-The current exact Stage B plan also updates the `stage-b-broker` inline policy
-through `aws_iam_role_policy.broker`. That in-place Terraform update requires
-`iam:PutRolePolicy`, scoped only to the broker role
+The old `stage-b-broker` inline-policy model is rejected. AWS authorizes
+`iam:PutRolePolicy` at the role level and cannot constrain the embedded
+`PolicyName`, so granting it would allow replacement of any inline policy on
+the broker role. Terraform now manages the exact dedicated customer-managed
+policy `mscqr-production-rls-approval-broker-runtime` and the exact
+`aws_iam_role_policy_attachment.broker` attachment to
 `arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker`.
+
+The locked AWS provider refreshes that managed policy with
+`iam:GetPolicy`, `iam:GetPolicyVersion`, `iam:ListPolicyVersions`, and the
+broker attachment with `iam:ListAttachedRolePolicies`, each scoped to the
+exact managed-policy or broker-role ARN. Ordinary policy updates use
+`iam:CreatePolicyVersion` and, when the provider prunes old versions,
+`iam:DeletePolicyVersion` on the exact managed-policy ARN. The provider sets
+the new version as default through `CreatePolicyVersion`; no
+`iam:SetDefaultPolicyVersion` grant is required. The release role receives no
+`iam:PutRolePolicy`, `iam:DeleteRolePolicy`, or arbitrary attachment authority.
+
+The initial migration is administrator-controlled: create the exact managed
+policy, attach it only to the broker role, verify semantic equivalence with
+`stage-b-broker`, then import
+`aws_iam_policy.broker` and
+`aws_iam_role_policy_attachment.broker` after destination-address and state-
+backup checks. Remove the old inline policy only after the managed attachment,
+equivalence proof, fresh plan, audit, and permission preflight succeed; use an
+administrator-controlled cleanup path for the exact old inline policy rather
+than expanding the release role. All earlier plans, audits, and permission
+reports are stale after this model correction.
 The permission manifest binds that write to the exact Terraform address,
 resource type, `update` action, role name, and inline policy name; no other
 inline policy or IAM role is covered. This is the only additional IAM write in
@@ -535,7 +559,8 @@ Remaining additions, in canonical order:
 12. aws_ecs_task_definition.executor["full-rls-rollback"]
 13. aws_ecs_task_definition.executor["full-rls-runtime-policy"]
 14. aws_ecs_task_definition.executor["full-rls-verification"]
-15. aws_iam_role_policy.broker
+15. aws_iam_policy.broker
+16. aws_iam_role_policy_attachment.broker
 16. aws_iam_role_policy.execution["backend"]
 17. aws_iam_role_policy.execution["canary"]
 18. aws_iam_role_policy.execution["executor"]

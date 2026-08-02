@@ -99,7 +99,8 @@
       "Action": "iam:ListAttachedRolePolicies",
       "Resource": [
         "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
-        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
       ]
     },
     {
@@ -107,6 +108,16 @@
       "Effect": "Allow",
       "Action": "iam:GetRolePolicy",
       "Resource": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution"
+    },
+    {
+      "Sid": "ReadExactStageBBrokerManagedPolicy",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyVersions"
+      ],
+      "Resource": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
     },
     {
       "Sid": "TagExactReplayTable",

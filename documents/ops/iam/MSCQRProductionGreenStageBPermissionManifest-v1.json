@@ -241,20 +241,66 @@
       "evidence": "Terraform aws_lambda_alias.reviewed update and prior successful apply"
     },
     {
-      "id": "update-broker-inline-policy",
-      "phase": "apply",
-      "action": "iam:PutRolePolicy",
-      "plan": {
-        "type": "aws_iam_role_policy",
-        "actions": ["update"],
-        "address": "aws_iam_role_policy.broker",
-        "roleName": "mscqr-production-rls-approval-broker",
-        "inlinePolicyName": "stage-b-broker",
-        "coverageRequired": true
-      },
+      "id": "refresh-stage-b-broker-managed-policy",
+      "phase": "refresh",
+      "action": "iam:GetPolicy",
+      "resources": ["arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 refresh of aws_iam_policy.broker"
+    },
+    {
+      "id": "refresh-stage-b-broker-managed-policy-version",
+      "phase": "refresh",
+      "action": "iam:GetPolicyVersion",
+      "resources": ["arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 refresh of the default aws_iam_policy.broker version"
+    },
+    {
+      "id": "refresh-stage-b-broker-managed-policy-versions",
+      "phase": "refresh",
+      "action": "iam:ListPolicyVersions",
+      "resources": ["arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 policy-version pruning path for aws_iam_policy.broker"
+    },
+    {
+      "id": "refresh-stage-b-broker-role-policy-attachments",
+      "phase": "refresh",
+      "action": "iam:ListAttachedRolePolicies",
       "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"],
       "context": [],
-      "evidence": "Terraform aws_iam_role_policy.broker in-place update uses iam:PutRolePolicy for the exact broker role and stage-b-broker inline policy"
+      "evidence": "locked hashicorp/aws 6.56.0 refresh of aws_iam_role_policy_attachment.broker"
+    },
+    {
+      "id": "update-broker-managed-policy",
+      "phase": "apply",
+      "action": "iam:CreatePolicyVersion",
+      "plan": {
+        "type": "aws_iam_policy",
+        "actions": ["update"],
+        "address": "aws_iam_policy.broker",
+        "policyName": "mscqr-production-rls-approval-broker-runtime",
+        "coverageRequired": true
+      },
+      "resources": ["arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 aws_iam_policy update calls iam:CreatePolicyVersion with SetAsDefault=true"
+    },
+    {
+      "id": "prune-broker-managed-policy-versions",
+      "phase": "apply",
+      "action": "iam:DeletePolicyVersion",
+      "plan": {
+        "type": "aws_iam_policy",
+        "actions": ["update"],
+        "address": "aws_iam_policy.broker",
+        "policyName": "mscqr-production-rls-approval-broker-runtime",
+        "coverageRequired": true
+      },
+      "resources": ["arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 aws_iam_policy update prunes the oldest non-default version when five versions exist"
     }
   ],
   "taskDefinitionMappings": [

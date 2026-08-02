@@ -17,9 +17,18 @@ export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${
 export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
 export const PERMISSION_REPORT_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
 export const PERMISSION_REPORT_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
-const BROKER_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-rls-approval-broker`;
 const BROKER_ROLE_NAME = "mscqr-production-rls-approval-broker";
-const BROKER_INLINE_POLICY_NAME = "stage-b-broker";
+const BROKER_MANAGED_POLICY_ARN = `arn:aws:iam::${ACCOUNT}:policy/mscqr-production-rls-approval-broker-runtime`;
+const BROKER_MANAGED_POLICY_NAME = "mscqr-production-rls-approval-broker-runtime";
+const BROKER_POLICY_STATEMENTS = Object.freeze([
+  ["RunOnlyApprovedExecutorAndCanaryRevisions", ["ecs:RunTask"]],
+  ["PassOnlyApprovedTaskRoles", ["iam:PassRole"]],
+  ["ClaimOnlyStageBReplayRows", ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem"]],
+  ["ReadOnlyStageAApproval", ["secretsmanager:GetSecretValue"]],
+  ["VerifyOnlyStageAApprovalKey", ["kms:Verify"]],
+  ["WriteOnlyBrokerReceipts", ["s3:PutObject"]],
+  ["WriteOnlyStageABrokerLogs", ["logs:CreateLogStream", "logs:PutLogEvents"]],
+]);
 const TASK_DEFINITION_TAG_CONTEXT = Object.freeze([
   { key: "aws:RequestedRegion", type: "string", values: [REGION] },
   { key: "aws:RequestTag/Environment", type: "string", values: ["production"] },
@@ -186,12 +195,12 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION 
       }
       if (entry.plan.coverageRequired !== undefined && typeof entry.plan.coverageRequired !== "boolean") throw new Error(`Permission manifest plan coverage flag is malformed: ${entry.id}.`);
     }
-    if (entry.id === "update-broker-inline-policy") {
-      if (!entry.plan || entry.action !== "iam:PutRolePolicy" || entry.resources.length !== 1 || entry.resources[0] !== BROKER_ROLE_ARN
-        || entry.plan.type !== "aws_iam_role_policy" || !exactActions(entry.plan.actions, ["update"])
-        || entry.plan.address !== "aws_iam_role_policy.broker" || entry.plan.roleName !== BROKER_ROLE_NAME
-        || entry.plan.inlinePolicyName !== BROKER_INLINE_POLICY_NAME || entry.plan.coverageRequired !== true) {
-        throw new Error("Broker inline-policy permission mapping is not exact.");
+    if (["update-broker-managed-policy", "prune-broker-managed-policy-versions"].includes(entry.id)) {
+      if (!entry.plan || entry.resources.length !== 1 || entry.resources[0] !== BROKER_MANAGED_POLICY_ARN
+        || entry.plan.type !== "aws_iam_policy" || !exactActions(entry.plan.actions, ["update"])
+        || entry.plan.address !== "aws_iam_policy.broker" || entry.plan.policyName !== BROKER_MANAGED_POLICY_NAME
+        || entry.plan.coverageRequired !== true) {
+        throw new Error("Broker managed-policy permission mapping is not exact.");
       }
     }
   }
@@ -232,8 +241,36 @@ function planMatches(selector, change) {
   if (selector.address && change.address !== selector.address) return false;
   if (selector.family && change.change?.after?.family !== selector.family) return false;
   if (selector.roleName && change.change?.after?.role !== selector.roleName) return false;
-  if (selector.inlinePolicyName && change.change?.after?.name !== selector.inlinePolicyName) return false;
+  if (selector.policyName && change.change?.after?.name !== selector.policyName) return false;
   return true;
+}
+
+function assertBrokerPolicyDocument(change) {
+  if (change.type !== "aws_iam_policy" || change.change?.after?.name !== BROKER_MANAGED_POLICY_NAME) {
+    throw new Error("Broker managed-policy identity is not exact.");
+  }
+  if (typeof change.change.after.policy === "string") {
+    let document;
+    try { document = JSON.parse(change.change.after.policy); } catch { throw new Error("Broker managed-policy document is not valid JSON."); }
+    const statements = Array.isArray(document.Statement) ? document.Statement : [];
+    const actual = statements.map((statement) => [statement.Sid, Array.isArray(statement.Action) ? statement.Action : [statement.Action]]).sort((left, right) => left[0].localeCompare(right[0]));
+    const expected = BROKER_POLICY_STATEMENTS.map(([sid, actions]) => [sid, actions]).sort((left, right) => left[0].localeCompare(right[0]));
+    if (document.Version !== "2012-10-17" || JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("Broker managed-policy document differs from the reviewed runtime contract.");
+  } else if (change.change?.after_unknown?.policy !== true) {
+    throw new Error("Broker managed-policy document is missing or unprovable.");
+  }
+}
+
+function assertBrokerManagedPolicyChange(change) {
+  if (change.address === "aws_iam_role_policy.broker") throw new Error("aws_iam_role_policy.broker is forbidden; use the dedicated managed policy.");
+  if (change.address === "aws_iam_policy.broker") assertBrokerPolicyDocument(change);
+  if (change.address === "aws_iam_role_policy_attachment.broker") {
+    if (change.type !== "aws_iam_role_policy_attachment" || change.change?.after?.role !== BROKER_ROLE_NAME
+      || (change.change?.after?.policy_arn !== undefined && change.change.after.policy_arn !== BROKER_MANAGED_POLICY_ARN)
+      || !exactActions(change.change?.actions, ["no-op"])) {
+      throw new Error("Broker managed-policy attachment must be the exact imported no-op attachment.");
+    }
+  }
 }
 
 function evaluation(entry, resource) {
@@ -255,6 +292,7 @@ export function deriveRequiredEvaluations(plan, manifest) {
   const matchedPlanEntries = new Set();
   for (const change of changes) {
     const actions = change.change?.actions || [];
+    if (["aws_iam_role_policy.broker", "aws_iam_policy.broker", "aws_iam_role_policy_attachment.broker"].includes(change.address)) assertBrokerManagedPolicyChange(change);
     if (exactActions(actions, ["no-op"])) continue;
     const taskMapping = change.type === "aws_ecs_task_definition" && exactActions(actions, ["create"])
       ? manifest.taskDefinitionMappings.find((mapping) => mapping.address === change.address)

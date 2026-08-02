@@ -60,15 +60,25 @@ no wildcard IAM resource. No runtime, service, secret, database, networking,
 ALB, DNS, or traffic authority is added, and `ecs:DeregisterTaskDefinition`
 remains absent.
 
-The exact current plan also changes the broker inline policy resource
-`aws_iam_role_policy.broker` in place. Its required write is
-`iam:PutRolePolicy`, scoped only to
-`arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker`, for the
-`stage-b-broker` inline policy. The permission preflight maps and simulates
-that exact address/type/action/resource tuple and rejects any other IAM role
-policy update, create, delete, replacement, wildcard, or role mismatch. The
-grant introduces no broader IAM mutation authority. The prior plan and audit
-are stale after this merge and must not be reused.
+The old broker inline policy is not an acceptable release model: AWS exposes
+only the role as the `iam:PutRolePolicy` authorization resource, so that grant
+cannot enforce the reviewed inline policy name. Terraform now manages one
+dedicated customer-managed policy,
+`mscqr-production-rls-approval-broker-runtime`, and attaches it only to
+`arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker` through
+`aws_iam_role_policy_attachment.broker`. The managed policy contains exactly
+the existing broker runtime statements.
+
+The permission preflight maps the exact `aws_iam_policy.broker` update to
+`iam:CreatePolicyVersion` and `iam:DeletePolicyVersion` on the exact managed
+policy ARN, and verifies the exact attachment. It rejects the old
+`aws_iam_role_policy.broker`, `iam:PutRolePolicy`, unrelated policy or role
+attachments, wildcard resources, policy-document drift, and unsafe cleanup
+ordering. Initial managed-policy creation, attachment, equivalence
+verification, import, and removal of the old inline policy are
+administrator-controlled. The release role receives no arbitrary IAM inline
+policy or deletion authority. All prior plans, audits, and permission reports
+are stale after this correction and must not be reused.
 
 ## Append-only task-definition registration model
 
@@ -210,7 +220,8 @@ release-deployer session.
 13. `aws_ecs_task_definition.executor["full-rls-rollback"]`
 14. `aws_ecs_task_definition.executor["full-rls-runtime-policy"]`
 15. `aws_ecs_task_definition.executor["full-rls-verification"]`
-16. `aws_iam_role_policy.broker`
+16. `aws_iam_policy.broker`
+17. `aws_iam_role_policy_attachment.broker`
 17. `aws_iam_role_policy.candidate_object_storage["backend"]`
 18. `aws_iam_role_policy.candidate_object_storage["canary"]`
 19. `aws_iam_role_policy.candidate_object_storage["worker"]`
