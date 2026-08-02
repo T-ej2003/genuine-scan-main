@@ -18,6 +18,7 @@ import {
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
+import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -47,6 +48,11 @@ export function parseCli(argv) {
     permissionReportPath: requireOption(argv, "--permission-report"),
     permissionReportSha256: requireOption(argv, "--permission-report-sha256"),
     permissionReportSignaturePath: requireOption(argv, "--permission-report-signature"),
+    imageEvidencePath: requireOption(argv, "--image-evidence"),
+    imageEvidenceSha256: requireOption(argv, "--image-evidence-sha256"),
+    imageEvidenceSignaturePath: requireOption(argv, "--image-evidence-signature"),
+    imageEvidenceWorkflowRunId: requireOption(argv, "--image-evidence-workflow-run-id"),
+    imageEvidenceArtifactSha256: requireOption(argv, "--image-evidence-artifact-sha256"),
     planSha256: requireOption(argv, "--plan-sha256"),
     auditSha256: requireOption(argv, "--audit-sha256"),
     savedPlanSha256: requireOption(argv, "--saved-plan-sha256"),
@@ -78,19 +84,26 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   return true;
 }
 
-export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature }) {
-  if (!path.isAbsolute(planPath) || !path.isAbsolute(planJsonPath) || !path.isAbsolute(auditPath) || !path.isAbsolute(permissionReportPath) || !path.isAbsolute(permissionReportSignaturePath)) throw new Error("All Stage B apply artifacts must use absolute paths.");
+export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
+  if (!path.isAbsolute(planPath) || !path.isAbsolute(planJsonPath) || !path.isAbsolute(auditPath) || !path.isAbsolute(permissionReportPath) || !path.isAbsolute(permissionReportSignaturePath) || !path.isAbsolute(imageEvidencePath) || !path.isAbsolute(imageEvidenceSignaturePath)) throw new Error("All Stage B apply artifacts must use absolute paths.");
   if (!fs.existsSync(planPath)) throw new Error("Saved Terraform plan is missing.");
   if (!fs.existsSync(permissionReportPath)) throw new Error("Permission-preflight report is missing.");
   if (!fs.existsSync(permissionReportSignaturePath)) throw new Error("Permission-preflight report signature is missing.");
-  const planBytes = fs.readFileSync(planJsonPath); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReportBytes = fs.readFileSync(permissionReportPath); const permissionReport = JSON.parse(permissionReportBytes); const signatureArtifact = JSON.parse(fs.readFileSync(permissionReportSignaturePath, "utf8"));
+  if (!fs.existsSync(imageEvidencePath)) throw new Error("Authenticated image evidence is missing.");
+  if (!fs.existsSync(imageEvidenceSignaturePath)) throw new Error("Authenticated image evidence signature is missing.");
+  const planBytes = fs.readFileSync(planJsonPath); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReportBytes = fs.readFileSync(permissionReportPath); const permissionReport = JSON.parse(permissionReportBytes); const signatureArtifact = JSON.parse(fs.readFileSync(permissionReportSignaturePath, "utf8")); const imageEvidenceBytes = fs.readFileSync(imageEvidencePath); const imageEvidence = JSON.parse(imageEvidenceBytes); const imageEvidenceSignatureArtifact = JSON.parse(fs.readFileSync(imageEvidenceSignaturePath, "utf8"));
   if (!/^[a-f0-9]{64}$/.test(savedPlanSha256) || sha256(savedPlanBytes) !== savedPlanSha256) throw new Error("Saved Terraform plan SHA256 does not match the approved digest.");
   if (!/^[a-f0-9]{64}$/.test(canonicalPlanJsonSha256)) throw new Error("Canonical plan JSON SHA256 is missing or malformed.");
   if (sha256(planBytes) !== planSha256) throw new Error("Plan JSON SHA256 does not match the approved digest.");
   if (sha256(auditBytes) !== auditSha256) throw new Error("Reference audit SHA256 does not match the approved digest.");
   if (!/^[a-f0-9]{64}$/.test(permissionReportSha256) || sha256(permissionReportBytes) !== permissionReportSha256) throw new Error("Permission-preflight report SHA256 does not match the approved digest.");
+  if (!/^[a-f0-9]{64}$/.test(imageEvidenceSha256) || sha256(imageEvidenceBytes) !== imageEvidenceSha256) throw new Error("Image evidence SHA256 does not match the approved digest.");
   try { assertStageBReleaseCallerArn(callerArn); } catch { throw new Error("Current caller is not the production release-deployer STS assumed-role."); }
   const plan = JSON.parse(planBytes); const audit = JSON.parse(auditBytes);
+  const expectedReleaseSha = plan.variables?.release_sha?.value;
+  if (!/^[a-f0-9]{40}$/.test(String(expectedReleaseSha || ""))) throw new Error("Approved Terraform plan is missing a valid release_sha variable.");
+  assertImageEvidence(imageEvidence, { signatureArtifact: imageEvidenceSignatureArtifact, verifySignature: ({ report, signatureArtifact: artifact, now: signatureNow }) => verifyImageEvidence({ report, signatureArtifact: artifact, now: signatureNow }), releaseSha: expectedReleaseSha, workflowRunId: imageEvidenceWorkflowRunId, artifactSha256: imageEvidenceArtifactSha256, now });
+  const imageBindings = assertStageBPlanImageEvidenceBinding({ plan, imageEvidence });
   const brokerChanges = (plan.resource_changes || []).filter((change) => ["aws_lambda_function.broker", "aws_lambda_alias.reviewed", "aws_iam_policy.broker"].includes(change.address));
   if (brokerChanges.some((change) => (change.change?.actions || []).some((action) => action !== "no-op"))) {
     const broker = audit.broker;
@@ -117,12 +130,13 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
     referenceAuditSha256: auditSha256,
     planJsonBytes: planBytes,
     planJsonSha256: planSha256,
+    imageEvidence,
     trustedCallerArn: callerArn,
     terraformConfiguration: fs.readFileSync(path.join(root, terraformRoot, "main.tf"), "utf8"),
     now: new Date(now),
   });
   if ((plan.resource_changes || []).some((change) => (change.change?.actions || []).includes("delete"))) throw new Error("Stage B apply plan contains a delete action.");
-  return { plan, audit, permissionReport, savedPlanSha256, canonicalPlanJsonSha256, derivedPlanJsonSha256: sha256(derivedPlanBytes) };
+  return { plan, audit, permissionReport, imageEvidence, imageBindings, savedPlanSha256, canonicalPlanJsonSha256, derivedPlanJsonSha256: sha256(derivedPlanBytes) };
 }
 
 function currentCaller() {
@@ -139,11 +153,11 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const artifacts = parseCli(argv); const callerArn = deps.getCaller();
   const defaultDeps = { getCaller: currentCaller, showPlan: showSavedPlan, validatePlan: assertStageBPlan, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) };
   const effectiveDeps = { ...defaultDeps, ...deps };
-  const verified = assertApplyArtifacts({ ...artifacts, callerArn, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature });
-  if (artifacts.verifyOnly) return { status: "ready-to-apply", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
+  const verified = assertApplyArtifacts({ ...artifacts, callerArn, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature, verifyImageEvidence: effectiveDeps.verifyImageEvidence });
+  if (artifacts.verifyOnly) return { status: "ready-to-apply", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, imageBindings: verified.imageBindings, actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
   const result = effectiveDeps.apply(artifacts.planPath);
   if (result?.status !== undefined && result.status !== 0) throw new Error("Terraform apply failed; stop without retry.");
-  return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
+  return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, imageBindings: verified.imageBindings, actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

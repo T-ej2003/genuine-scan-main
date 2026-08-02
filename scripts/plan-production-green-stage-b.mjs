@@ -15,6 +15,7 @@ import {
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
 } from "./aws/stage-b-reference-audit-contract.mjs";
 import { assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
+import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-stage-b-image-evidence.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const allowed = new Set(["aws_cloudwatch_log_group", "aws_iam_role", "aws_iam_role_policy", "aws_ecs_task_definition", "aws_dynamodb_table", "aws_lambda_function", "aws_lambda_alias", "aws_lambda_permission"]);
@@ -505,7 +506,8 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
 }
 
 export function assertStageBPlan(plan, options = {}) {
-  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration } = options;
+  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence } = options;
+  const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence }) : undefined;
   const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
   const brokerMutationAddresses = new Set(["aws_lambda_function.broker", "aws_lambda_alias.reviewed", "aws_iam_policy.broker"]);
   const brokerMutation = (plan.resource_changes || []).find((change) => brokerMutationAddresses.has(change.address)
@@ -542,7 +544,7 @@ export function assertStageBPlan(plan, options = {}) {
     const after = JSON.stringify(change.change.after || {});
     if ((after.match(/"image":"([^"@]+):[^"@]+"/) || after.match(/"image"\s*:\s*"[^"@]+:[^"@]+"/)) && !after.includes("@sha256:")) throw new Error(`Stage B image tag rejected: ${change.address}`);
   }
-  return { taskDefinitions: taskDefinitionClassification };
+  return { taskDefinitions: taskDefinitionClassification, imageBindings };
 }
 
 function readOption(argv, name) {
