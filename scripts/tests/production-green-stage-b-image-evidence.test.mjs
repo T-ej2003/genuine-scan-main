@@ -11,6 +11,7 @@ import {
   assertStageBPlanImageEvidenceBinding,
   IMAGE_EVIDENCE_MAX_AGE_MS,
   IMAGE_EVIDENCE_REVOCATION_MODEL,
+  readImageEvidence,
   readImageRepositoryEvidence,
   runCli,
 } from "../aws/production-green-stage-b-image-evidence.mjs";
@@ -40,11 +41,13 @@ const records = [
 const artifactBytes = Buffer.from(`${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
 const artifactSha256 = crypto.createHash("sha256").update(artifactBytes).digest("hex");
 const repositoryEvidence = ["mscqr-backend", "mscqr-worker"].map((repository) => ({
-  repository,
+  repositoryName: repository,
   repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`,
   registryId: "368992683803",
+  repositoryUri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}`,
   imageTagMutability: "IMMUTABLE",
-  exclusionFilters: [],
+  encryptionConfiguration: { encryptionType: "AES256" },
+  createdAt: "2026-04-17T15:17:09.210Z",
   observedAt,
 }));
 const describe = (repository, tag) => {
@@ -156,15 +159,40 @@ test("repository configuration is validated from AWS-shaped evidence before sign
   let calls = 0;
   const describeRepositories = (repository) => {
     calls += 1;
-    return { repositories: [{ repositoryName: repository, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, registryId: "368992683803", imageTagMutability: "IMMUTABLE" }] };
+    return { repositories: [{ repositoryName: repository, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, registryId: "368992683803", repositoryUri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}`, imageTagMutability: "IMMUTABLE", encryptionConfiguration: { encryptionType: "AES256" }, createdAt: "2026-04-17T15:17:09.210Z" }] };
   };
   const evidence = ["mscqr-backend", "mscqr-worker"].map((repository) => readImageRepositoryEvidence(repository, { observedAt, describe: describeRepositories }));
   assert.equal(calls, 2);
-  assert.deepEqual(evidence.map(({ repository, imageTagMutability }) => ({ repository, imageTagMutability })), [
-    { repository: "mscqr-backend", imageTagMutability: "IMMUTABLE" },
-    { repository: "mscqr-worker", imageTagMutability: "IMMUTABLE" },
+  assert.deepEqual(evidence.map(({ repositoryName, imageTagMutability }) => ({ repositoryName, imageTagMutability })), [
+    { repositoryName: "mscqr-backend", imageTagMutability: "IMMUTABLE" },
+    { repositoryName: "mscqr-worker", imageTagMutability: "IMMUTABLE" },
   ]);
   assert.doesNotThrow(() => reportFixture({ repositories: evidence }));
+});
+
+test("repository reader accepts the AWS envelope once and returns the exact normalized contract", () => {
+  const raw = { repositories: [{ repositoryName: "mscqr-backend", repositoryArn: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", registryId: "368992683803", repositoryUri: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend", imageTagMutability: "IMMUTABLE", encryptionConfiguration: { encryptionType: "AES256" }, createdAt: "2026-04-17T15:17:09.210Z" }] };
+  let calls = 0;
+  const normalized = readImageRepositoryEvidence("mscqr-backend", { observedAt, describe: () => { calls += 1; return raw; } });
+  assert.equal(calls, 1);
+  assert.deepEqual(Object.keys(normalized).sort(), ["createdAt", "encryptionConfiguration", "imageTagMutability", "observedAt", "registryId", "repositoryArn", "repositoryName", "repositoryUri"]);
+  assert.equal(normalized.repositoryName, "mscqr-backend");
+});
+
+test("repository reader rejects projected arrays, raw strings, wrong casing, and invalid counts", () => {
+  const repository = { repositoryName: "mscqr-backend", repositoryArn: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", registryId: "368992683803", repositoryUri: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend", imageTagMutability: "IMMUTABLE", encryptionConfiguration: { encryptionType: "AES256" }, createdAt: "2026-04-17T15:17:09.210Z" };
+  for (const response of [[], JSON.stringify({ repositories: [repository] }), { Repositories: [repository] }, { repositories: [] }, { repositories: [repository, repository] }]) {
+    assert.throws(() => readImageRepositoryEvidence("mscqr-backend", { observedAt, describe: () => response }), /exactly one repository/);
+  }
+});
+
+test("image reader accepts the AWS imageDetails envelope exactly once", () => {
+  let calls = 0;
+  const image = readImageEvidence("mscqr-backend", imageReleaseSha, {
+    describe: () => { calls += 1; return { imageDetails: [{ imageDigest: records[0].image_digest, imagePushedAt: observedAt }] }; },
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(image, { digest: records[0].image_digest, imagePushedAt: observedAt });
 });
 
 test("administrator CLI reads DescribeRepositories exactly once per unique repository", () => {
@@ -181,7 +209,7 @@ test("administrator CLI reads DescribeRepositories exactly once per unique repos
       describe: (repository, tag) => describe(repository, tag),
       describeRepository: (repository) => {
         calls += 1;
-        return { repositories: [{ repositoryName: repository, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, registryId: "368992683803", imageTagMutability: "IMMUTABLE" }] };
+        return { repositories: [{ repositoryName: repository, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, registryId: "368992683803", repositoryUri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}`, imageTagMutability: "IMMUTABLE", encryptionConfiguration: { encryptionType: "AES256" }, createdAt: "2026-04-17T15:17:09.210Z" }] };
       },
       sign: () => "AQ==",
     });
@@ -196,15 +224,15 @@ test("administrator CLI reads DescribeRepositories exactly once per unique repos
 test("mutable, exclusion-based, missing, mismatched, or unrelated repository evidence fails closed", () => {
   const cases = [
     ["mutable", { imageTagMutability: "MUTABLE" }, /not authoritatively immutable/],
-    ["exclusion", { imageTagMutability: "IMMUTABLE_WITH_EXCLUSION", exclusionFilters: [{ filter: "latest", filterType: "WILDCARD" }] }, /not authoritatively immutable/],
+    ["exclusion", { imageTagMutability: "IMMUTABLE_WITH_EXCLUSION", imageTagMutabilityExclusionFilters: [{ filter: "latest", filterType: "WILDCARD" }] }, /not authoritatively immutable/],
     ["missing", undefined, /exactly one authoritative repository/],
     ["wrong ARN", { repositoryArn: "arn:aws:ecr:us-east-1:000000000000:repository/mscqr-backend" }, /identity is wrong/],
     ["wrong account", { registryId: "000000000000" }, /identity is wrong/],
     ["wrong region", { repositoryArn: "arn:aws:ecr:us-east-1:368992683803:repository/mscqr-backend" }, /identity is wrong/],
-    ["unverified repository", [...repositoryEvidence, { repository: "other", repositoryArn: "arn:aws:ecr:eu-west-2:368992683803:repository/other", registryId: "368992683803", imageTagMutability: "IMMUTABLE", observedAt }], /exactly one authoritative repository/],
+    ["unverified repository", [...repositoryEvidence, { repositoryName: "other", repositoryArn: "arn:aws:ecr:eu-west-2:368992683803:repository/other", registryId: "368992683803", repositoryUri: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/other", imageTagMutability: "IMMUTABLE", encryptionConfiguration: { encryptionType: "AES256" }, createdAt: "2026-04-17T15:17:09.210Z", observedAt }], /exactly one authoritative repository/],
   ];
   for (const [, change, expected] of cases) {
-    const repositories = change === undefined ? [repositoryEvidence[1]] : Array.isArray(change) ? change : repositoryEvidence.map((entry) => entry.repository === "mscqr-backend" ? { ...entry, ...change } : entry);
+    const repositories = change === undefined ? [repositoryEvidence[1]] : Array.isArray(change) ? change : repositoryEvidence.map((entry) => entry.repositoryName === "mscqr-backend" ? { ...entry, ...change } : entry);
     assert.throws(() => reportFixture({ repositories }), expected);
   }
 });

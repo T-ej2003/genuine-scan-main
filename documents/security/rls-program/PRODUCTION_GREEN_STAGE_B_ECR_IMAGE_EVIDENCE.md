@@ -22,6 +22,8 @@ The executor and canary images use the backend repository, so the four bindings 
 
 The administrator generates a schema-versioned report containing `imageReleaseSha`, the canonical workflow run, canonical artifact SHA, authoritative repository configuration evidence, exact repository/tag/digest records, observation time, account, region, verifier ARN, and `revocationModel=time-bounded-no-supersession-registry`. No supersession registry currently exists, so the report does not claim `superseded=false`; immediate revocation requires a separately authenticated registry. The report is signed with the existing Stage B KMS signing contract. The apply wrapper verifies the detached signature and all repository/four-image bindings; it does not call ECR.
 
+The repository reader consumes the AWS `{ "repositories": [...] }` response once and returns only the validated normalized fields `repositoryName`, `repositoryArn`, `registryId`, `repositoryUri`, `imageTagMutability`, optional `imageTagMutabilityExclusionFilters`, `encryptionConfiguration`, `createdAt`, and `observedAt`. A projected repository object, array, string, wrong top-level casing, missing result, or ambiguous result is rejected before signing.
+
 The canonical workflow artifact is authoritative. A failed duplicate workflow cannot become authoritative because it has no accepted artifact and its immutable-tag collision does not alter the canonical tag-to-digest binding.
 
 ## IAM boundary
