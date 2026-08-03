@@ -185,7 +185,6 @@ function trackedFiles(toolingSha) {
 function changedFiles(imageReleaseSha, toolingSha) {
   const files = git(["diff", "--name-only", `${imageReleaseSha}..${toolingSha}`]).split("\n").filter(Boolean);
   if (!files.includes(COMPATIBILITY_REPORT_REPO_PATH)) files.push(COMPATIBILITY_REPORT_REPO_PATH);
-  if (!files.includes(IMAGE_IMPACT_REPORT_REPO_PATH)) files.push(IMAGE_IMPACT_REPORT_REPO_PATH);
   return [...new Set(files)];
 }
 
@@ -193,6 +192,10 @@ function toolingInputTreeSha256(toolingSha) {
   const entries = trackedFiles(toolingSha);
   const blobByFile = new Map(entries.map(({ file, blobSha }) => [file, blobSha]));
   return computeStageBToolingInputTreeSha256({ files: entries.map(({ file }) => file), blobSha256: (file) => blobByFile.get(file) });
+}
+
+function imageImpactReportPath() {
+  return process.env.STAGE_B_IMAGE_IMPACT_REPORT_PATH || path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -209,9 +212,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const inputTreeSha256 = toolingInputTreeSha256(toolingSha);
   if (mode === "pull-request") {
     const impactReport = imageImpactReportFor({ imageReleaseSha, toolingSha, changedFiles: files, toolingInputTreeSha256: inputTreeSha256 });
-    if (process.argv.includes("--write-image-impact-report")) fs.writeFileSync(path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH), `${JSON.stringify(impactReport, null, 2)}\n`);
-    else assertImageImpactReport({ report: JSON.parse(fs.readFileSync(path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH), "utf8")), imageReleaseSha, toolingSha, toolingInputTreeSha256: inputTreeSha256, changedFiles: files });
-    process.stdout.write(`${JSON.stringify({ ...impactReport, summary: impactReport.newImagesRequired ? "Merge permitted; fresh protected-main images required before production deployment." : "Merge permitted; reviewed image reuse remains compatible." }, null, 2)}\n`);
+    const reportPath = imageImpactReportPath();
+    if (process.argv.includes("--write-image-impact-report")) fs.writeFileSync(reportPath, `${JSON.stringify(impactReport, null, 2)}\n`);
+    else assertImageImpactReport({ report: JSON.parse(fs.readFileSync(reportPath, "utf8")), imageReleaseSha, toolingSha, toolingInputTreeSha256: inputTreeSha256, changedFiles: files });
+    process.stdout.write(`${JSON.stringify({ ...impactReport, reportPath, summary: impactReport.newImagesRequired ? "Merge permitted; fresh protected-main images required before production deployment." : "Merge permitted; reviewed image reuse remains compatible." }, null, 2)}\n`);
   } else if (process.argv.includes("--write-reviewed-report")) {
     fs.writeFileSync(path.join(root, COMPATIBILITY_REPORT_REPO_PATH), `${JSON.stringify(reportFor({ imageReleaseSha, toolingSha, changedFiles: files, toolingInputTreeSha256: inputTreeSha256 }), null, 2)}\n`);
   } else {

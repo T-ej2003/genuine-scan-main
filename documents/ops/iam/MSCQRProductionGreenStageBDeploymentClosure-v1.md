@@ -35,7 +35,7 @@ The package command runs the explicit `pull-request` closure mode. It verifies t
 
 Production operators must invoke the closure implementation with `--mode production` from a protected-main checkout and provide the complete signed image, tfvars, audit, permission, and plan evidence. Production mode rejects `newImagesRequired`, pull-request impact reports, unmerged tooling SHAs, stale compatibility reports, and missing signed image evidence. The apply wrapper independently requires `--closure-mode production`.
 
-For an image-affecting pull request, the deterministic report at [MSCQRProductionGreenStageBImageImpact-v1.json](./MSCQRProductionGreenStageBImageImpact-v1.json) records the exact classified diff and returns:
+For an image-affecting pull request, the deterministic private CI artifact `stage-b-image-impact-<run>.json` records the exact classified diff and returns:
 
 ```text
 Merge permitted; fresh protected-main images required before production deployment.

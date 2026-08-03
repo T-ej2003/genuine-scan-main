@@ -50,7 +50,7 @@ if (mode === "production" || tfvarsPath || bindingReportPath) {
   if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256 || !process.env.STAGE_B_TOOLING_TREE_SHA256 || !process.env.STAGE_B_IMAGE_RELEASE_SHA || !process.env.STAGE_B_IMAGE_EVIDENCE_SHA256) throw new Error("Production Stage B closure requires canonical tfvars provenance and complete deployment identity.");
   assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedImageReleaseSha: process.env.STAGE_B_IMAGE_RELEASE_SHA, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256 });
 }
-const imageImpactReport = mode === "pull-request" ? JSON.parse(fs.readFileSync(path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH), "utf8")) : undefined;
+const imageImpactReport = mode === "pull-request" ? JSON.parse(fs.readFileSync(process.env.STAGE_B_IMAGE_IMPACT_REPORT_PATH || path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH), "utf8")) : undefined;
 if (mode === "pull-request") assertImageImpactReport({ report: imageImpactReport, imageReleaseSha: imageImpactReport.imageReleaseSha, toolingSha: currentHead, toolingInputTreeSha256: imageImpactReport.toolingInputTreeSha256, changedFiles: imageImpactReport.classifiedChangedFiles });
 assert.equal(matrix.schemaVersion, 1, "Stage B closure matrix schema is unsupported.");
 assert.equal(matrix.account, "368992683803");
