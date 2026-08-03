@@ -1,0 +1,256 @@
+{
+  "schemaVersion": 1,
+  "identityModel": "tooling-input-tree-sha256",
+  "imageReleaseSha": "7245a6036492f875654c414473737e33c1422f3c",
+  "comparisonBaseSha": "7245a6036492f875654c414473737e33c1422f3c",
+  "toolingSha": "c591fb1d301afb7bd849dae7ab7005e0861b30df",
+  "toolingInputTreeSha256": "c205115e98c6177d7d36d50fb2972ed4c0c15ecf1ccba01223651d2715bd5ee6",
+  "comparisonHeadIdentity": "tooling-input-tree-sha256",
+  "comparisonHeadSha256": "c205115e98c6177d7d36d50fb2972ed4c0c15ecf1ccba01223651d2715bd5ee6",
+  "classificationRulesVersion": "stage-b-image-reuse-v2",
+  "classifiedChangedFiles": [
+    {
+      "file": ".github/workflows/quality-gate.yml",
+      "category": "ciOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQR_PRODUCTION_GREEN_STAGE_B_TERRAFORM_BACKEND_ACCESS_2026-08-03.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBImageImpact-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_ECR_IMAGE_EVIDENCE.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_IMAGE_PUBLISHER_IDENTITY.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_PLAN_RECONCILIATION_2026-07-29.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_TWO_SHA_IDENTITY.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "infra/aws/terraform/production-green-stage-b/.terraform.lock.hcl",
+      "category": "terraformOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "category": "terraformOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "infra/aws/terraform/production-green-stage-b/README.md",
+      "category": "terraformOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "infra/aws/terraform/production-green-stage-b/stage-a-prerequisites.schema.json",
+      "category": "terraformOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "infra/aws/terraform/production-green-stage-b/variables.tf",
+      "category": "terraformOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "package-lock.json",
+      "category": "dependencyLockfile",
+      "imageAffecting": true
+    },
+    {
+      "file": "package.json",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/apply-production-green-stage-b.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/production-green-stage-b-image-evidence.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/production-green-stage-b-task-definitions.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-deployment-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-deployment-identity.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-reference-audit-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-terraform-backend-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/validate-stage-b-deployment-closure.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/validate-stage-b-image-reuse.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/plan-production-green-stage-b.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/full-database-rls-enforcement.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-control-plane.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-deployment-closure.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-deployment-identity.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-image-evidence.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-image-impact.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-permission-preflight.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-plan.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-reference-audit-generator.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-terraform-backend.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-tfvars-generator.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    }
+  ],
+  "imageAffectingFiles": [
+    "package-lock.json"
+  ],
+  "imageReuseCompatible": false,
+  "newImagesRequired": true,
+  "deploymentAuthorized": false,
+  "status": "merge-ready-new-images-required",
+  "reason": "Image-affecting changes require fresh protected-main images after merge."
+}
