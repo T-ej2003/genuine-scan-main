@@ -3,7 +3,7 @@
   "identityModel": "tooling-input-tree-sha256",
   "imageReleaseSha": "7245a6036492f875654c414473737e33c1422f3c",
   "comparisonBaseSha": "7245a6036492f875654c414473737e33c1422f3c",
-  "toolingSha": "c591fb1d301afb7bd849dae7ab7005e0861b30df",
+  "toolingSha": "b60e96ddbaf3fce9e8c782df5e40f323824dd5a5",
   "toolingInputTreeSha256": "c205115e98c6177d7d36d50fb2972ed4c0c15ecf1ccba01223651d2715bd5ee6",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
   "comparisonHeadSha256": "c205115e98c6177d7d36d50fb2972ed4c0c15ecf1ccba01223651d2715bd5ee6",
