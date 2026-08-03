@@ -84,6 +84,14 @@
       "evidence": "Terraform S3 lockfile release"
     },
     {
+      "id": "collect-stage-a-prerequisite-state",
+      "phase": "preflight",
+      "action": "s3:GetObject",
+      "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"],
+      "context": [],
+      "evidence": "Canonical Stage A prerequisite handoff derives only reviewed outputs from the exact Stage A state object"
+    },
+    {
       "id": "refresh-read-only-canary-roles",
       "phase": "refresh",
       "action": "iam:GetRole",
@@ -408,7 +416,6 @@
     {"id": "backend-default-state-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate"], "context": [], "reason": "The selected production workspace uses the env:/ object, not the configured base key"},
     {"id": "backend-default-state-write", "action": "s3:PutObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate"], "context": [], "reason": "The selected production workspace uses the env:/ object, not the configured base key"},
     {"id": "backend-default-lock-delete", "action": "s3:DeleteObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"], "context": [], "reason": "The selected production workspace uses the env:/ lock object, not the configured base key"},
-    {"id": "backend-staging-state-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"], "context": [], "reason": "Stage B release role must not read Stage A state"},
     {"id": "backend-other-production-workspace-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/other/terraform.tfstate"], "context": [], "reason": "Stage B release role is bound to one production workspace object"},
     {"id": "backend-other-stage-b-key-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/other.tfstate"], "context": [], "reason": "Stage B release role is bound to one exact state object"},
     {"id": "backend-unrelated-bucket-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::unrelated-bucket/state.tfstate"], "context": [], "reason": "Stage B release role has no arbitrary bucket access"},
