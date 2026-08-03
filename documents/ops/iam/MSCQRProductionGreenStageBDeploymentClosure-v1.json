@@ -4,6 +4,24 @@
   "region": "eu-west-2",
   "terraformRoot": "infra/aws/terraform/production-green-stage-b",
   "zeroDestroy": true,
+  "backendContract": {
+    "policyPath": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+    "bucketArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+    "workspaceDiscoveryPrefixes": ["env:/"],
+    "stateArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate",
+    "lockArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock",
+    "configuredDefaultKeyAccess": "denied",
+    "headBucketRequired": false,
+    "requiredActions": [
+      "s3:GetBucketLocation",
+      "s3:ListBucket(env:/)",
+      "s3:GetObject(state)",
+      "s3:PutObject(state)",
+      "s3:GetObject(lock)",
+      "s3:PutObject(lock)",
+      "s3:DeleteObject(lock)"
+    ]
+  },
   "deploymentIdentity": {
     "schemaVersion": 1,
     "toolingSha": "the exact clean origin/main commit running Terraform, audit, validator, preflight, and apply tooling",

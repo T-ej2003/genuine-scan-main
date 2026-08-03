@@ -11,12 +11,16 @@ import {
   APPROVED_PREFLIGHT_GENERATOR_ARNS,
   PERMISSION_PREFLIGHT_CLOCK_SKEW_MS,
   PERMISSION_PREFLIGHT_MAX_AGE_MS,
+  normalizeExpectedMissingContextValues,
+  validateManifest,
+  validateSimulationResult,
   verifyPermissionReportSignature,
   RELEASE_CALLER_PATTERN,
   RELEASE_ROLE_ARN,
   canonicalizeJson,
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
+import { assertStageBTerraformBackendPolicy } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenceSha256 as canonicalImageEvidenceSha256, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
@@ -29,6 +33,27 @@ const requiredConfirmation = "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE";
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const readJson = (file) => JSON.parse(fs.readFileSync(path.resolve(root, file), "utf8"));
 const readBytes = (file) => fs.readFileSync(path.resolve(root, file));
+
+function assertPermissionEvaluationBindings(report) {
+  const manifest = readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
+  validateManifest(manifest);
+  const entries = new Map([...manifest.required, ...manifest.forbidden].map((entry) => [entry.id, { entry, forbidden: manifest.forbidden.includes(entry) }]));
+  for (const mapping of manifest.taskDefinitionMappings) {
+    for (const suffix of ["register", "tag", "pass-execution", "pass-task"]) entries.set(`${mapping.id}-${suffix}`, { entry: { context: [] }, forbidden: false });
+  }
+  for (const [items, forbidden] of [[report.requiredEvaluations, false], [report.forbiddenEvaluations, true]]) {
+    if (!Array.isArray(items)) throw new Error("Permission-preflight evaluation results are missing.");
+    for (const item of items) {
+      const binding = entries.get(item.manifestId);
+      if (!binding || binding.forbidden !== forbidden) throw new Error(`Permission-preflight evaluation ${item.id} is not bound to the current manifest section.`);
+      const expected = normalizeExpectedMissingContextValues(binding.entry, { forbidden, label: item.manifestId });
+      if (JSON.stringify(item.expectedMissingContextValues || []) !== JSON.stringify(expected)) throw new Error(`Permission-preflight evaluation ${item.id} has different expected missing context.`);
+      const validated = validateSimulationResult({ ...item, forbidden, expectedMissingContextValues: expected }, item);
+      const expectedValidation = forbidden ? (item.decision === "allowed" ? "rejected" : "accepted") : (item.decision === "allowed" ? "accepted" : "rejected");
+      if (item.validation !== expectedValidation || JSON.stringify(validated.missingContextValues) !== JSON.stringify(item.missingContextValues)) throw new Error(`Permission-preflight evaluation ${item.id} has inconsistent validation evidence.`);
+    }
+  }
+}
 
 function readOption(argv, option) {
   const index = argv.indexOf(option);
@@ -67,6 +92,7 @@ export function parseCli(argv) {
 export function assertPermissionReport(report, { signatureArtifact, verifySignature = verifyPermissionReportSignature, planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, toolingSha, imageReleaseSha, canonicalImageEvidenceSha256, now = new Date().toISOString() } = {}) {
   if (!verifySignature({ report, signatureArtifact, now })) throw new Error("Permission report signature verification failed.");
   if (report?.schemaVersion !== 1 || report.status !== "valid") throw new Error("A valid permission-preflight report is required.");
+  assertPermissionEvaluationBindings(report);
   if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(report.reportGeneratorCallerArn)) throw new Error("Permission-preflight report generator is not approved.");
   if (report.simulatedRoleArn !== RELEASE_ROLE_ARN || report.applyRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission-preflight report role contract is wrong.");
   if (report.applyCallerArn !== null && report.applyCallerArn !== callerArn) throw new Error("Permission-preflight report apply caller is wrong.");
@@ -90,6 +116,7 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
 }
 
 export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, imageReleaseSha, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
+  assertStageBTerraformBackendPolicy(readJson("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json"));
   if (!path.isAbsolute(planPath) || !path.isAbsolute(planJsonPath) || !path.isAbsolute(auditPath) || !path.isAbsolute(permissionReportPath) || !path.isAbsolute(permissionReportSignaturePath) || !path.isAbsolute(imageEvidencePath) || !path.isAbsolute(imageEvidenceSignaturePath)) throw new Error("All Stage B apply artifacts must use absolute paths.");
   if (!fs.existsSync(planPath)) throw new Error("Saved Terraform plan is missing.");
   if (!fs.existsSync(permissionReportPath)) throw new Error("Permission-preflight report is missing.");
