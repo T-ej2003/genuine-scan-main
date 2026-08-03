@@ -8,6 +8,9 @@ import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 
 export const STAGE_A_PREREQUISITES_GENERATOR = "scripts/aws/generate-production-green-stage-a-prerequisites.mjs";
 export const STAGE_A_PREREQUISITES_SCHEMA_VERSION = 2;
+export const STAGE_A_STATE_OBJECT = "mscqr/production/rls-green/stage-a/terraform.tfstate";
+export const STAGE_A_EXPECTED_STATE_LINEAGE = "02afb75a-f902-ab8a-f4c1-751d4aef7837";
+export const STAGE_A_MINIMUM_STATE_SERIAL = 35;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const json = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
@@ -17,8 +20,16 @@ function resourceInstances(state, type, name) {
   return (state.resources || []).filter((resource) => resource.type === type && resource.name === name).flatMap((resource) => resource.instances || []);
 }
 
-function stageAValues(state) {
-  if (!state || state.lineage !== "4e438e59-8b8b-194d-030c-5ede0c26344a" || !Number.isInteger(state.serial) || state.serial < 76) throw new Error("Stage A state lineage or serial is not approved.");
+export function assertStageAStateIdentity(state, { stateObject = STAGE_A_STATE_OBJECT } = {}) {
+  if (stateObject !== STAGE_A_STATE_OBJECT) throw new Error(`Stage A state object is wrong: expected ${STAGE_A_STATE_OBJECT}, got ${stateObject}.`);
+  if (!state || typeof state !== "object") throw new Error("Stage A state is malformed.");
+  if (state.lineage !== STAGE_A_EXPECTED_STATE_LINEAGE) throw new Error(`Stage A state lineage is wrong: expected ${STAGE_A_EXPECTED_STATE_LINEAGE}, got ${state.lineage || "missing"}.`);
+  if (!Number.isInteger(state.serial) || state.serial < STAGE_A_MINIMUM_STATE_SERIAL) throw new Error(`Stage A state serial is stale: minimum ${STAGE_A_MINIMUM_STATE_SERIAL}, got ${Number.isInteger(state.serial) ? state.serial : "missing"}.`);
+  return state;
+}
+
+function stageAValues(state, options) {
+  assertStageAStateIdentity(state, options);
   const value = state.outputs?.stage_b_prerequisites?.value;
   if (!value || typeof value !== "object") throw new Error("Stage A state has no stage_b_prerequisites output.");
   const endpoints = resourceInstances(state, "aws_vpc_endpoint", "executor").map((instance) => instance.attributes || {});
@@ -61,15 +72,15 @@ function liveEvidence({ vpcId, subnetIds, databaseIdentifier, run }) {
   return { vpcId, privateSubnets: checkedSubnets, securityGroups: groups.map((group) => ({ groupId: group.GroupId, vpcId: group.VpcId })).sort((a, b) => a.groupId.localeCompare(b.groupId)), ecsClusterArn: cluster[0].clusterArn, databaseIdentifier, rdsSubnetIds: rdsSubnets };
 }
 
-export function generateStageAPrerequisites({ stateBackup, toolingSha, toolingTreeSha256, outputPath, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function generateStageAPrerequisites({ stateBackup, stateObject, toolingSha, toolingTreeSha256, outputPath, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
   if (!path.isAbsolute(stateBackup || "") || !path.isAbsolute(outputPath || "") || outputPath.startsWith(`${root}${path.sep}`)) throw new Error("Stage A prerequisite inputs and output must be absolute private paths.");
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !/^[a-f0-9]{64}$/.test(toolingTreeSha256 || "")) throw new Error("Stage A prerequisite tooling identity is malformed.");
   if (fs.existsSync(outputPath)) throw new Error("Refusing to overwrite an existing Stage A prerequisite artifact.");
-  const bytes = fs.readFileSync(stateBackup); const { value, vpcId, subnetIds, databaseIdentifier } = stageAValues(JSON.parse(bytes));
+  const bytes = fs.readFileSync(stateBackup); const state = JSON.parse(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = stageAValues(state, { stateObject });
   const network = liveEvidence({ vpcId, subnetIds, databaseIdentifier, run });
   const output = {
     schemaVersion: STAGE_A_PREREQUISITES_SCHEMA_VERSION, generator: STAGE_A_PREREQUISITES_GENERATOR, toolingSha, toolingTreeSha256,
-    sourceStateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", sourceStateSerial: JSON.parse(bytes).serial, sourceStateSha256: sha256(bytes), networkEvidence: network,
+    stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: STAGE_A_EXPECTED_STATE_LINEAGE, stageAStateSerial: state.serial, stageAStateSha256: sha256(bytes), networkEvidence: network,
     accountId: STAGE_B.account, region: STAGE_B.region, vpcId, privateSubnetIds: subnetIds, ecsClusterArn: STAGE_B.clusterArn,
     stageADatabaseSecurityGroupId: exact(value.database_security_group_id, STAGE_B.databaseSecurityGroupId, "Stage A database security group"), stageAExecutorSecurityGroupId: exact(value.executor_security_group_id, STAGE_B.executorSecurityGroupId, "Stage A executor security group"),
     stageAExecutorTaskRoleArn: exact(value.executor_role_arn, STAGE_B.executorRoleArn, "Stage A executor role"), stageABrokerRoleArn: exact(value.broker_role_arn, STAGE_B.brokerRoleArn, "Stage A broker role"),
@@ -81,5 +92,5 @@ export function generateStageAPrerequisites({ stateBackup, toolingSha, toolingTr
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const option = (name) => { const i = process.argv.indexOf(name); const value = i === -1 ? undefined : process.argv[i + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
-  generateStageAPrerequisites({ stateBackup: option("--stage-a-state-backup"), toolingSha: option("--tooling-sha"), toolingTreeSha256: option("--tooling-tree-sha256"), outputPath: option("--output") });
+  generateStageAPrerequisites({ stateBackup: option("--stage-a-state-backup"), stateObject: option("--stage-a-state-object"), toolingSha: option("--tooling-sha"), toolingTreeSha256: option("--tooling-tree-sha256"), outputPath: option("--output") });
 }

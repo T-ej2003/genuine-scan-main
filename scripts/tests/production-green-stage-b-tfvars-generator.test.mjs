@@ -6,9 +6,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
-import { assertStageBTfvarsBinding, deriveContractDigests, deriveRetainedDefinitions, generateStageBTfvars, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
+import { assertStageBTfvarsBinding, deriveContractDigests, deriveRetainedDefinitions, generateStageBTfvars, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
+import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 
 const releaseSha = "7245a6036492f875654c414473737e33c1422f3c";
 const now = "2026-08-03T12:00:00.000Z";
@@ -43,18 +44,18 @@ function stateFixture(overrides = {}) {
   ], ...overrides };
 }
 
-const stageA = { schemaVersion: 2, generator: "scripts/aws/generate-production-green-stage-a-prerequisites.mjs", toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), sourceStateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", sourceStateSerial: 76, sourceStateSha256: "0".repeat(64), networkEvidence: { vpcId: "vpc-0123456789abcdef0", privateSubnets: [...STAGE_B.privateSubnetIds].map((subnetId, index) => ({ subnetId, availabilityZone: `eu-west-2${index ? "b" : "a"}`, cidrBlock: `10.0.${index}.0/24`, routeTableId: `rtb-${String(index + 1).repeat(8)}`, natGatewayId: `nat-${String(index + 1).repeat(8)}` })), securityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map((groupId) => ({ groupId, vpcId: "vpc-0123456789abcdef0" })), ecsClusterArn: STAGE_B.clusterArn, databaseIdentifier: "mscqr-production-rls-green", rdsSubnetIds: [...STAGE_B.privateSubnetIds] }, accountId: STAGE_B.account, region: STAGE_B.region, vpcId: "vpc-0123456789abcdef0", privateSubnetIds: [...STAGE_B.privateSubnetIds], ecsClusterArn: STAGE_B.clusterArn, stageADatabaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, stageAExecutorSecurityGroupId: STAGE_B.executorSecurityGroupId, stageAExecutorTaskRoleArn: STAGE_B.executorRoleArn, stageABrokerRoleArn: STAGE_B.brokerRoleArn, stageAExecutorLogGroupName: "/ecs/mscqr-production/full-rls-green", stageAExecutorLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green:*", stageABrokerLogGroupName: "/aws/lambda/mscqr-production-rls-approval-broker", stageABrokerLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:*", stageARuntimeSecretArns: Object.fromEntries(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"].map((role) => [role, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/${role}-abc123`])), stageAExecutorNetworkingReady: true, approvalSecretArn: STAGE_B.approvalSecretArn, approvalKmsKeyArn: STAGE_B.approvalKmsKeyArn, receiptBucketArn: `arn:aws:s3:::${STAGE_B.receiptBucket}`, stageAReadOnlyCanaryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-abc123" };
+const stageA = { schemaVersion: 2, generator: "scripts/aws/generate-production-green-stage-a-prerequisites.mjs", toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: STAGE_A_EXPECTED_STATE_LINEAGE, stageAStateSerial: STAGE_A_MINIMUM_STATE_SERIAL, stageAStateSha256: "0".repeat(64), networkEvidence: { vpcId: "vpc-0123456789abcdef0", privateSubnets: [...STAGE_B.privateSubnetIds].map((subnetId, index) => ({ subnetId, availabilityZone: `eu-west-2${index ? "b" : "a"}`, cidrBlock: `10.0.${index}.0/24`, routeTableId: `rtb-${String(index + 1).repeat(8)}`, natGatewayId: `nat-${String(index + 1).repeat(8)}` })), securityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map((groupId) => ({ groupId, vpcId: "vpc-0123456789abcdef0" })), ecsClusterArn: STAGE_B.clusterArn, databaseIdentifier: "mscqr-production-rls-green", rdsSubnetIds: [...STAGE_B.privateSubnetIds] }, accountId: STAGE_B.account, region: STAGE_B.region, vpcId: "vpc-0123456789abcdef0", privateSubnetIds: [...STAGE_B.privateSubnetIds], ecsClusterArn: STAGE_B.clusterArn, stageADatabaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, stageAExecutorSecurityGroupId: STAGE_B.executorSecurityGroupId, stageAExecutorTaskRoleArn: STAGE_B.executorRoleArn, stageABrokerRoleArn: STAGE_B.brokerRoleArn, stageAExecutorLogGroupName: "/ecs/mscqr-production/full-rls-green", stageAExecutorLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green:*", stageABrokerLogGroupName: "/aws/lambda/mscqr-production-rls-approval-broker", stageABrokerLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:*", stageARuntimeSecretArns: Object.fromEntries(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"].map((role) => [role, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/${role}-abc123`])), stageAExecutorNetworkingReady: true, approvalSecretArn: STAGE_B.approvalSecretArn, approvalKmsKeyArn: STAGE_B.approvalKmsKeyArn, receiptBucketArn: `arn:aws:s3:::${STAGE_B.receiptBucket}`, stageAReadOnlyCanaryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-abc123" };
 
 function files() {
   const dir = fs.mkdtempSync(path.join(tempRoot, "run-"));
   const write = (name, value, mode = 0o600) => { const file = path.join(dir, name); fs.writeFileSync(file, typeof value === "string" || Buffer.isBuffer(value) ? value : `${JSON.stringify(value, null, 2)}\n`, { mode }); return file; };
-  const state = write("state.json", stateFixture()); const stageAPath = write("stage-a.json", { ...stageA, sourceStateSha256: crypto.createHash("sha256").update(fs.readFileSync(state)).digest("hex") }); const evidencePath = write("evidence.json", evidence); const signaturePath = write("signature.json", signature); const packagePath = write("broker.zip", Buffer.from("broker package fixture"));
-  return { dir, state, stageAPath, evidencePath, signaturePath, packagePath };
+  const state = write("state.json", stateFixture()); const stageAState = write("stage-a-state.json", { lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: STAGE_A_MINIMUM_STATE_SERIAL }); const stageAPath = write("stage-a.json", { ...stageA, stageAStateSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAState)).digest("hex") }); const evidencePath = write("evidence.json", evidence); const signaturePath = write("signature.json", signature); const packagePath = write("broker.zip", Buffer.from("broker package fixture"));
+  return { dir, state, stageAState, stageAPath, evidencePath, signaturePath, packagePath };
 }
 
 function input(overrides = {}) {
   const f = files();
-  return { imageEvidence: f.evidencePath, imageEvidenceSignature: f.signaturePath, stateBackup: f.state, stageAInput: f.stageAPath, stageAStateBackup: f.state, brokerPackagePath: f.packagePath, toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), imageReleaseSha: releaseSha, workflowRunId: evidence.workflowRunId, canonicalArtifactSha256: evidence.canonicalArtifactSha256, outputPath: path.join(f.dir, "out.tfvars"), bindingReportPath: path.join(f.dir, "binding.json"), now, verifySignature: () => true, ...overrides };
+  return { imageEvidence: f.evidencePath, imageEvidenceSignature: f.signaturePath, stateBackup: f.state, stageAInput: f.stageAPath, stageAStateBackup: f.stageAState, brokerPackagePath: f.packagePath, toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), imageReleaseSha: releaseSha, workflowRunId: evidence.workflowRunId, canonicalArtifactSha256: evidence.canonicalArtifactSha256, outputPath: path.join(f.dir, "out.tfvars"), bindingReportPath: path.join(f.dir, "binding.json"), now, verifySignature: () => true, ...overrides };
 }
 
 test.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
@@ -122,6 +123,51 @@ test("current Stage-A handoff and source state bytes are revalidated at the bind
   const fresh = input(); const regenerated = generateStageBTfvars(fresh);
   fs.appendFileSync(fresh.stageAStateBackup, "\n");
   assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: regenerated.outputPath, bindingReportPath: regenerated.bindingReportPath }), /Stage-A state backup was modified/);
+});
+
+test("Stage A and Stage B state identities cannot be substituted", () => {
+  const args = input(); const stageAInput = JSON.parse(fs.readFileSync(args.stageAInput, "utf8")); const stageBBytes = fs.readFileSync(args.stateBackup);
+  const swappedInputPath = path.join(path.dirname(args.stageAInput), "swapped-stage-a.json");
+  fs.writeFileSync(swappedInputPath, JSON.stringify({ ...stageAInput, stageAStateSha256: crypto.createHash("sha256").update(stageBBytes).digest("hex") }));
+  assert.throws(() => generateStageBTfvars({ ...args, stageAInput: swappedInputPath, stageAStateBackup: args.stateBackup }), /Stage A state lineage is wrong/);
+  assert.throws(() => generateStageBTfvars({ ...input(), stateBackup: args.stageAStateBackup }), /Stage B state lineage is wrong/);
+  assert.throws(() => validateStageBStageAInput({ ...stageAInput, stageAStateObject: "env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate" }), /provenance/);
+  assert.throws(() => validateStageBStageAInput({ ...stageAInput, stageAStateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a" }), /provenance/);
+  assert.throws(() => validateStageBStageAInput({ ...stageAInput, stageAStateSerial: 34 }), /provenance/);
+  assert.equal(validateStageBStageAInput({ ...stageAInput, stageAStateSerial: 36 }).stageAStateSerial, 36);
+  assert.equal(deriveRetainedDefinitions({ ...stateFixture(), serial: 77 }).serial, 77);
+});
+
+test("Stage-A prerequisite identity fields must exactly describe the bound backup", () => {
+  const updateInput = (args, mutate) => {
+    const value = JSON.parse(fs.readFileSync(args.stageAInput, "utf8")); mutate(value); fs.writeFileSync(args.stageAInput, `${JSON.stringify(value)}\n`);
+  };
+  const updateState = (args, mutate) => {
+    const value = JSON.parse(fs.readFileSync(args.stageAStateBackup, "utf8")); mutate(value); fs.writeFileSync(args.stageAStateBackup, `${JSON.stringify(value)}\n`); return fs.readFileSync(args.stageAStateBackup);
+  };
+
+  const artifactAhead = input(); updateInput(artifactAhead, (value) => { value.stageAStateSerial = 36; });
+  assert.throws(() => generateStageBTfvars(artifactAhead), /Stage-A prerequisite serial does not match/);
+
+  const backupAhead = input(); const backupAheadBytes = updateState(backupAhead, (value) => { value.serial = 36; }); updateInput(backupAhead, (value) => { value.stageAStateSha256 = crypto.createHash("sha256").update(backupAheadBytes).digest("hex"); });
+  assert.throws(() => generateStageBTfvars(backupAhead), /Stage-A prerequisite serial does not match/);
+
+  const lineageMismatch = input(); updateState(lineageMismatch, (value) => { value.lineage = "4e438e59-8b8b-194d-030c-5ede0c26344a"; });
+  assert.throws(() => generateStageBTfvars(lineageMismatch), /Stage A state lineage is wrong/);
+
+  const shaMismatch = input(); updateInput(shaMismatch, (value) => { value.stageAStateSha256 = "f".repeat(64); });
+  assert.throws(() => generateStageBTfvars(shaMismatch), /source state backup/);
+
+  const objectMismatch = input(); updateInput(objectMismatch, (value) => { value.stageAStateObject = "env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"; });
+  assert.throws(() => generateStageBTfvars(objectMismatch), /provenance/);
+
+  const future = input(); const futureBytes = updateState(future, (value) => { value.serial = 36; }); updateInput(future, (value) => { value.stageAStateSerial = 36; value.stageAStateSha256 = crypto.createHash("sha256").update(futureBytes).digest("hex"); });
+  const futureResult = generateStageBTfvars(future);
+  assert.equal(futureResult.bindingReport.stageAStateSerial, 36);
+  assert.equal(futureResult.bindingReport.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE);
+
+  const tamperedReport = JSON.parse(fs.readFileSync(futureResult.bindingReportPath, "utf8")); tamperedReport.stageAStateSerial = 35; fs.writeFileSync(futureResult.bindingReportPath, `${JSON.stringify(tamperedReport)}\n`);
+  assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: futureResult.outputPath, bindingReportPath: futureResult.bindingReportPath }), /binding report Stage-A serial/);
 });
 
 test("atomic output pair commits together and rolls back on a second rename failure", () => {
