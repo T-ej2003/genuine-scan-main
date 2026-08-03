@@ -21,12 +21,12 @@ import {
 import simulatorAllowed from "./fixtures/aws-iam-simulate-principal-policy-allowed.mjs";
 import { assertStageBReleaseCallerArn } from "../plan-production-green-stage-b.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
-import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
 import { generateImageEvidence, imageEvidenceSha256, signImageEvidence, IMAGE_EVIDENCE_MAX_AGE_MS } from "../aws/production-green-stage-b-image-evidence.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
+const initializedBackendMetadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8")).backend;
 const roleArn = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
 const brokerPolicyArn = "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime";
 const brokerRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker";
@@ -682,7 +682,7 @@ const validApplyInput = (fixture) => ({
     validatePlan: () => {},
     verifyPermissionSignature: () => true,
     verifyImageEvidence: fixture.verifyImageEvidence,
-    getBackendConfig: () => STAGE_B_TERRAFORM_BACKEND_CONFIG,
+    getBackendMetadata: () => structuredClone(initializedBackendMetadata),
     apply: () => { throw new Error("apply must not be reached"); },
   },
 });
@@ -706,7 +706,7 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
       validatePlan: () => {},
       verifyPermissionSignature: () => true,
       verifyImageEvidence: fixture.verifyImageEvidence,
-      getBackendConfig: () => STAGE_B_TERRAFORM_BACKEND_CONFIG,
+      getBackendMetadata: () => structuredClone(initializedBackendMetadata),
       apply: (planPath) => {
         applyCalls.push(planPath);
         return { status: 0 };
@@ -751,9 +751,20 @@ test("valid non-verify-only apply path calls the injected apply stub exactly onc
 test("wrapper rejects a backend config using another key before the apply seam", () => {
   const fixture = createValidStageBApplyFixture();
   const input = validRealApplyInput(fixture);
-  input.deps.getBackendConfig = () => ({ ...STAGE_B_TERRAFORM_BACKEND_CONFIG, key: "other.tfstate" });
+  input.deps.getBackendMetadata = () => ({ ...structuredClone(initializedBackendMetadata), config: { ...initializedBackendMetadata.config, key: "other.tfstate" } });
   assert.throws(() => runApply(input), /backend key/);
   assert.deepEqual(input.applyCalls, []);
+});
+
+test("wrapper verify-only and pre-apply reject redirected backend metadata", () => {
+  for (const verifyOnly of [true, false]) {
+    const fixture = createValidStageBApplyFixture();
+    const input = verifyOnly ? validApplyInput(fixture) : validRealApplyInput(fixture);
+    input.argv = wrapperArgs(fixture, verifyOnly);
+    input.deps.getBackendMetadata = () => ({ ...structuredClone(initializedBackendMetadata), config: { ...initializedBackendMetadata.config, endpoints: { s3: "https://other.example" } } });
+    assert.throws(() => runApply(input), /endpoints/);
+    if (!verifyOnly) assert.deepEqual(input.applyCalls, []);
+  }
 });
 
 test("production apply rejects every incomplete canonical tfvars provenance combination", () => {
@@ -838,7 +849,7 @@ test("exact binary plan and derived JSON reach the ready-to-apply boundary witho
   const result = runApply({
     argv: wrapperArgs(fixture, true),
     env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
-    deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, getBackendConfig: () => STAGE_B_TERRAFORM_BACKEND_CONFIG, apply: () => { throw new Error("apply must not be reached"); } },
+    deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, getBackendMetadata: () => structuredClone(initializedBackendMetadata), apply: () => { throw new Error("apply must not be reached"); } },
   });
   assert.equal(result.status, "ready-to-apply");
 });

@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
-import { assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
+import { assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
 import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, validateManifest } from "./validate-production-green-stage-b-permissions.mjs";
 import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENCE_REVOCATION_MODEL } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL } from "./stage-b-reference-audit-contract.mjs";
@@ -47,9 +47,10 @@ if (mode === "production") {
     "STAGE_B_IMAGE_EVIDENCE_PATH", "STAGE_B_IMAGE_EVIDENCE_SIGNATURE_PATH", "STAGE_B_IMAGE_EVIDENCE_SHA256", "STAGE_B_IMAGE_EVIDENCE_WORKFLOW_RUN_ID", "STAGE_B_IMAGE_EVIDENCE_ARTIFACT_SHA256",
     "STAGE_B_PLAN_PATH", "STAGE_B_PLAN_JSON_PATH", "STAGE_B_PLAN_SHA256", "STAGE_B_SAVED_PLAN_SHA256", "STAGE_B_CANONICAL_PLAN_JSON_SHA256",
     "STAGE_B_REFERENCE_AUDIT_PATH", "STAGE_B_REFERENCE_AUDIT_SHA256",
-    "STAGE_B_PERMISSION_REPORT_PATH", "STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH", "STAGE_B_PERMISSION_REPORT_SHA256",
+    "STAGE_B_PERMISSION_REPORT_PATH", "STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH", "STAGE_B_PERMISSION_REPORT_SHA256", "STAGE_B_TERRAFORM_BACKEND_METADATA_PATH",
   ];
-  if (requiredProductionEvidence.some((name) => !process.env[name])) throw new Error("Production Stage B closure requires fresh signed image evidence.");
+  if (requiredProductionEvidence.some((name) => !process.env[name])) throw new Error("Production Stage B closure requires complete fresh deployment evidence.");
+  assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(process.env.STAGE_B_TERRAFORM_BACKEND_METADATA_PATH, "utf8"))?.backend);
 }
 if (mode === "production" || tfvarsPath || bindingReportPath) {
   if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256 || !process.env.STAGE_B_TOOLING_TREE_SHA256 || !process.env.STAGE_B_IMAGE_RELEASE_SHA || !process.env.STAGE_B_IMAGE_EVIDENCE_SHA256) throw new Error("Production Stage B closure requires canonical tfvars provenance and complete deployment identity.");

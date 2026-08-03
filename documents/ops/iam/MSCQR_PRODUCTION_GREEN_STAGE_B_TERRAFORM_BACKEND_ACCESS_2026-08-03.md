@@ -25,6 +25,12 @@ production state object is never deletable by the release role. The policy does
 not grant `s3:ListBucket`, arbitrary object access, bucket administration,
 versioning changes, or encryption changes.
 
+The plan, closure, verify-only, and pre-apply gates read Terraform's initialized
+backend metadata, require backend type `s3`, and accept only the reviewed bucket,
+key, region, encryption, and lockfile values plus Terraform's known null defaults.
+They reject unknown options and endpoint, credential, role, proxy, path-style,
+workspace-prefix, DynamoDB-lock, KMS, TLS, retry, or validation overrides.
+
 ## Exact policy
 
 The source of truth is

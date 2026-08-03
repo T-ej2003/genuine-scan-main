@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   assertStageBTerraformBackendConfig,
+  assertStageBTerraformInitializedBackendMetadata,
   assertStageBTerraformBackendManifest,
   assertStageBTerraformBackendPolicy,
   STAGE_B_TERRAFORM_BACKEND,
@@ -18,6 +19,7 @@ import { validateManifest } from "../aws/validate-production-green-stage-b-permi
 const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json", "utf8"));
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const stageA = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
+const initializedMetadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8"));
 
 function matches(statement, action, resource, context) {
   const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
@@ -49,6 +51,50 @@ test("the direct production-state config uses the default CLI workspace", () => 
   assert.equal(STAGE_B_TERRAFORM_BACKEND_CONFIG.key, STAGE_B_TERRAFORM_BACKEND.stateKey);
   assert.match(STAGE_B_TERRAFORM_BACKEND_CONFIG.key, /^env:\/production\//);
   assert.throws(() => assertStageBTerraformBackendConfig({ ...STAGE_B_TERRAFORM_BACKEND_CONFIG, key: "other.tfstate" }), /backend key/);
+  assert.throws(() => assertStageBTerraformBackendConfig({ ...STAGE_B_TERRAFORM_BACKEND_CONFIG, profile: "other" }), /unreviewed key/);
+});
+
+test("Terraform v1.15.7 initialized metadata accepts only the canonical normalized S3 shape", () => {
+  assert.equal(assertStageBTerraformInitializedBackendMetadata(initializedMetadata.backend), true);
+});
+
+test("initialized backend metadata rejects noncanonical type, keys, endpoints, credentials, and transport options", () => {
+  const reject = (label, mutate, pattern) => {
+    const metadata = structuredClone(initializedMetadata);
+    mutate(metadata);
+    assert.throws(() => assertStageBTerraformInitializedBackendMetadata(metadata.backend), pattern, label);
+  };
+  reject("backend type", ({ backend }) => { backend.type = "local"; }, /type/);
+  reject("unknown metadata key", ({ backend }) => { backend.unreviewed = true; }, /unreviewed/);
+  reject("unknown config key", ({ backend }) => { backend.config.unreviewed = true; }, /unreviewed/);
+  for (const [key, value] of [
+    ["endpoints", { s3: "https://other.example" }], ["endpoints", { sts: "https://other.example" }],
+    ["profile", "other"], ["shared_credentials_file", "/tmp/creds"], ["shared_credentials_files", ["/tmp/creds"]], ["shared_config_files", ["/tmp/config"]], ["assume_role", { role_arn: "arn:aws:iam::1:role/other" }],
+    ["assume_role_with_web_identity", { role_arn: "arn:aws:iam::1:role/other" }], ["access_key", "access"], ["secret_key", "secret"], ["token", "token"],
+    ["custom_ca_bundle", "/tmp/ca"], ["insecure", true], ["http_proxy", "http://proxy"], ["https_proxy", "https://proxy"], ["no_proxy", "internal"], ["sts_region", "us-east-1"],
+    ["use_path_style", true], ["workspace_key_prefix", "env:"], ["dynamodb_table", "locks"], ["kms_key_id", "alias/other"],
+    ["skip_credentials_validation", true], ["skip_region_validation", true], ["skip_requesting_account_id", true], ["skip_metadata_api_check", true], ["skip_s3_checksum", true], ["max_retries", 10], ["retry_mode", "adaptive"],
+  ]) reject(key, ({ backend }) => { backend.config[key] = value; }, new RegExp(key));
+  reject("nested endpoint key", ({ backend }) => { backend.config.endpoints = { other: "https://other.example" }; }, /endpoints/);
+  reject("legacy path-style alias", ({ backend }) => { backend.config.force_path_style = true; backend.config.use_path_style = true; }, /force_path_style/);
+});
+
+test("initialized backend metadata rejects canonical value overrides", () => {
+  for (const [key, value] of [["bucket", "other"], ["key", "other.tfstate"], ["region", "us-east-1"], ["encrypt", false], ["use_lockfile", false]]) {
+    const metadata = structuredClone(initializedMetadata);
+    metadata.backend.config[key] = value;
+    assert.throws(() => assertStageBTerraformInitializedBackendMetadata(metadata.backend), new RegExp(key));
+  }
+});
+
+test("plan, closure, verify-only, and pre-apply consume initialized metadata rather than generated HCL", () => {
+  const planSource = fs.readFileSync("scripts/plan-production-green-stage-b.mjs", "utf8");
+  const closureSource = fs.readFileSync("scripts/aws/validate-stage-b-deployment-closure.mjs", "utf8");
+  const applySource = fs.readFileSync("scripts/apply-production-green-stage-b.mjs", "utf8");
+  assert.match(planSource, /assertStageBTerraformInitializedBackendMetadata/);
+  assert.match(closureSource, /STAGE_B_TERRAFORM_BACKEND_METADATA_PATH/);
+  assert.match(applySource, /assertStageBTerraformInitializedBackendMetadata/);
+  assert.match(applySource, /getBackendMetadata/);
 });
 
 test("the canonical backend-config generator writes only the direct production key", () => {
