@@ -4,12 +4,12 @@
   "imageReleaseSha": "7245a6036492f875654c414473737e33c1422f3c",
   "comparisonBaseSha": "7245a6036492f875654c414473737e33c1422f3c",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
-  "comparisonHeadSha256": "05e857afb5c555818195e5ec130c35467eccc2c9ac0f2e28e26204cff3a34608",
-  "toolingInputTreeSha256": "05e857afb5c555818195e5ec130c35467eccc2c9ac0f2e28e26204cff3a34608",
+  "comparisonHeadSha256": "d4b2307b537b0a94629ab29cba09914e3b67de901d858d74f9bd7ce880a38631",
+  "toolingInputTreeSha256": "d4b2307b537b0a94629ab29cba09914e3b67de901d858d74f9bd7ce880a38631",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
   "classificationRulesVersion": "stage-b-image-reuse-v2",
-  "generatedAt": "2026-08-03T00:43:08+01:00",
+  "generatedAt": "2026-08-03T01:23:33+01:00",
   "generatorVersion": "validate-stage-b-image-reuse@2",
   "classifiedChangedFiles": [
     {
@@ -134,6 +134,11 @@
     },
     {
       "file": "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/full-database-rls-enforcement.test.mjs",
       "category": "testOnly",
       "imageAffecting": false
     },
