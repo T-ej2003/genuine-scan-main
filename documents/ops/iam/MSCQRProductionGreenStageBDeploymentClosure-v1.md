@@ -59,3 +59,14 @@ non-self-referential. The production wrapper separately requires
 `HEAD == tooling_sha == origin/main`, a fetched protected-main ref, complete history, and
 a clean worktree. CI closure uses review mode and does not require a pull-request head to
 equal origin/main.
+
+## Protected-checkout regression boundary
+
+The apply-wrapper regression harness first proves one complete artifact set reaches
+`ready-to-apply`. Checkout-negative fixtures then clone that baseline and mutate exactly one
+protected-main property, so artifact-gate failures remain separately testable and cannot mask
+the checkout invariant under test. The wrapper’s artifact-presence checks intentionally remain
+before protected-checkout validation; this order is part of the current implementation contract.
+The regression suite also covers the real non-verify-only boundary: a valid first read followed
+by a drifted second read must reject before the injected apply dependency is called, while a
+fully valid pair calls that dependency once with the saved-plan path.
