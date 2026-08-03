@@ -543,6 +543,35 @@ const validApplyInput = (fixture) => ({
   },
 });
 
+const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainCheckout, fixture.protectedMainCheckout]) => {
+  const reads = [...checkoutReads];
+  const applyCalls = [];
+  let checkoutReadCount = 0;
+  return {
+    argv: wrapperArgs(fixture),
+    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
+    deps: {
+      getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
+      getProtectedMainCheckout: () => {
+        const checkout = reads.shift();
+        checkoutReadCount += 1;
+        if (!checkout) throw new Error("Unexpected protected-main checkout read in test fixture.");
+        return checkout;
+      },
+      showPlan: () => fixture.shownBytes,
+      validatePlan: () => {},
+      verifyPermissionSignature: () => true,
+      verifyImageEvidence: fixture.verifyImageEvidence,
+      apply: (planPath) => {
+        applyCalls.push(planPath);
+        return { status: 0 };
+      },
+    },
+    applyCalls,
+    get checkoutReadCount() { return checkoutReadCount; },
+  };
+};
+
 const changedPaths = (before, after, prefix = "") => {
   if (Object.is(before, after)) return [];
   if (before && after && typeof before === "object" && typeof after === "object" && !Array.isArray(before) && !Array.isArray(after)) {
@@ -564,6 +593,14 @@ test("missing permission report remains an artifact-gate failure", () => {
 test("valid Stage B apply fixture reaches ready-to-apply before checkout mutation", () => {
   const fixture = createValidStageBApplyFixture();
   assert.equal(runApply(validApplyInput(fixture)).status, "ready-to-apply");
+});
+
+test("valid non-verify-only apply path calls the injected apply stub exactly once", () => {
+  const fixture = createValidStageBApplyFixture();
+  const input = validRealApplyInput(fixture);
+  assert.equal(runApply(input).status, "applied-saved-plan");
+  assert.equal(input.checkoutReadCount, 2);
+  assert.deepEqual(input.applyCalls, [fixture.planPath]);
 });
 
 const protectedCheckoutCases = [
@@ -589,6 +626,28 @@ for (const { name, changedFields, mutate, errorMessage } of protectedCheckoutCas
     mutate(mutated);
     assertSingleFailureMutation({ baseline, mutated, changedFields });
     assert.throws(() => runApply(validApplyInput(mutated)), (error) => error instanceof Error && error.message === errorMessage, name);
+  });
+}
+
+const secondCheckoutCases = [
+  { name: "tracked modification", mutate: (checkout) => { checkout.porcelainStatus = " M drifted"; }, errorMessage: "Stage B tooling checkout has tracked modifications." },
+  { name: "untracked file", mutate: (checkout) => { checkout.porcelainStatus = "?? drifted"; }, errorMessage: "Stage B tooling checkout contains an untracked file." },
+  { name: "origin/main mismatch", mutate: (checkout) => { checkout.originMainHead = "c".repeat(40); }, errorMessage: "Stage B tooling SHA does not match origin/main." },
+  { name: "HEAD differs from plan tooling SHA", mutate: (checkout) => { checkout.currentHead = "c".repeat(40); }, errorMessage: "Stage B tooling HEAD does not match toolingSha." },
+  { name: "merge operation", mutate: (checkout) => { checkout.repositoryState.mergeInProgress = true; }, errorMessage: "Stage B tooling checkout has a merge in progress." },
+  { name: "rebase operation", mutate: (checkout) => { checkout.repositoryState.rebaseInProgress = true; }, errorMessage: "Stage B tooling checkout has a rebase in progress." },
+  { name: "cherry-pick operation", mutate: (checkout) => { checkout.repositoryState.cherryPickInProgress = true; }, errorMessage: "Stage B tooling checkout has a cherry-pick in progress." },
+];
+
+for (const { name, mutate, errorMessage } of secondCheckoutCases) {
+  test(`non-verify-only apply rejects second-check ${name} drift`, () => {
+    const fixture = createValidStageBApplyFixture();
+    const secondCheckout = structuredClone(fixture.protectedMainCheckout);
+    mutate(secondCheckout);
+    const input = validRealApplyInput(fixture, [fixture.protectedMainCheckout, secondCheckout]);
+    assert.throws(() => runApply(input), (error) => error instanceof Error && error.message === errorMessage, name);
+    assert.equal(input.checkoutReadCount, 2);
+    assert.deepEqual(input.applyCalls, []);
   });
 }
 

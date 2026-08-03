@@ -67,3 +67,6 @@ The apply-wrapper regression harness first proves one complete artifact set reac
 protected-main property, so artifact-gate failures remain separately testable and cannot mask
 the checkout invariant under test. The wrapper’s artifact-presence checks intentionally remain
 before protected-checkout validation; this order is part of the current implementation contract.
+The regression suite also covers the real non-verify-only boundary: a valid first read followed
+by a drifted second read must reject before the injected apply dependency is called, while a
+fully valid pair calls that dependency once with the saved-plan path.
