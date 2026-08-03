@@ -4,7 +4,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schemaVersion", "generator", "toolingSha", "toolingTreeSha256", "sourceStateLineage", "sourceStateSerial", "sourceStateSha256", "networkEvidence", "accountId", "region", "vpcId", "privateSubnetIds", "ecsClusterArn",
+    "schemaVersion", "generator", "toolingSha", "toolingTreeSha256", "stageAStateObject", "stageAStateLineage", "stageAStateSerial", "stageAStateSha256", "networkEvidence", "accountId", "region", "vpcId", "privateSubnetIds", "ecsClusterArn",
     "stageADatabaseSecurityGroupId", "stageAExecutorSecurityGroupId", "stageAExecutorTaskRoleArn",
     "stageABrokerRoleArn", "stageAExecutorLogGroupName", "stageAExecutorLogGroupArn",
     "stageABrokerLogGroupName", "stageABrokerLogGroupArn", "stageARuntimeSecretArns",
@@ -16,9 +16,10 @@
     "generator": { "const": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs" },
     "toolingSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
     "toolingTreeSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "sourceStateLineage": { "const": "4e438e59-8b8b-194d-030c-5ede0c26344a" },
-    "sourceStateSerial": { "type": "integer", "minimum": 76 },
-    "sourceStateSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "stageAStateObject": { "const": "mscqr/production/rls-green/stage-a/terraform.tfstate" },
+    "stageAStateLineage": { "const": "02afb75a-f902-ab8a-f4c1-751d4aef7837" },
+    "stageAStateSerial": { "type": "integer", "minimum": 35 },
+    "stageAStateSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "networkEvidence": {
       "type": "object",
       "required": ["vpcId", "privateSubnets", "securityGroups", "ecsClusterArn", "databaseIdentifier", "rdsSubnetIds"],
