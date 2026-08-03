@@ -49,6 +49,26 @@ plan variables: `tooling_sha`, `image_release_sha`, and
 `canonical_image_evidence_sha256`. The wrapper also requires the checked-out tooling HEAD
 to equal `tooling_sha`.
 
+## Evidence freshness classes
+
+Image provenance is immutable after publication: the signed report carries the exact
+release/workflow/artifact identity, four digest bindings, and authoritative
+`DescribeRepositories` evidence for each unique repository. Each repository must report
+`imageTagMutability=IMMUTABLE`; exclusion-based mutability is rejected. The report uses
+`revocationModel=time-bounded-no-supersession-registry`: this is an explicit capability
+statement, not a claim that an external supersession registry was consulted. Immediate
+revocation is unavailable until a separately authenticated supersession registry exists.
+The evidence class is valid for 24 hours (`86400000` ms), which covers credential
+transitions and the full plan/audit/preflight workflow without weakening its signature or
+digest joins. It is rejected for a wrong release, workflow, artifact, digest, account,
+region, repository configuration, or unsupported revocation model.
+
+Permission preflight remains live and plan-sensitive with a 15-minute validity window
+(`900000` ms). The reference audit is also live and plan-bound with its independent
+15-minute window. These short windows are intentionally not reused for immutable image
+provenance; the wrapper still requires a fresh permission report and audit plus exact
+plan-to-image digest equality before apply.
+
 Image reuse is permitted only when the reviewed compatibility report for the exact image
 release and tooling-input tree contains no Dockerfile, dependency lockfile, runtime
 source, generated runtime package, or other image-build input change. Runtime validation

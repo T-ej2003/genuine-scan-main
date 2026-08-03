@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import { classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
-import { validateManifest } from "./validate-production-green-stage-b-permissions.mjs";
+import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, validateManifest } from "./validate-production-green-stage-b-permissions.mjs";
+import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENCE_REVOCATION_MODEL } from "./production-green-stage-b-image-evidence.mjs";
+import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL } from "./stage-b-reference-audit-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -37,6 +39,23 @@ assert.equal(matrix.schemaVersion, 1, "Stage B closure matrix schema is unsuppor
 assert.equal(matrix.account, "368992683803");
 assert.equal(matrix.region, "eu-west-2");
 assert.equal(matrix.zeroDestroy, true);
+assert.deepEqual(matrix.evidenceFreshness, {
+  imageProvenance: {
+    model: IMAGE_EVIDENCE_VALIDITY_MODEL,
+    maxAgeMs: IMAGE_EVIDENCE_MAX_AGE_MS,
+    requirements: ["valid KMS signature", "exact release/workflow/artifact identity", "exact repository/tag/digest bindings", "authoritative DescribeRepositories evidence", "imageTagMutability=IMMUTABLE", `revocationModel=${IMAGE_EVIDENCE_REVOCATION_MODEL}`],
+  },
+  permissionPreflight: {
+    model: PERMISSION_EVIDENCE_VALIDITY_MODEL,
+    maxAgeMs: PERMISSION_EVIDENCE_MAX_AGE_MS,
+    requirements: ["exact plan hashes", "exact role and policy simulation", "valid KMS signature"],
+  },
+  referenceAudit: {
+    model: STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL,
+    maxAgeMs: STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS,
+    requirements: ["exact plan hash", "fresh live ECS and broker observations", "release caller attestation"],
+  },
+}, "Stage B evidence freshness contract drifted.");
 assertStageBTerraformBackendPolicy(backendPolicy);
 assertStageBTerraformBackendManifest(permissionManifest);
 validateManifest(permissionManifest);

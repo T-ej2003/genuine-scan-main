@@ -11,8 +11,9 @@ import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mj
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
-export const PERMISSION_PREFLIGHT_MAX_AGE_MS = 15 * 60 * 1000;
+export const PERMISSION_EVIDENCE_MAX_AGE_MS = 15 * 60 * 1000;
 export const PERMISSION_PREFLIGHT_CLOCK_SKEW_MS = 60 * 1000;
+export const PERMISSION_EVIDENCE_VALIDITY_MODEL = "live-plan-bound-15m";
 export const ACCOUNT = "368992683803";
 export const REGION = "eu-west-2";
 export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
@@ -461,7 +462,7 @@ export function verifyPermissionReportSignature({ report, signatureArtifact, now
   const reportSha256 = sha256(Buffer.from(canonicalizeJson(report)));
   if (signatureArtifact.reportSha256 !== reportSha256) throw new Error("Permission report signature is bound to a different report.");
   const signedAtMs = Date.parse(signatureArtifact.signedAt); const nowMs = Date.parse(now);
-  if (!Number.isFinite(signedAtMs) || signedAtMs > nowMs + PERMISSION_PREFLIGHT_CLOCK_SKEW_MS || nowMs - signedAtMs > PERMISSION_PREFLIGHT_MAX_AGE_MS) throw new Error("Permission report signature is stale or malformed.");
+  if (!Number.isFinite(signedAtMs) || signedAtMs > nowMs + PERMISSION_PREFLIGHT_CLOCK_SKEW_MS || nowMs - signedAtMs > PERMISSION_EVIDENCE_MAX_AGE_MS) throw new Error("Permission report signature is stale or malformed.");
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureArtifact.signatureBase64 || "")) throw new Error("Permission report signature is malformed.");
   if (!verify({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), reportSha256 })) throw new Error("Permission report signature verification failed.");
   return true;
@@ -471,7 +472,7 @@ function validateFreshness(timestamp, now) {
   const timestampMs = Date.parse(timestamp); const nowMs = Date.parse(now);
   if (!Number.isFinite(timestampMs)) throw new Error("Permission report generatedAt is malformed.");
   if (timestampMs > nowMs + PERMISSION_PREFLIGHT_CLOCK_SKEW_MS) throw new Error("Permission report generatedAt is in the future.");
-  if (nowMs - timestampMs > PERMISSION_PREFLIGHT_MAX_AGE_MS) throw new Error("Permission report is expired.");
+  if (nowMs - timestampMs > PERMISSION_EVIDENCE_MAX_AGE_MS) throw new Error("Permission report is expired.");
 }
 
 export function runPermissionPreflight({

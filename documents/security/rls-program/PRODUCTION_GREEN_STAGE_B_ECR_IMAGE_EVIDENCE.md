@@ -4,7 +4,11 @@ The release-deployer is an infrastructure applier, not the image-publisher or im
 
 ## Approved evidence flow
 
-An approved administrator reads `ecr:DescribeImages` for exactly these repositories:
+An approved administrator reads `ecr:DescribeRepositories` once per unique repository
+and requires `imageTagMutability=IMMUTABLE` before reading `ecr:DescribeImages` for the
+exact release bindings. Exclusion-based mutability is rejected.
+
+The repositories are:
 
 - `arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend`
 - `arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker`
@@ -16,7 +20,7 @@ The executor and canary images use the backend repository, so the four bindings 
 - RLS executor: `<release-sha>-rls-executor` in `mscqr-backend`
 - read-only canary: `<release-sha>-rls-canary` in `mscqr-backend`
 
-The administrator generates a schema-versioned report containing `imageReleaseSha`, the canonical workflow run, canonical artifact SHA, exact repository/tag/digest records, observation time, account, region, and verifier ARN. The report is signed with the existing Stage B KMS signing contract. The apply wrapper verifies the detached signature and all four bindings; it does not call ECR.
+The administrator generates a schema-versioned report containing `imageReleaseSha`, the canonical workflow run, canonical artifact SHA, authoritative repository configuration evidence, exact repository/tag/digest records, observation time, account, region, verifier ARN, and `revocationModel=time-bounded-no-supersession-registry`. No supersession registry currently exists, so the report does not claim `superseded=false`; immediate revocation requires a separately authenticated registry. The report is signed with the existing Stage B KMS signing contract. The apply wrapper verifies the detached signature and all repository/four-image bindings; it does not call ECR.
 
 The canonical workflow artifact is authoritative. A failed duplicate workflow cannot become authoritative because it has no accepted artifact and its immutable-tag collision does not alter the canonical tag-to-digest binding.
 
@@ -34,8 +38,10 @@ The wrapper requires a detached signature and verifies:
 - approved administrator verifier identity
 - release SHA and workflow run
 - canonical artifact SHA
+- authoritative repository ARN, registry, region, and `imageTagMutability`
 - exact account and region
 - all four repository/tag/digest bindings
+- explicit revocation capability model
 - fresh observation and signature timestamps
 
 Unsigned, caller-supplied, modified, stale, duplicate-run, wrong-repository, wrong-region, or digest-mismatched evidence is rejected.
