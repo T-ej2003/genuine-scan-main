@@ -136,6 +136,7 @@ test("immutable image evidence survives realistic credential and artifact delays
 test("immutable-tag proof and supersession are required", () => {
   const report = reportFixture();
   const signature = signatureFixture(report);
+  assert.throws(() => verifyImageEvidenceSignature({ report: { ...report, immutableTagProof: undefined }, signatureArtifact: signature, verify: () => true }), /provenance/);
   assert.throws(() => assertValid({ ...report, immutableTagProof: undefined }, signature, { verifySignature: () => true }), /immutable-tag proof/);
   assert.throws(() => assertValid({ ...report, superseded: true }, signature, { verifySignature: () => true }), /superseded/);
   assert.throws(() => signImageEvidence({ ...report, superseded: true }, { sign: () => "AQ==" }), /superseded/);
