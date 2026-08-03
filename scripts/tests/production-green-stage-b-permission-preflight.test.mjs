@@ -796,6 +796,17 @@ test("broker ZIP mutation blocks apply before the injected apply seam", () => {
   assert.deepEqual(input.applyCalls, []);
 });
 
+test("Stage-A binding-report serial mismatch blocks apply before the injected apply seam", () => {
+  const fixture = createValidStageBApplyFixture();
+  const bindingReport = JSON.parse(fs.readFileSync(fixture.tfvarsBindingReportPath, "utf8"));
+  bindingReport.stageAStateSerial = 36;
+  fs.writeFileSync(fixture.tfvarsBindingReportPath, `${JSON.stringify(bindingReport)}\n`);
+  fixture.tfvarsBindingReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.tfvarsBindingReportPath)).digest("hex");
+  const input = validRealApplyInput(fixture);
+  assert.throws(() => runApply(input), /binding report Stage-A serial/);
+  assert.deepEqual(input.applyCalls, []);
+});
+
 const protectedCheckoutCases = [
   { name: "HEAD differs from origin/main", changedFields: ["protectedMainCheckout.currentHead"], mutate: (fixture) => { fixture.protectedMainCheckout.currentHead = "c".repeat(40); }, errorMessage: "Stage B tooling HEAD does not match toolingSha." },
   { name: "plan tooling SHA differs from HEAD", changedFields: ["protectedMainCheckout.toolingSha"], mutate: (fixture) => { fixture.protectedMainCheckout.toolingSha = "c".repeat(40); }, errorMessage: "Stage B protected-main checkout tooling SHA does not match the approved plan tooling SHA." },

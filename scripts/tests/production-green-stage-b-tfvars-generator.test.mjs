@@ -138,6 +138,38 @@ test("Stage A and Stage B state identities cannot be substituted", () => {
   assert.equal(deriveRetainedDefinitions({ ...stateFixture(), serial: 77 }).serial, 77);
 });
 
+test("Stage-A prerequisite identity fields must exactly describe the bound backup", () => {
+  const updateInput = (args, mutate) => {
+    const value = JSON.parse(fs.readFileSync(args.stageAInput, "utf8")); mutate(value); fs.writeFileSync(args.stageAInput, `${JSON.stringify(value)}\n`);
+  };
+  const updateState = (args, mutate) => {
+    const value = JSON.parse(fs.readFileSync(args.stageAStateBackup, "utf8")); mutate(value); fs.writeFileSync(args.stageAStateBackup, `${JSON.stringify(value)}\n`); return fs.readFileSync(args.stageAStateBackup);
+  };
+
+  const artifactAhead = input(); updateInput(artifactAhead, (value) => { value.stageAStateSerial = 36; });
+  assert.throws(() => generateStageBTfvars(artifactAhead), /Stage-A prerequisite serial does not match/);
+
+  const backupAhead = input(); const backupAheadBytes = updateState(backupAhead, (value) => { value.serial = 36; }); updateInput(backupAhead, (value) => { value.stageAStateSha256 = crypto.createHash("sha256").update(backupAheadBytes).digest("hex"); });
+  assert.throws(() => generateStageBTfvars(backupAhead), /Stage-A prerequisite serial does not match/);
+
+  const lineageMismatch = input(); updateState(lineageMismatch, (value) => { value.lineage = "4e438e59-8b8b-194d-030c-5ede0c26344a"; });
+  assert.throws(() => generateStageBTfvars(lineageMismatch), /Stage A state lineage is wrong/);
+
+  const shaMismatch = input(); updateInput(shaMismatch, (value) => { value.stageAStateSha256 = "f".repeat(64); });
+  assert.throws(() => generateStageBTfvars(shaMismatch), /source state backup/);
+
+  const objectMismatch = input(); updateInput(objectMismatch, (value) => { value.stageAStateObject = "env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"; });
+  assert.throws(() => generateStageBTfvars(objectMismatch), /provenance/);
+
+  const future = input(); const futureBytes = updateState(future, (value) => { value.serial = 36; }); updateInput(future, (value) => { value.stageAStateSerial = 36; value.stageAStateSha256 = crypto.createHash("sha256").update(futureBytes).digest("hex"); });
+  const futureResult = generateStageBTfvars(future);
+  assert.equal(futureResult.bindingReport.stageAStateSerial, 36);
+  assert.equal(futureResult.bindingReport.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE);
+
+  const tamperedReport = JSON.parse(fs.readFileSync(futureResult.bindingReportPath, "utf8")); tamperedReport.stageAStateSerial = 35; fs.writeFileSync(futureResult.bindingReportPath, `${JSON.stringify(tamperedReport)}\n`);
+  assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: futureResult.outputPath, bindingReportPath: futureResult.bindingReportPath }), /binding report Stage-A serial/);
+});
+
 test("atomic output pair commits together and rolls back on a second rename failure", () => {
   const directory = fs.mkdtempSync(path.join(tempRoot, "pair-"));
   const tfvarsPath = path.join(directory, "out.tfvars");

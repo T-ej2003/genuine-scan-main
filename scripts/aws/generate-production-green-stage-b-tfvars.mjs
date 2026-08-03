@@ -300,6 +300,21 @@ function assertBrokerPackageBinding(tfvarsBytes, report) {
   if (base64Sha256(bytes) !== report.brokerPackageBase64Sha256) throw new Error("Stage B broker package base64 SHA256 does not match the canonical binding report.");
 }
 
+function assertStageAInputMatchesStateBackup(stageAInput, stageAStateBytes, stageAState, report) {
+  const stateSha256 = sha256(stageAStateBytes);
+  assertStageAStateIdentity(stageAState, { stateObject: stageAInput.stageAStateObject });
+  if (stageAInput.stageAStateLineage !== stageAState.lineage) throw new Error("Stage-A prerequisite lineage does not match its source state backup.");
+  if (stageAInput.stageAStateSerial !== stageAState.serial) throw new Error("Stage-A prerequisite serial does not match its source state backup.");
+  if (stageAInput.stageAStateSha256 !== stateSha256) throw new Error("Stage-A prerequisite input does not match its source state backup.");
+  if (report) {
+    if (report.stageAStateObject !== stageAInput.stageAStateObject) throw new Error("Stage B tfvars binding report Stage-A state object does not match its source state backup.");
+    if (report.stageAStateLineage !== stageAState.lineage) throw new Error("Stage B tfvars binding report Stage-A lineage does not match its source state backup.");
+    if (report.stageAStateSerial !== stageAState.serial) throw new Error("Stage B tfvars binding report Stage-A serial does not match its source state backup.");
+    if (report.stageAStateBackupSha256 !== stateSha256) throw new Error("Stage B tfvars binding report Stage-A state SHA256 does not match its source state backup.");
+  }
+  return stateSha256;
+}
+
 function assertStageAPrerequisiteBinding(report) {
   for (const [field, label] of [["stageAInputPath", "Stage-A prerequisite input"], ["stageAStateBackupPath", "Stage-A state backup"]]) {
     if (!path.isAbsolute(report[field] || "")) throw new Error(`${label} path in the binding report must be absolute.`);
@@ -310,8 +325,8 @@ function assertStageAPrerequisiteBinding(report) {
   if (sha256(inputBytes) !== report.stageAInputSha256) throw new Error("Stage-A prerequisite input was modified after canonical generation.");
   if (sha256(stateBytes) !== report.stageAStateBackupSha256) throw new Error("Stage-A state backup was modified after canonical generation.");
   const input = validateStageBStageAInput(JSON.parse(inputBytes), { toolingSha: report.toolingSha, toolingTreeSha256: report.toolingTreeSha256 });
-  assertStageAStateIdentity(JSON.parse(stateBytes), { stateObject: input.stageAStateObject });
-  if (input.stageAStateSha256 !== report.stageAStateBackupSha256 || input.stageAStateObject !== report.stageAStateObject || input.stageAStateLineage !== report.stageAStateLineage || input.stageAStateSerial !== report.stageAStateSerial) throw new Error("Stage-A prerequisite input no longer matches its source state backup.");
+  const stageAState = JSON.parse(stateBytes);
+  assertStageAInputMatchesStateBackup(input, stateBytes, stageAState, report);
 }
 
 export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedImageReleaseSha, expectedImageEvidenceSha256 } = {}) {
@@ -352,16 +367,19 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   assertImageEvidence(report, { signatureArtifact: signature, verifySignature, imageReleaseSha, workflowRunId, artifactSha256: canonicalArtifactSha256, now });
   const evidenceSha256 = imageEvidenceSha256(report);
   const images = extractImages(report, imageReleaseSha);
-  const state = readJson(stateBackup); const retained = deriveRetainedDefinitions(state); const stageAStateBytes = fs.readFileSync(stageAStateBackup); const stageA = validateStageBStageAInput(readJson(stageAInput), { toolingSha, toolingTreeSha256 }); assertStageAStateIdentity(JSON.parse(stageAStateBytes), { stateObject: stageA.stageAStateObject });
-  if (sha256(stageAStateBytes) !== stageA.stageAStateSha256) throw new Error("Stage-A prerequisite input does not match its source state backup.");
+  const state = readJson(stateBackup); const retained = deriveRetainedDefinitions(state);
+  const stageAStateBytes = fs.readFileSync(stageAStateBackup);
+  const stageAState = JSON.parse(stageAStateBytes);
+  const stageAPrerequisiteInput = validateStageBStageAInput(readJson(stageAInput), { toolingSha, toolingTreeSha256 });
+  const stageAStateSha256 = assertStageAInputMatchesStateBackup(stageAPrerequisiteInput, stageAStateBytes, stageAState);
   const contract = deriveContractDigests({ file: checksumsFile }); const brokerBytes = fs.readFileSync(brokerPackagePath);
   const values = {
-    account_id: STAGE_B.account, aws_region: STAGE_B.region, deployment_environment: environment, vpc_id: stageA.vpcId, private_subnet_ids: [...stageA.privateSubnetIds].sort(), ecs_cluster_arn: stageA.ecsClusterArn,
-    stage_a_database_security_group_id: stageA.stageADatabaseSecurityGroupId, stage_a_executor_security_group_id: stageA.stageAExecutorSecurityGroupId, stage_a_executor_task_role_arn: stageA.stageAExecutorTaskRoleArn, stage_a_broker_role_arn: stageA.stageABrokerRoleArn,
-    stage_a_executor_log_group_name: stageA.stageAExecutorLogGroupName, stage_a_executor_log_group_arn: stageA.stageAExecutorLogGroupArn, stage_a_broker_log_group_name: stageA.stageABrokerLogGroupName, stage_a_broker_log_group_arn: stageA.stageABrokerLogGroupArn,
-    stage_a_runtime_secret_arns: stageA.stageARuntimeSecretArns, stage_a_executor_networking_ready: stageA.stageAExecutorNetworkingReady, approval_secret_arn: stageA.approvalSecretArn, approval_kms_key_arn: stageA.approvalKmsKeyArn, receipt_bucket_arn: stageA.receiptBucketArn,
+    account_id: STAGE_B.account, aws_region: STAGE_B.region, deployment_environment: environment, vpc_id: stageAPrerequisiteInput.vpcId, private_subnet_ids: [...stageAPrerequisiteInput.privateSubnetIds].sort(), ecs_cluster_arn: stageAPrerequisiteInput.ecsClusterArn,
+    stage_a_database_security_group_id: stageAPrerequisiteInput.stageADatabaseSecurityGroupId, stage_a_executor_security_group_id: stageAPrerequisiteInput.stageAExecutorSecurityGroupId, stage_a_executor_task_role_arn: stageAPrerequisiteInput.stageAExecutorTaskRoleArn, stage_a_broker_role_arn: stageAPrerequisiteInput.stageABrokerRoleArn,
+    stage_a_executor_log_group_name: stageAPrerequisiteInput.stageAExecutorLogGroupName, stage_a_executor_log_group_arn: stageAPrerequisiteInput.stageAExecutorLogGroupArn, stage_a_broker_log_group_name: stageAPrerequisiteInput.stageABrokerLogGroupName, stage_a_broker_log_group_arn: stageAPrerequisiteInput.stageABrokerLogGroupArn,
+    stage_a_runtime_secret_arns: stageAPrerequisiteInput.stageARuntimeSecretArns, stage_a_executor_networking_ready: stageAPrerequisiteInput.stageAExecutorNetworkingReady, approval_secret_arn: stageAPrerequisiteInput.approvalSecretArn, approval_kms_key_arn: stageAPrerequisiteInput.approvalKmsKeyArn, receipt_bucket_arn: stageAPrerequisiteInput.receiptBucketArn,
     broker_package_path: path.resolve(brokerPackagePath), tooling_sha: toolingSha, image_release_sha: imageReleaseSha, canonical_image_evidence_sha256: evidenceSha256, source_contract_sha256: contract.sourceContractSha256, migration_set_digest: contract.migrationSetDigest, package_checksum_sha256: contract.packageChecksumSha256,
-    backend_image: images.backend_image.value, worker_image: images.worker_image.value, executor_image: images.executor_image.value, canary_image: images.canary_image.value, read_only_canary_image: images.read_only_canary_image.value, stage_a_read_only_canary_database_secret_arn: stageA.stageAReadOnlyCanaryDatabaseSecretArn,
+    backend_image: images.backend_image.value, worker_image: images.worker_image.value, executor_image: images.executor_image.value, canary_image: images.canary_image.value, read_only_canary_image: images.read_only_canary_image.value, stage_a_read_only_canary_database_secret_arn: stageAPrerequisiteInput.stageAReadOnlyCanaryDatabaseSecretArn,
     retained_candidate_task_definitions: retained.retainedCandidateTaskDefinitions, retained_executor_task_definitions: retained.retainedExecutorTaskDefinitions,
   };
   validateTfvarsValues(values);
@@ -371,7 +389,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
     tfvarsSchemaVersion: STAGE_B_TFVARS_SCHEMA_VERSION,
     generator: STAGE_B_TFVARS_GENERATOR,
     toolingSha, toolingTreeSha256, imageReleaseSha, imageEvidenceCanonicalSha256: evidenceSha256,
-    imageEvidenceSource: path.basename(imageEvidence), imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputPath: path.resolve(stageAInput), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stageAStateBackupPath: path.resolve(stageAStateBackup), stageAStateBackupSha256: sha256(stageAStateBytes), stageAStateObject: stageA.stageAStateObject, stageAStateLineage: stageA.stageAStateLineage, stageAStateSerial: stageA.stageAStateSerial, stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
+    imageEvidenceSource: path.basename(imageEvidence), imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputPath: path.resolve(stageAInput), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stageAStateBackupPath: path.resolve(stageAStateBackup), stageAStateBackupSha256: stageAStateSha256, stageAStateObject: stageAPrerequisiteInput.stageAStateObject, stageAStateLineage: stageAState.lineage, stageAStateSerial: stageAState.serial, stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
     brokerPackagePath: path.resolve(brokerPackagePath), brokerPackageRawSha256: sha256(brokerBytes), brokerPackageBase64Sha256: base64Sha256(brokerBytes), sourceContractSha256: contract.sourceContractSha256, migrationSetDigest: contract.migrationSetDigest, packageChecksumSha256: contract.packageChecksumSha256,
     images: Object.fromEntries(Object.entries(images).map(([variable, image]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: image.service, repository: image.repository, tag: image.tag, imageReference: image.value, digestLength: image.digest.length, digest: image.digest, matchesEvidence: report.images.find((record) => record.service === image.service)?.digest === image.digest }])),
     retainedDefinitions: { candidate: retained.counts.candidate, executor: retained.counts.executor },
