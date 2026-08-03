@@ -13,6 +13,7 @@ import {
 import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
+import { STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION } from "./generate-production-green-stage-a-prerequisites.mjs";
 
 export const STAGE_B_TFVARS_SCHEMA_VERSION = 1;
 export const STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION = 1;
@@ -31,7 +32,7 @@ const candidateKeyPattern = /^([a-f0-9]{7,40})-(backend|worker|canary|read_only_
 const executorKeyPattern = /^([a-f0-9]{7,40})-(full-rls-(admin-bootstrap|admin-ownership|capability-preflight|role-provision|role-verify|rollback|runtime-policy|verification))$/;
 
 const stageAKeys = Object.freeze([
-  "schemaVersion", "accountId", "region", "vpcId", "privateSubnetIds", "ecsClusterArn",
+  "schemaVersion", "generator", "toolingSha", "toolingTreeSha256", "sourceStateLineage", "sourceStateSerial", "sourceStateSha256", "networkEvidence", "accountId", "region", "vpcId", "privateSubnetIds", "ecsClusterArn",
   "stageADatabaseSecurityGroupId", "stageAExecutorSecurityGroupId", "stageAExecutorTaskRoleArn",
   "stageABrokerRoleArn", "stageAExecutorLogGroupName", "stageAExecutorLogGroupArn",
   "stageABrokerLogGroupName", "stageABrokerLogGroupArn", "stageARuntimeSecretArns",
@@ -111,10 +112,12 @@ export function writeAtomicPair({ tfvarsPath, bindingReportPath, tfvarsBytes, bi
   }
 }
 
-export function validateStageBStageAInput(input) {
+export function validateStageBStageAInput(input, { toolingSha, toolingTreeSha256 } = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Stage-A prerequisite input is malformed.");
   if (JSON.stringify(Object.keys(input).sort()) !== JSON.stringify([...stageAKeys].sort())) throw new Error("Stage-A prerequisite input fields do not match the reviewed contract.");
-  if (input.schemaVersion !== 1 || input.accountId !== STAGE_B.account || input.region !== STAGE_B.region) throw new Error("Stage-A prerequisite account, region, or schema is wrong.");
+  if (input.schemaVersion !== STAGE_A_PREREQUISITES_SCHEMA_VERSION || input.generator !== STAGE_A_PREREQUISITES_GENERATOR || input.accountId !== STAGE_B.account || input.region !== STAGE_B.region) throw new Error("Stage-A prerequisite account, region, schema, or generator is wrong.");
+  if (!/^[a-f0-9]{40}$/.test(input.toolingSha || "") || !digestPattern.test(input.toolingTreeSha256 || "") || input.sourceStateLineage !== STAGE_B_EXPECTED_STATE_LINEAGE || !Number.isInteger(input.sourceStateSerial) || input.sourceStateSerial < STAGE_B_MINIMUM_STATE_SERIAL || !digestPattern.test(input.sourceStateSha256 || "")) throw new Error("Stage-A prerequisite provenance is malformed.");
+  if ((toolingSha !== undefined && input.toolingSha !== toolingSha) || (toolingTreeSha256 !== undefined && input.toolingTreeSha256 !== toolingTreeSha256)) throw new Error("Stage-A prerequisite tooling provenance does not match this deployment.");
   if (!/^vpc-[a-f0-9]+$/.test(input.vpcId)) throw new Error("Stage-A VPC ID is malformed.");
   if (!Array.isArray(input.privateSubnetIds)) throw new Error("Stage-A private subnets are malformed.");
   if (JSON.stringify([...input.privateSubnetIds].sort()) !== JSON.stringify([...STAGE_B.privateSubnetIds].sort())) throw new Error("Stage-A private subnets do not match the reviewed contract.");
@@ -123,6 +126,8 @@ export function validateStageBStageAInput(input) {
   if (!/^arn:aws:logs:eu-west-2:368992683803:log-group:\/ecs\/mscqr-production\/full-rls-green(?::\*)?$/.test(input.stageAExecutorLogGroupArn)) throw new Error("Stage-A executor log-group ARN is malformed.");
   if (!/^arn:aws:logs:eu-west-2:368992683803:log-group:\/aws\/lambda\/mscqr-production-rls-approval-broker(?::\*)?$/.test(input.stageABrokerLogGroupArn)) throw new Error("Stage-A broker log-group ARN is malformed.");
   if (input.stageAExecutorNetworkingReady !== true) throw new Error("Stage-A executor networking readiness is not proven.");
+  const network = input.networkEvidence;
+  if (!network || network.vpcId !== input.vpcId || network.ecsClusterArn !== input.ecsClusterArn || !Array.isArray(network.privateSubnets) || JSON.stringify(network.privateSubnets.map((item) => item.subnetId).sort()) !== JSON.stringify([...input.privateSubnetIds].sort()) || network.privateSubnets.some((item) => !item.availabilityZone || !item.routeTableId || !/^nat-[a-f0-9]+$/.test(item.natGatewayId || "")) || new Set(network.privateSubnets.map((item) => item.availabilityZone)).size !== 2 || !Array.isArray(network.securityGroups) || JSON.stringify(network.securityGroups.map((item) => item.groupId).sort()) !== JSON.stringify([STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].sort()) || network.securityGroups.some((item) => item.vpcId !== input.vpcId) || !Array.isArray(network.rdsSubnetIds) || JSON.stringify([...network.rdsSubnetIds].sort()) !== JSON.stringify([...input.privateSubnetIds].sort())) throw new Error("Stage-A prerequisite live networking evidence is incomplete or wrong.");
   if (input.approvalSecretArn !== STAGE_B.approvalSecretArn || input.approvalKmsKeyArn !== STAGE_B.approvalKmsKeyArn || input.receiptBucketArn !== `arn:aws:s3:::${STAGE_B.receiptBucket}`) throw new Error("Stage-A approval or receipt binding is wrong.");
   if (!/^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr\/production\/rls-green\/phase4\/read-only-canary-database-url-[A-Za-z0-9]+$/.test(input.stageAReadOnlyCanaryDatabaseSecretArn)) throw new Error("Stage-A read-only-canary secret ARN is malformed.");
   const roles = ["app", "read", "preauth", "worker", "scheduled", "operator", "migration"];
@@ -294,6 +299,19 @@ function assertBrokerPackageBinding(tfvarsBytes, report) {
   if (base64Sha256(bytes) !== report.brokerPackageBase64Sha256) throw new Error("Stage B broker package base64 SHA256 does not match the canonical binding report.");
 }
 
+function assertStageAPrerequisiteBinding(report) {
+  for (const [field, label] of [["stageAInputPath", "Stage-A prerequisite input"], ["stageAStateBackupPath", "Stage-A state backup"]]) {
+    if (!path.isAbsolute(report[field] || "")) throw new Error(`${label} path in the binding report must be absolute.`);
+    const stat = fs.lstatSync(report[field], { throwIfNoEntry: false });
+    if (!stat?.isFile() || stat.isSymbolicLink()) throw new Error(`${label} must remain a regular file.`);
+  }
+  const inputBytes = fs.readFileSync(report.stageAInputPath); const stateBytes = fs.readFileSync(report.stageAStateBackupPath);
+  if (sha256(inputBytes) !== report.stageAInputSha256) throw new Error("Stage-A prerequisite input was modified after canonical generation.");
+  if (sha256(stateBytes) !== report.stageAStateBackupSha256) throw new Error("Stage-A state backup was modified after canonical generation.");
+  const input = validateStageBStageAInput(JSON.parse(inputBytes), { toolingSha: report.toolingSha, toolingTreeSha256: report.toolingTreeSha256 });
+  if (input.sourceStateSha256 !== report.stageAStateBackupSha256) throw new Error("Stage-A prerequisite input no longer matches its source state backup.");
+}
+
 export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedImageReleaseSha, expectedImageEvidenceSha256 } = {}) {
   assertAbsoluteFile(tfvarsPath, "Tfvars"); assertAbsoluteFile(bindingReportPath, "Binding report");
   const tfvarsBytes = fs.readFileSync(tfvarsPath); const reportBytes = fs.readFileSync(bindingReportPath); const report = JSON.parse(reportBytes);
@@ -301,6 +319,7 @@ export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindi
   if (report?.schemaVersion !== STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION || report.tfvarsSchemaVersion !== STAGE_B_TFVARS_SCHEMA_VERSION || report.generator !== STAGE_B_TFVARS_GENERATOR) throw new Error("Stage B tfvars binding report is not produced by the canonical generator.");
   if (report.tfvarsSha256 !== sha256(tfvarsBytes)) throw new Error("Stage B tfvars was modified after canonical generation.");
   assertBrokerPackageBinding(tfvarsBytes, report);
+  assertStageAPrerequisiteBinding(report);
   for (const [key, expected] of [["toolingSha", expectedToolingSha], ["toolingTreeSha256", expectedToolingTreeSha256], ["imageReleaseSha", expectedImageReleaseSha], ["imageEvidenceCanonicalSha256", expectedImageEvidenceSha256]]) if (expected !== undefined && report[key] !== expected) throw new Error(`Stage B tfvars binding report ${key} does not match the current deployment identity.`);
   if (report.stateLineage !== STAGE_B_EXPECTED_STATE_LINEAGE || !Number.isInteger(report.stateSerial)) throw new Error("Stage B tfvars binding report state identity is malformed.");
   const expectedImages = ["backend", "worker", "executor", "canary", "readOnlyCanary"];
@@ -319,10 +338,10 @@ function validateTfvarsValues(values) {
   for (const field of ["backend_image", "worker_image", "executor_image", "canary_image", "read_only_canary_image"]) if (!imageUriPattern.test(values[field] || "")) throw new Error(`${field} is not an immutable Stage B image reference.`);
 }
 
-export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, stateBackup, stageAInput, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, workspace = STAGE_B_EXPECTED_WORKSPACE, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, outputPath, bindingReportPath, allowOverwrite = false } = {}) {
+export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, workspace = STAGE_B_EXPECTED_WORKSPACE, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, outputPath, bindingReportPath, allowOverwrite = false } = {}) {
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !digestPattern.test(toolingTreeSha256 || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "")) throw new Error("Tooling, tooling-tree, or image-release identity is malformed.");
   if (workspace !== STAGE_B_EXPECTED_WORKSPACE) throw new Error("Stage B tfvars require the production workspace.");
-  assertAbsoluteFile(imageEvidence, "Image evidence"); assertAbsoluteFile(imageEvidenceSignature, "Image-evidence signature"); assertAbsoluteFile(stateBackup, "State backup"); assertAbsoluteFile(stageAInput, "Stage-A prerequisite input"); assertAbsoluteFile(brokerPackagePath, "Broker package");
+  assertAbsoluteFile(imageEvidence, "Image evidence"); assertAbsoluteFile(imageEvidenceSignature, "Image-evidence signature"); assertAbsoluteFile(stateBackup, "State backup"); assertAbsoluteFile(stageAInput, "Stage-A prerequisite input"); assertAbsoluteFile(stageAStateBackup, "Stage-A state backup"); assertAbsoluteFile(brokerPackagePath, "Broker package");
   const brokerPackageStat = fs.lstatSync(brokerPackagePath);
   if (!brokerPackageStat.isFile() || brokerPackageStat.isSymbolicLink() || brokerPackageStat.size === 0) throw new Error("Broker package must be a non-empty regular file.");
   if (outputPath) assertOutputPath(outputPath, "Tfvars output"); if (bindingReportPath) assertOutputPath(bindingReportPath, "Binding-report output");
@@ -331,7 +350,8 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   assertImageEvidence(report, { signatureArtifact: signature, verifySignature, imageReleaseSha, workflowRunId, artifactSha256: canonicalArtifactSha256, now });
   const evidenceSha256 = imageEvidenceSha256(report);
   const images = extractImages(report, imageReleaseSha);
-  const state = readJson(stateBackup); const retained = deriveRetainedDefinitions(state); const stageA = validateStageBStageAInput(readJson(stageAInput));
+  const state = readJson(stateBackup); const retained = deriveRetainedDefinitions(state); const stageAStateBytes = fs.readFileSync(stageAStateBackup); const stageA = validateStageBStageAInput(readJson(stageAInput), { toolingSha, toolingTreeSha256 });
+  if (sha256(stageAStateBytes) !== stageA.sourceStateSha256) throw new Error("Stage-A prerequisite input does not match its source state backup.");
   const contract = deriveContractDigests({ file: checksumsFile }); const brokerBytes = fs.readFileSync(brokerPackagePath);
   const values = {
     account_id: STAGE_B.account, aws_region: STAGE_B.region, vpc_id: stageA.vpcId, private_subnet_ids: [...stageA.privateSubnetIds].sort(), ecs_cluster_arn: stageA.ecsClusterArn,
@@ -349,7 +369,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
     tfvarsSchemaVersion: STAGE_B_TFVARS_SCHEMA_VERSION,
     generator: STAGE_B_TFVARS_GENERATOR,
     toolingSha, toolingTreeSha256, imageReleaseSha, imageEvidenceCanonicalSha256: evidenceSha256,
-    imageEvidenceSource: path.basename(imageEvidence), imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
+    imageEvidenceSource: path.basename(imageEvidence), imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputPath: path.resolve(stageAInput), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stageAStateBackupPath: path.resolve(stageAStateBackup), stageAStateBackupSha256: sha256(stageAStateBytes), stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
     brokerPackagePath: path.resolve(brokerPackagePath), brokerPackageRawSha256: sha256(brokerBytes), brokerPackageBase64Sha256: base64Sha256(brokerBytes), sourceContractSha256: contract.sourceContractSha256, migrationSetDigest: contract.migrationSetDigest, packageChecksumSha256: contract.packageChecksumSha256,
     images: Object.fromEntries(Object.entries(images).map(([variable, image]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: image.service, repository: image.repository, tag: image.tag, imageReference: image.value, digestLength: image.digest.length, digest: image.digest, matchesEvidence: report.images.find((record) => record.service === image.service)?.digest === image.digest }])),
     retainedDefinitions: { candidate: retained.counts.candidate, executor: retained.counts.executor },
@@ -364,7 +384,7 @@ function requiredOption(argv, option) { const index = argv.indexOf(option); cons
 
 export function parseCli(argv = process.argv.slice(2)) {
   return {
-    imageEvidence: requiredOption(argv, "--image-evidence"), imageEvidenceSignature: requiredOption(argv, "--image-evidence-signature"), stateBackup: requiredOption(argv, "--state-backup"), stageAInput: requiredOption(argv, "--stage-a-input"), brokerPackagePath: requiredOption(argv, "--broker-package"),
+    imageEvidence: requiredOption(argv, "--image-evidence"), imageEvidenceSignature: requiredOption(argv, "--image-evidence-signature"), stateBackup: requiredOption(argv, "--state-backup"), stageAInput: requiredOption(argv, "--stage-a-input"), stageAStateBackup: requiredOption(argv, "--stage-a-state-backup"), brokerPackagePath: requiredOption(argv, "--broker-package"),
     toolingSha: requiredOption(argv, "--tooling-sha"), toolingTreeSha256: requiredOption(argv, "--tooling-tree-sha256"), imageReleaseSha: requiredOption(argv, "--image-release-sha"), workflowRunId: requiredOption(argv, "--workflow-run-id"), canonicalArtifactSha256: requiredOption(argv, "--canonical-artifact-sha256"), workspace: requiredOption(argv, "--workspace"), outputPath: requiredOption(argv, "--output"), bindingReportPath: requiredOption(argv, "--binding-report"), allowOverwrite: argv.includes("--allow-overwrite"),
   };
 }

@@ -87,6 +87,35 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
 });
 
+test("Stage A live-evidence preflight covers exactly the five region-bound read actions", () => {
+  const expected = [
+    ["collect-stage-a-live-subnets", "ec2:DescribeSubnets"], ["collect-stage-a-live-route-tables", "ec2:DescribeRouteTables"], ["collect-stage-a-live-security-groups", "ec2:DescribeSecurityGroups"], ["collect-stage-a-live-cluster", "ecs:DescribeClusters"], ["collect-stage-a-live-database", "rds:DescribeDBInstances"],
+  ];
+  const derived = deriveRequiredEvaluations(plan, manifest).required.filter((item) => item.manifestId.startsWith("collect-stage-a-live-"));
+  assert.deepEqual(derived.map((item) => [item.manifestId, item.action, item.resource, item.context]), expected.map(([id, action]) => [id, action, "*", [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }] ]).sort(([left], [right]) => left.localeCompare(right)));
+  const missing = structuredClone(manifest); missing.required = missing.required.filter((entry) => entry.id !== "collect-stage-a-live-database");
+  assert.throws(() => validateManifest(missing), /live-evidence permission mapping/);
+});
+
+test("Stage A live-evidence simulations fail closed for denied or wrong-region requests", () => {
+  const evaluations = deriveRequiredEvaluations(plan, manifest).required.filter((item) => item.manifestId.startsWith("collect-stage-a-live-"));
+  for (const item of evaluations) assert.equal(simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify({ EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: "*", EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [] }] }) }).decision, "allowed");
+  assert.equal(runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: ({ evaluation }) => evaluation.manifestId === evaluations[0].manifestId ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }), cloudTrail: clearCloudTrail }).status, "invalid");
+  const wrongRegion = structuredClone(manifest); wrongRegion.required.find((entry) => entry.id === evaluations[0].manifestId).context[0].values = ["us-east-1"];
+  assert.throws(() => validateManifest(wrongRegion), /live-evidence permission mapping/);
+});
+
+test("Stage A live-evidence policy source contains no mutation permission", () => {
+  const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));
+  const statement = policy.Statement.find((item) => item.Sid === "ReadStageALivePrerequisites");
+  assert.deepEqual(statement, { Sid: "ReadStageALivePrerequisites", Effect: "Allow", Action: ["ec2:DescribeSubnets", "ec2:DescribeRouteTables", "ec2:DescribeSecurityGroups", "ecs:DescribeClusters", "rds:DescribeDBInstances"], Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } } });
+  for (const action of ["ec2:CreateSubnet", "ecs:UpdateService", "rds:ModifyDBInstance"]) {
+    const evaluation = { id: `unrelated-${action}`, action, resource: "*", context: [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }], expectedMissingContextValues: [] };
+    Object.defineProperty(evaluation, "forbidden", { value: true });
+    assert.equal(validateSimulationResult(evaluation, { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] }).decision, "implicitDeny");
+  }
+});
+
 const headBucketEvaluation = () => deriveRequiredEvaluations(plan, manifest).forbidden.find((item) => item.manifestId === "backend-head-bucket-not-required");
 const realHeadBucketSimulation = ({ evaluation }) => evaluation.manifestId === "backend-head-bucket-not-required"
   ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: ["s3:prefix"] }
@@ -591,6 +620,15 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   fs.writeFileSync(imageEvidenceSignaturePath, JSON.stringify(signImageEvidence(imageEvidence, { sign: () => "AQ==" })));
   const brokerPackagePath = path.join(directory, "broker.zip");
   fs.writeFileSync(brokerPackagePath, Buffer.from("broker package fixture"), { mode: 0o600 });
+  const stageAStateBackupPath = path.join(directory, "stage-a-state.json");
+  fs.writeFileSync(stageAStateBackupPath, JSON.stringify({ lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 76 }), { mode: 0o600 });
+  const stageAInputPath = path.join(directory, "stage-a-prerequisites.json");
+  const stageAInput = {
+    schemaVersion: 2, generator: "scripts/aws/generate-production-green-stage-a-prerequisites.mjs", toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), sourceStateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", sourceStateSerial: 76, sourceStateSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAStateBackupPath)).digest("hex"),
+    networkEvidence: { vpcId: "vpc-0123456789abcdef0", privateSubnets: STAGE_B.privateSubnetIds.map((subnetId, index) => ({ subnetId, availabilityZone: `eu-west-2${index ? "b" : "a"}`, cidrBlock: `10.0.${index}.0/24`, routeTableId: "rtb-12345678", natGatewayId: "nat-12345678" })), securityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map((groupId) => ({ groupId, vpcId: "vpc-0123456789abcdef0" })), ecsClusterArn: STAGE_B.clusterArn, databaseIdentifier: "mscqr-production-rls-green", rdsSubnetIds: STAGE_B.privateSubnetIds },
+    accountId: STAGE_B.account, region: STAGE_B.region, vpcId: "vpc-0123456789abcdef0", privateSubnetIds: STAGE_B.privateSubnetIds, ecsClusterArn: STAGE_B.clusterArn, stageADatabaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, stageAExecutorSecurityGroupId: STAGE_B.executorSecurityGroupId, stageAExecutorTaskRoleArn: STAGE_B.executorRoleArn, stageABrokerRoleArn: STAGE_B.brokerRoleArn, stageAExecutorLogGroupName: "/ecs/mscqr-production/full-rls-green", stageAExecutorLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green:*", stageABrokerLogGroupName: "/aws/lambda/mscqr-production-rls-approval-broker", stageABrokerLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:*", stageARuntimeSecretArns: Object.fromEntries(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"].map((role) => [role, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/${role}-abc123`])), stageAExecutorNetworkingReady: true, approvalSecretArn: STAGE_B.approvalSecretArn, approvalKmsKeyArn: STAGE_B.approvalKmsKeyArn, receiptBucketArn: `arn:aws:s3:::${STAGE_B.receiptBucket}`, stageAReadOnlyCanaryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-abc123",
+  };
+  fs.writeFileSync(stageAInputPath, `${JSON.stringify(stageAInput)}\n`, { mode: 0o600 });
   const tfvarsPath = path.join(directory, "canonical.tfvars");
   const tfvarsValues = Object.fromEntries([
     ["backend_image", "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:" + "a".repeat(64)],
@@ -605,7 +643,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   const tfvarsBindingReport = {
     schemaVersion: 1, tfvarsSchemaVersion: 1, generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
     toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), imageReleaseSha: "a".repeat(40), imageEvidenceCanonicalSha256: canonicalImageEvidenceSha256,
-    stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 76, brokerPackagePath,
+    stageAInputPath, stageAInputSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAInputPath)).digest("hex"), stageAStateBackupPath, stageAStateBackupSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAStateBackupPath)).digest("hex"), stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 76, brokerPackagePath,
     brokerPackageRawSha256: crypto.createHash("sha256").update(brokerBytes).digest("hex"), brokerPackageBase64Sha256: crypto.createHash("sha256").update(brokerBytes).digest("base64"),
     tfvarsSha256: crypto.createHash("sha256").update(tfvarsBytes).digest("hex"),
     images: Object.fromEntries(Object.entries(tfvarsValues).map(([variable, imageReference]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: variable === "worker_image" ? "worker" : variable === "executor_image" ? "rls-executor" : variable.includes("canary") ? "rls-canary" : "backend", repository: variable === "worker_image" ? "mscqr-worker" : "mscqr-backend", tag: "a".repeat(40), imageReference, digestLength: 71, digest: imageReference.slice(imageReference.indexOf("@") + 1), matchesEvidence: true }])),

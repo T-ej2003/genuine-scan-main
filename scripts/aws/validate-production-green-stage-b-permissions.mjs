@@ -17,6 +17,13 @@ export const PERMISSION_EVIDENCE_VALIDITY_MODEL = "live-plan-bound-15m";
 export const ACCOUNT = "368992683803";
 export const REGION = "eu-west-2";
 export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
+const STAGE_A_LIVE_EVIDENCE_EVALUATIONS = Object.freeze([
+  ["collect-stage-a-live-subnets", "ec2:DescribeSubnets"],
+  ["collect-stage-a-live-route-tables", "ec2:DescribeRouteTables"],
+  ["collect-stage-a-live-security-groups", "ec2:DescribeSecurityGroups"],
+  ["collect-stage-a-live-cluster", "ecs:DescribeClusters"],
+  ["collect-stage-a-live-database", "rds:DescribeDBInstances"],
+]);
 export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${ACCOUNT}:root`]);
 export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
 export const PERMISSION_REPORT_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
@@ -207,6 +214,12 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION 
   if (manifest.accountId !== account || manifest.region !== region) throw new Error("Permission manifest account or region is wrong.");
   if (!Array.isArray(manifest.required) || !Array.isArray(manifest.forbidden)) throw new Error("Permission manifest sections are malformed.");
   assertStageBTerraformBackendManifest(manifest);
+  for (const [id, action] of STAGE_A_LIVE_EVIDENCE_EVALUATIONS) {
+    const entry = manifest.required.find((candidate) => candidate.id === id);
+    if (!entry || entry.action !== action || JSON.stringify(entry.resources) !== JSON.stringify(["*"]) || JSON.stringify(entry.context) !== JSON.stringify([{ key: "aws:RequestedRegion", type: "string", values: [region] }])) {
+      throw new Error(`Stage A live-evidence permission mapping is not exact: ${id}.`);
+    }
+  }
   const ids = new Set();
   for (const [entry, forbidden] of [...manifest.required.map((entry) => [entry, false]), ...manifest.forbidden.map((entry) => [entry, true])]) {
     if (!entry.id || ids.has(entry.id) || !/^[-a-z0-9]+$/.test(entry.id)) throw new Error(`Permission manifest entry id is invalid: ${entry.id || "missing"}.`);

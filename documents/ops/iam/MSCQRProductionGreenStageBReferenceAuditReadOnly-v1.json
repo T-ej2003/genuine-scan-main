@@ -2,6 +2,23 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "ReadStageALivePrerequisites",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeSubnets",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeSecurityGroups",
+        "ecs:DescribeClusters",
+        "rds:DescribeDBInstances"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
       "Sid": "ListAttachedRolePoliciesReadOnly",
       "Effect": "Allow",
       "Action": "iam:ListAttachedRolePolicies",

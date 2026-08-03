@@ -566,8 +566,9 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const bindingReportSha256 = readOption(cliOptions, "--binding-report-sha256");
   const toolingTreeSha256 = readOption(cliOptions, "--tooling-tree-sha256");
   const expectedImageReleaseSha = readOption(cliOptions, "--image-release-sha");
+  const closureMode = readOption(cliOptions, "--closure-mode");
   const protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true });
-  if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha) throw new Error("Stage B planning requires the canonical tfvars binding report, its SHA256, tooling-tree digest, and image-release SHA.");
+  if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha || closureMode !== "production") throw new Error("Stage B planning requires canonical tfvars provenance and --closure-mode production.");
   assertStageBTfvarsBinding({ tfvarsPath: tfvars, bindingReportPath, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha });
   const out = path.resolve(".terraform-plans/production-green-stage-b.tfplan");
   fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });

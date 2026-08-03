@@ -43,18 +43,18 @@ function stateFixture(overrides = {}) {
   ], ...overrides };
 }
 
-const stageA = { schemaVersion: 1, accountId: STAGE_B.account, region: STAGE_B.region, vpcId: "vpc-0123456789abcdef0", privateSubnetIds: [...STAGE_B.privateSubnetIds], ecsClusterArn: STAGE_B.clusterArn, stageADatabaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, stageAExecutorSecurityGroupId: STAGE_B.executorSecurityGroupId, stageAExecutorTaskRoleArn: STAGE_B.executorRoleArn, stageABrokerRoleArn: STAGE_B.brokerRoleArn, stageAExecutorLogGroupName: "/ecs/mscqr-production/full-rls-green", stageAExecutorLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green:*", stageABrokerLogGroupName: "/aws/lambda/mscqr-production-rls-approval-broker", stageABrokerLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:*", stageARuntimeSecretArns: Object.fromEntries(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"].map((role) => [role, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/${role}-abc123`])), stageAExecutorNetworkingReady: true, approvalSecretArn: STAGE_B.approvalSecretArn, approvalKmsKeyArn: STAGE_B.approvalKmsKeyArn, receiptBucketArn: `arn:aws:s3:::${STAGE_B.receiptBucket}`, stageAReadOnlyCanaryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-abc123" };
+const stageA = { schemaVersion: 2, generator: "scripts/aws/generate-production-green-stage-a-prerequisites.mjs", toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), sourceStateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", sourceStateSerial: 76, sourceStateSha256: "0".repeat(64), networkEvidence: { vpcId: "vpc-0123456789abcdef0", privateSubnets: [...STAGE_B.privateSubnetIds].map((subnetId, index) => ({ subnetId, availabilityZone: `eu-west-2${index ? "b" : "a"}`, cidrBlock: `10.0.${index}.0/24`, routeTableId: `rtb-${String(index + 1).repeat(8)}`, natGatewayId: `nat-${String(index + 1).repeat(8)}` })), securityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map((groupId) => ({ groupId, vpcId: "vpc-0123456789abcdef0" })), ecsClusterArn: STAGE_B.clusterArn, databaseIdentifier: "mscqr-production-rls-green", rdsSubnetIds: [...STAGE_B.privateSubnetIds] }, accountId: STAGE_B.account, region: STAGE_B.region, vpcId: "vpc-0123456789abcdef0", privateSubnetIds: [...STAGE_B.privateSubnetIds], ecsClusterArn: STAGE_B.clusterArn, stageADatabaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, stageAExecutorSecurityGroupId: STAGE_B.executorSecurityGroupId, stageAExecutorTaskRoleArn: STAGE_B.executorRoleArn, stageABrokerRoleArn: STAGE_B.brokerRoleArn, stageAExecutorLogGroupName: "/ecs/mscqr-production/full-rls-green", stageAExecutorLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green:*", stageABrokerLogGroupName: "/aws/lambda/mscqr-production-rls-approval-broker", stageABrokerLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:*", stageARuntimeSecretArns: Object.fromEntries(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"].map((role) => [role, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/${role}-abc123`])), stageAExecutorNetworkingReady: true, approvalSecretArn: STAGE_B.approvalSecretArn, approvalKmsKeyArn: STAGE_B.approvalKmsKeyArn, receiptBucketArn: `arn:aws:s3:::${STAGE_B.receiptBucket}`, stageAReadOnlyCanaryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-abc123" };
 
 function files() {
   const dir = fs.mkdtempSync(path.join(tempRoot, "run-"));
   const write = (name, value, mode = 0o600) => { const file = path.join(dir, name); fs.writeFileSync(file, typeof value === "string" || Buffer.isBuffer(value) ? value : `${JSON.stringify(value, null, 2)}\n`, { mode }); return file; };
-  const state = write("state.json", stateFixture()); const stageAPath = write("stage-a.json", stageA); const evidencePath = write("evidence.json", evidence); const signaturePath = write("signature.json", signature); const packagePath = write("broker.zip", Buffer.from("broker package fixture"));
+  const state = write("state.json", stateFixture()); const stageAPath = write("stage-a.json", { ...stageA, sourceStateSha256: crypto.createHash("sha256").update(fs.readFileSync(state)).digest("hex") }); const evidencePath = write("evidence.json", evidence); const signaturePath = write("signature.json", signature); const packagePath = write("broker.zip", Buffer.from("broker package fixture"));
   return { dir, state, stageAPath, evidencePath, signaturePath, packagePath };
 }
 
 function input(overrides = {}) {
   const f = files();
-  return { imageEvidence: f.evidencePath, imageEvidenceSignature: f.signaturePath, stateBackup: f.state, stageAInput: f.stageAPath, brokerPackagePath: f.packagePath, toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), imageReleaseSha: releaseSha, workflowRunId: evidence.workflowRunId, canonicalArtifactSha256: evidence.canonicalArtifactSha256, outputPath: path.join(f.dir, "out.tfvars"), bindingReportPath: path.join(f.dir, "binding.json"), now, verifySignature: () => true, ...overrides };
+  return { imageEvidence: f.evidencePath, imageEvidenceSignature: f.signaturePath, stateBackup: f.state, stageAInput: f.stageAPath, stageAStateBackup: f.state, brokerPackagePath: f.packagePath, toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), imageReleaseSha: releaseSha, workflowRunId: evidence.workflowRunId, canonicalArtifactSha256: evidence.canonicalArtifactSha256, outputPath: path.join(f.dir, "out.tfvars"), bindingReportPath: path.join(f.dir, "binding.json"), now, verifySignature: () => true, ...overrides };
 }
 
 test.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
@@ -113,6 +113,15 @@ test("current broker ZIP bytes are revalidated at the binding gate", () => {
   assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath }), /broker package raw SHA256/);
   fs.rmSync(args.brokerPackagePath);
   assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath }), /broker package must be/);
+});
+
+test("current Stage-A handoff and source state bytes are revalidated at the binding gate", () => {
+  const args = input(); const result = generateStageBTfvars(args);
+  fs.appendFileSync(args.stageAInput, "\n");
+  assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath }), /Stage-A prerequisite input was modified/);
+  const fresh = input(); const regenerated = generateStageBTfvars(fresh);
+  fs.appendFileSync(fresh.stageAStateBackup, "\n");
+  assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: regenerated.outputPath, bindingReportPath: regenerated.bindingReportPath }), /Stage-A state backup was modified/);
 });
 
 test("atomic output pair commits together and rolls back on a second rename failure", () => {

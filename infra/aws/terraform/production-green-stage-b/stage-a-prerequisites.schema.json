@@ -4,7 +4,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schemaVersion", "accountId", "region", "vpcId", "privateSubnetIds", "ecsClusterArn",
+    "schemaVersion", "generator", "toolingSha", "toolingTreeSha256", "sourceStateLineage", "sourceStateSerial", "sourceStateSha256", "networkEvidence", "accountId", "region", "vpcId", "privateSubnetIds", "ecsClusterArn",
     "stageADatabaseSecurityGroupId", "stageAExecutorSecurityGroupId", "stageAExecutorTaskRoleArn",
     "stageABrokerRoleArn", "stageAExecutorLogGroupName", "stageAExecutorLogGroupArn",
     "stageABrokerLogGroupName", "stageABrokerLogGroupArn", "stageARuntimeSecretArns",
@@ -12,7 +12,25 @@
     "stageAReadOnlyCanaryDatabaseSecretArn"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
+    "generator": { "const": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs" },
+    "toolingSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "toolingTreeSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceStateLineage": { "const": "4e438e59-8b8b-194d-030c-5ede0c26344a" },
+    "sourceStateSerial": { "type": "integer", "minimum": 76 },
+    "sourceStateSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "networkEvidence": {
+      "type": "object",
+      "required": ["vpcId", "privateSubnets", "securityGroups", "ecsClusterArn", "databaseIdentifier", "rdsSubnetIds"],
+      "properties": {
+        "vpcId": { "type": "string", "pattern": "^vpc-[a-f0-9]+$" },
+        "privateSubnets": { "type": "array", "minItems": 2 },
+        "securityGroups": { "type": "array", "minItems": 2 },
+        "ecsClusterArn": { "const": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" },
+        "databaseIdentifier": { "type": "string", "minLength": 1 },
+        "rdsSubnetIds": { "type": "array", "minItems": 2, "uniqueItems": true }
+      }
+    },
     "accountId": { "const": "368992683803" },
     "region": { "const": "eu-west-2" },
     "vpcId": { "type": "string", "pattern": "^vpc-[a-f0-9]+$" },

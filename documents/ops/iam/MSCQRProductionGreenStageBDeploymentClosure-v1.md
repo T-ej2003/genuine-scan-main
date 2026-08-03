@@ -28,12 +28,14 @@ The validator classifies every resource by exact Terraform address, type, identi
 ## Required check
 
 ```text
-npm run stage-b:deployment-closure
+npm run stage-b:deployment-closure:pull-request
 ```
 
 The package command runs the explicit `pull-request` closure mode. It verifies the generated RLS package, formats and validates the Stage B Terraform root without a backend, checks all Terraform declarations against the matrix, validates the 73-resource fixture, runs the full Stage B control-plane suite, and runs the plan, audit, preflight, and wrapper regression suites. The pull-request mode may return `merge-ready-reuse-compatible` or `merge-ready-new-images-required`; it never authorizes a deployment.
 
-Production operators must invoke the closure implementation with `--mode production` from a protected-main checkout and provide the complete signed image, tfvars, audit, permission, and plan evidence. Production mode rejects `newImagesRequired`, pull-request impact reports, unmerged tooling SHAs, stale compatibility reports, and missing signed image evidence. The apply wrapper independently requires `--closure-mode production`.
+Production operators must invoke `npm run stage-b:deployment-closure:production -- <complete production evidence arguments>` from a protected-main checkout and provide the complete signed image, tfvars, audit, permission, and plan evidence. Production mode rejects `newImagesRequired`, pull-request impact reports, unmerged tooling SHAs, stale compatibility reports, and missing signed image evidence. The apply wrapper independently requires `--closure-mode production`.
+
+The canonical Stage A prerequisite handoff is part of permission preflight. It requires the exact Stage A state object plus five region-bound, read-only live checks: EC2 subnet, route-table, and security-group descriptions, ECS cluster description, and RDS DB-instance description. AWS does not expose resource-level authorization for these Describe APIs, so each exact action uses `Resource: "*"` with `aws:RequestedRegion=eu-west-2`; no write action is granted.
 
 For an image-affecting pull request, the deterministic private CI artifact `stage-b-image-impact-<run>.json` records the exact classified diff and returns:
 
