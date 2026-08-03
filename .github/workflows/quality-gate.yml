@@ -107,6 +107,14 @@ jobs:
       - name: Validate complete Stage B deployment closure
         run: npm run stage-b:deployment-closure
 
+      - name: Upload Stage B pre-merge image-impact evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-b-image-impact-${{ github.run_id }}
+          path: ${{ runner.temp }}/stage-b-image-impact-${{ github.run_id }}.json
+          if-no-files-found: error
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 20
