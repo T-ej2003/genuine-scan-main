@@ -11,6 +11,22 @@ export const STAGE_B_PLAN_IDENTITY_VARIABLES = Object.freeze({
   imageReleaseSha: "image_release_sha",
   canonicalImageEvidenceSha256: "canonical_image_evidence_sha256",
 });
+export const STAGE_B_PROTECTED_CHECKOUT_FIELDS = Object.freeze([
+  "mode",
+  "toolingSha",
+  "currentHead",
+  "originMainHead",
+  "isAncestor",
+  "porcelainStatus",
+  "repositoryState",
+]);
+export const STAGE_B_PROTECTED_CHECKOUT_REPOSITORY_STATE_FIELDS = Object.freeze([
+  "remoteDefaultBranch",
+  "shallow",
+  "mergeInProgress",
+  "rebaseInProgress",
+  "cherryPickInProgress",
+]);
 
 function requireSha(value, label) {
   if (!SHA_PATTERN.test(String(value || ""))) throw new Error(`${label} must be a full 40-character commit SHA.`);
@@ -45,15 +61,28 @@ export function assertStageBDeploymentIdentity({
   return Object.freeze({ toolingSha, imageReleaseSha, canonicalImageEvidenceSha256 });
 }
 
-export function assertStageBProtectedMainCheckout({
-  toolingSha,
-  currentHead,
-  originMainHead,
-  isAncestor,
-  porcelainStatus = "",
-  repositoryState = {},
-  mode = "production",
-} = {}) {
+function requireExactFields(value, fields, label) {
+  if (!value || typeof value !== "object") throw new Error(`Stage B ${label} evidence is missing.`);
+  const actual = Object.keys(value).sort();
+  const expected = [...fields].sort();
+  const missing = expected.filter((field) => !actual.includes(field));
+  const extra = actual.filter((field) => !expected.includes(field));
+  if (missing.length) throw new Error(`Stage B ${label} evidence is missing field ${missing[0]}.`);
+  if (extra.length) throw new Error(`Stage B ${label} evidence has unsupported field ${extra[0]}.`);
+}
+
+export function buildStageBProtectedMainCheckoutEvidence(input = {}) {
+  requireExactFields(input, STAGE_B_PROTECTED_CHECKOUT_FIELDS, "protected checkout");
+  requireExactFields(input.repositoryState, STAGE_B_PROTECTED_CHECKOUT_REPOSITORY_STATE_FIELDS, "protected checkout repository state");
+  return Object.freeze({
+    ...input,
+    repositoryState: Object.freeze({ ...input.repositoryState }),
+  });
+}
+
+export function assertStageBProtectedMainCheckout(input = {}) {
+  const evidence = buildStageBProtectedMainCheckoutEvidence(input);
+  const { toolingSha, currentHead, originMainHead, isAncestor, porcelainStatus, repositoryState, mode } = evidence;
   requireSha(toolingSha, "toolingSha");
   if (currentHead !== toolingSha) throw new Error("Stage B tooling HEAD does not match toolingSha.");
   if (repositoryState.mergeInProgress) throw new Error("Stage B tooling checkout has a merge in progress.");
@@ -72,7 +101,7 @@ export function assertStageBProtectedMainCheckout({
   } else if (mode !== "review") {
     throw new Error(`Unsupported Stage B tooling checkout mode: ${mode}.`);
   }
-  return Object.freeze({ toolingSha, currentHead, originMainHead, mode });
+  return evidence;
 }
 
 export function assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity } = {}) {
@@ -122,5 +151,5 @@ export function readStageBProtectedMainCheckout({ cwd = process.cwd(), fetchOrig
     rebaseInProgress: exists(cwd, "rebase-merge") || exists(cwd, "rebase-apply"),
     cherryPickInProgress: exists(cwd, "CHERRY_PICK_HEAD"),
   };
-  return assertStageBProtectedMainCheckout({ toolingSha: currentHead, currentHead, originMainHead, isAncestor, porcelainStatus, repositoryState });
+  return assertStageBProtectedMainCheckout({ mode: "production", toolingSha: currentHead, currentHead, originMainHead, isAncestor, porcelainStatus, repositoryState });
 }

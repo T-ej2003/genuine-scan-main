@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import { assertStageBPlan, assertStageBTaskDefinitionStateMigrationPreconditions } from "../plan-production-green-stage-b.mjs";
+import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -118,14 +119,15 @@ test("strict validation joins protected main to the plan tooling SHA before reso
     },
     resource_changes: [],
   };
-  const checkout = {
+  const checkout = buildStageBProtectedMainCheckoutEvidence({
     toolingSha,
     currentHead: toolingSha,
     originMainHead: toolingSha,
     isAncestor: true,
     porcelainStatus: "",
-    repositoryState: { remoteDefaultBranch: "main", shallow: false },
-  };
+    repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false },
+    mode: "production",
+  });
   assert.doesNotThrow(() => assertStageBPlan(plan, { strictResourceContract: true, protectedMainCheckout: checkout }));
   assert.throws(() => assertStageBPlan({ ...plan, resource_changes: [{ address: "unclassified.resource", type: "unknown", change: { actions: ["create"] } }] }, { strictResourceContract: true, protectedMainCheckout: { ...checkout, toolingSha: imageReleaseSha } }), /does not match the approved plan tooling SHA/);
   assert.throws(() => assertStageBPlan(plan, { strictResourceContract: true, protectedMainCheckout: { ...checkout, currentHead: imageReleaseSha } }), /tooling HEAD/);

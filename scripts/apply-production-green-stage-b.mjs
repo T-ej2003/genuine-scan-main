@@ -18,7 +18,7 @@ import {
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
-import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
+import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenceSha256 as canonicalImageEvidenceSha256, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -109,7 +109,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
   const boundToolingSha = toolingSha || deploymentIdentity.toolingSha;
   const boundImageReleaseSha = imageReleaseSha || deploymentIdentity.imageReleaseSha;
   assertStageBProtectedCheckoutMatchesDeploymentIdentity({
-    protectedMainCheckout: protectedMainCheckout || { toolingSha: boundToolingSha, currentHead: currentHead || boundToolingSha, originMainHead: boundToolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false }, mode: "production" },
+    protectedMainCheckout: protectedMainCheckout || buildStageBProtectedMainCheckoutEvidence({ toolingSha: boundToolingSha, currentHead: currentHead || boundToolingSha, originMainHead: boundToolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "production" }),
     deploymentIdentity,
   });
   if (deploymentIdentity.canonicalImageEvidenceSha256 !== imageEvidenceSha256) throw new Error("Stage B plan canonical image-evidence digest does not match the authenticated report.");
@@ -170,14 +170,14 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const protectedMainCheckout = effectiveDeps.getProtectedMainCheckout
     ? effectiveDeps.getProtectedMainCheckout()
     : effectiveDeps.currentHead
-      ? { toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false }, mode: "production" }
+      ? buildStageBProtectedMainCheckoutEvidence({ toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "production" })
       : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
   const verified = assertApplyArtifacts({ ...artifacts, callerArn, protectedMainCheckout, currentHead: protectedMainCheckout.currentHead, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature, verifyImageEvidence: effectiveDeps.verifyImageEvidence });
   if (artifacts.verifyOnly) return { status: "ready-to-apply", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
   const applyCheckout = effectiveDeps.getProtectedMainCheckout
     ? effectiveDeps.getProtectedMainCheckout()
     : effectiveDeps.currentHead
-      ? { toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false }, mode: "production" }
+      ? buildStageBProtectedMainCheckoutEvidence({ toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "production" })
       : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
   assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout: { ...applyCheckout, mode: "production" }, deploymentIdentity: verified.deploymentIdentity });
   const result = effectiveDeps.apply(artifacts.planPath);

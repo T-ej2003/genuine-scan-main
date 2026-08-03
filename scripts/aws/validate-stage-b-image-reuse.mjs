@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { assertStageBProtectedMainCheckout, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const STAGE_B_IMAGE_REUSE_SCHEMA_VERSION = 2;
@@ -147,7 +147,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const toolingSha = process.argv[3] || git(["rev-parse", "HEAD"]);
   const checkoutMode = process.env.STAGE_B_TOOLING_CHECKOUT_MODE || "review";
   if (checkoutMode === "production") readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
-  else assertStageBProtectedMainCheckout({ toolingSha, currentHead: git(["rev-parse", "HEAD"]), porcelainStatus: git(["status", "--porcelain=v1", "--untracked-files=all"]), mode: "review" });
+  else assertStageBProtectedMainCheckout(buildStageBProtectedMainCheckoutEvidence({ toolingSha, currentHead: git(["rev-parse", "HEAD"]), originMainHead: undefined, isAncestor: false, porcelainStatus: git(["status", "--porcelain=v1", "--untracked-files=all"]), repositoryState: { remoteDefaultBranch: undefined, shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "review" }));
   const files = changedFiles(imageReleaseSha, toolingSha);
   const inputTreeSha256 = toolingInputTreeSha256(toolingSha);
   if (process.argv.includes("--write-reviewed-report")) {
