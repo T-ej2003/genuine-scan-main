@@ -255,17 +255,6 @@ test("CloudTrail denial supplements simulation and blocks preflight", () => {
   assert.throws(() => assertReport(report, { planSha256: report.planSha256, savedPlanSha256: report.savedPlanSha256, canonicalPlanJsonSha256: report.canonicalPlanJsonSha256, now }), /valid permission-preflight report/);
 });
 
-test("saved-plan apply wrapper refuses an unreviewed tooling checkout before artifacts", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-preflight-"));
-  const planPath = path.join(directory, "plan.tfplan");
-  fs.writeFileSync(planPath, "saved-plan");
-  assert.throws(() => runApply({
-    argv: ["--plan", planPath, "--plan-json", path.join(directory, "plan.json"), "--reference-audit", path.join(directory, "audit.json"), "--permission-report", path.join(directory, "permission.json"), "--permission-report-sha256", "0".repeat(64), "--permission-report-signature", path.join(directory, "permission.signature.json"), "--image-evidence", path.join(directory, "image-evidence.json"), "--image-evidence-sha256", "0".repeat(64), "--image-evidence-signature", path.join(directory, "image-evidence.signature.json"), "--image-evidence-workflow-run-id", "30760789616", "--image-evidence-artifact-sha256", "0".repeat(64), "--tooling-sha", "b".repeat(40), "--image-release-sha", "a".repeat(40), "--plan-sha256", "0".repeat(64), "--audit-sha256", "0".repeat(64), "--saved-plan-sha256", "0".repeat(64), "--canonical-plan-json-sha256", "0".repeat(64)],
-    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
-    deps: { getCaller: () => `${roleArn}/test-session`, apply: () => { throw new Error("apply must not be reached"); } },
-  }), /origin\/main|tracked modifications|untracked file/);
-});
-
 test("AWS simulator accepts the hand-reviewed PascalCase CLI fixture", () => {
   const result = simulatePrincipalPolicy({
     roleArn,
@@ -526,6 +515,82 @@ const wrapperArgs = (fixture, verifyOnly = false) => [
   "--tooling-sha", "b".repeat(40), "--image-release-sha", "a".repeat(40),
   "--plan-sha256", fixture.planHash, "--audit-sha256", fixture.auditHash, "--saved-plan-sha256", fixture.savedHash, "--canonical-plan-json-sha256", fixture.canonicalHash,
 ];
+
+const createValidStageBApplyFixture = (options = {}) => ({
+  ...wrapperFixture(options),
+  protectedMainCheckout: {
+    toolingSha: "b".repeat(40),
+    currentHead: "b".repeat(40),
+    originMainHead: "b".repeat(40),
+    isAncestor: true,
+    porcelainStatus: "",
+    repositoryState: { remoteDefaultBranch: "main", shallow: false },
+    mode: "production",
+  },
+});
+
+const validApplyInput = (fixture) => ({
+  argv: wrapperArgs(fixture, true),
+  env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
+  deps: {
+    getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
+    getProtectedMainCheckout: () => fixture.protectedMainCheckout,
+    showPlan: () => fixture.shownBytes,
+    validatePlan: () => {},
+    verifyPermissionSignature: () => true,
+    verifyImageEvidence: fixture.verifyImageEvidence,
+    apply: () => { throw new Error("apply must not be reached"); },
+  },
+});
+
+const changedPaths = (before, after, prefix = "") => {
+  if (Object.is(before, after)) return [];
+  if (before && after && typeof before === "object" && typeof after === "object" && !Array.isArray(before) && !Array.isArray(after)) {
+    return [...new Set([...Object.keys(before), ...Object.keys(after)])].flatMap((key) => changedPaths(before[key], after[key], prefix ? `${prefix}.${key}` : key));
+  }
+  return [prefix];
+};
+
+const assertSingleFailureMutation = ({ baseline, mutated, changedFields }) => {
+  assert.deepEqual(changedPaths(baseline, mutated).sort(), [...changedFields].sort());
+};
+
+test("missing permission report remains an artifact-gate failure", () => {
+  const fixture = createValidStageBApplyFixture();
+  fs.unlinkSync(fixture.permissionReportPath);
+  assert.throws(() => runApply(validApplyInput(fixture)), (error) => error instanceof Error && error.message === "Permission-preflight report is missing.");
+});
+
+test("valid Stage B apply fixture reaches ready-to-apply before checkout mutation", () => {
+  const fixture = createValidStageBApplyFixture();
+  assert.equal(runApply(validApplyInput(fixture)).status, "ready-to-apply");
+});
+
+const protectedCheckoutCases = [
+  { name: "HEAD differs from origin/main", changedFields: ["protectedMainCheckout.currentHead"], mutate: (fixture) => { fixture.protectedMainCheckout.currentHead = "c".repeat(40); }, errorMessage: "Stage B tooling HEAD does not match toolingSha." },
+  { name: "plan tooling SHA differs from HEAD", changedFields: ["protectedMainCheckout.toolingSha"], mutate: (fixture) => { fixture.protectedMainCheckout.toolingSha = "c".repeat(40); }, errorMessage: "Stage B protected-main checkout tooling SHA does not match the approved plan tooling SHA." },
+  { name: "tracked modification exists", changedFields: ["protectedMainCheckout.porcelainStatus"], mutate: (fixture) => { fixture.protectedMainCheckout.porcelainStatus = " M tracked"; }, errorMessage: "Stage B tooling checkout has tracked modifications." },
+  { name: "staged modification exists", changedFields: ["protectedMainCheckout.porcelainStatus"], mutate: (fixture) => { fixture.protectedMainCheckout.porcelainStatus = "M  staged"; }, errorMessage: "Stage B tooling checkout has tracked modifications." },
+  { name: "tracked deletion exists", changedFields: ["protectedMainCheckout.porcelainStatus"], mutate: (fixture) => { fixture.protectedMainCheckout.porcelainStatus = " D deleted"; }, errorMessage: "Stage B tooling checkout has tracked modifications." },
+  { name: "untracked file exists", changedFields: ["protectedMainCheckout.porcelainStatus"], mutate: (fixture) => { fixture.protectedMainCheckout.porcelainStatus = "?? untracked"; }, errorMessage: "Stage B tooling checkout contains an untracked file." },
+  { name: "commit is not merged into origin/main", changedFields: ["protectedMainCheckout.isAncestor"], mutate: (fixture) => { fixture.protectedMainCheckout.isAncestor = false; }, errorMessage: "Stage B tooling ancestry in origin/main could not be proven." },
+  { name: "merge operation is in progress", changedFields: ["protectedMainCheckout.repositoryState.mergeInProgress"], mutate: (fixture) => { fixture.protectedMainCheckout.repositoryState.mergeInProgress = true; }, errorMessage: "Stage B tooling checkout has a merge in progress." },
+  { name: "rebase operation is in progress", changedFields: ["protectedMainCheckout.repositoryState.rebaseInProgress"], mutate: (fixture) => { fixture.protectedMainCheckout.repositoryState.rebaseInProgress = true; }, errorMessage: "Stage B tooling checkout has a rebase in progress." },
+  { name: "cherry-pick operation is in progress", changedFields: ["protectedMainCheckout.repositoryState.cherryPickInProgress"], mutate: (fixture) => { fixture.protectedMainCheckout.repositoryState.cherryPickInProgress = true; }, errorMessage: "Stage B tooling checkout has a cherry-pick in progress." },
+  { name: "origin/main is missing", changedFields: ["protectedMainCheckout.originMainHead"], mutate: (fixture) => { fixture.protectedMainCheckout.originMainHead = undefined; }, errorMessage: "Stage B protected origin/main is unavailable." },
+  { name: "ancestry cannot be proven", changedFields: ["protectedMainCheckout.isAncestor"], mutate: (fixture) => { fixture.protectedMainCheckout.isAncestor = undefined; }, errorMessage: "Stage B tooling ancestry in origin/main could not be proven." },
+];
+
+for (const { name, changedFields, mutate, errorMessage } of protectedCheckoutCases) {
+  test(`protected checkout rejects ${name}`, () => {
+    const baseline = createValidStageBApplyFixture();
+    assert.equal(runApply(validApplyInput(baseline)).status, "ready-to-apply");
+    const mutated = { ...baseline, protectedMainCheckout: structuredClone(baseline.protectedMainCheckout) };
+    mutate(mutated);
+    assertSingleFailureMutation({ baseline, mutated, changedFields });
+    assert.throws(() => runApply(validApplyInput(mutated)), (error) => error instanceof Error && error.message === errorMessage, name);
+  });
+}
 
 test("exact binary plan and derived JSON reach the ready-to-apply boundary without applying", () => {
   const fixture = wrapperFixture();
