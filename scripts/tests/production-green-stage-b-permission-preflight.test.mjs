@@ -54,7 +54,7 @@ const planBytes = Buffer.from(JSON.stringify(plan));
 const savedPlanBytes = Buffer.from("saved-binary-plan");
 const now = "2026-08-01T12:00:00.000Z";
 const clearCloudTrail = () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] });
-const allowRequiredDenyForbidden = ({ evaluation }) => ({ decision: evaluation.id.startsWith("pass-unrelated-role") || evaluation.id.startsWith("pass-to-lambda") || evaluation.id.startsWith("invoke-broker") || evaluation.id.startsWith("execute-ecs-task") || evaluation.id.startsWith("update-ecs-service") || evaluation.id.startsWith("create-iam-role") || evaluation.id.startsWith("deregister-task-definition") ? "explicitDeny" : "allowed", matchedStatements: 1 });
+const allowRequiredDenyForbidden = ({ evaluation }) => ({ decision: evaluation.id.startsWith("backend-") || evaluation.id.startsWith("pass-unrelated-role") || evaluation.id.startsWith("pass-to-lambda") || evaluation.id.startsWith("invoke-broker") || evaluation.id.startsWith("execute-ecs-task") || evaluation.id.startsWith("update-ecs-service") || evaluation.id.startsWith("create-iam-role") || evaluation.id.startsWith("deregister-task-definition") ? "explicitDeny" : "allowed", matchedStatements: 1 });
 const reportSignature = (report, overrides = {}) => ({
   schemaVersion: 1,
   keyId: PERMISSION_REPORT_SIGNING_KEY_ARN,
@@ -185,12 +185,14 @@ test("PassRole with the wrong service context is rejected by the manifest", () =
 
 test("required and forbidden exact tuples cannot overlap, while different contexts remain distinct", () => {
   const broken = structuredClone(manifest);
-  broken.forbidden[0].resources = [manifest.taskDefinitionMappings[0].taskRoleArn];
+  const unrelatedRole = broken.forbidden.find((entry) => entry.id === "pass-unrelated-role");
+  unrelatedRole.resources = [manifest.taskDefinitionMappings[0].taskRoleArn];
   assert.throws(() => validateManifest(broken), /required\/forbidden overlap.*pass-unrelated-role.*rls-green-backend-task/);
 
   const differentContext = structuredClone(manifest);
-  differentContext.forbidden[0].resources = [manifest.taskDefinitionMappings[0].taskRoleArn];
-  differentContext.forbidden[0].context[0].values = ["lambda.amazonaws.com"];
+  const differentContextEntry = differentContext.forbidden.find((entry) => entry.id === "pass-unrelated-role");
+  differentContextEntry.resources = [manifest.taskDefinitionMappings[0].taskRoleArn];
+  differentContextEntry.context[0].values = ["lambda.amazonaws.com"];
   assert.doesNotThrow(() => validateManifest(differentContext));
 });
 

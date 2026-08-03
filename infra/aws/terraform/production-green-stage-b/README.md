@@ -6,6 +6,8 @@ Stage A exclusively owns `/ecs/mscqr-production/full-rls-green`, `/aws/lambda/ms
 
 Use only an MFA-backed non-root `mscqr-production-release-deployer` session with the dedicated encrypted production state backend and `production` workspace. Supply Stage A output ARNs/IDs and secret ARNs only through an untracked absolute tfvars file. Set `stage_a_executor_networking_ready=true` only after the reviewed Stage A egress is applied. The four image inputs must be ECR `@sha256` references; the release, source-contract, migration, and package checksum inputs are mandatory.
 
+The release role's backend access is defined by `documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json`: it uses `s3:GetBucketLocation`, `s3:ListBucket` only with Terraform's exact `env:/` workspace prefix, exact production state read/write, and exact `.tflock` lifecycle access. `HeadBucket`, state deletion, the configured default key, and unrestricted bucket listing are not deployment gates or permissions.
+
 Plan only:
 
 ```sh

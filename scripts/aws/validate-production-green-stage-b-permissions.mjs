@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
+import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_PREFLIGHT_MAX_AGE_MS = 15 * 60 * 1000;
@@ -45,7 +46,7 @@ const TASK_DEFINITION_MAPPINGS = Object.freeze([
   ["full-rls-verification", 'aws_ecs_task_definition.executor["full-rls-verification"]', "mscqr-production-full-rls-green-full-rls-verification", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
 ].map(([id, address, family, executionRoleName, taskRoleName]) => Object.freeze({ id, address, family, resource: `arn:aws:ecs:${REGION}:${ACCOUNT}:task-definition/${family}:*`, executionRoleArn: `arn:aws:iam::${ACCOUNT}:role/${executionRoleName}`, taskRoleArn: `arn:aws:iam::${ACCOUNT}:role/${taskRoleName}` })));
 const stageBRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const arnPattern = /^arn:aws:[^:]+:[^:]*:368992683803:.+$/;
+const arnPattern = /^(?:arn:aws:[^:]+:[^:]*:368992683803:.+|arn:aws:s3:::[^/]+(?:\/.*)?)$/;
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const exactActions = (actual, expected) => JSON.stringify(actual || []) === JSON.stringify(expected);
@@ -156,6 +157,7 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION 
   if (manifest?.schemaVersion !== PERMISSION_PREFLIGHT_SCHEMA_VERSION) throw new Error("Permission manifest schema version is unsupported.");
   if (manifest.accountId !== account || manifest.region !== region) throw new Error("Permission manifest account or region is wrong.");
   if (!Array.isArray(manifest.required) || !Array.isArray(manifest.forbidden)) throw new Error("Permission manifest sections are malformed.");
+  assertStageBTerraformBackendManifest(manifest);
   const ids = new Set();
   for (const [entry, forbidden] of [...manifest.required.map((entry) => [entry, false]), ...manifest.forbidden.map((entry) => [entry, true])]) {
     if (!entry.id || ids.has(entry.id) || !/^[-a-z0-9]+$/.test(entry.id)) throw new Error(`Permission manifest entry id is invalid: ${entry.id || "missing"}.`);

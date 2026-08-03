@@ -5,10 +5,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
+import { validateManifest } from "./validate-production-green-stage-b-permissions.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
 const matrixPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.json");
+const backendPolicyPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json");
+const permissionManifestPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
 const fixturePath = path.join(root, "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
 
 function filesUnder(directory) {
@@ -20,6 +24,8 @@ function filesUnder(directory) {
 
 const matrix = JSON.parse(fs.readFileSync(matrixPath, "utf8"));
 const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+const backendPolicy = JSON.parse(fs.readFileSync(backendPolicyPath, "utf8"));
+const permissionManifest = JSON.parse(fs.readFileSync(permissionManifestPath, "utf8"));
 const checkoutMode = process.env.STAGE_B_TOOLING_CHECKOUT_MODE || "review";
 const currentHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
 if (checkoutMode === "production") {
@@ -31,6 +37,10 @@ assert.equal(matrix.schemaVersion, 1, "Stage B closure matrix schema is unsuppor
 assert.equal(matrix.account, "368992683803");
 assert.equal(matrix.region, "eu-west-2");
 assert.equal(matrix.zeroDestroy, true);
+assertStageBTerraformBackendPolicy(backendPolicy);
+assertStageBTerraformBackendManifest(permissionManifest);
+validateManifest(permissionManifest);
+assert.deepEqual(matrix.backendContract, permissionManifest.backendContract);
 assert.equal(matrix.deploymentIdentity?.schemaVersion, 1);
 assert.equal(matrix.deploymentIdentity?.splitSupported, true);
 assert.deepEqual(matrix.deploymentIdentity?.requiredPlanVariables, ["tooling_sha", "image_release_sha", "canonical_image_evidence_sha256"]);
@@ -70,5 +80,6 @@ process.stdout.write(JSON.stringify({
   fixtureResources: fixture.resource_changes.length,
   classifiedResources: classified.classifiedResources.length,
   actionCounts: classified.actionCounts,
+  backendContract: matrix.backendContract,
   unclassifiedResources: classified.unclassifiedResources,
 }, null, 2) + "\n");
