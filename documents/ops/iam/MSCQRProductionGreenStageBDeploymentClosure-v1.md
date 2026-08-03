@@ -31,7 +31,17 @@ The validator classifies every resource by exact Terraform address, type, identi
 npm run stage-b:deployment-closure
 ```
 
-The command verifies the generated RLS package, formats and validates the Stage B Terraform root without a backend, checks all Terraform declarations against the matrix, validates the 73-resource fixture, runs the full Stage B control-plane suite, and runs the plan, audit, preflight, and wrapper regression suites.
+The package command runs the explicit `pull-request` closure mode. It verifies the generated RLS package, formats and validates the Stage B Terraform root without a backend, checks all Terraform declarations against the matrix, validates the 73-resource fixture, runs the full Stage B control-plane suite, and runs the plan, audit, preflight, and wrapper regression suites. The pull-request mode may return `merge-ready-reuse-compatible` or `merge-ready-new-images-required`; it never authorizes a deployment.
+
+Production operators must invoke the closure implementation with `--mode production` from a protected-main checkout and provide the complete signed image, tfvars, audit, permission, and plan evidence. Production mode rejects `newImagesRequired`, pull-request impact reports, unmerged tooling SHAs, stale compatibility reports, and missing signed image evidence. The apply wrapper independently requires `--closure-mode production`.
+
+For an image-affecting pull request, the deterministic report at [MSCQRProductionGreenStageBImageImpact-v1.json](./MSCQRProductionGreenStageBImageImpact-v1.json) records the exact classified diff and returns:
+
+```text
+Merge permitted; fresh protected-main images required before production deployment.
+```
+
+That result is merge readiness only. It contains no image digests and cannot satisfy the production wrapper.
 
 This gate is offline and does not publish images, call mutating AWS APIs, generate a production plan, mutate state, or apply Terraform.
 

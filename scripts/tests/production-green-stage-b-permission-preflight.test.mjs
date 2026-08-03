@@ -617,6 +617,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
 
 const wrapperArgs = (fixture, verifyOnly = false) => [
   ...(verifyOnly ? ["--verify-only"] : []),
+  "--closure-mode", "production",
   "--plan", fixture.planPath, "--plan-json", fixture.planJsonPath, "--reference-audit", fixture.auditPath,
   "--permission-report", fixture.permissionReportPath, "--permission-report-sha256", fixture.permissionReportSha256, "--permission-report-signature", fixture.permissionReportSignaturePath,
   "--image-evidence", fixture.imageEvidencePath, "--image-evidence-sha256", fixture.imageEvidenceSha256, "--image-evidence-signature", fixture.imageEvidenceSignaturePath, "--image-evidence-workflow-run-id", fixture.imageEvidenceWorkflowRunId, "--image-evidence-artifact-sha256", fixture.imageEvidenceArtifactSha256,
@@ -724,6 +725,12 @@ test("production apply rejects every incomplete canonical tfvars provenance comb
     assert.throws(() => parseApplyCli(argv), (error) => error instanceof Error && error.message === message, option);
   }
   assert.throws(() => parseApplyCli(wrapperArgs(fixture).filter((value, index, values) => values[index - 1] !== "--tfvars-binding-report-sha256" && value !== "--tfvars-binding-report-sha256")), /--tfvars-binding-report-sha256 is required/);
+});
+
+test("production apply rejects pull-request closure mode before artifact verification", () => {
+  const fixture = createValidStageBApplyFixture();
+  const argv = wrapperArgs(fixture).map((value, index, values) => index > 0 && values[index - 1] === "--closure-mode" ? "pull-request" : value);
+  assert.throws(() => parseApplyCli(argv), (error) => error instanceof Error && error.message === "Stage B apply requires --closure-mode production.");
 });
 
 test("broker ZIP mutation blocks apply before the injected apply seam", () => {

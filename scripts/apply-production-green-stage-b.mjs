@@ -68,7 +68,10 @@ function requireOption(argv, option) {
 }
 
 export function parseCli(argv) {
+  const closureMode = requireOption(argv, "--closure-mode");
+  if (closureMode !== "production") throw new Error("Stage B apply requires --closure-mode production.");
   return {
+    closureMode,
     planPath: requireOption(argv, "--plan"),
     planJsonPath: requireOption(argv, "--plan-json"),
     auditPath: requireOption(argv, "--reference-audit"),
