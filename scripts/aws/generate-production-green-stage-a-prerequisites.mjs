@@ -31,16 +31,24 @@ function stageAValues(state) {
 }
 
 function awsJson(args, run) { return JSON.parse(run(args)); }
+export function resolveStageASubnetRouteTable({ routeTables, vpcId, subnetId } = {}) {
+  const tables = (routeTables || []).filter((table) => table?.VpcId === vpcId);
+  const explicit = tables.filter((table) => (table.Associations || []).some((association) => association.SubnetId === subnetId));
+  if (explicit.length > 1) throw new Error("Live Stage A subnet has multiple explicit route-table associations.");
+  const candidates = explicit.length === 1 ? explicit : tables.filter((table) => (table.Associations || []).some((association) => association.Main === true));
+  if (candidates.length !== 1) throw new Error("Live Stage A subnet has no unique route-table resolution.");
+  const table = candidates[0]; const natGatewayId = table.Routes?.find((route) => route.DestinationCidrBlock === "0.0.0.0/0" && route.NatGatewayId)?.NatGatewayId;
+  if (!natGatewayId) throw new Error("Live Stage A subnet does not have the required NAT default route.");
+  return { table, natGatewayId, resolution: explicit.length === 1 ? "explicit-subnet-association" : "vpc-main-fallback" };
+}
 function liveEvidence({ vpcId, subnetIds, databaseIdentifier, run }) {
   const subnets = awsJson(["ec2", "describe-subnets", "--subnet-ids", ...subnetIds, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).Subnets || [];
   if (subnets.length !== subnetIds.length) throw new Error("Live Stage A subnet evidence is incomplete.");
   const checkedSubnets = subnets.map((subnet) => {
     if (!subnet || !subnet.SubnetId || subnet.VpcId !== vpcId || subnet.State !== "available" || subnet.MapPublicIpOnLaunch === true) throw new Error("Live Stage A subnet is unavailable, public, or in the wrong VPC.");
     const tables = awsJson(["ec2", "describe-route-tables", "--filters", `Name=vpc-id,Values=${vpcId}`, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).RouteTables || [];
-    const matches = tables.filter((table) => (table.Associations || []).some((association) => association.SubnetId === subnet.SubnetId) || (table.Associations || []).some((association) => association.Main === true));
-    const table = matches[0]; const nat = table?.Routes?.find((route) => route.DestinationCidrBlock === "0.0.0.0/0" && route.NatGatewayId)?.NatGatewayId;
-    if (matches.length !== 1 || !nat) throw new Error("Live Stage A subnet does not have the required NAT default route.");
-    return { subnetId: subnet.SubnetId, availabilityZone: subnet.AvailabilityZone, cidrBlock: subnet.CidrBlock, routeTableId: table.RouteTableId, natGatewayId: nat };
+    const route = resolveStageASubnetRouteTable({ routeTables: tables, vpcId, subnetId: subnet.SubnetId });
+    return { subnetId: subnet.SubnetId, availabilityZone: subnet.AvailabilityZone, cidrBlock: subnet.CidrBlock, routeTableId: route.table.RouteTableId, natGatewayId: route.natGatewayId, routeTableResolution: route.resolution };
   }).sort((left, right) => left.subnetId.localeCompare(right.subnetId));
   if (new Set(checkedSubnets.map((item) => item.availabilityZone)).size !== 2) throw new Error("Live Stage A subnets do not span two availability zones.");
   const groups = awsJson(["ec2", "describe-security-groups", "--group-ids", STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).SecurityGroups || [];
