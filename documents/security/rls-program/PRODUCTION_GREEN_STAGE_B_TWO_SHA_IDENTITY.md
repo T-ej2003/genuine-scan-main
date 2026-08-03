@@ -16,10 +16,13 @@ image_release_sha
 ```
 
 The image-evidence report is schema version 3 and contains `imageReleaseSha`; it does
-not contain `toolingSha`. It also carries a signed `ecr-immutable-tag` proof and an
-explicit `superseded: false` marker. This is deliberate: image evidence authenticates
-the immutable image publication chain, while plan-bound artifacts authenticate the
-joined deployment.
+not contain `toolingSha`. It carries authoritative `DescribeRepositories` evidence for
+each unique image repository, requiring `imageTagMutability=IMMUTABLE`, and the explicit
+capability `revocationModel=time-bounded-no-supersession-registry`. This is deliberate:
+there is no authenticated supersession registry in the current contract, so the report
+does not claim `superseded: false`; immediate revocation is unavailable until that
+separate capability exists. Image evidence authenticates the immutable image publication
+chain, while plan-bound artifacts authenticate the joined deployment.
 
 Image provenance uses a reviewed 24-hour validity window. Permission preflight remains
 independently plan-bound and expires after 15 minutes; the reference audit has its own

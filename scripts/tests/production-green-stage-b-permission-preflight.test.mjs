@@ -561,7 +561,9 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   ].map(([service, repository, digest, tag]) => ({ service, repository, image_uri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}:${tag}`, image_tag: tag, image_digest: `sha256:${digest}`, image_ref: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}@sha256:${digest}` }));
   const imageArtifactBytes = Buffer.from(`${imageRecords.map((record) => JSON.stringify(record)).join("\n")}\n`);
   const imageArtifactSha256 = crypto.createHash("sha256").update(imageArtifactBytes).digest("hex");
-  const imageEvidence = generateImageEvidence({ artifactBytes: imageArtifactBytes, imageReleaseSha: releaseSha, workflowRunId: "30760789616", artifactSha256: imageArtifactSha256, verifierCallerArn: generatorArn, observedAt: new Date().toISOString(), describe: (repository, tag) => ({ digest: `sha256:${imageRecords.find((record) => record.repository === repository && record.image_tag === tag).image_digest.slice(7)}`, imagePushedAt: "2026-08-02T18:26:34.000Z" }) });
+  const imageObservedAt = new Date().toISOString();
+  const imageRepositories = ["mscqr-backend", "mscqr-worker"].map((repository) => ({ repository, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, registryId: "368992683803", imageTagMutability: "IMMUTABLE", exclusionFilters: [], observedAt: imageObservedAt }));
+  const imageEvidence = generateImageEvidence({ artifactBytes: imageArtifactBytes, imageReleaseSha: releaseSha, workflowRunId: "30760789616", artifactSha256: imageArtifactSha256, verifierCallerArn: generatorArn, observedAt: imageObservedAt, repositories: imageRepositories, describe: (repository, tag) => ({ digest: `sha256:${imageRecords.find((record) => record.repository === repository && record.image_tag === tag).image_digest.slice(7)}`, imagePushedAt: "2026-08-02T18:26:34.000Z" }) });
   const canonicalImageEvidenceSha256 = imageEvidenceSha256(imageEvidence);
   effectivePlan.variables.canonical_image_evidence_sha256 = { value: canonicalImageEvidenceSha256 };
   const approvedPlanObject = approvedBytes ? JSON.parse(effectiveApprovedBytes) : effectivePlan;

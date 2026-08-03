@@ -14,7 +14,8 @@ export const IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION = 3;
 export const IMAGE_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const IMAGE_EVIDENCE_CLOCK_SKEW_MS = 60 * 1000;
 export const IMAGE_EVIDENCE_VALIDITY_MODEL = "immutable-image-provenance-24h";
-export const IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF = "ecr-immutable-tag";
+export const IMAGE_EVIDENCE_REPOSITORY_MUTABILITY = "IMMUTABLE";
+export const IMAGE_EVIDENCE_REVOCATION_MODEL = "time-bounded-no-supersession-registry";
 export const IMAGE_EVIDENCE_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
 export const IMAGE_EVIDENCE_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
 export const APPROVED_IMAGE_EVIDENCE_VERIFIER_ARNS = APPROVED_PREFLIGHT_GENERATOR_ARNS;
@@ -160,13 +161,67 @@ function describeImage(repository, tag, describe = (repo, imageTag) => JSON.pars
   return { digest: requireDigest(image.imageDigest, `${repository}:${tag} digest`), imagePushedAt: image.imagePushedAt };
 }
 
-export function generateImageEvidence({ artifactBytes, imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, observedAt = new Date().toISOString(), describe = describeImage }) {
+function describeRepository(repository, describe = (repo) => JSON.parse(execFileSync("aws", [
+  "ecr", "describe-repositories", "--region", STAGE_B.region, "--repository-names", repo, "--output", "json", "--no-cli-pager",
+], { encoding: "utf8" }))) {
+  const response = describe(repository);
+  if (!response || !Array.isArray(response.repositories) || response.repositories.length !== 1) throw new Error(`ECR repository evidence must resolve exactly one repository for ${repository}.`);
+  return response.repositories[0];
+}
+
+function rejectLegacyProvenanceClaims(report) {
+  if (Object.hasOwn(report || {}, "immutableTagProof") || Object.hasOwn(report || {}, "superseded")) throw new Error("Image evidence schema contains unsupported legacy provenance claims.");
+}
+
+function requireRepositoryEvidence(repositories, requiredRepositories, observedAt) {
+  if (!Array.isArray(repositories) || repositories.length !== requiredRepositories.length) throw new Error("Image evidence must include exactly one authoritative repository record per image repository.");
+  const expected = new Set(requiredRepositories);
+  const seen = new Set();
+  const observedAtMs = Date.parse(observedAt);
+  if (!Number.isFinite(observedAtMs)) throw new Error("Image repository evidence timestamp is malformed.");
+  return repositories.map((evidence) => {
+    const repository = String(evidence?.repository || "");
+    const expectedArn = `arn:aws:ecr:${STAGE_B.region}:${STAGE_B.account}:repository/${repository}`;
+    if (!expected.has(repository) || seen.has(repository)) throw new Error(`Image repository evidence is missing, duplicated, or unexpected: ${repository}.`);
+    if (evidence.repositoryArn !== expectedArn || String(evidence.registryId) !== STAGE_B.account) throw new Error(`Image repository evidence identity is wrong: ${repository}.`);
+    if (evidence.imageTagMutability !== IMAGE_EVIDENCE_REPOSITORY_MUTABILITY) throw new Error(`Image repository ${repository} is not authoritatively immutable.`);
+    if (evidence.exclusionFilters?.length) throw new Error(`Image repository ${repository} uses unsupported mutability exclusions.`);
+    if (evidence.exclusionFilters !== undefined && !Array.isArray(evidence.exclusionFilters)) throw new Error(`Image repository exclusion evidence is malformed: ${repository}.`);
+    const evidenceObservedAt = evidence.observedAt || observedAt;
+    if (Date.parse(evidenceObservedAt) !== observedAtMs) throw new Error(`Image repository evidence timestamp does not match the report observation: ${repository}.`);
+    seen.add(repository);
+    return Object.freeze({
+      repository,
+      repositoryArn: expectedArn,
+      registryId: STAGE_B.account,
+      imageTagMutability: IMAGE_EVIDENCE_REPOSITORY_MUTABILITY,
+      exclusionFilters: Object.freeze([...(evidence.exclusionFilters || [])]),
+      observedAt: evidenceObservedAt,
+    });
+  }).sort((a, b) => a.repository.localeCompare(b.repository));
+}
+
+export function readImageRepositoryEvidence(repository, { observedAt = new Date().toISOString(), describe = describeRepository } = {}) {
+  const source = describeRepository(repository, describe);
+  if (source.repositoryName !== repository) throw new Error(`ECR repository evidence resolved the wrong repository: ${repository}.`);
+  return {
+    repository,
+    repositoryArn: source.repositoryArn,
+    registryId: String(source.registryId || ""),
+    imageTagMutability: source.imageTagMutability,
+    exclusionFilters: source.imageTagMutabilityExclusionFilters || [],
+    observedAt,
+  };
+}
+
+export function generateImageEvidence({ artifactBytes, imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, observedAt = new Date().toISOString(), describe = describeImage, repositories }) {
   requireImageReleaseSha(imageReleaseSha);
   if (!/^\d+$/.test(String(workflowRunId || ""))) throw new Error("Canonical workflow run ID is required.");
   requireVerifier(verifierCallerArn);
   const observedAtMs = Date.parse(observedAt);
   if (!Number.isFinite(observedAtMs)) throw new Error("Image evidence observation timestamp is malformed.");
   const artifactImages = parseArtifact(artifactBytes, { imageReleaseSha, artifactSha256 });
+  const repositoryEvidence = requireRepositoryEvidence(repositories, [...new Set(artifactImages.map(({ repository }) => repository))], observedAt);
   const images = artifactImages.map((image) => {
     const live = describe(image.repository, image.tag);
     if (live.digest !== image.digest) throw new Error(`ECR digest does not match canonical artifact for ${image.service}.`);
@@ -181,15 +236,17 @@ export function generateImageEvidence({ artifactBytes, imageReleaseSha, workflow
     account: STAGE_B.account,
     region: STAGE_B.region,
     observedAt,
-    immutableTagProof: IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF,
-    superseded: false,
+    revocationModel: IMAGE_EVIDENCE_REVOCATION_MODEL,
+    repositories: repositoryEvidence,
     images,
   };
 }
 
 export function signImageEvidence(report, { now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, sign = ({ digest }) => withTempBytes("stage-b-image-evidence-sign-", { digest }, ({ digest: digestPath }) => JSON.parse(execFileSync("aws", ["kms", "sign", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signing-algorithm", signingAlgorithm, "--output", "json"], { encoding: "utf8" })).Signature) } = {}) {
   if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION) throw new Error("Only a valid image-evidence report may be signed.");
-  if (report.immutableTagProof !== IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF || report.superseded !== false) throw new Error("Image evidence provenance is incomplete or superseded.");
+  rejectLegacyProvenanceClaims(report);
+  requireRepositoryEvidence(report.repositories, [...new Set((report.images || []).map(({ repository }) => repository))], report.observedAt);
+  if (report.revocationModel !== IMAGE_EVIDENCE_REVOCATION_MODEL) throw new Error("Image evidence revocation model is unsupported.");
   if (keyArn !== IMAGE_EVIDENCE_SIGNING_KEY_ARN || signingAlgorithm !== IMAGE_EVIDENCE_SIGNING_ALGORITHM) throw new Error("Image evidence signing contract is wrong.");
   const reportSha256 = imageEvidenceSha256(report);
   const signatureBase64 = String(sign({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), reportSha256 }) || "");
@@ -198,7 +255,9 @@ export function signImageEvidence(report, { now = new Date().toISOString(), keyA
 }
 
 export function verifyImageEvidenceSignature({ report, signatureArtifact, now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, verify = ({ digest, signature }) => withTempBytes("stage-b-image-evidence-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(execFileSync("aws", ["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json"], { encoding: "utf8" })).SignatureValid === true) }) {
-  if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.immutableTagProof !== IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF || report.superseded !== false) throw new Error("Image evidence provenance is incomplete or superseded.");
+  rejectLegacyProvenanceClaims(report);
+  if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.revocationModel !== IMAGE_EVIDENCE_REVOCATION_MODEL) throw new Error("Image evidence revocation model or schema is unsupported.");
+  requireRepositoryEvidence(report.repositories, [...new Set((report.images || []).map(({ repository }) => repository))], report.observedAt);
   if (!signatureArtifact || signatureArtifact.schemaVersion !== IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm || signatureArtifact.imageReleaseSha !== report?.imageReleaseSha || String(signatureArtifact.workflowRunId) !== String(report?.workflowRunId) || signatureArtifact.canonicalArtifactSha256 !== report?.canonicalArtifactSha256) throw new Error("Image evidence signature identity or algorithm is wrong.");
   const reportSha256 = imageEvidenceSha256(report);
   if (signatureArtifact.reportSha256 !== reportSha256) throw new Error("Image evidence signature is bound to a different report.");
@@ -210,15 +269,16 @@ export function verifyImageEvidenceSignature({ report, signatureArtifact, now = 
 }
 
 export function assertImageEvidence(report, { signatureArtifact, verifySignature = verifyImageEvidenceSignature, imageReleaseSha, workflowRunId, artifactSha256, now = new Date().toISOString() } = {}) {
+  rejectLegacyProvenanceClaims(report);
   if (!verifySignature({ report, signatureArtifact, now })) throw new Error("Authenticated image evidence signature verification failed.");
   if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.imageReleaseSha !== imageReleaseSha || String(report.workflowRunId) !== String(workflowRunId) || report.canonicalArtifactSha256 !== artifactSha256) throw new Error("Image evidence is bound to a different image release, workflow, or canonical artifact.");
-  if (report.immutableTagProof !== IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF) throw new Error("Image evidence immutable-tag proof is missing or unsupported.");
-  if (report.superseded !== false) throw new Error("Image evidence is superseded.");
+  if (report.revocationModel !== IMAGE_EVIDENCE_REVOCATION_MODEL) throw new Error("Image evidence revocation model is unsupported.");
   requireVerifier(report.verifierCallerArn);
   if (report.account !== STAGE_B.account || report.region !== STAGE_B.region) throw new Error("Image evidence account or region is wrong.");
   const observedAtMs = Date.parse(report.observedAt); const nowMs = Date.parse(now);
   if (!Number.isFinite(observedAtMs) || !Number.isFinite(nowMs) || observedAtMs > nowMs + IMAGE_EVIDENCE_CLOCK_SKEW_MS || nowMs - observedAtMs > IMAGE_EVIDENCE_MAX_AGE_MS) throw new Error("Image evidence observation is stale or malformed.");
   if (!Array.isArray(report.images) || report.images.length !== Object.keys(SERVICES).length || new Set(report.images.map((image) => image.service)).size !== report.images.length) throw new Error("Image evidence does not contain all four Stage B images.");
+  requireRepositoryEvidence(report.repositories, [...new Set(Object.values(SERVICES).map(({ repository }) => repository))], report.observedAt);
   for (const [service, contract] of Object.entries(SERVICES)) {
     const image = report.images.find((candidate) => candidate.service === service);
     if (!image || image.repository !== contract.repository || image.tag !== contract.tag(imageReleaseSha) || !/^sha256:[a-f0-9]{64}$/.test(image.digest) || !image.imagePushedAt) throw new Error(`Image evidence is incomplete for ${service}.`);
@@ -231,7 +291,9 @@ function requiredOption(argv, option) { const index = argv.indexOf(option); cons
 export function runCli(argv = process.argv.slice(2), deps = {}) {
   const artifactPath = requiredOption(argv, "--artifact"); const imageReleaseSha = requiredOption(argv, "--image-release-sha"); const workflowRunId = requiredOption(argv, "--workflow-run-id"); const artifactSha256 = requiredOption(argv, "--artifact-sha256"); const outputPath = requiredOption(argv, "--output"); const signaturePath = requiredOption(argv, "--signature-output");
   const verifierCallerArn = deps.getCaller ? deps.getCaller() : JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"], { encoding: "utf8" })).Arn;
-  const report = generateImageEvidence({ artifactBytes: fs.readFileSync(artifactPath), imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, describe: deps.describe || describeImage, observedAt: deps.observedAt });
+  const observedAt = deps.observedAt || new Date().toISOString();
+  const repositories = [...new Set(Object.values(SERVICES).map(({ repository }) => repository))].map((repository) => readImageRepositoryEvidence(repository, { observedAt, describe: deps.describeRepository || describeRepository }));
+  const report = generateImageEvidence({ artifactBytes: fs.readFileSync(artifactPath), imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, describe: deps.describe || describeImage, observedAt, repositories });
   const signature = (deps.sign || signImageEvidence)(report, deps.sign ? { sign: deps.sign, now: deps.now } : {});
   fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   fs.writeFileSync(signaturePath, `${JSON.stringify(signature, null, 2)}\n`, { mode: 0o600, flag: "wx" });

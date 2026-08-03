@@ -10,7 +10,9 @@ import {
   verifyImageEvidenceSignature,
   assertStageBPlanImageEvidenceBinding,
   IMAGE_EVIDENCE_MAX_AGE_MS,
-  IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF,
+  IMAGE_EVIDENCE_REVOCATION_MODEL,
+  readImageRepositoryEvidence,
+  runCli,
 } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
@@ -37,6 +39,14 @@ const records = [
 });
 const artifactBytes = Buffer.from(`${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
 const artifactSha256 = crypto.createHash("sha256").update(artifactBytes).digest("hex");
+const repositoryEvidence = ["mscqr-backend", "mscqr-worker"].map((repository) => ({
+  repository,
+  repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`,
+  registryId: "368992683803",
+  imageTagMutability: "IMMUTABLE",
+  exclusionFilters: [],
+  observedAt,
+}));
 const describe = (repository, tag) => {
   const record = records.find((candidate) => candidate.repository === repository && candidate.image_tag === tag);
   return { digest: record.image_digest, imagePushedAt: observedAt };
@@ -66,7 +76,7 @@ const imagePlan = (overrides = {}) => {
 };
 
 function reportFixture(overrides = {}) {
-  return generateImageEvidence({ artifactBytes, imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, observedAt, describe, ...overrides });
+  return generateImageEvidence({ artifactBytes, imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, observedAt, describe, repositories: repositoryEvidence, ...overrides });
 }
 
 function signatureFixture(report, overrides = {}) {
@@ -88,8 +98,8 @@ function assertValid(report = reportFixture(), signatureArtifact = signatureFixt
 test("administrator evidence proves all four exact release tag-to-digest bindings", () => {
   const report = reportFixture();
   assert.equal(assertValid(report), true);
-  assert.equal(report.immutableTagProof, IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF);
-  assert.equal(report.superseded, false);
+  assert.equal(report.revocationModel, IMAGE_EVIDENCE_REVOCATION_MODEL);
+  assert.deepEqual(report.repositories, repositoryEvidence);
   assert.deepEqual(report.images.map(({ service, repository, tag, digest }) => ({ service, repository, tag, digest })), [
     { service: "backend", repository: "mscqr-backend", tag: imageReleaseSha, digest: `sha256:${"1".repeat(64)}` },
     { service: "rls-canary", repository: "mscqr-backend", tag: `${imageReleaseSha}-rls-canary`, digest: `sha256:${"4".repeat(64)}` },
@@ -133,13 +143,80 @@ test("immutable image evidence survives realistic credential and artifact delays
   assert.throws(() => assertValid(report, signature, { now: new Date(Date.parse(observedAt) + IMAGE_EVIDENCE_MAX_AGE_MS + 1).toISOString() }), /stale/);
 });
 
-test("immutable-tag proof and supersession are required", () => {
+test("authoritative repository evidence and revocation capability are required", () => {
   const report = reportFixture();
   const signature = signatureFixture(report);
-  assert.throws(() => verifyImageEvidenceSignature({ report: { ...report, immutableTagProof: undefined }, signatureArtifact: signature, verify: () => true }), /provenance/);
-  assert.throws(() => assertValid({ ...report, immutableTagProof: undefined }, signature, { verifySignature: () => true }), /immutable-tag proof/);
-  assert.throws(() => assertValid({ ...report, superseded: true }, signature, { verifySignature: () => true }), /superseded/);
-  assert.throws(() => signImageEvidence({ ...report, superseded: true }, { sign: () => "AQ==" }), /superseded/);
+  assert.throws(() => verifyImageEvidenceSignature({ report: { ...report, repositories: undefined }, signatureArtifact: signature, verify: () => true }), /authoritative repository/);
+  assert.throws(() => assertValid({ ...report, repositories: undefined }, signature, { verifySignature: () => true }), /authoritative repository/);
+  assert.throws(() => signImageEvidence({ ...report, revocationModel: "superseded-false" }, { sign: () => "AQ==" }), /revocation model/);
+  assert.throws(() => signImageEvidence({ ...report, repositories: [{ ...report.repositories[0], imageTagMutability: "MUTABLE" }, report.repositories[1]] }, { sign: () => "AQ==" }), /not authoritatively immutable/);
+});
+
+test("repository configuration is validated from AWS-shaped evidence before signing", () => {
+  let calls = 0;
+  const describeRepositories = (repository) => {
+    calls += 1;
+    return { repositories: [{ repositoryName: repository, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, registryId: "368992683803", imageTagMutability: "IMMUTABLE" }] };
+  };
+  const evidence = ["mscqr-backend", "mscqr-worker"].map((repository) => readImageRepositoryEvidence(repository, { observedAt, describe: describeRepositories }));
+  assert.equal(calls, 2);
+  assert.deepEqual(evidence.map(({ repository, imageTagMutability }) => ({ repository, imageTagMutability })), [
+    { repository: "mscqr-backend", imageTagMutability: "IMMUTABLE" },
+    { repository: "mscqr-worker", imageTagMutability: "IMMUTABLE" },
+  ]);
+  assert.doesNotThrow(() => reportFixture({ repositories: evidence }));
+});
+
+test("administrator CLI reads DescribeRepositories exactly once per unique repository", () => {
+  const directory = fs.mkdtempSync("/tmp/stage-b-image-evidence-cli-");
+  try {
+    const artifactPath = `${directory}/artifact.jsonl`;
+    const outputPath = `${directory}/report.json`;
+    const signaturePath = `${directory}/signature.json`;
+    fs.writeFileSync(artifactPath, artifactBytes);
+    let calls = 0;
+    const result = runCli(["--artifact", artifactPath, "--image-release-sha", imageReleaseSha, "--workflow-run-id", workflowRunId, "--artifact-sha256", artifactSha256, "--output", outputPath, "--signature-output", signaturePath], {
+      getCaller: () => verifierCallerArn,
+      observedAt,
+      describe: (repository, tag) => describe(repository, tag),
+      describeRepository: (repository) => {
+        calls += 1;
+        return { repositories: [{ repositoryName: repository, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, registryId: "368992683803", imageTagMutability: "IMMUTABLE" }] };
+      },
+      sign: () => "AQ==",
+    });
+    assert.equal(calls, 2);
+    assert.equal(result.reportSha256, imageEvidenceSha256(JSON.parse(fs.readFileSync(outputPath, "utf8"))));
+    assert.equal(JSON.parse(fs.readFileSync(outputPath, "utf8")).repositories.length, 2);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("mutable, exclusion-based, missing, mismatched, or unrelated repository evidence fails closed", () => {
+  const cases = [
+    ["mutable", { imageTagMutability: "MUTABLE" }, /not authoritatively immutable/],
+    ["exclusion", { imageTagMutability: "IMMUTABLE_WITH_EXCLUSION", exclusionFilters: [{ filter: "latest", filterType: "WILDCARD" }] }, /not authoritatively immutable/],
+    ["missing", undefined, /exactly one authoritative repository/],
+    ["wrong ARN", { repositoryArn: "arn:aws:ecr:us-east-1:000000000000:repository/mscqr-backend" }, /identity is wrong/],
+    ["wrong account", { registryId: "000000000000" }, /identity is wrong/],
+    ["wrong region", { repositoryArn: "arn:aws:ecr:us-east-1:368992683803:repository/mscqr-backend" }, /identity is wrong/],
+    ["unverified repository", [...repositoryEvidence, { repository: "other", repositoryArn: "arn:aws:ecr:eu-west-2:368992683803:repository/other", registryId: "368992683803", imageTagMutability: "IMMUTABLE", observedAt }], /exactly one authoritative repository/],
+  ];
+  for (const [, change, expected] of cases) {
+    const repositories = change === undefined ? [repositoryEvidence[1]] : Array.isArray(change) ? change : repositoryEvidence.map((entry) => entry.repository === "mscqr-backend" ? { ...entry, ...change } : entry);
+    assert.throws(() => reportFixture({ repositories }), expected);
+  }
+});
+
+test("repository evidence is part of the signed report and tampering invalidates it", () => {
+  const report = reportFixture();
+  const signature = signatureFixture(report);
+  const tampered = { ...report, repositories: report.repositories.map((entry) => ({ ...entry, imageTagMutability: "MUTABLE" })) };
+  assert.throws(() => verifyImageEvidenceSignature({ report: tampered, signatureArtifact: signature, verify: () => true }), /not authoritatively immutable/);
+  assert.throws(() => assertValid({ ...report, revocationModel: "unsupported" }, signature, { verifySignature: () => true }), /revocation model/);
+  assert.throws(() => assertValid({ ...report, superseded: false }, signature, { verifySignature: () => true }), /unsupported legacy provenance/);
+  assert.throws(() => assertValid({ ...report, immutableTagProof: "ecr-immutable-tag" }, signature, { verifySignature: () => true }), /unsupported legacy provenance/);
 });
 
 test("the release wrapper has no ECR read or mutation path", () => {

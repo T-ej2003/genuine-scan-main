@@ -7,7 +7,7 @@ import { classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-de
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
 import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, validateManifest } from "./validate-production-green-stage-b-permissions.mjs";
-import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL } from "./production-green-stage-b-image-evidence.mjs";
+import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENCE_REVOCATION_MODEL } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL } from "./stage-b-reference-audit-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -43,7 +43,7 @@ assert.deepEqual(matrix.evidenceFreshness, {
   imageProvenance: {
     model: IMAGE_EVIDENCE_VALIDITY_MODEL,
     maxAgeMs: IMAGE_EVIDENCE_MAX_AGE_MS,
-    requirements: ["valid KMS signature", "exact release/workflow/artifact identity", "exact repository/tag/digest bindings", "immutable-tag proof", "superseded=false"],
+    requirements: ["valid KMS signature", "exact release/workflow/artifact identity", "exact repository/tag/digest bindings", "authoritative DescribeRepositories evidence", "imageTagMutability=IMMUTABLE", `revocationModel=${IMAGE_EVIDENCE_REVOCATION_MODEL}`],
   },
   permissionPreflight: {
     model: PERMISSION_EVIDENCE_VALIDITY_MODEL,

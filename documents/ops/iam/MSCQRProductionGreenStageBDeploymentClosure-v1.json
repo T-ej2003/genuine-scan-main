@@ -8,7 +8,7 @@
     "imageProvenance": {
       "model": "immutable-image-provenance-24h",
       "maxAgeMs": 86400000,
-      "requirements": ["valid KMS signature", "exact release/workflow/artifact identity", "exact repository/tag/digest bindings", "immutable-tag proof", "superseded=false"]
+      "requirements": ["valid KMS signature", "exact release/workflow/artifact identity", "exact repository/tag/digest bindings", "authoritative DescribeRepositories evidence", "imageTagMutability=IMMUTABLE", "revocationModel=time-bounded-no-supersession-registry"]
     },
     "permissionPreflight": {
       "model": "live-plan-bound-15m",
