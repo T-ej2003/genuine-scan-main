@@ -40,7 +40,9 @@ test("canonical Stage A handoff rejects a subnet without NAT routing", () => {
 test("Stage A state identity is independent from Stage B and accepts later Stage A serials", () => {
   assert.equal(assertStageAStateIdentity({ ...stage, serial: 36 }, { stateObject: STAGE_A_STATE_OBJECT }).serial, 36);
   assert.throws(() => assertStageAStateIdentity({ lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 76 }, { stateObject: STAGE_A_STATE_OBJECT }), /lineage is wrong/);
+  assert.throws(() => assertStageAStateIdentity({ serial: 35 }, { stateObject: STAGE_A_STATE_OBJECT }), /lineage is wrong/);
   assert.throws(() => assertStageAStateIdentity({ ...stage, serial: 34 }, { stateObject: STAGE_A_STATE_OBJECT }), /serial is stale/);
+  assert.throws(() => assertStageAStateIdentity({ ...stage, serial: "35" }, { stateObject: STAGE_A_STATE_OBJECT }), /serial is stale/);
   assert.throws(() => assertStageAStateIdentity(stage, { stateObject: "env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate" }), /state object is wrong/);
 });
 
