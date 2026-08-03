@@ -23,6 +23,7 @@ export const STAGE_B_TASK_DEFINITION_FAMILY_NAMES = Object.freeze(
 export const STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION = 1;
 export const STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS = 15 * 60 * 1000;
 export const STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS = 60 * 1000;
+export const STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL = "live-plan-bound-15m";
 export const STAGE_B_BROKER_TERRAFORM_ADDRESS = "aws_lambda_function.broker";
 export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.broker_task_definition_arns";
 export const STAGE_B_BROKER_APPROVAL_REFERENCE = "local.broker_approval_expected";

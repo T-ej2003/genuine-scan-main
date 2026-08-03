@@ -9,9 +9,12 @@ import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from "./production
 import { APPROVED_PREFLIGHT_GENERATOR_ARNS } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 
-export const IMAGE_EVIDENCE_SCHEMA_VERSION = 2;
-export const IMAGE_EVIDENCE_MAX_AGE_MS = 15 * 60 * 1000;
+export const IMAGE_EVIDENCE_SCHEMA_VERSION = 3;
+export const IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION = 3;
+export const IMAGE_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const IMAGE_EVIDENCE_CLOCK_SKEW_MS = 60 * 1000;
+export const IMAGE_EVIDENCE_VALIDITY_MODEL = "immutable-image-provenance-24h";
+export const IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF = "ecr-immutable-tag";
 export const IMAGE_EVIDENCE_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
 export const IMAGE_EVIDENCE_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
 export const APPROVED_IMAGE_EVIDENCE_VERIFIER_ARNS = APPROVED_PREFLIGHT_GENERATOR_ARNS;
@@ -178,21 +181,24 @@ export function generateImageEvidence({ artifactBytes, imageReleaseSha, workflow
     account: STAGE_B.account,
     region: STAGE_B.region,
     observedAt,
+    immutableTagProof: IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF,
+    superseded: false,
     images,
   };
 }
 
 export function signImageEvidence(report, { now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, sign = ({ digest }) => withTempBytes("stage-b-image-evidence-sign-", { digest }, ({ digest: digestPath }) => JSON.parse(execFileSync("aws", ["kms", "sign", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signing-algorithm", signingAlgorithm, "--output", "json"], { encoding: "utf8" })).Signature) } = {}) {
   if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION) throw new Error("Only a valid image-evidence report may be signed.");
+  if (report.immutableTagProof !== IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF || report.superseded !== false) throw new Error("Image evidence provenance is incomplete or superseded.");
   if (keyArn !== IMAGE_EVIDENCE_SIGNING_KEY_ARN || signingAlgorithm !== IMAGE_EVIDENCE_SIGNING_ALGORITHM) throw new Error("Image evidence signing contract is wrong.");
   const reportSha256 = imageEvidenceSha256(report);
   const signatureBase64 = String(sign({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), reportSha256 }) || "");
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureBase64)) throw new Error("Image evidence signing returned an invalid signature.");
-  return { schemaVersion: 2, keyId: keyArn, keyArn, signingAlgorithm, reportSha256, imageReleaseSha: report.imageReleaseSha, workflowRunId: report.workflowRunId, canonicalArtifactSha256: report.canonicalArtifactSha256, signatureBase64, signedAt: now };
+  return { schemaVersion: IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION, keyId: keyArn, keyArn, signingAlgorithm, reportSha256, imageReleaseSha: report.imageReleaseSha, workflowRunId: report.workflowRunId, canonicalArtifactSha256: report.canonicalArtifactSha256, signatureBase64, signedAt: now };
 }
 
 export function verifyImageEvidenceSignature({ report, signatureArtifact, now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, verify = ({ digest, signature }) => withTempBytes("stage-b-image-evidence-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(execFileSync("aws", ["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json"], { encoding: "utf8" })).SignatureValid === true) }) {
-  if (!signatureArtifact || signatureArtifact.schemaVersion !== 2 || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm || signatureArtifact.imageReleaseSha !== report?.imageReleaseSha || String(signatureArtifact.workflowRunId) !== String(report?.workflowRunId) || signatureArtifact.canonicalArtifactSha256 !== report?.canonicalArtifactSha256) throw new Error("Image evidence signature identity or algorithm is wrong.");
+  if (!signatureArtifact || signatureArtifact.schemaVersion !== IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm || signatureArtifact.imageReleaseSha !== report?.imageReleaseSha || String(signatureArtifact.workflowRunId) !== String(report?.workflowRunId) || signatureArtifact.canonicalArtifactSha256 !== report?.canonicalArtifactSha256) throw new Error("Image evidence signature identity or algorithm is wrong.");
   const reportSha256 = imageEvidenceSha256(report);
   if (signatureArtifact.reportSha256 !== reportSha256) throw new Error("Image evidence signature is bound to a different report.");
   const signedAtMs = Date.parse(signatureArtifact.signedAt); const nowMs = Date.parse(now);
@@ -205,6 +211,8 @@ export function verifyImageEvidenceSignature({ report, signatureArtifact, now = 
 export function assertImageEvidence(report, { signatureArtifact, verifySignature = verifyImageEvidenceSignature, imageReleaseSha, workflowRunId, artifactSha256, now = new Date().toISOString() } = {}) {
   if (!verifySignature({ report, signatureArtifact, now })) throw new Error("Authenticated image evidence signature verification failed.");
   if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.imageReleaseSha !== imageReleaseSha || String(report.workflowRunId) !== String(workflowRunId) || report.canonicalArtifactSha256 !== artifactSha256) throw new Error("Image evidence is bound to a different image release, workflow, or canonical artifact.");
+  if (report.immutableTagProof !== IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF) throw new Error("Image evidence immutable-tag proof is missing or unsupported.");
+  if (report.superseded !== false) throw new Error("Image evidence is superseded.");
   requireVerifier(report.verifierCallerArn);
   if (report.account !== STAGE_B.account || report.region !== STAGE_B.region) throw new Error("Image evidence account or region is wrong.");
   const observedAtMs = Date.parse(report.observedAt); const nowMs = Date.parse(now);

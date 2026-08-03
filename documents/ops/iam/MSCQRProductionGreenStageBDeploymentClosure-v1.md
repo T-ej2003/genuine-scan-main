@@ -49,6 +49,21 @@ plan variables: `tooling_sha`, `image_release_sha`, and
 `canonical_image_evidence_sha256`. The wrapper also requires the checked-out tooling HEAD
 to equal `tooling_sha`.
 
+## Evidence freshness classes
+
+Image provenance is immutable after publication: the signed report carries the exact
+release/workflow/artifact identity, four digest bindings, an `ecr-immutable-tag` proof,
+and `superseded: false`. That class is valid for 24 hours (`86400000` ms), which covers
+credential transitions and the full plan/audit/preflight workflow without weakening its
+signature or digest joins. It is rejected for a wrong release, workflow, artifact, digest,
+missing immutability proof, or supersession.
+
+Permission preflight remains live and plan-sensitive with a 15-minute validity window
+(`900000` ms). The reference audit is also live and plan-bound with its independent
+15-minute window. These short windows are intentionally not reused for immutable image
+provenance; the wrapper still requires a fresh permission report and audit plus exact
+plan-to-image digest equality before apply.
+
 Image reuse is permitted only when the reviewed compatibility report for the exact image
 release and tooling-input tree contains no Dockerfile, dependency lockfile, runtime
 source, generated runtime package, or other image-build input change. Runtime validation

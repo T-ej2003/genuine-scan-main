@@ -4,6 +4,23 @@
   "region": "eu-west-2",
   "terraformRoot": "infra/aws/terraform/production-green-stage-b",
   "zeroDestroy": true,
+  "evidenceFreshness": {
+    "imageProvenance": {
+      "model": "immutable-image-provenance-24h",
+      "maxAgeMs": 86400000,
+      "requirements": ["valid KMS signature", "exact release/workflow/artifact identity", "exact repository/tag/digest bindings", "immutable-tag proof", "superseded=false"]
+    },
+    "permissionPreflight": {
+      "model": "live-plan-bound-15m",
+      "maxAgeMs": 900000,
+      "requirements": ["exact plan hashes", "exact role and policy simulation", "valid KMS signature"]
+    },
+    "referenceAudit": {
+      "model": "live-plan-bound-15m",
+      "maxAgeMs": 900000,
+      "requirements": ["exact plan hash", "fresh live ECS and broker observations", "release caller attestation"]
+    }
+  },
   "backendContract": {
     "policyPath": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
     "bucketArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",

@@ -9,6 +9,8 @@ import {
   signImageEvidence,
   verifyImageEvidenceSignature,
   assertStageBPlanImageEvidenceBinding,
+  IMAGE_EVIDENCE_MAX_AGE_MS,
+  IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF,
 } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
@@ -86,6 +88,8 @@ function assertValid(report = reportFixture(), signatureArtifact = signatureFixt
 test("administrator evidence proves all four exact release tag-to-digest bindings", () => {
   const report = reportFixture();
   assert.equal(assertValid(report), true);
+  assert.equal(report.immutableTagProof, IMAGE_EVIDENCE_IMMUTABLE_TAG_PROOF);
+  assert.equal(report.superseded, false);
   assert.deepEqual(report.images.map(({ service, repository, tag, digest }) => ({ service, repository, tag, digest })), [
     { service: "backend", repository: "mscqr-backend", tag: imageReleaseSha, digest: `sha256:${"1".repeat(64)}` },
     { service: "rls-canary", repository: "mscqr-backend", tag: `${imageReleaseSha}-rls-canary`, digest: `sha256:${"4".repeat(64)}` },
@@ -117,7 +121,24 @@ test("signed evidence is independently bound to key, report, freshness, and rele
   assert.throws(() => assertValid(report, { ...signature, keyArn: "arn:aws:kms:eu-west-2:368992683803:key/other" }), /identity or algorithm/);
   assert.throws(() => assertValid(report, signature, { imageReleaseSha: "a".repeat(40) }), /different image release|different release/);
   assert.throws(() => assertValid(report, signature, { workflowRunId: "30760808821" }), /different release|different image release/);
-  assert.throws(() => assertValid(report, signature, { now: "2026-08-02T19:00:01.000Z" }), /stale/);
+  assert.throws(() => assertValid(report, signature, { now: new Date(Date.parse(observedAt) + IMAGE_EVIDENCE_MAX_AGE_MS + 1).toISOString() }), /stale/);
+});
+
+test("immutable image evidence survives realistic credential and artifact delays", () => {
+  const report = reportFixture();
+  const signature = signatureFixture(report);
+  const delayedNow = new Date(Date.parse(observedAt) + 16 * 60 * 1000).toISOString();
+  assert.doesNotThrow(() => assertValid(report, signature, { now: delayedNow }));
+  assert.doesNotThrow(() => assertValid(report, signature, { now: new Date(Date.parse(observedAt) + 60 * 60 * 1000).toISOString() }));
+  assert.throws(() => assertValid(report, signature, { now: new Date(Date.parse(observedAt) + IMAGE_EVIDENCE_MAX_AGE_MS + 1).toISOString() }), /stale/);
+});
+
+test("immutable-tag proof and supersession are required", () => {
+  const report = reportFixture();
+  const signature = signatureFixture(report);
+  assert.throws(() => assertValid({ ...report, immutableTagProof: undefined }, signature, { verifySignature: () => true }), /immutable-tag proof/);
+  assert.throws(() => assertValid({ ...report, superseded: true }, signature, { verifySignature: () => true }), /superseded/);
+  assert.throws(() => signImageEvidence({ ...report, superseded: true }, { sign: () => "AQ==" }), /superseded/);
 });
 
 test("the release wrapper has no ECR read or mutation path", () => {

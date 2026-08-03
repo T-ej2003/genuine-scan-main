@@ -10,6 +10,7 @@ import {
   deriveRequiredEvaluations,
   PERMISSION_REPORT_SIGNING_ALGORITHM,
   PERMISSION_REPORT_SIGNING_KEY_ARN,
+  PERMISSION_EVIDENCE_MAX_AGE_MS,
   runCli,
   runPermissionPreflight,
   signPermissionReport,
@@ -22,7 +23,7 @@ import { assertStageBReleaseCallerArn } from "../plan-production-green-stage-b.m
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
-import { generateImageEvidence, imageEvidenceSha256, signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
+import { generateImageEvidence, imageEvidenceSha256, signImageEvidence, IMAGE_EVIDENCE_MAX_AGE_MS } from "../aws/production-green-stage-b-image-evidence.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const roleArn = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
@@ -293,6 +294,14 @@ test("wrong plan binding and stale reports are rejected", () => {
   assert.throws(() => assertReport(report, { planSha256: "0".repeat(64), savedPlanSha256: report.savedPlanSha256, canonicalPlanJsonSha256: report.canonicalPlanJsonSha256, now }), /different plan/);
   const stale = { ...report, generatedAt: "2026-08-01T11:00:00.000Z" };
   assert.throws(() => assertPermissionReport(stale, { signatureArtifact: reportSignature(stale), verifySignature: () => true, planSha256: report.planSha256, savedPlanSha256: report.savedPlanSha256, canonicalPlanJsonSha256: report.canonicalPlanJsonSha256, now }), /expired/);
+  const oneHourOld = { ...report, generatedAt: new Date(Date.parse(now) - 60 * 60 * 1000).toISOString() };
+  assert.ok(60 * 60 * 1000 > PERMISSION_EVIDENCE_MAX_AGE_MS);
+  assert.throws(() => assertPermissionReport(oneHourOld, { signatureArtifact: reportSignature(oneHourOld), verifySignature: () => true, planSha256: report.planSha256, savedPlanSha256: report.savedPlanSha256, canonicalPlanJsonSha256: report.canonicalPlanJsonSha256, now }), /expired/);
+});
+
+test("image provenance and permission evidence use independent freshness windows", () => {
+  assert.notEqual(IMAGE_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_MAX_AGE_MS);
+  assert.ok(IMAGE_EVIDENCE_MAX_AGE_MS > PERMISSION_EVIDENCE_MAX_AGE_MS);
 });
 
 test("permission preflight requires binary-plan bytes and the report carries both plan hashes", () => {

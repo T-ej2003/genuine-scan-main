@@ -15,9 +15,17 @@ image_release_sha
   -> Terraform image variables and current task-definition images
 ```
 
-The image-evidence report is schema version 2 and contains `imageReleaseSha`; it does
-not contain `toolingSha`. This is deliberate: image evidence authenticates the image
-publication chain, while plan-bound artifacts authenticate the joined deployment.
+The image-evidence report is schema version 3 and contains `imageReleaseSha`; it does
+not contain `toolingSha`. It also carries a signed `ecr-immutable-tag` proof and an
+explicit `superseded: false` marker. This is deliberate: image evidence authenticates
+the immutable image publication chain, while plan-bound artifacts authenticate the
+joined deployment.
+
+Image provenance uses a reviewed 24-hour validity window. Permission preflight remains
+independently plan-bound and expires after 15 minutes; the reference audit has its own
+15-minute live-observation window. A longer image window cannot authorize a different
+digest because the canonical report SHA, release/workflow/artifact identity, plan image
+variables, and all twelve current task definitions remain exact joins.
 
 Every approved plan must contain:
 

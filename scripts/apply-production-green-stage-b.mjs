@@ -10,7 +10,7 @@ import {
 import {
   APPROVED_PREFLIGHT_GENERATOR_ARNS,
   PERMISSION_PREFLIGHT_CLOCK_SKEW_MS,
-  PERMISSION_PREFLIGHT_MAX_AGE_MS,
+  PERMISSION_EVIDENCE_MAX_AGE_MS,
   normalizeExpectedMissingContextValues,
   validateManifest,
   validateSimulationResult,
@@ -107,7 +107,7 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   const generatedAtMs = Date.parse(report.generatedAt); const nowMs = Date.parse(now);
   if (!Number.isFinite(generatedAtMs)) throw new Error("Permission-preflight report timestamp is malformed.");
   if (generatedAtMs > nowMs + PERMISSION_PREFLIGHT_CLOCK_SKEW_MS) throw new Error("Permission-preflight report timestamp is in the future.");
-  if (nowMs - generatedAtMs > PERMISSION_PREFLIGHT_MAX_AGE_MS) throw new Error("Permission-preflight report is expired.");
+  if (nowMs - generatedAtMs > PERMISSION_EVIDENCE_MAX_AGE_MS) throw new Error("Permission-preflight report is expired.");
   if (!Array.isArray(report.requiredEvaluations) || report.requiredEvaluations.some((item) => item.decision !== "allowed")) throw new Error("Permission-preflight report has a denied required evaluation.");
   if (!Array.isArray(report.forbiddenEvaluations) || report.forbiddenEvaluations.some((item) => item.decision === "allowed")) throw new Error("Permission-preflight report allowed a forbidden evaluation.");
   if (report.cloudTrail?.status !== "clear" || report.cloudTrail.unresolvedDenials?.length !== 0) throw new Error("Permission-preflight report contains an unresolved CloudTrail denial.");
