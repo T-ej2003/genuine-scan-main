@@ -4,12 +4,12 @@
   "imageReleaseSha": "7245a6036492f875654c414473737e33c1422f3c",
   "comparisonBaseSha": "7245a6036492f875654c414473737e33c1422f3c",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
-  "comparisonHeadSha256": "c2e845018f0196e2a7df34ee62fc9ddda3c181f5afbc7253213fa6f7885f231e",
-  "toolingInputTreeSha256": "c2e845018f0196e2a7df34ee62fc9ddda3c181f5afbc7253213fa6f7885f231e",
+  "comparisonHeadSha256": "b7a994515ab7d749872c7c9f47cfe98a965776af176e31dda66d97e08427751f",
+  "toolingInputTreeSha256": "b7a994515ab7d749872c7c9f47cfe98a965776af176e31dda66d97e08427751f",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
   "classificationRulesVersion": "stage-b-image-reuse-v2",
-  "generatedAt": "2026-08-03T12:09:02+01:00",
+  "generatedAt": "2026-08-03T14:51:07+01:00",
   "generatorVersion": "validate-stage-b-image-reuse@2",
   "classifiedChangedFiles": [
     {
@@ -64,6 +64,11 @@
     },
     {
       "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_IMAGE_PUBLISHER_IDENTITY.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md",
       "category": "documentationOnly",
       "imageAffecting": false
     },
