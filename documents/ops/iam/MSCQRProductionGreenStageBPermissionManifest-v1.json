@@ -92,6 +92,46 @@
       "evidence": "Canonical Stage A prerequisite handoff derives only reviewed outputs from the exact Stage A state object"
     },
     {
+      "id": "collect-stage-a-live-subnets",
+      "phase": "preflight",
+      "action": "ec2:DescribeSubnets",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "EC2 DescribeSubnets has no resource-level IAM type; handoff validates reviewed production subnets in eu-west-2"
+    },
+    {
+      "id": "collect-stage-a-live-route-tables",
+      "phase": "preflight",
+      "action": "ec2:DescribeRouteTables",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "EC2 DescribeRouteTables has no resource-level IAM type; handoff validates NAT routing in eu-west-2"
+    },
+    {
+      "id": "collect-stage-a-live-security-groups",
+      "phase": "preflight",
+      "action": "ec2:DescribeSecurityGroups",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "EC2 DescribeSecurityGroups has no resource-level IAM type; handoff validates reviewed groups in eu-west-2"
+    },
+    {
+      "id": "collect-stage-a-live-cluster",
+      "phase": "preflight",
+      "action": "ecs:DescribeClusters",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "ECS DescribeClusters is list-style authorization; handoff requires the reviewed production cluster in eu-west-2"
+    },
+    {
+      "id": "collect-stage-a-live-database",
+      "phase": "preflight",
+      "action": "rds:DescribeDBInstances",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "RDS DescribeDBInstances has no resource-level IAM type; handoff validates the reviewed green database in eu-west-2"
+    },
+    {
       "id": "refresh-read-only-canary-roles",
       "phase": "refresh",
       "action": "iam:GetRole",

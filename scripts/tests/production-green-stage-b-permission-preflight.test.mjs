@@ -87,6 +87,35 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
 });
 
+test("Stage A live-evidence preflight covers exactly the five region-bound read actions", () => {
+  const expected = [
+    ["collect-stage-a-live-subnets", "ec2:DescribeSubnets"], ["collect-stage-a-live-route-tables", "ec2:DescribeRouteTables"], ["collect-stage-a-live-security-groups", "ec2:DescribeSecurityGroups"], ["collect-stage-a-live-cluster", "ecs:DescribeClusters"], ["collect-stage-a-live-database", "rds:DescribeDBInstances"],
+  ];
+  const derived = deriveRequiredEvaluations(plan, manifest).required.filter((item) => item.manifestId.startsWith("collect-stage-a-live-"));
+  assert.deepEqual(derived.map((item) => [item.manifestId, item.action, item.resource, item.context]), expected.map(([id, action]) => [id, action, "*", [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }] ]).sort(([left], [right]) => left.localeCompare(right)));
+  const missing = structuredClone(manifest); missing.required = missing.required.filter((entry) => entry.id !== "collect-stage-a-live-database");
+  assert.throws(() => validateManifest(missing), /live-evidence permission mapping/);
+});
+
+test("Stage A live-evidence simulations fail closed for denied or wrong-region requests", () => {
+  const evaluations = deriveRequiredEvaluations(plan, manifest).required.filter((item) => item.manifestId.startsWith("collect-stage-a-live-"));
+  for (const item of evaluations) assert.equal(simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify({ EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: "*", EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [] }] }) }).decision, "allowed");
+  assert.equal(runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: ({ evaluation }) => evaluation.manifestId === evaluations[0].manifestId ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }), cloudTrail: clearCloudTrail }).status, "invalid");
+  const wrongRegion = structuredClone(manifest); wrongRegion.required.find((entry) => entry.id === evaluations[0].manifestId).context[0].values = ["us-east-1"];
+  assert.throws(() => validateManifest(wrongRegion), /live-evidence permission mapping/);
+});
+
+test("Stage A live-evidence policy source contains no mutation permission", () => {
+  const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));
+  const statement = policy.Statement.find((item) => item.Sid === "ReadStageALivePrerequisites");
+  assert.deepEqual(statement, { Sid: "ReadStageALivePrerequisites", Effect: "Allow", Action: ["ec2:DescribeSubnets", "ec2:DescribeRouteTables", "ec2:DescribeSecurityGroups", "ecs:DescribeClusters", "rds:DescribeDBInstances"], Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } } });
+  for (const action of ["ec2:CreateSubnet", "ecs:UpdateService", "rds:ModifyDBInstance"]) {
+    const evaluation = { id: `unrelated-${action}`, action, resource: "*", context: [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }], expectedMissingContextValues: [] };
+    Object.defineProperty(evaluation, "forbidden", { value: true });
+    assert.equal(validateSimulationResult(evaluation, { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] }).decision, "implicitDeny");
+  }
+});
+
 const headBucketEvaluation = () => deriveRequiredEvaluations(plan, manifest).forbidden.find((item) => item.manifestId === "backend-head-bucket-not-required");
 const realHeadBucketSimulation = ({ evaluation }) => evaluation.manifestId === "backend-head-bucket-not-required"
   ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: ["s3:prefix"] }
