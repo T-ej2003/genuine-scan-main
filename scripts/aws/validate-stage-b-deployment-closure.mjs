@@ -39,7 +39,7 @@ if (checkoutMode === "production") {
 const tfvarsPath = process.env.STAGE_B_TFVARS_PATH;
 const bindingReportPath = process.env.STAGE_B_TFVARS_BINDING_REPORT_PATH;
 if (checkoutMode === "production" || tfvarsPath || bindingReportPath) {
-  if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256) throw new Error("Production Stage B closure requires canonical tfvars, binding report, and binding-report SHA256.");
+  if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256 || !process.env.STAGE_B_TOOLING_TREE_SHA256 || !process.env.STAGE_B_IMAGE_RELEASE_SHA || !process.env.STAGE_B_IMAGE_EVIDENCE_SHA256) throw new Error("Production Stage B closure requires canonical tfvars provenance and complete deployment identity.");
   assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedImageReleaseSha: process.env.STAGE_B_IMAGE_RELEASE_SHA, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256 });
 }
 assert.equal(matrix.schemaVersion, 1, "Stage B closure matrix schema is unsupported.");

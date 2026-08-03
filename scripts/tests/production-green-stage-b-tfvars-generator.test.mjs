@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
-import { assertStageBTfvarsBinding, deriveContractDigests, deriveRetainedDefinitions, generateStageBTfvars } from "../aws/generate-production-green-stage-b-tfvars.mjs";
+import { assertStageBTfvarsBinding, deriveContractDigests, deriveRetainedDefinitions, generateStageBTfvars, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 
@@ -80,6 +80,77 @@ test("all five emitted image variables are byte-for-byte bound to signed evidenc
   const result = generateStageBTfvars(input());
   for (const image of Object.values(result.bindingReport.images)) assert.equal(image.digest, evidence.images.find((record) => record.service === image.service).digest);
   assert.equal(result.bindingReport.images.readOnlyCanary.digest.endsWith("f9a1"), true);
+});
+
+test("retained generations accept complete historical 11-family and post-canary 12-family shapes", () => {
+  const state = stateFixture();
+  const candidate = state.resources[0].instances;
+  const executor = state.resources[1].instances;
+  const originalCandidates = structuredClone(candidate);
+  const originalExecutors = structuredClone(executor);
+  for (const [generation, revision] of [["760df83", 2], ["7029425", 3]]) {
+    candidate.push(...originalCandidates.map((instance) => ({ ...structuredClone(instance), index_key: instance.index_key.replace("60b782b", generation), attributes: { ...structuredClone(instance.attributes), revision, arn: instance.attributes.arn.replace(":1", `:${revision}`) } })));
+    executor.push(...originalExecutors.map((instance) => ({ ...structuredClone(instance), index_key: instance.index_key.replace("60b782b", generation), attributes: { ...structuredClone(instance.attributes), revision, arn: instance.attributes.arn.replace(":1", `:${revision}`) } })));
+  }
+  candidate.push({ index_key: "7029425-read_only_canary", attributes: taskAttributes("mscqr-production-full-rls-green-read-only-canary", 4) });
+  assert.equal(deriveRetainedDefinitions(state).counts.candidate, 10);
+  assert.equal(deriveRetainedDefinitions(state).counts.executor, 24);
+});
+
+test("retained 12-family state generates valid tfvars", () => {
+  const f = files();
+  const state = stateFixture();
+  state.resources[0].instances.push({ index_key: "60b782b-read_only_canary", attributes: taskAttributes("mscqr-production-full-rls-green-read-only-canary", 2) });
+  fs.writeFileSync(f.state, `${JSON.stringify(state)}\n`);
+  const result = generateStageBTfvars(input({ stateBackup: f.state }));
+  assert.equal(result.bindingReport.retainedDefinitions.candidate, 4);
+});
+
+test("current broker ZIP bytes are revalidated at the binding gate", () => {
+  const args = input();
+  const result = generateStageBTfvars(args);
+  fs.appendFileSync(args.brokerPackagePath, Buffer.from("changed"));
+  assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath }), /broker package raw SHA256/);
+  fs.rmSync(args.brokerPackagePath);
+  assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath }), /broker package must be/);
+});
+
+test("atomic output pair commits together and rolls back on a second rename failure", () => {
+  const directory = fs.mkdtempSync(path.join(tempRoot, "pair-"));
+  const tfvarsPath = path.join(directory, "out.tfvars");
+  const reportPath = path.join(directory, "binding.json");
+  let renames = 0;
+  const fileSystem = {
+    ...fs,
+    renameSync: (...args) => {
+      renames += 1;
+      if (renames === 2) throw new Error("simulated second rename failure");
+      return fs.renameSync(...args);
+    },
+  };
+  assert.throws(() => writeAtomicPair({ tfvarsPath, bindingReportPath: reportPath, tfvarsBytes: Buffer.from("tfvars"), bindingReportBytes: Buffer.from("report"), fileSystem }), /second rename/);
+  assert.equal(fs.existsSync(tfvarsPath), false);
+  assert.equal(fs.existsSync(reportPath), false);
+});
+
+test("atomic output pair preflights both destinations and rolls back a second temporary write", () => {
+  const directory = fs.mkdtempSync(path.join(tempRoot, "pair-preflight-"));
+  const tfvarsPath = path.join(directory, "out.tfvars");
+  const reportPath = path.join(directory, "binding.json");
+  fs.writeFileSync(reportPath, "existing");
+  assert.throws(() => writeAtomicPair({ tfvarsPath, bindingReportPath: reportPath, tfvarsBytes: Buffer.from("new"), bindingReportBytes: Buffer.from("new") }), /Refusing to overwrite/);
+  assert.equal(fs.existsSync(tfvarsPath), false);
+  let writes = 0;
+  const fileSystem = {
+    ...fs,
+    writeFileSync: (...args) => {
+      writes += 1;
+      if (writes === 2) throw new Error("simulated second temporary write failure");
+      return fs.writeFileSync(...args);
+    },
+  };
+  assert.throws(() => writeAtomicPair({ tfvarsPath, bindingReportPath: path.join(directory, "second.json"), tfvarsBytes: Buffer.from("new"), bindingReportBytes: Buffer.from("new"), fileSystem }), /second temporary write/);
+  assert.equal(fs.existsSync(tfvarsPath), false);
 });
 
 for (const [name, mutate] of [

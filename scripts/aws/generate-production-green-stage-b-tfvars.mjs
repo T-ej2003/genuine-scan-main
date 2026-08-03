@@ -12,6 +12,7 @@ import {
 } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
+import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 
 export const STAGE_B_TFVARS_SCHEMA_VERSION = 1;
 export const STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION = 1;
@@ -64,16 +65,49 @@ function assertOutputPath(file, label) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 }
 
-function writeAtomic(file, bytes, { allowOverwrite = false } = {}) {
-  if (!allowOverwrite && fs.existsSync(file)) throw new Error(`Refusing to overwrite existing ${file}.`);
-  const directory = fs.mkdtempSync(path.join(path.dirname(file), ".stage-b-tfvars-"));
-  const temporary = path.join(directory, path.basename(file));
+function outputState(file, label, fileSystem) {
+  if (!fileSystem.existsSync(file)) return { file, label, exists: false };
+  if (fileSystem.lstatSync(file).isDirectory()) throw new Error(`${label} output must not be a directory.`);
+  return { file, label, exists: true };
+}
+
+export function writeAtomicPair({ tfvarsPath, bindingReportPath, tfvarsBytes, bindingReportBytes, allowOverwrite = false, fileSystem = fs } = {}) {
+  if (path.resolve(tfvarsPath) === path.resolve(bindingReportPath)) throw new Error("Tfvars and binding-report outputs must be different files.");
+  const outputs = [outputState(tfvarsPath, "Tfvars", fileSystem), outputState(bindingReportPath, "Binding-report", fileSystem)];
+  if (!allowOverwrite && outputs.some(({ exists }) => exists)) throw new Error(`Refusing to overwrite existing ${outputs.find(({ exists }) => exists).file}.`);
+  const temporaryDirectories = outputs.map(({ file }) => fileSystem.mkdtempSync(path.join(path.dirname(file), ".stage-b-tfvars-")));
+  const temporaryFiles = outputs.map(({ file }, index) => path.join(temporaryDirectories[index], path.basename(file)));
+  const backups = [];
+  const committed = [];
   try {
-    fs.writeFileSync(temporary, bytes, { flag: "wx", mode: 0o600 });
-    fs.chmodSync(temporary, 0o600);
-    fs.renameSync(temporary, file);
+    for (const [index, bytes] of [tfvarsBytes, bindingReportBytes].entries()) {
+      fileSystem.writeFileSync(temporaryFiles[index], bytes, { flag: "wx", mode: 0o600 });
+      fileSystem.chmodSync(temporaryFiles[index], 0o600);
+    }
+    for (const output of outputs) {
+      const current = outputState(output.file, output.label, fileSystem);
+      if (current.exists !== output.exists || (!allowOverwrite && current.exists)) throw new Error(`${output.label} output changed during generation.`);
+    }
+    if (allowOverwrite) {
+      for (const output of outputs) {
+        if (!output.exists) continue;
+        const directory = fileSystem.mkdtempSync(path.join(path.dirname(output.file), ".stage-b-tfvars-backup-"));
+        const backup = path.join(directory, path.basename(output.file));
+        fileSystem.renameSync(output.file, backup);
+        backups.push({ output: output.file, backup, directory });
+      }
+    }
+    for (let index = 0; index < outputs.length; index += 1) {
+      fileSystem.renameSync(temporaryFiles[index], outputs[index].file);
+      committed.push(outputs[index].file);
+    }
+  } catch (error) {
+    for (const file of committed) fileSystem.rmSync(file, { force: true });
+    for (const { output, backup } of backups.reverse()) if (fileSystem.existsSync(backup)) fileSystem.renameSync(backup, output);
+    throw error;
   } finally {
-    fs.rmSync(directory, { recursive: true, force: true });
+    for (const directory of temporaryDirectories) fileSystem.rmSync(directory, { recursive: true, force: true });
+    for (const { directory } of backups) fileSystem.rmSync(directory, { recursive: true, force: true });
   }
 }
 
@@ -111,11 +145,16 @@ function retainedDefinition(attributes, label) {
   if (!Array.isArray(volumes) || volumes.some((volume) => !volume || typeof volume.name !== "string")) throw new Error(`${label} volumes are malformed.`);
   const definition = { family: attributes.family, networkMode: attributes.network_mode, requiresCompatibilities: attributes.requires_compatibilities, cpu: attributes.cpu, memory: attributes.memory, containerDefinitions: parseContainerDefinitions(attributes, label), volumes: volumes.map(({ name }) => ({ name })) };
   if (typeof definition.networkMode !== "string" || !Array.isArray(definition.requiresCompatibilities) || definition.cpu === undefined || definition.memory === undefined) throw new Error(`${label} task-definition contract is incomplete.`);
-  return { definition, arn: attributes.arn };
+  return { definition, arn: attributes.arn, revision: String(attributes.revision) };
 }
 
 function resourceInstances(state, type, name) {
   return (state.resources || []).filter((resource) => resource.type === type && resource.name === name).flatMap((resource) => resource.instances || []);
+}
+
+function taskDefinitionFamily(kind, category) {
+  const address = category === "executor" ? `aws_ecs_task_definition.executor["${kind}"]` : `aws_ecs_task_definition.candidate["${kind}"]`;
+  return STAGE_B_TASK_DEFINITION_FAMILIES[address];
 }
 
 export function deriveRetainedDefinitions(state) {
@@ -124,14 +163,17 @@ export function deriveRetainedDefinitions(state) {
   if (!Number.isInteger(state.serial) || state.serial < STAGE_B_MINIMUM_STATE_SERIAL) throw new Error("Terraform state serial is stale or malformed.");
   const resources = state.resources || [];
   if (resources.some((resource) => resource.type === "aws_ecs_task_definition" && ["candidate", "executor"].includes(resource.name))) throw new Error("Terraform state still contains current Stage B task-definition addresses.");
-  if (resources.some((resource) => resource.type === "aws_ecs_task_definition" && resource.name === "candidate_retained" && (resource.instances || []).some((instance) => String(instance.index_key).endsWith("-read_only_canary")))) throw new Error("Terraform state unexpectedly contains a retained read-only-canary definition.");
   const candidates = {};
+  const familyRevisions = new Set();
   for (const instance of resourceInstances(state, "aws_ecs_task_definition", "candidate_retained")) {
     const match = candidateKeyPattern.exec(String(instance.index_key || ""));
     if (!match || !generationPattern.test(match[1]) || candidates[instance.index_key]) throw new Error(`Retained candidate key is missing, malformed, or duplicated: ${instance.index_key}.`);
-    const { definition } = retainedDefinition(instance.attributes, `Retained candidate ${instance.index_key}`);
-    const expectedFamily = match[2] === "canary" ? "mscqr-production-full-rls-green-application-canary" : `mscqr-production-rls-green-${match[2]}-candidate`;
+    const { definition, revision } = retainedDefinition(instance.attributes, `Retained candidate ${instance.index_key}`);
+    const expectedFamily = taskDefinitionFamily(match[2], "candidate");
     if (definition.family !== expectedFamily) throw new Error(`Retained candidate family does not match ${instance.index_key}.`);
+    const familyRevision = `${definition.family}:${revision}`;
+    if (familyRevisions.has(familyRevision)) throw new Error(`Retained task-definition family/revision is duplicated: ${familyRevision}.`);
+    familyRevisions.add(familyRevision);
     candidates[instance.index_key] = { kind: match[2], definition: JSON.stringify(definition) };
   }
   const executors = {};
@@ -139,8 +181,11 @@ export function deriveRetainedDefinitions(state) {
     const match = executorKeyPattern.exec(String(instance.index_key || ""));
     if (!match || executors[instance.index_key]) throw new Error(`Retained executor key is missing, malformed, or duplicated: ${instance.index_key}.`);
     const mode = match[2];
-    const { definition } = retainedDefinition(instance.attributes, `Retained executor ${instance.index_key}`);
-    if (definition.family !== `mscqr-production-full-rls-green-${mode}`) throw new Error(`Retained executor family does not match ${instance.index_key}.`);
+    const { definition, revision } = retainedDefinition(instance.attributes, `Retained executor ${instance.index_key}`);
+    if (definition.family !== taskDefinitionFamily(mode, "executor")) throw new Error(`Retained executor family does not match ${instance.index_key}.`);
+    const familyRevision = `${definition.family}:${revision}`;
+    if (familyRevisions.has(familyRevision)) throw new Error(`Retained task-definition family/revision is duplicated: ${familyRevision}.`);
+    familyRevisions.add(familyRevision);
     executors[instance.index_key] = { mode, definition: JSON.stringify(definition) };
   }
   if (!Object.keys(candidates).length || !Object.keys(executors).length) throw new Error("Terraform state retained task-definition evidence is incomplete.");
@@ -148,8 +193,9 @@ export function deriveRetainedDefinitions(state) {
   for (const key of Object.keys(candidates)) { const match = candidateKeyPattern.exec(key); const kinds = candidateGenerations.get(match[1]) || new Set(); kinds.add(match[2]); candidateGenerations.set(match[1], kinds); }
   const executorGenerations = new Map();
   for (const key of Object.keys(executors)) { const match = executorKeyPattern.exec(key); const modes = executorGenerations.get(match[1]) || new Set(); modes.add(match[2]); executorGenerations.set(match[1], modes); }
-  const requiredCandidates = new Set(["backend", "worker", "canary"]); const requiredExecutors = new Set(["full-rls-admin-bootstrap", "full-rls-admin-ownership", "full-rls-capability-preflight", "full-rls-role-provision", "full-rls-role-verify", "full-rls-rollback", "full-rls-runtime-policy", "full-rls-verification"]);
-  if ([...candidateGenerations.entries()].some(([, kinds]) => JSON.stringify([...kinds].sort()) !== JSON.stringify([...requiredCandidates].sort())) || [...executorGenerations.entries()].some(([, modes]) => JSON.stringify([...modes].sort()) !== JSON.stringify([...requiredExecutors].sort())) || candidateGenerations.size !== executorGenerations.size || [...candidateGenerations.keys()].some((generation) => !executorGenerations.has(generation))) throw new Error("Terraform state retained task-definition generations are incomplete.");
+  const requiredCandidates = new Set(["backend", "worker", "canary"]); const requiredReadOnlyCandidates = new Set([...requiredCandidates, "read_only_canary"]); const requiredExecutors = new Set(["full-rls-admin-bootstrap", "full-rls-admin-ownership", "full-rls-capability-preflight", "full-rls-role-provision", "full-rls-role-verify", "full-rls-rollback", "full-rls-runtime-policy", "full-rls-verification"]);
+  const completeGeneration = (kinds) => [requiredCandidates, requiredReadOnlyCandidates].some((expected) => JSON.stringify([...kinds].sort()) === JSON.stringify([...expected].sort()));
+  if ([...candidateGenerations.values()].some((kinds) => !completeGeneration(kinds)) || [...executorGenerations.values()].some((modes) => JSON.stringify([...modes].sort()) !== JSON.stringify([...requiredExecutors].sort())) || candidateGenerations.size !== executorGenerations.size || [...candidateGenerations.keys()].some((generation) => !executorGenerations.has(generation)) || [...executorGenerations.keys()].some((generation) => !candidateGenerations.has(generation))) throw new Error("Terraform state retained task-definition generations are incomplete; each generation must contain all 11 or all 12 task-definition families.");
   const policy = resourceInstances(state, "aws_iam_policy", "broker");
   if (policy.length !== 1 || policy[0].attributes?.arn !== STAGE_B_BROKER_POLICY.arn) throw new Error("Terraform state broker managed policy evidence is missing or wrong.");
   const attachment = resourceInstances(state, "aws_iam_role_policy_attachment", "broker");
@@ -230,12 +276,31 @@ export function renderTfvars(values) {
   return `${lines.join("\n")}\n`;
 }
 
+function readGeneratedString(tfvarsBytes, variable) {
+  const line = tfvarsBytes.toString("utf8").split("\n").find((candidate) => candidate.startsWith(`${variable} = `));
+  const encoded = line?.slice(variable.length + 3);
+  if (!encoded) throw new Error(`Stage B tfvars is missing ${variable}.`);
+  try { return JSON.parse(encoded); } catch { throw new Error(`Stage B tfvars ${variable} is malformed.`); }
+}
+
+function assertBrokerPackageBinding(tfvarsBytes, report) {
+  if (!path.isAbsolute(report.brokerPackagePath)) throw new Error("Stage B broker package path in the binding report must be absolute.");
+  const tfvarsBrokerPath = readGeneratedString(tfvarsBytes, "broker_package_path");
+  if (!path.isAbsolute(tfvarsBrokerPath) || tfvarsBrokerPath !== report.brokerPackagePath) throw new Error("Stage B broker package path does not match the canonical binding report.");
+  const stat = fs.lstatSync(tfvarsBrokerPath, { throwIfNoEntry: false });
+  if (!stat?.isFile() || stat.isSymbolicLink() || stat.size === 0) throw new Error("Stage B broker package must be a non-empty regular file.");
+  const bytes = fs.readFileSync(tfvarsBrokerPath);
+  if (sha256(bytes) !== report.brokerPackageRawSha256) throw new Error("Stage B broker package raw SHA256 does not match the canonical binding report.");
+  if (base64Sha256(bytes) !== report.brokerPackageBase64Sha256) throw new Error("Stage B broker package base64 SHA256 does not match the canonical binding report.");
+}
+
 export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedImageReleaseSha, expectedImageEvidenceSha256 } = {}) {
   assertAbsoluteFile(tfvarsPath, "Tfvars"); assertAbsoluteFile(bindingReportPath, "Binding report");
   const tfvarsBytes = fs.readFileSync(tfvarsPath); const reportBytes = fs.readFileSync(bindingReportPath); const report = JSON.parse(reportBytes);
   if (bindingReportSha256 && sha256(reportBytes) !== bindingReportSha256) throw new Error("Stage B tfvars binding-report SHA256 does not match the approved digest.");
   if (report?.schemaVersion !== STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION || report.tfvarsSchemaVersion !== STAGE_B_TFVARS_SCHEMA_VERSION || report.generator !== STAGE_B_TFVARS_GENERATOR) throw new Error("Stage B tfvars binding report is not produced by the canonical generator.");
   if (report.tfvarsSha256 !== sha256(tfvarsBytes)) throw new Error("Stage B tfvars was modified after canonical generation.");
+  assertBrokerPackageBinding(tfvarsBytes, report);
   for (const [key, expected] of [["toolingSha", expectedToolingSha], ["toolingTreeSha256", expectedToolingTreeSha256], ["imageReleaseSha", expectedImageReleaseSha], ["imageEvidenceCanonicalSha256", expectedImageEvidenceSha256]]) if (expected !== undefined && report[key] !== expected) throw new Error(`Stage B tfvars binding report ${key} does not match the current deployment identity.`);
   if (report.stateLineage !== STAGE_B_EXPECTED_STATE_LINEAGE || !Number.isInteger(report.stateSerial)) throw new Error("Stage B tfvars binding report state identity is malformed.");
   const expectedImages = ["backend", "worker", "executor", "canary", "readOnlyCanary"];
@@ -258,6 +323,8 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !digestPattern.test(toolingTreeSha256 || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "")) throw new Error("Tooling, tooling-tree, or image-release identity is malformed.");
   if (workspace !== STAGE_B_EXPECTED_WORKSPACE) throw new Error("Stage B tfvars require the production workspace.");
   assertAbsoluteFile(imageEvidence, "Image evidence"); assertAbsoluteFile(imageEvidenceSignature, "Image-evidence signature"); assertAbsoluteFile(stateBackup, "State backup"); assertAbsoluteFile(stageAInput, "Stage-A prerequisite input"); assertAbsoluteFile(brokerPackagePath, "Broker package");
+  const brokerPackageStat = fs.lstatSync(brokerPackagePath);
+  if (!brokerPackageStat.isFile() || brokerPackageStat.isSymbolicLink() || brokerPackageStat.size === 0) throw new Error("Broker package must be a non-empty regular file.");
   if (outputPath) assertOutputPath(outputPath, "Tfvars output"); if (bindingReportPath) assertOutputPath(bindingReportPath, "Binding-report output");
   if (!outputPath || !bindingReportPath) throw new Error("Tfvars and binding-report output paths are required.");
   const report = readJson(imageEvidence); const signature = readJson(imageEvidenceSignature);
@@ -271,7 +338,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
     stage_a_database_security_group_id: stageA.stageADatabaseSecurityGroupId, stage_a_executor_security_group_id: stageA.stageAExecutorSecurityGroupId, stage_a_executor_task_role_arn: stageA.stageAExecutorTaskRoleArn, stage_a_broker_role_arn: stageA.stageABrokerRoleArn,
     stage_a_executor_log_group_name: stageA.stageAExecutorLogGroupName, stage_a_executor_log_group_arn: stageA.stageAExecutorLogGroupArn, stage_a_broker_log_group_name: stageA.stageABrokerLogGroupName, stage_a_broker_log_group_arn: stageA.stageABrokerLogGroupArn,
     stage_a_runtime_secret_arns: stageA.stageARuntimeSecretArns, stage_a_executor_networking_ready: stageA.stageAExecutorNetworkingReady, approval_secret_arn: stageA.approvalSecretArn, approval_kms_key_arn: stageA.approvalKmsKeyArn, receipt_bucket_arn: stageA.receiptBucketArn,
-    broker_package_path: brokerPackagePath, tooling_sha: toolingSha, image_release_sha: imageReleaseSha, canonical_image_evidence_sha256: evidenceSha256, source_contract_sha256: contract.sourceContractSha256, migration_set_digest: contract.migrationSetDigest, package_checksum_sha256: contract.packageChecksumSha256,
+    broker_package_path: path.resolve(brokerPackagePath), tooling_sha: toolingSha, image_release_sha: imageReleaseSha, canonical_image_evidence_sha256: evidenceSha256, source_contract_sha256: contract.sourceContractSha256, migration_set_digest: contract.migrationSetDigest, package_checksum_sha256: contract.packageChecksumSha256,
     backend_image: images.backend_image.value, worker_image: images.worker_image.value, executor_image: images.executor_image.value, canary_image: images.canary_image.value, read_only_canary_image: images.read_only_canary_image.value, stage_a_read_only_canary_database_secret_arn: stageA.stageAReadOnlyCanaryDatabaseSecretArn,
     retained_candidate_task_definitions: retained.retainedCandidateTaskDefinitions, retained_executor_task_definitions: retained.retainedExecutorTaskDefinitions,
   };
@@ -283,13 +350,13 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
     generator: STAGE_B_TFVARS_GENERATOR,
     toolingSha, toolingTreeSha256, imageReleaseSha, imageEvidenceCanonicalSha256: evidenceSha256,
     imageEvidenceSource: path.basename(imageEvidence), imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
-    brokerPackageRawSha256: sha256(brokerBytes), brokerPackageBase64Sha256: base64Sha256(brokerBytes), sourceContractSha256: contract.sourceContractSha256, migrationSetDigest: contract.migrationSetDigest, packageChecksumSha256: contract.packageChecksumSha256,
+    brokerPackagePath: path.resolve(brokerPackagePath), brokerPackageRawSha256: sha256(brokerBytes), brokerPackageBase64Sha256: base64Sha256(brokerBytes), sourceContractSha256: contract.sourceContractSha256, migrationSetDigest: contract.migrationSetDigest, packageChecksumSha256: contract.packageChecksumSha256,
     images: Object.fromEntries(Object.entries(images).map(([variable, image]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: image.service, repository: image.repository, tag: image.tag, imageReference: image.value, digestLength: image.digest.length, digest: image.digest, matchesEvidence: report.images.find((record) => record.service === image.service)?.digest === image.digest }])),
     retainedDefinitions: { candidate: retained.counts.candidate, executor: retained.counts.executor },
     tfvarsSha256,
   };
   if (Object.values(bindingReport.images).some((image) => image.digestLength !== 71 || image.matchesEvidence !== true)) throw new Error("Stage B image binding report contains an unequal or malformed digest.");
-  writeAtomic(outputPath, tfvarsBytes, { allowOverwrite }); writeAtomic(bindingReportPath, Buffer.from(`${JSON.stringify(bindingReport, null, 2)}\n`), { allowOverwrite });
+  writeAtomicPair({ tfvarsPath: outputPath, bindingReportPath, tfvarsBytes, bindingReportBytes: Buffer.from(`${JSON.stringify(bindingReport, null, 2)}\n`), allowOverwrite });
   return { outputPath, bindingReportPath, tfvarsSha256, bindingReport, values };
 }
 

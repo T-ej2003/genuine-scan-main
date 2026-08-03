@@ -25,7 +25,7 @@ npm run stage-b:generate-tfvars -- \
   --binding-report /absolute/private/production-green-stage-b-tfvars.binding.json
 ```
 
-Record the generated tfvars SHA and binding-report SHA. Closure and the apply wrapper must receive both files and the binding-report SHA; a modified tfvars file or missing report is rejected.
+Record the generated tfvars SHA and binding-report SHA. Closure, plan generation, and both wrapper modes must receive --tfvars, --tfvars-binding-report, --tfvars-binding-report-sha256, and --tooling-tree-sha256; a modified tfvars file, missing provenance, or current broker ZIP byte mismatch is rejected before Terraform execution. The real apply path repeats the ZIP check immediately before applying the saved plan.
 
 ## Generator input inventory
 
@@ -55,4 +55,4 @@ MSCQR_STAGE_B_PLAN_ENABLED=true MSCQR_STAGE_B_PLAN_CONFIRM=MSCQR_GENERATE_STAGE_
   --image-release-sha "$IMAGE_RELEASE_SHA"
 ```
 
-Review the saved JSON plan. Stop on any delete or any resource outside the listed control-plane types. A separately approved operator runbook must authorize `terraform apply`; this repository does not provide an apply wrapper.
+Review the saved JSON plan. Stop on any delete or any resource outside the listed control-plane types. A separately approved operator runbook must invoke scripts/apply-production-green-stage-b.mjs with the complete canonical tfvars provenance options; direct Terraform apply is not an approved path.
