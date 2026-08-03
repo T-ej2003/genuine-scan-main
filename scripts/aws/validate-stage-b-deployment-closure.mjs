@@ -9,6 +9,7 @@ import { assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolic
 import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, validateManifest } from "./validate-production-green-stage-b-permissions.mjs";
 import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENCE_REVOCATION_MODEL } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -34,6 +35,12 @@ if (checkoutMode === "production") {
   readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
 } else {
   assertStageBProtectedMainCheckout(buildStageBProtectedMainCheckoutEvidence({ toolingSha: currentHead, currentHead, originMainHead: undefined, isAncestor: false, porcelainStatus: execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root, encoding: "utf8" }), repositoryState: { remoteDefaultBranch: undefined, shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "review" }));
+}
+const tfvarsPath = process.env.STAGE_B_TFVARS_PATH;
+const bindingReportPath = process.env.STAGE_B_TFVARS_BINDING_REPORT_PATH;
+if (checkoutMode === "production" || tfvarsPath || bindingReportPath) {
+  if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256) throw new Error("Production Stage B closure requires canonical tfvars, binding report, and binding-report SHA256.");
+  assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedImageReleaseSha: process.env.STAGE_B_IMAGE_RELEASE_SHA, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256 });
 }
 assert.equal(matrix.schemaVersion, 1, "Stage B closure matrix schema is unsupported.");
 assert.equal(matrix.account, "368992683803");

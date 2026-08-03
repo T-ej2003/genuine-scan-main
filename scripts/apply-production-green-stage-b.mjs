@@ -24,6 +24,7 @@ import { assertStageBTerraformBackendPolicy } from "./aws/stage-b-terraform-back
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenceSha256 as canonicalImageEvidenceSha256, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
+import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -85,6 +86,10 @@ export function parseCli(argv) {
     auditSha256: requireOption(argv, "--audit-sha256"),
     savedPlanSha256: requireOption(argv, "--saved-plan-sha256"),
     canonicalPlanJsonSha256: requireOption(argv, "--canonical-plan-json-sha256"),
+    tfvarsPath: readOption(argv, "--tfvars"),
+    tfvarsBindingReportPath: readOption(argv, "--tfvars-binding-report"),
+    tfvarsBindingReportSha256: readOption(argv, "--tfvars-binding-report-sha256"),
+    toolingTreeSha256: readOption(argv, "--tooling-tree-sha256"),
     verifyOnly: argv.includes("--verify-only"),
   };
 }
@@ -115,8 +120,12 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   return true;
 }
 
-export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, imageReleaseSha, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
+export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, toolingTreeSha256, imageReleaseSha, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
   assertStageBTerraformBackendPolicy(readJson("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json"));
+  if (tfvarsPath || tfvarsBindingReportPath || tfvarsBindingReportSha256) {
+    if (!tfvarsPath || !tfvarsBindingReportPath || !tfvarsBindingReportSha256) throw new Error("Canonical Stage B tfvars, binding report, and binding-report SHA256 are required together.");
+    assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath: tfvarsBindingReportPath, bindingReportSha256: tfvarsBindingReportSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha: imageReleaseSha, expectedImageEvidenceSha256: imageEvidenceSha256 });
+  }
   if (!path.isAbsolute(planPath) || !path.isAbsolute(planJsonPath) || !path.isAbsolute(auditPath) || !path.isAbsolute(permissionReportPath) || !path.isAbsolute(permissionReportSignaturePath) || !path.isAbsolute(imageEvidencePath) || !path.isAbsolute(imageEvidenceSignaturePath)) throw new Error("All Stage B apply artifacts must use absolute paths.");
   if (!fs.existsSync(planPath)) throw new Error("Saved Terraform plan is missing.");
   if (!fs.existsSync(permissionReportPath)) throw new Error("Permission-preflight report is missing.");
