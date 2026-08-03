@@ -20,6 +20,7 @@ import simulatorAllowed from "./fixtures/aws-iam-simulate-principal-policy-allow
 import { assertStageBReleaseCallerArn } from "../plan-production-green-stage-b.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
+import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
 import { generateImageEvidence, imageEvidenceSha256, signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
@@ -518,15 +519,15 @@ const wrapperArgs = (fixture, verifyOnly = false) => [
 
 const createValidStageBApplyFixture = (options = {}) => ({
   ...wrapperFixture(options),
-  protectedMainCheckout: {
+  protectedMainCheckout: buildStageBProtectedMainCheckoutEvidence({
     toolingSha: "b".repeat(40),
     currentHead: "b".repeat(40),
     originMainHead: "b".repeat(40),
     isAncestor: true,
     porcelainStatus: "",
-    repositoryState: { remoteDefaultBranch: "main", shallow: false },
+    repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false },
     mode: "production",
-  },
+  }),
 });
 
 const validApplyInput = (fixture) => ({

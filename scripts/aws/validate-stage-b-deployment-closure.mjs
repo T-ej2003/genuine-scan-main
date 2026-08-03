@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
-import { assertStageBProtectedMainCheckout, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -25,7 +25,7 @@ const currentHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, enco
 if (checkoutMode === "production") {
   readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
 } else {
-  assertStageBProtectedMainCheckout({ toolingSha: currentHead, currentHead, porcelainStatus: execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root, encoding: "utf8" }), repositoryState: {}, mode: "review" });
+  assertStageBProtectedMainCheckout(buildStageBProtectedMainCheckoutEvidence({ toolingSha: currentHead, currentHead, originMainHead: undefined, isAncestor: false, porcelainStatus: execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root, encoding: "utf8" }), repositoryState: { remoteDefaultBranch: undefined, shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "review" }));
 }
 assert.equal(matrix.schemaVersion, 1, "Stage B closure matrix schema is unsupported.");
 assert.equal(matrix.account, "368992683803");
