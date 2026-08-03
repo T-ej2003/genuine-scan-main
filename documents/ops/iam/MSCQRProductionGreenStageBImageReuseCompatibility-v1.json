@@ -4,12 +4,12 @@
   "imageReleaseSha": "7245a6036492f875654c414473737e33c1422f3c",
   "comparisonBaseSha": "7245a6036492f875654c414473737e33c1422f3c",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
-  "comparisonHeadSha256": "6666fed39459a3b6cea3188d295b7d03c87b9f85779cf1a0f986a084f83bed40",
-  "toolingInputTreeSha256": "6666fed39459a3b6cea3188d295b7d03c87b9f85779cf1a0f986a084f83bed40",
+  "comparisonHeadSha256": "a631b7a0737f5fa405755d1ac790e8ec60f08f71a3662acba3aaecaee64f3fa8",
+  "toolingInputTreeSha256": "a631b7a0737f5fa405755d1ac790e8ec60f08f71a3662acba3aaecaee64f3fa8",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
   "classificationRulesVersion": "stage-b-image-reuse-v2",
-  "generatedAt": "2026-08-03T16:40:46+01:00",
+  "generatedAt": "2026-08-03T18:04:48+01:00",
   "generatorVersion": "validate-stage-b-image-reuse@2",
   "classifiedChangedFiles": [
     {
@@ -98,6 +98,11 @@
       "imageAffecting": false
     },
     {
+      "file": "infra/aws/terraform/production-green-stage-b/stage-a-prerequisites.schema.json",
+      "category": "terraformOnly",
+      "imageAffecting": false
+    },
+    {
       "file": "infra/aws/terraform/production-green-stage-b/variables.tf",
       "category": "terraformOnly",
       "imageAffecting": false
@@ -114,6 +119,11 @@
     },
     {
       "file": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
       "category": "toolingOnly",
       "imageAffecting": false
     },
@@ -214,6 +224,11 @@
     },
     {
       "file": "scripts/tests/production-green-stage-b-terraform-backend.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-tfvars-generator.test.mjs",
       "category": "testOnly",
       "imageAffecting": false
     }
