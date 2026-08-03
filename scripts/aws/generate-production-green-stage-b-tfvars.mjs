@@ -17,7 +17,7 @@ import { STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION }
 
 export const STAGE_B_TFVARS_SCHEMA_VERSION = 1;
 export const STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION = 1;
-export const STAGE_B_EXPECTED_WORKSPACE = "production";
+export const STAGE_B_EXPECTED_ENVIRONMENT = "production";
 export const STAGE_B_EXPECTED_STATE_LINEAGE = "4e438e59-8b8b-194d-030c-5ede0c26344a";
 export const STAGE_B_MINIMUM_STATE_SERIAL = 76;
 export const STAGE_B_TFVARS_GENERATOR = "scripts/aws/generate-production-green-stage-b-tfvars.mjs";
@@ -164,7 +164,7 @@ function taskDefinitionFamily(kind, category) {
 
 export function deriveRetainedDefinitions(state) {
   if (!state || typeof state !== "object" || state.lineage !== STAGE_B_EXPECTED_STATE_LINEAGE) throw new Error("Terraform state lineage is wrong or missing.");
-  if (state.workspace && state.workspace !== STAGE_B_EXPECTED_WORKSPACE) throw new Error("Terraform state workspace is not production.");
+  if (state.workspace && ![STAGE_B_EXPECTED_ENVIRONMENT, "default"].includes(state.workspace)) throw new Error("Terraform state provenance is not production.");
   if (!Number.isInteger(state.serial) || state.serial < STAGE_B_MINIMUM_STATE_SERIAL) throw new Error("Terraform state serial is stale or malformed.");
   const resources = state.resources || [];
   if (resources.some((resource) => resource.type === "aws_ecs_task_definition" && ["candidate", "executor"].includes(resource.name))) throw new Error("Terraform state still contains current Stage B task-definition addresses.");
@@ -246,6 +246,7 @@ export function renderTfvars(values) {
   const lines = [
     `account_id = ${quote(values.account_id)}`,
     `aws_region = ${quote(values.aws_region)}`,
+    `deployment_environment = ${quote(values.deployment_environment)}`,
     `vpc_id = ${quote(values.vpc_id)}`,
     `private_subnet_ids = [${values.private_subnet_ids.map(quote).join(", ")}]`,
     `ecs_cluster_arn = ${quote(values.ecs_cluster_arn)}`,
@@ -338,9 +339,9 @@ function validateTfvarsValues(values) {
   for (const field of ["backend_image", "worker_image", "executor_image", "canary_image", "read_only_canary_image"]) if (!imageUriPattern.test(values[field] || "")) throw new Error(`${field} is not an immutable Stage B image reference.`);
 }
 
-export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, workspace = STAGE_B_EXPECTED_WORKSPACE, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, outputPath, bindingReportPath, allowOverwrite = false } = {}) {
+export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, outputPath, bindingReportPath, allowOverwrite = false } = {}) {
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !digestPattern.test(toolingTreeSha256 || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "")) throw new Error("Tooling, tooling-tree, or image-release identity is malformed.");
-  if (workspace !== STAGE_B_EXPECTED_WORKSPACE) throw new Error("Stage B tfvars require the production workspace.");
+  if (environment !== STAGE_B_EXPECTED_ENVIRONMENT) throw new Error("Stage B tfvars require the production environment.");
   assertAbsoluteFile(imageEvidence, "Image evidence"); assertAbsoluteFile(imageEvidenceSignature, "Image-evidence signature"); assertAbsoluteFile(stateBackup, "State backup"); assertAbsoluteFile(stageAInput, "Stage-A prerequisite input"); assertAbsoluteFile(stageAStateBackup, "Stage-A state backup"); assertAbsoluteFile(brokerPackagePath, "Broker package");
   const brokerPackageStat = fs.lstatSync(brokerPackagePath);
   if (!brokerPackageStat.isFile() || brokerPackageStat.isSymbolicLink() || brokerPackageStat.size === 0) throw new Error("Broker package must be a non-empty regular file.");
@@ -354,7 +355,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   if (sha256(stageAStateBytes) !== stageA.sourceStateSha256) throw new Error("Stage-A prerequisite input does not match its source state backup.");
   const contract = deriveContractDigests({ file: checksumsFile }); const brokerBytes = fs.readFileSync(brokerPackagePath);
   const values = {
-    account_id: STAGE_B.account, aws_region: STAGE_B.region, vpc_id: stageA.vpcId, private_subnet_ids: [...stageA.privateSubnetIds].sort(), ecs_cluster_arn: stageA.ecsClusterArn,
+    account_id: STAGE_B.account, aws_region: STAGE_B.region, deployment_environment: environment, vpc_id: stageA.vpcId, private_subnet_ids: [...stageA.privateSubnetIds].sort(), ecs_cluster_arn: stageA.ecsClusterArn,
     stage_a_database_security_group_id: stageA.stageADatabaseSecurityGroupId, stage_a_executor_security_group_id: stageA.stageAExecutorSecurityGroupId, stage_a_executor_task_role_arn: stageA.stageAExecutorTaskRoleArn, stage_a_broker_role_arn: stageA.stageABrokerRoleArn,
     stage_a_executor_log_group_name: stageA.stageAExecutorLogGroupName, stage_a_executor_log_group_arn: stageA.stageAExecutorLogGroupArn, stage_a_broker_log_group_name: stageA.stageABrokerLogGroupName, stage_a_broker_log_group_arn: stageA.stageABrokerLogGroupArn,
     stage_a_runtime_secret_arns: stageA.stageARuntimeSecretArns, stage_a_executor_networking_ready: stageA.stageAExecutorNetworkingReady, approval_secret_arn: stageA.approvalSecretArn, approval_kms_key_arn: stageA.approvalKmsKeyArn, receipt_bucket_arn: stageA.receiptBucketArn,
@@ -385,7 +386,7 @@ function requiredOption(argv, option) { const index = argv.indexOf(option); cons
 export function parseCli(argv = process.argv.slice(2)) {
   return {
     imageEvidence: requiredOption(argv, "--image-evidence"), imageEvidenceSignature: requiredOption(argv, "--image-evidence-signature"), stateBackup: requiredOption(argv, "--state-backup"), stageAInput: requiredOption(argv, "--stage-a-input"), stageAStateBackup: requiredOption(argv, "--stage-a-state-backup"), brokerPackagePath: requiredOption(argv, "--broker-package"),
-    toolingSha: requiredOption(argv, "--tooling-sha"), toolingTreeSha256: requiredOption(argv, "--tooling-tree-sha256"), imageReleaseSha: requiredOption(argv, "--image-release-sha"), workflowRunId: requiredOption(argv, "--workflow-run-id"), canonicalArtifactSha256: requiredOption(argv, "--canonical-artifact-sha256"), workspace: requiredOption(argv, "--workspace"), outputPath: requiredOption(argv, "--output"), bindingReportPath: requiredOption(argv, "--binding-report"), allowOverwrite: argv.includes("--allow-overwrite"),
+    toolingSha: requiredOption(argv, "--tooling-sha"), toolingTreeSha256: requiredOption(argv, "--tooling-tree-sha256"), imageReleaseSha: requiredOption(argv, "--image-release-sha"), workflowRunId: requiredOption(argv, "--workflow-run-id"), canonicalArtifactSha256: requiredOption(argv, "--canonical-artifact-sha256"), environment: requiredOption(argv, "--environment"), outputPath: requiredOption(argv, "--output"), bindingReportPath: requiredOption(argv, "--binding-report"), allowOverwrite: argv.includes("--allow-overwrite"),
   };
 }
 

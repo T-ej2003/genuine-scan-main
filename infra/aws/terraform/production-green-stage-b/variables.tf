@@ -1,5 +1,6 @@
 variable "account_id" { type = string }
 variable "aws_region" { type = string }
+variable "deployment_environment" { type = string }
 variable "vpc_id" { type = string }
 variable "private_subnet_ids" { type = set(string) }
 variable "ecs_cluster_arn" { type = string }
@@ -68,8 +69,8 @@ variable "log_retention_days" {
 
 check "production_only" {
   assert {
-    condition     = var.account_id == "368992683803" && var.aws_region == "eu-west-2" && terraform.workspace == "production"
-    error_message = "Stage B requires the production workspace in eu-west-2 account 368992683803."
+    condition     = var.account_id == "368992683803" && var.aws_region == "eu-west-2" && var.deployment_environment == "production"
+    error_message = "Stage B requires the production deployment environment in eu-west-2 account 368992683803."
   }
 }
 

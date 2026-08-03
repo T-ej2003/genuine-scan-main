@@ -8,17 +8,6 @@
       "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
     },
     {
-      "Sid": "ListStageBTerraformWorkspacePrefix",
-      "Effect": "Allow",
-      "Action": "s3:ListBucket",
-      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
-      "Condition": {
-        "StringEquals": {
-          "s3:prefix": "env:/"
-        }
-      }
-    },
-    {
       "Sid": "ReadWriteStageBProductionStateOnly",
       "Effect": "Allow",
       "Action": [
@@ -44,17 +33,24 @@
       "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
     },
     {
-      "Sid": "DenyStageBConfiguredDefaultKeyAccess",
+      "Sid": "DenyStageBLegacyWorkspaceLockAccess",
       "Effect": "Deny",
       "Action": [
         "s3:GetObject",
         "s3:PutObject",
         "s3:DeleteObject"
       ],
-      "Resource": [
-        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate",
-        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
-      ]
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
+    },
+    {
+      "Sid": "DenyStageBLegacyWorkspaceStateAccess",
+      "Effect": "Deny",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate"
     }
   ]
 }

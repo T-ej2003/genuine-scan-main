@@ -20,7 +20,7 @@ import {
   canonicalizeJson,
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
-import { assertStageBTerraformBackendPolicy } from "./aws/stage-b-terraform-backend-contract.mjs";
+import { assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendPolicy } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenceSha256 as canonicalImageEvidenceSha256, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
@@ -198,11 +198,16 @@ function showSavedPlan(planPath) {
   return execFileSync("terraform", ["show", "-json", planPath], { cwd: root, encoding: null, stdio: ["ignore", "pipe", "pipe"] });
 }
 
+function readInitializedBackendMetadata() {
+  const metadataPath = path.join(root, terraformRoot, ".terraform", "terraform.tfstate");
+  return JSON.parse(fs.readFileSync(metadataPath, "utf8"))?.backend;
+}
+
 export function runApply({ argv = process.argv.slice(2), env = process.env, deps = { getCaller: currentCaller, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) } } = {}) {
   if (env.MSCQR_STAGE_B_APPLY_ENABLED !== "true" || env.MSCQR_STAGE_B_APPLY_CONFIRM !== requiredConfirmation) throw new Error("Stage B apply gate is not enabled.");
-  if (env.TF_WORKSPACE !== "production") throw new Error("Stage B apply requires TF_WORKSPACE=production.");
+  if (env.TF_WORKSPACE !== "default") throw new Error("Stage B apply requires TF_WORKSPACE=default for the direct production state key.");
   const artifacts = parseCli(argv); const callerArn = deps.getCaller();
-  const defaultDeps = { getCaller: currentCaller, showPlan: showSavedPlan, validatePlan: assertStageBPlan, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) };
+  const defaultDeps = { getCaller: currentCaller, showPlan: showSavedPlan, validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) };
   const effectiveDeps = { ...defaultDeps, ...deps };
   const protectedMainCheckout = effectiveDeps.getProtectedMainCheckout
     ? effectiveDeps.getProtectedMainCheckout()
@@ -210,6 +215,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
       ? buildStageBProtectedMainCheckoutEvidence({ toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "production" })
       : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
   const verified = assertApplyArtifacts({ ...artifacts, callerArn, protectedMainCheckout, currentHead: protectedMainCheckout.currentHead, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature, verifyImageEvidence: effectiveDeps.verifyImageEvidence });
+  assertStageBTerraformInitializedBackendMetadata(effectiveDeps.getBackendMetadata());
   if (artifacts.verifyOnly) return { status: "ready-to-apply", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
   const applyCheckout = effectiveDeps.getProtectedMainCheckout
     ? effectiveDeps.getProtectedMainCheckout()

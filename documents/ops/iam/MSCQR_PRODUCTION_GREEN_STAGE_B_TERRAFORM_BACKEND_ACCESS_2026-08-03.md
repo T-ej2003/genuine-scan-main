@@ -5,26 +5,31 @@ This is the reviewed least-privilege contract for the non-root
 
 ## Proven Terraform request shape
 
-Terraform v1.15.7's S3 backend uses the default workspace key prefix `env:`. Its
-workspace discovery calls `ListObjectsV2` with the single prefix `env:/`; it does
-not first require `HeadBucket`, and it does not use the configured base key as a
-workspace-discovery prefix. Selecting `production` addresses the exact state and
-lock objects below.
+Terraform initializes by probing its configured key before it can select a CLI
+workspace. The prior base-key/workspace configuration therefore contradicted its
+base-key deny. The reviewed configuration now points directly at the existing
+production object and uses Terraform's `default` CLI workspace; the explicit
+`deployment_environment = "production"` input retains the environment guard.
 
 | Operation | Exact request/resource |
 | --- | --- |
 | bucket validation | `s3:GetBucketLocation` on the bucket ARN |
-| workspace discovery | `s3:ListBucket` with `s3:prefix=env:/` |
 | state refresh | `s3:GetObject` on the production state ARN |
 | state persistence | `s3:PutObject` on the production state ARN |
 | lock acquisition | `s3:PutObject` on the production `.tflock` ARN |
 | lock ownership/read | `s3:GetObject` on the production `.tflock` ARN |
 | lock release | `s3:DeleteObject` on the production `.tflock` ARN |
 
-The configured default key and its lock object are denied. The production state
-object is never deletable by the release role. The policy does not grant
-unconditioned `s3:ListBucket`, arbitrary object access, bucket administration,
+The legacy base key and its lock object are denied for reads and writes. The
+production state object is never deletable by the release role. The policy does
+not grant `s3:ListBucket`, arbitrary object access, bucket administration,
 versioning changes, or encryption changes.
+
+The plan, closure, verify-only, and pre-apply gates read Terraform's initialized
+backend metadata, require backend type `s3`, and accept only the reviewed bucket,
+key, region, encryption, and lockfile values plus Terraform's known null defaults.
+They reject unknown options and endpoint, credential, role, proxy, path-style,
+workspace-prefix, DynamoDB-lock, KMS, TLS, retry, or validation overrides.
 
 ## Exact policy
 
@@ -42,10 +47,9 @@ bucket/key grant.
 
 This PR changes source-controlled contracts and offline tests only. After manual
 merge, the approved administrator must publish the exact reviewed managed-policy
-version and remove only the stale Stage B statements from the Stage A inline
-policy. Then a fresh release session may verify `GetBucketLocation`, Terraform
-workspace discovery, exact state read, backend initialization, workspace
-selection, and a local state backup. Terraform must be the only actor exercising
+version. Then a fresh release session may generate the canonical backend config,
+verify `GetBucketLocation`, initialize the direct production-state backend, select
+the `default` workspace, and create a local state backup. Terraform must be the only actor exercising
 lock and state writes during the later approved saved-plan wrapper run.
 
 No production state, lock, IAM, ECR, runtime, database, network, or traffic

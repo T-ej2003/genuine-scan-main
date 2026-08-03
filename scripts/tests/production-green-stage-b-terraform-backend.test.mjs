@@ -1,18 +1,25 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
+  assertStageBTerraformBackendConfig,
+  assertStageBTerraformInitializedBackendMetadata,
   assertStageBTerraformBackendManifest,
   assertStageBTerraformBackendPolicy,
   STAGE_B_TERRAFORM_BACKEND,
+  STAGE_B_TERRAFORM_BACKEND_CONFIG,
   STAGE_B_TERRAFORM_BACKEND_MANIFEST,
   STAGE_B_TERRAFORM_BACKEND_POLICY,
 } from "../aws/stage-b-terraform-backend-contract.mjs";
+import { generateStageBTerraformBackendConfig } from "../aws/generate-production-green-stage-b-backend-config.mjs";
 import { validateManifest } from "../aws/validate-production-green-stage-b-permissions.mjs";
 
 const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json", "utf8"));
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const stageA = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
+const initializedMetadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8"));
 
 function matches(statement, action, resource, context) {
   const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
@@ -28,7 +35,7 @@ function decision(policies, action, resource, context = {}) {
   return statements.some((statement) => statement.Effect === "Allow" && matches(statement, action, resource, context)) ? "allowed" : "implicitDeny";
 }
 
-const { bucketArn, stateArn, lockArn, baseStateArn, baseLockArn } = STAGE_B_TERRAFORM_BACKEND;
+const { bucketArn, stateArn, lockArn, legacyWorkspaceArn, legacyWorkspaceLockArn } = STAGE_B_TERRAFORM_BACKEND;
 
 test("the canonical backend policy and manifest are exact and complete", () => {
   assert.equal(assertStageBTerraformBackendPolicy(policy), true);
@@ -38,10 +45,72 @@ test("the canonical backend policy and manifest are exact and complete", () => {
   assert.deepEqual(policy, STAGE_B_TERRAFORM_BACKEND_POLICY);
 });
 
-test("Terraform's exact backend operation set is allowed", () => {
+test("the direct production-state config uses the default CLI workspace", () => {
+  assert.equal(assertStageBTerraformBackendConfig(STAGE_B_TERRAFORM_BACKEND_CONFIG), true);
+  assert.equal(STAGE_B_TERRAFORM_BACKEND.workspaceName, "default");
+  assert.equal(STAGE_B_TERRAFORM_BACKEND_CONFIG.key, STAGE_B_TERRAFORM_BACKEND.stateKey);
+  assert.match(STAGE_B_TERRAFORM_BACKEND_CONFIG.key, /^env:\/production\//);
+  assert.throws(() => assertStageBTerraformBackendConfig({ ...STAGE_B_TERRAFORM_BACKEND_CONFIG, key: "other.tfstate" }), /backend key/);
+  assert.throws(() => assertStageBTerraformBackendConfig({ ...STAGE_B_TERRAFORM_BACKEND_CONFIG, profile: "other" }), /unreviewed key/);
+});
+
+test("Terraform v1.15.7 initialized metadata accepts only the canonical normalized S3 shape", () => {
+  assert.equal(assertStageBTerraformInitializedBackendMetadata(initializedMetadata.backend), true);
+});
+
+test("initialized backend metadata rejects noncanonical type, keys, endpoints, credentials, and transport options", () => {
+  const reject = (label, mutate, pattern) => {
+    const metadata = structuredClone(initializedMetadata);
+    mutate(metadata);
+    assert.throws(() => assertStageBTerraformInitializedBackendMetadata(metadata.backend), pattern, label);
+  };
+  reject("backend type", ({ backend }) => { backend.type = "local"; }, /type/);
+  reject("unknown metadata key", ({ backend }) => { backend.unreviewed = true; }, /unreviewed/);
+  reject("unknown config key", ({ backend }) => { backend.config.unreviewed = true; }, /unreviewed/);
+  for (const [key, value] of [
+    ["endpoints", { s3: "https://other.example" }], ["endpoints", { sts: "https://other.example" }],
+    ["profile", "other"], ["shared_credentials_file", "/tmp/creds"], ["shared_credentials_files", ["/tmp/creds"]], ["shared_config_files", ["/tmp/config"]], ["assume_role", { role_arn: "arn:aws:iam::1:role/other" }],
+    ["assume_role_with_web_identity", { role_arn: "arn:aws:iam::1:role/other" }], ["access_key", "access"], ["secret_key", "secret"], ["token", "token"],
+    ["custom_ca_bundle", "/tmp/ca"], ["insecure", true], ["http_proxy", "http://proxy"], ["https_proxy", "https://proxy"], ["no_proxy", "internal"], ["sts_region", "us-east-1"],
+    ["use_path_style", true], ["workspace_key_prefix", "env:"], ["dynamodb_table", "locks"], ["kms_key_id", "alias/other"],
+    ["skip_credentials_validation", true], ["skip_region_validation", true], ["skip_requesting_account_id", true], ["skip_metadata_api_check", true], ["skip_s3_checksum", true], ["max_retries", 10], ["retry_mode", "adaptive"],
+  ]) reject(key, ({ backend }) => { backend.config[key] = value; }, new RegExp(key));
+  reject("nested endpoint key", ({ backend }) => { backend.config.endpoints = { other: "https://other.example" }; }, /endpoints/);
+  reject("legacy path-style alias", ({ backend }) => { backend.config.force_path_style = true; backend.config.use_path_style = true; }, /force_path_style/);
+});
+
+test("initialized backend metadata rejects canonical value overrides", () => {
+  for (const [key, value] of [["bucket", "other"], ["key", "other.tfstate"], ["region", "us-east-1"], ["encrypt", false], ["use_lockfile", false]]) {
+    const metadata = structuredClone(initializedMetadata);
+    metadata.backend.config[key] = value;
+    assert.throws(() => assertStageBTerraformInitializedBackendMetadata(metadata.backend), new RegExp(key));
+  }
+});
+
+test("plan, closure, verify-only, and pre-apply consume initialized metadata rather than generated HCL", () => {
+  const planSource = fs.readFileSync("scripts/plan-production-green-stage-b.mjs", "utf8");
+  const closureSource = fs.readFileSync("scripts/aws/validate-stage-b-deployment-closure.mjs", "utf8");
+  const applySource = fs.readFileSync("scripts/apply-production-green-stage-b.mjs", "utf8");
+  assert.match(planSource, /assertStageBTerraformInitializedBackendMetadata/);
+  assert.match(closureSource, /STAGE_B_TERRAFORM_BACKEND_METADATA_PATH/);
+  assert.match(applySource, /assertStageBTerraformInitializedBackendMetadata/);
+  assert.match(applySource, /getBackendMetadata/);
+});
+
+test("the canonical backend-config generator writes only the direct production key", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-backend-"));
+  const outputPath = path.join(directory, "production.tfbackend");
+  const result = generateStageBTerraformBackendConfig({ outputPath });
+  assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
+  assert.match(fs.readFileSync(outputPath, "utf8"), /env:\/production\/mscqr\/production\/rls-green\/stage-b\/terraform\.tfstate/);
+  assert.equal(result.outputPath, outputPath);
+  assert.throws(() => generateStageBTerraformBackendConfig({ outputPath }), /new absolute private output path/);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("Terraform's exact direct backend operation set is allowed", () => {
   for (const [action, resource, context] of [
     ["s3:GetBucketLocation", bucketArn, {}],
-    ["s3:ListBucket", bucketArn, { prefix: "env:/" }],
     ["s3:GetObject", stateArn, {}],
     ["s3:PutObject", stateArn, {}],
     ["s3:GetObject", lockArn, {}],
@@ -50,24 +119,25 @@ test("Terraform's exact backend operation set is allowed", () => {
   ]) assert.equal(decision([policy], action, resource, context), "allowed", `${action} ${resource}`);
 });
 
-test("unprefixed HeadBucket semantics and unrelated prefixes remain denied", () => {
+test("workspace listing and HeadBucket-style access are not required", () => {
   assert.equal(decision([policy], "s3:ListBucket", bucketArn), "implicitDeny");
   assert.equal(decision([policy], "s3:ListBucket", bucketArn, { prefix: "env:/production/" }), "implicitDeny");
   assert.equal(decision([policy], "s3:ListBucket", bucketArn, { prefix: "unrelated/" }), "implicitDeny");
   assert.equal(STAGE_B_TERRAFORM_BACKEND.headBucketRequired, false);
 });
 
-test("state deletion and configured base-key access fail closed even with overlapping stale allows", () => {
+test("state deletion and legacy workspace access fail closed even with overlapping stale allows", () => {
   const staleStageB = {
     Version: "2012-10-17",
     Statement: [
-      { Effect: "Allow", Action: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], Resource: [stateArn, lockArn, baseStateArn, baseLockArn] },
+      { Effect: "Allow", Action: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], Resource: [stateArn, lockArn, legacyWorkspaceArn, legacyWorkspaceLockArn] },
     ],
   };
   assert.equal(decision([policy, staleStageB], "s3:DeleteObject", stateArn), "explicitDeny");
-  assert.equal(decision([policy, staleStageB], "s3:GetObject", baseStateArn), "explicitDeny");
-  assert.equal(decision([policy, staleStageB], "s3:PutObject", baseStateArn), "explicitDeny");
-  assert.equal(decision([policy, staleStageB], "s3:DeleteObject", baseLockArn), "explicitDeny");
+  for (const action of ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]) {
+    assert.equal(decision([policy, staleStageB], action, legacyWorkspaceArn), "explicitDeny");
+    assert.equal(decision([policy, staleStageB], action, legacyWorkspaceLockArn), "explicitDeny");
+  }
 });
 
 test("unrelated keys, buckets, and backend administration actions are denied", () => {

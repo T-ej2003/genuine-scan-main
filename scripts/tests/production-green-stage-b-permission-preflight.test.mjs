@@ -26,6 +26,7 @@ import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deploym
 import { generateImageEvidence, imageEvidenceSha256, signImageEvidence, IMAGE_EVIDENCE_MAX_AGE_MS } from "../aws/production-green-stage-b-image-evidence.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
+const initializedBackendMetadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8")).backend;
 const roleArn = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
 const brokerPolicyArn = "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime";
 const brokerRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker";
@@ -56,7 +57,7 @@ const planBytes = Buffer.from(JSON.stringify(plan));
 const savedPlanBytes = Buffer.from("saved-binary-plan");
 const now = "2026-08-01T12:00:00.000Z";
 const clearCloudTrail = () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] });
-const allowRequiredDenyForbidden = ({ evaluation }) => ({ decision: evaluation.id.startsWith("backend-") || evaluation.id.startsWith("pass-unrelated-role") || evaluation.id.startsWith("pass-to-lambda") || evaluation.id.startsWith("invoke-broker") || evaluation.id.startsWith("execute-ecs-task") || evaluation.id.startsWith("update-ecs-service") || evaluation.id.startsWith("create-iam-role") || evaluation.id.startsWith("deregister-task-definition") ? "explicitDeny" : "allowed", matchedStatements: 1, missingContextValues: evaluation.manifestId === "backend-head-bucket-not-required" ? ["s3:prefix"] : [] });
+const allowRequiredDenyForbidden = ({ evaluation }) => ({ decision: evaluation.id.startsWith("backend-") || evaluation.id.startsWith("pass-unrelated-role") || evaluation.id.startsWith("pass-to-lambda") || evaluation.id.startsWith("invoke-broker") || evaluation.id.startsWith("execute-ecs-task") || evaluation.id.startsWith("update-ecs-service") || evaluation.id.startsWith("create-iam-role") || evaluation.id.startsWith("deregister-task-definition") ? "explicitDeny" : "allowed", matchedStatements: 1, missingContextValues: [] });
 const reportSignature = (report, overrides = {}) => ({
   schemaVersion: 1,
   keyId: PERMISSION_REPORT_SIGNING_KEY_ARN,
@@ -116,31 +117,25 @@ test("Stage A live-evidence policy source contains no mutation permission", () =
   }
 });
 
-const headBucketEvaluation = () => deriveRequiredEvaluations(plan, manifest).forbidden.find((item) => item.manifestId === "backend-head-bucket-not-required");
-const realHeadBucketSimulation = ({ evaluation }) => evaluation.manifestId === "backend-head-bucket-not-required"
-  ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: ["s3:prefix"] }
+const listBucketEvaluation = () => deriveRequiredEvaluations(plan, manifest).forbidden.find((item) => item.manifestId === "backend-list-bucket-not-required");
+const deniedListBucketSimulation = ({ evaluation }) => evaluation.manifestId === "backend-list-bucket-not-required"
+  ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] }
   : allowRequiredDenyForbidden({ evaluation });
 
-test("real AWS-shaped HeadBucket simulation is accepted as the declared forbidden proof", () => {
-  const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: realHeadBucketSimulation, cloudTrail: clearCloudTrail });
-  const result = report.forbiddenEvaluations.find((item) => item.manifestId === "backend-head-bucket-not-required");
+test("direct backend rejects unneeded ListBucket without missing context", () => {
+  const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: deniedListBucketSimulation, cloudTrail: clearCloudTrail });
+  const result = report.forbiddenEvaluations.find((item) => item.manifestId === "backend-list-bucket-not-required");
   assert.equal(report.status, "valid");
-  assert.deepEqual({ expected: result.expectedMissingContextValues, actual: result.missingContextValues, decision: result.decision, matchedStatements: result.matchedStatements, validation: result.validation }, { expected: ["s3:prefix"], actual: ["s3:prefix"], decision: "implicitDeny", matchedStatements: 0, validation: "accepted" });
+  assert.deepEqual({ expected: result.expectedMissingContextValues, actual: result.missingContextValues, decision: result.decision, matchedStatements: result.matchedStatements, validation: result.validation }, { expected: [], actual: [], decision: "implicitDeny", matchedStatements: 0, validation: "accepted" });
 });
 
-test("HeadBucket missing-context acceptance requires exact values and a deny decision", () => {
-  const item = headBucketEvaluation();
-  for (const [missingContextValues, decision] of [
-    [[], "implicitDeny"],
-    [["aws:RequestedRegion"], "implicitDeny"],
-    [["s3:prefix", "aws:RequestedRegion"], "implicitDeny"],
-    [["s3:prefix"], "allowed"],
-  ]) assert.throws(() => simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify({ EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: item.resource, EvalDecision: decision, MatchedStatements: [], MissingContextValues: missingContextValues }] }) }), /unexpected|allowed/);
-  assert.equal(simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify({ EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: item.resource, EvalDecision: "explicitDeny", MatchedStatements: [{}], MissingContextValues: ["s3:prefix"] }] }) }).decision, "explicitDeny");
+test("direct backend rejects missing context on its unneeded ListBucket proof", () => {
+  const item = listBucketEvaluation();
+  assert.throws(() => simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify({ EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: item.resource, EvalDecision: "implicitDeny", MatchedStatements: [], MissingContextValues: ["s3:prefix"] }] }) }), /unexpected MissingContextValues/);
 });
 
 test("unexpected missing context is rejected for forbidden and required evaluations", () => {
-  const forbidden = structuredClone(headBucketEvaluation());
+  const forbidden = structuredClone(listBucketEvaluation());
   forbidden.forbidden = true;
   forbidden.expectedMissingContextValues = [];
   assert.throws(() => validateSimulationResult(forbidden, { decision: "implicitDeny", matchedStatements: 0, missingContextValues: ["s3:prefix"] }), /unexpected MissingContextValues/);
@@ -153,10 +148,11 @@ test("expected missing context is forbidden on required entries, supplied contex
   required.required[0].expectedMissingContextValues = ["s3:prefix"];
   assert.throws(() => validateManifest(required), /only for forbidden/);
   const supplied = structuredClone(manifest);
-  supplied.forbidden.find((entry) => entry.id === "backend-head-bucket-not-required").context = [{ key: "s3:prefix", type: "string", values: ["env:/"] }];
+  supplied.forbidden.find((entry) => entry.id === "backend-list-bucket-not-required").expectedMissingContextValues = ["s3:prefix"];
+  supplied.forbidden.find((entry) => entry.id === "backend-list-bucket-not-required").context = [{ key: "s3:prefix", type: "string", values: ["env:/"] }];
   assert.throws(() => validateManifest(supplied), /overlaps supplied/);
   const duplicate = structuredClone(manifest);
-  duplicate.forbidden.find((entry) => entry.id === "backend-head-bucket-not-required").expectedMissingContextValues = ["s3:prefix", "s3:prefix"];
+  duplicate.forbidden.find((entry) => entry.id === "backend-list-bucket-not-required").expectedMissingContextValues = ["s3:prefix", "s3:prefix"];
   assert.throws(() => validateManifest(duplicate), /duplicate/);
 });
 
@@ -165,7 +161,7 @@ test("signed permission reports bind expected and actual missing context", () =>
   assertReport(report, reportBinding(report));
   for (const field of ["expectedMissingContextValues", "missingContextValues"]) {
     const tampered = structuredClone(report);
-    tampered.forbiddenEvaluations.find((item) => item.manifestId === "backend-head-bucket-not-required")[field] = [];
+    tampered.forbiddenEvaluations.find((item) => item.manifestId === "backend-list-bucket-not-required")[field] = ["s3:prefix"];
     assert.throws(() => assertReport(tampered, reportBinding(tampered)), /different expected missing context|unexpected MissingContextValues|inconsistent validation evidence/);
   }
 });
@@ -230,7 +226,7 @@ test("broker managed-policy simulation allows the exact update and rejects impli
   const brokerPlan = { ...plan, resource_changes: [plan.resource_changes[1]] };
   const evaluate = (decision) => runPermissionPreflight({
     reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: brokerPlan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session",
-    simulate: ({ evaluation }) => evaluation.action.startsWith("iam:") ? { decision, matchedStatements: 1, missingContextValues: evaluation.manifestId === "backend-head-bucket-not-required" ? ["s3:prefix"] : [] } : allowRequiredDenyForbidden({ evaluation }),
+    simulate: ({ evaluation }) => evaluation.action.startsWith("iam:") ? { decision, matchedStatements: 1, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }),
     cloudTrail: clearCloudTrail,
   });
   assert.equal(evaluate("allowed").requiredEvaluations.find((item) => item.action === "iam:CreatePolicyVersion").decision, "allowed");
@@ -540,7 +536,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   let planHash = crypto.createHash("sha256").update(effectiveApprovedBytes).digest("hex");
   let canonicalHash = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(JSON.parse(JSON.stringify(effectiveShownPlan))))).digest("hex");
   const requiredFixtureEntry = manifest.required.find((entry) => !entry.plan);
-  const forbiddenFixtureEntry = manifest.forbidden.find((entry) => entry.id === "backend-head-bucket-not-required");
+  const forbiddenFixtureEntry = manifest.forbidden.find((entry) => entry.id === "backend-list-bucket-not-required");
   const fixtureEvaluation = (entry, forbidden, decision, missingContextValues) => ({
     id: `${entry.id}:${entry.resources[0]}`,
     manifestId: entry.id,
@@ -569,7 +565,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     canonicalPlanJsonSha256: canonicalHash,
     generatedAt: new Date().toISOString(),
     requiredEvaluations: [fixtureEvaluation(requiredFixtureEntry, false, "allowed", [])],
-    forbiddenEvaluations: [fixtureEvaluation(forbiddenFixtureEntry, true, "implicitDeny", ["s3:prefix"])],
+    forbiddenEvaluations: [fixtureEvaluation(forbiddenFixtureEntry, true, "implicitDeny", [])],
     cloudTrail: { status: "clear", unresolvedDenials: [] },
     requiredAllowedCount: 1,
     requiredDeniedCount: 0,
@@ -678,7 +674,7 @@ const createValidStageBApplyFixture = (options = {}) => ({
 
 const validApplyInput = (fixture) => ({
   argv: wrapperArgs(fixture, true),
-  env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
+  env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
   deps: {
     getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
     getProtectedMainCheckout: () => fixture.protectedMainCheckout,
@@ -686,6 +682,7 @@ const validApplyInput = (fixture) => ({
     validatePlan: () => {},
     verifyPermissionSignature: () => true,
     verifyImageEvidence: fixture.verifyImageEvidence,
+    getBackendMetadata: () => structuredClone(initializedBackendMetadata),
     apply: () => { throw new Error("apply must not be reached"); },
   },
 });
@@ -696,7 +693,7 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
   let checkoutReadCount = 0;
   return {
     argv: wrapperArgs(fixture),
-    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
+    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
     deps: {
       getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
       getProtectedMainCheckout: () => {
@@ -709,6 +706,7 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
       validatePlan: () => {},
       verifyPermissionSignature: () => true,
       verifyImageEvidence: fixture.verifyImageEvidence,
+      getBackendMetadata: () => structuredClone(initializedBackendMetadata),
       apply: (planPath) => {
         applyCalls.push(planPath);
         return { status: 0 };
@@ -748,6 +746,25 @@ test("valid non-verify-only apply path calls the injected apply stub exactly onc
   assert.equal(runApply(input).status, "applied-saved-plan");
   assert.equal(input.checkoutReadCount, 2);
   assert.deepEqual(input.applyCalls, [fixture.planPath]);
+});
+
+test("wrapper rejects a backend config using another key before the apply seam", () => {
+  const fixture = createValidStageBApplyFixture();
+  const input = validRealApplyInput(fixture);
+  input.deps.getBackendMetadata = () => ({ ...structuredClone(initializedBackendMetadata), config: { ...initializedBackendMetadata.config, key: "other.tfstate" } });
+  assert.throws(() => runApply(input), /backend key/);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("wrapper verify-only and pre-apply reject redirected backend metadata", () => {
+  for (const verifyOnly of [true, false]) {
+    const fixture = createValidStageBApplyFixture();
+    const input = verifyOnly ? validApplyInput(fixture) : validRealApplyInput(fixture);
+    input.argv = wrapperArgs(fixture, verifyOnly);
+    input.deps.getBackendMetadata = () => ({ ...structuredClone(initializedBackendMetadata), config: { ...initializedBackendMetadata.config, endpoints: { s3: "https://other.example" } } });
+    assert.throws(() => runApply(input), /endpoints/);
+    if (!verifyOnly) assert.deepEqual(input.applyCalls, []);
+  }
 });
 
 test("production apply rejects every incomplete canonical tfvars provenance combination", () => {
@@ -831,8 +848,8 @@ test("exact binary plan and derived JSON reach the ready-to-apply boundary witho
   const fixture = wrapperFixture();
   const result = runApply({
     argv: wrapperArgs(fixture, true),
-    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
-    deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { throw new Error("apply must not be reached"); } },
+    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+    deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, getBackendMetadata: () => structuredClone(initializedBackendMetadata), apply: () => { throw new Error("apply must not be reached"); } },
   });
   assert.equal(result.status, "ready-to-apply");
 });
@@ -932,7 +949,7 @@ test("verification-only and real apply paths reject an invalid report signature 
   for (const verifyOnly of [true, false]) {
     assert.throws(() => runApply({
       argv: wrapperArgs(fixture, verifyOnly),
-      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
+      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
       deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => false, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { throw new Error("apply must not be reached"); } },
     }), /signature verification failed/);
   }
@@ -967,7 +984,7 @@ test("wrapper rejects a plan digest mismatch before invoking apply", () => {
     let applied = false;
     assert.throws(() => runApply({
       argv: wrapperArgs(fixture, verifyOnly),
-      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
+      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
       deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { applied = true; } },
     }), /Terraform image variable backend_image/);
     assert.equal(applied, false);
@@ -978,7 +995,7 @@ test("apply wrapper rejects a non-STS caller during verification-only mode", () 
   const fixture = wrapperFixture();
   assert.throws(() => runApply({
     argv: wrapperArgs(fixture, true),
-    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "production" },
+    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
     deps: { getCaller: () => roleArn, currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, apply: () => { throw new Error("apply must not be reached"); } },
   }), /STS assumed-role/);
 });

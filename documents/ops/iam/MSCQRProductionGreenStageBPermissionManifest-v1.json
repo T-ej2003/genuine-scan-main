@@ -11,14 +11,14 @@
   "backendContract": {
     "policyPath": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
     "bucketArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
-    "workspaceDiscoveryPrefixes": ["env:/"],
+    "workspaceName": "default",
+    "backendConfig": {"bucket":"mscqr-production-terraform-state-368992683803-eu-west-2","key":"env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate","region":"eu-west-2","encrypt":true,"use_lockfile":true},
     "stateArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate",
     "lockArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock",
-    "configuredDefaultKeyAccess": "denied",
+    "legacyWorkspaceKeyAccess": "read-write-delete-denied",
     "headBucketRequired": false,
     "requiredActions": [
       "s3:GetBucketLocation",
-      "s3:ListBucket(env:/)",
       "s3:GetObject(state)",
       "s3:PutObject(state)",
       "s3:GetObject(lock)",
@@ -34,14 +34,6 @@
       "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"],
       "context": [],
       "evidence": "approved Stage B Terraform S3 backend bucket validation"
-    },
-    {
-      "id": "refresh-stage-b-backend-workspace-discovery",
-      "phase": "refresh",
-      "action": "s3:ListBucket",
-      "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"],
-      "context": [{"key": "s3:prefix", "type": "string", "values": ["env:/"]}],
-      "evidence": "Terraform v1.15.7 S3 backend Workspaces uses the exact env:/ prefix"
     },
     {
       "id": "refresh-stage-b-backend-state-read",
@@ -450,12 +442,12 @@
     {"id":"full-rls-verification","address":"aws_ecs_task_definition.executor[\"full-rls-verification\"]","family":"mscqr-production-full-rls-green-full-rls-verification","resource":"arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-verification:*","executionRoleArn":"arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution","taskRoleArn":"arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task","actions":["create"],"registerContext":[{"key":"aws:RequestedRegion","type":"string","values":["eu-west-2"]},{"key":"aws:RequestTag/Environment","type":"string","values":["production"]},{"key":"aws:RequestTag/ManagedBy","type":"string","values":["Terraform"]},{"key":"aws:RequestTag/Component","type":"string","values":["full-rls-green-stage-b"]},{"key":"aws:TagKeys","type":"stringList","values":["Environment","ManagedBy","Component"]}],"passRoleContext":[{"key":"iam:PassedToService","type":"string","values":["ecs-tasks.amazonaws.com"]}]}
   ],
   "forbidden": [
-    {"id": "backend-head-bucket-not-required", "action": "s3:ListBucket", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"], "context": [], "expectedMissingContextValues": ["s3:prefix"], "reason": "HeadBucket supplies no s3:prefix and is not a Stage B acceptance gate"},
-    {"id": "backend-unrelated-prefix-list", "action": "s3:ListBucket", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"], "context": [{"key": "s3:prefix", "type": "string", "values": ["unrelated/"]}], "reason": "ListBucket is limited to Terraform's exact env:/ workspace prefix"},
+    {"id": "backend-list-bucket-not-required", "action": "s3:ListBucket", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"], "context": [], "reason": "The direct production-state backend does not list workspaces or require HeadBucket"},
     {"id": "backend-state-delete", "action": "s3:DeleteObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"], "context": [], "reason": "Terraform persists state but never deletes the state object"},
-    {"id": "backend-default-state-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate"], "context": [], "reason": "The selected production workspace uses the env:/ object, not the configured base key"},
-    {"id": "backend-default-state-write", "action": "s3:PutObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate"], "context": [], "reason": "The selected production workspace uses the env:/ object, not the configured base key"},
-    {"id": "backend-default-lock-delete", "action": "s3:DeleteObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"], "context": [], "reason": "The selected production workspace uses the env:/ lock object, not the configured base key"},
+    {"id": "backend-legacy-state-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate"], "context": [], "reason": "The direct production-state backend never reads the legacy workspace base key"},
+    {"id": "backend-legacy-state-write", "action": "s3:PutObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate"], "context": [], "reason": "The direct production-state backend never writes the legacy workspace base key"},
+    {"id": "backend-legacy-lock-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"], "context": [], "reason": "The direct production-state backend never reads the legacy workspace lock"},
+    {"id": "backend-legacy-lock-delete", "action": "s3:DeleteObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"], "context": [], "reason": "The direct production-state backend never deletes the legacy workspace lock"},
     {"id": "backend-other-production-workspace-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/other/terraform.tfstate"], "context": [], "reason": "Stage B release role is bound to one production workspace object"},
     {"id": "backend-other-stage-b-key-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/other.tfstate"], "context": [], "reason": "Stage B release role is bound to one exact state object"},
     {"id": "backend-unrelated-bucket-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::unrelated-bucket/state.tfstate"], "context": [], "reason": "Stage B release role has no arbitrary bucket access"},

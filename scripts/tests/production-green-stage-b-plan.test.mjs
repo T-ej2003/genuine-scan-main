@@ -323,7 +323,8 @@ test("Stage B Terraform root is control-plane-only and binds four digest images"
   assert.match(main, /aws_dynamodb_table/);
   assert.match(main, /aws_lambda_alias/);
   assert.doesNotMatch(main, /aws_ecs_service|aws_db_|aws_rds_|aws_lb|aws_route53|aws_secretsmanager_secret/);
-  assert.match(variables, /terraform\.workspace == "production"/);
+  assert.match(variables, /var\.deployment_environment == "production"/);
+  assert.doesNotMatch(variables, /terraform\.workspace/);
   assert.match(variables, /@sha256/);
   for (const file of ["green-backend-candidate.json", "green-worker-candidate.json", "green-activation-executor.json", "green-application-canary.json"]) {
     assert.match(fs.readFileSync(`${root}/task-definitions/${file}`, "utf8"), /"readonlyRootFilesystem": true/);
