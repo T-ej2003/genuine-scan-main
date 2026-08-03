@@ -120,6 +120,54 @@ function assertExactContextValues(context, expected, label) {
   }
 }
 
+function normalizeActualMissingContextValues(values, label) {
+  if (!Array.isArray(values) || values.some((value) => typeof value !== "string" || value.length === 0)) {
+    throw new Error(`${label} MissingContextValues is malformed.`);
+  }
+  return [...new Set(values)].sort();
+}
+
+export function normalizeExpectedMissingContextValues(entry, { forbidden, label = entry?.id || "permission evaluation" } = {}) {
+  const values = entry?.expectedMissingContextValues;
+  if (values === undefined) return [];
+  if (!forbidden) throw new Error(`${label} may declare expectedMissingContextValues only for forbidden evaluations.`);
+  if (!Array.isArray(values) || values.some((value) => typeof value !== "string" || value.length === 0)) {
+    throw new Error(`${label} expectedMissingContextValues is malformed.`);
+  }
+  if (new Set(values).size !== values.length) throw new Error(`${label} expectedMissingContextValues contains duplicate keys.`);
+  const suppliedKeys = new Set((entry.context || []).map(({ key }) => key));
+  if (values.some((value) => suppliedKeys.has(value))) throw new Error(`${label} expectedMissingContextValues overlaps supplied context.`);
+  return [...values].sort();
+}
+
+function sameStringSet(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+export function validateSimulationResult(item, result) {
+  if (!result || !["allowed", "explicitDeny", "implicitDeny"].includes(result.decision)
+    || !Number.isInteger(result.matchedStatements) || result.matchedStatements < 0) {
+    throw new Error(`IAM simulation result is malformed for ${item.id}.`);
+  }
+  const actualMissing = normalizeActualMissingContextValues(result.missingContextValues, item.id);
+  const expectedMissing = item.forbidden === true
+    ? normalizeExpectedMissingContextValues(item, { forbidden: true, label: item.id })
+    : (() => {
+      const values = item.expectedMissingContextValues;
+      if (values !== undefined && (!Array.isArray(values) || values.some((value) => typeof value !== "string" || value.length === 0))) throw new Error(`${item.id} expectedMissingContextValues is malformed.`);
+      if (values?.length) throw new Error(`${item.id} may declare expectedMissingContextValues only for forbidden evaluations.`);
+      return [];
+    })();
+  if (!item.forbidden && actualMissing.length > 0) throw new Error(`Required evaluation ${item.id} returned unexpected MissingContextValues: ${actualMissing.join(", ")}.`);
+  if (item.forbidden && !sameStringSet(actualMissing, expectedMissing)) {
+    throw new Error(`Forbidden evaluation ${item.id} returned unexpected MissingContextValues: expected=${expectedMissing.join(",")} actual=${actualMissing.join(",")}.`);
+  }
+  if (item.forbidden && actualMissing.length > 0 && result.decision === "allowed") {
+    throw new Error(`Forbidden evaluation ${item.id} returned allowed with MissingContextValues.`);
+  }
+  return { ...result, missingContextValues: actualMissing };
+}
+
 export function normalizeEvaluationTuple(entry, resource) {
   return JSON.stringify({
     action: entry.action,
@@ -167,6 +215,7 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION 
       throw new Error(`Permission manifest resources are invalid: ${entry.id}.`);
     }
     assertContext(entry.context, entry.id);
+    normalizeExpectedMissingContextValues(entry, { forbidden, label: entry.id });
     if (lambdaWriteActions.has(entry.action)) {
       const expectedResource = entry.action === "lambda:UpdateAlias"
         ? STAGE_B.brokerAliasArn
@@ -269,15 +318,18 @@ function assertBrokerManagedPolicyChange(change) {
   }
 }
 
-function evaluation(entry, resource) {
-  return {
+function evaluation(entry, resource, { forbidden = false } = {}) {
+  const result = {
     id: `${entry.id}:${resource}`,
     manifestId: entry.id,
     action: entry.action,
     resource,
     context: entry.context.map(({ key, type, values }) => ({ key, type, values: [...values] })),
+    expectedMissingContextValues: normalizeExpectedMissingContextValues(entry, { forbidden }),
     phase: entry.phase || "unspecified",
   };
+  Object.defineProperty(result, "forbidden", { value: forbidden, enumerable: false });
+  return result;
 }
 
 export function deriveRequiredEvaluations(plan, manifest) {
@@ -313,7 +365,7 @@ export function deriveRequiredEvaluations(plan, manifest) {
   for (const entry of manifest.required.filter((candidate) => candidate.plan?.coverageRequired)) {
     if (!matchedPlanEntries.has(entry.id)) throw new Error(`Permission manifest mapping has no matching plan change: ${entry.id}.`);
   }
-  const forbidden = manifest.forbidden.flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource)));
+  const forbidden = manifest.forbidden.flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource, { forbidden: true })));
   return {
     required: required.sort((left, right) => left.id.localeCompare(right.id)),
     forbidden: forbidden.sort((left, right) => left.id.localeCompare(right.id)),
@@ -344,11 +396,11 @@ export function simulatePrincipalPolicy({ roleArn, evaluation: item, run = (args
   if (!result || result.EvalActionName !== item.action || result.EvalResourceName !== item.resource) {
     throw new Error(`IAM simulation action or resource mismatch for ${item.id}.`);
   }
-  if (!Array.isArray(result.MatchedStatements) || !Array.isArray(result.MissingContextValues) || result.MissingContextValues.length > 0
+  if (!Array.isArray(result.MatchedStatements) || !Array.isArray(result.MissingContextValues)
     || !["allowed", "explicitDeny", "implicitDeny"].includes(result.EvalDecision)) {
     throw new Error(`IAM simulation returned malformed output for ${item.id}.`);
   }
-  return { decision: result.EvalDecision, matchedStatements: result.MatchedStatements.length, missingContextValues: result.MissingContextValues };
+  return validateSimulationResult(item, { decision: result.EvalDecision, matchedStatements: result.MatchedStatements.length, missingContextValues: result.MissingContextValues });
 }
 
 export function inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
@@ -449,8 +501,12 @@ export function runPermissionPreflight({
   if (!policyPublishedAt || !Number.isFinite(Date.parse(policyPublishedAt))) throw new Error("Policy publication timestamp is required and must be valid.");
   if (!cloudTrailSessionName) throw new Error("CloudTrail session name is required.");
   const derived = deriveRequiredEvaluations(plan, manifest);
-  const requiredResults = derived.required.map((item) => ({ ...item, ...simulate({ roleArn: simulatedRoleArn, evaluation: item }) }));
-  const forbiddenResults = derived.forbidden.map((item) => ({ ...item, ...simulate({ roleArn: simulatedRoleArn, evaluation: item }) }));
+  const runSimulation = (item) => {
+    const result = validateSimulationResult(item, simulate({ roleArn: simulatedRoleArn, evaluation: item }));
+    return { ...item, ...result, validation: item.forbidden ? (result.decision === "allowed" ? "rejected" : "accepted") : (result.decision === "allowed" ? "accepted" : "rejected") };
+  };
+  const requiredResults = derived.required.map(runSimulation);
+  const forbiddenResults = derived.forbidden.map(runSimulation);
   const cloudTrailResult = cloudTrail({ sessionName: cloudTrailSessionName, startTime: policyPublishedAt, endTime: generatedAt, requiredActions: derived.required.map((item) => item.action) });
   const deniedRequired = requiredResults.filter((item) => item.decision !== "allowed");
   const allowedForbidden = forbiddenResults.filter((item) => item.decision === "allowed");

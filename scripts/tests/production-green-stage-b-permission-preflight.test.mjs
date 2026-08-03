@@ -14,6 +14,7 @@ import {
   runPermissionPreflight,
   signPermissionReport,
   simulatePrincipalPolicy,
+  validateSimulationResult,
   validateManifest,
 } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import simulatorAllowed from "./fixtures/aws-iam-simulate-principal-policy-allowed.mjs";
@@ -54,7 +55,7 @@ const planBytes = Buffer.from(JSON.stringify(plan));
 const savedPlanBytes = Buffer.from("saved-binary-plan");
 const now = "2026-08-01T12:00:00.000Z";
 const clearCloudTrail = () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] });
-const allowRequiredDenyForbidden = ({ evaluation }) => ({ decision: evaluation.id.startsWith("backend-") || evaluation.id.startsWith("pass-unrelated-role") || evaluation.id.startsWith("pass-to-lambda") || evaluation.id.startsWith("invoke-broker") || evaluation.id.startsWith("execute-ecs-task") || evaluation.id.startsWith("update-ecs-service") || evaluation.id.startsWith("create-iam-role") || evaluation.id.startsWith("deregister-task-definition") ? "explicitDeny" : "allowed", matchedStatements: 1 });
+const allowRequiredDenyForbidden = ({ evaluation }) => ({ decision: evaluation.id.startsWith("backend-") || evaluation.id.startsWith("pass-unrelated-role") || evaluation.id.startsWith("pass-to-lambda") || evaluation.id.startsWith("invoke-broker") || evaluation.id.startsWith("execute-ecs-task") || evaluation.id.startsWith("update-ecs-service") || evaluation.id.startsWith("create-iam-role") || evaluation.id.startsWith("deregister-task-definition") ? "explicitDeny" : "allowed", matchedStatements: 1, missingContextValues: evaluation.manifestId === "backend-head-bucket-not-required" ? ["s3:prefix"] : [] });
 const reportSignature = (report, overrides = {}) => ({
   schemaVersion: 1,
   keyId: PERMISSION_REPORT_SIGNING_KEY_ARN,
@@ -85,6 +86,60 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
 });
 
+const headBucketEvaluation = () => deriveRequiredEvaluations(plan, manifest).forbidden.find((item) => item.manifestId === "backend-head-bucket-not-required");
+const realHeadBucketSimulation = ({ evaluation }) => evaluation.manifestId === "backend-head-bucket-not-required"
+  ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: ["s3:prefix"] }
+  : allowRequiredDenyForbidden({ evaluation });
+
+test("real AWS-shaped HeadBucket simulation is accepted as the declared forbidden proof", () => {
+  const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: realHeadBucketSimulation, cloudTrail: clearCloudTrail });
+  const result = report.forbiddenEvaluations.find((item) => item.manifestId === "backend-head-bucket-not-required");
+  assert.equal(report.status, "valid");
+  assert.deepEqual({ expected: result.expectedMissingContextValues, actual: result.missingContextValues, decision: result.decision, matchedStatements: result.matchedStatements, validation: result.validation }, { expected: ["s3:prefix"], actual: ["s3:prefix"], decision: "implicitDeny", matchedStatements: 0, validation: "accepted" });
+});
+
+test("HeadBucket missing-context acceptance requires exact values and a deny decision", () => {
+  const item = headBucketEvaluation();
+  for (const [missingContextValues, decision] of [
+    [[], "implicitDeny"],
+    [["aws:RequestedRegion"], "implicitDeny"],
+    [["s3:prefix", "aws:RequestedRegion"], "implicitDeny"],
+    [["s3:prefix"], "allowed"],
+  ]) assert.throws(() => simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify({ EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: item.resource, EvalDecision: decision, MatchedStatements: [], MissingContextValues: missingContextValues }] }) }), /unexpected|allowed/);
+  assert.equal(simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify({ EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: item.resource, EvalDecision: "explicitDeny", MatchedStatements: [{}], MissingContextValues: ["s3:prefix"] }] }) }).decision, "explicitDeny");
+});
+
+test("unexpected missing context is rejected for forbidden and required evaluations", () => {
+  const forbidden = structuredClone(headBucketEvaluation());
+  forbidden.forbidden = true;
+  forbidden.expectedMissingContextValues = [];
+  assert.throws(() => validateSimulationResult(forbidden, { decision: "implicitDeny", matchedStatements: 0, missingContextValues: ["s3:prefix"] }), /unexpected MissingContextValues/);
+  const required = deriveRequiredEvaluations(plan, manifest).required[0];
+  assert.throws(() => validateSimulationResult(required, { decision: "allowed", matchedStatements: 1, missingContextValues: ["unexpected:key"] }), /Required evaluation/);
+});
+
+test("expected missing context is forbidden on required entries, supplied contexts, and duplicates", () => {
+  const required = structuredClone(manifest);
+  required.required[0].expectedMissingContextValues = ["s3:prefix"];
+  assert.throws(() => validateManifest(required), /only for forbidden/);
+  const supplied = structuredClone(manifest);
+  supplied.forbidden.find((entry) => entry.id === "backend-head-bucket-not-required").context = [{ key: "s3:prefix", type: "string", values: ["env:/"] }];
+  assert.throws(() => validateManifest(supplied), /overlaps supplied/);
+  const duplicate = structuredClone(manifest);
+  duplicate.forbidden.find((entry) => entry.id === "backend-head-bucket-not-required").expectedMissingContextValues = ["s3:prefix", "s3:prefix"];
+  assert.throws(() => validateManifest(duplicate), /duplicate/);
+});
+
+test("signed permission reports bind expected and actual missing context", () => {
+  const report = validReport();
+  assertReport(report, reportBinding(report));
+  for (const field of ["expectedMissingContextValues", "missingContextValues"]) {
+    const tampered = structuredClone(report);
+    tampered.forbiddenEvaluations.find((item) => item.manifestId === "backend-head-bucket-not-required")[field] = [];
+    assert.throws(() => assertReport(tampered, reportBinding(tampered)), /different expected missing context|unexpected MissingContextValues|inconsistent validation evidence/);
+  }
+});
+
 test("exact canary create derives Register, TagResource, and both PassRole evaluations", () => {
   const derived = deriveRequiredEvaluations(plan, manifest);
   const passRoles = derived.required.filter((item) => item.action === "iam:PassRole");
@@ -104,6 +159,7 @@ test("exact broker managed-policy update derives version actions for the exact p
     action: "iam:DeletePolicyVersion",
     resource: brokerPolicyArn,
     context: [],
+    expectedMissingContextValues: [],
     phase: "apply",
   }, {
     id: "update-broker-managed-policy:arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime",
@@ -111,6 +167,7 @@ test("exact broker managed-policy update derives version actions for the exact p
     action: "iam:CreatePolicyVersion",
     resource: brokerPolicyArn,
     context: [],
+    expectedMissingContextValues: [],
     phase: "apply",
   }]);
 });
@@ -143,7 +200,7 @@ test("broker managed-policy simulation allows the exact update and rejects impli
   const brokerPlan = { ...plan, resource_changes: [plan.resource_changes[1]] };
   const evaluate = (decision) => runPermissionPreflight({
     reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: brokerPlan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session",
-    simulate: ({ evaluation }) => evaluation.action.startsWith("iam:") ? { decision } : allowRequiredDenyForbidden({ evaluation }),
+    simulate: ({ evaluation }) => evaluation.action.startsWith("iam:") ? { decision, matchedStatements: 1, missingContextValues: evaluation.manifestId === "backend-head-bucket-not-required" ? ["s3:prefix"] : [] } : allowRequiredDenyForbidden({ evaluation }),
     cloudTrail: clearCloudTrail,
   });
   assert.equal(evaluate("allowed").requiredEvaluations.find((item) => item.action === "iam:CreatePolicyVersion").decision, "allowed");
@@ -169,7 +226,7 @@ test("complete mocked preflight passes and binds the exact plan SHA", () => {
 test("missing required PassRole fails closed", () => {
   const report = runPermissionPreflight({
     reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
-    simulate: ({ evaluation }) => evaluation.action === "iam:PassRole" ? { decision: "implicitDeny" } : allowRequiredDenyForbidden({ evaluation }),
+    simulate: ({ evaluation }) => evaluation.action === "iam:PassRole" ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }),
     cloudTrail: clearCloudTrail,
   });
   assert.equal(report.status, "invalid");
@@ -220,7 +277,7 @@ test("IAM simulation uses argv arrays and passes context explicitly", () => {
 test("forbidden allowed evaluation fails closed", () => {
   const report = runPermissionPreflight({
     reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
-    simulate: ({ evaluation }) => evaluation.id.startsWith("pass-unrelated-role") ? { decision: "allowed" } : allowRequiredDenyForbidden({ evaluation }),
+    simulate: ({ evaluation }) => evaluation.id.startsWith("pass-unrelated-role") ? { decision: "allowed", matchedStatements: 1, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }),
     cloudTrail: clearCloudTrail,
   });
   assert.equal(report.status, "invalid");
@@ -275,7 +332,7 @@ test("AWS simulator rejects camelCase-only and incomplete responses", () => {
     { EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: item.resource, MatchedStatements: [], MissingContextValues: [] }] },
     { EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: item.resource, EvalDecision: "allowed", MatchedStatements: [], MissingContextValues: ["aws:ResourceTag/Environment"] }] },
     { EvaluationResults: [{ EvalActionName: "lambda:UpdateAlias", EvalResourceName: item.resource, EvalDecision: "allowed", MatchedStatements: [], MissingContextValues: [] }] },
-  ]) assert.throws(() => simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify(response) }), /malformed|mismatch/);
+  ]) assert.throws(() => simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify(response) }), /malformed|mismatch|unexpected/);
 });
 
 test("caller validation accepts only the exact STS assumed-role ARN", () => {
@@ -444,6 +501,20 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   const savedHash = crypto.createHash("sha256").update(savedBytes).digest("hex");
   let planHash = crypto.createHash("sha256").update(effectiveApprovedBytes).digest("hex");
   let canonicalHash = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(JSON.parse(JSON.stringify(effectiveShownPlan))))).digest("hex");
+  const requiredFixtureEntry = manifest.required.find((entry) => !entry.plan);
+  const forbiddenFixtureEntry = manifest.forbidden.find((entry) => entry.id === "backend-head-bucket-not-required");
+  const fixtureEvaluation = (entry, forbidden, decision, missingContextValues) => ({
+    id: `${entry.id}:${entry.resources[0]}`,
+    manifestId: entry.id,
+    action: entry.action,
+    resource: entry.resources[0],
+    context: entry.context,
+    expectedMissingContextValues: entry.expectedMissingContextValues || [],
+    missingContextValues,
+    decision,
+    matchedStatements: forbidden ? 0 : 1,
+    validation: forbidden ? "accepted" : "accepted",
+  });
   const report = {
     schemaVersion: 1,
     toolingSha: "b".repeat(40),
@@ -459,8 +530,8 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     savedPlanSha256: savedHash,
     canonicalPlanJsonSha256: canonicalHash,
     generatedAt: new Date().toISOString(),
-    requiredEvaluations: [{ decision: "allowed" }],
-    forbiddenEvaluations: [{ decision: "explicitDeny" }],
+    requiredEvaluations: [fixtureEvaluation(requiredFixtureEntry, false, "allowed", [])],
+    forbiddenEvaluations: [fixtureEvaluation(forbiddenFixtureEntry, true, "implicitDeny", ["s3:prefix"])],
     cloudTrail: { status: "clear", unresolvedDenials: [] },
     requiredAllowedCount: 1,
     requiredDeniedCount: 0,
