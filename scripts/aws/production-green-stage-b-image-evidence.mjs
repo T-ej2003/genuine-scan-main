@@ -151,9 +151,13 @@ function parseArtifact(artifactBytes, { imageReleaseSha, artifactSha256 }) {
   }).sort((a, b) => a.service.localeCompare(b.service));
 }
 
-function describeImage(repository, tag, describe = (repo, imageTag) => JSON.parse(execFileSync("aws", [
-  "ecr", "describe-images", "--region", STAGE_B.region, "--repository-name", repo, "--image-ids", `imageTag=${imageTag}`, "--output", "json", "--no-cli-pager",
-], { encoding: "utf8" }))) {
+function describeImages(repository, tag) {
+  return JSON.parse(execFileSync("aws", [
+    "ecr", "describe-images", "--region", STAGE_B.region, "--repository-name", repository, "--image-ids", `imageTag=${tag}`, "--output", "json", "--no-cli-pager",
+  ], { encoding: "utf8" }));
+}
+
+export function readImageEvidence(repository, tag, { describe = describeImages } = {}) {
   const response = describe(repository, tag);
   if (!response || !Array.isArray(response.imageDetails) || response.imageDetails.length !== 1) throw new Error(`ECR evidence must resolve exactly one image for ${repository}:${tag}.`);
   const image = response.imageDetails[0];
@@ -161,12 +165,46 @@ function describeImage(repository, tag, describe = (repo, imageTag) => JSON.pars
   return { digest: requireDigest(image.imageDigest, `${repository}:${tag} digest`), imagePushedAt: image.imagePushedAt };
 }
 
-function describeRepository(repository, describe = (repo) => JSON.parse(execFileSync("aws", [
-  "ecr", "describe-repositories", "--region", STAGE_B.region, "--repository-names", repo, "--output", "json", "--no-cli-pager",
-], { encoding: "utf8" }))) {
-  const response = describe(repository);
-  if (!response || !Array.isArray(response.repositories) || response.repositories.length !== 1) throw new Error(`ECR repository evidence must resolve exactly one repository for ${repository}.`);
-  return response.repositories[0];
+function describeImage(repository, tag, describe = describeImages) {
+  return readImageEvidence(repository, tag, { describe });
+}
+
+function describeRepositories(repository) {
+  return JSON.parse(execFileSync("aws", [
+    "ecr", "describe-repositories", "--registry-id", STAGE_B.account, "--region", STAGE_B.region, "--repository-names", repository, "--output", "json", "--no-cli-pager",
+  ], { encoding: "utf8" }));
+}
+
+const IMAGE_REPOSITORY_EVIDENCE_KEYS = new Set(["repositoryName", "repositoryArn", "registryId", "repositoryUri", "imageTagMutability", "imageTagMutabilityExclusionFilters", "encryptionConfiguration", "createdAt", "observedAt"]);
+
+function normalizeRepositoryEvidence(evidence, requiredRepository, observedAt) {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) throw new Error(`Image repository evidence is malformed: ${requiredRepository}.`);
+  const repository = String(evidence.repositoryName || "");
+  const expectedArn = `arn:aws:ecr:${STAGE_B.region}:${STAGE_B.account}:repository/${requiredRepository}`;
+  const expectedUri = `${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/${requiredRepository}`;
+  const observedAtMs = Date.parse(observedAt);
+  const evidenceObservedAt = evidence.observedAt || observedAt;
+  if (repository !== requiredRepository || evidence.repositoryArn !== expectedArn || String(evidence.registryId) !== STAGE_B.account) throw new Error(`Image repository evidence identity is wrong: ${requiredRepository}.`);
+  if (evidence.repositoryUri !== expectedUri) throw new Error(`Image repository URI is wrong: ${requiredRepository}.`);
+  if (evidence.imageTagMutability !== IMAGE_EVIDENCE_REPOSITORY_MUTABILITY) throw new Error(`Image repository ${requiredRepository} is not authoritatively immutable.`);
+  if (evidence.imageTagMutabilityExclusionFilters?.length) throw new Error(`Image repository ${requiredRepository} uses unsupported mutability exclusions.`);
+  if (evidence.imageTagMutabilityExclusionFilters !== undefined && !Array.isArray(evidence.imageTagMutabilityExclusionFilters)) throw new Error(`Image repository exclusion evidence is malformed: ${requiredRepository}.`);
+  if (!evidence.encryptionConfiguration || typeof evidence.encryptionConfiguration !== "object" || Array.isArray(evidence.encryptionConfiguration)) throw new Error(`Image repository encryption evidence is malformed: ${requiredRepository}.`);
+  if (!Number.isFinite(Date.parse(evidence.createdAt))) throw new Error(`Image repository creation evidence is malformed: ${requiredRepository}.`);
+  if (!Number.isFinite(observedAtMs) || Date.parse(evidenceObservedAt) !== observedAtMs) throw new Error(`Image repository evidence timestamp is malformed: ${requiredRepository}.`);
+  const unsupported = Object.keys(evidence).find((key) => !IMAGE_REPOSITORY_EVIDENCE_KEYS.has(key));
+  if (unsupported) throw new Error(`Image repository evidence has unsupported field ${unsupported}: ${requiredRepository}.`);
+  return Object.freeze({
+    repositoryName: requiredRepository,
+    repositoryArn: expectedArn,
+    registryId: STAGE_B.account,
+    repositoryUri: expectedUri,
+    imageTagMutability: IMAGE_EVIDENCE_REPOSITORY_MUTABILITY,
+    ...(evidence.imageTagMutabilityExclusionFilters === undefined ? {} : { imageTagMutabilityExclusionFilters: Object.freeze([...evidence.imageTagMutabilityExclusionFilters]) }),
+    encryptionConfiguration: Object.freeze({ ...evidence.encryptionConfiguration }),
+    createdAt: evidence.createdAt,
+    observedAt: evidenceObservedAt,
+  });
 }
 
 function rejectLegacyProvenanceClaims(report) {
@@ -177,41 +215,30 @@ function requireRepositoryEvidence(repositories, requiredRepositories, observedA
   if (!Array.isArray(repositories) || repositories.length !== requiredRepositories.length) throw new Error("Image evidence must include exactly one authoritative repository record per image repository.");
   const expected = new Set(requiredRepositories);
   const seen = new Set();
-  const observedAtMs = Date.parse(observedAt);
-  if (!Number.isFinite(observedAtMs)) throw new Error("Image repository evidence timestamp is malformed.");
   return repositories.map((evidence) => {
-    const repository = String(evidence?.repository || "");
-    const expectedArn = `arn:aws:ecr:${STAGE_B.region}:${STAGE_B.account}:repository/${repository}`;
+    const repository = String(evidence?.repositoryName || "");
     if (!expected.has(repository) || seen.has(repository)) throw new Error(`Image repository evidence is missing, duplicated, or unexpected: ${repository}.`);
-    if (evidence.repositoryArn !== expectedArn || String(evidence.registryId) !== STAGE_B.account) throw new Error(`Image repository evidence identity is wrong: ${repository}.`);
-    if (evidence.imageTagMutability !== IMAGE_EVIDENCE_REPOSITORY_MUTABILITY) throw new Error(`Image repository ${repository} is not authoritatively immutable.`);
-    if (evidence.exclusionFilters?.length) throw new Error(`Image repository ${repository} uses unsupported mutability exclusions.`);
-    if (evidence.exclusionFilters !== undefined && !Array.isArray(evidence.exclusionFilters)) throw new Error(`Image repository exclusion evidence is malformed: ${repository}.`);
-    const evidenceObservedAt = evidence.observedAt || observedAt;
-    if (Date.parse(evidenceObservedAt) !== observedAtMs) throw new Error(`Image repository evidence timestamp does not match the report observation: ${repository}.`);
+    const normalized = normalizeRepositoryEvidence(evidence, repository, observedAt);
     seen.add(repository);
-    return Object.freeze({
-      repository,
-      repositoryArn: expectedArn,
-      registryId: STAGE_B.account,
-      imageTagMutability: IMAGE_EVIDENCE_REPOSITORY_MUTABILITY,
-      exclusionFilters: Object.freeze([...(evidence.exclusionFilters || [])]),
-      observedAt: evidenceObservedAt,
-    });
-  }).sort((a, b) => a.repository.localeCompare(b.repository));
+    return normalized;
+  }).sort((a, b) => a.repositoryName.localeCompare(b.repositoryName));
 }
 
-export function readImageRepositoryEvidence(repository, { observedAt = new Date().toISOString(), describe = describeRepository } = {}) {
-  const source = describeRepository(repository, describe);
-  if (source.repositoryName !== repository) throw new Error(`ECR repository evidence resolved the wrong repository: ${repository}.`);
-  return {
-    repository,
+export function readImageRepositoryEvidence(repository, { observedAt = new Date().toISOString(), describe = describeRepositories } = {}) {
+  const response = describe(repository);
+  if (!response || typeof response !== "object" || Array.isArray(response) || !Array.isArray(response.repositories) || response.repositories.length !== 1) throw new Error(`ECR repository evidence must resolve exactly one repository for ${repository}.`);
+  const source = response.repositories[0];
+  return normalizeRepositoryEvidence({
+    repositoryName: source.repositoryName,
     repositoryArn: source.repositoryArn,
     registryId: String(source.registryId || ""),
+    repositoryUri: source.repositoryUri,
     imageTagMutability: source.imageTagMutability,
-    exclusionFilters: source.imageTagMutabilityExclusionFilters || [],
+    ...(source.imageTagMutabilityExclusionFilters === undefined ? {} : { imageTagMutabilityExclusionFilters: source.imageTagMutabilityExclusionFilters }),
+    encryptionConfiguration: source.encryptionConfiguration,
+    createdAt: source.createdAt,
     observedAt,
-  };
+  }, repository, observedAt);
 }
 
 export function generateImageEvidence({ artifactBytes, imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, observedAt = new Date().toISOString(), describe = describeImage, repositories }) {
@@ -292,7 +319,7 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   const artifactPath = requiredOption(argv, "--artifact"); const imageReleaseSha = requiredOption(argv, "--image-release-sha"); const workflowRunId = requiredOption(argv, "--workflow-run-id"); const artifactSha256 = requiredOption(argv, "--artifact-sha256"); const outputPath = requiredOption(argv, "--output"); const signaturePath = requiredOption(argv, "--signature-output");
   const verifierCallerArn = deps.getCaller ? deps.getCaller() : JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"], { encoding: "utf8" })).Arn;
   const observedAt = deps.observedAt || new Date().toISOString();
-  const repositories = [...new Set(Object.values(SERVICES).map(({ repository }) => repository))].map((repository) => readImageRepositoryEvidence(repository, { observedAt, describe: deps.describeRepository || describeRepository }));
+  const repositories = [...new Set(Object.values(SERVICES).map(({ repository }) => repository))].map((repository) => readImageRepositoryEvidence(repository, { observedAt, describe: deps.describeRepository || describeRepositories }));
   const report = generateImageEvidence({ artifactBytes: fs.readFileSync(artifactPath), imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, describe: deps.describe || describeImage, observedAt, repositories });
   const signature = (deps.sign || signImageEvidence)(report, deps.sign ? { sign: deps.sign, now: deps.now } : {});
   fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600, flag: "wx" });
