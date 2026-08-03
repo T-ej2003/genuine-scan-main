@@ -16,6 +16,7 @@ import {
 } from "./aws/stage-b-reference-audit-contract.mjs";
 import { assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-stage-b-image-evidence.mjs";
+import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
 import { classifyStageBPlan } from "./aws/stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 
@@ -560,6 +561,14 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   if (process.env.MSCQR_STAGE_B_PLAN_ENABLED !== "true" || process.env.MSCQR_STAGE_B_PLAN_CONFIRM !== "MSCQR_GENERATE_STAGE_B_PLAN_ONLY") throw new Error("Stage B planning requires both explicit plan-only confirmations.");
   const tfvars = process.argv[2];
   if (!tfvars || !path.isAbsolute(tfvars) || !fs.existsSync(tfvars)) throw new Error("Stage B requires an existing absolute private tfvars path.");
+  const cliOptions = process.argv.slice(3);
+  const bindingReportPath = readOption(cliOptions, "--binding-report");
+  const bindingReportSha256 = readOption(cliOptions, "--binding-report-sha256");
+  const toolingTreeSha256 = readOption(cliOptions, "--tooling-tree-sha256");
+  const expectedImageReleaseSha = readOption(cliOptions, "--image-release-sha");
+  const protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true });
+  if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha) throw new Error("Stage B planning requires the canonical tfvars binding report, its SHA256, tooling-tree digest, and image-release SHA.");
+  assertStageBTfvarsBinding({ tfvarsPath: tfvars, bindingReportPath, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha });
   const out = path.resolve(".terraform-plans/production-green-stage-b.tfplan");
   fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
   execFileSync("terraform", [`-chdir=${root}`, "workspace", "select", "production"], { stdio: "inherit" });
@@ -567,9 +576,9 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const planJsonText = execFileSync("terraform", [`-chdir=${root}`, "show", "-json", out], { encoding: "utf8" });
   const plan = JSON.parse(planJsonText);
   const terraformConfiguration = fs.readFileSync(path.resolve(root, "main.tf"), "utf8");
-  const referenceAuditPath = readOption(process.argv.slice(3), "--reference-audit");
-  const referenceAuditSha256 = readOption(process.argv.slice(3), "--reference-audit-sha256");
-  const planJsonSha256 = readOption(process.argv.slice(3), "--plan-json-sha256");
+  const referenceAuditPath = readOption(cliOptions, "--reference-audit");
+  const referenceAuditSha256 = readOption(cliOptions, "--reference-audit-sha256");
+  const planJsonSha256 = readOption(cliOptions, "--plan-json-sha256");
   const referenceAuditBytes = referenceAuditPath ? fs.readFileSync(path.resolve(referenceAuditPath)) : undefined;
   const referenceAudit = referenceAuditBytes ? JSON.parse(referenceAuditBytes) : undefined;
   let trustedCallerArn;
@@ -578,7 +587,6 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   } catch {
     throw new Error("Stage B trusted caller attestation failed: aws sts get-caller-identity did not return valid identity JSON.");
   }
-  const protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true });
   assertStageBPlan(plan, { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes: Buffer.from(planJsonText), planJsonSha256, trustedCallerArn, terraformConfiguration, strictResourceContract: true, protectedMainCheckout });
   process.stdout.write(JSON.stringify({ status: "approved-plan-only", plan: out }) + "\n");
 }

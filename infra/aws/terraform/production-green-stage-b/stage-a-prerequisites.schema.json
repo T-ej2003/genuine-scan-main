@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stage B reviewed Stage A prerequisite input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "accountId", "region", "vpcId", "privateSubnetIds", "ecsClusterArn",
+    "stageADatabaseSecurityGroupId", "stageAExecutorSecurityGroupId", "stageAExecutorTaskRoleArn",
+    "stageABrokerRoleArn", "stageAExecutorLogGroupName", "stageAExecutorLogGroupArn",
+    "stageABrokerLogGroupName", "stageABrokerLogGroupArn", "stageARuntimeSecretArns",
+    "stageAExecutorNetworkingReady", "approvalSecretArn", "approvalKmsKeyArn", "receiptBucketArn",
+    "stageAReadOnlyCanaryDatabaseSecretArn"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "accountId": { "const": "368992683803" },
+    "region": { "const": "eu-west-2" },
+    "vpcId": { "type": "string", "pattern": "^vpc-[a-f0-9]+$" },
+    "privateSubnetIds": { "type": "array", "items": { "type": "string", "pattern": "^subnet-[a-f0-9]+$" }, "minItems": 2, "uniqueItems": true },
+    "ecsClusterArn": { "const": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" },
+    "stageADatabaseSecurityGroupId": { "const": "sg-0703d3f227f35b81c" },
+    "stageAExecutorSecurityGroupId": { "const": "sg-051a24aedff773761" },
+    "stageAExecutorTaskRoleArn": { "const": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task" },
+    "stageABrokerRoleArn": { "const": "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker" },
+    "stageAExecutorLogGroupName": { "const": "/ecs/mscqr-production/full-rls-green" },
+    "stageAExecutorLogGroupArn": { "type": "string", "pattern": "^arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green(:\\*)?$" },
+    "stageABrokerLogGroupName": { "const": "/aws/lambda/mscqr-production-rls-approval-broker" },
+    "stageABrokerLogGroupArn": { "type": "string", "pattern": "^arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker(:\\*)?$" },
+    "stageARuntimeSecretArns": { "type": "object", "propertyNames": { "enum": ["app", "read", "preauth", "worker", "scheduled", "operator", "migration"] }, "minProperties": 7, "maxProperties": 7, "additionalProperties": { "type": "string", "pattern": "^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/[A-Za-z0-9]+$" } },
+    "stageAExecutorNetworkingReady": { "const": true },
+    "approvalSecretArn": { "const": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho" },
+    "approvalKmsKeyArn": { "const": "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478" },
+    "receiptBucketArn": { "const": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" },
+    "stageAReadOnlyCanaryDatabaseSecretArn": { "type": "string", "pattern": "^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-[A-Za-z0-9]+$" }
+  }
+}

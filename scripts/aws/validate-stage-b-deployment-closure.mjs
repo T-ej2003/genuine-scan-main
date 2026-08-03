@@ -9,6 +9,8 @@ import { assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolic
 import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, validateManifest } from "./validate-production-green-stage-b-permissions.mjs";
 import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENCE_REVOCATION_MODEL } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
+import { IMAGE_IMPACT_REPORT_REPO_PATH, assertImageImpactReport, parseStageBClosureMode } from "./validate-stage-b-image-reuse.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -16,6 +18,7 @@ const matrixPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageB
 const backendPolicyPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json");
 const permissionManifestPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
 const fixturePath = path.join(root, "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
+const mode = parseStageBClosureMode(process.argv.slice(2));
 
 function filesUnder(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -30,11 +33,30 @@ const backendPolicy = JSON.parse(fs.readFileSync(backendPolicyPath, "utf8"));
 const permissionManifest = JSON.parse(fs.readFileSync(permissionManifestPath, "utf8"));
 const checkoutMode = process.env.STAGE_B_TOOLING_CHECKOUT_MODE || "review";
 const currentHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+if (mode === "production" && checkoutMode !== "production") throw new Error("Production Stage B closure requires a protected-main checkout mode.");
+if (mode === "pull-request" && checkoutMode === "production") throw new Error("Pull-request Stage B closure cannot run as a production checkout.");
 if (checkoutMode === "production") {
   readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
 } else {
   assertStageBProtectedMainCheckout(buildStageBProtectedMainCheckoutEvidence({ toolingSha: currentHead, currentHead, originMainHead: undefined, isAncestor: false, porcelainStatus: execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root, encoding: "utf8" }), repositoryState: { remoteDefaultBranch: undefined, shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "review" }));
 }
+const tfvarsPath = process.env.STAGE_B_TFVARS_PATH;
+const bindingReportPath = process.env.STAGE_B_TFVARS_BINDING_REPORT_PATH;
+if (mode === "production") {
+  const requiredProductionEvidence = [
+    "STAGE_B_IMAGE_EVIDENCE_PATH", "STAGE_B_IMAGE_EVIDENCE_SIGNATURE_PATH", "STAGE_B_IMAGE_EVIDENCE_SHA256", "STAGE_B_IMAGE_EVIDENCE_WORKFLOW_RUN_ID", "STAGE_B_IMAGE_EVIDENCE_ARTIFACT_SHA256",
+    "STAGE_B_PLAN_PATH", "STAGE_B_PLAN_JSON_PATH", "STAGE_B_PLAN_SHA256", "STAGE_B_SAVED_PLAN_SHA256", "STAGE_B_CANONICAL_PLAN_JSON_SHA256",
+    "STAGE_B_REFERENCE_AUDIT_PATH", "STAGE_B_REFERENCE_AUDIT_SHA256",
+    "STAGE_B_PERMISSION_REPORT_PATH", "STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH", "STAGE_B_PERMISSION_REPORT_SHA256",
+  ];
+  if (requiredProductionEvidence.some((name) => !process.env[name])) throw new Error("Production Stage B closure requires fresh signed image evidence.");
+}
+if (mode === "production" || tfvarsPath || bindingReportPath) {
+  if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256 || !process.env.STAGE_B_TOOLING_TREE_SHA256 || !process.env.STAGE_B_IMAGE_RELEASE_SHA || !process.env.STAGE_B_IMAGE_EVIDENCE_SHA256) throw new Error("Production Stage B closure requires canonical tfvars provenance and complete deployment identity.");
+  assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedImageReleaseSha: process.env.STAGE_B_IMAGE_RELEASE_SHA, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256 });
+}
+const imageImpactReport = mode === "pull-request" ? JSON.parse(fs.readFileSync(process.env.STAGE_B_IMAGE_IMPACT_REPORT_PATH || path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH), "utf8")) : undefined;
+if (mode === "pull-request") assertImageImpactReport({ report: imageImpactReport, imageReleaseSha: imageImpactReport.imageReleaseSha, toolingSha: currentHead, toolingInputTreeSha256: imageImpactReport.toolingInputTreeSha256, changedFiles: imageImpactReport.classifiedChangedFiles });
 assert.equal(matrix.schemaVersion, 1, "Stage B closure matrix schema is unsupported.");
 assert.equal(matrix.account, "368992683803");
 assert.equal(matrix.region, "eu-west-2");
@@ -93,7 +115,14 @@ const duplicateBrokerPolicyLiterals = executableFiles.filter((file) => fs.readFi
 assert.deepEqual(duplicateBrokerPolicyLiterals, [], `Executable broker policy ARN duplicates found: ${duplicateBrokerPolicyLiterals.join(", ")}`);
 
 process.stdout.write(JSON.stringify({
-  status: "valid",
+  mode,
+  deploymentAuthorized: mode === "production" ? true : false,
+  imageImpact: mode === "pull-request" ? { status: imageImpactReport.status, imageReuseCompatible: imageImpactReport.imageReuseCompatible, newImagesRequired: imageImpactReport.newImagesRequired, imageAffectingFiles: imageImpactReport.imageAffectingFiles } : undefined,
+  imageReuseCompatible: mode === "pull-request" ? imageImpactReport.imageReuseCompatible : undefined,
+  newImagesRequired: mode === "pull-request" ? imageImpactReport.newImagesRequired : undefined,
+  imageAffectingFiles: mode === "pull-request" ? imageImpactReport.imageAffectingFiles : undefined,
+  summary: mode === "pull-request" && imageImpactReport.newImagesRequired ? "Merge permitted; fresh protected-main images required before production deployment." : undefined,
+  status: mode === "pull-request" ? imageImpactReport.status : "ready-to-apply",
   matrixResources: matrix.resources.length,
   terraformDeclarations: declarations.length,
   fixtureResources: fixture.resource_changes.length,
