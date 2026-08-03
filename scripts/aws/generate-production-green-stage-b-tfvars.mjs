@@ -234,7 +234,7 @@ export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindi
   assertAbsoluteFile(tfvarsPath, "Tfvars"); assertAbsoluteFile(bindingReportPath, "Binding report");
   const tfvarsBytes = fs.readFileSync(tfvarsPath); const reportBytes = fs.readFileSync(bindingReportPath); const report = JSON.parse(reportBytes);
   if (bindingReportSha256 && sha256(reportBytes) !== bindingReportSha256) throw new Error("Stage B tfvars binding-report SHA256 does not match the approved digest.");
-  if (report?.schemaVersion !== STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION || report.generator !== STAGE_B_TFVARS_GENERATOR) throw new Error("Stage B tfvars binding report is not produced by the canonical generator.");
+  if (report?.schemaVersion !== STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION || report.tfvarsSchemaVersion !== STAGE_B_TFVARS_SCHEMA_VERSION || report.generator !== STAGE_B_TFVARS_GENERATOR) throw new Error("Stage B tfvars binding report is not produced by the canonical generator.");
   if (report.tfvarsSha256 !== sha256(tfvarsBytes)) throw new Error("Stage B tfvars was modified after canonical generation.");
   for (const [key, expected] of [["toolingSha", expectedToolingSha], ["toolingTreeSha256", expectedToolingTreeSha256], ["imageReleaseSha", expectedImageReleaseSha], ["imageEvidenceCanonicalSha256", expectedImageEvidenceSha256]]) if (expected !== undefined && report[key] !== expected) throw new Error(`Stage B tfvars binding report ${key} does not match the current deployment identity.`);
   if (report.stateLineage !== STAGE_B_EXPECTED_STATE_LINEAGE || !Number.isInteger(report.stateSerial)) throw new Error("Stage B tfvars binding report state identity is malformed.");
@@ -279,6 +279,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   const tfvars = renderTfvars(values); const tfvarsBytes = Buffer.from(tfvars); const tfvarsSha256 = sha256(tfvarsBytes); const stateBytes = fs.readFileSync(stateBackup);
   const bindingReport = {
     schemaVersion: STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION,
+    tfvarsSchemaVersion: STAGE_B_TFVARS_SCHEMA_VERSION,
     generator: STAGE_B_TFVARS_GENERATOR,
     toolingSha, toolingTreeSha256, imageReleaseSha, imageEvidenceCanonicalSha256: evidenceSha256,
     imageEvidenceSource: path.basename(imageEvidence), imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
