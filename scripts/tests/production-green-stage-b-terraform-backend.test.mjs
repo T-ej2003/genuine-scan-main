@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
+  assertStageBTerraformBackendConfig,
   assertStageBTerraformBackendManifest,
   assertStageBTerraformBackendPolicy,
   STAGE_B_TERRAFORM_BACKEND,
+  STAGE_B_TERRAFORM_BACKEND_CONFIG,
   STAGE_B_TERRAFORM_BACKEND_MANIFEST,
   STAGE_B_TERRAFORM_BACKEND_POLICY,
 } from "../aws/stage-b-terraform-backend-contract.mjs";
+import { generateStageBTerraformBackendConfig } from "../aws/generate-production-green-stage-b-backend-config.mjs";
 import { validateManifest } from "../aws/validate-production-green-stage-b-permissions.mjs";
 
 const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json", "utf8"));
@@ -28,7 +33,7 @@ function decision(policies, action, resource, context = {}) {
   return statements.some((statement) => statement.Effect === "Allow" && matches(statement, action, resource, context)) ? "allowed" : "implicitDeny";
 }
 
-const { bucketArn, stateArn, lockArn, baseStateArn, baseLockArn } = STAGE_B_TERRAFORM_BACKEND;
+const { bucketArn, stateArn, lockArn, legacyWorkspaceArn, legacyWorkspaceLockArn } = STAGE_B_TERRAFORM_BACKEND;
 
 test("the canonical backend policy and manifest are exact and complete", () => {
   assert.equal(assertStageBTerraformBackendPolicy(policy), true);
@@ -38,10 +43,28 @@ test("the canonical backend policy and manifest are exact and complete", () => {
   assert.deepEqual(policy, STAGE_B_TERRAFORM_BACKEND_POLICY);
 });
 
-test("Terraform's exact backend operation set is allowed", () => {
+test("the direct production-state config uses the default CLI workspace", () => {
+  assert.equal(assertStageBTerraformBackendConfig(STAGE_B_TERRAFORM_BACKEND_CONFIG), true);
+  assert.equal(STAGE_B_TERRAFORM_BACKEND.workspaceName, "default");
+  assert.equal(STAGE_B_TERRAFORM_BACKEND_CONFIG.key, STAGE_B_TERRAFORM_BACKEND.stateKey);
+  assert.match(STAGE_B_TERRAFORM_BACKEND_CONFIG.key, /^env:\/production\//);
+  assert.throws(() => assertStageBTerraformBackendConfig({ ...STAGE_B_TERRAFORM_BACKEND_CONFIG, key: "other.tfstate" }), /backend key/);
+});
+
+test("the canonical backend-config generator writes only the direct production key", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-backend-"));
+  const outputPath = path.join(directory, "production.tfbackend");
+  const result = generateStageBTerraformBackendConfig({ outputPath });
+  assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
+  assert.match(fs.readFileSync(outputPath, "utf8"), /env:\/production\/mscqr\/production\/rls-green\/stage-b\/terraform\.tfstate/);
+  assert.equal(result.outputPath, outputPath);
+  assert.throws(() => generateStageBTerraformBackendConfig({ outputPath }), /new absolute private output path/);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("Terraform's exact direct backend operation set is allowed", () => {
   for (const [action, resource, context] of [
     ["s3:GetBucketLocation", bucketArn, {}],
-    ["s3:ListBucket", bucketArn, { prefix: "env:/" }],
     ["s3:GetObject", stateArn, {}],
     ["s3:PutObject", stateArn, {}],
     ["s3:GetObject", lockArn, {}],
@@ -50,24 +73,25 @@ test("Terraform's exact backend operation set is allowed", () => {
   ]) assert.equal(decision([policy], action, resource, context), "allowed", `${action} ${resource}`);
 });
 
-test("unprefixed HeadBucket semantics and unrelated prefixes remain denied", () => {
+test("workspace listing and HeadBucket-style access are not required", () => {
   assert.equal(decision([policy], "s3:ListBucket", bucketArn), "implicitDeny");
   assert.equal(decision([policy], "s3:ListBucket", bucketArn, { prefix: "env:/production/" }), "implicitDeny");
   assert.equal(decision([policy], "s3:ListBucket", bucketArn, { prefix: "unrelated/" }), "implicitDeny");
   assert.equal(STAGE_B_TERRAFORM_BACKEND.headBucketRequired, false);
 });
 
-test("state deletion and configured base-key access fail closed even with overlapping stale allows", () => {
+test("state deletion and legacy workspace access fail closed even with overlapping stale allows", () => {
   const staleStageB = {
     Version: "2012-10-17",
     Statement: [
-      { Effect: "Allow", Action: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], Resource: [stateArn, lockArn, baseStateArn, baseLockArn] },
+      { Effect: "Allow", Action: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], Resource: [stateArn, lockArn, legacyWorkspaceArn, legacyWorkspaceLockArn] },
     ],
   };
   assert.equal(decision([policy, staleStageB], "s3:DeleteObject", stateArn), "explicitDeny");
-  assert.equal(decision([policy, staleStageB], "s3:GetObject", baseStateArn), "explicitDeny");
-  assert.equal(decision([policy, staleStageB], "s3:PutObject", baseStateArn), "explicitDeny");
-  assert.equal(decision([policy, staleStageB], "s3:DeleteObject", baseLockArn), "explicitDeny");
+  for (const action of ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]) {
+    assert.equal(decision([policy, staleStageB], action, legacyWorkspaceArn), "explicitDeny");
+    assert.equal(decision([policy, staleStageB], action, legacyWorkspaceLockArn), "explicitDeny");
+  }
 });
 
 test("unrelated keys, buckets, and backend administration actions are denied", () => {

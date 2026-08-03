@@ -24,14 +24,14 @@
   "backendContract": {
     "policyPath": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
     "bucketArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
-    "workspaceDiscoveryPrefixes": ["env:/"],
+    "workspaceName": "default",
+    "backendConfig": {"bucket":"mscqr-production-terraform-state-368992683803-eu-west-2","key":"env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate","region":"eu-west-2","encrypt":true,"use_lockfile":true},
     "stateArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate",
     "lockArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock",
-    "configuredDefaultKeyAccess": "denied",
+    "legacyWorkspaceKeyAccess": "read-write-delete-denied",
     "headBucketRequired": false,
     "requiredActions": [
       "s3:GetBucketLocation",
-      "s3:ListBucket(env:/)",
       "s3:GetObject(state)",
       "s3:PutObject(state)",
       "s3:GetObject(lock)",

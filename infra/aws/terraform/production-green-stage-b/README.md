@@ -4,7 +4,7 @@ This production-only root creates fixed task definitions, Stage B-owned executio
 
 Stage A exclusively owns `/ecs/mscqr-production/full-rls-green`, `/aws/lambda/mscqr-production-rls-approval-broker`, the executor task role, the executor security group, its database/AWS-endpoint/S3/DNS egress, the green database security group, and the empty Phase 4 read-only-canary database URL handle. Stage B consumes the exact `stage_b_prerequisites` output, including `read_only_canary_database_secret_arn`, and adds only separately managed executor and broker runtime policies; it never recreates or imports those Stage A resources.
 
-Use only an MFA-backed non-root `mscqr-production-release-deployer` session with the dedicated encrypted production state backend and `production` workspace. Generate the Stage-A prerequisite artifact first from the exact Stage-A state backup plus read-only live networking evidence; do not construct it by hand. It must conform to [`stage-a-prerequisites.schema.json`](./stage-a-prerequisites.schema.json), bind the Stage-A state SHA and tooling identity, and prove private multi-AZ NAT routing. The five image inputs must be ECR `@sha256` references; the release, source-contract, migration, and package checksum inputs are derived and mandatory.
+Use only an MFA-backed non-root `mscqr-production-release-deployer` session with the dedicated encrypted production state backend configured directly to the existing production state key and `TF_WORKSPACE=default`. The explicit `deployment_environment = "production"` variable retains the environment guard without workspace indirection. Generate the Stage-A prerequisite artifact first from the exact Stage-A state backup plus read-only live networking evidence; do not construct it by hand. It must conform to [`stage-a-prerequisites.schema.json`](./stage-a-prerequisites.schema.json), bind the Stage-A state SHA and tooling identity, and prove private multi-AZ NAT routing. The five image inputs must be ECR `@sha256` references; the release, source-contract, migration, and package checksum inputs are derived and mandatory.
 
 The generator verifies the signed schema-v3 image evidence, derives all five Terraform image variables without digest reconstruction, derives retained definitions from the supplied production state backup, and atomically writes mode-0600 outputs only after validation. Do not use heredocs, inline scripts, copied tfvars, manual digest values, or post-generation edits.
 
@@ -27,7 +27,7 @@ npm run stage-b:generate-tfvars -- \
   --image-release-sha "$IMAGE_RELEASE_SHA" \
   --workflow-run-id "$WORKFLOW_RUN_ID" \
   --canonical-artifact-sha256 "$CANONICAL_ARTIFACT_SHA256" \
-  --workspace production \
+  --environment production \
   --output /absolute/private/production-green-stage-b.tfvars \
   --binding-report /absolute/private/production-green-stage-b-tfvars.binding.json
 ```
@@ -49,7 +49,7 @@ Record the generated tfvars SHA and binding-report SHA. Closure, plan generation
 
 `stage_a_executor_networking_ready` and `log_retention_days` are contract values; the former must be proven true in the prerequisite JSON and the latter remains the reviewed Terraform default of 30 days. No sensitive secret values are accepted or emitted.
 
-The release role's backend access is defined by `documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json`: it uses `s3:GetBucketLocation`, `s3:ListBucket` only with Terraform's exact `env:/` workspace prefix, exact production state read/write, and exact `.tflock` lifecycle access. `HeadBucket`, state deletion, the configured default key, and unrestricted bucket listing are not deployment gates or permissions.
+The release role's backend access is defined by `documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json`: it uses `s3:GetBucketLocation`, exact production state read/write, and exact `.tflock` lifecycle access. The legacy workspace base key, state deletion, workspace listing, and unrestricted bucket listing are not deployment gates or permissions.
 
 Plan only:
 

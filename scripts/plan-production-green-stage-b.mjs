@@ -19,6 +19,7 @@ import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-sta
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
 import { classifyStageBPlan } from "./aws/stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
+import { assertStageBTerraformBackendConfig } from "./aws/stage-b-terraform-backend-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
@@ -569,10 +570,12 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const closureMode = readOption(cliOptions, "--closure-mode");
   const protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true });
   if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha || closureMode !== "production") throw new Error("Stage B planning requires canonical tfvars provenance and --closure-mode production.");
+  if (process.env.TF_WORKSPACE !== "default") throw new Error("Stage B planning requires TF_WORKSPACE=default for the direct production state key.");
   assertStageBTfvarsBinding({ tfvarsPath: tfvars, bindingReportPath, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha });
+  assertStageBTerraformBackendConfig(JSON.parse(fs.readFileSync(path.resolve(root, ".terraform", "terraform.tfstate"), "utf8"))?.backend?.config);
   const out = path.resolve(".terraform-plans/production-green-stage-b.tfplan");
   fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
-  execFileSync("terraform", [`-chdir=${root}`, "workspace", "select", "production"], { stdio: "inherit" });
+  execFileSync("terraform", [`-chdir=${root}`, "workspace", "select", "default"], { stdio: "inherit" });
   execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${out}`], { stdio: "inherit" });
   const planJsonText = execFileSync("terraform", [`-chdir=${root}`, "show", "-json", out], { encoding: "utf8" });
   const plan = JSON.parse(planJsonText);
