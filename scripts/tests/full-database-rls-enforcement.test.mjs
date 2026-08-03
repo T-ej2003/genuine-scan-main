@@ -45,13 +45,18 @@ test("focused certification writes a family artifact without replacing full evid
 });
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const requireAuthOwnerOrganizationSelect = (policies) => {
+  const expectedOwner = "authOwner";
   const policy = policies.rows.find(
     (entry) => entry.policyName === "full_rls_internal_authowner_organization_select"
   );
-  assert.ok(policy, "auth-owner Organization SELECT policy is required");
+  if (!policy) {
+    throw new Error("Organization SELECT policy missing: expected=full_rls_internal_authowner_organization_select");
+  }
   assert.equal(policy.table, "Organization");
   assert.equal(policy.command, "SELECT");
-  assert.equal(policy.roleKey, "authOwner");
+  if (policy.roleKey !== expectedOwner) {
+    throw new Error(`Organization SELECT policy owner mismatch: expected=${expectedOwner}, actual=${policy.roleKey}`);
+  }
   assert.equal(policy.internalHelperOnly, true);
   assert.match(policy.scopePredicate, /current_user='mscqr_rls_cert_auth_owner'/);
   assert.match(policy.scopePredicate, /app_rls\.current_purpose\(\)='dashboard-snapshot-read'/);
@@ -108,13 +113,21 @@ test("owner-qualified Organization verification rejects missing or wrongly owned
   missing.rows = missing.rows.filter(
     (entry) => entry.policyName !== "full_rls_internal_authowner_organization_select"
   );
-  assert.throws(() => requireAuthOwnerOrganizationSelect(missing), /policy is required/);
+  assert.throws(
+    () => requireAuthOwnerOrganizationSelect(missing),
+    (error) => error instanceof Error &&
+      error.message === "Organization SELECT policy missing: expected=full_rls_internal_authowner_organization_select"
+  );
 
   const wrongOwner = clone(packageInputs()).policies;
   wrongOwner.rows.find(
     (entry) => entry.policyName === "full_rls_internal_authowner_organization_select"
   ).roleKey = "owner";
-  assert.throws(() => requireAuthOwnerOrganizationSelect(wrongOwner), /authOwner/);
+  assert.throws(
+    () => requireAuthOwnerOrganizationSelect(wrongOwner),
+    (error) => error instanceof Error &&
+      error.message === "Organization SELECT policy owner mismatch: expected=authOwner, actual=owner"
+  );
 });
 
 test("risk analytics uses an exact function while direct User privilege stays audit-display-only", () => {
