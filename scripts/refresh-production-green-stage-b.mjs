@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
-import { assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
+import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertStageBRefreshStateBinding, classifyStageBRefreshResult, STAGE_B_REFRESH_ALLOWED_STATUSES } from "./aws/stage-b-refresh-contract.mjs";
@@ -45,22 +45,6 @@ function assertPrivateNewOutput(outputPath) {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true, mode: 0o700 });
 }
 
-function assertTerraformDataDirectory(terraformDataDir, backendMetadataPath, ambientTerraformDataDir) {
-  const resolvedDataDir = path.resolve(terraformDataDir);
-  const resolvedMetadataPath = path.resolve(backendMetadataPath);
-  const expectedMetadataPath = path.join(resolvedDataDir, "terraform.tfstate");
-  if (resolvedDataDir.startsWith(`${root}${path.sep}`)) throw new Error("Stage B Terraform data directory must be outside the repository.");
-  const dataStat = fs.lstatSync(resolvedDataDir, { throwIfNoEntry: false });
-  if (!dataStat?.isDirectory() || dataStat.isSymbolicLink()) throw new Error("Stage B Terraform data directory must be an existing non-symlink directory.");
-  if ((dataStat.mode & 0o077) !== 0) throw new Error("Stage B Terraform data directory must be private.");
-  if (resolvedMetadataPath !== expectedMetadataPath) throw new Error("Stage B backend metadata must be <terraform-data-dir>/terraform.tfstate.");
-  const metadataStat = fs.lstatSync(expectedMetadataPath, { throwIfNoEntry: false });
-  if (!metadataStat?.isFile() || metadataStat.isSymbolicLink()) throw new Error("Stage B backend metadata must be a regular non-symlink file.");
-  if ((metadataStat.mode & 0o077) !== 0) throw new Error("Stage B backend metadata must be private.");
-  if (ambientTerraformDataDir !== undefined && path.resolve(ambientTerraformDataDir) !== resolvedDataDir) throw new Error("Ambient TF_DATA_DIR conflicts with --terraform-data-dir.");
-  return { resolvedDataDir, expectedMetadataPath };
-}
-
 function writeOutput(outputPath, output) {
   fs.writeFileSync(outputPath, `${JSON.stringify(output, null, 2)}\n`, { flag: "wx", mode: 0o600 });
   fs.chmodSync(outputPath, 0o600);
@@ -71,7 +55,10 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
   const artifacts = parseCli(argv);
   if (env.TF_WORKSPACE !== "default") throw new Error("Stage B refresh-only requires TF_WORKSPACE=default.");
   for (const [value, label] of [[artifacts.terraformDataDir, "Terraform data directory"], [artifacts.backendMetadataPath, "Backend metadata"], [artifacts.outputPath, "Refresh-only output"]]) if (!path.isAbsolute(value)) throw new Error(`${label} must be an absolute private path.`);
-  const { resolvedDataDir, expectedMetadataPath } = assertTerraformDataDirectory(artifacts.terraformDataDir, artifacts.backendMetadataPath, env.TF_DATA_DIR);
+  const resolvedDataDir = path.resolve(artifacts.terraformDataDir);
+  if (env.TF_DATA_DIR !== undefined && path.resolve(env.TF_DATA_DIR) !== resolvedDataDir) throw new Error("Ambient TF_DATA_DIR conflicts with --terraform-data-dir.");
+  const backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: resolvedDataDir, backendMetadataPath: artifacts.backendMetadataPath, repositoryRoot: root });
+  const { backendMetadataPath: expectedMetadataPath } = backendMetadata;
   assertPrivateNewOutput(artifacts.outputPath);
   const validateTfvarsBinding = deps.validateTfvarsBinding || assertStageBTfvarsBinding;
   const bindingReport = validateTfvarsBinding({
@@ -124,6 +111,8 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
     stageBStateLineage: bindingReport.stateLineage,
     stageBStateSerial: bindingReport.stateSerial,
     backendMetadataSha256: sha256(fs.readFileSync(expectedMetadataPath)),
+    backendMetadataMode: backendMetadata.backendMetadataMode,
+    privateModeValidated: backendMetadata.privateModeValidated,
     backendMetadataPath: expectedMetadataPath,
     terraformDataDir: resolvedDataDir,
     workspace: observedWorkspace,

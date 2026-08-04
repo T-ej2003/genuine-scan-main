@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { runReleaseReadPreflight } from "./production-green-stage-b-identity-capabilities.mjs";
 import { assertStageBDeploymentCapabilityGraph } from "./generate-production-green-stage-b-capability-graph.mjs";
 import { generateStageBTerraformBackendConfig } from "./generate-production-green-stage-b-backend-config.mjs";
-import { assertStageBTerraformInitializedBackendMetadata } from "./stage-b-terraform-backend-contract.mjs";
+import { assertStageBTerraformInitializedBackendMetadata, ensureStageBTerraformBackendMetadataPrivate } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
 import { generateStageAPrerequisites, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { generateStageBTfvars } from "./generate-production-green-stage-b-tfvars.mjs";
@@ -53,11 +53,12 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
   const env = { ...process.env, TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: "default" };
   run("terraform", [`-chdir=${terraformRoot}`, "init", `-backend-config=${backendConfig}`, "-input=false", "-lockfile=readonly", "-no-color"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  const metadata = JSON.parse(fs.readFileSync(path.join(terraformDataDir, "terraform.tfstate"), "utf8")).backend;
+  const backendMetadata = ensureStageBTerraformBackendMetadataPrivate({ terraformDataDir, repositoryRoot: root, normalize: true });
+  const metadata = JSON.parse(fs.readFileSync(backendMetadata.backendMetadataPath, "utf8")).backend;
   assertStageBTerraformInitializedBackendMetadata(metadata);
   const observedWorkspace = String(run("terraform", [`-chdir=${terraformRoot}`, "workspace", "show"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
   assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE, observedWorkspace });
-  return { backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, tfvarsSha256: generated.tfvarsSha256 };
+  return { backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, tfvarsSha256: generated.tfvarsSha256, ...backendMetadata };
 }
 
 export function runProductionPreflightCli(argv = process.argv.slice(2), {

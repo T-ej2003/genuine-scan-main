@@ -19,7 +19,7 @@ import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-sta
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
 import { classifyStageBPlan } from "./aws/stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
-import { assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
+import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 
@@ -49,6 +49,14 @@ export function runStageBTerraformPlanCommand({ env = process.env, argv = [], sh
   if (typeof plan !== "function") throw new Error("Stage B Terraform plan command dependency is required.");
   const workspace = assertStageBPlanningWorkspace({ env, argv, showWorkspace });
   return { workspace, result: plan() };
+}
+
+export function assertStageBPlanningBackendMetadata({ env = process.env, repositoryRoot = process.cwd() } = {}) {
+  if (!env.TF_DATA_DIR) throw new Error("Stage B planning requires the reviewed TF_DATA_DIR.");
+  const terraformDataDir = path.resolve(env.TF_DATA_DIR);
+  const backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir, backendMetadataPath: path.join(terraformDataDir, "terraform.tfstate"), repositoryRoot });
+  assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(backendMetadata.backendMetadataPath, "utf8"))?.backend);
+  return backendMetadata;
 }
 const expectedBrokerFamily = (mode) => mode === "full-rls-application-canary"
   ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
@@ -588,8 +596,8 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true });
   if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha || !refreshReportPath || !refreshReportSha256 || closureMode !== "production") throw new Error("Stage B planning requires canonical tfvars and refresh provenance with --closure-mode production.");
   const bindingReport = assertStageBTfvarsBinding({ tfvarsPath: tfvars, bindingReportPath, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha });
-  assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: bindingReport.imageEvidenceCanonicalSha256, expectedStateSha256: bindingReport.stateBackupSha256 });
-  assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(path.resolve(root, ".terraform", "terraform.tfstate"), "utf8"))?.backend);
+  const backendMetadata = assertStageBPlanningBackendMetadata();
+  assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: bindingReport.imageEvidenceCanonicalSha256, expectedStateSha256: bindingReport.stateBackupSha256, expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir });
   const out = path.resolve(".terraform-plans/production-green-stage-b.tfplan");
   fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
   const { workspace } = runStageBTerraformPlanCommand({ argv: process.argv.slice(2), plan: () => execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${out}`], { stdio: "inherit" }) });
