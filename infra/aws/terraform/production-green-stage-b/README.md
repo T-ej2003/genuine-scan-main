@@ -35,7 +35,7 @@ npm run stage-b:generate-tfvars -- \
 
 Record the generated tfvars SHA and binding-report SHA. Closure, plan generation, and both wrapper modes must receive --tfvars, --tfvars-binding-report, --tfvars-binding-report-sha256, and --tooling-tree-sha256; a modified tfvars file, missing provenance, or current broker ZIP byte mismatch is rejected before Terraform execution. The real apply path repeats the ZIP check immediately before applying the saved plan.
 
-Refresh-only is available only through `npm run stage-b:refresh-only -- --closure-mode production ...`. It validates the canonical `.tfvars` contract, initialized backend metadata, protected checkout, and `TF_WORKSPACE=default` before running one untargeted refresh-only plan. It never accepts an output plan path or Terraform `-out` flag.
+Refresh-only is available only through `npm run stage-b:refresh-only -- --closure-mode production ...`. It validates the canonical `.tfvars` contract, initialized backend metadata, protected checkout, and `TF_WORKSPACE=default` before running one untargeted refresh-only plan. `--terraform-data-dir` must be an existing private directory, `--backend-metadata` must be its exact `terraform.tfstate` child, and both Terraform subprocesses receive that same directory as `TF_DATA_DIR`. It never accepts an output plan path or Terraform `-out` flag.
 
 ## Generator input inventory
 

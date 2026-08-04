@@ -32,6 +32,53 @@ test("refresh-only rejects deployable plan output arguments", () => {
   assert.throws(() => parseCli(["--closure-mode", "production", "-out=/private/tmp/plan.tfplan"]), /does not accept/);
 });
 
+test("refresh-only rejects backend metadata redirected outside the validated data directory", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
+  const argv = args(directory);
+  argv[argv.indexOf("--backend-metadata") + 1] = path.join(directory, "other", "terraform.tfstate");
+  let calls = 0;
+  assert.throws(() => runRefreshOnly({ argv, env: { TF_WORKSPACE: "default" }, deps: { showWorkspace: () => { calls += 1; return "default\n"; } } }), /must be <terraform-data-dir>/);
+  assert.equal(calls, 0);
+});
+
+test("refresh-only rejects a conflicting ambient TF_DATA_DIR before Terraform", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
+  let calls = 0;
+  assert.throws(() => runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default", TF_DATA_DIR: path.join(directory, "stale") }, deps: { showWorkspace: () => { calls += 1; return "default\n"; } } }), /conflicts with --terraform-data-dir/);
+  assert.equal(calls, 0);
+});
+
+test("refresh-only passes one exact Terraform environment to workspace and plan", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
+  const environments = [];
+  const result = runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: {
+    validateTfvarsBinding: () => true,
+    validateBackendMetadata: () => true,
+    getProtectedMainCheckout: () => checkout,
+    showWorkspace: ({ env }) => { environments.push(env); return "default\n"; },
+    runTerraform: (_args, { env }) => { environments.push(env); return { status: 0, stdout: "No changes.\n", stderr: "" }; },
+  } });
+  assert.equal(result.status, "refresh-only-verified");
+  assert.equal(environments.length, 2);
+  assert.equal(environments[0].TF_DATA_DIR, directory);
+  assert.equal(environments[1], environments[0]);
+});
+
+test("refresh-only rejects a non-private Terraform data directory", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
+  fs.chmodSync(directory, 0o755);
+  assert.throws(() => runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" } }), /data directory must be private/);
+});
+
+test("refresh-only rejects a symlinked Terraform data directory", () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-target-"));
+  fs.symlinkSync(target, path.join(parent, "data"), "dir");
+  const argv = args(target);
+  argv[argv.indexOf("--terraform-data-dir") + 1] = path.join(parent, "data");
+  assert.throws(() => runRefreshOnly({ argv, env: { TF_WORKSPACE: "default" } }), /non-symlink directory/);
+});
+
 test("valid refresh-only invokes Terraform once without a deployable plan output", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
   const argv = args(directory);
