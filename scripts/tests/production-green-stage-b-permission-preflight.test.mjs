@@ -27,6 +27,7 @@ import { assertStageBReleaseCallerArn } from "../plan-production-green-stage-b.m
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
+import { STAGE_B_EXPECTED_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 import { generateImageEvidence, imageEvidenceSha256, signImageEvidence, IMAGE_EVIDENCE_MAX_AGE_MS } from "../aws/production-green-stage-b-image-evidence.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
@@ -839,8 +840,17 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     images: Object.fromEntries(Object.entries(tfvarsValues).map(([variable, imageReference]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: variable === "worker_image" ? "worker" : variable === "executor_image" ? "rls-executor" : variable.includes("canary") ? "rls-canary" : "backend", repository: variable === "worker_image" ? "mscqr-worker" : "mscqr-backend", tag: "a".repeat(40), imageReference, digestLength: 71, digest: imageReference.slice(imageReference.indexOf("@") + 1), matchesEvidence: true }])),
   };
   const tfvarsBindingReportPath = path.join(directory, "canonical.binding.json");
+  const stageBStateBackupPath = path.join(directory, "stage-b-state.json");
+  const stageBStateBytes = Buffer.from(JSON.stringify({ lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 76, resources: [] }));
+  fs.writeFileSync(stageBStateBackupPath, stageBStateBytes, { mode: 0o600 });
+  tfvarsBindingReport.stateBackupSha256 = crypto.createHash("sha256").update(stageBStateBytes).digest("hex");
   fs.writeFileSync(tfvarsBindingReportPath, JSON.stringify(tfvarsBindingReport) + "\n", { mode: 0o600 });
-  return { directory, planPath, planJsonPath, auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256: crypto.createHash("sha256").update(fs.readFileSync(tfvarsBindingReportPath)).digest("hex"), toolingTreeSha256: "e".repeat(64) };
+  const tfvarsBindingReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(tfvarsBindingReportPath)).digest("hex");
+  const refreshReportPath = path.join(directory, "refresh.json");
+  const checks = STAGE_B_EXPECTED_CHECK_ADDRESSES.map((address) => ({ address, status: "pass", instances: [{ address, status: "pass", problems: [] }] }));
+  const refreshReport = { schemaVersion: 1, status: "NO_CHANGES", deployablePlan: false, toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), tfvarsSha256: tfvarsBindingReport.tfvarsSha256, bindingReportSha256: tfvarsBindingReportSha256, imageEvidenceSha256: canonicalImageEvidenceSha256, stageAStateSha256: tfvarsBindingReport.stageAStateBackupSha256, stageAStateLineage: tfvarsBindingReport.stageAStateLineage, stageAStateSerial: tfvarsBindingReport.stageAStateSerial, stageBStateSha256: tfvarsBindingReport.stateBackupSha256, stageBStateLineage: tfvarsBindingReport.stateLineage, stageBStateSerial: tfvarsBindingReport.stateSerial, backendMetadataSha256: "m".repeat(64), backendMetadataPath: path.join(directory, "terraform.tfstate"), terraformDataDir: directory, workspace: "default", checkCount: checks.length, passedCheckCount: checks.length, failedCheckCount: 0, malformedCheckCount: 0, failedChecks: [], checks, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
+  fs.writeFileSync(refreshReportPath, `${JSON.stringify(refreshReport)}\n`, { mode: 0o600 });
+  return { directory, planPath, planJsonPath, auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256: crypto.createHash("sha256").update(fs.readFileSync(refreshReportPath)).digest("hex"), toolingTreeSha256: "e".repeat(64) };
 }
 
 const wrapperArgs = (fixture, verifyOnly = false) => [
@@ -850,6 +860,7 @@ const wrapperArgs = (fixture, verifyOnly = false) => [
   "--permission-report", fixture.permissionReportPath, "--permission-report-sha256", fixture.permissionReportSha256, "--permission-report-signature", fixture.permissionReportSignaturePath,
   "--image-evidence", fixture.imageEvidencePath, "--image-evidence-sha256", fixture.imageEvidenceSha256, "--image-evidence-signature", fixture.imageEvidenceSignaturePath, "--image-evidence-workflow-run-id", fixture.imageEvidenceWorkflowRunId, "--image-evidence-artifact-sha256", fixture.imageEvidenceArtifactSha256,
   "--tooling-sha", "b".repeat(40), "--image-release-sha", "a".repeat(40), "--tfvars", fixture.tfvarsPath, "--tfvars-binding-report", fixture.tfvarsBindingReportPath, "--tfvars-binding-report-sha256", fixture.tfvarsBindingReportSha256, "--tooling-tree-sha256", fixture.toolingTreeSha256,
+  "--refresh-report", fixture.refreshReportPath, "--refresh-report-sha256", fixture.refreshReportSha256,
   "--plan-sha256", fixture.planHash, "--audit-sha256", fixture.auditHash, "--saved-plan-sha256", fixture.savedHash, "--canonical-plan-json-sha256", fixture.canonicalHash,
 ];
 
@@ -980,6 +991,8 @@ test("production apply rejects every incomplete canonical tfvars provenance comb
     ["--tfvars", "--tfvars is required."],
     ["--tfvars-binding-report", "--tfvars-binding-report is required."],
     ["--tfvars-binding-report-sha256", "--tfvars-binding-report-sha256 is required."],
+    ["--refresh-report", "--refresh-report is required."],
+    ["--refresh-report-sha256", "--refresh-report-sha256 is required."],
     ["--tooling-tree-sha256", "--tooling-tree-sha256 is required."],
   ];
   for (const [option, message] of required) {
@@ -1070,6 +1083,26 @@ test("exact binary plan and derived JSON reach the ready-to-apply boundary witho
     deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, getBackendMetadata: () => structuredClone(initializedBackendMetadata), apply: () => { throw new Error("apply must not be reached"); } },
   });
   assert.equal(result.status, "ready-to-apply");
+});
+
+test("verify-only and apply reject failed refresh checks before any plan or apply seam", () => {
+  const fixture = wrapperFixture();
+  const refresh = JSON.parse(fs.readFileSync(fixture.refreshReportPath, "utf8"));
+  refresh.checks[0].status = "fail";
+  refresh.failedCheckCount = 1;
+  refresh.passedCheckCount = refresh.checkCount - 1;
+  refresh.failedChecks = [{ address: refresh.checks[0].address, status: "fail", message: "binding mismatch" }];
+  fs.writeFileSync(fixture.refreshReportPath, `${JSON.stringify(refresh)}\n`);
+  fixture.refreshReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.refreshReportPath)).digest("hex");
+  for (const verifyOnly of [true, false]) {
+    let applied = false;
+    assert.throws(() => runApply({
+      argv: wrapperArgs(fixture, verifyOnly),
+      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+      deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => { throw new Error("plan seam must not be reached"); }, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { applied = true; } },
+    }), /check or binding structure/);
+    assert.equal(applied, false);
+  }
 });
 
 test("apply wrapper rejects an unqualified broker target before apply", () => {

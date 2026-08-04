@@ -27,6 +27,7 @@ import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenc
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBDeploymentCapabilityGraph } from "./aws/generate-production-green-stage-b-capability-graph.mjs";
+import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -73,6 +74,8 @@ export function parseCli(argv) {
     tfvarsPath: requireOption(argv, "--tfvars"),
     tfvarsBindingReportPath: requireOption(argv, "--tfvars-binding-report"),
     tfvarsBindingReportSha256: requireOption(argv, "--tfvars-binding-report-sha256"),
+    refreshReportPath: requireOption(argv, "--refresh-report"),
+    refreshReportSha256: requireOption(argv, "--refresh-report-sha256"),
     toolingTreeSha256: requireOption(argv, "--tooling-tree-sha256"),
     verifyOnly: argv.includes("--verify-only"),
   };
@@ -106,11 +109,12 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   return true;
 }
 
-export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, toolingTreeSha256, imageReleaseSha, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
+export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, toolingTreeSha256, imageReleaseSha, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
   assertStageBDeploymentCapabilityGraph();
   assertStageBTerraformBackendPolicy(readJson("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json"));
-  if (!tfvarsPath || !tfvarsBindingReportPath || !tfvarsBindingReportSha256 || !toolingTreeSha256) throw new Error("Canonical Stage B tfvars, binding report, binding-report SHA256, and tooling-tree SHA256 are required.");
-  assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath: tfvarsBindingReportPath, bindingReportSha256: tfvarsBindingReportSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha: imageReleaseSha, expectedImageEvidenceSha256: imageEvidenceSha256 });
+  if (!tfvarsPath || !tfvarsBindingReportPath || !tfvarsBindingReportSha256 || !refreshReportPath || !refreshReportSha256 || !toolingTreeSha256) throw new Error("Canonical Stage B tfvars, binding report, refresh report, binding-report SHA256, refresh-report SHA256, and tooling-tree SHA256 are required.");
+  const bindingReport = assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath: tfvarsBindingReportPath, bindingReportSha256: tfvarsBindingReportSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha: imageReleaseSha, expectedImageEvidenceSha256: imageEvidenceSha256 });
+  assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256: tfvarsBindingReportSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: imageEvidenceSha256, expectedStateSha256: bindingReport.stateBackupSha256 });
   if (!path.isAbsolute(planPath) || !path.isAbsolute(planJsonPath) || !path.isAbsolute(auditPath) || !path.isAbsolute(permissionReportPath) || !path.isAbsolute(permissionReportSignaturePath) || !path.isAbsolute(imageEvidencePath) || !path.isAbsolute(imageEvidenceSignaturePath)) throw new Error("All Stage B apply artifacts must use absolute paths.");
   if (!fs.existsSync(planPath)) throw new Error("Saved Terraform plan is missing.");
   if (!fs.existsSync(permissionReportPath)) throw new Error("Permission-preflight report is missing.");

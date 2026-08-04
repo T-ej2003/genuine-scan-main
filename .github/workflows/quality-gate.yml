@@ -182,9 +182,12 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout repository
+        id: checkout
+        uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
+        id: setup_node
         with:
           node-version: 24
           cache: npm
@@ -193,7 +196,12 @@ jobs:
             backend/package-lock.json
 
       - name: Install frontend dependencies
+        id: frontend_dependencies
         run: npm ci
+
+      - name: Validate frontend E2E cleanup contract
+        id: cleanup_contract
+        run: node --test scripts/tests/frontend-e2e-cleanup-workflow.test.mjs
 
       - name: Install backend dependencies
         run: npm --prefix backend ci
@@ -306,6 +314,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Build and prepare enterprise E2E backend
+        id: enterprise_db_setup
         run: |
           npm --prefix backend run build
           node scripts/enterprise-e2e-db.mjs prepare
@@ -331,8 +340,18 @@ jobs:
         run: npm run verify:ci:frontend:e2e
 
       - name: Clean disposable enterprise E2E database
-        if: always()
-        run: node scripts/enterprise-e2e-db.mjs cleanup
+        if: >-
+          always() &&
+          steps.checkout.outcome == 'success' &&
+          steps.enterprise_db_setup.outcome != 'skipped'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f scripts/enterprise-e2e-db.mjs || {
+            echo "::error::enterprise E2E cleanup script is missing after successful checkout."
+            exit 1
+          }
+          node scripts/enterprise-e2e-db.mjs cleanup
 
   backend:
     runs-on: ubuntu-latest

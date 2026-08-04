@@ -21,6 +21,7 @@ import { classifyStageBPlan } from "./aws/stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments } from "./aws/stage-b-terraform-workspace.mjs";
+import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
@@ -580,11 +581,14 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const bindingReportPath = readOption(cliOptions, "--binding-report");
   const bindingReportSha256 = readOption(cliOptions, "--binding-report-sha256");
   const toolingTreeSha256 = readOption(cliOptions, "--tooling-tree-sha256");
+  const refreshReportPath = readOption(cliOptions, "--refresh-report");
+  const refreshReportSha256 = readOption(cliOptions, "--refresh-report-sha256");
   const expectedImageReleaseSha = readOption(cliOptions, "--image-release-sha");
   const closureMode = readOption(cliOptions, "--closure-mode");
   const protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true });
-  if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha || closureMode !== "production") throw new Error("Stage B planning requires canonical tfvars provenance and --closure-mode production.");
-  assertStageBTfvarsBinding({ tfvarsPath: tfvars, bindingReportPath, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha });
+  if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha || !refreshReportPath || !refreshReportSha256 || closureMode !== "production") throw new Error("Stage B planning requires canonical tfvars and refresh provenance with --closure-mode production.");
+  const bindingReport = assertStageBTfvarsBinding({ tfvarsPath: tfvars, bindingReportPath, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha });
+  assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: bindingReport.imageEvidenceCanonicalSha256, expectedStateSha256: bindingReport.stateBackupSha256 });
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(path.resolve(root, ".terraform", "terraform.tfstate"), "utf8"))?.backend);
   const out = path.resolve(".terraform-plans/production-green-stage-b.tfplan");
   fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
