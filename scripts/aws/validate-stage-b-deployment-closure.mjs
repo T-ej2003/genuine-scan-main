@@ -11,6 +11,7 @@ import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENC
 import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { IMAGE_IMPACT_REPORT_REPO_PATH, assertImageImpactReport, parseStageBClosureMode } from "./validate-stage-b-image-reuse.mjs";
+import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -35,6 +36,7 @@ const checkoutMode = process.env.STAGE_B_TOOLING_CHECKOUT_MODE || "review";
 const currentHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
 if (mode === "production" && checkoutMode !== "production") throw new Error("Production Stage B closure requires a protected-main checkout mode.");
 if (mode === "pull-request" && checkoutMode === "production") throw new Error("Pull-request Stage B closure cannot run as a production checkout.");
+if (mode === "production") assertStageBTerraformWorkspace({ envWorkspace: process.env.TF_WORKSPACE });
 if (checkoutMode === "production") {
   readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
 } else {

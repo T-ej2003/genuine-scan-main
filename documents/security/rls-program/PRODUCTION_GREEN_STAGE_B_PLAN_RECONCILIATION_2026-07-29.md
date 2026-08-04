@@ -104,20 +104,20 @@ commands below. The destination key must match the map entry:
 
 ```sh
 generation=<release-sha-prefix>
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state pull > "/private/tmp/mscqr-stage-b-production-${generation}.state.backup.json"
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state list
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state pull > "/private/tmp/mscqr-stage-b-production-${generation}.state.backup.json"
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state list
 
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["backend"]' 'aws_ecs_task_definition.candidate_retained["<generation>-backend"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["canary"]' 'aws_ecs_task_definition.candidate_retained["<generation>-canary"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["worker"]' 'aws_ecs_task_definition.candidate_retained["<generation>-worker"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-admin-bootstrap"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-ownership"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-admin-ownership"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-capability-preflight"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-capability-preflight"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-provision"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-role-provision"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-verify"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-role-verify"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-rollback"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-rollback"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-runtime-policy"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-runtime-policy"]'
-TF_WORKSPACE=production terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-verification"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-verification"]'
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["backend"]' 'aws_ecs_task_definition.candidate_retained["<generation>-backend"]'
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["canary"]' 'aws_ecs_task_definition.candidate_retained["<generation>-canary"]'
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.candidate["worker"]' 'aws_ecs_task_definition.candidate_retained["<generation>-worker"]'
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-admin-bootstrap"]'
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-admin-ownership"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-admin-ownership"]'
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-capability-preflight"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-capability-preflight"]'
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-provision"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-role-provision"]'
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-role-verify"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-role-verify"]'
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-rollback"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-rollback"]'
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-runtime-policy"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-runtime-policy"]'
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-green-stage-b state mv 'aws_ecs_task_definition.executor["full-rls-verification"]' 'aws_ecs_task_definition.executor_retained["<generation>-full-rls-verification"]'
 ```
 
 The migration preserves all eleven existing revisions. It is not performed by
