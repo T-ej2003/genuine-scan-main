@@ -811,6 +811,9 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   writePrivate(imageEvidenceSignaturePath, JSON.stringify(signImageEvidence(imageEvidence, { sign: () => "AQ==" })));
   const brokerPackagePath = path.join(directory, "broker.zip");
   fs.writeFileSync(brokerPackagePath, Buffer.from("broker package fixture"), { mode: 0o600 });
+  const brokerBytes = fs.readFileSync(brokerPackagePath);
+  const brokerPackageManifestPath = `${brokerPackagePath}.manifest.json`;
+  fs.writeFileSync(brokerPackageManifestPath, JSON.stringify({ schemaVersion: 1, format: "stage-b-broker-zip-v2", archiveTimestamp: "1980-01-01T00:00:00.000Z", compression: "DEFLATE", compressionLevel: 9, toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), rawSha256: crypto.createHash("sha256").update(brokerBytes).digest("hex"), base64Sha256: crypto.createHash("sha256").update(Buffer.from(brokerBytes.toString("base64"))).digest("hex"), entries: [{ path: "fixture", sha256: crypto.createHash("sha256").update(brokerBytes).digest("hex"), mode: "0644", timestamp: "1980-01-01T00:00:00.000Z", compression: "DEFLATE", compressionLevel: 9, size: brokerBytes.length }] }, null, 2) + "\n", { mode: 0o600 });
   const stageAStateBackupPath = path.join(directory, "stage-a-state.json");
   fs.writeFileSync(stageAStateBackupPath, JSON.stringify({ lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 35 }), { mode: 0o600 });
   const stageAInputPath = path.join(directory, "stage-a-prerequisites.json");
@@ -830,12 +833,11 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   ]);
   const tfvarsBytes = Buffer.from(["broker_package_path = " + JSON.stringify(brokerPackagePath), ...Object.entries(tfvarsValues).map(([key, value]) => key + " = " + JSON.stringify(value)), ""].join("\n"));
   fs.writeFileSync(tfvarsPath, tfvarsBytes, { mode: 0o600 });
-  const brokerBytes = fs.readFileSync(brokerPackagePath);
   const tfvarsBindingReport = {
-    schemaVersion: 1, tfvarsSchemaVersion: 1, generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+    schemaVersion: 2, tfvarsSchemaVersion: 1, generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
     tfvarsFormat: "hcl", tfvarsFileName: path.basename(tfvarsPath), tfvarsExtension: ".tfvars",
     toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), imageReleaseSha: "a".repeat(40), imageEvidenceCanonicalSha256: canonicalImageEvidenceSha256,
-    stageAInputPath, stageAInputSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAInputPath)).digest("hex"), stageAStateBackupPath, stageAStateBackupSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAStateBackupPath)).digest("hex"), stageAStateObject: "mscqr/production/rls-green/stage-a/terraform.tfstate", stageAStateLineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", stageAStateSerial: 35, stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 76, brokerPackagePath,
+    stageAInputPath, stageAInputSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAInputPath)).digest("hex"), stageAStateBackupPath, stageAStateBackupSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAStateBackupPath)).digest("hex"), stageAStateObject: "mscqr/production/rls-green/stage-a/terraform.tfstate", stageAStateLineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", stageAStateSerial: 35, stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 76, brokerPackagePath, brokerPackageManifestPath, brokerPackageManifestSha256: crypto.createHash("sha256").update(fs.readFileSync(brokerPackageManifestPath)).digest("hex"), brokerPackageManifestFormat: "stage-b-broker-zip-v2",
     brokerPackageRawSha256: crypto.createHash("sha256").update(brokerBytes).digest("hex"), brokerPackageBase64Sha256: crypto.createHash("sha256").update(brokerBytes).digest("base64"),
     tfvarsSha256: crypto.createHash("sha256").update(tfvarsBytes).digest("hex"),
     images: Object.fromEntries(Object.entries(tfvarsValues).map(([variable, imageReference]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: variable === "worker_image" ? "worker" : variable === "executor_image" ? "rls-executor" : variable.includes("canary") ? "rls-canary" : "backend", repository: variable === "worker_image" ? "mscqr-worker" : "mscqr-backend", tag: "a".repeat(40), imageReference, digestLength: 71, digest: imageReference.slice(imageReference.indexOf("@") + 1), matchesEvidence: true }])),

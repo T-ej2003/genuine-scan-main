@@ -33,6 +33,17 @@ npm run stage-b:generate-tfvars -- \
   --binding-report /absolute/private/production-green-stage-b-tfvars.binding.json
 ```
 
+Build the broker package first with the protected-main identities. The reviewed packager writes the ZIP and its mode-0600 canonical manifest as one transactional pair; both hashes are required downstream.
+
+```sh
+node scripts/aws/package-production-green-stage-b-broker.mjs \
+  /absolute/private/production-green-stage-b-broker.zip \
+  --tooling-sha "$TOOLING_SHA" \
+  --tooling-tree-sha256 "$TOOLING_TREE_SHA256"
+```
+
+The manifest is written beside the ZIP as `broker.zip.manifest.json` and fixes entry order, timestamps (`1980-01-01T00:00:00Z`), modes, DEFLATE level 9, lockfile/source/contract identities, raw ZIP SHA-256, and the SHA-256 of the base64 ZIP representation. The packager rejects symlinks, special files, cache/debug files, lockfile mutation, and non-canonical tooling identities.
+
 Record the generated tfvars SHA and binding-report SHA. Closure, plan generation, and both wrapper modes must receive --tfvars, --tfvars-binding-report, --tfvars-binding-report-sha256, and --tooling-tree-sha256; a modified tfvars file, missing provenance, or current broker ZIP byte mismatch is rejected before Terraform execution. The real apply path repeats the ZIP check immediately before applying the saved plan.
 
 Refresh-only is available only through `npm run stage-b:refresh-only -- --closure-mode production ...`. It validates the canonical `.tfvars` contract, initialized backend metadata, protected checkout, and `TF_WORKSPACE=default` before running one untargeted refresh-only plan. `--terraform-data-dir` must be an existing private directory, `--backend-metadata` must be its exact `terraform.tfstate` child, and both Terraform subprocesses receive that same directory as `TF_DATA_DIR`. It never accepts an output plan path or Terraform `-out` flag.

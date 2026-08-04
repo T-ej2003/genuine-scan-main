@@ -12,12 +12,13 @@ import {
 } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
+import { assertStageBBrokerPackageManifest } from "./package-production-green-stage-b-broker.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageAStateIdentity, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 
 export const STAGE_B_TFVARS_SCHEMA_VERSION = 1;
-export const STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION = 1;
+export const STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION = 2;
 export const STAGE_B_TFVARS_FORMAT = "hcl";
 export const STAGE_B_TFVARS_EXTENSION = ".tfvars";
 export const STAGE_B_EXPECTED_ENVIRONMENT = "production";
@@ -298,6 +299,8 @@ function assertBrokerPackageBinding(tfvarsBytes, report) {
   const bytes = fs.readFileSync(tfvarsBrokerPath);
   if (sha256(bytes) !== report.brokerPackageRawSha256) throw new Error("Stage B broker package raw SHA256 does not match the canonical binding report.");
   if (base64Sha256(bytes) !== report.brokerPackageBase64Sha256) throw new Error("Stage B broker package base64 SHA256 does not match the canonical binding report.");
+  const manifest = assertStageBBrokerPackageManifest({ brokerPackagePath: tfvarsBrokerPath, manifestPath: report.brokerPackageManifestPath, repositoryRoot: root, expectedToolingSha: report.toolingSha, expectedToolingTreeSha256: report.toolingTreeSha256 });
+  if (manifest.sha256 !== report.brokerPackageManifestSha256 || manifest.manifest.rawSha256 !== report.brokerPackageRawSha256) throw new Error("Stage B broker package manifest binding does not match the canonical report.");
 }
 
 function assertStageAInputMatchesStateBackup(stageAInput, stageAStateBytes, stageAState, report) {
@@ -374,6 +377,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   const stageAPrerequisiteInput = validateStageBStageAInput(readJson(stageAInput), { toolingSha, toolingTreeSha256 });
   const stageAStateSha256 = assertStageAInputMatchesStateBackup(stageAPrerequisiteInput, stageAStateBytes, stageAState);
   const contract = deriveContractDigests({ file: checksumsFile }); const brokerBytes = fs.readFileSync(brokerPackagePath);
+  const brokerManifest = assertStageBBrokerPackageManifest({ brokerPackagePath, repositoryRoot: root, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256 });
   const values = {
     account_id: STAGE_B.account, aws_region: STAGE_B.region, deployment_environment: environment, vpc_id: stageAPrerequisiteInput.vpcId, private_subnet_ids: [...stageAPrerequisiteInput.privateSubnetIds].sort(), ecs_cluster_arn: stageAPrerequisiteInput.ecsClusterArn,
     stage_a_database_security_group_id: stageAPrerequisiteInput.stageADatabaseSecurityGroupId, stage_a_executor_security_group_id: stageAPrerequisiteInput.stageAExecutorSecurityGroupId, stage_a_executor_task_role_arn: stageAPrerequisiteInput.stageAExecutorTaskRoleArn, stage_a_broker_role_arn: stageAPrerequisiteInput.stageABrokerRoleArn,
@@ -394,7 +398,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
     generator: STAGE_B_TFVARS_GENERATOR,
     toolingSha, toolingTreeSha256, imageReleaseSha, imageEvidenceCanonicalSha256: evidenceSha256,
     imageEvidenceSource: path.basename(imageEvidence), imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputPath: path.resolve(stageAInput), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stageAStateBackupPath: path.resolve(stageAStateBackup), stageAStateBackupSha256: stageAStateSha256, stageAStateObject: stageAPrerequisiteInput.stageAStateObject, stageAStateLineage: stageAState.lineage, stageAStateSerial: stageAState.serial, stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
-    brokerPackagePath: path.resolve(brokerPackagePath), brokerPackageRawSha256: sha256(brokerBytes), brokerPackageBase64Sha256: base64Sha256(brokerBytes), sourceContractSha256: contract.sourceContractSha256, migrationSetDigest: contract.migrationSetDigest, packageChecksumSha256: contract.packageChecksumSha256,
+    brokerPackagePath: path.resolve(brokerPackagePath), brokerPackageManifestPath: brokerManifest.path, brokerPackageManifestSha256: brokerManifest.sha256, brokerPackageManifestFormat: brokerManifest.manifest.format, brokerPackageRawSha256: sha256(brokerBytes), brokerPackageBase64Sha256: base64Sha256(brokerBytes), sourceContractSha256: contract.sourceContractSha256, migrationSetDigest: contract.migrationSetDigest, packageChecksumSha256: contract.packageChecksumSha256,
     images: Object.fromEntries(Object.entries(images).map(([variable, image]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: image.service, repository: image.repository, tag: image.tag, imageReference: image.value, digestLength: image.digest.length, digest: image.digest, matchesEvidence: report.images.find((record) => record.service === image.service)?.digest === image.digest }])),
     retainedDefinitions: { candidate: retained.counts.candidate, executor: retained.counts.executor },
     tfvarsSha256,

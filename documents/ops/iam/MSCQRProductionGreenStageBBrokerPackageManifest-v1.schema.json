@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://genuine-scan.example/schemas/mscqr-stage-b-broker-package-manifest-v1.json",
+  "title": "MSCQR Stage B broker package manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "format",
+    "archiveTimestamp",
+    "compression",
+    "compressionLevel",
+    "toolingSha",
+    "toolingTreeSha256",
+    "nodeVersion",
+    "npmVersion",
+    "packageLockSha256",
+    "brokerSourceTreeSha256",
+    "deploymentContractSha256",
+    "entries",
+    "rawSha256",
+    "base64Sha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "format": { "const": "stage-b-broker-zip-v2" },
+    "archiveTimestamp": { "const": "1980-01-01T00:00:00.000Z" },
+    "compression": { "const": "DEFLATE" },
+    "compressionLevel": { "const": 9 },
+    "toolingSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "toolingTreeSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "nodeVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "npmVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "packageLockSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "brokerSourceTreeSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "deploymentContractSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "rawSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "base64Sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "mode", "timestamp", "compression", "compressionLevel", "size"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)[^\\u0000]+$" },
+          "sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "mode": { "enum": ["0644", "0755"] },
+          "timestamp": { "const": "1980-01-01T00:00:00.000Z" },
+          "compression": { "enum": ["STORE", "DEFLATE"] },
+          "compressionLevel": { "type": ["integer", "null"], "minimum": 0, "maximum": 9 },
+          "size": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

@@ -242,12 +242,32 @@
       "fileMode": "0600",
       "symlink": "reject",
       "outsideRepository": true,
-      "atomic": false,
+      "atomic": true,
       "overwrite": false,
       "hashBound": true,
-      "atomicGroup": null,
-      "allOrNone": false,
-      "rollback": "none"
+      "atomicGroup": "broker-package",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "broker-package-manifest",
+      "kind": "file",
+      "producer": "scripts/aws/package-production-green-stage-b-broker.mjs",
+      "consumers": [
+        "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "broker-package",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "tfvars",
