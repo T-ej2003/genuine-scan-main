@@ -20,6 +20,7 @@ import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage
 import { classifyStageBPlan } from "./aws/stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
+import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments } from "./aws/stage-b-terraform-workspace.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
@@ -35,6 +36,18 @@ export function assertStageBReleaseCallerArn(value) {
     throw new Error("Stage B caller must be the exact production release-deployer STS assumed-role ARN.");
   }
   return value;
+}
+
+export function assertStageBPlanningWorkspace({ env = process.env, argv = [], showWorkspace = () => execFileSync("terraform", [`-chdir=${root}`, "workspace", "show"], { encoding: "utf8" }).trim() } = {}) {
+  assertStageBTerraformWorkspaceArguments(argv);
+  assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE });
+  return assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE, observedWorkspace: showWorkspace() });
+}
+
+export function runStageBTerraformPlanCommand({ env = process.env, argv = [], showWorkspace, plan } = {}) {
+  if (typeof plan !== "function") throw new Error("Stage B Terraform plan command dependency is required.");
+  const workspace = assertStageBPlanningWorkspace({ env, argv, showWorkspace });
+  return { workspace, result: plan() };
 }
 const expectedBrokerFamily = (mode) => mode === "full-rls-application-canary"
   ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
@@ -509,7 +522,8 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
 }
 
 export function assertStageBPlan(plan, options = {}) {
-  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence, strictResourceContract = false, protectedMainCheckout } = options;
+  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence, strictResourceContract = false, protectedMainCheckout, terraformWorkspace } = options;
+  if (terraformWorkspace) assertStageBTerraformWorkspace(terraformWorkspace);
   const deploymentIdentity = strictResourceContract || imageEvidence ? assertStageBDeploymentIdentity({ plan, imageEvidence }) : undefined;
   if (strictResourceContract) assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity });
   const resourceClassification = classifyStageBPlan(plan, { strict: strictResourceContract, terraformConfiguration });
@@ -570,13 +584,11 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const closureMode = readOption(cliOptions, "--closure-mode");
   const protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true });
   if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha || closureMode !== "production") throw new Error("Stage B planning requires canonical tfvars provenance and --closure-mode production.");
-  if (process.env.TF_WORKSPACE !== "default") throw new Error("Stage B planning requires TF_WORKSPACE=default for the direct production state key.");
   assertStageBTfvarsBinding({ tfvarsPath: tfvars, bindingReportPath, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha });
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(path.resolve(root, ".terraform", "terraform.tfstate"), "utf8"))?.backend);
   const out = path.resolve(".terraform-plans/production-green-stage-b.tfplan");
   fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
-  execFileSync("terraform", [`-chdir=${root}`, "workspace", "select", "default"], { stdio: "inherit" });
-  execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${out}`], { stdio: "inherit" });
+  const { workspace } = runStageBTerraformPlanCommand({ argv: process.argv.slice(2), plan: () => execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${out}`], { stdio: "inherit" }) });
   const planJsonText = execFileSync("terraform", [`-chdir=${root}`, "show", "-json", out], { encoding: "utf8" });
   const plan = JSON.parse(planJsonText);
   const terraformConfiguration = fs.readFileSync(path.resolve(root, "main.tf"), "utf8");
@@ -591,6 +603,6 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   } catch {
     throw new Error("Stage B trusted caller attestation failed: aws sts get-caller-identity did not return valid identity JSON.");
   }
-  assertStageBPlan(plan, { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes: Buffer.from(planJsonText), planJsonSha256, trustedCallerArn, terraformConfiguration, strictResourceContract: true, protectedMainCheckout });
+  assertStageBPlan(plan, { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes: Buffer.from(planJsonText), planJsonSha256, trustedCallerArn, terraformConfiguration, strictResourceContract: true, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: workspace } });
   process.stdout.write(JSON.stringify({ status: "approved-plan-only", plan: out }) + "\n");
 }
