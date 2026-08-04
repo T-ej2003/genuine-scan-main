@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 function requireOption(argv, option) {
   const index = argv.indexOf(option);
@@ -13,7 +15,8 @@ function requireOption(argv, option) {
 }
 
 export function runCli(argv = process.argv.slice(2)) {
-  const outputPath = requireOption(argv, "--output");
+  const outputPath = assertStageBArtifactPath({ artifactPath: requireOption(argv, "--output"), repositoryRoot, label: "Stage B ECS observations", allowExisting: false });
+  ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot, create: true });
   const reader = createAwsReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn });
   const callerArn = reader.getCallerIdentity()?.Arn;
   if (typeof callerArn !== "string" || !callerArn) throw new Error("Stage B ECS observation caller identity is missing.");
@@ -25,8 +28,7 @@ export function runCli(argv = process.argv.slice(2)) {
     clusterArn: STAGE_B.clusterArn,
     ...observations,
   };
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(outputPath, `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
+  writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(result, null, 2)}\n`), repositoryRoot, label: "Stage B ECS observations" });
   return { outputPath, serviceCount: result.services.length, runningCount: result.runningTasks.length, pendingCount: result.pendingTasks.length };
 }
 

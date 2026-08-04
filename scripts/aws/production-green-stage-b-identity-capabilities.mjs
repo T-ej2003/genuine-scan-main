@@ -7,6 +7,7 @@ import { STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prereq
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 import { RELEASE_CALLER_PATTERN } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
+import { ensureStageBPrivateDirectory, ensureStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const IDENTITY_CAPABILITY_MATRIX_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -68,7 +69,7 @@ export function runReleaseReadPreflight({
   if (region !== STAGE_B.region) throw new Error("Stage B release preflight region is wrong.");
   if (!path.isAbsolute(outputDirectory || "")) throw new Error("Stage B release preflight requires an absolute private output directory.");
   readIdentityCapabilityMatrix();
-  fs.mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
+  ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot: root, create: true, normalize: true });
   const requiredReads = {}; const failed = []; const responses = new Map(); let total = 0;
   let caller;
   for (const probe of RELEASE_READ_PROBES) {
@@ -77,6 +78,9 @@ export function runReleaseReadPreflight({
     const args = probe.args.map((value) => value === "{output}" ? outputPath : value);
     try {
       const response = run(args, probe);
+      if (probe.id === "stage-a-state" || probe.id === "stage-b-state") {
+        ensureStageBPrivateFile({ filePath: outputPath, repositoryRoot: root, normalize: true, label: `${probe.id} backup` });
+      }
       responses.set(probe.id, response);
       if (probe.id === "caller") {
         caller = JSON.parse(response).Arn;

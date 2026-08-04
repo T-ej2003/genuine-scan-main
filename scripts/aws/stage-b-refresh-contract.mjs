@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 
 export const STAGE_B_REFRESH_SCHEMA_VERSION = 1;
 export const STAGE_B_REFRESH_STATUSES = Object.freeze([
@@ -15,6 +16,7 @@ export const STAGE_B_REFRESH_STATUSES = Object.freeze([
 ]);
 export const STAGE_B_REFRESH_ALLOWED_STATUSES = Object.freeze(["NO_CHANGES", "REVIEWED_OUTPUT_RECONCILIATION"]);
 const VARIABLES_SOURCE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b/variables.tf");
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const checkAddressesFromSource = (source) => [...source.matchAll(/check\s+"([^"]+)"\s*\{/g)].map(([, name]) => `check.${name}`).sort();
 export const STAGE_B_EXPECTED_CHECK_ADDRESSES = Object.freeze(checkAddressesFromSource(fs.readFileSync(VARIABLES_SOURCE_PATH, "utf8")));
 
@@ -122,8 +124,7 @@ function expectedTaskDefinitionArns(state, outputsSource) {
 
 export function assertStageBRefreshStateBinding({ stateBackupPath, bindingReport } = {}) {
   if (!path.isAbsolute(stateBackupPath || "")) throw new Error("Stage B refresh state backup must be an absolute path.");
-  const stat = fs.lstatSync(stateBackupPath, { throwIfNoEntry: false });
-  if (!stat?.isFile() || stat.isSymbolicLink()) throw new Error("Stage B refresh state backup must be a regular file.");
+  assertStageBPrivateFile({ filePath: stateBackupPath, repositoryRoot, label: "Stage B refresh state backup" });
   const bytes = fs.readFileSync(stateBackupPath);
   const state = JSON.parse(bytes);
   if (sha256(bytes) !== bindingReport.stateBackupSha256) throw new Error("Stage B refresh state backup SHA256 does not match the tfvars binding report.");
@@ -166,6 +167,7 @@ export function classifyStageBRefreshResult({ plan, terraformExitCode = 0, terra
 
 export function assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedTfvarsSha256, expectedImageEvidenceSha256, expectedStateSha256, expectedBackendMetadataSha256, expectedTerraformDataDir, expectedWorkspace = "default" } = {}) {
   if (!path.isAbsolute(refreshReportPath || "")) throw new Error("Stage B refresh report path must be absolute.");
+  assertStageBPrivateFile({ filePath: refreshReportPath, repositoryRoot, label: "Stage B refresh report" });
   const bytes = fs.readFileSync(refreshReportPath); const report = JSON.parse(bytes);
   if (refreshReportSha256 && sha256(bytes) !== refreshReportSha256) throw new Error("Stage B refresh report SHA256 does not match the approved report.");
   if (report.schemaVersion !== STAGE_B_REFRESH_SCHEMA_VERSION || report.deployablePlan !== false || !STAGE_B_REFRESH_ALLOWED_STATUSES.includes(report.status)) throw new Error("Stage B refresh evidence is not an approved non-deployable refresh result.");

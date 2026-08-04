@@ -1,0 +1,416 @@
+{
+  "schemaVersion": 1,
+  "deployment": "production-green-stage-b",
+  "artifacts": [
+    {
+      "id": "release-artifact-directory",
+      "kind": "directory",
+      "producer": "scripts/aws/run-production-green-stage-b-preflight.mjs:runReleaseReadPreflight",
+      "consumers": [
+        "scripts/aws/run-production-green-stage-b-preflight.mjs",
+        "scripts/refresh-production-green-stage-b.mjs",
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": null,
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": false
+    },
+    {
+      "id": "administrator-capability-report",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-green-stage-b-preflight.mjs:runAdministratorPreflight",
+      "consumers": [
+        "scripts/aws/run-production-green-stage-b-preflight.mjs",
+        "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "administrator-capability-signature",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-green-stage-b-preflight.mjs:runAdministratorPreflight",
+      "consumers": [
+        "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "release-preflight-report",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-green-stage-b-preflight.mjs:runReleaseReadiness",
+      "consumers": [
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "image-manifest",
+      "kind": "file",
+      "producer": "external:protected image workflow artifact",
+      "consumers": [
+        "scripts/aws/production-green-stage-b-image-evidence.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true
+    },
+    {
+      "id": "stage-a-state-backup",
+      "kind": "file",
+      "producer": "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight",
+      "consumers": [
+        "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+        "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+        "scripts/refresh-production-green-stage-b.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "stage-b-state-backup",
+      "kind": "file",
+      "producer": "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight",
+      "consumers": [
+        "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+        "scripts/refresh-production-green-stage-b.mjs",
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "backend-config",
+      "kind": "file",
+      "producer": "scripts/aws/generate-production-green-stage-b-backend-config.mjs:generateStageBTerraformBackendConfig",
+      "consumers": [
+        "scripts/aws/run-production-green-stage-b-preflight.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "terraform-data-directory",
+      "kind": "directory",
+      "producer": "scripts/aws/run-production-green-stage-b-preflight.mjs:continueReleaseReadiness",
+      "consumers": [
+        "scripts/aws/stage-b-terraform-backend-contract.mjs",
+        "scripts/refresh-production-green-stage-b.mjs",
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": null,
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "backend-metadata",
+      "kind": "file",
+      "producer": "scripts/aws/stage-b-terraform-backend-contract.mjs:terraform init + ensureStageBTerraformBackendMetadataPrivate",
+      "consumers": [
+        "scripts/refresh-production-green-stage-b.mjs",
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "stage-a-handoff",
+      "kind": "file",
+      "producer": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs:generateStageAPrerequisites",
+      "consumers": [
+        "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "broker-package",
+      "kind": "file",
+      "producer": "scripts/aws/package-production-green-stage-b-broker.mjs",
+      "consumers": [
+        "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "tfvars",
+      "kind": "file",
+      "producer": "scripts/aws/generate-production-green-stage-b-tfvars.mjs:writeAtomicPair",
+      "consumers": [
+        "scripts/refresh-production-green-stage-b.mjs",
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "tfvars-binding-report",
+      "kind": "file",
+      "producer": "scripts/aws/generate-production-green-stage-b-tfvars.mjs:writeAtomicPair",
+      "consumers": [
+        "scripts/refresh-production-green-stage-b.mjs",
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "refresh-report",
+      "kind": "file",
+      "producer": "scripts/refresh-production-green-stage-b.mjs:writeOutput",
+      "consumers": [
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "refresh-temporary-plan",
+      "kind": "file",
+      "producer": "scripts/refresh-production-green-stage-b.mjs:terraform plan -refresh-only",
+      "consumers": [
+        "scripts/refresh-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": false
+    },
+    {
+      "id": "saved-plan",
+      "kind": "file",
+      "producer": "scripts/plan-production-green-stage-b.mjs:terraform plan",
+      "consumers": [
+        "scripts/aws/generate-production-green-stage-b-reference-audit.mjs",
+        "scripts/aws/validate-production-green-stage-b-permissions.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "plan-json",
+      "kind": "file",
+      "producer": "scripts/plan-production-green-stage-b.mjs:terraform show -json",
+      "consumers": [
+        "scripts/aws/generate-production-green-stage-b-reference-audit.mjs",
+        "scripts/aws/validate-production-green-stage-b-permissions.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "reference-audit",
+      "kind": "file",
+      "producer": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs:runCli",
+      "consumers": [
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "ecs-observations",
+      "kind": "file",
+      "producer": "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs:runCli",
+      "consumers": [
+        "scripts/aws/generate-production-green-stage-b-reference-audit.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "permission-report",
+      "kind": "file",
+      "producer": "scripts/aws/validate-production-green-stage-b-permissions.mjs:runCli",
+      "consumers": [
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "permission-signature",
+      "kind": "file",
+      "producer": "scripts/aws/validate-production-green-stage-b-permissions.mjs:runCli",
+      "consumers": [
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "image-evidence",
+      "kind": "file",
+      "producer": "scripts/aws/production-green-stage-b-image-evidence.mjs:runCli",
+      "consumers": [
+        "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    },
+    {
+      "id": "image-evidence-signature",
+      "kind": "file",
+      "producer": "scripts/aws/production-green-stage-b-image-evidence.mjs:runCli",
+      "consumers": [
+        "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true
+    }
+  ]
+}

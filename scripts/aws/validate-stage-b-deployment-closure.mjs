@@ -15,6 +15,7 @@ import { IMAGE_IMPACT_REPORT_REPO_PATH, assertImageImpactReport, parseStageBClos
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
 import { assertStageBDeploymentCapabilityGraph } from "./generate-production-green-stage-b-capability-graph.mjs";
 import { assertStageBRefreshEvidence } from "./stage-b-refresh-contract.mjs";
+import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -58,6 +59,9 @@ if (mode === "production") {
   ];
   if (requiredProductionEvidence.some((name) => !process.env[name])) throw new Error("Production Stage B closure requires complete fresh deployment evidence.");
   if (!process.env.TF_DATA_DIR) throw new Error("Production Stage B closure requires the reviewed TF_DATA_DIR.");
+  for (const name of ["STAGE_B_IMAGE_EVIDENCE_PATH", "STAGE_B_IMAGE_EVIDENCE_SIGNATURE_PATH", "STAGE_B_PLAN_PATH", "STAGE_B_PLAN_JSON_PATH", "STAGE_B_REFERENCE_AUDIT_PATH", "STAGE_B_PERMISSION_REPORT_PATH", "STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH", "STAGE_B_REFRESH_REPORT_PATH"]) {
+    assertStageBPrivateFile({ filePath: process.env[name], repositoryRoot: root, label: name });
+  }
   const backendMetadataPath = path.resolve(process.env.STAGE_B_TERRAFORM_BACKEND_METADATA_PATH);
   backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: process.env.TF_DATA_DIR, backendMetadataPath, repositoryRoot: root });
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(backendMetadataPath, "utf8"))?.backend);

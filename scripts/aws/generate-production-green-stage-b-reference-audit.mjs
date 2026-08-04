@@ -16,6 +16,7 @@ import {
 import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
 import { classifyStageBPlan } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
+import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
 export { batch, createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 
@@ -25,6 +26,7 @@ const assumedReleaseRolePattern = /^arn:aws:sts::368992683803:assumed-role\/mscq
 const exactReplacePaths = (paths) => JSON.stringify(paths) === JSON.stringify([["container_definitions"]]);
 const sorted = (items, key) => [...items].sort((left, right) => String(key(left)).localeCompare(String(key(right))));
 const stageBTerraformConfigurationPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b/main.tf");
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const familyFromArn = (value, label) => {
   const match = taskDefinitionArnPattern.exec(value || "");
@@ -621,14 +623,16 @@ export function parseCli(argv) {
 
 export async function runCli(argv = process.argv.slice(2)) {
   const options = parseCli(argv);
+  assertStageBPrivateFile({ filePath: options.planJsonPath, repositoryRoot, label: "Stage B plan JSON" });
+  const outputPath = assertStageBArtifactPath({ artifactPath: options.outputPath, repositoryRoot, label: "Stage B reference audit", allowExisting: false });
+  ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot, create: true });
   const planBytes = fs.readFileSync(options.planJsonPath);
   const plan = parseJson(planBytes.toString("utf8"), "Terraform plan JSON");
   const reader = createAwsReader(options);
   const terraformConfiguration = fs.readFileSync(stageBTerraformConfigurationPath, "utf8");
   const audit = generateReferenceAudit({ ...options, plan, planBytes, reader, terraformConfiguration });
-  fs.mkdirSync(path.dirname(options.outputPath), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(options.outputPath, `${JSON.stringify(audit, null, 2)}\n`, { mode: 0o600 });
-  return { outputPath: options.outputPath, auditSha256: sha256(fs.readFileSync(options.outputPath)), planJsonSha256: audit.planJsonSha256 };
+  writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(audit, null, 2)}\n`), repositoryRoot, label: "Stage B reference audit" });
+  return { outputPath, auditSha256: sha256(fs.readFileSync(outputPath)), planJsonSha256: audit.planJsonSha256 };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
