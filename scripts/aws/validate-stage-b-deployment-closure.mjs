@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
-import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, validateManifest } from "./validate-production-green-stage-b-permissions.mjs";
+import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, assertReleasePolicyEvidence, validateManifest, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
 import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENCE_REVOCATION_MODEL } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
@@ -53,6 +53,11 @@ if (mode === "production") {
   ];
   if (requiredProductionEvidence.some((name) => !process.env[name])) throw new Error("Production Stage B closure requires complete fresh deployment evidence.");
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(process.env.STAGE_B_TERRAFORM_BACKEND_METADATA_PATH, "utf8"))?.backend);
+  const permissionReport = JSON.parse(fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_PATH, "utf8"));
+  const permissionSignature = JSON.parse(fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH, "utf8"));
+  if (permissionReport.purpose !== "saved-plan-authorization" || permissionReport.status !== "valid") throw new Error("Production closure requires a valid saved-plan administrator permission report.");
+  assertReleasePolicyEvidence(permissionReport.policyEvidence);
+  verifyPermissionReportSignature({ report: permissionReport, signatureArtifact: permissionSignature });
 }
 if (mode === "production" || tfvarsPath || bindingReportPath) {
   if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256 || !process.env.STAGE_B_TOOLING_TREE_SHA256 || !process.env.STAGE_B_IMAGE_RELEASE_SHA || !process.env.STAGE_B_IMAGE_EVIDENCE_SHA256) throw new Error("Production Stage B closure requires canonical tfvars provenance and complete deployment identity.");
@@ -73,7 +78,7 @@ assert.deepEqual(matrix.evidenceFreshness, {
   permissionPreflight: {
     model: PERMISSION_EVIDENCE_VALIDITY_MODEL,
     maxAgeMs: PERMISSION_EVIDENCE_MAX_AGE_MS,
-    requirements: ["exact plan hashes", "exact role and policy simulation", "valid KMS signature"],
+    requirements: ["exact plan hashes", "exact role and policy simulation", "exact source/live policy versions and hashes", "valid KMS signature"],
   },
   referenceAudit: {
     model: STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL,

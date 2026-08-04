@@ -18,6 +18,7 @@ import {
   RELEASE_CALLER_PATTERN,
   RELEASE_ROLE_ARN,
   canonicalizeJson,
+  assertReleasePolicyEvidence,
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendPolicy } from "./aws/stage-b-terraform-backend-contract.mjs";
@@ -101,11 +102,13 @@ export function parseCli(argv) {
 export function assertPermissionReport(report, { signatureArtifact, verifySignature = verifyPermissionReportSignature, planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, toolingSha, imageReleaseSha, canonicalImageEvidenceSha256, now = new Date().toISOString() } = {}) {
   if (!verifySignature({ report, signatureArtifact, now })) throw new Error("Permission report signature verification failed.");
   if (report?.schemaVersion !== 1 || report.status !== "valid") throw new Error("A valid permission-preflight report is required.");
+  if (report.purpose !== "saved-plan-authorization") throw new Error("A saved-plan authorization permission report is required.");
   assertPermissionEvaluationBindings(report);
   if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(report.reportGeneratorCallerArn)) throw new Error("Permission-preflight report generator is not approved.");
   if (report.simulatedRoleArn !== RELEASE_ROLE_ARN || report.applyRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission-preflight report role contract is wrong.");
   if (report.applyCallerArn !== null && report.applyCallerArn !== callerArn) throw new Error("Permission-preflight report apply caller is wrong.");
   if (report.applyCallerArnPattern !== RELEASE_CALLER_PATTERN) throw new Error("Permission-preflight report caller pattern is wrong.");
+  assertReleasePolicyEvidence(report.policyEvidence);
   if (!/^[a-f0-9]{64}$/.test(report.manifestSha256)) throw new Error("Permission-preflight report manifest hash is missing or malformed.");
   if (manifestSha256 && report.manifestSha256 !== manifestSha256) throw new Error("Permission-preflight report is bound to a different permission manifest.");
   if (report.planSha256 !== planSha256) throw new Error("Permission-preflight report is bound to a different plan.");

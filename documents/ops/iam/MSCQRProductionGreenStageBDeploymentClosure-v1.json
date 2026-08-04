@@ -13,7 +13,7 @@
     "permissionPreflight": {
       "model": "live-plan-bound-15m",
       "maxAgeMs": 900000,
-      "requirements": ["exact plan hashes", "exact role and policy simulation", "valid KMS signature"]
+      "requirements": ["exact plan hashes", "exact role and policy simulation", "exact source/live policy versions and hashes", "valid KMS signature"]
     },
     "referenceAudit": {
       "model": "live-plan-bound-15m",

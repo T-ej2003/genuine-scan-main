@@ -56,6 +56,14 @@ const TASK_DEFINITION_MAPPINGS = Object.freeze([
 const stageBRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const arnPattern = /^(?:arn:aws:[^:]+:[^:]*:368992683803:.+|arn:aws:s3:::[^/]+(?:\/.*)?)$/;
 
+export const RELEASE_POLICY_SOURCES = Object.freeze([
+  ["MSCQRProductionGreenStageARelease", "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json"],
+  ["MSCQRProductionGreenStageBProviderRecovery", "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json"],
+  ["MSCQRProductionGreenStageBReferenceAuditReadOnly", "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json"],
+  ["MSCQRProductionGreenStageBFinalApplyWrite", "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json"],
+  ["MSCQRProductionGreenStageBWorkspaceState", "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json"],
+].map(([name, sourcePath]) => Object.freeze({ name, arn: `arn:aws:iam::${ACCOUNT}:policy/${name}`, sourcePath })));
+
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const exactActions = (actual, expected) => JSON.stringify(actual || []) === JSON.stringify(expected);
 
@@ -91,6 +99,56 @@ export function canonicalizeJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalizeJson).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalizeJson(value[key])}`).join(",")}}`;
   return JSON.stringify(value);
+}
+
+const decodePolicyDocument = (document) => typeof document === "string" ? JSON.parse(decodeURIComponent(document)) : document;
+export function sourcePolicyEvidence() {
+  return RELEASE_POLICY_SOURCES.map(({ name, arn, sourcePath }) => {
+    const document = JSON.parse(fs.readFileSync(path.join(stageBRoot, sourcePath), "utf8"));
+    return { name, arn, sourcePath, sourceSha256: sha256(Buffer.from(canonicalizeJson(document))) };
+  });
+}
+
+export function collectLiveReleasePolicyEvidence({ run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+  const roleName = RELEASE_ROLE_ARN.split("/").at(-1);
+  const attached = JSON.parse(run(["iam", "list-attached-role-policies", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).AttachedPolicies || [];
+  const inlinePolicyNames = JSON.parse(run(["iam", "list-role-policies", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).PolicyNames || [];
+  const inlinePolicies = inlinePolicyNames.map((policyName) => {
+    const response = JSON.parse(run(["iam", "get-role-policy", "--role-name", roleName, "--policy-name", policyName, "--output", "json", "--no-cli-pager"]));
+    return { policyName, sha256: sha256(Buffer.from(canonicalizeJson(decodePolicyDocument(response.PolicyDocument)))) };
+  }).sort((left, right) => left.policyName.localeCompare(right.policyName));
+  const role = JSON.parse(run(["iam", "get-role", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).Role;
+  const policies = sourcePolicyEvidence().map((expected) => {
+    const metadata = JSON.parse(run(["iam", "get-policy", "--policy-arn", expected.arn, "--output", "json", "--no-cli-pager"])).Policy;
+    if (!metadata?.DefaultVersionId) throw new Error(`Live release policy has no default version: ${expected.name}.`);
+    const version = JSON.parse(run(["iam", "get-policy-version", "--policy-arn", expected.arn, "--version-id", metadata.DefaultVersionId, "--output", "json", "--no-cli-pager"])).PolicyVersion;
+    const liveSha256 = sha256(Buffer.from(canonicalizeJson(decodePolicyDocument(version?.Document))));
+    return { ...expected, defaultVersionId: metadata.DefaultVersionId, liveSha256, attached: attached.some(({ PolicyArn }) => PolicyArn === expected.arn), matchesSource: liveSha256 === expected.sourceSha256 };
+  });
+  return {
+    roleArn: RELEASE_ROLE_ARN,
+    attachedPolicyArns: attached.map(({ PolicyArn }) => PolicyArn).sort(),
+    inlinePolicyNames: [...inlinePolicyNames].sort(), inlinePolicies,
+    permissionsBoundaryArn: role?.PermissionsBoundary?.PermissionsBoundaryArn || null,
+    policies,
+    status: policies.every(({ attached: isAttached, matchesSource }) => isAttached && matchesSource) ? "valid" : "invalid",
+  };
+}
+
+export function assertReleasePolicyEvidence(evidence) {
+  if (evidence?.roleArn !== RELEASE_ROLE_ARN || evidence.status !== "valid" || !Array.isArray(evidence.policies)) throw new Error("Release policy evidence is missing or invalid.");
+  if (evidence.permissionsBoundaryArn !== null) throw new Error("Release policy evidence contains an unreviewed permissions boundary.");
+  if (!Array.isArray(evidence.inlinePolicyNames) || !Array.isArray(evidence.inlinePolicies || []) || evidence.inlinePolicyNames.length !== (evidence.inlinePolicies || []).length) throw new Error("Release inline-policy evidence is incomplete.");
+  const expected = sourcePolicyEvidence();
+  const expectedAttachments = expected.map(({ arn }) => arn).sort();
+  if (JSON.stringify(evidence.attachedPolicyArns || []) !== JSON.stringify(expectedAttachments)) throw new Error("Release role attachment set differs from the reviewed source policies.");
+  if (evidence.inlinePolicyNames.length !== 0) throw new Error("Release role has an unreviewed inline policy.");
+  if (evidence.policies.length !== expected.length) throw new Error("Release policy evidence is incomplete.");
+  for (const policy of expected) {
+    const actual = evidence.policies.find(({ arn }) => arn === policy.arn);
+    if (!actual || actual.sourcePath !== policy.sourcePath || actual.sourceSha256 !== policy.sourceSha256 || actual.liveSha256 !== policy.sourceSha256 || actual.attached !== true || !/^v[1-9][0-9]*$/.test(actual.defaultVersionId || "")) throw new Error(`Release policy source/live identity differs: ${policy.name}.`);
+  }
+  return true;
 }
 
 function assertContext(context, label) {
@@ -414,7 +472,13 @@ export function simulatePrincipalPolicy({ roleArn, evaluation: item, run = (args
     || !["allowed", "explicitDeny", "implicitDeny"].includes(result.EvalDecision)) {
     throw new Error(`IAM simulation returned malformed output for ${item.id}.`);
   }
-  return validateSimulationResult(item, { decision: result.EvalDecision, matchedStatements: result.MatchedStatements.length, missingContextValues: result.MissingContextValues });
+  return validateSimulationResult(item, {
+    decision: result.EvalDecision,
+    matchedStatements: result.MatchedStatements.length,
+    missingContextValues: result.MissingContextValues,
+    organizationsAllowed: result.OrganizationsDecisionDetail?.AllowedByOrganizations ?? null,
+    permissionsBoundaryAllowed: result.PermissionsBoundaryDecisionDetail?.AllowedByPermissionsBoundary ?? null,
+  });
 }
 
 export function inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
@@ -500,6 +564,8 @@ export function runPermissionPreflight({
   generatedAt = new Date().toISOString(),
   policyPublishedAt,
   cloudTrailSessionName,
+  purpose = "saved-plan-authorization",
+  policyEvidence,
   now = new Date().toISOString(),
   simulate = ({ roleArn: sourceArn, evaluation: item }) => simulatePrincipalPolicy({ roleArn: sourceArn, evaluation: item }),
   cloudTrail = ({ sessionName, startTime, endTime, requiredActions }) => inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions }),
@@ -514,6 +580,8 @@ export function runPermissionPreflight({
   validateFreshness(generatedAt, now);
   if (!policyPublishedAt || !Number.isFinite(Date.parse(policyPublishedAt))) throw new Error("Policy publication timestamp is required and must be valid.");
   if (!cloudTrailSessionName) throw new Error("CloudTrail session name is required.");
+  let policyEvidenceError = null;
+  try { assertReleasePolicyEvidence(policyEvidence); } catch (error) { policyEvidenceError = error.message; }
   const derived = deriveRequiredEvaluations(plan, manifest);
   const runSimulation = (item) => {
     const result = validateSimulationResult(item, simulate({ roleArn: simulatedRoleArn, evaluation: item }));
@@ -527,6 +595,7 @@ export function runPermissionPreflight({
   const unresolved = cloudTrailResult.unresolvedDenials || [];
   const report = {
     schemaVersion: PERMISSION_PREFLIGHT_SCHEMA_VERSION,
+    purpose,
     toolingSha: deploymentIdentity.toolingSha,
     imageReleaseSha: deploymentIdentity.imageReleaseSha,
     canonicalImageEvidenceSha256: deploymentIdentity.canonicalImageEvidenceSha256,
@@ -545,18 +614,21 @@ export function runPermissionPreflight({
     requiredEvaluations: requiredResults,
     forbiddenEvaluations: forbiddenResults,
     cloudTrail: cloudTrailResult,
+    policyEvidence,
+    policySourceLiveMismatchCount: policyEvidenceError ? 1 : 0,
+    policySourceLiveMismatch: policyEvidenceError,
     requiredAllowedCount: requiredResults.filter((item) => item.decision === "allowed").length,
     requiredDeniedCount: deniedRequired.length,
     forbiddenAllowedCount: allowedForbidden.length,
     forbiddenDeniedCount: forbiddenResults.filter((item) => item.decision !== "allowed").length,
     allowedCount: requiredResults.filter((item) => item.decision === "allowed").length,
     deniedCount: deniedRequired.length + allowedForbidden.length + unresolved.length,
-    status: deniedRequired.length === 0 && allowedForbidden.length === 0 && unresolved.length === 0 ? "valid" : "invalid",
+    status: deniedRequired.length === 0 && allowedForbidden.length === 0 && unresolved.length === 0 && !policyEvidenceError ? "valid" : "invalid",
   };
   return report;
 }
 
-export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn, runPreflight = runPermissionPreflight, signReport = signPermissionReport } = {}) {
+export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn, collectPolicyEvidence = collectLiveReleasePolicyEvidence, runPreflight = runPermissionPreflight, signReport = signPermissionReport } = {}) {
   const options = parseCli(argv);
   const observedCallerArn = getCaller();
   if (observedCallerArn !== options.reportGeneratorCallerArn) throw new Error("Report generator caller does not match the current AWS identity.");
@@ -564,7 +636,7 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   const savedPlanBytes = fs.readFileSync(path.resolve(options.savedPlanPath));
   const plan = JSON.parse(planBytes);
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
-  const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, savedPlanBytes });
+  const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, savedPlanBytes, policyEvidence: collectPolicyEvidence() });
   const signatureArtifact = signReport(report, { now: options.generatedAt });
   fs.writeFileSync(path.resolve(options.outputPath), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
   fs.writeFileSync(path.resolve(options.signatureOutputPath), `${JSON.stringify(signatureArtifact, null, 2)}\n`, { mode: 0o600 });

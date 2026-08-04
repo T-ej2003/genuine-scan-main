@@ -718,6 +718,14 @@ the manifest SHA256, both plan hashes, the policy-publication window, and the
 CloudTrail result. The administrator logs out immediately after generation;
 the fresh MFA-backed release session only consumes the report.
 
+Before image publication where release credentials are already available, and always
+before backend initialization, run the two-section `npm run
+stage-b:production-preflight` boundary documented in
+`MSCQRProductionGreenStageBIdentityCapabilities-v1.md`. Administrator/root owns policy
+inspection, IAM simulation, forbidden controls, and signing. The release-deployer only
+verifies that signed report and executes the aggregated safe-read probes; it never calls
+IAM simulation or mutation APIs as probes.
+
 The manifest explicitly enumerates all twelve possible current task-definition
 create addresses: backend, worker, application-canary, read-only-canary, and
 the eight executor modes. Each address independently proves
