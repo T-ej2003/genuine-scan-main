@@ -132,6 +132,22 @@ export function sourcePolicyEvidence() {
   });
 }
 
+export function sourcePolicyConditionKeyOrigins() {
+  const origins = new Map();
+  for (const { name, sourcePath } of RELEASE_POLICY_SOURCES) {
+    const document = JSON.parse(fs.readFileSync(path.join(stageBRoot, sourcePath), "utf8"));
+    for (const statement of document.Statement || []) {
+      for (const [operator, condition] of Object.entries(statement.Condition || {})) {
+        for (const key of Object.keys(condition)) {
+          if (!origins.has(key)) origins.set(key, []);
+          origins.get(key).push({ policy: name, sid: statement.Sid, operator, sourcePath });
+        }
+      }
+    }
+  }
+  return origins;
+}
+
 export function collectLiveReleasePolicyEvidence({ run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
   const roleName = RELEASE_ROLE_ARN.split("/").at(-1);
   const attached = JSON.parse(run(["iam", "list-attached-role-policies", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).AttachedPolicies || [];
@@ -216,7 +232,8 @@ function normalizeActualMissingContextValues(values, label) {
   if (!Array.isArray(values) || values.some((value) => typeof value !== "string" || value.length === 0)) {
     throw new Error(`${label} MissingContextValues is malformed.`);
   }
-  return [...new Set(values)].sort();
+  if (new Set(values).size !== values.length) throw new Error(`${label} MissingContextValues contains duplicate keys.`);
+  return [...values].sort();
 }
 
 export function normalizeExpectedMissingContextValues(entry, { forbidden, label = entry?.id || "permission evaluation" } = {}) {
@@ -251,11 +268,12 @@ export function validateSimulationResult(item, result) {
       return [];
     })();
   if (!item.forbidden && actualMissing.length > 0) throw new Error(`Required evaluation ${item.id} returned unexpected MissingContextValues: ${actualMissing.join(", ")}.`);
-  if (item.forbidden && !sameStringSet(actualMissing, expectedMissing)) {
-    throw new Error(`Forbidden evaluation ${item.id} returned unexpected MissingContextValues: expected=${expectedMissing.join(",")} actual=${actualMissing.join(",")}.`);
+  if (item.forbidden && !["explicitDeny", "implicitDeny"].includes(item.expectedDecision)) throw new Error(`Forbidden evaluation ${item.id} has no reviewed expected decision.`);
+  if (item.forbidden && result.decision !== item.expectedDecision) {
+    throw new Error(`Forbidden evaluation ${item.id} ${item.action} ${item.resource} returned decision ${result.decision}; expected ${item.expectedDecision}.`);
   }
-  if (item.forbidden && actualMissing.length > 0 && result.decision === "allowed") {
-    throw new Error(`Forbidden evaluation ${item.id} returned allowed with MissingContextValues.`);
+  if (item.forbidden && !sameStringSet(actualMissing, expectedMissing)) {
+    throw new Error(`Forbidden evaluation ${item.id} ${item.action} ${item.resource} returned unexpected MissingContextValues: expected=${expectedMissing.join(",")} actual=${actualMissing.join(",")}.`);
   }
   return { ...result, missingContextValues: actualMissing };
 }
@@ -275,9 +293,11 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan } = 
       if (JSON.stringify(item.context) !== JSON.stringify(binding.entry.context)) throw new Error(`Permission-preflight evaluation ${item.id} has different context from the current manifest.`);
       const expected = normalizeExpectedMissingContextValues(binding.entry, { forbidden, label: item.manifestId });
       if (JSON.stringify(item.expectedMissingContextValues || []) !== JSON.stringify(expected)) throw new Error(`Permission-preflight evaluation ${item.id} has different expected missing context.`);
-      const validated = validateSimulationResult({ ...item, forbidden, expectedMissingContextValues: expected }, item);
+      const expectedDecision = forbidden ? binding.entry.expectedDecision : undefined;
+      if (forbidden && item.expectedDecision !== expectedDecision) throw new Error(`Permission-preflight evaluation ${item.id} has a different expected decision.`);
+      const validated = validateSimulationResult({ ...item, forbidden, expectedDecision, expectedMissingContextValues: expected }, item);
       const expectedValidation = forbidden ? (item.decision === "allowed" ? "rejected" : "accepted") : (item.decision === "allowed" ? "accepted" : "rejected");
-      if (item.validation !== expectedValidation || JSON.stringify(validated.missingContextValues) !== JSON.stringify(item.missingContextValues)) throw new Error(`Permission-preflight evaluation ${item.id} has inconsistent validation evidence.`);
+      if (item.missingContextExactMatch !== true || item.validation !== expectedValidation || JSON.stringify(validated.missingContextValues) !== JSON.stringify(item.missingContextValues)) throw new Error(`Permission-preflight evaluation ${item.id} has inconsistent validation evidence.`);
     }
   }
   const project = (items) => items.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision }));
@@ -320,7 +340,7 @@ function assertNoDuplicateOrOverlap(requiredEntries, forbiddenEntries) {
   }
 }
 
-export function validateManifest(manifest, { account = ACCOUNT, region = REGION } = {}) {
+export function validateManifest(manifest, { account = ACCOUNT, region = REGION, conditionKeyOrigins = sourcePolicyConditionKeyOrigins() } = {}) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) throw new Error("Permission manifest is required.");
   if (manifest?.schemaVersion !== PERMISSION_PREFLIGHT_SCHEMA_VERSION) throw new Error("Permission manifest schema version is unsupported.");
   if (manifest.accountId !== account || manifest.region !== region) throw new Error("Permission manifest account or region is wrong.");
@@ -341,7 +361,19 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION 
       throw new Error(`Permission manifest resources are invalid: ${entry.id}.`);
     }
     assertContext(entry.context, entry.id);
-    normalizeExpectedMissingContextValues(entry, { forbidden, label: entry.id });
+    const expectedMissing = normalizeExpectedMissingContextValues(entry, { forbidden, label: entry.id });
+    if (forbidden) {
+      if (!["explicitDeny", "implicitDeny"].includes(entry.expectedDecision)) throw new Error(`${entry.id} must declare its exact forbidden expectedDecision.`);
+      const unexplained = expectedMissing.filter((key) => !conditionKeyOrigins.has(key));
+      if (unexplained.length) throw new Error(`${entry.id} expectedMissingContextValues has no reviewed source-policy origin: ${unexplained.join(", ")}.`);
+      const suppliedKeys = new Set(entry.context.map(({ key }) => key));
+      const sourceExpected = entry.expectedDecision === "implicitDeny"
+        ? [...conditionKeyOrigins.keys()].filter((key) => !suppliedKeys.has(key)).sort()
+        : [];
+      if (!sameStringSet(expectedMissing, sourceExpected)) throw new Error(`${entry.id} expectedMissingContextValues differs from reviewed source-policy conditions.`);
+    } else if (entry.expectedDecision !== undefined) {
+      throw new Error(`${entry.id} may declare expectedDecision only for forbidden evaluations.`);
+    }
     if (lambdaWriteActions.has(entry.action)) {
       const expectedResource = entry.action === "lambda:UpdateAlias"
         ? STAGE_B.brokerAliasArn
@@ -484,6 +516,7 @@ function evaluation(entry, resource, { forbidden = false } = {}) {
     expectedMissingContextValues: normalizeExpectedMissingContextValues(entry, { forbidden }),
     phase: entry.phase || "unspecified",
   };
+  if (forbidden) result.expectedDecision = entry.expectedDecision;
   Object.defineProperty(result, "forbidden", { value: forbidden, enumerable: false });
   return result;
 }
@@ -670,7 +703,7 @@ export function runPermissionPreflight({
   const derived = deriveRequiredEvaluations(plan, manifest);
   const runSimulation = (item) => {
     const result = validateSimulationResult(item, simulate({ roleArn: simulatedRoleArn, evaluation: item }));
-    return { ...item, ...result, validation: item.forbidden ? (result.decision === "allowed" ? "rejected" : "accepted") : (result.decision === "allowed" ? "accepted" : "rejected") };
+    return { ...item, ...result, missingContextExactMatch: true, validation: item.forbidden ? (result.decision === "allowed" ? "rejected" : "accepted") : (result.decision === "allowed" ? "accepted" : "rejected") };
   };
   const requiredResults = derived.required.map(runSimulation);
   const forbiddenResults = derived.forbidden.map(runSimulation);
