@@ -9,7 +9,7 @@ import { generateStageBTerraformBackendConfig } from "../aws/generate-production
 import { ensureStageBTerraformBackendMetadataPrivate } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { STAGE_B_EXPECTED_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 import { runRefreshOnly } from "../refresh-production-green-stage-b.mjs";
-import { STAGE_B_PRIVATE_FILE_MODE, STAGE_B_PRIVATE_DIRECTORY_MODE, writeStageBPrivateFilesAtomic } from "../aws/stage-b-artifact-contract.mjs";
+import { STAGE_B_PRIVATE_FILE_MODE, STAGE_B_PRIVATE_DIRECTORY_MODE, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "../aws/stage-b-artifact-contract.mjs";
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-artifact-contract-"));
@@ -76,4 +76,86 @@ test("atomic artifact batch leaves private regular files", () => {
   ] });
   assert.deepEqual(outputs.map((item) => item.mode), ["0600", "0600"]);
   assert.equal(mode(path.join(directory, "audit.json")), STAGE_B_PRIVATE_FILE_MODE);
+});
+
+function batchFiles(directory, count = 2) {
+  return Array.from({ length: count }, (_, index) => ({
+    filePath: path.join(directory, `artifact-${index}.json`),
+    bytes: Buffer.from(`artifact-${index}\n`),
+    label: `artifact-${index}`,
+  }));
+}
+
+function commitFailureFs(failureNumber, { rollbackFailure = false } = {}) {
+  let commits = 0;
+  const temporaryDirectory = (filePath) => path.basename(path.dirname(filePath)).startsWith(".stage-b-artifact-") && !path.basename(path.dirname(filePath)).startsWith(".stage-b-artifact-backup-");
+  return {
+    ...fs,
+    renameSync: (source, destination) => {
+      if (temporaryDirectory(source)) {
+        commits += 1;
+        if (commits === failureNumber) throw new Error(`simulated commit ${failureNumber} failure`);
+      }
+      return fs.renameSync(source, destination);
+    },
+    unlinkSync: (filePath) => {
+      if (rollbackFailure && path.basename(filePath) === "artifact-0.json") throw new Error("simulated rollback failure");
+      return fs.unlinkSync(filePath);
+    },
+  };
+}
+
+test("batch rollback removes committed outputs, cleans temporaries, and permits retry", () => {
+  const directory = fs.mkdtempSync(path.join(root, "rollback-")); fs.chmodSync(directory, 0o700);
+  const files = batchFiles(directory);
+  assert.throws(() => writeStageBPrivateFilesAtomic({ repositoryRoot: process.cwd(), files, fsOps: commitFailureFs(2) }), /simulated commit 2 failure/);
+  assert.deepEqual(fs.readdirSync(directory), []);
+  assert.deepEqual(writeStageBPrivateFilesAtomic({ repositoryRoot: process.cwd(), files }).map(({ mode: fileMode }) => fileMode), ["0600", "0600"]);
+});
+
+test("first and third commit failures leave no published outputs", () => {
+  for (const failureNumber of [1, 3]) {
+    const directory = fs.mkdtempSync(path.join(root, `rollback-${failureNumber}-`)); fs.chmodSync(directory, 0o700);
+    const files = batchFiles(directory, 3);
+    assert.throws(() => writeStageBPrivateFilesAtomic({ repositoryRoot: process.cwd(), files, fsOps: commitFailureFs(failureNumber) }), new RegExp(`simulated commit ${failureNumber} failure`));
+    assert.deepEqual(fs.readdirSync(directory), []);
+  }
+});
+
+test("overwrite batches restore every original file and mode on commit failure", () => {
+  const directory = fs.mkdtempSync(path.join(root, "overwrite-")); fs.chmodSync(directory, 0o700);
+  const files = batchFiles(directory);
+  for (const file of files) fs.writeFileSync(file.filePath, `original-${path.basename(file.filePath)}\n`, { mode: 0o640 });
+  const before = files.map((file) => ({ bytes: fs.readFileSync(file.filePath), mode: mode(file.filePath) }));
+  assert.throws(() => writeStageBPrivateFilesAtomic({ repositoryRoot: process.cwd(), files, overwrite: true, fsOps: commitFailureFs(2) }), /simulated commit 2 failure/);
+  files.forEach((file, index) => { assert.deepEqual(fs.readFileSync(file.filePath), before[index].bytes); assert.equal(mode(file.filePath), before[index].mode); });
+  assert.deepEqual(fs.readdirSync(directory).sort(), files.map((file) => path.basename(file.filePath)).sort());
+  writeStageBPrivateFilesAtomic({ repositoryRoot: process.cwd(), files, overwrite: true });
+  files.forEach((file) => assert.equal(mode(file.filePath), STAGE_B_PRIVATE_FILE_MODE));
+});
+
+test("rollback failure preserves the original error and reports rollback errors", () => {
+  const directory = fs.mkdtempSync(path.join(root, "rollback-error-")); fs.chmodSync(directory, 0o700);
+  const files = batchFiles(directory);
+  assert.throws(() => writeStageBPrivateFilesAtomic({ repositoryRoot: process.cwd(), files, fsOps: commitFailureFs(2, { rollbackFailure: true }) }), (error) => {
+    assert.equal(error.cause?.message, "simulated commit 2 failure");
+    assert.equal(error.rollbackErrors?.length, 1);
+    assert.match(error.rollbackErrors[0].message, /simulated rollback failure/);
+    return error instanceof AggregateError;
+  });
+  fs.unlinkSync(files[0].filePath);
+});
+
+test("batch publication rejects a destination symlink before commit", () => {
+  const directory = fs.mkdtempSync(path.join(root, "symlink-")); fs.chmodSync(directory, 0o700);
+  const files = batchFiles(directory);
+  fs.symlinkSync(files[0].filePath, files[1].filePath);
+  assert.throws(() => writeStageBPrivateFilesAtomic({ repositoryRoot: process.cwd(), files }), /must not be a symlink/);
+  assert.equal(fs.lstatSync(files[1].filePath).isSymbolicLink(), true);
+  fs.unlinkSync(files[1].filePath);
+});
+
+test("artifact consumers reject a directory that was made public after production", () => {
+  const directory = fs.mkdtempSync(path.join(root, "consumer-")); fs.chmodSync(directory, 0o755);
+  assert.throws(() => ensureStageBPrivateDirectory({ directory, repositoryRoot: process.cwd() }), /mode 0700/);
 });

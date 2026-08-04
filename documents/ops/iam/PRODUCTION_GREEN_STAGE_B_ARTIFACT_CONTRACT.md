@@ -23,5 +23,8 @@ Downstream consumers only validate; they never repair permissions.
 
 All plan, refresh, audit, permission, image, state, handoff, tfvars, and broker
 artifacts are external to the repository, hash-bound, and written without implicit
-overwrite. The local contract test exercises real temporary filesystem behavior and
-uses injected command seams, so it performs no AWS or Terraform-state operation.
+overwrite. Grouped publications are all-or-none: a commit failure removes outputs
+already committed by that invocation; overwrite-enabled callers use same-filesystem
+backups and restore the original bytes and modes before returning the original error.
+The local contract test exercises real temporary filesystem behavior and injected
+rename/unlink failures, so it performs no AWS or Terraform-state operation.

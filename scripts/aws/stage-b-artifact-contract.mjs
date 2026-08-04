@@ -63,6 +63,29 @@ export function ensureStageBPrivateFile({ filePath, repositoryRoot, normalize = 
 
 export const assertStageBPrivateFile = (options = {}) => ensureStageBPrivateFile({ ...options, normalize: false });
 
+function removeExactFile(filePath, fsOps) {
+  const stat = fsOps.lstatSync(filePath, { throwIfNoEntry: false });
+  if (!stat) return;
+  if (!stat.isFile() && !stat.isSymbolicLink()) throw new Error(`Cannot remove non-file rollback target: ${filePath}`);
+  fsOps.unlinkSync(filePath);
+}
+
+function removeExactDirectory(directory, fsOps) {
+  const stat = fsOps.lstatSync(directory, { throwIfNoEntry: false });
+  if (!stat) return;
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Cannot remove non-directory rollback target: ${directory}`);
+  fsOps.rmdirSync(directory);
+}
+
+function transactionalFailure(originalError, rollbackErrors, committedOutputs, restoredOutputs) {
+  if (rollbackErrors.length === 0) throw originalError;
+  const error = new AggregateError([originalError, ...rollbackErrors], `Stage B artifact batch commit failed: ${originalError.message}`, { cause: originalError });
+  error.rollbackErrors = rollbackErrors;
+  error.committedOutputs = committedOutputs;
+  error.restoredOutputs = restoredOutputs;
+  throw error;
+}
+
 export function assertStageBArtifactPath({ artifactPath, repositoryRoot, label = "Stage B artifact", allowExisting = true } = {}) {
   const resolved = assertOutsideRepository(artifactPath, repositoryRoot, label);
   const stat = fs.lstatSync(resolved, { throwIfNoEntry: false });
@@ -74,27 +97,87 @@ export function assertStageBArtifactPath({ artifactPath, repositoryRoot, label =
 export function writeStageBPrivateFilesAtomic({ files = [], repositoryRoot, overwrite = false, fsOps = fs } = {}) {
   if (!Array.isArray(files) || files.length === 0) throw new Error("Stage B artifact batch must contain at least one file.");
   const outputs = files.map(({ filePath, bytes, label = "Stage B private file" }) => ({
-    path: assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: overwrite }), bytes, label,
+    path: assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: true }), bytes, label,
   }));
   const parent = path.dirname(outputs[0].path);
   if (outputs.some((output) => path.dirname(output.path) !== parent)) throw new Error("Stage B atomic artifact batch must use one directory.");
+  if (new Set(outputs.map((output) => output.path)).size !== outputs.length) throw new Error("Stage B atomic artifact batch must use distinct files.");
   ensureStageBPrivateDirectory({ directory: parent, repositoryRoot, create: true, fsOps });
-  const temporary = fsOps.mkdtempSync(path.join(parent, ".stage-b-artifact-"));
-  const temporaryFiles = outputs.map((output) => path.join(temporary, path.basename(output.path)));
+  const initial = outputs.map((output) => ({ ...output, stat: fsOps.lstatSync(output.path, { throwIfNoEntry: false }) }));
+  for (const output of initial) {
+    if (!output.stat) continue;
+    if (output.stat.isSymbolicLink()) throw new Error(`${output.label} must not be a symlink.`);
+    if (!output.stat.isFile()) throw new Error(`${output.label} output must be a regular file.`);
+    if (!overwrite) throw new Error(`Refusing to overwrite existing ${output.path}.`);
+  }
+  let temporary;
+  let backupDirectory;
+  const temporaryFiles = [];
+  const backedUpOutputs = [];
+  const committedOutputs = [];
+  const restoredOutputs = [];
+  const rollbackErrors = [];
+  const cleanup = ({ removeBackups = true } = {}) => {
+    for (const filePath of temporaryFiles) {
+      try { removeExactFile(filePath, fsOps); } catch (error) { rollbackErrors.push(error); }
+    }
+    if (temporary) {
+      try { removeExactDirectory(temporary, fsOps); } catch (error) { rollbackErrors.push(error); }
+    }
+    if (backupDirectory && removeBackups) {
+      for (const { backup } of backedUpOutputs) {
+        try { removeExactFile(backup, fsOps); } catch (error) { rollbackErrors.push(error); }
+      }
+      try { removeExactDirectory(backupDirectory, fsOps); } catch (error) { rollbackErrors.push(error); }
+    }
+  };
   try {
+    temporary = fsOps.mkdtempSync(path.join(parent, ".stage-b-artifact-"));
+    fsOps.chmodSync(temporary, STAGE_B_PRIVATE_DIRECTORY_MODE);
+    for (const output of outputs) temporaryFiles.push(path.join(temporary, path.basename(output.path)));
+    backupDirectory = overwrite ? fsOps.mkdtempSync(path.join(parent, ".stage-b-artifact-backup-")) : undefined;
+    if (backupDirectory) fsOps.chmodSync(backupDirectory, STAGE_B_PRIVATE_DIRECTORY_MODE);
     outputs.forEach((output, index) => {
       fsOps.writeFileSync(temporaryFiles[index], output.bytes, { flag: "wx", mode: STAGE_B_PRIVATE_FILE_MODE });
       fsOps.chmodSync(temporaryFiles[index], STAGE_B_PRIVATE_FILE_MODE);
     });
-    outputs.forEach((output) => {
-      const existing = fsOps.lstatSync(output.path, { throwIfNoEntry: false });
-      if (!overwrite && existing) throw new Error(`${output.label} already exists.`);
-      if (overwrite && existing?.isSymbolicLink()) throw new Error(`${output.label} must not replace a symlink.`);
-    });
-    outputs.forEach((output, index) => fsOps.renameSync(temporaryFiles[index], output.path));
-    return outputs.map((output) => ensureStageBPrivateFile({ filePath: output.path, repositoryRoot, fsOps, label: output.label }));
-  } finally {
-    fsOps.rmSync(temporary, { recursive: true, force: true });
+    for (const output of outputs) {
+      const current = fsOps.lstatSync(output.path, { throwIfNoEntry: false });
+      if (current?.isSymbolicLink()) throw new Error(`${output.label} must not be a symlink.`);
+      if (overwrite && current) {
+        const backup = path.join(backupDirectory, path.basename(output.path));
+        fsOps.renameSync(output.path, backup);
+        backedUpOutputs.push({ output: output.path, backup, label: output.label });
+      } else if (current) {
+        throw new Error(`${output.label} output changed during generation.`);
+      }
+    }
+    for (let index = 0; index < outputs.length; index += 1) {
+      const output = outputs[index];
+      const current = fsOps.lstatSync(output.path, { throwIfNoEntry: false });
+      if (current?.isSymbolicLink()) throw new Error(`${output.label} must not be a symlink.`);
+      if (current) throw new Error(`${output.label} output changed during generation.`);
+      fsOps.renameSync(temporaryFiles[index], output.path);
+      committedOutputs.push({ path: output.path, label: output.label });
+    }
+    const result = outputs.map((output) => ensureStageBPrivateFile({ filePath: output.path, repositoryRoot, fsOps, label: output.label }));
+    cleanup({ removeBackups: true });
+    return result;
+  } catch (originalError) {
+    for (const output of [...committedOutputs].reverse()) {
+      try { removeExactFile(output.path, fsOps); } catch (error) { rollbackErrors.push(error); }
+    }
+    for (const backup of [...backedUpOutputs].reverse()) {
+      try {
+        const current = fsOps.lstatSync(backup.output, { throwIfNoEntry: false });
+        if (current) removeExactFile(backup.output, fsOps);
+        fsOps.renameSync(backup.backup, backup.output);
+        backup.restored = true;
+        restoredOutputs.push(backup.output);
+      } catch (error) { rollbackErrors.push(error); }
+    }
+    cleanup({ removeBackups: backedUpOutputs.every(({ restored }) => restored === true) });
+    transactionalFailure(originalError, rollbackErrors, committedOutputs.map(({ path: filePath }) => filePath), restoredOutputs);
   }
 }
 
@@ -129,6 +212,26 @@ export const STAGE_B_ARTIFACT_CONTRACTS = Object.freeze([
   { id: "image-evidence-signature", kind: "file", producer: "scripts/aws/production-green-stage-b-image-evidence.mjs:runCli", consumers: ["scripts/aws/generate-production-green-stage-b-tfvars.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
 ]);
 
+const atomicGroup = Object.freeze({
+  "administrator-capability-report": "administrator-capability",
+  "administrator-capability-signature": "administrator-capability",
+  "image-evidence": "image-evidence",
+  "image-evidence-signature": "image-evidence",
+  tfvars: "tfvars-binding",
+  "tfvars-binding-report": "tfvars-binding",
+  "permission-report": "permission-report",
+  "permission-signature": "permission-report",
+});
+
+function withPublicationContract(artifact) {
+  return {
+    ...artifact,
+    atomicGroup: artifact.atomic ? (atomicGroup[artifact.id] || artifact.id) : null,
+    allOrNone: artifact.atomic === true,
+    rollback: artifact.atomic ? "remove-committed-or-restore-backups" : "none",
+  };
+}
+
 export function canonicalStageBArtifactContracts() {
-  return { schemaVersion: STAGE_B_ARTIFACT_CONTRACT_SCHEMA_VERSION, deployment: "production-green-stage-b", artifacts: STAGE_B_ARTIFACT_CONTRACTS };
+  return { schemaVersion: STAGE_B_ARTIFACT_CONTRACT_SCHEMA_VERSION, deployment: "production-green-stage-b", artifacts: STAGE_B_ARTIFACT_CONTRACTS.map(withPublicationContract) };
 }

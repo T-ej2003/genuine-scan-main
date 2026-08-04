@@ -14,7 +14,7 @@ import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs"
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageAStateIdentity, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
-import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 
 export const STAGE_B_TFVARS_SCHEMA_VERSION = 1;
 export const STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION = 1;
@@ -101,54 +101,15 @@ export function assertStageBCanonicalTfvarsFile({ tfvarsPath, bindingReport, tfv
   return true;
 }
 
-function outputState(file, label, fileSystem) {
-  if (!fileSystem.existsSync(file)) return { file, label, exists: false };
-  if (fileSystem.lstatSync(file).isDirectory()) throw new Error(`${label} output must not be a directory.`);
-  return { file, label, exists: true };
-}
-
 export function writeAtomicPair({ tfvarsPath, bindingReportPath, tfvarsBytes, bindingReportBytes, allowOverwrite = false, fileSystem = fs } = {}) {
   assertStageBCanonicalTfvarsOutputPath(tfvarsPath);
   const resolvedBindingReportPath = assertStageBArtifactPath({ artifactPath: bindingReportPath, repositoryRoot: root, label: "Binding-report output", allowExisting: true });
   if (path.resolve(tfvarsPath) === resolvedBindingReportPath) throw new Error("Tfvars and binding-report outputs must be different files.");
   if (path.dirname(tfvarsPath) !== path.dirname(resolvedBindingReportPath)) throw new Error("Tfvars and binding-report outputs must use one private directory.");
-  ensureStageBPrivateDirectory({ directory: path.dirname(tfvarsPath), repositoryRoot: root, create: true, fsOps: fileSystem });
-  const outputs = [outputState(tfvarsPath, "Tfvars", fileSystem), outputState(resolvedBindingReportPath, "Binding-report", fileSystem)];
-  if (!allowOverwrite && outputs.some(({ exists }) => exists)) throw new Error(`Refusing to overwrite existing ${outputs.find(({ exists }) => exists).file}.`);
-  const temporaryDirectories = outputs.map(({ file }) => fileSystem.mkdtempSync(path.join(path.dirname(file), ".stage-b-tfvars-")));
-  const temporaryFiles = outputs.map(({ file }, index) => path.join(temporaryDirectories[index], path.basename(file)));
-  const backups = [];
-  const committed = [];
-  try {
-    for (const [index, bytes] of [tfvarsBytes, bindingReportBytes].entries()) {
-      fileSystem.writeFileSync(temporaryFiles[index], bytes, { flag: "wx", mode: 0o600 });
-      fileSystem.chmodSync(temporaryFiles[index], 0o600);
-    }
-    for (const output of outputs) {
-      const current = outputState(output.file, output.label, fileSystem);
-      if (current.exists !== output.exists || (!allowOverwrite && current.exists)) throw new Error(`${output.label} output changed during generation.`);
-    }
-    if (allowOverwrite) {
-      for (const output of outputs) {
-        if (!output.exists) continue;
-        const directory = fileSystem.mkdtempSync(path.join(path.dirname(output.file), ".stage-b-tfvars-backup-"));
-        const backup = path.join(directory, path.basename(output.file));
-        fileSystem.renameSync(output.file, backup);
-        backups.push({ output: output.file, backup, directory });
-      }
-    }
-    for (let index = 0; index < outputs.length; index += 1) {
-      fileSystem.renameSync(temporaryFiles[index], outputs[index].file);
-      committed.push(outputs[index].file);
-    }
-  } catch (error) {
-    for (const file of committed) fileSystem.rmSync(file, { force: true });
-    for (const { output, backup } of backups.reverse()) if (fileSystem.existsSync(backup)) fileSystem.renameSync(backup, output);
-    throw error;
-  } finally {
-    for (const directory of temporaryDirectories) fileSystem.rmSync(directory, { recursive: true, force: true });
-    for (const { directory } of backups) fileSystem.rmSync(directory, { recursive: true, force: true });
-  }
+  return writeStageBPrivateFilesAtomic({ repositoryRoot: root, overwrite: allowOverwrite, fsOps: fileSystem, files: [
+    { filePath: tfvarsPath, bytes: tfvarsBytes, label: "Tfvars" },
+    { filePath: resolvedBindingReportPath, bytes: bindingReportBytes, label: "Binding-report" },
+  ] });
 }
 
 export function validateStageBStageAInput(input, { toolingSha, toolingTreeSha256 } = {}) {

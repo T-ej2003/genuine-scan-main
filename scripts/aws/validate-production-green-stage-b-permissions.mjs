@@ -9,7 +9,7 @@ import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-
 import { STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
-import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_EVIDENCE_MAX_AGE_MS = 15 * 60 * 1000;
@@ -767,11 +767,16 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   const plan = JSON.parse(planBytes);
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
   const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, savedPlanBytes, policyEvidence: collectPolicyEvidence() });
-  writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), repositoryRoot: stageBRoot, label: "Stage B permission report" });
   process.stdout.write(`${JSON.stringify({ status: report.status, outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
-  if (report.status !== "valid") { process.exitCode = 1; return report; }
+  if (report.status !== "valid") {
+    writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), repositoryRoot: stageBRoot, label: "Stage B permission report" });
+    process.exitCode = 1; return report;
+  }
   const signatureArtifact = signReport(report, { now: options.generatedAt });
-  writeStageBPrivateFileAtomic({ filePath: signatureOutputPath, bytes: Buffer.from(`${JSON.stringify(signatureArtifact, null, 2)}\n`), repositoryRoot: stageBRoot, label: "Stage B permission-report signature" });
+  writeStageBPrivateFilesAtomic({ repositoryRoot: stageBRoot, files: [
+    { filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), label: "Stage B permission report" },
+    { filePath: signatureOutputPath, bytes: Buffer.from(`${JSON.stringify(signatureArtifact, null, 2)}\n`), label: "Stage B permission-report signature" },
+  ] });
   return report;
 }
 

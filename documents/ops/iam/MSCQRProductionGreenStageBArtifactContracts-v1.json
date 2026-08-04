@@ -19,7 +19,10 @@
       "outsideRepository": true,
       "atomic": false,
       "overwrite": false,
-      "hashBound": false
+      "hashBound": false,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
     },
     {
       "id": "administrator-capability-report",
@@ -37,7 +40,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "administrator-capability",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "administrator-capability-signature",
@@ -54,7 +60,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "administrator-capability",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "release-preflight-report",
@@ -71,7 +80,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "release-preflight-report",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "image-manifest",
@@ -87,7 +99,10 @@
       "atomic": true,
       "overwrite": false,
       "hashBound": true,
-      "externalProducer": true
+      "externalProducer": true,
+      "atomicGroup": "image-manifest",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "stage-a-state-backup",
@@ -106,7 +121,10 @@
       "outsideRepository": true,
       "atomic": false,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
     },
     {
       "id": "stage-b-state-backup",
@@ -125,7 +143,10 @@
       "outsideRepository": true,
       "atomic": false,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
     },
     {
       "id": "backend-config",
@@ -140,7 +161,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "backend-config",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "terraform-data-directory",
@@ -159,7 +183,10 @@
       "outsideRepository": true,
       "atomic": false,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
     },
     {
       "id": "backend-metadata",
@@ -177,7 +204,10 @@
       "outsideRepository": true,
       "atomic": false,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
     },
     {
       "id": "stage-a-handoff",
@@ -194,7 +224,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "stage-a-handoff",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "broker-package",
@@ -211,7 +244,10 @@
       "outsideRepository": true,
       "atomic": false,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
     },
     {
       "id": "tfvars",
@@ -229,7 +265,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "tfvars-binding",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "tfvars-binding-report",
@@ -247,7 +286,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "tfvars-binding",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "refresh-report",
@@ -264,7 +306,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "refresh-report",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "refresh-temporary-plan",
@@ -279,7 +324,10 @@
       "outsideRepository": true,
       "atomic": false,
       "overwrite": false,
-      "hashBound": false
+      "hashBound": false,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
     },
     {
       "id": "saved-plan",
@@ -296,7 +344,10 @@
       "outsideRepository": true,
       "atomic": false,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
     },
     {
       "id": "plan-json",
@@ -313,7 +364,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "plan-json",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "reference-audit",
@@ -329,7 +383,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "reference-audit",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "ecs-observations",
@@ -346,7 +403,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "ecs-observations",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "permission-report",
@@ -362,7 +422,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "permission-report",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "permission-signature",
@@ -377,7 +440,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "permission-report",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "image-evidence",
@@ -394,7 +460,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "image-evidence",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     },
     {
       "id": "image-evidence-signature",
@@ -410,7 +479,10 @@
       "outsideRepository": true,
       "atomic": true,
       "overwrite": false,
-      "hashBound": true
+      "hashBound": true,
+      "atomicGroup": "image-evidence",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
     }
   ]
 }

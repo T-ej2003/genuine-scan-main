@@ -30,6 +30,9 @@ export function verifyStageBArtifactContract({ write = false } = {}) {
     assert.equal(artifact.symlink, "reject", `${artifact.id} must reject symlinks.`);
     assert.equal(artifact.directoryMode, "0700", `${artifact.id} directory mode drifted.`);
     if (artifact.kind === "file") assert.equal(artifact.fileMode, "0600", `${artifact.id} file mode drifted.`);
+    assert.equal(artifact.allOrNone, artifact.atomic === true, `${artifact.id} all-or-none publication drifted.`);
+    assert.equal(artifact.rollback, artifact.atomic ? "remove-committed-or-restore-backups" : "none", `${artifact.id} rollback contract drifted.`);
+    if (artifact.atomic) assert.ok(artifact.atomicGroup, `${artifact.id} is missing an atomic group.`);
   }
   assert.deepEqual([...generated].sort(), [...consumed].sort(), "Generated and consumed artifact sets differ.");
   return { schemaVersion: parsed.schemaVersion, artifactCount: parsed.artifacts.length, generatedArtifacts: generated.size, consumedArtifacts: consumed.size, outputPath };

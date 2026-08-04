@@ -8,7 +8,7 @@ import { runReleaseReadPreflight } from "./production-green-stage-b-identity-cap
 import { assertStageBDeploymentCapabilityGraph } from "./generate-production-green-stage-b-capability-graph.mjs";
 import { generateStageBTerraformBackendConfig } from "./generate-production-green-stage-b-backend-config.mjs";
 import { assertStageBTerraformInitializedBackendMetadata, ensureStageBTerraformBackendMetadataPrivate } from "./stage-b-terraform-backend-contract.mjs";
-import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
 import { generateStageAPrerequisites, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { generateStageBTfvars } from "./generate-production-green-stage-b-tfvars.mjs";
@@ -34,6 +34,17 @@ const write = (output, document) => {
   ensureStageBPrivateDirectory({ directory: path.dirname(resolved), repositoryRoot: root, create: true });
   const written = writeStageBPrivateFileAtomic({ filePath: resolved, bytes: Buffer.from(`${JSON.stringify(document, null, 2)}\n`), repositoryRoot: root, label: "Production preflight output" });
   return { path: written.path, sha256: written.sha256 };
+};
+const writePair = (output, signatureOutput, document, signature) => {
+  const outputPath = assertStageBArtifactPath({ artifactPath: output, repositoryRoot: root, label: "Production preflight output", allowExisting: false });
+  const signaturePath = assertStageBArtifactPath({ artifactPath: signatureOutput, repositoryRoot: root, label: "Production preflight signature", allowExisting: false });
+  if (path.dirname(outputPath) !== path.dirname(signaturePath)) throw new Error("Production preflight output and signature must use one private directory.");
+  ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root, create: true });
+  const [reportFile, signatureFile] = writeStageBPrivateFilesAtomic({ repositoryRoot: root, files: [
+    { filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(document, null, 2)}\n`), label: "Production preflight output" },
+    { filePath: signaturePath, bytes: Buffer.from(`${JSON.stringify(signature, null, 2)}\n`), label: "Production preflight signature" },
+  ] });
+  return { report: reportFile, signature: signatureFile };
 };
 
 function continueReleaseReadiness(argv, { run = (command, args, options) => execFileSync(command, args, options) } = {}) {
@@ -86,10 +97,12 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
       cloudTrail: () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] }), purpose: "pre-plan-capability",
     });
     report.capabilityGraph = capabilityGraph;
-    const reportFile = write(output, report);
-    if (report.status !== "valid") return { identity, status: "blocked", administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: report.policySourceLiveMismatchCount, report: reportFile, capabilityGraph };
-    const signature = sign(report, { now: generatedAt }); const signatureFile = write(value(argv, "--signature-output"), signature);
-    return { identity, status: report.status, administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: 0, report: reportFile, signature: signatureFile, capabilityGraph };
+    if (report.status !== "valid") {
+      const reportFile = write(output, report);
+      return { identity, status: "blocked", administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: report.policySourceLiveMismatchCount, report: reportFile, capabilityGraph };
+    }
+    const signature = sign(report, { now: generatedAt }); const files = writePair(output, value(argv, "--signature-output"), report, signature);
+    return { identity, status: report.status, administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: 0, report: files.report, signature: files.signature, capabilityGraph };
   }
   if (identity === "release-deployer") {
     if (!new RegExp(`^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`).test(observedCaller)) throw new Error("Release production preflight requires the exact release-deployer identity.");
