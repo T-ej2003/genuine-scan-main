@@ -18,6 +18,8 @@ import {
   RELEASE_CALLER_PATTERN,
   RELEASE_ROLE_ARN,
   canonicalizeJson,
+  assertPermissionReportPlanBinding,
+  assertReleasePolicyEvidence,
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendPolicy } from "./aws/stage-b-terraform-backend-contract.mjs";
@@ -26,6 +28,7 @@ import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDep
 import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenceSha256 as canonicalImageEvidenceSha256, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspace.mjs";
+import { assertStageBDeploymentCapabilityGraph } from "./aws/generate-production-green-stage-b-capability-graph.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -55,6 +58,10 @@ function assertPermissionEvaluationBindings(report) {
       if (item.validation !== expectedValidation || JSON.stringify(validated.missingContextValues) !== JSON.stringify(item.missingContextValues)) throw new Error(`Permission-preflight evaluation ${item.id} has inconsistent validation evidence.`);
     }
   }
+  const project = (items) => items.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision }));
+  if (report.planCapabilities?.schemaVersion !== 1
+    || JSON.stringify(report.planCapabilities.required) !== JSON.stringify(project(report.requiredEvaluations))
+    || JSON.stringify(report.planCapabilities.forbidden) !== JSON.stringify(project(report.forbiddenEvaluations))) throw new Error("Permission-preflight plan capability manifest is incomplete or stale.");
 }
 
 function readOption(argv, option) {
@@ -101,11 +108,13 @@ export function parseCli(argv) {
 export function assertPermissionReport(report, { signatureArtifact, verifySignature = verifyPermissionReportSignature, planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, toolingSha, imageReleaseSha, canonicalImageEvidenceSha256, now = new Date().toISOString() } = {}) {
   if (!verifySignature({ report, signatureArtifact, now })) throw new Error("Permission report signature verification failed.");
   if (report?.schemaVersion !== 1 || report.status !== "valid") throw new Error("A valid permission-preflight report is required.");
+  if (report.purpose !== "saved-plan-authorization") throw new Error("A saved-plan authorization permission report is required.");
   assertPermissionEvaluationBindings(report);
   if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(report.reportGeneratorCallerArn)) throw new Error("Permission-preflight report generator is not approved.");
   if (report.simulatedRoleArn !== RELEASE_ROLE_ARN || report.applyRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission-preflight report role contract is wrong.");
   if (report.applyCallerArn !== null && report.applyCallerArn !== callerArn) throw new Error("Permission-preflight report apply caller is wrong.");
   if (report.applyCallerArnPattern !== RELEASE_CALLER_PATTERN) throw new Error("Permission-preflight report caller pattern is wrong.");
+  assertReleasePolicyEvidence(report.policyEvidence);
   if (!/^[a-f0-9]{64}$/.test(report.manifestSha256)) throw new Error("Permission-preflight report manifest hash is missing or malformed.");
   if (manifestSha256 && report.manifestSha256 !== manifestSha256) throw new Error("Permission-preflight report is bound to a different permission manifest.");
   if (report.planSha256 !== planSha256) throw new Error("Permission-preflight report is bound to a different plan.");
@@ -125,6 +134,7 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
 }
 
 export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, toolingTreeSha256, imageReleaseSha, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
+  assertStageBDeploymentCapabilityGraph();
   assertStageBTerraformBackendPolicy(readJson("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json"));
   if (!tfvarsPath || !tfvarsBindingReportPath || !tfvarsBindingReportSha256 || !toolingTreeSha256) throw new Error("Canonical Stage B tfvars, binding report, binding-report SHA256, and tooling-tree SHA256 are required.");
   assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath: tfvarsBindingReportPath, bindingReportSha256: tfvarsBindingReportSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha: imageReleaseSha, expectedImageEvidenceSha256: imageEvidenceSha256 });
@@ -163,7 +173,10 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
     });
     if (broker.resolvedVersionArn !== brokerIdentity.resolvedVersionArn) throw new Error("Stage B broker resolved version identity does not match the configuration evidence.");
   }
-  const manifestSha256 = sha256(Buffer.from(canonicalizeJson(readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"))));
+  const manifest = readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
+  const reportBinding = assertPermissionReportPlanBinding(permissionReport, { planJsonBytes: planBytes, savedPlanBytes, manifest });
+  if (reportBinding.planSha256 !== planSha256 || reportBinding.savedPlanSha256 !== savedPlanSha256 || reportBinding.canonicalPlanJsonSha256 !== canonicalPlanJsonSha256) throw new Error("Permission report deployment hashes differ from the selected plan inputs.");
+  const manifestSha256 = reportBinding.manifestSha256;
   if (typeof showPlan !== "function") throw new Error("Terraform show dependency is required to bind the saved plan.");
   const shown = showPlan(planPath);
   const derivedPlanBytes = Buffer.isBuffer(shown) ? shown : Buffer.from(shown);

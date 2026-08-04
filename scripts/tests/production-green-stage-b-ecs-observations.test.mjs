@@ -25,10 +25,10 @@ function reader(overrides = {}) {
   return { ...base, ...overrides };
 }
 
-test("the source-controlled audit policy contains the complete ECS read set and no mutation", () => {
+test("the source-controlled companion policy contains audit reads plus the Stage A cluster read and no mutation", () => {
   const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));
   const actions = policy.Statement.flatMap((statement) => Array.isArray(statement.Action) ? statement.Action : [statement.Action]).filter((action) => action.startsWith("ecs:"));
-  assert.deepEqual(actions.sort(), [...STAGE_B_ECS_READ_ACTIONS].sort());
+  assert.deepEqual(actions.sort(), [...STAGE_B_ECS_READ_ACTIONS, "ecs:DescribeClusters"].sort());
   assert.equal(actions.some((action) => /RunTask|StartTask|StopTask|UpdateService|RegisterTaskDefinition|DeregisterTaskDefinition/.test(action)), false);
 });
 

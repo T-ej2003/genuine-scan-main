@@ -7,12 +7,15 @@ import test from "node:test";
 import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, runApply } from "../apply-production-green-stage-b.mjs";
 import {
   canonicalizeJson,
+  assertPermissionReportPlanBinding,
   deriveRequiredEvaluations,
   PERMISSION_REPORT_SIGNING_ALGORITHM,
   PERMISSION_REPORT_SIGNING_KEY_ARN,
   PERMISSION_EVIDENCE_MAX_AGE_MS,
+  sourcePolicyEvidence,
+  assertReleasePolicyEvidence,
   runCli,
-  runPermissionPreflight,
+  runPermissionPreflight as runPermissionPreflightRaw,
   signPermissionReport,
   simulatePrincipalPolicy,
   validateSimulationResult,
@@ -31,6 +34,24 @@ const roleArn = "arn:aws:iam::368992683803:role/mscqr-production-release-deploye
 const brokerPolicyArn = "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime";
 const brokerRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker";
 const generatorArn = "arn:aws:iam::368992683803:root";
+const policyEvidence = (() => {
+  const policies = sourcePolicyEvidence().map((policy) => ({ ...policy, defaultVersionId: "v1", liveSha256: policy.sourceSha256, attached: true, matchesSource: true }));
+  return { roleArn, attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: [], inlinePolicies: [], permissionsBoundaryArn: null, policies, status: "valid" };
+})();
+const runPermissionPreflight = (input) => runPermissionPreflightRaw({ policyEvidence, ...input });
+
+test("permission report identity fields exactly bind the selected plan artifacts", () => {
+  const planJsonBytes = fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
+  const savedPlanBytes = Buffer.from("selected-saved-plan");
+  const report = {
+    planSha256: crypto.createHash("sha256").update(planJsonBytes).digest("hex"),
+    savedPlanSha256: crypto.createHash("sha256").update(savedPlanBytes).digest("hex"),
+    canonicalPlanJsonSha256: crypto.createHash("sha256").update(canonicalizeJson(JSON.parse(planJsonBytes))).digest("hex"),
+    manifestSha256: crypto.createHash("sha256").update(canonicalizeJson(manifest)).digest("hex"),
+  };
+  assert.deepEqual(assertPermissionReportPlanBinding(report, { planJsonBytes, savedPlanBytes, manifest }), report);
+  for (const field of Object.keys(report)) assert.throws(() => assertPermissionReportPlanBinding({ ...report, [field]: "0".repeat(64) }, { planJsonBytes, savedPlanBytes, manifest }), new RegExp(field));
+});
 const plan = {
   variables: {
     account_id: { value: "368992683803" },
@@ -355,7 +376,13 @@ test("AWS simulator accepts the hand-reviewed PascalCase CLI fixture", () => {
     evaluation: { id: "lambda-fixture", action: simulatorAllowed.EvaluationResults[0].EvalActionName, resource: simulatorAllowed.EvaluationResults[0].EvalResourceName, context: [] },
     run: () => JSON.stringify(simulatorAllowed),
   });
-  assert.deepEqual(result, { decision: "allowed", matchedStatements: 0, missingContextValues: [] });
+  assert.deepEqual(result, { decision: "allowed", matchedStatements: 0, missingContextValues: [], organizationsAllowed: null, permissionsBoundaryAllowed: null });
+});
+
+test("AWS simulation preserves Organizations and permissions-boundary decisions", () => {
+  const evaluation = deriveRequiredEvaluations(plan, manifest).required[0];
+  const result = simulatePrincipalPolicy({ roleArn, evaluation, run: () => JSON.stringify({ EvaluationResults: [{ EvalActionName: evaluation.action, EvalResourceName: evaluation.resource, EvalDecision: "implicitDeny", MatchedStatements: [], MissingContextValues: [], OrganizationsDecisionDetail: { AllowedByOrganizations: false }, PermissionsBoundaryDecisionDetail: { AllowedByPermissionsBoundary: false } }] }) });
+  assert.equal(result.organizationsAllowed, false); assert.equal(result.permissionsBoundaryAllowed, false);
 });
 
 test("AWS simulator rejects camelCase-only and incomplete responses", () => {
@@ -435,6 +462,19 @@ test("preflight separates approved generator identity from the simulated release
   assert.match(report.manifestSha256, /^[a-f0-9]{64}$/);
 });
 
+test("permission evidence fails closed on stale versions, source drift, and detached policies", () => {
+  const stale = structuredClone(policyEvidence); stale.policies[0].defaultVersionId = "legacy";
+  assert.throws(() => assertReleasePolicyEvidence(stale), /source\/live identity/);
+  const drifted = structuredClone(policyEvidence); drifted.policies[0].liveSha256 = "0".repeat(64);
+  assert.throws(() => assertReleasePolicyEvidence(drifted), /source\/live identity/);
+  const detached = structuredClone(policyEvidence); detached.policies[0].attached = false;
+  assert.throws(() => assertReleasePolicyEvidence(detached), /source\/live identity/);
+  const bounded = structuredClone(policyEvidence); bounded.permissionsBoundaryArn = "arn:aws:iam::368992683803:policy/boundary";
+  assert.throws(() => assertReleasePolicyEvidence(bounded), /permissions boundary/);
+  const extraAttachment = structuredClone(policyEvidence); extraAttachment.attachedPolicyArns.push("arn:aws:iam::aws:policy/AdministratorAccess");
+  assert.throws(() => assertReleasePolicyEvidence(extraAttachment), /attachment set/);
+});
+
 test("preflight requires a manifest and rejects an unapproved generator", () => {
   assert.throws(() => runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail }), /manifest is required/);
   assert.throws(() => runPermissionPreflight({ reportGeneratorCallerArn: "arn:aws:iam::368992683803:user/operator", simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail }), /approved audit\/admin/);
@@ -476,10 +516,21 @@ test("CLI passes its parsed manifest through the same preflight entrypoint", () 
   const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json"); const outputPath = path.join(directory, "report.json"); const signaturePath = path.join(directory, "report.signature.json");
   fs.writeFileSync(planPath, planBytes); fs.writeFileSync(savedPath, savedPlanBytes); fs.writeFileSync(manifestPath, JSON.stringify(manifest));
   let received;
-  runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test"], { getCaller: () => generatorArn, runPreflight: (input) => { received = input.manifest; return { status: "valid", generatedAt: now }; }, signReport: (report) => reportSignature(report) });
+  runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test"], { getCaller: () => generatorArn, collectPolicyEvidence: () => policyEvidence, runPreflight: (input) => { received = input.manifest; return { status: "valid", generatedAt: now }; }, signReport: (report) => reportSignature(report) });
   assert.deepEqual(received, manifest);
   assert.equal(JSON.parse(fs.readFileSync(outputPath, "utf8")).status, "valid");
   assert.equal(JSON.parse(fs.readFileSync(signaturePath, "utf8")).reportSha256, reportSignature(JSON.parse(fs.readFileSync(outputPath, "utf8"))).reportSha256);
+});
+
+test("invalid administrator permission evidence is recorded but never signed", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-invalid-preflight-"));
+  const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json"); const outputPath = path.join(directory, "report.json"); const signaturePath = path.join(directory, "report.signature.json");
+  fs.writeFileSync(planPath, planBytes); fs.writeFileSync(savedPath, savedPlanBytes); fs.writeFileSync(manifestPath, JSON.stringify(manifest)); let signed = 0;
+  runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test"], {
+    getCaller: () => generatorArn, collectPolicyEvidence: () => policyEvidence,
+    runPreflight: () => ({ status: "invalid", generatedAt: now, deniedCount: 2 }), signReport: () => { signed += 1; },
+  });
+  assert.equal(signed, 0); assert.equal(fs.existsSync(signaturePath), false); assert.equal(JSON.parse(fs.readFileSync(outputPath)).status, "invalid"); process.exitCode = 0;
 });
 
 test("CLI and programmatic preflight paths produce the same deterministic report", () => {
@@ -489,6 +540,7 @@ test("CLI and programmatic preflight paths produce the same deterministic report
   const direct = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, manifest, plan, planBytes, savedPlanBytes, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test"], {
     getCaller: () => generatorArn,
+    collectPolicyEvidence: () => policyEvidence,
     runPreflight: (input) => runPermissionPreflight({ ...input, generatedAt: now, now, simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail }),
     signReport: (report) => reportSignature(report),
   });
@@ -551,6 +603,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   });
   const report = {
     schemaVersion: 1,
+    purpose: "saved-plan-authorization",
     toolingSha: "b".repeat(40),
     imageReleaseSha: "a".repeat(40),
     canonicalImageEvidenceSha256: "c".repeat(64),
@@ -567,6 +620,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     requiredEvaluations: [fixtureEvaluation(requiredFixtureEntry, false, "allowed", [])],
     forbiddenEvaluations: [fixtureEvaluation(forbiddenFixtureEntry, true, "implicitDeny", [])],
     cloudTrail: { status: "clear", unresolvedDenials: [] },
+    policyEvidence,
     requiredAllowedCount: 1,
     requiredDeniedCount: 0,
     forbiddenAllowedCount: 0,
@@ -610,6 +664,8 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   report.canonicalImageEvidenceSha256 = canonicalImageEvidenceSha256;
   report.planSha256 = planHash;
   report.canonicalPlanJsonSha256 = canonicalHash;
+  const projectCapabilities = (items) => items.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision }));
+  report.planCapabilities = { schemaVersion: 1, required: projectCapabilities(report.requiredEvaluations), forbidden: projectCapabilities(report.forbiddenEvaluations) };
   fs.writeFileSync(permissionPath, JSON.stringify(report));
   fs.writeFileSync(permissionSignaturePath, JSON.stringify(reportSignature(report)));
   fs.writeFileSync(imageEvidencePath, `${JSON.stringify(imageEvidence, null, 2)}\n`);
@@ -968,7 +1024,7 @@ test("verification-only and real apply paths reject an invalid report signature 
 
 test("saved-plan binding rejects stale, changed, or semantically different binary plans", () => {
   const fixture = wrapperFixture({ shownPlan: { ...plan, resource_changes: [{ address: "unexpected", change: { actions: ["delete"] } }] } });
-  assert.throws(() => assertApplyArtifacts({ ...fixture, planSha256: fixture.planHash, auditSha256: fixture.auditHash, savedPlanSha256: fixture.savedHash, canonicalPlanJsonSha256: fixture.canonicalHash, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true }), /Saved binary Terraform plan/);
+  assert.throws(() => assertApplyArtifacts({ ...fixture, planSha256: fixture.planHash, auditSha256: fixture.auditHash, savedPlanSha256: fixture.savedHash, canonicalPlanJsonSha256: fixture.canonicalHash, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true }), /Permission report canonicalPlanJsonSha256|Saved binary Terraform plan/);
   const changed = wrapperFixture({ savedBytes: Buffer.from("changed-binary") });
   assert.throws(() => assertApplyArtifacts({ ...changed, planSha256: changed.planHash, auditSha256: changed.auditHash, savedPlanSha256: fixture.savedHash, canonicalPlanJsonSha256: changed.canonicalHash, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => changed.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true }), /Saved Terraform plan SHA256/);
   assert.throws(() => assertApplyArtifacts({ ...fixture, planSha256: "0".repeat(64), auditSha256: fixture.auditHash, savedPlanSha256: fixture.savedHash, canonicalPlanJsonSha256: fixture.canonicalHash, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true }), /Plan JSON SHA256/);

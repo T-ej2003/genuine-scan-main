@@ -718,6 +718,28 @@ the manifest SHA256, both plan hashes, the policy-publication window, and the
 CloudTrail result. The administrator logs out immediately after generation;
 the fresh MFA-backed release session only consumes the report.
 
+Before image publication where release credentials are already available, and always
+before backend initialization, run the two-section `npm run
+stage-b:production-preflight` boundary documented in
+`MSCQRProductionGreenStageBDeploymentCapabilities-v1.md`. Administrator/root owns policy
+inspection, IAM simulation, forbidden controls, and signing. The release-deployer only
+verifies that signed report and executes the aggregated safe-read probes; it never calls
+IAM simulation or mutation APIs as probes.
+
+The generated graph is verified with `npm run stage-b:capability-graph:verify`; regenerate
+it only with `npm run stage-b:capability-graph:generate`. The reviewed credential order is
+administrator/root preflight and signature, complete credential clearing, bootstrap-user
+MFA `sts:GetSessionToken`, exact `sts:AssumeRole` into
+`mscqr-production-release-deployer`, bootstrap credential clearing, then release preflight.
+Each public preflight invocation asserts its exact caller. The administrator invocation
+accepts only `--identity administrator --output <new-private-report>
+--signature-output <new-private-signature>`. The release invocation accepts only
+`--identity release-deployer` plus those signed administrator artifacts and the canonical
+backend, state, handoff, image-evidence, broker-package, tfvars, and binding-report inputs.
+Invalid administrator evidence is recorded but never signed. The release phase aggregates
+all independent direct-read failures and cannot initialize Terraform until that set is
+empty.
+
 The manifest explicitly enumerates all twelve possible current task-definition
 create addresses: backend, worker, application-canary, read-only-canary, and
 the eight executor modes. Each address independently proves
