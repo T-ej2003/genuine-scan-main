@@ -35,6 +35,7 @@ const movedSids = [
   "ReadStageBBrokerConfiguration",
 ];
 const auditAdditionSids = ["ReadStageBBrokerReviewedAlias"];
+const stageALiveEvidenceSids = ["ReadStageALivePrerequisites"];
 const controlSids = [
   "TagExactStageBLogs",
   "CreateExactStageBLogs",
@@ -102,7 +103,7 @@ test("all policy artifacts parse and historical v2/v3 remain byte-stable", () =>
 test("v4 and the companion policy fit the AWS managed-policy document limit", () => {
   assert.equal(awsCharacterCount(policies.v3), 6651);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
-  assert.equal(awsCharacterCount(policies.audit), 2040);
+  assert.equal(awsCharacterCount(policies.audit), 2312);
   assert.ok(awsCharacterCount(policies.finalWrite) < 6144);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.ok(awsCharacterCount(policies.audit) < 6144);
@@ -121,19 +122,20 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBReadOnlyCanaryExecutionRolePolicy"));
   correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBBrokerManagedPolicy"));
   correctedV3.Statement.push(statementOf(policies.audit, "ReadStageBBrokerReviewedAlias"));
+  correctedV3.Statement.push(statementOf(policies.audit, "ReadStageALivePrerequisites"));
   assert.deepEqual(canonical(correctedV3), canonical({
     Version: policies.v3.Version,
     Statement: [...policies.v4.Statement, ...policies.audit.Statement],
   }));
 });
 
-test("the split has seven moved statements, one audit-only addition, eleven provider-control statements, and six final-write statements", () => {
-  assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...movedSids, ...auditAdditionSids]);
+test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and six final-write statements", () => {
+  assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), finalWriteSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids]).size, 25);
+  assert.equal(new Set([...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids]).size, 26);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
   for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "ReadExactStageBBrokerManagedPolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
@@ -425,7 +427,7 @@ test("the runbook targets v4 and the companion policy for the separately authori
 });
 
 test("historical policy bytes remain unchanged while the active v4 correction is explicit", () => {
-  assert.equal(sha256(read(paths.audit)), "8ae0343dfbfbbe34736bb9b9496e212b77849f809e44ef3fb360aa407653e16b");
+  assert.equal(sha256(read(paths.audit)), "985f77d3fdc40d033d0e2859ecd811ebd506a089573326427bb2fee81b6bb4f2");
 });
 
 test("runbook is companion-first and verifies complete policy attachments before provider mutation", () => {
