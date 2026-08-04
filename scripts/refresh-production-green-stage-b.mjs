@@ -9,6 +9,7 @@ import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformIniti
 import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertStageBRefreshStateBinding, classifyStageBRefreshResult, STAGE_B_REFRESH_ALLOWED_STATUSES } from "./aws/stage-b-refresh-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./aws/stage-b-artifact-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -40,15 +41,12 @@ export function parseCli(argv = process.argv.slice(2)) {
 }
 
 function assertPrivateNewOutput(outputPath) {
-  if (!path.isAbsolute(outputPath) || path.resolve(outputPath).startsWith(`${root}${path.sep}`)) throw new Error("Stage B refresh-only output must be a new private path outside the repository.");
-  if (fs.existsSync(outputPath)) throw new Error("Stage B refresh-only output must be a new private path.");
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true, mode: 0o700 });
+  assertStageBArtifactPath({ artifactPath: outputPath, repositoryRoot: root, label: "Stage B refresh-only output", allowExisting: false });
+  ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root, create: true });
 }
 
 function writeOutput(outputPath, output) {
-  fs.writeFileSync(outputPath, `${JSON.stringify(output, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-  fs.chmodSync(outputPath, 0o600);
-  return outputPath;
+  return writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(output, null, 2)}\n`), repositoryRoot: root, label: "Stage B refresh report" }).path;
 }
 
 export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env, deps = {} } = {}) {
@@ -89,6 +87,8 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
   const output = `${result.stdout || ""}${result.stderr || ""}`;
   let plan;
   if (result.status === 0 || result.status === 2) {
+    if (fs.existsSync(refreshPlanPath)) ensureStageBPrivateFile({ filePath: refreshPlanPath, repositoryRoot: root, normalize: true, label: "Stage B refresh-only temporary plan" });
+    else if (!deps.showPlanJson) throw new Error("Stage B refresh-only did not produce its temporary plan.");
     try { const shown = showPlanJson(refreshPlanPath, { cwd: root, env: terraformEnv }); plan = typeof shown === "string" || Buffer.isBuffer(shown) ? JSON.parse(shown) : shown; } catch (error) { plan = { malformed: error.message }; }
   }
   const classification = plan?.malformed

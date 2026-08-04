@@ -9,6 +9,7 @@ import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-
 import { STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
+import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_EVIDENCE_MAX_AGE_MS = 15 * 60 * 1000;
@@ -753,6 +754,12 @@ export function runPermissionPreflight({
 
 export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn, collectPolicyEvidence = collectLiveReleasePolicyEvidence, runPreflight = runPermissionPreflight, signReport = signPermissionReport } = {}) {
   const options = parseCli(argv);
+  assertStageBPrivateFile({ filePath: options.planJsonPath, repositoryRoot: stageBRoot, label: "Stage B plan JSON" });
+  assertStageBPrivateFile({ filePath: options.savedPlanPath, repositoryRoot: stageBRoot, label: "Stage B saved plan" });
+  const outputPath = assertStageBArtifactPath({ artifactPath: options.outputPath, repositoryRoot: stageBRoot, label: "Stage B permission report", allowExisting: false });
+  const signatureOutputPath = assertStageBArtifactPath({ artifactPath: options.signatureOutputPath, repositoryRoot: stageBRoot, label: "Stage B permission-report signature", allowExisting: false });
+  if (path.dirname(outputPath) !== path.dirname(signatureOutputPath)) throw new Error("Stage B permission report and signature must use one private directory.");
+  ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: stageBRoot, create: true });
   const observedCallerArn = getCaller();
   if (observedCallerArn !== options.reportGeneratorCallerArn) throw new Error("Report generator caller does not match the current AWS identity.");
   const planBytes = fs.readFileSync(path.resolve(options.planJsonPath));
@@ -760,11 +767,16 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   const plan = JSON.parse(planBytes);
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
   const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, savedPlanBytes, policyEvidence: collectPolicyEvidence() });
-  fs.writeFileSync(path.resolve(options.outputPath), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
-  process.stdout.write(`${JSON.stringify({ status: report.status, outputPath: options.outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
-  if (report.status !== "valid") { process.exitCode = 1; return report; }
+  process.stdout.write(`${JSON.stringify({ status: report.status, outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
+  if (report.status !== "valid") {
+    writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), repositoryRoot: stageBRoot, label: "Stage B permission report" });
+    process.exitCode = 1; return report;
+  }
   const signatureArtifact = signReport(report, { now: options.generatedAt });
-  fs.writeFileSync(path.resolve(options.signatureOutputPath), `${JSON.stringify(signatureArtifact, null, 2)}\n`, { mode: 0o600 });
+  writeStageBPrivateFilesAtomic({ repositoryRoot: stageBRoot, files: [
+    { filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), label: "Stage B permission report" },
+    { filePath: signatureOutputPath, bytes: Buffer.from(`${JSON.stringify(signatureArtifact, null, 2)}\n`), label: "Stage B permission-report signature" },
+  ] });
   return report;
 }
 

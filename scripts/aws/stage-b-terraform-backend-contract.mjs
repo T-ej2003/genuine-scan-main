@@ -1,6 +1,6 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { ensureStageBPrivateDirectory, ensureStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 
 const bucketName = "mscqr-production-terraform-state-368992683803-eu-west-2";
 const bucketArn = `arn:aws:s3:::${bucketName}`;
@@ -54,35 +54,20 @@ const initializedBackendConfigKeys = Object.freeze([...Object.keys(STAGE_B_TERRA
 export const STAGE_B_TERRAFORM_DATA_DIR_MODE = 0o700;
 export const STAGE_B_TERRAFORM_BACKEND_METADATA_MODE = 0o600;
 
-const mode = (stat) => stat.mode & 0o777;
 const privatePathError = "Stage B Terraform backend metadata must be a regular non-symlink file at <terraform-data-dir>/terraform.tfstate with mode 0600.";
 
-function assertPrivateDataDirectory(terraformDataDir, repositoryRoot, fsOps) {
-  const resolved = path.resolve(terraformDataDir || "");
-  if (!path.isAbsolute(terraformDataDir || "")) throw new Error("Stage B Terraform data directory must be an absolute path.");
-  if (repositoryRoot && resolved.startsWith(`${path.resolve(repositoryRoot)}${path.sep}`)) throw new Error("Stage B Terraform data directory must be outside the repository.");
-  const stat = fsOps.lstatSync(resolved, { throwIfNoEntry: false });
-  if (!stat?.isDirectory() || stat.isSymbolicLink()) throw new Error("Stage B Terraform data directory must be an existing non-symlink directory.");
-  if (mode(stat) !== STAGE_B_TERRAFORM_DATA_DIR_MODE) throw new Error("Stage B Terraform data directory must be private with mode 0700.");
-  return resolved;
-}
-
 export function ensureStageBTerraformBackendMetadataPrivate({ terraformDataDir, backendMetadataPath, repositoryRoot, normalize = false, fsOps = fs } = {}) {
-  const resolvedDataDir = assertPrivateDataDirectory(terraformDataDir, repositoryRoot, fsOps);
+  const resolvedDataDir = ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot, create: normalize, normalize, fsOps, label: "Stage B Terraform data directory" });
   const expectedMetadataPath = path.join(resolvedDataDir, "terraform.tfstate");
   const resolvedMetadataPath = path.resolve(backendMetadataPath || expectedMetadataPath);
   if (resolvedMetadataPath !== expectedMetadataPath) throw new Error("Stage B backend metadata must be <terraform-data-dir>/terraform.tfstate.");
-  let stat = fsOps.lstatSync(expectedMetadataPath, { throwIfNoEntry: false });
-  if (!stat?.isFile() || stat.isSymbolicLink()) throw new Error(privatePathError);
-  if (normalize && mode(stat) !== STAGE_B_TERRAFORM_BACKEND_METADATA_MODE) fsOps.chmodSync(expectedMetadataPath, STAGE_B_TERRAFORM_BACKEND_METADATA_MODE);
-  stat = fsOps.lstatSync(expectedMetadataPath, { throwIfNoEntry: false });
-  if (!stat?.isFile() || stat.isSymbolicLink() || mode(stat) !== STAGE_B_TERRAFORM_BACKEND_METADATA_MODE) throw new Error(privatePathError);
-  const bytes = fsOps.readFileSync(expectedMetadataPath);
+  const metadata = ensureStageBPrivateFile({ filePath: expectedMetadataPath, repositoryRoot, normalize, fsOps, label: "Stage B Terraform backend metadata" });
+  if (metadata.mode !== "0600") throw new Error(privatePathError);
   return {
     terraformDataDir: resolvedDataDir,
     backendMetadataPath: expectedMetadataPath,
     backendMetadataMode: "0600",
-    backendMetadataSha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+    backendMetadataSha256: metadata.sha256,
     privateModeValidated: true,
   };
 }

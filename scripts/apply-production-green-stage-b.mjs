@@ -28,6 +28,7 @@ import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage
 import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBDeploymentCapabilityGraph } from "./aws/generate-production-green-stage-b-capability-graph.mjs";
 import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
+import { assertStageBPrivateFile } from "./aws/stage-b-artifact-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -121,6 +122,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
   if (!fs.existsSync(permissionReportSignaturePath)) throw new Error("Permission-preflight report signature is missing.");
   if (!fs.existsSync(imageEvidencePath)) throw new Error("Authenticated image evidence is missing.");
   if (!fs.existsSync(imageEvidenceSignaturePath)) throw new Error("Authenticated image evidence signature is missing.");
+  for (const [filePath, label] of [[planPath, "Stage B saved plan"], [planJsonPath, "Stage B plan JSON"], [auditPath, "Stage B reference audit"], [permissionReportPath, "Stage B permission report"], [permissionReportSignaturePath, "Stage B permission-report signature"], [imageEvidencePath, "Stage B image evidence"], [imageEvidenceSignaturePath, "Stage B image-evidence signature"]]) assertStageBPrivateFile({ filePath, repositoryRoot: root, label });
   const planBytes = fs.readFileSync(planJsonPath); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReportBytes = fs.readFileSync(permissionReportPath); const permissionReport = JSON.parse(permissionReportBytes); const signatureArtifact = JSON.parse(fs.readFileSync(permissionReportSignaturePath, "utf8")); const imageEvidenceBytes = fs.readFileSync(imageEvidencePath); const imageEvidence = JSON.parse(imageEvidenceBytes); const imageEvidenceSignatureArtifact = JSON.parse(fs.readFileSync(imageEvidenceSignaturePath, "utf8"));
   if (!/^[a-f0-9]{64}$/.test(savedPlanSha256) || sha256(savedPlanBytes) !== savedPlanSha256) throw new Error("Saved Terraform plan SHA256 does not match the approved digest.");
   if (!/^[a-f0-9]{64}$/.test(canonicalPlanJsonSha256)) throw new Error("Canonical plan JSON SHA256 is missing or malformed.");

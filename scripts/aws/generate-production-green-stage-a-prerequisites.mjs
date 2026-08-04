@@ -5,6 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
 export const STAGE_A_PREREQUISITES_GENERATOR = "scripts/aws/generate-production-green-stage-a-prerequisites.mjs";
 export const STAGE_A_PREREQUISITES_SCHEMA_VERSION = 2;
@@ -76,7 +77,8 @@ export function generateStageAPrerequisites({ stateBackup, stateObject, toolingS
   if (!path.isAbsolute(stateBackup || "") || !path.isAbsolute(outputPath || "") || outputPath.startsWith(`${root}${path.sep}`)) throw new Error("Stage A prerequisite inputs and output must be absolute private paths.");
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !/^[a-f0-9]{64}$/.test(toolingTreeSha256 || "")) throw new Error("Stage A prerequisite tooling identity is malformed.");
   if (fs.existsSync(outputPath)) throw new Error("Refusing to overwrite an existing Stage A prerequisite artifact.");
-  const bytes = fs.readFileSync(stateBackup); const state = JSON.parse(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = stageAValues(state, { stateObject });
+  const stateArtifact = assertStageBPrivateFile({ filePath: stateBackup, repositoryRoot: root, label: "Stage A state backup" });
+  const bytes = fs.readFileSync(stateArtifact.path); const state = JSON.parse(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = stageAValues(state, { stateObject });
   const network = liveEvidence({ vpcId, subnetIds, databaseIdentifier, run });
   const output = {
     schemaVersion: STAGE_A_PREREQUISITES_SCHEMA_VERSION, generator: STAGE_A_PREREQUISITES_GENERATOR, toolingSha, toolingTreeSha256,
@@ -87,7 +89,7 @@ export function generateStageAPrerequisites({ stateBackup, stateObject, toolingS
     stageAExecutorLogGroupName: value.executor_log_group_name, stageAExecutorLogGroupArn: value.executor_log_group_arn, stageABrokerLogGroupName: value.broker_log_group_name, stageABrokerLogGroupArn: value.broker_log_group_arn,
     stageARuntimeSecretArns: value.runtime_secret_arns, stageAExecutorNetworkingReady: true, approvalSecretArn: exact(value.approval_secret_arn, STAGE_B.approvalSecretArn, "Stage A approval secret"), approvalKmsKeyArn: exact(value.approval_kms_key_arn, STAGE_B.approvalKmsKeyArn, "Stage A approval key"), receiptBucketArn: `arn:aws:s3:::${STAGE_B.receiptBucket}`, stageAReadOnlyCanaryDatabaseSecretArn: value.read_only_canary_database_secret_arn,
   };
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true, mode: 0o700 }); fs.writeFileSync(outputPath, `${JSON.stringify(output, null, 2)}\n`, { mode: 0o600, flag: "wx" }); return output;
+  writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(output, null, 2)}\n`), repositoryRoot: root, label: "Stage A prerequisite artifact" }); return output;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

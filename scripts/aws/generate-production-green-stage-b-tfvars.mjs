@@ -14,6 +14,7 @@ import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs"
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageAStateIdentity, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 
 export const STAGE_B_TFVARS_SCHEMA_VERSION = 1;
 export const STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION = 1;
@@ -57,7 +58,8 @@ const quote = (value) => JSON.stringify(value);
 const sortedEntries = (value) => Object.entries(value || {}).sort(([a], [b]) => a.localeCompare(b));
 
 function assertAbsoluteFile(file, label) {
-  if (!path.isAbsolute(file) || !fs.statSync(file, { throwIfNoEntry: false } )?.isFile()) throw new Error(`${label} must be an existing absolute file.`);
+  if (!path.isAbsolute(file)) throw new Error(`${label} must be an existing absolute file.`);
+  assertStageBPrivateFile({ filePath: file, repositoryRoot: root, label });
 }
 
 function assertOutputPath(file, label) {
@@ -65,7 +67,7 @@ function assertOutputPath(file, label) {
   if (path.resolve(file) === path.resolve(root) || path.resolve(file).startsWith(`${root}${path.sep}`)) {
     throw new Error(`${label} must be outside the repository.`);
   }
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  ensureStageBPrivateDirectory({ directory: path.dirname(file), repositoryRoot: root, create: true });
 }
 
 export function assertStageBCanonicalTfvarsOutputPath(file) {
@@ -99,51 +101,15 @@ export function assertStageBCanonicalTfvarsFile({ tfvarsPath, bindingReport, tfv
   return true;
 }
 
-function outputState(file, label, fileSystem) {
-  if (!fileSystem.existsSync(file)) return { file, label, exists: false };
-  if (fileSystem.lstatSync(file).isDirectory()) throw new Error(`${label} output must not be a directory.`);
-  return { file, label, exists: true };
-}
-
 export function writeAtomicPair({ tfvarsPath, bindingReportPath, tfvarsBytes, bindingReportBytes, allowOverwrite = false, fileSystem = fs } = {}) {
   assertStageBCanonicalTfvarsOutputPath(tfvarsPath);
-  if (path.resolve(tfvarsPath) === path.resolve(bindingReportPath)) throw new Error("Tfvars and binding-report outputs must be different files.");
-  const outputs = [outputState(tfvarsPath, "Tfvars", fileSystem), outputState(bindingReportPath, "Binding-report", fileSystem)];
-  if (!allowOverwrite && outputs.some(({ exists }) => exists)) throw new Error(`Refusing to overwrite existing ${outputs.find(({ exists }) => exists).file}.`);
-  const temporaryDirectories = outputs.map(({ file }) => fileSystem.mkdtempSync(path.join(path.dirname(file), ".stage-b-tfvars-")));
-  const temporaryFiles = outputs.map(({ file }, index) => path.join(temporaryDirectories[index], path.basename(file)));
-  const backups = [];
-  const committed = [];
-  try {
-    for (const [index, bytes] of [tfvarsBytes, bindingReportBytes].entries()) {
-      fileSystem.writeFileSync(temporaryFiles[index], bytes, { flag: "wx", mode: 0o600 });
-      fileSystem.chmodSync(temporaryFiles[index], 0o600);
-    }
-    for (const output of outputs) {
-      const current = outputState(output.file, output.label, fileSystem);
-      if (current.exists !== output.exists || (!allowOverwrite && current.exists)) throw new Error(`${output.label} output changed during generation.`);
-    }
-    if (allowOverwrite) {
-      for (const output of outputs) {
-        if (!output.exists) continue;
-        const directory = fileSystem.mkdtempSync(path.join(path.dirname(output.file), ".stage-b-tfvars-backup-"));
-        const backup = path.join(directory, path.basename(output.file));
-        fileSystem.renameSync(output.file, backup);
-        backups.push({ output: output.file, backup, directory });
-      }
-    }
-    for (let index = 0; index < outputs.length; index += 1) {
-      fileSystem.renameSync(temporaryFiles[index], outputs[index].file);
-      committed.push(outputs[index].file);
-    }
-  } catch (error) {
-    for (const file of committed) fileSystem.rmSync(file, { force: true });
-    for (const { output, backup } of backups.reverse()) if (fileSystem.existsSync(backup)) fileSystem.renameSync(backup, output);
-    throw error;
-  } finally {
-    for (const directory of temporaryDirectories) fileSystem.rmSync(directory, { recursive: true, force: true });
-    for (const { directory } of backups) fileSystem.rmSync(directory, { recursive: true, force: true });
-  }
+  const resolvedBindingReportPath = assertStageBArtifactPath({ artifactPath: bindingReportPath, repositoryRoot: root, label: "Binding-report output", allowExisting: true });
+  if (path.resolve(tfvarsPath) === resolvedBindingReportPath) throw new Error("Tfvars and binding-report outputs must be different files.");
+  if (path.dirname(tfvarsPath) !== path.dirname(resolvedBindingReportPath)) throw new Error("Tfvars and binding-report outputs must use one private directory.");
+  return writeStageBPrivateFilesAtomic({ repositoryRoot: root, overwrite: allowOverwrite, fsOps: fileSystem, files: [
+    { filePath: tfvarsPath, bytes: tfvarsBytes, label: "Tfvars" },
+    { filePath: resolvedBindingReportPath, bytes: bindingReportBytes, label: "Binding-report" },
+  ] });
 }
 
 export function validateStageBStageAInput(input, { toolingSha, toolingTreeSha256 } = {}) {
@@ -327,8 +293,8 @@ function assertBrokerPackageBinding(tfvarsBytes, report) {
   if (!path.isAbsolute(report.brokerPackagePath)) throw new Error("Stage B broker package path in the binding report must be absolute.");
   const tfvarsBrokerPath = readGeneratedString(tfvarsBytes, "broker_package_path");
   if (!path.isAbsolute(tfvarsBrokerPath) || tfvarsBrokerPath !== report.brokerPackagePath) throw new Error("Stage B broker package path does not match the canonical binding report.");
-  const stat = fs.lstatSync(tfvarsBrokerPath, { throwIfNoEntry: false });
-  if (!stat?.isFile() || stat.isSymbolicLink() || stat.size === 0) throw new Error("Stage B broker package must be a non-empty regular file.");
+  assertStageBPrivateFile({ filePath: tfvarsBrokerPath, repositoryRoot: root, label: "Stage B broker package" });
+  if (fs.statSync(tfvarsBrokerPath).size === 0) throw new Error("Stage B broker package must be a non-empty regular file.");
   const bytes = fs.readFileSync(tfvarsBrokerPath);
   if (sha256(bytes) !== report.brokerPackageRawSha256) throw new Error("Stage B broker package raw SHA256 does not match the canonical binding report.");
   if (base64Sha256(bytes) !== report.brokerPackageBase64Sha256) throw new Error("Stage B broker package base64 SHA256 does not match the canonical binding report.");
@@ -352,8 +318,7 @@ function assertStageAInputMatchesStateBackup(stageAInput, stageAStateBytes, stag
 function assertStageAPrerequisiteBinding(report) {
   for (const [field, label] of [["stageAInputPath", "Stage-A prerequisite input"], ["stageAStateBackupPath", "Stage-A state backup"]]) {
     if (!path.isAbsolute(report[field] || "")) throw new Error(`${label} path in the binding report must be absolute.`);
-    const stat = fs.lstatSync(report[field], { throwIfNoEntry: false });
-    if (!stat?.isFile() || stat.isSymbolicLink()) throw new Error(`${label} must remain a regular file.`);
+    assertStageBPrivateFile({ filePath: report[field], repositoryRoot: root, label });
   }
   const inputBytes = fs.readFileSync(report.stageAInputPath); const stateBytes = fs.readFileSync(report.stageAStateBackupPath);
   if (sha256(inputBytes) !== report.stageAInputSha256) throw new Error("Stage-A prerequisite input was modified after canonical generation.");
@@ -365,8 +330,7 @@ function assertStageAPrerequisiteBinding(report) {
 
 export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedImageReleaseSha, expectedImageEvidenceSha256 } = {}) {
   assertAbsoluteFile(tfvarsPath, "Tfvars"); assertAbsoluteFile(bindingReportPath, "Binding report");
-  const bindingStat = fs.lstatSync(bindingReportPath);
-  if (bindingStat.isSymbolicLink() || (bindingStat.mode & 0o777) !== 0o600) throw new Error("Stage B tfvars binding report must be a regular mode-0600 file.");
+  assertStageBPrivateFile({ filePath: bindingReportPath, repositoryRoot: root, label: "Stage B tfvars binding report" });
   const tfvarsBytes = fs.readFileSync(tfvarsPath); const reportBytes = fs.readFileSync(bindingReportPath); const report = JSON.parse(reportBytes);
   assertStageBCanonicalTfvarsFile({ tfvarsPath, bindingReport: report, tfvarsBytes });
   if (bindingReportSha256 && sha256(reportBytes) !== bindingReportSha256) throw new Error("Stage B tfvars binding-report SHA256 does not match the approved digest.");

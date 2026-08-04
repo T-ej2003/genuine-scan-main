@@ -154,7 +154,7 @@ test("current Stage-A handoff and source state bytes are revalidated at the bind
 test("Stage A and Stage B state identities cannot be substituted", () => {
   const args = input(); const stageAInput = JSON.parse(fs.readFileSync(args.stageAInput, "utf8")); const stageBBytes = fs.readFileSync(args.stateBackup);
   const swappedInputPath = path.join(path.dirname(args.stageAInput), "swapped-stage-a.json");
-  fs.writeFileSync(swappedInputPath, JSON.stringify({ ...stageAInput, stageAStateSha256: crypto.createHash("sha256").update(stageBBytes).digest("hex") }));
+  fs.writeFileSync(swappedInputPath, JSON.stringify({ ...stageAInput, stageAStateSha256: crypto.createHash("sha256").update(stageBBytes).digest("hex") }), { mode: 0o600 });
   assert.throws(() => generateStageBTfvars({ ...args, stageAInput: swappedInputPath, stageAStateBackup: args.stateBackup }), /Stage A state lineage is wrong/);
   assert.throws(() => generateStageBTfvars({ ...input(), stateBackup: args.stageAStateBackup }), /Stage B state lineage is wrong/);
   assert.throws(() => validateStageBStageAInput({ ...stageAInput, stageAStateObject: "env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate" }), /provenance/);

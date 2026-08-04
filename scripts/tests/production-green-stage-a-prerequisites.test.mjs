@@ -16,7 +16,7 @@ const stage = {
     { type: "aws_db_instance", name: "green", instances: [{ attributes: { identifier: "mscqr-production-rls-green" } }] },
   ],
 };
-const statePath = path.join(directory, "stage-a-state.json"); fs.writeFileSync(statePath, JSON.stringify(stage));
+const statePath = path.join(directory, "stage-a-state.json"); fs.writeFileSync(statePath, JSON.stringify(stage), { mode: 0o600 });
 const run = (args) => {
   if (args[1] === "describe-subnets") return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: "vpc-0123456789abcdef0", State: "available", MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? "b" : "a"}`, CidrBlock: `10.0.${index}.0/24` })) });
   if (args[1] === "describe-route-tables") return JSON.stringify({ RouteTables: [{ RouteTableId: "rtb-12345678", VpcId: "vpc-0123456789abcdef0", Associations: [{ Main: true }], Routes: [{ DestinationCidrBlock: "0.0.0.0/0", NatGatewayId: "nat-12345678" }] }] });

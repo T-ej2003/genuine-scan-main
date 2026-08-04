@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { APPROVED_PREFLIGHT_GENERATOR_ARNS } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 
 export const IMAGE_EVIDENCE_SCHEMA_VERSION = 3;
 export const IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION = 3;
@@ -19,6 +20,7 @@ export const IMAGE_EVIDENCE_REVOCATION_MODEL = "time-bounded-no-supersession-reg
 export const IMAGE_EVIDENCE_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
 export const IMAGE_EVIDENCE_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
 export const APPROVED_IMAGE_EVIDENCE_VERIFIER_ARNS = APPROVED_PREFLIGHT_GENERATOR_ARNS;
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const SERVICES = Object.freeze({
   backend: { repository: "mscqr-backend", tag: (sha) => sha },
@@ -316,14 +318,18 @@ export function assertImageEvidence(report, { signatureArtifact, verifySignature
 function requiredOption(argv, option) { const index = argv.indexOf(option); const value = index === -1 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${option} is required.`); return value; }
 
 export function runCli(argv = process.argv.slice(2), deps = {}) {
-  const artifactPath = requiredOption(argv, "--artifact"); const imageReleaseSha = requiredOption(argv, "--image-release-sha"); const workflowRunId = requiredOption(argv, "--workflow-run-id"); const artifactSha256 = requiredOption(argv, "--artifact-sha256"); const outputPath = requiredOption(argv, "--output"); const signaturePath = requiredOption(argv, "--signature-output");
+  const artifactPath = requiredOption(argv, "--artifact"); const imageReleaseSha = requiredOption(argv, "--image-release-sha"); const workflowRunId = requiredOption(argv, "--workflow-run-id"); const artifactSha256 = requiredOption(argv, "--artifact-sha256"); const outputPath = assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--output"), repositoryRoot, label: "Stage B image evidence", allowExisting: false }); const signaturePath = assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--signature-output"), repositoryRoot, label: "Stage B image-evidence signature", allowExisting: false });
+  if (path.dirname(outputPath) !== path.dirname(signaturePath)) throw new Error("Stage B image evidence and signature must use one private directory.");
+  ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot, create: true });
   const verifierCallerArn = deps.getCaller ? deps.getCaller() : JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"], { encoding: "utf8" })).Arn;
   const observedAt = deps.observedAt || new Date().toISOString();
   const repositories = [...new Set(Object.values(SERVICES).map(({ repository }) => repository))].map((repository) => readImageRepositoryEvidence(repository, { observedAt, describe: deps.describeRepository || describeRepositories }));
   const report = generateImageEvidence({ artifactBytes: fs.readFileSync(artifactPath), imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, describe: deps.describe || describeImage, observedAt, repositories });
   const signature = (deps.sign || signImageEvidence)(report, deps.sign ? { sign: deps.sign, now: deps.now } : {});
-  fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-  fs.writeFileSync(signaturePath, `${JSON.stringify(signature, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+  writeStageBPrivateFilesAtomic({ repositoryRoot, files: [
+    { filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), label: "Stage B image evidence" },
+    { filePath: signaturePath, bytes: Buffer.from(`${JSON.stringify(signature, null, 2)}\n`), label: "Stage B image-evidence signature" },
+  ] });
   return { outputPath, signaturePath, reportSha256: imageEvidenceSha256(report) };
 }
 

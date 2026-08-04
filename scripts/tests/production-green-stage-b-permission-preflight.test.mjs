@@ -92,6 +92,7 @@ const planBytes = Buffer.from(JSON.stringify(plan));
 const savedPlanBytes = Buffer.from("saved-binary-plan");
 const now = "2026-08-01T12:00:00.000Z";
 const clearCloudTrail = () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] });
+const writePrivate = (filePath, bytes) => fs.writeFileSync(filePath, bytes, { mode: 0o600 });
 const allowRequiredDenyForbidden = ({ evaluation }) => ({
   decision: evaluation.forbidden ? evaluation.expectedDecision : "allowed",
   matchedStatements: evaluation.expectedDecision === "explicitDeny" ? 1 : 0,
@@ -641,14 +642,14 @@ test("unsigned, modified, wrong-key, wrong-algorithm, wrong-hash, and stale repo
 test("release-deployer cannot generate a report or sign through the CLI", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-signing-caller-"));
   const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json");
-  fs.writeFileSync(planPath, planBytes); fs.writeFileSync(savedPath, savedPlanBytes); fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  writePrivate(planPath, planBytes); writePrivate(savedPath, savedPlanBytes); writePrivate(manifestPath, JSON.stringify(manifest));
   assert.throws(() => runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", path.join(directory, "report.json"), "--signature-output", path.join(directory, "signature.json"), "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test"], { getCaller: () => roleArn }), /Report generator caller/);
 });
 
 test("CLI passes its parsed manifest through the same preflight entrypoint", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-cli-flow-"));
   const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json"); const outputPath = path.join(directory, "report.json"); const signaturePath = path.join(directory, "report.signature.json");
-  fs.writeFileSync(planPath, planBytes); fs.writeFileSync(savedPath, savedPlanBytes); fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  writePrivate(planPath, planBytes); writePrivate(savedPath, savedPlanBytes); writePrivate(manifestPath, JSON.stringify(manifest));
   let received;
   runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test"], { getCaller: () => generatorArn, collectPolicyEvidence: () => policyEvidence, runPreflight: (input) => { received = input.manifest; return { status: "valid", generatedAt: now }; }, signReport: (report) => reportSignature(report) });
   assert.deepEqual(received, manifest);
@@ -659,7 +660,7 @@ test("CLI passes its parsed manifest through the same preflight entrypoint", () 
 test("invalid administrator permission evidence is recorded but never signed", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-invalid-preflight-"));
   const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json"); const outputPath = path.join(directory, "report.json"); const signaturePath = path.join(directory, "report.signature.json");
-  fs.writeFileSync(planPath, planBytes); fs.writeFileSync(savedPath, savedPlanBytes); fs.writeFileSync(manifestPath, JSON.stringify(manifest)); let signed = 0;
+  writePrivate(planPath, planBytes); writePrivate(savedPath, savedPlanBytes); writePrivate(manifestPath, JSON.stringify(manifest)); let signed = 0;
   runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test"], {
     getCaller: () => generatorArn, collectPolicyEvidence: () => policyEvidence,
     runPreflight: () => ({ status: "invalid", generatedAt: now, deniedCount: 2 }), signReport: () => { signed += 1; },
@@ -670,7 +671,7 @@ test("invalid administrator permission evidence is recorded but never signed", (
 test("CLI and programmatic preflight paths produce the same deterministic report", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-cli-equivalence-"));
   const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json"); const outputPath = path.join(directory, "report.json"); const signaturePath = path.join(directory, "report.signature.json");
-  fs.writeFileSync(planPath, planBytes); fs.writeFileSync(savedPath, savedPlanBytes); fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  writePrivate(planPath, planBytes); writePrivate(savedPath, savedPlanBytes); writePrivate(manifestPath, JSON.stringify(manifest));
   const direct = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, manifest, plan, planBytes, savedPlanBytes, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test"], {
     getCaller: () => generatorArn,
@@ -709,8 +710,8 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   }
   let effectiveShownPlan = structuredClone(shownPlan || effectivePlan);
   let effectiveApprovedBytes = approvedBytes || Buffer.from(JSON.stringify(effectivePlan));
-  fs.writeFileSync(planPath, savedBytes);
-  fs.writeFileSync(planJsonPath, effectiveApprovedBytes);
+  writePrivate(planPath, savedBytes);
+  writePrivate(planJsonPath, effectiveApprovedBytes);
   let auditBytes = Buffer.from(JSON.stringify({ audit: true, toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), canonicalImageEvidenceSha256: "c".repeat(64), broker: {
     aliasArn: STAGE_B.brokerAliasArn,
     aliasName: "reviewed",
@@ -719,7 +720,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     configurationVersion: "2",
     resolvedVersionArn: `${STAGE_B.brokerFunctionArn}:2`,
   } }));
-  fs.writeFileSync(auditPath, auditBytes);
+  writePrivate(auditPath, auditBytes);
   const savedHash = crypto.createHash("sha256").update(savedBytes).digest("hex");
   let planHash = crypto.createHash("sha256").update(effectiveApprovedBytes).digest("hex");
   let canonicalHash = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(JSON.parse(JSON.stringify(effectiveShownPlan))))).digest("hex");
@@ -766,9 +767,9 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     deniedCount: 0,
     status: "valid",
   };
-  fs.writeFileSync(permissionPath, JSON.stringify(report));
+  writePrivate(permissionPath, JSON.stringify(report));
   const permissionSignaturePath = path.join(directory, "approved.permission.signature.json");
-  fs.writeFileSync(permissionSignaturePath, JSON.stringify(reportSignature(report)));
+  writePrivate(permissionSignaturePath, JSON.stringify(reportSignature(report)));
   const permissionReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex");
   const imageRecords = [
     ["backend", "mscqr-backend", "a".repeat(64), releaseSha],
@@ -787,7 +788,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   approvedPlanObject.variables.canonical_image_evidence_sha256 = { value: canonicalImageEvidenceSha256 };
   effectiveApprovedBytes = Buffer.from(JSON.stringify(approvedPlanObject));
   effectiveShownPlan.variables = { ...effectiveShownPlan.variables, canonical_image_evidence_sha256: { value: canonicalImageEvidenceSha256 } };
-  fs.writeFileSync(planJsonPath, effectiveApprovedBytes);
+  writePrivate(planJsonPath, effectiveApprovedBytes);
   planHash = crypto.createHash("sha256").update(effectiveApprovedBytes).digest("hex");
   canonicalHash = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(JSON.parse(JSON.stringify(effectiveShownPlan))))).digest("hex");
   auditBytes = Buffer.from(JSON.stringify({ audit: true, toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), canonicalImageEvidenceSha256, broker: {
@@ -798,16 +799,16 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     configurationVersion: "2",
     resolvedVersionArn: `${STAGE_B.brokerFunctionArn}:2`,
   } }));
-  fs.writeFileSync(auditPath, auditBytes);
+  writePrivate(auditPath, auditBytes);
   report.canonicalImageEvidenceSha256 = canonicalImageEvidenceSha256;
   report.planSha256 = planHash;
   report.canonicalPlanJsonSha256 = canonicalHash;
   const projectCapabilities = (items) => items.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision }));
   report.planCapabilities = { schemaVersion: 1, required: projectCapabilities(report.requiredEvaluations), forbidden: projectCapabilities(report.forbiddenEvaluations) };
-  fs.writeFileSync(permissionPath, JSON.stringify(report));
-  fs.writeFileSync(permissionSignaturePath, JSON.stringify(reportSignature(report)));
-  fs.writeFileSync(imageEvidencePath, `${JSON.stringify(imageEvidence, null, 2)}\n`);
-  fs.writeFileSync(imageEvidenceSignaturePath, JSON.stringify(signImageEvidence(imageEvidence, { sign: () => "AQ==" })));
+  writePrivate(permissionPath, JSON.stringify(report));
+  writePrivate(permissionSignaturePath, JSON.stringify(reportSignature(report)));
+  writePrivate(imageEvidencePath, `${JSON.stringify(imageEvidence, null, 2)}\n`);
+  writePrivate(imageEvidenceSignaturePath, JSON.stringify(signImageEvidence(imageEvidence, { sign: () => "AQ==" })));
   const brokerPackagePath = path.join(directory, "broker.zip");
   fs.writeFileSync(brokerPackagePath, Buffer.from("broker package fixture"), { mode: 0o600 });
   const stageAStateBackupPath = path.join(directory, "stage-a-state.json");
@@ -958,8 +959,8 @@ test("wrapper rejects permission context drift before the injected apply seam", 
   const report = JSON.parse(fs.readFileSync(fixture.permissionReportPath, "utf8"));
   report.requiredEvaluations[0].context = [{ key: "ecs:privileged", type: "string", values: ["false"] }];
   report.planCapabilities.required[0].context = report.requiredEvaluations[0].context;
-  fs.writeFileSync(fixture.permissionReportPath, JSON.stringify(report));
-  fs.writeFileSync(fixture.permissionReportSignaturePath, JSON.stringify(reportSignature(report)));
+  writePrivate(fixture.permissionReportPath, JSON.stringify(report));
+  writePrivate(fixture.permissionReportSignaturePath, JSON.stringify(reportSignature(report)));
   fixture.permissionReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportPath)).digest("hex");
   const input = validRealApplyInput(fixture);
   assert.throws(() => runApply(input), /different context from the current manifest/);
@@ -1020,7 +1021,7 @@ test("Stage-A binding-report serial mismatch blocks apply before the injected ap
   const fixture = createValidStageBApplyFixture();
   const bindingReport = JSON.parse(fs.readFileSync(fixture.tfvarsBindingReportPath, "utf8"));
   bindingReport.stageAStateSerial = 36;
-  fs.writeFileSync(fixture.tfvarsBindingReportPath, `${JSON.stringify(bindingReport)}\n`);
+  writePrivate(fixture.tfvarsBindingReportPath, `${JSON.stringify(bindingReport)}\n`);
   fixture.tfvarsBindingReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.tfvarsBindingReportPath)).digest("hex");
   const input = validRealApplyInput(fixture);
   assert.throws(() => runApply(input), /binding report Stage-A serial/);
@@ -1092,7 +1093,7 @@ test("verify-only and apply reject failed refresh checks before any plan or appl
   refresh.failedCheckCount = 1;
   refresh.passedCheckCount = refresh.checkCount - 1;
   refresh.failedChecks = [{ address: refresh.checks[0].address, status: "fail", message: "binding mismatch" }];
-  fs.writeFileSync(fixture.refreshReportPath, `${JSON.stringify(refresh)}\n`);
+  writePrivate(fixture.refreshReportPath, `${JSON.stringify(refresh)}\n`);
   fixture.refreshReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.refreshReportPath)).digest("hex");
   for (const verifyOnly of [true, false]) {
     let applied = false;
@@ -1116,7 +1117,7 @@ test("apply wrapper rejects an unqualified broker target before apply", () => {
     resolvedVersionArn: `${STAGE_B.brokerFunctionArn}:2`,
   } };
   const auditBytes = Buffer.from(JSON.stringify(audit));
-  fs.writeFileSync(fixture.auditPath, auditBytes);
+  writePrivate(fixture.auditPath, auditBytes);
   assert.throws(() => assertApplyArtifacts({
     ...fixture,
     planSha256: fixture.planHash,
@@ -1150,7 +1151,7 @@ test("apply wrapper validates the canonical alias for any broker mutation regard
       configurationVersion: "2",
       resolvedVersionArn: `${STAGE_B.brokerFunctionArn}:2`,
     } }));
-    fs.writeFileSync(fixture.auditPath, auditBytes);
+    writePrivate(fixture.auditPath, auditBytes);
     return () => assertApplyArtifacts({
       ...fixture,
       planSha256: fixture.planHash,

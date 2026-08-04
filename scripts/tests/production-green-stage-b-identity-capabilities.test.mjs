@@ -20,6 +20,10 @@ const shapedPolicyEvidence = () => {
 const temp = () => fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-release-preflight-test-"));
 const allowed = (args) => {
   if (args[0] === "sts") return JSON.stringify({ Arn: caller });
+  if (args[0] === "s3api" && args[1] === "get-object") {
+    fs.writeFileSync(args.at(-1), JSON.stringify({ lineage: "fixture", serial: 1 }), { mode: 0o644 });
+    return "";
+  }
   if (args[0] === "ecs" && args[1] === "list-services") return JSON.stringify({ serviceArns: ["arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/frontend"] });
   if (args[0] === "ecs" && args[1] === "list-tasks") return JSON.stringify({ taskArns: ["arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/abc"] });
   if (args[0] === "iam" && args[1] === "get-policy") return JSON.stringify({ Policy: { DefaultVersionId: "v1" } });
