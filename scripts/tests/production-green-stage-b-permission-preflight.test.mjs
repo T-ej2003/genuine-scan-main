@@ -27,6 +27,7 @@ import { assertStageBReleaseCallerArn } from "../plan-production-green-stage-b.m
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
+import { STAGE_B_EXPECTED_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 import { generateImageEvidence, imageEvidenceSha256, signImageEvidence, IMAGE_EVIDENCE_MAX_AGE_MS } from "../aws/production-green-stage-b-image-evidence.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
@@ -846,7 +847,8 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   fs.writeFileSync(tfvarsBindingReportPath, JSON.stringify(tfvarsBindingReport) + "\n", { mode: 0o600 });
   const tfvarsBindingReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(tfvarsBindingReportPath)).digest("hex");
   const refreshReportPath = path.join(directory, "refresh.json");
-  const refreshReport = { schemaVersion: 1, status: "NO_CHANGES", deployablePlan: false, toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), tfvarsSha256: tfvarsBindingReport.tfvarsSha256, bindingReportSha256: tfvarsBindingReportSha256, imageEvidenceSha256: canonicalImageEvidenceSha256, stageAStateSha256: tfvarsBindingReport.stageAStateBackupSha256, stageAStateLineage: tfvarsBindingReport.stageAStateLineage, stageAStateSerial: tfvarsBindingReport.stageAStateSerial, stageBStateSha256: tfvarsBindingReport.stateBackupSha256, stageBStateLineage: tfvarsBindingReport.stateLineage, stageBStateSerial: tfvarsBindingReport.stateSerial, backendMetadataSha256: "m".repeat(64), backendMetadataPath: path.join(directory, "terraform.tfstate"), terraformDataDir: directory, workspace: "default", resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
+  const checks = STAGE_B_EXPECTED_CHECK_ADDRESSES.map((address) => ({ address, status: "pass", instances: [{ address, status: "pass", problems: [] }] }));
+  const refreshReport = { schemaVersion: 1, status: "NO_CHANGES", deployablePlan: false, toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), tfvarsSha256: tfvarsBindingReport.tfvarsSha256, bindingReportSha256: tfvarsBindingReportSha256, imageEvidenceSha256: canonicalImageEvidenceSha256, stageAStateSha256: tfvarsBindingReport.stageAStateBackupSha256, stageAStateLineage: tfvarsBindingReport.stageAStateLineage, stageAStateSerial: tfvarsBindingReport.stageAStateSerial, stageBStateSha256: tfvarsBindingReport.stateBackupSha256, stageBStateLineage: tfvarsBindingReport.stateLineage, stageBStateSerial: tfvarsBindingReport.stateSerial, backendMetadataSha256: "m".repeat(64), backendMetadataPath: path.join(directory, "terraform.tfstate"), terraformDataDir: directory, workspace: "default", checkCount: checks.length, passedCheckCount: checks.length, failedCheckCount: 0, malformedCheckCount: 0, failedChecks: [], checks, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
   fs.writeFileSync(refreshReportPath, `${JSON.stringify(refreshReport)}\n`, { mode: 0o600 });
   return { directory, planPath, planJsonPath, auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256: crypto.createHash("sha256").update(fs.readFileSync(refreshReportPath)).digest("hex"), toolingTreeSha256: "e".repeat(64) };
 }
@@ -1081,6 +1083,26 @@ test("exact binary plan and derived JSON reach the ready-to-apply boundary witho
     deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, getBackendMetadata: () => structuredClone(initializedBackendMetadata), apply: () => { throw new Error("apply must not be reached"); } },
   });
   assert.equal(result.status, "ready-to-apply");
+});
+
+test("verify-only and apply reject failed refresh checks before any plan or apply seam", () => {
+  const fixture = wrapperFixture();
+  const refresh = JSON.parse(fs.readFileSync(fixture.refreshReportPath, "utf8"));
+  refresh.checks[0].status = "fail";
+  refresh.failedCheckCount = 1;
+  refresh.passedCheckCount = refresh.checkCount - 1;
+  refresh.failedChecks = [{ address: refresh.checks[0].address, status: "fail", message: "binding mismatch" }];
+  fs.writeFileSync(fixture.refreshReportPath, `${JSON.stringify(refresh)}\n`);
+  fixture.refreshReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.refreshReportPath)).digest("hex");
+  for (const verifyOnly of [true, false]) {
+    let applied = false;
+    assert.throws(() => runApply({
+      argv: wrapperArgs(fixture, verifyOnly),
+      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+      deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => { throw new Error("plan seam must not be reached"); }, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { applied = true; } },
+    }), /check or binding structure/);
+    assert.equal(applied, false);
+  }
 });
 
 test("apply wrapper rejects an unqualified broker target before apply", () => {

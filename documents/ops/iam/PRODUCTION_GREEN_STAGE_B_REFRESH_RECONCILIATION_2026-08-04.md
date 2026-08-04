@@ -4,6 +4,14 @@ The Stage B refresh-only command produces a temporary non-deployable Terraform
 refresh plan, reads its JSON with `terraform show -json`, and writes a structured
 refresh report. Console text such as `No changes.` is not authoritative.
 
+The classifier also requires the eight source-defined `plan.checks` entries to be
+present, unique, and explicitly `pass` at both check and instance level:
+`production_only`, `stage_a_bindings`, `stage_a_runtime_secrets`,
+`stage_a_release_resources`, `release_bindings`, `immutable_images`,
+`read_only_canary_secret`, and `retained_task_definition_families`. Missing,
+unknown, duplicate, malformed, `fail`, `error`, or `unknown` checks produce
+`FAILED_CHECK` before resource or output classification.
+
 The only accepted statuses are:
 
 - `NO_CHANGES`: no non-no-op resource changes and no output changes;

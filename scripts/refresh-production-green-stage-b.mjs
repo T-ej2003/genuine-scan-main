@@ -129,6 +129,12 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
     workspace: observedWorkspace,
     terraformExitCode: result.status,
     terraformOutputSha256: sha256(Buffer.from(output)),
+    checkCount: classification.checkCount || 0,
+    passedCheckCount: classification.passedCheckCount || 0,
+    failedCheckCount: classification.failedCheckCount || 0,
+    malformedCheckCount: classification.malformedCheckCount || 0,
+    failedChecks: classification.failedChecks || [],
+    checks: classification.checks || [],
     resourceChanges: classification.resourceChanges,
     outputChanges: classification.outputChanges,
   };
