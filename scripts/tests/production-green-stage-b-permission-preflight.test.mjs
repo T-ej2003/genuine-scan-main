@@ -39,6 +39,17 @@ const policyEvidence = (() => {
   return { roleArn, attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: [], inlinePolicies: [], permissionsBoundaryArn: null, policies, status: "valid" };
 })();
 const runPermissionPreflight = (input) => runPermissionPreflightRaw({ policyEvidence, ...input });
+const contextValue = (mapping, key) => mapping.registerContext.find((entry) => entry.key === key).values[0];
+const taskDefinitionAfter = (mapping) => ({
+  family: mapping.family,
+  cpu: contextValue(mapping, "ecs:task-cpu"),
+  memory: contextValue(mapping, "ecs:task-memory"),
+  requires_compatibilities: [contextValue(mapping, "ecs:compute-compatibility")],
+  execution_role_arn: mapping.executionRoleArn,
+  task_role_arn: mapping.taskRoleArn,
+  tags: { Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" },
+  container_definitions: JSON.stringify([{ name: mapping.id, privileged: false }]),
+});
 
 test("permission report identity fields exactly bind the selected plan artifacts", () => {
   const planJsonBytes = fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
@@ -63,7 +74,7 @@ const plan = {
   resource_changes: [{
     address: 'aws_ecs_task_definition.candidate["read_only_canary"]',
     type: "aws_ecs_task_definition",
-    change: { actions: ["create"], after: { family: "mscqr-production-full-rls-green-read-only-canary" } },
+    change: { actions: ["create"], after: taskDefinitionAfter(manifest.taskDefinitionMappings.find(({ id }) => id === "read-only-canary")) },
   }, {
     address: "aws_iam_policy.broker",
     type: "aws_iam_policy",
@@ -431,13 +442,67 @@ test("the exact twelve task-definition creates expand to registration, tagging, 
   const fullPlan = { ...plan, resource_changes: [...manifest.taskDefinitionMappings.map((mapping) => ({
     address: mapping.address,
     type: "aws_ecs_task_definition",
-    change: { actions: ["create"], after: { family: mapping.family } },
+    change: { actions: ["create"], after: taskDefinitionAfter(mapping) },
   })), plan.resource_changes[1]] };
   const derived = deriveRequiredEvaluations(fullPlan, manifest);
   assert.equal(derived.coveredChanges.length, 13);
   assert.equal(derived.required.filter((item) => item.action === "ecs:RegisterTaskDefinition").length, 12);
   assert.equal(derived.required.filter((item) => item.action === "ecs:TagResource").length, 12);
   assert.equal(derived.required.filter((item) => item.action === "iam:PassRole").length, 24);
+});
+
+test("task-definition registration context is complete and bound to each planned family", () => {
+  const productionPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
+  const registrations = deriveRequiredEvaluations(productionPlan, manifest).required.filter(({ action }) => action === "ecs:RegisterTaskDefinition");
+  assert.equal(registrations.length, 12);
+  for (const registration of registrations) {
+    assert.deepEqual(registration.context.filter(({ key }) => key.startsWith("ecs:")).map(({ key, type, values }) => ({ key, type, values })), [
+      { key: "ecs:compute-compatibility", type: "stringList", values: ["FARGATE"] },
+      { key: "ecs:privileged", type: "string", values: ["false"] },
+      { key: "ecs:task-cpu", type: "numeric", values: [registration.manifestId === "worker-register" ? "512" : registration.manifestId === "read-only-canary-register" ? "256" : "1024"] },
+      { key: "ecs:task-memory", type: "numeric", values: [registration.manifestId === "worker-register" ? "1024" : registration.manifestId === "read-only-canary-register" ? "512" : "2048"] },
+    ]);
+  }
+});
+
+test("missing or mismatched task registration context fails before simulation", () => {
+  const productionPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
+  for (const mutate of [
+    (after) => { delete after.cpu; },
+    (after) => { after.cpu = "512"; },
+    (after) => { after.memory = "1024"; },
+    (after) => { after.requires_compatibilities = ["EC2"]; },
+    (after) => { after.container_definitions = JSON.stringify([{ privileged: true }]); },
+    (after) => { after.tags.Environment = "staging"; },
+    (after) => { after.family = "mscqr-production-unrelated"; },
+  ]) {
+    const candidate = structuredClone(productionPlan);
+    mutate(candidate.resource_changes.find(({ address }) => address === manifest.taskDefinitionMappings[0].address).change.after);
+    assert.throws(() => deriveRequiredEvaluations(candidate, manifest), /registration context|ecs:privileged|No permission manifest entry/);
+  }
+});
+
+test("manifest rejects missing, duplicate, and cross-family ECS registration context", () => {
+  for (const mutate of [
+    (mapping) => { mapping.registerContext = mapping.registerContext.filter(({ key }) => key !== "ecs:privileged"); },
+    (mapping) => { mapping.registerContext = mapping.registerContext.filter(({ key }) => key !== "ecs:compute-compatibility"); },
+    (mapping) => { mapping.registerContext = mapping.registerContext.filter(({ key }) => key !== "ecs:task-cpu"); },
+    (mapping) => { mapping.registerContext = mapping.registerContext.filter(({ key }) => key !== "ecs:task-memory"); },
+    (mapping) => { mapping.registerContext.push(structuredClone(mapping.registerContext[0])); },
+    (mapping) => { mapping.registerContext.find(({ key }) => key === "ecs:privileged").values = ["true"]; },
+    (mapping) => { mapping.registerContext.find(({ key }) => key === "ecs:task-cpu").values = ["512"]; },
+    (mapping) => { mapping.registerContext.find(({ key }) => key === "ecs:task-memory").values = ["1024"]; },
+    (mapping) => { mapping.registerContext.find(({ key }) => key === "ecs:compute-compatibility").values = ["EC2"]; },
+    (mapping) => { mapping.registerContext.find(({ key }) => key === "aws:RequestedRegion").values = ["eu-west-1"]; },
+    (mapping) => { mapping.registerContext = mapping.registerContext.filter(({ key }) => key !== "aws:RequestTag/Environment"); },
+    (mapping) => { mapping.registerContext.find(({ key }) => key === "aws:TagKeys").values = ["Environment"]; },
+    (mapping) => { mapping.registerContext.find(({ key }) => key === "ecs:task-cpu").type = "boolean"; },
+    (mapping) => { mapping.registerContext.find(({ key }) => key === "ecs:task-cpu").values = []; },
+  ]) {
+    const broken = structuredClone(manifest);
+    mutate(broken.taskDefinitionMappings[0]);
+    assert.throws(() => validateManifest(broken), /ECS registration context|duplicate context key|malformed context/);
+  }
 });
 
 test("incomplete, duplicate, unknown, and mismatched task-definition mappings fail closed", () => {
@@ -567,9 +632,11 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   };
   const planImageVariable = (address) => address.startsWith("aws_ecs_task_definition.executor[") ? "executor_image" : `${/\["([^"]+)"\]$/.exec(address)?.[1]}_image`;
   for (const [address, family] of Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES)) {
+    const mapping = manifest.taskDefinitionMappings.find((candidate) => candidate.address === address);
     const change = effectivePlan.resource_changes.find((candidate) => candidate.address === address);
-    if (change) change.change.after.container_definitions = JSON.stringify([{ image: effectivePlan.variables[planImageVariable(address)].value }]);
-    else effectivePlan.resource_changes.push({ address, type: "aws_ecs_task_definition", change: { actions: ["create"], after: { family, container_definitions: JSON.stringify([{ image: effectivePlan.variables[planImageVariable(address)].value }]) } } });
+    const after = { ...taskDefinitionAfter(mapping), family, container_definitions: JSON.stringify([{ image: effectivePlan.variables[planImageVariable(address)].value, privileged: false }]) };
+    if (change) change.change.after = { ...after, ...change.change.after, container_definitions: after.container_definitions };
+    else effectivePlan.resource_changes.push({ address, type: "aws_ecs_task_definition", change: { actions: ["create"], after } });
   }
   let effectiveShownPlan = structuredClone(shownPlan || effectivePlan);
   let effectiveApprovedBytes = approvedBytes || Buffer.from(JSON.stringify(effectivePlan));
@@ -802,6 +869,19 @@ test("valid non-verify-only apply path calls the injected apply stub exactly onc
   assert.equal(runApply(input).status, "applied-saved-plan");
   assert.equal(input.checkoutReadCount, 2);
   assert.deepEqual(input.applyCalls, [fixture.planPath]);
+});
+
+test("wrapper rejects permission context drift before the injected apply seam", () => {
+  const fixture = createValidStageBApplyFixture();
+  const report = JSON.parse(fs.readFileSync(fixture.permissionReportPath, "utf8"));
+  report.requiredEvaluations[0].context = [{ key: "ecs:privileged", type: "string", values: ["false"] }];
+  report.planCapabilities.required[0].context = report.requiredEvaluations[0].context;
+  fs.writeFileSync(fixture.permissionReportPath, JSON.stringify(report));
+  fs.writeFileSync(fixture.permissionReportSignaturePath, JSON.stringify(reportSignature(report)));
+  fixture.permissionReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportPath)).digest("hex");
+  const input = validRealApplyInput(fixture);
+  assert.throws(() => runApply(input), /different context from the current manifest/);
+  assert.deepEqual(input.applyCalls, []);
 });
 
 test("wrapper rejects a backend config using another key before the apply seam", () => {

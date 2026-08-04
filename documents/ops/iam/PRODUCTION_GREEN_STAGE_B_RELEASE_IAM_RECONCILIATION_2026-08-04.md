@@ -28,6 +28,8 @@ Primary references:
 
 - [AWS Lambda actions, resources, and condition keys](https://docs.aws.amazon.com/service-authorization/latest/reference/list_awslambda.html)
 - [AWS Lambda UpdateAlias API](https://docs.aws.amazon.com/lambda/latest/api/API_UpdateAlias.html)
+- [Amazon ECS actions, resources, and condition keys](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonelasticcontainerservice.html)
+- [IAM SimulatePrincipalPolicy API](https://docs.aws.amazon.com/IAM/latest/APIReference/API_SimulatePrincipalPolicy.html)
 
 `UpdateExactStageBBrokerFunctionRelease` remains limited to code,
 configuration, and version operations on the unqualified function.
@@ -35,6 +37,27 @@ configuration, and version operations on the unqualified function.
 `lambda:UpdateAlias` on the exact `reviewed` alias and retains the reviewed
 region and resource-tag conditions. Alias creation, deletion, invocation, and
 wildcard Lambda authority remain absent.
+
+## ECS task-definition simulation context
+
+AWS defines `ecs:compute-compatibility`, `ecs:privileged`, `ecs:task-cpu`,
+and `ecs:task-memory` as `RegisterTaskDefinition` condition keys. IAM
+simulation does not infer request context: every referenced key must be passed
+through `ContextEntries`. The permission generator therefore derives the four
+values from each selected plan change and requires exact equality with its
+source-controlled family mapping before simulation:
+
+| Task-definition family | Compatibility | Privileged | CPU | Memory (MiB) |
+|---|---:|---:|---:|---:|
+| `mscqr-production-rls-green-worker-candidate` | `FARGATE` | `false` | 512 | 1024 |
+| `mscqr-production-full-rls-green-read-only-canary` | `FARGATE` | `false` | 256 | 512 |
+| Other ten reviewed Stage B families | `FARGATE` | `false` | 1024 | 2048 |
+
+`ecs:compute-compatibility` is supplied as a `stringList`, CPU and memory as
+`numeric`, and `ecs:privileged` as a `string`, matching the ECS service
+authorization types and the IAM simulation API. Region, exact request tags,
+and the exact tag-key set remain mandatory. Missing, duplicate, unknown, or
+cross-family values fail before report signing.
 
 ## Canonical attachment set
 
