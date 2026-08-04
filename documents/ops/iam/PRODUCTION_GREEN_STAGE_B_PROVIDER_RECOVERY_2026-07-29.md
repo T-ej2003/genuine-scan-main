@@ -81,8 +81,11 @@ The deployable split is:
   `iam:ListRoleTags` or `iam:ListInstanceProfilesForRole` during refresh. The
   policy still contains no `ecs:DeregisterTaskDefinition` authority.
 - `MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json` is the permanent
-  companion containing exactly those seven read-only statements, including the
-  isolated wildcard `ecs:DescribeTaskDefinition` metadata read.
+  companion containing the seven moved read-only statements, the additional
+  `ReadStageBBrokerReviewedAlias` statement, and the additional region-bound
+  `ReadStageALivePrerequisites` statement required before canonical handoff
+  generation. `DescribeStageBTaskDefinitionsReadOnly` is one of the seven moved
+  statements, not an additional statement.
 
 V2 remains the immutable PR #161 artifact, v3 remains the immutable corrected
 wildcard artifact, v4 is the deployable provider-recovery artifact, and
