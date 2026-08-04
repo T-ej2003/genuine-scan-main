@@ -839,8 +839,16 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     images: Object.fromEntries(Object.entries(tfvarsValues).map(([variable, imageReference]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: variable === "worker_image" ? "worker" : variable === "executor_image" ? "rls-executor" : variable.includes("canary") ? "rls-canary" : "backend", repository: variable === "worker_image" ? "mscqr-worker" : "mscqr-backend", tag: "a".repeat(40), imageReference, digestLength: 71, digest: imageReference.slice(imageReference.indexOf("@") + 1), matchesEvidence: true }])),
   };
   const tfvarsBindingReportPath = path.join(directory, "canonical.binding.json");
+  const stageBStateBackupPath = path.join(directory, "stage-b-state.json");
+  const stageBStateBytes = Buffer.from(JSON.stringify({ lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 76, resources: [] }));
+  fs.writeFileSync(stageBStateBackupPath, stageBStateBytes, { mode: 0o600 });
+  tfvarsBindingReport.stateBackupSha256 = crypto.createHash("sha256").update(stageBStateBytes).digest("hex");
   fs.writeFileSync(tfvarsBindingReportPath, JSON.stringify(tfvarsBindingReport) + "\n", { mode: 0o600 });
-  return { directory, planPath, planJsonPath, auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256: crypto.createHash("sha256").update(fs.readFileSync(tfvarsBindingReportPath)).digest("hex"), toolingTreeSha256: "e".repeat(64) };
+  const tfvarsBindingReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(tfvarsBindingReportPath)).digest("hex");
+  const refreshReportPath = path.join(directory, "refresh.json");
+  const refreshReport = { schemaVersion: 1, status: "NO_CHANGES", deployablePlan: false, toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), tfvarsSha256: tfvarsBindingReport.tfvarsSha256, bindingReportSha256: tfvarsBindingReportSha256, imageEvidenceSha256: canonicalImageEvidenceSha256, stageAStateSha256: tfvarsBindingReport.stageAStateBackupSha256, stageAStateLineage: tfvarsBindingReport.stageAStateLineage, stageAStateSerial: tfvarsBindingReport.stageAStateSerial, stageBStateSha256: tfvarsBindingReport.stateBackupSha256, stageBStateLineage: tfvarsBindingReport.stateLineage, stageBStateSerial: tfvarsBindingReport.stateSerial, backendMetadataSha256: "m".repeat(64), backendMetadataPath: path.join(directory, "terraform.tfstate"), terraformDataDir: directory, workspace: "default", resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
+  fs.writeFileSync(refreshReportPath, `${JSON.stringify(refreshReport)}\n`, { mode: 0o600 });
+  return { directory, planPath, planJsonPath, auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256: crypto.createHash("sha256").update(fs.readFileSync(refreshReportPath)).digest("hex"), toolingTreeSha256: "e".repeat(64) };
 }
 
 const wrapperArgs = (fixture, verifyOnly = false) => [
@@ -850,6 +858,7 @@ const wrapperArgs = (fixture, verifyOnly = false) => [
   "--permission-report", fixture.permissionReportPath, "--permission-report-sha256", fixture.permissionReportSha256, "--permission-report-signature", fixture.permissionReportSignaturePath,
   "--image-evidence", fixture.imageEvidencePath, "--image-evidence-sha256", fixture.imageEvidenceSha256, "--image-evidence-signature", fixture.imageEvidenceSignaturePath, "--image-evidence-workflow-run-id", fixture.imageEvidenceWorkflowRunId, "--image-evidence-artifact-sha256", fixture.imageEvidenceArtifactSha256,
   "--tooling-sha", "b".repeat(40), "--image-release-sha", "a".repeat(40), "--tfvars", fixture.tfvarsPath, "--tfvars-binding-report", fixture.tfvarsBindingReportPath, "--tfvars-binding-report-sha256", fixture.tfvarsBindingReportSha256, "--tooling-tree-sha256", fixture.toolingTreeSha256,
+  "--refresh-report", fixture.refreshReportPath, "--refresh-report-sha256", fixture.refreshReportSha256,
   "--plan-sha256", fixture.planHash, "--audit-sha256", fixture.auditHash, "--saved-plan-sha256", fixture.savedHash, "--canonical-plan-json-sha256", fixture.canonicalHash,
 ];
 
@@ -980,6 +989,8 @@ test("production apply rejects every incomplete canonical tfvars provenance comb
     ["--tfvars", "--tfvars is required."],
     ["--tfvars-binding-report", "--tfvars-binding-report is required."],
     ["--tfvars-binding-report-sha256", "--tfvars-binding-report-sha256 is required."],
+    ["--refresh-report", "--refresh-report is required."],
+    ["--refresh-report-sha256", "--refresh-report-sha256 is required."],
     ["--tooling-tree-sha256", "--tooling-tree-sha256 is required."],
   ];
   for (const [option, message] of required) {

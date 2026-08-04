@@ -1,98 +1,57 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { parseCli, runRefreshOnly } from "../refresh-production-green-stage-b.mjs";
+import { assertStageBRefreshEvidence, assertStageBRefreshStateBinding, classifyStageBRefreshResult } from "../aws/stage-b-refresh-contract.mjs";
 
 const toolingSha = "8d9b8d820afa161d410490678661266d7c9e1345";
 const toolingTreeSha256 = "a".repeat(64);
+const image = (kind) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-${kind === "worker" ? "worker" : "backend"}@sha256:${kind[0].repeat(64)}`;
+const bindingReport = () => ({
+  tfvarsSha256: "t".repeat(64), bindingReportSha256: "b".repeat(64), imageEvidenceCanonicalSha256: "i".repeat(64), stateBackupSha256: "s".repeat(64), stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 76,
+  images: Object.fromEntries(["backend", "worker", "executor", "canary", "readOnlyCanary"].map((kind) => [kind, { terraformVariable: kind === "readOnlyCanary" ? "read_only_canary_image" : `${kind}_image`, imageReference: image(kind === "readOnlyCanary" ? "canary" : kind), matchesEvidence: true, digestLength: 71 }])),
+});
+const state = { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 76, resources: [] };
+const stateBytes = Buffer.from(JSON.stringify(state));
+const stateHash = crypto.createHash("sha256").update(stateBytes).digest("hex");
 const checkout = { mode: "production", toolingSha, currentHead: toolingSha, originMainHead: toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false } };
+const outputsSource = 'output "task_definition_arns" {}\noutput "bound_images" {}\n';
+const noChangePlan = () => ({ resource_changes: [{ address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: ["no-op"] } }], output_changes: {} });
+const outputChange = (name, after) => ({ [name]: { actions: ["update"], before: {}, after, after_unknown: false, after_sensitive: false } });
+const expectedImages = Object.fromEntries(Object.values(bindingReport().images).map((entry) => [entry.terraformVariable.replace(/_image$/, ""), entry.imageReference]));
 
 function args(directory, tfvarsName = "production.tfvars") {
-  const tfvarsPath = path.join(directory, tfvarsName);
-  const bindingReportPath = path.join(directory, "binding.json");
-  const backendMetadataPath = path.join(directory, "terraform.tfstate");
-  const outputPath = path.join(directory, "refresh-only.log");
-  fs.writeFileSync(tfvarsPath, "account_id = \"368992683803\"\n", { mode: 0o600 });
-  fs.writeFileSync(bindingReportPath, "{}\n", { mode: 0o600 });
-  fs.writeFileSync(backendMetadataPath, "{}\n", { mode: 0o600 });
-  return ["--closure-mode", "production", "--tfvars", tfvarsPath, "--binding-report", bindingReportPath, "--binding-report-sha256", "a".repeat(64), "--tooling-sha", toolingSha, "--tooling-tree-sha256", toolingTreeSha256, "--terraform-data-dir", directory, "--backend-metadata", backendMetadataPath, "--output", outputPath];
+  const tfvarsPath = path.join(directory, tfvarsName); const reportPath = path.join(directory, "binding.json"); const metadataPath = path.join(directory, "terraform.tfstate"); const statePath = path.join(directory, "stage-b-state.json"); const outputPath = path.join(directory, "refresh-only.json");
+  fs.writeFileSync(tfvarsPath, "account_id = \"368992683803\"\n", { mode: 0o600 }); fs.writeFileSync(reportPath, "{}\n", { mode: 0o600 }); fs.writeFileSync(metadataPath, "{}\n", { mode: 0o600 }); fs.writeFileSync(statePath, stateBytes, { mode: 0o600 }); fs.chmodSync(directory, 0o700); fs.chmodSync(metadataPath, 0o600); fs.chmodSync(statePath, 0o600);
+  return ["--closure-mode", "production", "--tfvars", tfvarsPath, "--binding-report", reportPath, "--binding-report-sha256", bindingReport().bindingReportSha256, "--tooling-sha", toolingSha, "--tooling-tree-sha256", toolingTreeSha256, "--stage-b-state-backup", statePath, "--terraform-data-dir", directory, "--backend-metadata", metadataPath, "--output", outputPath];
 }
 
-test("refresh-only rejects HCL at a JSON filename before Terraform", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
-  let calls = 0;
-  assert.throws(() => runRefreshOnly({ argv: args(directory, "production.json"), env: { TF_WORKSPACE: "default" }, deps: { runTerraform: () => { calls += 1; return { status: 0, stdout: "No changes.", stderr: "" }; } } }), /\.tfvars filename/);
-  assert.equal(calls, 0);
-  assert.equal(fs.existsSync(path.join(directory, "refresh-only.log")), false);
-});
+function validDeps(plan = noChangePlan()) {
+  return { validateTfvarsBinding: () => ({ ...bindingReport(), stateBackupSha256: stateHash }), validateBackendMetadata: () => true, getProtectedMainCheckout: () => checkout, showWorkspace: ({ env }) => { assert.equal(env.TF_DATA_DIR, env.TF_DATA_DIR); return "default\n"; }, showPlanJson: () => plan, runTerraform: () => ({ status: 0, stdout: "No changes.\n", stderr: "" }) };
+}
 
-test("refresh-only rejects deployable plan output arguments", () => {
-  assert.throws(() => parseCli(["--closure-mode", "production", "-out=/private/tmp/plan.tfplan"]), /does not accept/);
-});
+test("refresh-only rejects HCL at a JSON filename before Terraform", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); let calls = 0; assert.throws(() => runRefreshOnly({ argv: args(directory, "production.json"), env: { TF_WORKSPACE: "default" }, deps: { runTerraform: () => { calls += 1; return { status: 0 }; } } }), /\.tfvars filename/); assert.equal(calls, 0); });
+test("refresh-only rejects deployable plan output arguments", () => assert.throws(() => parseCli(["--closure-mode", "production", "-out=/private/tmp/plan.tfplan"]), /does not accept/));
+test("refresh-only rejects backend metadata redirected outside the validated data directory", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); const argv = args(directory); argv[argv.indexOf("--backend-metadata") + 1] = path.join(directory, "other", "terraform.tfstate"); assert.throws(() => runRefreshOnly({ argv, env: { TF_WORKSPACE: "default" }, deps: validDeps() }), /must be <terraform-data-dir>/); });
+test("refresh-only rejects a conflicting ambient TF_DATA_DIR before Terraform", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); assert.throws(() => runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default", TF_DATA_DIR: path.join(directory, "stale") }, deps: validDeps() }), /conflicts with --terraform-data-dir/); });
+test("refresh-only passes one exact Terraform environment to workspace and plan", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); const environments = []; const result = runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: { ...validDeps(), showWorkspace: ({ env }) => { environments.push(env); return "default\n"; }, runTerraform: (_args, { env }) => { environments.push(env); return { status: 0, stdout: "No changes.\n", stderr: "" }; } } }); assert.equal(result.status, "NO_CHANGES"); assert.equal(environments.length, 2); assert.equal(environments[0], environments[1]); });
+test("refresh-only rejects a non-private Terraform data directory", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); const argv = args(directory); fs.chmodSync(directory, 0o755); assert.throws(() => runRefreshOnly({ argv, env: { TF_WORKSPACE: "default" } }), /data directory must be private/); });
+test("refresh-only rejects a symlinked Terraform data directory", () => { const parent = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); const target = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-target-")); fs.symlinkSync(target, path.join(parent, "data"), "dir"); const argv = args(target); argv[argv.indexOf("--terraform-data-dir") + 1] = path.join(parent, "data"); assert.throws(() => runRefreshOnly({ argv, env: { TF_WORKSPACE: "default" } }), /non-symlink directory/); });
+test("valid refresh-only invokes Terraform once and emits non-deployable JSON evidence", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); let calls = 0; const result = runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: { ...validDeps(), runTerraform: () => { calls += 1; return { status: 0, stdout: "No changes.\n", stderr: "" }; } } }); const report = JSON.parse(fs.readFileSync(result.outputPath)); assert.equal(calls, 1); assert.equal(result.status, "NO_CHANGES"); assert.equal(report.deployablePlan, false); assert.deepEqual(report.resourceChanges, { nonNoOp: 0, changes: [] }); });
 
-test("refresh-only rejects backend metadata redirected outside the validated data directory", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
-  const argv = args(directory);
-  argv[argv.indexOf("--backend-metadata") + 1] = path.join(directory, "other", "terraform.tfstate");
-  let calls = 0;
-  assert.throws(() => runRefreshOnly({ argv, env: { TF_WORKSPACE: "default" }, deps: { showWorkspace: () => { calls += 1; return "default\n"; } } }), /must be <terraform-data-dir>/);
-  assert.equal(calls, 0);
-});
-
-test("refresh-only rejects a conflicting ambient TF_DATA_DIR before Terraform", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
-  let calls = 0;
-  assert.throws(() => runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default", TF_DATA_DIR: path.join(directory, "stale") }, deps: { showWorkspace: () => { calls += 1; return "default\n"; } } }), /conflicts with --terraform-data-dir/);
-  assert.equal(calls, 0);
-});
-
-test("refresh-only passes one exact Terraform environment to workspace and plan", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
-  const environments = [];
-  const result = runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: {
-    validateTfvarsBinding: () => true,
-    validateBackendMetadata: () => true,
-    getProtectedMainCheckout: () => checkout,
-    showWorkspace: ({ env }) => { environments.push(env); return "default\n"; },
-    runTerraform: (_args, { env }) => { environments.push(env); return { status: 0, stdout: "No changes.\n", stderr: "" }; },
-  } });
-  assert.equal(result.status, "refresh-only-verified");
-  assert.equal(environments.length, 2);
-  assert.equal(environments[0].TF_DATA_DIR, directory);
-  assert.equal(environments[1], environments[0]);
-});
-
-test("refresh-only rejects a non-private Terraform data directory", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
-  fs.chmodSync(directory, 0o755);
-  assert.throws(() => runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" } }), /data directory must be private/);
-});
-
-test("refresh-only rejects a symlinked Terraform data directory", () => {
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-target-"));
-  fs.symlinkSync(target, path.join(parent, "data"), "dir");
-  const argv = args(target);
-  argv[argv.indexOf("--terraform-data-dir") + 1] = path.join(parent, "data");
-  assert.throws(() => runRefreshOnly({ argv, env: { TF_WORKSPACE: "default" } }), /non-symlink directory/);
-});
-
-test("valid refresh-only invokes Terraform once without a deployable plan output", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-"));
-  const argv = args(directory);
-  let calls = 0;
-  let terraformArgs;
-  const result = runRefreshOnly({ argv, env: { TF_WORKSPACE: "default" }, deps: {
-    validateTfvarsBinding: () => true,
-    validateBackendMetadata: () => true,
-    getProtectedMainCheckout: () => checkout,
-    showWorkspace: () => "default\n",
-    runTerraform: (received) => { calls += 1; terraformArgs = received; return { status: 0, stdout: "No changes. Infrastructure is up-to-date.\n", stderr: "" }; },
-  } });
-  assert.equal(result.status, "refresh-only-verified");
-  assert.equal(calls, 1);
-  assert.equal(terraformArgs.includes("-out"), false);
-  assert.equal(fs.existsSync(path.join(directory, "refresh-only.log")), true);
-});
+test("exact no-change refresh passes", () => assert.equal(classifyStageBRefreshResult({ plan: noChangePlan(), bindingReport: bindingReport(), state, outputsSource }).status, "NO_CHANGES"));
+test("bound_images update matching signed evidence passes", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: outputChange("bound_images", expectedImages) }, bindingReport: bindingReport(), state, outputsSource }).status, "REVIEWED_OUTPUT_RECONCILIATION"));
+test("wrong, missing, or extra image bindings fail", () => { const wrong = { ...expectedImages, backend: "wrong" }; assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: outputChange("bound_images", wrong) }, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"); const missing = { ...expectedImages }; delete missing.worker; assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: outputChange("bound_images", missing) }, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"); const extra = { ...expectedImages, extra: "unexpected" }; assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: outputChange("bound_images", extra) }, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"); });
+test("unexpected output name fails", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: outputChange("unknown", {}) }, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"));
+test("task_definition_arns is reviewed only when empty state proves empty output", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["create"], before: null, after: {}, after_unknown: false, after_sensitive: false } } }, bindingReport: bindingReport(), state, outputsSource }).status, "REVIEWED_OUTPUT_RECONCILIATION"));
+test("unknown task-definition state fails closed", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["create"], after: {}, after_unknown: false } } }, bindingReport: bindingReport(), state: { ...state, resources: [{ type: "aws_ecs_task_definition", name: "candidate", instances: [{}] }] }, outputsSource }).status, "MALFORMED_RESULT"));
+for (const action of ["update", "create", "delete", "replace", "create-delete"]) test(`resource ${action} fails closed`, () => assert.equal(classifyStageBRefreshResult({ plan: { resource_changes: [{ address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: [action] } }], output_changes: {} }, bindingReport: bindingReport(), state, outputsSource }).status, "RESOURCE_DRIFT"));
+test("failed checks and provider failures remain distinct", () => { assert.equal(classifyStageBRefreshResult({ plan: undefined, terraformExitCode: 1, bindingReport: bindingReport(), state, outputsSource }).status, "FAILED_CHECK"); assert.equal(classifyStageBRefreshResult({ plan: undefined, terraformExitCode: 3, bindingReport: bindingReport(), state, outputsSource }).status, "PROVIDER_OR_BACKEND_FAILURE"); });
+test("human No changes text cannot override structural resource drift", () => assert.equal(classifyStageBRefreshResult({ plan: { resource_changes: [{ address: "aws_lambda_function.broker", change: { actions: ["update"] } }], output_changes: {} }, terraformOutput: "No changes.", bindingReport: bindingReport(), state, outputsSource }).status, "RESOURCE_DRIFT"));
+test("malformed JSON fails closed", () => assert.equal(classifyStageBRefreshResult({ plan: { resource_changes: [], output_changes: null }, bindingReport: bindingReport(), state, outputsSource }).status, "MALFORMED_RESULT"));
+test("refresh evidence rejects non-allowlisted status", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); const reportPath = path.join(directory, "refresh.json"); fs.writeFileSync(reportPath, JSON.stringify({ schemaVersion: 1, status: "RESOURCE_DRIFT", deployablePlan: false })); assert.throws(() => assertStageBRefreshEvidence({ refreshReportPath: reportPath, bindingReport: bindingReport() }), /not an approved/); });
+test("stale state serial invalidates refresh state evidence", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); const statePath = path.join(directory, "state.json"); const bytes = Buffer.from(JSON.stringify({ ...state, serial: 75 })); fs.writeFileSync(statePath, bytes, { mode: 0o600 }); assert.throws(() => assertStageBRefreshStateBinding({ stateBackupPath: statePath, bindingReport: { ...bindingReport(), stateBackupSha256: crypto.createHash("sha256").update(bytes).digest("hex") } }), /identity does not match/); });
+test("mismatched tfvars or image evidence invalidates refresh evidence", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); const reportPath = path.join(directory, "refresh.json"); fs.writeFileSync(reportPath, JSON.stringify({ schemaVersion: 1, status: "NO_CHANGES", deployablePlan: false, toolingSha, toolingTreeSha256, tfvarsSha256: "wrong", imageEvidenceSha256: bindingReport().imageEvidenceCanonicalSha256, stageAStateSha256: "a".repeat(64), stageAStateLineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", stageAStateSerial: 35, stageBStateSha256: bindingReport().stateBackupSha256, stageBStateLineage: bindingReport().stateLineage, stageBStateSerial: bindingReport().stateSerial, backendMetadataPath: path.join(directory, "terraform.tfstate"), terraformDataDir: directory, workspace: "default", resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] })); assert.throws(() => assertStageBRefreshEvidence({ refreshReportPath: reportPath, bindingReport: bindingReport(), expectedTfvarsSha256: bindingReport().tfvarsSha256 }), /tfvarsSha256/); });

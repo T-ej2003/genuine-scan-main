@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -7,9 +8,11 @@ import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage
 import { assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
+import { assertStageBRefreshStateBinding, classifyStageBRefreshResult, STAGE_B_REFRESH_ALLOWED_STATUSES } from "./aws/stage-b-refresh-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
+const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
 function option(argv, name) {
   const index = argv.indexOf(name);
@@ -27,6 +30,7 @@ export function parseCli(argv = process.argv.slice(2)) {
     tfvarsPath: option(argv, "--tfvars"),
     bindingReportPath: option(argv, "--binding-report"),
     bindingReportSha256: option(argv, "--binding-report-sha256"),
+    stageBStateBackup: option(argv, "--stage-b-state-backup"),
     toolingSha: option(argv, "--tooling-sha"),
     toolingTreeSha256: option(argv, "--tooling-tree-sha256"),
     terraformDataDir: option(argv, "--terraform-data-dir"),
@@ -58,7 +62,7 @@ function assertTerraformDataDirectory(terraformDataDir, backendMetadataPath, amb
 }
 
 function writeOutput(outputPath, output) {
-  fs.writeFileSync(outputPath, output, { flag: "wx", mode: 0o600 });
+  fs.writeFileSync(outputPath, `${JSON.stringify(output, null, 2)}\n`, { flag: "wx", mode: 0o600 });
   fs.chmodSync(outputPath, 0o600);
   return outputPath;
 }
@@ -70,13 +74,14 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
   const { resolvedDataDir, expectedMetadataPath } = assertTerraformDataDirectory(artifacts.terraformDataDir, artifacts.backendMetadataPath, env.TF_DATA_DIR);
   assertPrivateNewOutput(artifacts.outputPath);
   const validateTfvarsBinding = deps.validateTfvarsBinding || assertStageBTfvarsBinding;
-  validateTfvarsBinding({
+  const bindingReport = validateTfvarsBinding({
     tfvarsPath: artifacts.tfvarsPath,
     bindingReportPath: artifacts.bindingReportPath,
     bindingReportSha256: artifacts.bindingReportSha256,
     expectedToolingSha: artifacts.toolingSha,
     expectedToolingTreeSha256: artifacts.toolingTreeSha256,
   });
+  const { state } = assertStageBRefreshStateBinding({ stateBackupPath: artifacts.stageBStateBackup, bindingReport });
   const metadata = JSON.parse(fs.readFileSync(expectedMetadataPath, "utf8"));
   (deps.validateBackendMetadata || ((value) => assertStageBTerraformInitializedBackendMetadata(value)))(metadata.backend);
   const protectedMainCheckout = deps.getProtectedMainCheckout
@@ -88,14 +93,49 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
   const observedWorkspace = String(showWorkspace({ cwd: root, env: terraformEnv })).trim();
   assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE, observedWorkspace });
   const runTerraform = deps.runTerraform || ((args, options) => spawnSync("terraform", args, { ...options, encoding: "utf8" }));
-  const argsForTerraform = [`-chdir=${terraformRoot}`, "plan", "-refresh-only", `-var-file=${artifacts.tfvarsPath}`, "-input=false", "-lock=true", "-no-color", "-detailed-exitcode"];
+  const showPlanJson = deps.showPlanJson || ((planPath, options) => execFileSync("terraform", [`-chdir=${terraformRoot}`, "show", "-json", planPath], { ...options, encoding: "utf8" }));
+  const refreshDirectory = fs.mkdtempSync(path.join(path.dirname(artifacts.outputPath), ".stage-b-refresh-"));
+  fs.chmodSync(refreshDirectory, 0o700);
+  const refreshPlanPath = path.join(refreshDirectory, "refresh-only.tfplan");
+  const argsForTerraform = [`-chdir=${terraformRoot}`, "plan", "-refresh-only", `-var-file=${artifacts.tfvarsPath}`, `-out=${refreshPlanPath}`, "-input=false", "-lock=true", "-no-color", "-detailed-exitcode"];
   const result = runTerraform(argsForTerraform, { cwd: root, env: terraformEnv });
   const output = `${result.stdout || ""}${result.stderr || ""}`;
-  writeOutput(artifacts.outputPath, output);
-  if (result.status !== 0) throw new Error(result.status === 2 ? "Stage B refresh-only detected drift; stop before plan." : "Stage B refresh-only Terraform command failed; stop before plan.");
-  if (!/No changes\./i.test(output)) throw new Error("Stage B refresh-only did not prove zero drift.");
-  if (/\bwill be (created|updated|destroyed)\b|\bfailed\b/i.test(output)) throw new Error("Stage B refresh-only output contains a failed check or mutation.");
-  return { status: "refresh-only-verified", outputPath: artifacts.outputPath, terraformArgs: argsForTerraform, terraformDataDir: resolvedDataDir, backendMetadataPath: expectedMetadataPath, workspace: observedWorkspace };
+  let plan;
+  if (result.status === 0 || result.status === 2) {
+    try { const shown = showPlanJson(refreshPlanPath, { cwd: root, env: terraformEnv }); plan = typeof shown === "string" || Buffer.isBuffer(shown) ? JSON.parse(shown) : shown; } catch (error) { plan = { malformed: error.message }; }
+  }
+  const classification = plan?.malformed
+    ? { status: "MALFORMED_RESULT", reason: plan.malformed, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] }
+    : classifyStageBRefreshResult({ plan, terraformExitCode: result.status, terraformOutput: output, bindingReport, state, outputsSource: fs.readFileSync(path.join(root, terraformRoot, "outputs.tf"), "utf8") });
+  const refreshReport = {
+    schemaVersion: 1,
+    status: classification.status,
+    reason: classification.reason,
+    deployablePlan: false,
+    toolingSha: artifacts.toolingSha,
+    toolingTreeSha256: artifacts.toolingTreeSha256,
+    tfvarsSha256: bindingReport.tfvarsSha256,
+    bindingReportSha256: artifacts.bindingReportSha256,
+    imageEvidenceSha256: bindingReport.imageEvidenceCanonicalSha256,
+    stageAStateSha256: bindingReport.stageAStateBackupSha256,
+    stageAStateLineage: bindingReport.stageAStateLineage,
+    stageAStateSerial: bindingReport.stageAStateSerial,
+    stageBStateSha256: bindingReport.stateBackupSha256,
+    stageBStateLineage: bindingReport.stateLineage,
+    stageBStateSerial: bindingReport.stateSerial,
+    backendMetadataSha256: sha256(fs.readFileSync(expectedMetadataPath)),
+    backendMetadataPath: expectedMetadataPath,
+    terraformDataDir: resolvedDataDir,
+    workspace: observedWorkspace,
+    terraformExitCode: result.status,
+    terraformOutputSha256: sha256(Buffer.from(output)),
+    resourceChanges: classification.resourceChanges,
+    outputChanges: classification.outputChanges,
+  };
+  writeOutput(artifacts.outputPath, refreshReport);
+  fs.rmSync(refreshDirectory, { recursive: true, force: true });
+  if (!STAGE_B_REFRESH_ALLOWED_STATUSES.includes(classification.status)) throw new Error(`Stage B refresh-only ${classification.status}: ${classification.reason}`);
+  return { ...refreshReport, outputPath: artifacts.outputPath, terraformArgs: argsForTerraform };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
