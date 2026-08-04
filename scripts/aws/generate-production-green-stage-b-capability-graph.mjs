@@ -45,7 +45,7 @@ const PHASES = Object.freeze([
   ["stage-a-state-read", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["stage-a-handoff-generation", "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"],
   ["tfvars-generation", "scripts/aws/generate-production-green-stage-b-tfvars.mjs"],
-  ["refresh-only", "scripts/plan-production-green-stage-b.mjs"],
+  ["refresh-only", "scripts/refresh-production-green-stage-b.mjs"],
   ["saved-plan-generation", "scripts/plan-production-green-stage-b.mjs"],
   ["plan-json-canonicalization", "scripts/plan-production-green-stage-b.mjs"],
   ["reference-audit", "scripts/aws/generate-production-green-stage-b-reference-audit.mjs"],

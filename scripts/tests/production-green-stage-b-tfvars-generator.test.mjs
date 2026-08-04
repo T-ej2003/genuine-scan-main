@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
-import { assertStageBTfvarsBinding, deriveContractDigests, deriveRetainedDefinitions, generateStageBTfvars, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
+import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, deriveContractDigests, deriveRetainedDefinitions, generateStageBTfvars, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
@@ -75,6 +75,32 @@ test("production-shaped inputs generate deterministic private tfvars and binding
   assert.equal(second.tfvarsSha256, first.tfvarsSha256);
   assert.deepEqual(second.bindingReport, first.bindingReport);
   assert.match(fs.readFileSync(first.outputPath, "utf8"), /read_only_canary_image/);
+  assert.equal(first.bindingReport.tfvarsFormat, "hcl");
+  assert.equal(first.bindingReport.tfvarsFileName, "out.tfvars");
+  assert.equal(first.bindingReport.tfvarsExtension, ".tfvars");
+});
+
+test("canonical tfvars rejects JSON and ambiguous filenames before output", () => {
+  for (const name of ["production.json", "production.tfvars.json", "production"]) {
+    const args = input({ outputPath: path.join(tempRoot, name) });
+    assert.throws(() => generateStageBTfvars(args), /Stage B canonical HCL tfvars output must use a \.tfvars filename/);
+    assert.equal(fs.existsSync(args.outputPath), false);
+  }
+});
+
+test("canonical tfvars binding rejects a JSON-looking file and metadata tampering", () => {
+  const args = input();
+  const result = generateStageBTfvars(args);
+  const jsonPath = path.join(path.dirname(args.outputPath), "tampered.tfvars");
+  fs.copyFileSync(result.outputPath, jsonPath);
+  fs.chmodSync(jsonPath, 0o600);
+  const report = JSON.parse(fs.readFileSync(result.bindingReportPath, "utf8"));
+  assert.throws(() => assertStageBCanonicalTfvarsFile({ tfvarsPath: jsonPath, bindingReport: report }), /filename does not match/);
+  const hclPath = path.join(path.dirname(args.outputPath), "hcl.tfvars");
+  fs.writeFileSync(hclPath, JSON.stringify({ account_id: "368992683803" }) + "\n", { mode: 0o600 });
+  assert.throws(() => assertStageBCanonicalTfvarsFile({ tfvarsPath: hclPath }), /must be HCL, not JSON/);
+  report.tfvarsFormat = "json";
+  assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: (() => { const p = path.join(path.dirname(args.outputPath), "bad-binding.json"); fs.writeFileSync(p, `${JSON.stringify(report)}\n`, { mode: 0o600 }); return p; })() }), /format must be hcl/);
 });
 
 test("all five emitted image variables are byte-for-byte bound to signed evidence", () => {
@@ -231,5 +257,5 @@ test("retained-state validation requires broker policy and attachment", () => {
 test("binding report rejects a modified tfvars file and overwrite is opt-in", () => {
   const args = input(); const result = generateStageBTfvars(args); assert.throws(() => generateStageBTfvars(args), /Refusing to overwrite/);
   fs.appendFileSync(result.outputPath, "\n# modified\n"); const reportSha = crypto.createHash("sha256").update(fs.readFileSync(result.bindingReportPath)).digest("hex");
-  assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath, bindingReportSha256: reportSha }), /modified/);
+  assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath, bindingReportSha256: reportSha }), /tfvars SHA256/);
 });

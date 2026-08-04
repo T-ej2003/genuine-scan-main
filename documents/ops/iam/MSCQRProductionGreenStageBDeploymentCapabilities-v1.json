@@ -107,7 +107,7 @@
     {
       "order": 21,
       "id": "refresh-only",
-      "sourceFile": "scripts/plan-production-green-stage-b.mjs"
+      "sourceFile": "scripts/refresh-production-green-stage-b.mjs"
     },
     {
       "order": 22,

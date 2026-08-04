@@ -17,6 +17,8 @@ import { assertStageAStateIdentity, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINI
 
 export const STAGE_B_TFVARS_SCHEMA_VERSION = 1;
 export const STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION = 1;
+export const STAGE_B_TFVARS_FORMAT = "hcl";
+export const STAGE_B_TFVARS_EXTENSION = ".tfvars";
 export const STAGE_B_EXPECTED_ENVIRONMENT = "production";
 export const STAGE_B_EXPECTED_STATE_LINEAGE = "4e438e59-8b8b-194d-030c-5ede0c26344a";
 export const STAGE_B_MINIMUM_STATE_SERIAL = 76;
@@ -66,6 +68,37 @@ function assertOutputPath(file, label) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 }
 
+export function assertStageBCanonicalTfvarsOutputPath(file) {
+  if (!path.isAbsolute(file) || path.extname(file) !== STAGE_B_TFVARS_EXTENSION || file.endsWith(".tfvars.json")) {
+    throw new Error("Stage B canonical HCL tfvars output must use a .tfvars filename.");
+  }
+  assertOutputPath(file, "Tfvars output");
+  return file;
+}
+
+export function assertStageBCanonicalTfvarsFile({ tfvarsPath, bindingReport, tfvarsBytes } = {}) {
+  assertStageBCanonicalTfvarsOutputPath(tfvarsPath);
+  const stat = fs.lstatSync(tfvarsPath, { throwIfNoEntry: false });
+  if (!stat?.isFile() || stat.isSymbolicLink()) throw new Error("Stage B canonical tfvars file must be a regular file.");
+  if ((stat.mode & 0o777) !== 0o600) throw new Error("Stage B canonical tfvars file must have mode 0600.");
+  const bytes = tfvarsBytes || fs.readFileSync(tfvarsPath);
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(bytes) || !text.endsWith("\n")) throw new Error("Stage B canonical tfvars file must be UTF-8 HCL with one trailing newline.");
+  try {
+    JSON.parse(text);
+    throw new Error("Stage B canonical tfvars content must be HCL, not JSON.");
+  } catch (error) {
+    if (error?.message === "Stage B canonical tfvars content must be HCL, not JSON.") throw error;
+  }
+  if (bindingReport) {
+    if (bindingReport.tfvarsFormat !== STAGE_B_TFVARS_FORMAT) throw new Error("Stage B tfvars binding report format must be hcl.");
+    if (bindingReport.tfvarsFileName !== path.basename(tfvarsPath)) throw new Error("Stage B tfvars binding report filename does not match the canonical tfvars file.");
+    if (bindingReport.tfvarsExtension !== STAGE_B_TFVARS_EXTENSION) throw new Error("Stage B tfvars binding report extension must be .tfvars.");
+    if (bindingReport.tfvarsSha256 !== sha256(bytes)) throw new Error("Stage B tfvars binding report tfvars SHA256 does not match the canonical tfvars file.");
+  }
+  return true;
+}
+
 function outputState(file, label, fileSystem) {
   if (!fileSystem.existsSync(file)) return { file, label, exists: false };
   if (fileSystem.lstatSync(file).isDirectory()) throw new Error(`${label} output must not be a directory.`);
@@ -73,6 +106,7 @@ function outputState(file, label, fileSystem) {
 }
 
 export function writeAtomicPair({ tfvarsPath, bindingReportPath, tfvarsBytes, bindingReportBytes, allowOverwrite = false, fileSystem = fs } = {}) {
+  assertStageBCanonicalTfvarsOutputPath(tfvarsPath);
   if (path.resolve(tfvarsPath) === path.resolve(bindingReportPath)) throw new Error("Tfvars and binding-report outputs must be different files.");
   const outputs = [outputState(tfvarsPath, "Tfvars", fileSystem), outputState(bindingReportPath, "Binding-report", fileSystem)];
   if (!allowOverwrite && outputs.some(({ exists }) => exists)) throw new Error(`Refusing to overwrite existing ${outputs.find(({ exists }) => exists).file}.`);
@@ -331,7 +365,10 @@ function assertStageAPrerequisiteBinding(report) {
 
 export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedImageReleaseSha, expectedImageEvidenceSha256 } = {}) {
   assertAbsoluteFile(tfvarsPath, "Tfvars"); assertAbsoluteFile(bindingReportPath, "Binding report");
+  const bindingStat = fs.lstatSync(bindingReportPath);
+  if (bindingStat.isSymbolicLink() || (bindingStat.mode & 0o777) !== 0o600) throw new Error("Stage B tfvars binding report must be a regular mode-0600 file.");
   const tfvarsBytes = fs.readFileSync(tfvarsPath); const reportBytes = fs.readFileSync(bindingReportPath); const report = JSON.parse(reportBytes);
+  assertStageBCanonicalTfvarsFile({ tfvarsPath, bindingReport: report, tfvarsBytes });
   if (bindingReportSha256 && sha256(reportBytes) !== bindingReportSha256) throw new Error("Stage B tfvars binding-report SHA256 does not match the approved digest.");
   if (report?.schemaVersion !== STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION || report.tfvarsSchemaVersion !== STAGE_B_TFVARS_SCHEMA_VERSION || report.generator !== STAGE_B_TFVARS_GENERATOR) throw new Error("Stage B tfvars binding report is not produced by the canonical generator.");
   if (report.tfvarsSha256 !== sha256(tfvarsBytes)) throw new Error("Stage B tfvars was modified after canonical generation.");
@@ -361,7 +398,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   assertAbsoluteFile(imageEvidence, "Image evidence"); assertAbsoluteFile(imageEvidenceSignature, "Image-evidence signature"); assertAbsoluteFile(stateBackup, "State backup"); assertAbsoluteFile(stageAInput, "Stage-A prerequisite input"); assertAbsoluteFile(stageAStateBackup, "Stage-A state backup"); assertAbsoluteFile(brokerPackagePath, "Broker package");
   const brokerPackageStat = fs.lstatSync(brokerPackagePath);
   if (!brokerPackageStat.isFile() || brokerPackageStat.isSymbolicLink() || brokerPackageStat.size === 0) throw new Error("Broker package must be a non-empty regular file.");
-  if (outputPath) assertOutputPath(outputPath, "Tfvars output"); if (bindingReportPath) assertOutputPath(bindingReportPath, "Binding-report output");
+  if (outputPath) assertStageBCanonicalTfvarsOutputPath(outputPath); if (bindingReportPath) assertOutputPath(bindingReportPath, "Binding-report output");
   if (!outputPath || !bindingReportPath) throw new Error("Tfvars and binding-report output paths are required.");
   const report = readJson(imageEvidence); const signature = readJson(imageEvidenceSignature);
   assertImageEvidence(report, { signatureArtifact: signature, verifySignature, imageReleaseSha, workflowRunId, artifactSha256: canonicalArtifactSha256, now });
@@ -387,6 +424,9 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   const bindingReport = {
     schemaVersion: STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION,
     tfvarsSchemaVersion: STAGE_B_TFVARS_SCHEMA_VERSION,
+    tfvarsFormat: STAGE_B_TFVARS_FORMAT,
+    tfvarsFileName: path.basename(outputPath),
+    tfvarsExtension: STAGE_B_TFVARS_EXTENSION,
     generator: STAGE_B_TFVARS_GENERATOR,
     toolingSha, toolingTreeSha256, imageReleaseSha, imageEvidenceCanonicalSha256: evidenceSha256,
     imageEvidenceSource: path.basename(imageEvidence), imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputPath: path.resolve(stageAInput), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stageAStateBackupPath: path.resolve(stageAStateBackup), stageAStateBackupSha256: stageAStateSha256, stageAStateObject: stageAPrerequisiteInput.stageAStateObject, stageAStateLineage: stageAState.lineage, stageAStateSerial: stageAState.serial, stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),

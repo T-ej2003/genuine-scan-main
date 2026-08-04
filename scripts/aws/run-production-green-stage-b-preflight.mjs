@@ -42,6 +42,13 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   const stageAState = path.join(preflightDirectory, "stage-a-state.json"); const stageBState = path.join(preflightDirectory, "stage-b-state.json");
   const handoff = value(argv, "--stage-a-handoff"); const tfvars = value(argv, "--tfvars"); const bindingReport = value(argv, "--binding-report");
   const toolingSha = value(argv, "--tooling-sha"); const toolingTreeSha256 = value(argv, "--tooling-tree-sha256");
+  generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff });
+  const generated = generateStageBTfvars({
+    imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
+    stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,
+    imageReleaseSha: value(argv, "--image-release-sha"), workflowRunId: value(argv, "--workflow-run-id"), canonicalArtifactSha256: value(argv, "--canonical-artifact-sha256"),
+    environment: "production", outputPath: tfvars, bindingReportPath: bindingReport,
+  });
   generateStageBTerraformBackendConfig({ outputPath: backendConfig });
   const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
   const env = { ...process.env, TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: "default" };
@@ -50,13 +57,6 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   assertStageBTerraformInitializedBackendMetadata(metadata);
   const observedWorkspace = String(run("terraform", [`-chdir=${terraformRoot}`, "workspace", "show"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
   assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE, observedWorkspace });
-  generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff });
-  const generated = generateStageBTfvars({
-    imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
-    stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,
-    imageReleaseSha: value(argv, "--image-release-sha"), workflowRunId: value(argv, "--workflow-run-id"), canonicalArtifactSha256: value(argv, "--canonical-artifact-sha256"),
-    environment: "production", outputPath: tfvars, bindingReportPath: bindingReport,
-  });
   return { backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, tfvarsSha256: generated.tfvarsSha256 };
 }
 
