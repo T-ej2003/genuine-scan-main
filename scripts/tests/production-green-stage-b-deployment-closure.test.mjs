@@ -12,6 +12,16 @@ test("production closure binds signed permission evidence to every selected plan
   for (const name of ["STAGE_B_PLAN_SHA256", "STAGE_B_SAVED_PLAN_SHA256", "STAGE_B_CANONICAL_PLAN_JSON_SHA256", "STAGE_B_PERMISSION_REPORT_SHA256"]) assert.match(source, new RegExp(name));
 });
 
+test("production closure hoists backend metadata and validates refresh evidence once", () => {
+  const source = fs.readFileSync("scripts/aws/validate-stage-b-deployment-closure.mjs", "utf8");
+  assert.match(source, /let backendMetadata;/);
+  assert.match(source, /backendMetadata = assertStageBTerraformBackendMetadataPrivate/);
+  assert.match(source, /expectedBackendMetadataSha256: backendMetadata\.backendMetadataSha256/);
+  assert.match(source, /expectedTerraformDataDir: backendMetadata\.terraformDataDir/);
+  assert.equal((source.match(/assertStageBRefreshEvidence\(/g) || []).length, 1);
+  assert.ok(source.indexOf("let backendMetadata;") < source.indexOf('if (mode === "production")'));
+});
+
 test("production-shaped Stage B plan is fully classified with zero destroys", () => {
   const result = classifyStageBPlan(fixture, { strict: false });
   assert.deepEqual(result.actionCounts, { "no-op": 58, create: 12, update: 3 });

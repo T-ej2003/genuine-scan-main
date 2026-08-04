@@ -36,6 +36,7 @@ const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 const backendPolicy = JSON.parse(fs.readFileSync(backendPolicyPath, "utf8"));
 const permissionManifest = JSON.parse(fs.readFileSync(permissionManifestPath, "utf8"));
 assertStageBDeploymentCapabilityGraph();
+let backendMetadata;
 const checkoutMode = process.env.STAGE_B_TOOLING_CHECKOUT_MODE || "review";
 const currentHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
 if (mode === "production" && checkoutMode !== "production") throw new Error("Production Stage B closure requires a protected-main checkout mode.");
@@ -58,7 +59,7 @@ if (mode === "production") {
   if (requiredProductionEvidence.some((name) => !process.env[name])) throw new Error("Production Stage B closure requires complete fresh deployment evidence.");
   if (!process.env.TF_DATA_DIR) throw new Error("Production Stage B closure requires the reviewed TF_DATA_DIR.");
   const backendMetadataPath = path.resolve(process.env.STAGE_B_TERRAFORM_BACKEND_METADATA_PATH);
-  const backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: process.env.TF_DATA_DIR, backendMetadataPath, repositoryRoot: root });
+  backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: process.env.TF_DATA_DIR, backendMetadataPath, repositoryRoot: root });
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(backendMetadataPath, "utf8"))?.backend);
   const permissionReportBytes = fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_PATH);
   const permissionReport = JSON.parse(permissionReportBytes);
@@ -79,7 +80,7 @@ if (mode === "production") {
 if (mode === "production" || tfvarsPath || bindingReportPath) {
   if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256 || !process.env.STAGE_B_TOOLING_TREE_SHA256 || !process.env.STAGE_B_IMAGE_RELEASE_SHA || !process.env.STAGE_B_IMAGE_EVIDENCE_SHA256) throw new Error("Production Stage B closure requires canonical tfvars provenance and complete deployment identity.");
   const bindingReport = assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedImageReleaseSha: process.env.STAGE_B_IMAGE_RELEASE_SHA, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256 });
-  assertStageBRefreshEvidence({ refreshReportPath: process.env.STAGE_B_REFRESH_REPORT_PATH, refreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, bindingReport, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256, expectedStateSha256: bindingReport.stateBackupSha256, expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir });
+  assertStageBRefreshEvidence({ refreshReportPath: process.env.STAGE_B_REFRESH_REPORT_PATH, refreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, bindingReport, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256, expectedStateSha256: bindingReport.stateBackupSha256, ...(backendMetadata ? { expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir } : {}) });
 }
 const imageImpactReport = mode === "pull-request" ? JSON.parse(fs.readFileSync(process.env.STAGE_B_IMAGE_IMPACT_REPORT_PATH || path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH), "utf8")) : undefined;
 if (mode === "pull-request") assertImageImpactReport({ report: imageImpactReport, imageReleaseSha: imageImpactReport.imageReleaseSha, toolingSha: currentHead, toolingInputTreeSha256: imageImpactReport.toolingInputTreeSha256, changedFiles: imageImpactReport.classifiedChangedFiles });
