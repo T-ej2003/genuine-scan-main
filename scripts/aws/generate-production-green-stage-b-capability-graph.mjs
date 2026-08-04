@@ -92,7 +92,7 @@ function authority(entry, forbidden, policies) {
     const actions = asArray(statement.Action);
     const resources = asArray(statement.Resource);
     if (statement.Effect === (forbidden ? "Deny" : "Allow") && actions.includes(entry.action)
-      && asArray(entry.resources).every((resource) => resources.some((allowed) => allowed === "*" || allowed === resource || resource.startsWith(`${allowed}:`) || (allowed.endsWith("*") && resource.startsWith(allowed.slice(0, -1)))))) {
+      && asArray(entry.resources).every((resource) => resources.some((allowed) => allowed === "*" || allowed === resource || (allowed.endsWith("*") && resource.startsWith(allowed.slice(0, -1)))))) {
       return { sourceFile: policy.sourcePath, sid: statement.Sid, livePolicyArn: policy.arn, expectedVersion: "signed-administrator-evidence", expectedPolicySha256: policy.sourceSha256 };
     }
   }

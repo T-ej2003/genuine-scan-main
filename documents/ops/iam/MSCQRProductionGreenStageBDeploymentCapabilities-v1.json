@@ -1212,10 +1212,10 @@
       ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
-        "sid": "StageAStateObjectsOnly",
+        "sid": "ReadExactStageAStateForHandoff",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "3b7eefeec1e5d57253eb8bae6462d719a7ec586341441a2825ed8ad0d3835fbe"
+        "expectedPolicySha256": "fa6ac7e5f206a03cc4c45f5f65ae33c1bd9111b0cda348b539949d46b91021ea"
       },
       "required": true,
       "mutation": false
@@ -1442,7 +1442,7 @@
         "sid": "PruneExactStageBBrokerManagedPolicyVersions",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c6a199ee44124979416af1893878a09bcca227dc0f1fd41d1075b571e96728ca"
+        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
       },
       "required": true,
       "mutation": true
@@ -1496,7 +1496,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c6a199ee44124979416af1893878a09bcca227dc0f1fd41d1075b571e96728ca"
+        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
       },
       "required": true,
       "mutation": true
@@ -1563,11 +1563,11 @@
         "audit-broker-alias"
       ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
-        "sid": "ReadStageBBrokerReviewedAlias",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "a4e547a9882a2bd64c4f68db9643512a1e4eeea5bab9034b0b28c447ac496a95"
       },
       "required": true,
       "mutation": false
@@ -2239,7 +2239,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c6a199ee44124979416af1893878a09bcca227dc0f1fd41d1075b571e96728ca"
+        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
       },
       "required": true,
       "mutation": true
@@ -2293,7 +2293,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c6a199ee44124979416af1893878a09bcca227dc0f1fd41d1075b571e96728ca"
+        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
       },
       "required": true,
       "mutation": true
@@ -2318,7 +2318,7 @@
         "sid": "UpdateExactStageBBrokerManagedPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c6a199ee44124979416af1893878a09bcca227dc0f1fd41d1075b571e96728ca"
+        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
       },
       "required": true,
       "mutation": true
@@ -2394,10 +2394,10 @@
       "probeIds": [],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
-        "sid": "UpdateExactStageBBrokerFunctionRelease",
+        "sid": "UpdateExactStageBBrokerReviewedAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c6a199ee44124979416af1893878a09bcca227dc0f1fd41d1075b571e96728ca"
+        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
       },
       "required": true,
       "mutation": true

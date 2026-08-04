@@ -42,10 +42,23 @@
       "Action": [
         "lambda:UpdateFunctionConfiguration",
         "lambda:UpdateFunctionCode",
-        "lambda:PublishVersion",
-        "lambda:UpdateAlias"
+        "lambda:PublishVersion"
       ],
       "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "aws:ResourceTag/Environment": "production",
+          "aws:ResourceTag/ManagedBy": "Terraform",
+          "aws:ResourceTag/Component": "full-rls-green-stage-b"
+        }
+      }
+    },
+    {
+      "Sid": "UpdateExactStageBBrokerReviewedAlias",
+      "Effect": "Allow",
+      "Action": "lambda:UpdateAlias",
+      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "eu-west-2",

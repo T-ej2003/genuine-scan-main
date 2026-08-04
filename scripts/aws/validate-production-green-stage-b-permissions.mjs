@@ -32,35 +32,44 @@ const BROKER_ROLE_NAME = STAGE_B_BROKER_POLICY.roleName;
 const BROKER_MANAGED_POLICY_ARN = STAGE_B_BROKER_POLICY.arn;
 const BROKER_MANAGED_POLICY_NAME = STAGE_B_BROKER_POLICY.name;
 const BROKER_POLICY_STATEMENTS = STAGE_B_BROKER_POLICY_STATEMENTS;
-const TASK_DEFINITION_TAG_CONTEXT = Object.freeze([
-  { key: "aws:RequestedRegion", type: "string", values: [REGION] },
-  { key: "aws:RequestTag/Environment", type: "string", values: ["production"] },
-  { key: "aws:RequestTag/ManagedBy", type: "string", values: ["Terraform"] },
-  { key: "aws:RequestTag/Component", type: "string", values: ["full-rls-green-stage-b"] },
-  { key: "aws:TagKeys", type: "stringList", values: ["Environment", "ManagedBy", "Component"] },
-]);
+const TASK_DEFINITION_TAGS = Object.freeze({ Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" });
 const TASK_DEFINITION_MAPPINGS = Object.freeze([
-  ["backend", 'aws_ecs_task_definition.candidate["backend"]', "mscqr-production-rls-green-backend-candidate", "mscqr-production-rls-green-backend-execution", "mscqr-production-rls-green-backend-task"],
-  ["worker", 'aws_ecs_task_definition.candidate["worker"]', "mscqr-production-rls-green-worker-candidate", "mscqr-production-rls-green-worker-execution", "mscqr-production-rls-green-worker-task"],
-  ["application-canary", 'aws_ecs_task_definition.candidate["canary"]', "mscqr-production-full-rls-green-application-canary", "mscqr-production-rls-green-canary-execution", "mscqr-production-rls-green-canary-task"],
-  ["read-only-canary", 'aws_ecs_task_definition.candidate["read_only_canary"]', "mscqr-production-full-rls-green-read-only-canary", "mscqr-production-full-rls-green-read-only-canary-execution", "mscqr-production-full-rls-green-read-only-canary-task"],
-  ["full-rls-admin-bootstrap", 'aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]', "mscqr-production-full-rls-green-full-rls-admin-bootstrap", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
-  ["full-rls-admin-ownership", 'aws_ecs_task_definition.executor["full-rls-admin-ownership"]', "mscqr-production-full-rls-green-full-rls-admin-ownership", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
-  ["full-rls-capability-preflight", 'aws_ecs_task_definition.executor["full-rls-capability-preflight"]', "mscqr-production-full-rls-green-full-rls-capability-preflight", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
-  ["full-rls-role-provision", 'aws_ecs_task_definition.executor["full-rls-role-provision"]', "mscqr-production-full-rls-green-full-rls-role-provision", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
-  ["full-rls-role-verify", 'aws_ecs_task_definition.executor["full-rls-role-verify"]', "mscqr-production-full-rls-green-full-rls-role-verify", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
-  ["full-rls-rollback", 'aws_ecs_task_definition.executor["full-rls-rollback"]', "mscqr-production-full-rls-green-full-rls-rollback", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
-  ["full-rls-runtime-policy", 'aws_ecs_task_definition.executor["full-rls-runtime-policy"]', "mscqr-production-full-rls-green-full-rls-runtime-policy", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
-  ["full-rls-verification", 'aws_ecs_task_definition.executor["full-rls-verification"]', "mscqr-production-full-rls-green-full-rls-verification", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task"],
-].map(([id, address, family, executionRoleName, taskRoleName]) => Object.freeze({ id, address, family, resource: `arn:aws:ecs:${REGION}:${ACCOUNT}:task-definition/${family}:*`, executionRoleArn: `arn:aws:iam::${ACCOUNT}:role/${executionRoleName}`, taskRoleArn: `arn:aws:iam::${ACCOUNT}:role/${taskRoleName}` })));
+  ["backend", 'aws_ecs_task_definition.candidate["backend"]', "mscqr-production-rls-green-backend-candidate", "mscqr-production-rls-green-backend-execution", "mscqr-production-rls-green-backend-task", "1024", "2048"],
+  ["worker", 'aws_ecs_task_definition.candidate["worker"]', "mscqr-production-rls-green-worker-candidate", "mscqr-production-rls-green-worker-execution", "mscqr-production-rls-green-worker-task", "512", "1024"],
+  ["application-canary", 'aws_ecs_task_definition.candidate["canary"]', "mscqr-production-full-rls-green-application-canary", "mscqr-production-rls-green-canary-execution", "mscqr-production-rls-green-canary-task", "1024", "2048"],
+  ["read-only-canary", 'aws_ecs_task_definition.candidate["read_only_canary"]', "mscqr-production-full-rls-green-read-only-canary", "mscqr-production-full-rls-green-read-only-canary-execution", "mscqr-production-full-rls-green-read-only-canary-task", "256", "512"],
+  ["full-rls-admin-bootstrap", 'aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]', "mscqr-production-full-rls-green-full-rls-admin-bootstrap", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
+  ["full-rls-admin-ownership", 'aws_ecs_task_definition.executor["full-rls-admin-ownership"]', "mscqr-production-full-rls-green-full-rls-admin-ownership", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
+  ["full-rls-capability-preflight", 'aws_ecs_task_definition.executor["full-rls-capability-preflight"]', "mscqr-production-full-rls-green-full-rls-capability-preflight", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
+  ["full-rls-role-provision", 'aws_ecs_task_definition.executor["full-rls-role-provision"]', "mscqr-production-full-rls-green-full-rls-role-provision", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
+  ["full-rls-role-verify", 'aws_ecs_task_definition.executor["full-rls-role-verify"]', "mscqr-production-full-rls-green-full-rls-role-verify", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
+  ["full-rls-rollback", 'aws_ecs_task_definition.executor["full-rls-rollback"]', "mscqr-production-full-rls-green-full-rls-rollback", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
+  ["full-rls-runtime-policy", 'aws_ecs_task_definition.executor["full-rls-runtime-policy"]', "mscqr-production-full-rls-green-full-rls-runtime-policy", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
+  ["full-rls-verification", 'aws_ecs_task_definition.executor["full-rls-verification"]', "mscqr-production-full-rls-green-full-rls-verification", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
+].map(([id, address, family, executionRoleName, taskRoleName, cpu, memory]) => Object.freeze({ id, address, family, cpu, memory, resource: `arn:aws:ecs:${REGION}:${ACCOUNT}:task-definition/${family}:*`, executionRoleArn: `arn:aws:iam::${ACCOUNT}:role/${executionRoleName}`, taskRoleArn: `arn:aws:iam::${ACCOUNT}:role/${taskRoleName}` })));
+
+const taskDefinitionRegisterContext = ({ cpu, memory }) => [
+  { key: "aws:RequestTag/Component", type: "string", values: [TASK_DEFINITION_TAGS.Component] },
+  { key: "aws:RequestTag/Environment", type: "string", values: [TASK_DEFINITION_TAGS.Environment] },
+  { key: "aws:RequestTag/ManagedBy", type: "string", values: [TASK_DEFINITION_TAGS.ManagedBy] },
+  { key: "aws:RequestedRegion", type: "string", values: [REGION] },
+  { key: "aws:TagKeys", type: "stringList", values: Object.keys(TASK_DEFINITION_TAGS) },
+  { key: "ecs:compute-compatibility", type: "stringList", values: ["FARGATE"] },
+  { key: "ecs:privileged", type: "string", values: ["false"] },
+  { key: "ecs:task-cpu", type: "numeric", values: [cpu] },
+  { key: "ecs:task-memory", type: "numeric", values: [memory] },
+];
 const stageBRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const arnPattern = /^(?:arn:aws:[^:]+:[^:]*:368992683803:.+|arn:aws:s3:::[^/]+(?:\/.*)?)$/;
 
 export const RELEASE_POLICY_SOURCES = Object.freeze([
   ["MSCQRProductionGreenStageARelease", "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json"],
+  ["MSCQRProductionGreenStageBBrokerCodeSigningRead", "documents/ops/iam/MSCQRProductionGreenStageBBrokerCodeSigningRead-v1.json"],
   ["MSCQRProductionGreenStageBProviderRecovery", "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json"],
+  ["MSCQRProductionGreenStageBProviderReadOnly", "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json"],
   ["MSCQRProductionGreenStageBReferenceAuditReadOnly", "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json"],
   ["MSCQRProductionGreenStageBFinalApplyWrite", "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json"],
+  ["MSCQRProductionGreenStageBTaskDefinitionRegistration", "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json"],
   ["MSCQRProductionGreenStageBWorkspaceState", "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json"],
 ].map(([name, sourcePath]) => Object.freeze({ name, arn: `arn:aws:iam::${ACCOUNT}:policy/${name}`, sourcePath })));
 
@@ -167,10 +176,13 @@ export function assertReleasePolicyEvidence(evidence) {
 
 function assertContext(context, label) {
   if (!Array.isArray(context)) throw new Error(`${label} context must be an array.`);
+  const keys = new Set();
   for (const entry of context) {
     if (!entry || typeof entry.key !== "string" || !entry.key || !["string", "stringList", "boolean", "numeric"].includes(entry.type)) {
       throw new Error(`${label} has malformed context.`);
     }
+    if (keys.has(entry.key)) throw new Error(`${label} has duplicate context key ${entry.key}.`);
+    keys.add(entry.key);
     if (!Array.isArray(entry.values) || entry.values.length === 0 || entry.values.some((value) => typeof value !== "string")) {
       throw new Error(`${label} has malformed context values.`);
     }
@@ -246,6 +258,34 @@ export function validateSimulationResult(item, result) {
     throw new Error(`Forbidden evaluation ${item.id} returned allowed with MissingContextValues.`);
   }
   return { ...result, missingContextValues: actualMissing };
+}
+
+export function assertPermissionEvaluationBindings(report, manifest, { plan } = {}) {
+  validateManifest(manifest);
+  const entries = new Map([...manifest.required, ...manifest.forbidden].map((entry) => [entry.id, { entry, forbidden: manifest.forbidden.includes(entry) }]));
+  for (const mapping of manifest.taskDefinitionMappings) {
+    for (const suffix of ["register", "tag"]) entries.set(`${mapping.id}-${suffix}`, { entry: { context: mapping.registerContext }, forbidden: false });
+    for (const suffix of ["pass-execution", "pass-task"]) entries.set(`${mapping.id}-${suffix}`, { entry: { context: mapping.passRoleContext }, forbidden: false });
+  }
+  for (const [items, forbidden] of [[report.requiredEvaluations, false], [report.forbiddenEvaluations, true]]) {
+    if (!Array.isArray(items)) throw new Error("Permission-preflight evaluation results are missing.");
+    for (const item of items) {
+      const binding = entries.get(item.manifestId);
+      if (!binding || binding.forbidden !== forbidden) throw new Error(`Permission-preflight evaluation ${item.id} is not bound to the current manifest section.`);
+      if (JSON.stringify(item.context) !== JSON.stringify(binding.entry.context)) throw new Error(`Permission-preflight evaluation ${item.id} has different context from the current manifest.`);
+      const expected = normalizeExpectedMissingContextValues(binding.entry, { forbidden, label: item.manifestId });
+      if (JSON.stringify(item.expectedMissingContextValues || []) !== JSON.stringify(expected)) throw new Error(`Permission-preflight evaluation ${item.id} has different expected missing context.`);
+      const validated = validateSimulationResult({ ...item, forbidden, expectedMissingContextValues: expected }, item);
+      const expectedValidation = forbidden ? (item.decision === "allowed" ? "rejected" : "accepted") : (item.decision === "allowed" ? "accepted" : "rejected");
+      if (item.validation !== expectedValidation || JSON.stringify(validated.missingContextValues) !== JSON.stringify(item.missingContextValues)) throw new Error(`Permission-preflight evaluation ${item.id} has inconsistent validation evidence.`);
+    }
+  }
+  const project = (items) => items.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision }));
+  if (report.planCapabilities?.schemaVersion !== 1
+    || JSON.stringify(report.planCapabilities.required) !== JSON.stringify(project(report.requiredEvaluations))
+    || JSON.stringify(report.planCapabilities.forbidden) !== JSON.stringify(project(report.forbiddenEvaluations))) throw new Error("Permission-preflight plan capability manifest is incomplete or stale.");
+  if (plan) assertTaskDefinitionRegistrationContexts(plan, manifest);
+  return true;
 }
 
 export function normalizeEvaluationTuple(entry, resource) {
@@ -349,10 +389,8 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION 
     if (JSON.stringify(mapping.actions) !== JSON.stringify(["create"])) throw new Error(`Permission manifest task-definition actions are invalid: ${mapping.address}.`);
     assertContext(mapping.registerContext, mapping.address);
     assertContext(mapping.passRoleContext, mapping.address);
-    for (const expectedContext of TASK_DEFINITION_TAG_CONTEXT) {
-      const actualContext = mapping.registerContext.find((entry) => entry.key === expectedContext.key);
-      if (!actualContext || actualContext.type !== expectedContext.type || JSON.stringify(actualContext.values) !== JSON.stringify(expectedContext.values)) throw new Error(`${mapping.address} must include exact ${expectedContext.key} context.`);
-    }
+    const expectedContext = taskDefinitionRegisterContext(expected);
+    if (JSON.stringify(mapping.registerContext) !== JSON.stringify(expectedContext)) throw new Error(`${mapping.address} must include the exact family-specific ECS registration context.`);
     const service = mapping.passRoleContext.find((entry) => entry.key === "iam:PassedToService");
     if (!service || service.type !== "string" || JSON.stringify(service.values) !== JSON.stringify(["ecs-tasks.amazonaws.com"])) throw new Error(`Permission manifest PassRole context is invalid: ${mapping.address}.`);
   }
@@ -404,6 +442,38 @@ function assertBrokerManagedPolicyChange(change) {
   }
 }
 
+function contextFromTaskDefinitionPlan(change, manifestMapping) {
+  const mapping = TASK_DEFINITION_MAPPINGS.find(({ address }) => address === manifestMapping.address);
+  const after = change.change?.after;
+  if (!after || after.family !== mapping.family || String(after.cpu) !== mapping.cpu || String(after.memory) !== mapping.memory
+    || JSON.stringify(after.requires_compatibilities) !== JSON.stringify(["FARGATE"])
+    || after.execution_role_arn !== mapping.executionRoleArn || after.task_role_arn !== mapping.taskRoleArn
+    || canonicalizeJson(after.tags) !== canonicalizeJson(TASK_DEFINITION_TAGS)) {
+    throw new Error(`${change.address} task-definition registration context does not match the reviewed family contract.`);
+  }
+  let containers;
+  try { containers = typeof after.container_definitions === "string" ? JSON.parse(after.container_definitions) : after.container_definitions; } catch { throw new Error(`${change.address} container definitions are malformed.`); }
+  if (!Array.isArray(containers) || containers.length === 0 || containers.some((container) => !container || (Object.hasOwn(container, "privileged") && container.privileged !== false))) {
+    throw new Error(`${change.address} cannot prove ecs:privileged=false for every container.`);
+  }
+  const context = taskDefinitionRegisterContext(mapping);
+  if (JSON.stringify(context) !== JSON.stringify(manifestMapping.registerContext)) throw new Error(`${change.address} plan-derived ECS context differs from the permission manifest.`);
+  return context;
+}
+
+export function assertTaskDefinitionRegistrationContexts(plan, manifest) {
+  validateManifest(manifest);
+  const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
+  const registrations = changes.filter((change) => change.type === "aws_ecs_task_definition" && exactActions(change.change?.actions, ["create"]));
+  for (const mapping of manifest.taskDefinitionMappings) {
+    const matches = registrations.filter((change) => change.address === mapping.address);
+    if (matches.length !== 1) throw new Error(`Selected plan must contain exactly one reviewed task-definition registration for ${mapping.address}.`);
+    contextFromTaskDefinitionPlan(matches[0], mapping);
+  }
+  if (registrations.length !== manifest.taskDefinitionMappings.length) throw new Error("Selected plan contains an unreviewed task-definition registration.");
+  return true;
+}
+
 function evaluation(entry, resource, { forbidden = false } = {}) {
   const result = {
     id: `${entry.id}:${resource}`,
@@ -433,8 +503,9 @@ export function deriveRequiredEvaluations(plan, manifest) {
       : undefined;
     if (change.type === "aws_ecs_task_definition" && !taskMapping) throw new Error(`No permission manifest entry covers ${change.address} ${JSON.stringify(actions)}.`);
     if (taskMapping) {
-      required.push(evaluation({ id: `${taskMapping.id}-register`, action: "ecs:RegisterTaskDefinition", context: taskMapping.registerContext, phase: "apply" }, taskMapping.resource));
-      required.push(evaluation({ id: `${taskMapping.id}-tag`, action: "ecs:TagResource", context: taskMapping.registerContext, phase: "apply" }, taskMapping.resource));
+      const registerContext = contextFromTaskDefinitionPlan(change, taskMapping);
+      required.push(evaluation({ id: `${taskMapping.id}-register`, action: "ecs:RegisterTaskDefinition", context: registerContext, phase: "apply" }, taskMapping.resource));
+      required.push(evaluation({ id: `${taskMapping.id}-tag`, action: "ecs:TagResource", context: registerContext, phase: "apply" }, taskMapping.resource));
       required.push(evaluation({ id: `${taskMapping.id}-pass-execution`, action: "iam:PassRole", context: taskMapping.passRoleContext, phase: "apply" }, taskMapping.executionRoleArn));
       required.push(evaluation({ id: `${taskMapping.id}-pass-task`, action: "iam:PassRole", context: taskMapping.passRoleContext, phase: "apply" }, taskMapping.taskRoleArn));
       coveredChanges.add(change.address);
