@@ -186,10 +186,8 @@ jobs:
         id: checkout
         uses: actions/checkout@v6
 
-      - name: Validate frontend E2E cleanup contract
-        run: node --test scripts/tests/frontend-e2e-cleanup-workflow.test.mjs
-
       - uses: actions/setup-node@v6
+        id: setup_node
         with:
           node-version: 24
           cache: npm
@@ -198,7 +196,12 @@ jobs:
             backend/package-lock.json
 
       - name: Install frontend dependencies
+        id: frontend_dependencies
         run: npm ci
+
+      - name: Validate frontend E2E cleanup contract
+        id: cleanup_contract
+        run: node --test scripts/tests/frontend-e2e-cleanup-workflow.test.mjs
 
       - name: Install backend dependencies
         run: npm --prefix backend ci

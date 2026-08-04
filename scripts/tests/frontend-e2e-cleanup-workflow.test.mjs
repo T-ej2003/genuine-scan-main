@@ -10,12 +10,19 @@ const indexOf = (predicate) => steps.findIndex(predicate);
 
 test("frontend E2E cleanup is guarded by checkout and database setup", () => {
   const checkoutIndex = indexOf((step) => step.id === "checkout");
+  const setupNodeIndex = indexOf((step) => step.id === "setup_node");
+  const frontendDependenciesIndex = indexOf((step) => step.id === "frontend_dependencies");
+  const cleanupContractIndex = indexOf((step) => step.id === "cleanup_contract");
   const setupIndex = indexOf((step) => step.id === "enterprise_db_setup");
   const cleanupIndex = indexOf((step) => step.name === "Clean disposable enterprise E2E database");
   const cleanup = steps[cleanupIndex];
 
   assert.ok(checkoutIndex >= 0);
+  assert.ok(setupNodeIndex > checkoutIndex);
+  assert.ok(frontendDependenciesIndex > setupNodeIndex);
+  assert.ok(cleanupContractIndex > frontendDependenciesIndex);
   assert.ok(setupIndex > checkoutIndex);
+  assert.ok(setupIndex > cleanupContractIndex);
   assert.ok(cleanupIndex > setupIndex);
   assert.equal(cleanup.if, "always() && steps.checkout.outcome == 'success' && steps.enterprise_db_setup.outcome != 'skipped'");
   assert.match(cleanup.run, /test -f scripts\/enterprise-e2e-db\.mjs/);
