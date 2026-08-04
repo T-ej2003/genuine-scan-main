@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
-import { assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
+import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
 import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, assertPermissionEvaluationBindings, assertPermissionReportPlanBinding, assertReleasePolicyEvidence, validateManifest, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
 import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENCE_REVOCATION_MODEL } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL } from "./stage-b-reference-audit-contract.mjs";
@@ -56,7 +56,10 @@ if (mode === "production") {
     "STAGE_B_PERMISSION_REPORT_PATH", "STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH", "STAGE_B_PERMISSION_REPORT_SHA256", "STAGE_B_TERRAFORM_BACKEND_METADATA_PATH", "STAGE_B_REFRESH_REPORT_PATH", "STAGE_B_REFRESH_REPORT_SHA256",
   ];
   if (requiredProductionEvidence.some((name) => !process.env[name])) throw new Error("Production Stage B closure requires complete fresh deployment evidence.");
-  assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(process.env.STAGE_B_TERRAFORM_BACKEND_METADATA_PATH, "utf8"))?.backend);
+  if (!process.env.TF_DATA_DIR) throw new Error("Production Stage B closure requires the reviewed TF_DATA_DIR.");
+  const backendMetadataPath = path.resolve(process.env.STAGE_B_TERRAFORM_BACKEND_METADATA_PATH);
+  const backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: process.env.TF_DATA_DIR, backendMetadataPath, repositoryRoot: root });
+  assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(backendMetadataPath, "utf8"))?.backend);
   const permissionReportBytes = fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_PATH);
   const permissionReport = JSON.parse(permissionReportBytes);
   const permissionSignature = JSON.parse(fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH, "utf8"));
@@ -76,7 +79,7 @@ if (mode === "production") {
 if (mode === "production" || tfvarsPath || bindingReportPath) {
   if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256 || !process.env.STAGE_B_TOOLING_TREE_SHA256 || !process.env.STAGE_B_IMAGE_RELEASE_SHA || !process.env.STAGE_B_IMAGE_EVIDENCE_SHA256) throw new Error("Production Stage B closure requires canonical tfvars provenance and complete deployment identity.");
   const bindingReport = assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedImageReleaseSha: process.env.STAGE_B_IMAGE_RELEASE_SHA, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256 });
-  assertStageBRefreshEvidence({ refreshReportPath: process.env.STAGE_B_REFRESH_REPORT_PATH, refreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, bindingReport, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256, expectedStateSha256: bindingReport.stateBackupSha256 });
+  assertStageBRefreshEvidence({ refreshReportPath: process.env.STAGE_B_REFRESH_REPORT_PATH, refreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, bindingReport, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256, expectedStateSha256: bindingReport.stateBackupSha256, expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir });
 }
 const imageImpactReport = mode === "pull-request" ? JSON.parse(fs.readFileSync(process.env.STAGE_B_IMAGE_IMPACT_REPORT_PATH || path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH), "utf8")) : undefined;
 if (mode === "pull-request") assertImageImpactReport({ report: imageImpactReport, imageReleaseSha: imageImpactReport.imageReleaseSha, toolingSha: currentHead, toolingInputTreeSha256: imageImpactReport.toolingInputTreeSha256, changedFiles: imageImpactReport.classifiedChangedFiles });

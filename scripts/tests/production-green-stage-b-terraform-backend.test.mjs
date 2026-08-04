@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   assertStageBTerraformBackendConfig,
+  assertStageBTerraformBackendMetadataPrivate,
   assertStageBTerraformInitializedBackendMetadata,
   assertStageBTerraformBackendManifest,
   assertStageBTerraformBackendPolicy,
@@ -12,6 +13,7 @@ import {
   STAGE_B_TERRAFORM_BACKEND_CONFIG,
   STAGE_B_TERRAFORM_BACKEND_MANIFEST,
   STAGE_B_TERRAFORM_BACKEND_POLICY,
+  ensureStageBTerraformBackendMetadataPrivate,
 } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { generateStageBTerraformBackendConfig } from "../aws/generate-production-green-stage-b-backend-config.mjs";
 import { validateManifest } from "../aws/validate-production-green-stage-b-permissions.mjs";
@@ -105,6 +107,38 @@ test("the canonical backend-config generator writes only the direct production k
   assert.match(fs.readFileSync(outputPath, "utf8"), /env:\/production\/mscqr\/production\/rls-green\/stage-b\/terraform\.tfstate/);
   assert.equal(result.outputPath, outputPath);
   assert.throws(() => generateStageBTerraformBackendConfig({ outputPath }), /new absolute private output path/);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("the backend producer normalizes Terraform metadata to 0600 and returns its binding", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-backend-data-"));
+  const metadataPath = path.join(directory, "terraform.tfstate");
+  fs.writeFileSync(metadataPath, JSON.stringify(initializedMetadata), { mode: 0o644 });
+  fs.chmodSync(directory, 0o700); fs.chmodSync(metadataPath, 0o644);
+  const result = ensureStageBTerraformBackendMetadataPrivate({ terraformDataDir: directory, backendMetadataPath: metadataPath, repositoryRoot: process.cwd(), normalize: true });
+  assert.equal(result.backendMetadataMode, "0600");
+  assert.equal(result.privateModeValidated, true);
+  assert.equal(fs.statSync(metadataPath).mode & 0o777, 0o600);
+  assert.equal(result.backendMetadataSha256.length, 64);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("downstream validation rejects metadata made public after initialization", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-backend-data-"));
+  const metadataPath = path.join(directory, "terraform.tfstate");
+  fs.writeFileSync(metadataPath, JSON.stringify(initializedMetadata), { mode: 0o600 });
+  fs.chmodSync(directory, 0o700); fs.chmodSync(metadataPath, 0o644);
+  assert.throws(() => assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: directory, backendMetadataPath: metadataPath, repositoryRoot: process.cwd() }), /mode 0600/);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("metadata normalization fails closed when chmod fails", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-backend-data-"));
+  const metadataPath = path.join(directory, "terraform.tfstate");
+  fs.writeFileSync(metadataPath, JSON.stringify(initializedMetadata), { mode: 0o644 });
+  fs.chmodSync(directory, 0o700); fs.chmodSync(metadataPath, 0o644);
+  const fsOps = { ...fs, chmodSync: () => { throw new Error("chmod denied"); } };
+  assert.throws(() => ensureStageBTerraformBackendMetadataPrivate({ terraformDataDir: directory, backendMetadataPath: metadataPath, repositoryRoot: process.cwd(), normalize: true, fsOps }), /chmod denied/);
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
