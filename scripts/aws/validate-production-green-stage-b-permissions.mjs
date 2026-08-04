@@ -58,9 +58,12 @@ const arnPattern = /^(?:arn:aws:[^:]+:[^:]*:368992683803:.+|arn:aws:s3:::[^/]+(?
 
 export const RELEASE_POLICY_SOURCES = Object.freeze([
   ["MSCQRProductionGreenStageARelease", "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json"],
+  ["MSCQRProductionGreenStageBBrokerCodeSigningRead", "documents/ops/iam/MSCQRProductionGreenStageBBrokerCodeSigningRead-v1.json"],
   ["MSCQRProductionGreenStageBProviderRecovery", "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json"],
+  ["MSCQRProductionGreenStageBProviderReadOnly", "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json"],
   ["MSCQRProductionGreenStageBReferenceAuditReadOnly", "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json"],
   ["MSCQRProductionGreenStageBFinalApplyWrite", "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json"],
+  ["MSCQRProductionGreenStageBTaskDefinitionRegistration", "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json"],
   ["MSCQRProductionGreenStageBWorkspaceState", "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json"],
 ].map(([name, sourcePath]) => Object.freeze({ name, arn: `arn:aws:iam::${ACCOUNT}:policy/${name}`, sourcePath })));
 

@@ -53,6 +53,7 @@ const finalWriteSids = [
   "RegisterExactStageBReadOnlyCanaryTaskDefinition",
   "PassExactStageBReadOnlyCanaryRolesToEcsTasks",
   "UpdateExactStageBBrokerFunctionRelease",
+  "UpdateExactStageBBrokerReviewedAlias",
   "UpdateExactStageBBrokerManagedPolicy",
   "PruneExactStageBBrokerManagedPolicyVersions",
   "VerifyExactStageBPermissionReportSignature",
@@ -129,13 +130,13 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   }));
 });
 
-test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and six final-write statements", () => {
+test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and seven final-write statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), finalWriteSids);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids]).size, 26);
+  assert.equal(new Set([...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids]).size, 27);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
   for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "ReadExactStageBBrokerManagedPolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
@@ -195,7 +196,6 @@ test("retry write companion is exact and tag-constrained", () => {
     "lambda:UpdateFunctionConfiguration",
     "lambda:UpdateFunctionCode",
     "lambda:PublishVersion",
-    "lambda:UpdateAlias",
   ]);
   assert.equal(brokerStatement.Resource, broker);
   assert.deepEqual(brokerStatement.Condition.StringEquals, {
@@ -204,6 +204,17 @@ test("retry write companion is exact and tag-constrained", () => {
     "aws:ResourceTag/ManagedBy": "Terraform",
     "aws:ResourceTag/Component": "full-rls-green-stage-b",
   });
+  assert.deepEqual(statementOf(policies.finalWrite, "UpdateExactStageBBrokerReviewedAlias"), {
+    Sid: "UpdateExactStageBBrokerReviewedAlias",
+    Effect: "Allow",
+    Action: "lambda:UpdateAlias",
+    Resource: `${broker}:reviewed`,
+    Condition: brokerStatement.Condition,
+  });
+  assert.equal(statementsForAction(policies.finalWrite, "lambda:UpdateAlias").some(({ Resource }) => Resource === broker), false);
+  assert.equal(statementsForAction(policies.finalWrite, "lambda:UpdateAlias").some(({ Resource }) => String(Resource).includes("*")), false);
+  assert.equal(statementsForAction(policies.finalWrite, "lambda:CreateAlias").length, 0);
+  assert.equal(statementsForAction(policies.finalWrite, "lambda:DeleteAlias").length, 0);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:AddPermission").length, 0);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:InvokeFunction").length, 0);
   assert.equal(policies.finalWrite.Statement.some((statement) => actionsOf(statement).some((action) => action.startsWith("lambda:") && statement.Resource === "*")), false);

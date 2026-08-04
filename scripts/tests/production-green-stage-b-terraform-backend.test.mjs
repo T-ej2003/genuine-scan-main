@@ -156,8 +156,14 @@ test("unrelated keys, buckets, and backend administration actions are denied", (
   assert.equal(policy.Statement.some((statement) => statement.Effect === "Allow" && statement.Action === "s3:ListBucket" && !statement.Condition), false);
 });
 
-test("the stale Stage A inline contract contains no Stage B access", () => {
+test("the canonical Stage A managed contract is exact-state read-only", () => {
   const serialized = JSON.stringify(stageA);
   assert.equal(serialized.includes("rls-green/stage-b"), false);
   assert.equal(stageA.Statement.some((statement) => statement.Sid.startsWith("StageB")), false);
+  assert.deepEqual(stageA.Statement, [{
+    Sid: "ReadExactStageAStateForHandoff",
+    Effect: "Allow",
+    Action: "s3:GetObject",
+    Resource: "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate",
+  }]);
 });
