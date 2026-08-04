@@ -13,6 +13,7 @@ import {
   PERMISSION_REPORT_SIGNING_KEY_ARN,
   PERMISSION_EVIDENCE_MAX_AGE_MS,
   sourcePolicyEvidence,
+  sourcePolicyConditionKeyOrigins,
   assertReleasePolicyEvidence,
   runCli,
   runPermissionPreflight as runPermissionPreflightRaw,
@@ -29,6 +30,7 @@ import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deploym
 import { generateImageEvidence, imageEvidenceSha256, signImageEvidence, IMAGE_EVIDENCE_MAX_AGE_MS } from "../aws/production-green-stage-b-image-evidence.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
+const realForbiddenSimulations = JSON.parse(fs.readFileSync("scripts/tests/fixtures/aws-iam-simulate-principal-policy-stage-b-forbidden.json", "utf8"));
 const initializedBackendMetadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8")).backend;
 const roleArn = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
 const brokerPolicyArn = "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime";
@@ -89,7 +91,11 @@ const planBytes = Buffer.from(JSON.stringify(plan));
 const savedPlanBytes = Buffer.from("saved-binary-plan");
 const now = "2026-08-01T12:00:00.000Z";
 const clearCloudTrail = () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] });
-const allowRequiredDenyForbidden = ({ evaluation }) => ({ decision: evaluation.id.startsWith("backend-") || evaluation.id.startsWith("pass-unrelated-role") || evaluation.id.startsWith("pass-to-lambda") || evaluation.id.startsWith("invoke-broker") || evaluation.id.startsWith("execute-ecs-task") || evaluation.id.startsWith("update-ecs-service") || evaluation.id.startsWith("create-iam-role") || evaluation.id.startsWith("deregister-task-definition") ? "explicitDeny" : "allowed", matchedStatements: 1, missingContextValues: [] });
+const allowRequiredDenyForbidden = ({ evaluation }) => ({
+  decision: evaluation.forbidden ? evaluation.expectedDecision : "allowed",
+  matchedStatements: evaluation.expectedDecision === "explicitDeny" ? 1 : 0,
+  missingContextValues: evaluation.expectedMissingContextValues,
+});
 const reportSignature = (report, overrides = {}) => ({
   schemaVersion: 1,
   keyId: PERMISSION_REPORT_SIGNING_KEY_ARN,
@@ -143,7 +149,7 @@ test("Stage A live-evidence policy source contains no mutation permission", () =
   const statement = policy.Statement.find((item) => item.Sid === "ReadStageALivePrerequisites");
   assert.deepEqual(statement, { Sid: "ReadStageALivePrerequisites", Effect: "Allow", Action: ["ec2:DescribeSubnets", "ec2:DescribeRouteTables", "ec2:DescribeSecurityGroups", "ecs:DescribeClusters", "rds:DescribeDBInstances"], Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } } });
   for (const action of ["ec2:CreateSubnet", "ecs:UpdateService", "rds:ModifyDBInstance"]) {
-    const evaluation = { id: `unrelated-${action}`, action, resource: "*", context: [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }], expectedMissingContextValues: [] };
+    const evaluation = { id: `unrelated-${action}`, action, resource: "*", context: [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }], expectedDecision: "implicitDeny", expectedMissingContextValues: [] };
     Object.defineProperty(evaluation, "forbidden", { value: true });
     assert.equal(validateSimulationResult(evaluation, { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] }).decision, "implicitDeny");
   }
@@ -151,14 +157,15 @@ test("Stage A live-evidence policy source contains no mutation permission", () =
 
 const listBucketEvaluation = () => deriveRequiredEvaluations(plan, manifest).forbidden.find((item) => item.manifestId === "backend-list-bucket-not-required");
 const deniedListBucketSimulation = ({ evaluation }) => evaluation.manifestId === "backend-list-bucket-not-required"
-  ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] }
+  ? { decision: evaluation.expectedDecision, matchedStatements: 0, missingContextValues: evaluation.expectedMissingContextValues }
   : allowRequiredDenyForbidden({ evaluation });
 
-test("direct backend rejects unneeded ListBucket without missing context", () => {
+test("direct backend accepts the exact reviewed ListBucket denial context", () => {
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: deniedListBucketSimulation, cloudTrail: clearCloudTrail });
   const result = report.forbiddenEvaluations.find((item) => item.manifestId === "backend-list-bucket-not-required");
   assert.equal(report.status, "valid");
-  assert.deepEqual({ expected: result.expectedMissingContextValues, actual: result.missingContextValues, decision: result.decision, matchedStatements: result.matchedStatements, validation: result.validation }, { expected: [], actual: [], decision: "implicitDeny", matchedStatements: 0, validation: "accepted" });
+  assert.deepEqual(result.missingContextValues, result.expectedMissingContextValues);
+  assert.deepEqual({ decision: result.decision, matchedStatements: result.matchedStatements, validation: result.validation }, { decision: "implicitDeny", matchedStatements: 0, validation: "accepted" });
 });
 
 test("direct backend rejects missing context on its unneeded ListBucket proof", () => {
@@ -170,6 +177,7 @@ test("unexpected missing context is rejected for forbidden and required evaluati
   const forbidden = structuredClone(listBucketEvaluation());
   forbidden.forbidden = true;
   forbidden.expectedMissingContextValues = [];
+  forbidden.expectedDecision = "implicitDeny";
   assert.throws(() => validateSimulationResult(forbidden, { decision: "implicitDeny", matchedStatements: 0, missingContextValues: ["s3:prefix"] }), /unexpected MissingContextValues/);
   const required = deriveRequiredEvaluations(plan, manifest).required[0];
   assert.throws(() => validateSimulationResult(required, { decision: "allowed", matchedStatements: 1, missingContextValues: ["unexpected:key"] }), /Required evaluation/);
@@ -188,6 +196,65 @@ test("expected missing context is forbidden on required entries, supplied contex
   assert.throws(() => validateManifest(duplicate), /duplicate/);
 });
 
+test("all 21 sanitized real AWS forbidden responses match the reviewed contracts", () => {
+  const items = deriveRequiredEvaluations(plan, manifest).forbidden;
+  assert.equal(realForbiddenSimulations.evaluations.length, 21);
+  for (const fixture of realForbiddenSimulations.evaluations) {
+    const item = items.find(({ manifestId }) => manifestId === fixture.manifestId);
+    assert.ok(item, fixture.manifestId);
+    const result = simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify(fixture.response) });
+    assert.equal(result.decision, item.expectedDecision);
+    assert.deepEqual(result.missingContextValues, item.expectedMissingContextValues);
+  }
+});
+
+test("forbidden context comparison rejects missing, additional, wrong, duplicate, and misplaced values", () => {
+  const items = deriveRequiredEvaluations(plan, manifest).forbidden;
+  const implicit = structuredClone(items.find(({ manifestId }) => manifestId === "backend-list-bucket-not-required"));
+  implicit.forbidden = true;
+  const explicit = structuredClone(items.find(({ manifestId }) => manifestId === "backend-state-delete"));
+  explicit.forbidden = true;
+  const exact = { decision: implicit.expectedDecision, matchedStatements: 0, missingContextValues: implicit.expectedMissingContextValues };
+  assert.throws(() => validateSimulationResult({ ...implicit, expectedMissingContextValues: implicit.expectedMissingContextValues.slice(1) }, exact), /unexpected MissingContextValues/);
+  assert.throws(() => validateSimulationResult(implicit, { ...exact, missingContextValues: [...exact.missingContextValues, "unexpected:key"] }), /unexpected MissingContextValues/);
+  assert.throws(() => validateSimulationResult(implicit, { ...exact, missingContextValues: ["wrong:key", ...exact.missingContextValues.slice(1)] }), /unexpected MissingContextValues/);
+  assert.throws(() => validateSimulationResult(implicit, { ...exact, missingContextValues: [] }), /unexpected MissingContextValues/);
+  assert.throws(() => validateSimulationResult(explicit, { decision: explicit.expectedDecision, matchedStatements: 1, missingContextValues: ["aws:RequestedRegion"] }), /unexpected MissingContextValues/);
+  assert.throws(() => validateSimulationResult(implicit, { ...exact, missingContextValues: [...exact.missingContextValues, exact.missingContextValues[0]] }), /duplicate/);
+  assert.throws(() => validateSimulationResult(implicit, { ...exact, decision: "allowed" }), /returned decision allowed/);
+});
+
+test("every reviewed missing-context key has a canonical policy statement origin", () => {
+  const origins = sourcePolicyConditionKeyOrigins();
+  const expectedKeys = [...new Set(manifest.forbidden.flatMap(({ expectedMissingContextValues }) => expectedMissingContextValues))].sort();
+  assert.deepEqual([...origins.keys()].sort(), expectedKeys);
+  for (const key of expectedKeys) assert.ok(origins.get(key).every(({ policy, sid, operator, sourcePath }) => policy && sid && operator && sourcePath), key);
+  const missingOrigin = new Map(origins); missingOrigin.delete(expectedKeys[0]);
+  assert.throws(() => validateManifest(manifest, { conditionKeyOrigins: missingOrigin }), /no reviewed source-policy origin/);
+  const newCondition = new Map(origins); newCondition.set("new:ConditionKey", [{ policy: "fixture", sid: "NewCondition", operator: "StringEquals", sourcePath: "fixture.json" }]);
+  assert.throws(() => validateManifest(manifest, { conditionKeyOrigins: newCondition }), /differs from reviewed source-policy conditions/);
+});
+
+test("production-shaped plan requires and binds the exact account and region variables", () => {
+  const bytes = fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
+  const productionPlan = JSON.parse(bytes);
+  const run = (selectedPlan) => runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: selectedPlan, planBytes: Buffer.from(JSON.stringify(selectedPlan)), savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
+  for (const key of ["account_id", "aws_region"]) {
+    const missing = structuredClone(productionPlan); delete missing.variables[key];
+    assert.throws(() => run(missing), /Plan account or region is wrong/);
+  }
+  assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, account_id: { value: "000000000000" } } }), /Plan account or region is wrong/);
+  assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
+  const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
+  assert.equal(report.status, "valid");
+  assert.equal(report.requiredEvaluations.length, 89);
+  assert.equal(report.forbiddenEvaluations.length, 21);
+  for (const evaluation of report.requiredEvaluations) {
+    for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
+    if (evaluation.resource.startsWith("arn:aws:") && !evaluation.resource.startsWith("arn:aws:s3:::")) assert.ok(evaluation.resource === "*" || evaluation.resource.includes(":368992683803:"), evaluation.resource);
+  }
+});
+
 test("signed permission reports bind expected and actual missing context", () => {
   const report = validReport();
   assertReport(report, reportBinding(report));
@@ -196,6 +263,9 @@ test("signed permission reports bind expected and actual missing context", () =>
     tampered.forbiddenEvaluations.find((item) => item.manifestId === "backend-list-bucket-not-required")[field] = ["s3:prefix"];
     assert.throws(() => assertReport(tampered, reportBinding(tampered)), /different expected missing context|unexpected MissingContextValues|inconsistent validation evidence/);
   }
+  const tampered = structuredClone(report);
+  tampered.forbiddenEvaluations[0].missingContextExactMatch = false;
+  assert.throws(() => assertReport(tampered, reportBinding(tampered)), /inconsistent validation evidence/);
 });
 
 test("exact canary create derives Register, TagResource, and both PassRole evaluations", () => {
@@ -258,7 +328,7 @@ test("broker managed-policy simulation allows the exact update and rejects impli
   const brokerPlan = { ...plan, resource_changes: [plan.resource_changes[1]] };
   const evaluate = (decision) => runPermissionPreflight({
     reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: brokerPlan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session",
-    simulate: ({ evaluation }) => evaluation.action.startsWith("iam:") ? { decision, matchedStatements: 1, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }),
+    simulate: ({ evaluation }) => !evaluation.forbidden && evaluation.action.startsWith("iam:") ? { decision, matchedStatements: 1, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }),
     cloudTrail: clearCloudTrail,
   });
   assert.equal(evaluate("allowed").requiredEvaluations.find((item) => item.action === "iam:CreatePolicyVersion").decision, "allowed");
@@ -284,7 +354,7 @@ test("complete mocked preflight passes and binds the exact plan SHA", () => {
 test("missing required PassRole fails closed", () => {
   const report = runPermissionPreflight({
     reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
-    simulate: ({ evaluation }) => evaluation.action === "iam:PassRole" ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }),
+    simulate: ({ evaluation }) => !evaluation.forbidden && evaluation.action === "iam:PassRole" ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }),
     cloudTrail: clearCloudTrail,
   });
   assert.equal(report.status, "invalid");
@@ -333,13 +403,11 @@ test("IAM simulation uses argv arrays and passes context explicitly", () => {
 });
 
 test("forbidden allowed evaluation fails closed", () => {
-  const report = runPermissionPreflight({
+  assert.throws(() => runPermissionPreflight({
     reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
     simulate: ({ evaluation }) => evaluation.id.startsWith("pass-unrelated-role") ? { decision: "allowed", matchedStatements: 1, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }),
     cloudTrail: clearCloudTrail,
-  });
-  assert.equal(report.status, "invalid");
-  assert.ok(report.forbiddenEvaluations.some((item) => item.id.startsWith("pass-unrelated-role") && item.decision === "allowed"));
+  }), /returned decision allowed/);
 });
 
 test("wrong plan binding and stale reports are rejected", () => {
@@ -663,7 +731,9 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     resource: entry.resources[0],
     context: entry.context,
     expectedMissingContextValues: entry.expectedMissingContextValues || [],
+    ...(forbidden ? { expectedDecision: entry.expectedDecision } : {}),
     missingContextValues,
+    missingContextExactMatch: true,
     decision,
     matchedStatements: forbidden ? 0 : 1,
     validation: forbidden ? "accepted" : "accepted",
@@ -685,7 +755,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     canonicalPlanJsonSha256: canonicalHash,
     generatedAt: new Date().toISOString(),
     requiredEvaluations: [fixtureEvaluation(requiredFixtureEntry, false, "allowed", [])],
-    forbiddenEvaluations: [fixtureEvaluation(forbiddenFixtureEntry, true, "implicitDeny", [])],
+    forbiddenEvaluations: [fixtureEvaluation(forbiddenFixtureEntry, true, forbiddenFixtureEntry.expectedDecision, forbiddenFixtureEntry.expectedMissingContextValues)],
     cloudTrail: { status: "clear", unresolvedDenials: [] },
     policyEvidence,
     requiredAllowedCount: 1,

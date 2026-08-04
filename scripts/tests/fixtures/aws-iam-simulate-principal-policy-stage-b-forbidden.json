@@ -1,0 +1,598 @@
+{
+  "schemaVersion": 1,
+  "source": "sanitized post-reconciliation IAM SimulatePrincipalPolicy responses",
+  "evaluations": [
+    {
+      "manifestId": "backend-bucket-delete",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:DeleteBucket",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-bucket-policy-write",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:PutBucketPolicy",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-encryption-write",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:PutEncryptionConfiguration",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-legacy-lock-delete",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:DeleteObject",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock",
+            "EvalDecision": "explicitDeny",
+            "MatchedStatements": [
+              {
+                "SourcePolicyId": "reviewed-explicit-deny",
+                "StartPosition": {
+                  "Line": 1,
+                  "Column": 1
+                },
+                "EndPosition": {
+                  "Line": 1,
+                  "Column": 1
+                }
+              }
+            ],
+            "MissingContextValues": []
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-legacy-lock-read",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:GetObject",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock",
+            "EvalDecision": "explicitDeny",
+            "MatchedStatements": [
+              {
+                "SourcePolicyId": "reviewed-explicit-deny",
+                "StartPosition": {
+                  "Line": 1,
+                  "Column": 1
+                },
+                "EndPosition": {
+                  "Line": 1,
+                  "Column": 1
+                }
+              }
+            ],
+            "MissingContextValues": []
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-legacy-state-read",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:GetObject",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate",
+            "EvalDecision": "explicitDeny",
+            "MatchedStatements": [
+              {
+                "SourcePolicyId": "reviewed-explicit-deny",
+                "StartPosition": {
+                  "Line": 1,
+                  "Column": 1
+                },
+                "EndPosition": {
+                  "Line": 1,
+                  "Column": 1
+                }
+              }
+            ],
+            "MissingContextValues": []
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-legacy-state-write",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:PutObject",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-b/terraform.tfstate",
+            "EvalDecision": "explicitDeny",
+            "MatchedStatements": [
+              {
+                "SourcePolicyId": "reviewed-explicit-deny",
+                "StartPosition": {
+                  "Line": 1,
+                  "Column": 1
+                },
+                "EndPosition": {
+                  "Line": 1,
+                  "Column": 1
+                }
+              }
+            ],
+            "MissingContextValues": []
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-list-bucket-not-required",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:ListBucket",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-other-production-workspace-read",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:GetObject",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/other/terraform.tfstate",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-other-stage-b-key-read",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:GetObject",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/other.tfstate",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-state-delete",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:DeleteObject",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate",
+            "EvalDecision": "explicitDeny",
+            "MatchedStatements": [
+              {
+                "SourcePolicyId": "reviewed-explicit-deny",
+                "StartPosition": {
+                  "Line": 1,
+                  "Column": 1
+                },
+                "EndPosition": {
+                  "Line": 1,
+                  "Column": 1
+                }
+              }
+            ],
+            "MissingContextValues": []
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-unrelated-bucket-read",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:GetObject",
+            "EvalResourceName": "arn:aws:s3:::unrelated-bucket/state.tfstate",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-versioning-write",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:PutBucketVersioning",
+            "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "backend-wildcard-object-read",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "s3:GetObject",
+            "EvalResourceName": "*",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "create-iam-role",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "iam:CreateRole",
+            "EvalResourceName": "*",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "deregister-task-definition",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "ecs:DeregisterTaskDefinition",
+            "EvalResourceName": "*",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "execute-ecs-task",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "ecs:RunTask",
+            "EvalResourceName": "*",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "invoke-broker",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "lambda:InvokeFunction",
+            "EvalResourceName": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "pass-to-lambda",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "iam:PassRole",
+            "EvalResourceName": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "pass-unrelated-role",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "iam:PassRole",
+            "EvalResourceName": "arn:aws:iam::368992683803:role/mscqr-production-unrelated-role",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "manifestId": "update-ecs-service",
+      "response": {
+        "EvaluationResults": [
+          {
+            "EvalActionName": "ecs:UpdateService",
+            "EvalResourceName": "*",
+            "EvalDecision": "implicitDeny",
+            "MatchedStatements": [],
+            "MissingContextValues": [
+              "aws:ResourceTag/Component",
+              "aws:ResourceTag/ManagedBy",
+              "ecs:task-cpu",
+              "ecs:cluster",
+              "iam:PassedToService",
+              "ecs:compute-compatibility",
+              "aws:RequestedRegion",
+              "ecs:privileged",
+              "aws:RequestTag/Component",
+              "ecs:task-memory",
+              "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/Environment",
+              "aws:TagKeys",
+              "aws:ResourceTag/Environment"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

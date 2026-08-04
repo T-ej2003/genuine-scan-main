@@ -12,6 +12,8 @@
     }
   },
   "variables": {
+    "account_id": { "value": "368992683803" },
+    "aws_region": { "value": "eu-west-2" },
     "tooling_sha": { "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
     "image_release_sha": { "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     "canonical_image_evidence_sha256": { "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }

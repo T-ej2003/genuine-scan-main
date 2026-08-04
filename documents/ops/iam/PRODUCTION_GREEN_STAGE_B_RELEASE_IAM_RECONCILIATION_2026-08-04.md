@@ -59,6 +59,66 @@ authorization types and the IAM simulation API. Region, exact request tags,
 and the exact tag-key set remain mandatory. Missing, duplicate, unknown, or
 cross-family values fail before report signing.
 
+## Administrator preflight denial context
+
+The production-shaped plan fixture carries the reviewed Terraform variable
+shape: `account_id.value=368992683803` and `aws_region.value=eu-west-2`.
+The preflight has no fallback for either value.
+
+AWS principal simulation reports condition keys referenced by attached
+canonical policies even while a forbidden action remains denied. The manifest
+therefore records the exact decision and order-independent missing-context set:
+
+| Evaluation | Decision | Expected set |
+|---|---|---|
+| `backend-bucket-delete` | `implicitDeny` | FULL-14 |
+| `backend-bucket-policy-write` | `implicitDeny` | FULL-14 |
+| `backend-encryption-write` | `implicitDeny` | FULL-14 |
+| `backend-legacy-lock-delete` | `explicitDeny` | EMPTY |
+| `backend-legacy-lock-read` | `explicitDeny` | EMPTY |
+| `backend-legacy-state-read` | `explicitDeny` | EMPTY |
+| `backend-legacy-state-write` | `explicitDeny` | EMPTY |
+| `backend-list-bucket-not-required` | `implicitDeny` | FULL-14 |
+| `backend-other-production-workspace-read` | `implicitDeny` | FULL-14 |
+| `backend-other-stage-b-key-read` | `implicitDeny` | FULL-14 |
+| `backend-state-delete` | `explicitDeny` | EMPTY |
+| `backend-unrelated-bucket-read` | `implicitDeny` | FULL-14 |
+| `backend-versioning-write` | `implicitDeny` | FULL-14 |
+| `backend-wildcard-object-read` | `implicitDeny` | FULL-14 |
+| `create-iam-role` | `implicitDeny` | FULL-14 |
+| `deregister-task-definition` | `implicitDeny` | FULL-14 |
+| `execute-ecs-task` | `implicitDeny` | FULL-14 |
+| `invoke-broker` | `implicitDeny` | FULL-14 |
+| `pass-to-lambda` | `implicitDeny` | PASSROLE-13 |
+| `pass-unrelated-role` | `implicitDeny` | PASSROLE-13 |
+| `update-ecs-service` | `implicitDeny` | FULL-14 |
+
+`FULL-14` is the sorted set `aws:RequestTag/Component`,
+`aws:RequestTag/Environment`, `aws:RequestTag/ManagedBy`,
+`aws:RequestedRegion`, `aws:ResourceTag/Component`,
+`aws:ResourceTag/Environment`, `aws:ResourceTag/ManagedBy`, `aws:TagKeys`,
+`ecs:cluster`, `ecs:compute-compatibility`, `ecs:privileged`, `ecs:task-cpu`,
+`ecs:task-memory`, and `iam:PassedToService`. `PASSROLE-13` omits
+`iam:PassedToService` because both PassRole controls supply it. `EMPTY` has no
+keys. Thus 16 implicit denials have non-empty sets and five explicit backend
+denials have empty sets.
+
+| Condition keys | Reviewed statement origins |
+|---|---|
+| `aws:RequestTag/Component`, `Environment`, `ManagedBy` | `RegisterExactStageBReadOnlyCanaryTaskDefinition`; `TagExactStageBLogs`; `TagExactReplayTable`; `TagExactStageBTaskDefinitions`; `RegisterExactStageBTaskDefinitions1024`; `RegisterExactStageBTaskDefinitionWorker` |
+| `aws:RequestedRegion` | Region-bound FinalApplyWrite, ProviderReadOnly, ProviderRecovery, ReferenceAuditReadOnly, and TaskDefinitionRegistration statements |
+| `aws:ResourceTag/Component`, `Environment`, `ManagedBy` | `UpdateExactStageBBrokerFunctionRelease`; `UpdateExactStageBBrokerReviewedAlias` |
+| `aws:TagKeys` | Canary and task-definition registration statements plus the ProviderRecovery tag statements |
+| `ecs:cluster` | `ListStageBServicesAndTasks`; `DescribeStageBServicesAndTasks` |
+| `ecs:compute-compatibility`, `ecs:privileged`, `ecs:task-cpu`, `ecs:task-memory` | `RegisterExactStageBTaskDefinitions1024`; `RegisterExactStageBTaskDefinitionWorker` |
+| `iam:PassedToService` | `PassExactStageBReadOnlyCanaryRolesToEcsTasks`; `PassOnlyExactStageBTaskRolesToEcsTasks` |
+
+Validation fails for an unexplained key, source-condition drift, a different
+deny kind, or any missing, extra, duplicate, or wrong observed key. Required
+evaluations still reject every non-empty missing-context set. Signed reports
+preserve expected and observed sets; closure and apply revalidate them against
+the bound manifest SHA.
+
 ## Canonical attachment set
 
 The release role must have exactly these sorted managed-policy ARNs:
