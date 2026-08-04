@@ -29,7 +29,7 @@ Generated from the permission manifest, reviewed source policies, release probes
 | 18 | stage-a-state-read | `scripts/aws/run-production-green-stage-b-preflight.mjs` |
 | 19 | stage-a-handoff-generation | `scripts/aws/generate-production-green-stage-a-prerequisites.mjs` |
 | 20 | tfvars-generation | `scripts/aws/generate-production-green-stage-b-tfvars.mjs` |
-| 21 | refresh-only | `scripts/plan-production-green-stage-b.mjs` |
+| 21 | refresh-only | `scripts/refresh-production-green-stage-b.mjs` |
 | 22 | saved-plan-generation | `scripts/plan-production-green-stage-b.mjs` |
 | 23 | plan-json-canonicalization | `scripts/plan-production-green-stage-b.mjs` |
 | 24 | reference-audit | `scripts/aws/generate-production-green-stage-b-reference-audit.mjs` |

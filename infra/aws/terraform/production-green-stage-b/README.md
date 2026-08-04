@@ -6,7 +6,7 @@ Stage A exclusively owns `/ecs/mscqr-production/full-rls-green`, `/aws/lambda/ms
 
 Use only an MFA-backed non-root `mscqr-production-release-deployer` session with the dedicated encrypted production state backend configured directly to the existing production state key and `TF_WORKSPACE=default`. The explicit `deployment_environment = "production"` variable retains the environment guard without workspace indirection. Generate the Stage-A prerequisite artifact first from the exact Stage-A state backup plus read-only live networking evidence; do not construct it by hand. It must conform to [`stage-a-prerequisites.schema.json`](./stage-a-prerequisites.schema.json), bind the exact Stage-A object, lineage, serial, SHA and tooling identity, and prove private multi-AZ NAT routing. Its recorded lineage, serial, and SHA must exactly equal the parsed bound backup; the binding report records those parsed backup values. Stage A (`02afb75a-f902-ab8a-f4c1-751d4aef7837`, serial >=35) and Stage B (`4e438e59-8b8b-194d-030c-5ede0c26344a`, serial >=76) state contracts are independent and cannot be substituted. The five image inputs must be ECR `@sha256` references; the release, source-contract, migration, and package checksum inputs are derived and mandatory.
 
-The generator verifies the signed schema-v3 image evidence, derives all five Terraform image variables without digest reconstruction, derives retained definitions from the supplied production state backup, and atomically writes mode-0600 outputs only after validation. Do not use heredocs, inline scripts, copied tfvars, manual digest values, or post-generation edits.
+The generator emits canonical HCL tfvars only to an absolute `.tfvars` path, records the format and filename in the binding report, verifies the signed schema-v3 image evidence, derives all five Terraform image variables without digest reconstruction, derives retained definitions from the supplied production state backup, and atomically writes mode-0600 outputs only after validation. Do not use `.json`/`.tfvars.json` names, heredocs, inline scripts, copied tfvars, manual digest values, or post-generation edits.
 
 ```sh
 node scripts/aws/generate-production-green-stage-a-prerequisites.mjs \
@@ -34,6 +34,8 @@ npm run stage-b:generate-tfvars -- \
 ```
 
 Record the generated tfvars SHA and binding-report SHA. Closure, plan generation, and both wrapper modes must receive --tfvars, --tfvars-binding-report, --tfvars-binding-report-sha256, and --tooling-tree-sha256; a modified tfvars file, missing provenance, or current broker ZIP byte mismatch is rejected before Terraform execution. The real apply path repeats the ZIP check immediately before applying the saved plan.
+
+Refresh-only is available only through `npm run stage-b:refresh-only -- --closure-mode production ...`. It validates the canonical `.tfvars` contract, initialized backend metadata, protected checkout, and `TF_WORKSPACE=default` before running one untargeted refresh-only plan. `--terraform-data-dir` must be an existing private directory, `--backend-metadata` must be its exact `terraform.tfstate` child, and both Terraform subprocesses receive that same directory as `TF_DATA_DIR`. It never accepts an output plan path or Terraform `-out` flag.
 
 ## Generator input inventory
 

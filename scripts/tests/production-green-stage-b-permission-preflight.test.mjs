@@ -831,6 +831,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   const brokerBytes = fs.readFileSync(brokerPackagePath);
   const tfvarsBindingReport = {
     schemaVersion: 1, tfvarsSchemaVersion: 1, generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+    tfvarsFormat: "hcl", tfvarsFileName: path.basename(tfvarsPath), tfvarsExtension: ".tfvars",
     toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), imageReleaseSha: "a".repeat(40), imageEvidenceCanonicalSha256: canonicalImageEvidenceSha256,
     stageAInputPath, stageAInputSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAInputPath)).digest("hex"), stageAStateBackupPath, stageAStateBackupSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAStateBackupPath)).digest("hex"), stageAStateObject: "mscqr/production/rls-green/stage-a/terraform.tfstate", stageAStateLineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", stageAStateSerial: 35, stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 76, brokerPackagePath,
     brokerPackageRawSha256: crypto.createHash("sha256").update(brokerBytes).digest("hex"), brokerPackageBase64Sha256: crypto.createHash("sha256").update(brokerBytes).digest("base64"),
