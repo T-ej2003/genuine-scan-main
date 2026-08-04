@@ -8,6 +8,7 @@ import {
   readIdentityCapabilityMatrix,
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
+import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 
@@ -28,9 +29,36 @@ const allowed = (args) => {
 
 test("identity matrix assigns IAM simulation only to administrator", () => {
   const matrix = readIdentityCapabilityMatrix();
-  assert(matrix.calls.some(({ identity, action }) => identity === "administrator" && action === "iam:SimulatePrincipalPolicy"));
-  assert(!matrix.calls.some(({ identity, action }) => identity === "release-deployer" && action === "iam:SimulatePrincipalPolicy"));
-  assert.equal(new Set(matrix.calls.filter(({ permissionManifestId }) => permissionManifestId).map(({ permissionManifestId }) => permissionManifestId)).size > 0, true);
+  assert(matrix.calls.some(({ identity, action }) => identity === "ADMINISTRATOR" && action === "iam:SimulatePrincipalPolicy"));
+  assert(!matrix.calls.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy"));
+  assert.equal(matrix.phases.length, 31);
+});
+
+test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
+  const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
+  assert.deepEqual(first, second);
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 31, capabilities: 111, uniqueActions: 78, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
+  assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
+});
+
+test("unknown, removed, or identity-reassigned capabilities fail graph verification", () => {
+  const unknown = buildStageBDeploymentCapabilityGraph(); unknown.capabilities.push({ ...unknown.capabilities[0], id: "unknown-call", action: "sns:Publish" });
+  assert.throws(() => assertStageBDeploymentCapabilityGraph(unknown), /stale or incomplete/);
+  const removed = buildStageBDeploymentCapabilityGraph(); removed.capabilities.pop();
+  assert.throws(() => assertStageBDeploymentCapabilityGraph(removed), /stale or incomplete/);
+  const reassigned = buildStageBDeploymentCapabilityGraph(); reassigned.capabilities.find(({ action }) => action === "iam:SimulatePrincipalPolicy").identity = "RELEASE_DEPLOYER";
+  assert.throws(() => assertStageBDeploymentCapabilityGraph(reassigned), /stale or incomplete/);
+});
+
+test("a newly discovered AWS CLI action fails until it is classified", () => {
+  assert.throws(() => assertStageBAwsCallCoverage(buildStageBDeploymentCapabilityGraph(), [{ sourceFile: "new-production-path.mjs", action: "sns:Publish" }]), /absent from capability graph/);
+});
+
+test("release probes cover policy-list access on both canary roles", () => {
+  for (const role of ["mscqr-production-full-rls-green-read-only-canary-execution", "mscqr-production-full-rls-green-read-only-canary-task"]) {
+    for (const operation of ["list-role-policies", "list-attached-role-policies"]) assert(RELEASE_READ_PROBES.some(({ args }) => args.includes(role) && args.includes(operation)));
+  }
 });
 
 test("release preflight aggregates independent read denials and never simulates IAM", () => {
@@ -76,19 +104,20 @@ test("one command keeps administrator simulation and release reads on separate i
     caller: () => caller,
     verify: () => true,
     releasePreflight: () => { releaseReads += 1; return { schemaVersion: 1, caller, account: "368992683803", region: "eu-west-2", requiredReads: {}, failed: [], skipped: [], status: "valid" }; },
-    continueReadiness: () => ({ backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true }),
+    continueReadiness: () => ({ backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true }), validateCapabilityGraph: () => admin.capabilityGraph,
   });
   assert.equal(release.status, "ready-for-plan"); assert.equal(releaseReads, 1);
 });
 
 test("invalid release capability report stops before backend readiness", () => {
   const directory = temp(); const adminPath = path.join(directory, "admin.json"); const signaturePath = path.join(directory, "signature.json");
-  fs.writeFileSync(adminPath, JSON.stringify({ schemaVersion: 1, purpose: "pre-plan-capability", status: "valid", simulatedRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", policyEvidence: shapedPolicyEvidence() }));
+  const capabilityGraph = assertStageBDeploymentCapabilityGraph();
+  fs.writeFileSync(adminPath, JSON.stringify({ schemaVersion: 1, purpose: "pre-plan-capability", status: "valid", simulatedRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", policyEvidence: shapedPolicyEvidence(), capabilityGraph }));
   fs.writeFileSync(signaturePath, "{}"); let continued = 0;
   const result = runProductionPreflightCli(["--identity", "release-deployer", "--output", path.join(directory, "release.json"), "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
     caller: () => caller, verify: () => true,
     releasePreflight: () => ({ requiredReads: { "ecs:DescribeClusters": "denied" }, failed: [{ action: "ecs:DescribeClusters" }], skipped: [], status: "blocked" }),
-    continueReadiness: () => { continued += 1; },
+    continueReadiness: () => { continued += 1; }, validateCapabilityGraph: () => capabilityGraph,
   });
   assert.equal(result.status, "blocked"); assert.equal(continued, 0); assert.equal(result.backendReady, false);
 });

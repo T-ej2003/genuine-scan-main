@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -6,12 +7,13 @@ import { fileURLToPath } from "node:url";
 import { classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
-import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, assertReleasePolicyEvidence, validateManifest, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
+import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, assertPermissionReportPlanBinding, assertReleasePolicyEvidence, validateManifest, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
 import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENCE_REVOCATION_MODEL } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { IMAGE_IMPACT_REPORT_REPO_PATH, assertImageImpactReport, parseStageBClosureMode } from "./validate-stage-b-image-reuse.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
+import { assertStageBDeploymentCapabilityGraph } from "./generate-production-green-stage-b-capability-graph.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -32,6 +34,7 @@ const matrix = JSON.parse(fs.readFileSync(matrixPath, "utf8"));
 const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 const backendPolicy = JSON.parse(fs.readFileSync(backendPolicyPath, "utf8"));
 const permissionManifest = JSON.parse(fs.readFileSync(permissionManifestPath, "utf8"));
+assertStageBDeploymentCapabilityGraph();
 const checkoutMode = process.env.STAGE_B_TOOLING_CHECKOUT_MODE || "review";
 const currentHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
 if (mode === "production" && checkoutMode !== "production") throw new Error("Production Stage B closure requires a protected-main checkout mode.");
@@ -53,9 +56,17 @@ if (mode === "production") {
   ];
   if (requiredProductionEvidence.some((name) => !process.env[name])) throw new Error("Production Stage B closure requires complete fresh deployment evidence.");
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(process.env.STAGE_B_TERRAFORM_BACKEND_METADATA_PATH, "utf8"))?.backend);
-  const permissionReport = JSON.parse(fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_PATH, "utf8"));
+  const permissionReportBytes = fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_PATH);
+  const permissionReport = JSON.parse(permissionReportBytes);
   const permissionSignature = JSON.parse(fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH, "utf8"));
   if (permissionReport.purpose !== "saved-plan-authorization" || permissionReport.status !== "valid") throw new Error("Production closure requires a valid saved-plan administrator permission report.");
+  if (crypto.createHash("sha256").update(permissionReportBytes).digest("hex") !== process.env.STAGE_B_PERMISSION_REPORT_SHA256) throw new Error("Production closure permission report SHA256 differs from the selected report.");
+  const planBinding = assertPermissionReportPlanBinding(permissionReport, {
+    planJsonBytes: fs.readFileSync(process.env.STAGE_B_PLAN_JSON_PATH),
+    savedPlanBytes: fs.readFileSync(process.env.STAGE_B_PLAN_PATH),
+    manifest: permissionManifest,
+  });
+  if (planBinding.planSha256 !== process.env.STAGE_B_PLAN_SHA256 || planBinding.savedPlanSha256 !== process.env.STAGE_B_SAVED_PLAN_SHA256 || planBinding.canonicalPlanJsonSha256 !== process.env.STAGE_B_CANONICAL_PLAN_JSON_SHA256) throw new Error("Production closure permission report is bound to different plan hashes.");
   assertReleasePolicyEvidence(permissionReport.policyEvidence);
   verifyPermissionReportSignature({ report: permissionReport, signatureArtifact: permissionSignature });
 }

@@ -101,6 +101,20 @@ export function canonicalizeJson(value) {
   return JSON.stringify(value);
 }
 
+export function assertPermissionReportPlanBinding(report, { planJsonBytes, savedPlanBytes, manifest } = {}) {
+  if (!Buffer.isBuffer(planJsonBytes) || !Buffer.isBuffer(savedPlanBytes) || !manifest) throw new Error("Permission report plan-binding inputs are incomplete.");
+  let plan;
+  try { plan = JSON.parse(planJsonBytes); } catch { throw new Error("Permission report plan JSON is malformed."); }
+  const expected = {
+    planSha256: sha256(planJsonBytes),
+    savedPlanSha256: sha256(savedPlanBytes),
+    canonicalPlanJsonSha256: sha256(Buffer.from(canonicalizeJson(plan))),
+    manifestSha256: sha256(Buffer.from(canonicalizeJson(manifest))),
+  };
+  for (const [field, value] of Object.entries(expected)) if (report?.[field] !== value) throw new Error(`Permission report ${field} does not match the selected deployment artifact.`);
+  return expected;
+}
+
 const decodePolicyDocument = (document) => typeof document === "string" ? JSON.parse(decodeURIComponent(document)) : document;
 export function sourcePolicyEvidence() {
   return RELEASE_POLICY_SOURCES.map(({ name, arn, sourcePath }) => {
@@ -613,6 +627,11 @@ export function runPermissionPreflight({
     cloudTrailWindow: { startTime: policyPublishedAt, endTime: generatedAt, sessionName: cloudTrailSessionName },
     requiredEvaluations: requiredResults,
     forbiddenEvaluations: forbiddenResults,
+    planCapabilities: {
+      schemaVersion: 1,
+      required: requiredResults.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision })),
+      forbidden: forbiddenResults.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision })),
+    },
     cloudTrail: cloudTrailResult,
     policyEvidence,
     policySourceLiveMismatchCount: policyEvidenceError ? 1 : 0,
@@ -637,11 +656,11 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   const plan = JSON.parse(planBytes);
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
   const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, savedPlanBytes, policyEvidence: collectPolicyEvidence() });
-  const signatureArtifact = signReport(report, { now: options.generatedAt });
   fs.writeFileSync(path.resolve(options.outputPath), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
-  fs.writeFileSync(path.resolve(options.signatureOutputPath), `${JSON.stringify(signatureArtifact, null, 2)}\n`, { mode: 0o600 });
   process.stdout.write(`${JSON.stringify({ status: report.status, outputPath: options.outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
-  if (report.status !== "valid") process.exitCode = 1;
+  if (report.status !== "valid") { process.exitCode = 1; return report; }
+  const signatureArtifact = signReport(report, { now: options.generatedAt });
+  fs.writeFileSync(path.resolve(options.signatureOutputPath), `${JSON.stringify(signatureArtifact, null, 2)}\n`, { mode: 0o600 });
   return report;
 }
 

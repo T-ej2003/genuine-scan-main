@@ -5,6 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { runReleaseReadPreflight } from "./production-green-stage-b-identity-capabilities.mjs";
+import { assertStageBDeploymentCapabilityGraph } from "./generate-production-green-stage-b-capability-graph.mjs";
 import { generateStageBTerraformBackendConfig } from "./generate-production-green-stage-b-backend-config.mjs";
 import { assertStageBTerraformInitializedBackendMetadata } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
@@ -16,6 +17,7 @@ import {
   REGION,
   RELEASE_ROLE_ARN,
   assertReleasePolicyEvidence,
+  canonicalizeJson,
   collectLiveReleasePolicyEvidence,
   runPermissionPreflight,
   signPermissionReport,
@@ -66,8 +68,9 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
   verify = verifyPermissionReportSignature,
   releasePreflight = runReleaseReadPreflight,
   continueReadiness = (argv) => continueReleaseReadiness(argv),
+  validateCapabilityGraph = assertStageBDeploymentCapabilityGraph,
 } = {}) {
-  const identity = value(argv, "--identity"); const output = value(argv, "--output"); const observedCaller = caller();
+  const identity = value(argv, "--identity"); const output = value(argv, "--output"); const capabilityGraph = validateCapabilityGraph(); const observedCaller = caller();
   if (identity === "administrator") {
     if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(observedCaller)) throw new Error("Administrator production preflight requires the approved root identity.");
     const planPath = path.join(root, "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
@@ -80,10 +83,11 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
       policyPublishedAt: generatedAt, cloudTrailSessionName: "pre-plan-capability", policyEvidence: collectPolicies(),
       cloudTrail: () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] }), purpose: "pre-plan-capability",
     });
+    report.capabilityGraph = capabilityGraph;
     const reportFile = write(output, report);
-    if (report.status !== "valid") return { identity, status: "blocked", administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: report.policySourceLiveMismatchCount, report: reportFile };
+    if (report.status !== "valid") return { identity, status: "blocked", administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: report.policySourceLiveMismatchCount, report: reportFile, capabilityGraph };
     const signature = sign(report, { now: generatedAt }); const signatureFile = write(value(argv, "--signature-output"), signature);
-    return { identity, status: report.status, administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: 0, report: reportFile, signature: signatureFile };
+    return { identity, status: report.status, administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: 0, report: reportFile, signature: signatureFile, capabilityGraph };
   }
   if (identity === "release-deployer") {
     if (!new RegExp(`^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`).test(observedCaller)) throw new Error("Release production preflight requires the exact release-deployer identity.");
@@ -91,17 +95,19 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     const signature = JSON.parse(fs.readFileSync(path.resolve(value(argv, "--administrator-report-signature")), "utf8"));
     verify({ report: adminReport, signatureArtifact: signature });
     if (adminReport.purpose !== "pre-plan-capability" || adminReport.status !== "valid" || adminReport.simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Administrator pre-plan capability report is invalid.");
+    if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
     assertReleasePolicyEvidence(adminReport.policyEvidence);
     const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)) });
     report.requiredReads["kms:Verify"] = "allowed";
     report.administratorReportSha256 = sha256(adminReportBytes);
     report.policyVersions = adminReport.policyEvidence.policies.map(({ arn, defaultVersionId, liveSha256 }) => ({ arn, defaultVersionId, liveSha256 }));
     if (report.status !== "valid") {
-      const reportFile = write(output, report);
-      return { identity, status: report.status, releaseReadCapabilities: { failed: report.failed.length, skipped: report.skipped.length }, report: reportFile, backendReady: false, stateReady: false, handoffReady: false, tfvarsReady: false };
+      const blockedReport = { ...report, capabilityGraph, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, releaseReadFailures: report.failed.length, configurationFailures: 0 };
+      const reportFile = write(output, blockedReport);
+      return { identity, status: report.status, releaseReadCapabilities: { failed: report.failed.length, skipped: report.skipped.length }, report: reportFile, backendReady: false, stateReady: false, handoffReady: false, tfvarsReady: false, capabilityGraph };
     }
-    const readiness = continueReadiness(argv); const reportFile = write(output, { ...report, ...readiness, status: "ready-for-plan" });
-    return { identity, status: "ready-for-plan", releaseReadCapabilities: { failed: 0, skipped: 0 }, report: reportFile, ...readiness };
+    const readiness = continueReadiness(argv); const finalReport = { ...report, ...readiness, capabilityGraph, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, releaseReadFailures: 0, configurationFailures: 0, status: "ready-for-plan" }; const reportFile = write(output, finalReport);
+    return { identity, status: "ready-for-plan", releaseReadCapabilities: { failed: 0, skipped: 0 }, report: reportFile, ...readiness, capabilityGraph };
   }
   throw new Error("--identity must be administrator or release-deployer.");
 }

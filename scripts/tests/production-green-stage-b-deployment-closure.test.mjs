@@ -6,6 +6,12 @@ import { classifyStageBPlan } from "../aws/stage-b-deployment-contract.mjs";
 const fixturePath = "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json";
 const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 
+test("production closure binds signed permission evidence to every selected plan artifact", () => {
+  const source = fs.readFileSync("scripts/aws/validate-stage-b-deployment-closure.mjs", "utf8");
+  assert.match(source, /assertPermissionReportPlanBinding/);
+  for (const name of ["STAGE_B_PLAN_SHA256", "STAGE_B_SAVED_PLAN_SHA256", "STAGE_B_CANONICAL_PLAN_JSON_SHA256", "STAGE_B_PERMISSION_REPORT_SHA256"]) assert.match(source, new RegExp(name));
+});
+
 test("production-shaped Stage B plan is fully classified with zero destroys", () => {
   const result = classifyStageBPlan(fixture, { strict: false });
   assert.deepEqual(result.actionCounts, { "no-op": 58, create: 12, update: 3 });

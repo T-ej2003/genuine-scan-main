@@ -7,6 +7,7 @@ import test from "node:test";
 import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, runApply } from "../apply-production-green-stage-b.mjs";
 import {
   canonicalizeJson,
+  assertPermissionReportPlanBinding,
   deriveRequiredEvaluations,
   PERMISSION_REPORT_SIGNING_ALGORITHM,
   PERMISSION_REPORT_SIGNING_KEY_ARN,
@@ -38,6 +39,19 @@ const policyEvidence = (() => {
   return { roleArn, attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: [], inlinePolicies: [], permissionsBoundaryArn: null, policies, status: "valid" };
 })();
 const runPermissionPreflight = (input) => runPermissionPreflightRaw({ policyEvidence, ...input });
+
+test("permission report identity fields exactly bind the selected plan artifacts", () => {
+  const planJsonBytes = fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
+  const savedPlanBytes = Buffer.from("selected-saved-plan");
+  const report = {
+    planSha256: crypto.createHash("sha256").update(planJsonBytes).digest("hex"),
+    savedPlanSha256: crypto.createHash("sha256").update(savedPlanBytes).digest("hex"),
+    canonicalPlanJsonSha256: crypto.createHash("sha256").update(canonicalizeJson(JSON.parse(planJsonBytes))).digest("hex"),
+    manifestSha256: crypto.createHash("sha256").update(canonicalizeJson(manifest)).digest("hex"),
+  };
+  assert.deepEqual(assertPermissionReportPlanBinding(report, { planJsonBytes, savedPlanBytes, manifest }), report);
+  for (const field of Object.keys(report)) assert.throws(() => assertPermissionReportPlanBinding({ ...report, [field]: "0".repeat(64) }, { planJsonBytes, savedPlanBytes, manifest }), new RegExp(field));
+});
 const plan = {
   variables: {
     account_id: { value: "368992683803" },
@@ -508,6 +522,17 @@ test("CLI passes its parsed manifest through the same preflight entrypoint", () 
   assert.equal(JSON.parse(fs.readFileSync(signaturePath, "utf8")).reportSha256, reportSignature(JSON.parse(fs.readFileSync(outputPath, "utf8"))).reportSha256);
 });
 
+test("invalid administrator permission evidence is recorded but never signed", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-invalid-preflight-"));
+  const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json"); const outputPath = path.join(directory, "report.json"); const signaturePath = path.join(directory, "report.signature.json");
+  fs.writeFileSync(planPath, planBytes); fs.writeFileSync(savedPath, savedPlanBytes); fs.writeFileSync(manifestPath, JSON.stringify(manifest)); let signed = 0;
+  runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test"], {
+    getCaller: () => generatorArn, collectPolicyEvidence: () => policyEvidence,
+    runPreflight: () => ({ status: "invalid", generatedAt: now, deniedCount: 2 }), signReport: () => { signed += 1; },
+  });
+  assert.equal(signed, 0); assert.equal(fs.existsSync(signaturePath), false); assert.equal(JSON.parse(fs.readFileSync(outputPath)).status, "invalid"); process.exitCode = 0;
+});
+
 test("CLI and programmatic preflight paths produce the same deterministic report", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-cli-equivalence-"));
   const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json"); const outputPath = path.join(directory, "report.json"); const signaturePath = path.join(directory, "report.signature.json");
@@ -639,6 +664,8 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   report.canonicalImageEvidenceSha256 = canonicalImageEvidenceSha256;
   report.planSha256 = planHash;
   report.canonicalPlanJsonSha256 = canonicalHash;
+  const projectCapabilities = (items) => items.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision }));
+  report.planCapabilities = { schemaVersion: 1, required: projectCapabilities(report.requiredEvaluations), forbidden: projectCapabilities(report.forbiddenEvaluations) };
   fs.writeFileSync(permissionPath, JSON.stringify(report));
   fs.writeFileSync(permissionSignaturePath, JSON.stringify(reportSignature(report)));
   fs.writeFileSync(imageEvidencePath, `${JSON.stringify(imageEvidence, null, 2)}\n`);
@@ -997,7 +1024,7 @@ test("verification-only and real apply paths reject an invalid report signature 
 
 test("saved-plan binding rejects stale, changed, or semantically different binary plans", () => {
   const fixture = wrapperFixture({ shownPlan: { ...plan, resource_changes: [{ address: "unexpected", change: { actions: ["delete"] } }] } });
-  assert.throws(() => assertApplyArtifacts({ ...fixture, planSha256: fixture.planHash, auditSha256: fixture.auditHash, savedPlanSha256: fixture.savedHash, canonicalPlanJsonSha256: fixture.canonicalHash, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true }), /Saved binary Terraform plan/);
+  assert.throws(() => assertApplyArtifacts({ ...fixture, planSha256: fixture.planHash, auditSha256: fixture.auditHash, savedPlanSha256: fixture.savedHash, canonicalPlanJsonSha256: fixture.canonicalHash, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true }), /Permission report canonicalPlanJsonSha256|Saved binary Terraform plan/);
   const changed = wrapperFixture({ savedBytes: Buffer.from("changed-binary") });
   assert.throws(() => assertApplyArtifacts({ ...changed, planSha256: changed.planHash, auditSha256: changed.auditHash, savedPlanSha256: fixture.savedHash, canonicalPlanJsonSha256: changed.canonicalHash, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => changed.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true }), /Saved Terraform plan SHA256/);
   assert.throws(() => assertApplyArtifacts({ ...fixture, planSha256: "0".repeat(64), auditSha256: fixture.auditHash, savedPlanSha256: fixture.savedHash, canonicalPlanJsonSha256: fixture.canonicalHash, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true }), /Plan JSON SHA256/);
