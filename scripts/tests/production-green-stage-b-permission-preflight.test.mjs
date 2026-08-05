@@ -29,6 +29,7 @@ import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit
 import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
 import { STAGE_B_EXPECTED_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 import { generateImageEvidence, imageEvidenceSha256, signImageEvidence, IMAGE_EVIDENCE_MAX_AGE_MS } from "../aws/production-green-stage-b-image-evidence.mjs";
+import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const realForbiddenSimulations = JSON.parse(fs.readFileSync("scripts/tests/fixtures/aws-iam-simulate-principal-policy-stage-b-forbidden.json", "utf8"));
@@ -42,6 +43,9 @@ const policyEvidence = (() => {
   return { roleArn, attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: [], inlinePolicies: [], permissionsBoundaryArn: null, policies, status: "valid" };
 })();
 const runPermissionPreflight = (input) => runPermissionPreflightRaw({ policyEvidence, ...input });
+const brokerFixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-permission-broker-fixture-"));
+const brokerFixture = await packageStageBBroker({ outputPath: path.join(brokerFixtureRoot, "broker.zip"), toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), repositoryRoot: process.cwd() });
+test.after(() => fs.rmSync(brokerFixtureRoot, { recursive: true, force: true }));
 const contextValue = (mapping, key) => mapping.registerContext.find((entry) => entry.key === key).values[0];
 const taskDefinitionAfter = (mapping) => ({
   family: mapping.family,
@@ -810,7 +814,10 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   writePrivate(imageEvidencePath, `${JSON.stringify(imageEvidence, null, 2)}\n`);
   writePrivate(imageEvidenceSignaturePath, JSON.stringify(signImageEvidence(imageEvidence, { sign: () => "AQ==" })));
   const brokerPackagePath = path.join(directory, "broker.zip");
-  fs.writeFileSync(brokerPackagePath, Buffer.from("broker package fixture"), { mode: 0o600 });
+  fs.copyFileSync(brokerFixture.package.path, brokerPackagePath); fs.chmodSync(brokerPackagePath, 0o600);
+  const brokerBytes = fs.readFileSync(brokerPackagePath);
+  const brokerPackageManifestPath = `${brokerPackagePath}.manifest.json`;
+  fs.copyFileSync(brokerFixture.manifest.path, brokerPackageManifestPath); fs.chmodSync(brokerPackageManifestPath, 0o600);
   const stageAStateBackupPath = path.join(directory, "stage-a-state.json");
   fs.writeFileSync(stageAStateBackupPath, JSON.stringify({ lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 35 }), { mode: 0o600 });
   const stageAInputPath = path.join(directory, "stage-a-prerequisites.json");
@@ -830,12 +837,11 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   ]);
   const tfvarsBytes = Buffer.from(["broker_package_path = " + JSON.stringify(brokerPackagePath), ...Object.entries(tfvarsValues).map(([key, value]) => key + " = " + JSON.stringify(value)), ""].join("\n"));
   fs.writeFileSync(tfvarsPath, tfvarsBytes, { mode: 0o600 });
-  const brokerBytes = fs.readFileSync(brokerPackagePath);
   const tfvarsBindingReport = {
-    schemaVersion: 1, tfvarsSchemaVersion: 1, generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+    schemaVersion: 2, tfvarsSchemaVersion: 1, generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
     tfvarsFormat: "hcl", tfvarsFileName: path.basename(tfvarsPath), tfvarsExtension: ".tfvars",
     toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), imageReleaseSha: "a".repeat(40), imageEvidenceCanonicalSha256: canonicalImageEvidenceSha256,
-    stageAInputPath, stageAInputSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAInputPath)).digest("hex"), stageAStateBackupPath, stageAStateBackupSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAStateBackupPath)).digest("hex"), stageAStateObject: "mscqr/production/rls-green/stage-a/terraform.tfstate", stageAStateLineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", stageAStateSerial: 35, stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 76, brokerPackagePath,
+    stageAInputPath, stageAInputSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAInputPath)).digest("hex"), stageAStateBackupPath, stageAStateBackupSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAStateBackupPath)).digest("hex"), stageAStateObject: "mscqr/production/rls-green/stage-a/terraform.tfstate", stageAStateLineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", stageAStateSerial: 35, stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 76, brokerPackagePath, brokerPackageManifestPath, brokerPackageManifestSha256: crypto.createHash("sha256").update(fs.readFileSync(brokerPackageManifestPath)).digest("hex"), brokerPackageManifestFormat: "stage-b-broker-zip-v2",
     brokerPackageRawSha256: crypto.createHash("sha256").update(brokerBytes).digest("hex"), brokerPackageBase64Sha256: crypto.createHash("sha256").update(brokerBytes).digest("base64"),
     tfvarsSha256: crypto.createHash("sha256").update(tfvarsBytes).digest("hex"),
     images: Object.fromEntries(Object.entries(tfvarsValues).map(([variable, imageReference]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: variable === "worker_image" ? "worker" : variable === "executor_image" ? "rls-executor" : variable.includes("canary") ? "rls-canary" : "backend", repository: variable === "worker_image" ? "mscqr-worker" : "mscqr-backend", tag: "a".repeat(40), imageReference, digestLength: 71, digest: imageReference.slice(imageReference.indexOf("@") + 1), matchesEvidence: true }])),
