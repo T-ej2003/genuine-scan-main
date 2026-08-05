@@ -1,10 +1,47 @@
+import fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import { assertObservedStageBImagePublicationMetadata, STAGE_B_IMAGE_ARTIFACT_NAME, STAGE_B_IMAGE_CANONICAL_FILENAME, STAGE_B_IMAGE_WORKFLOW_FILE, STAGE_B_IMAGE_WORKFLOW_NAME, writeStageBImagePublicationIdentity } from "./stage-b-image-publication-identity.mjs";
 
-const WORKFLOW = "production-green-stage-b-images.yml";
+export const STAGE_B_IMAGE_WORKFLOW = "production-green-stage-b-images.yml";
+export { STAGE_B_IMAGE_ARTIFACT_NAME, STAGE_B_IMAGE_CANONICAL_FILENAME as STAGE_B_IMAGE_ARTIFACT_FILE, STAGE_B_IMAGE_WORKFLOW_FILE, STAGE_B_IMAGE_WORKFLOW_NAME };
+export { assertObservedStageBImagePublicationMetadata };
 const APPROVED_WORKFLOW_REF = "main";
 const SHA_PATTERN = /^[a-f0-9]{40}$/;
 
 const runGh = (args, run = execFileSync) => run("gh", args, { encoding: "utf8", stdio: "pipe" });
+
+export function observeStageBImagePublication({ repository, workflowRunId, releaseSha, run = execFileSync } = {}) {
+  if (!/^\d+$/.test(String(workflowRunId || ""))) throw new Error("Observed Stage B workflow run ID is required.");
+  if (!/^[a-f0-9]{40}$/.test(String(releaseSha || ""))) throw new Error("Stage B release SHA must be a full 40-character commit SHA.");
+  const runRecord = JSON.parse(runGh(["api", `repos/${repository}/actions/runs/${workflowRunId}`], run));
+  const artifacts = JSON.parse(runGh(["api", `repos/${repository}/actions/runs/${workflowRunId}/artifacts`], run)).artifacts || [];
+  const matching = artifacts.filter((artifact) => artifact.name === STAGE_B_IMAGE_ARTIFACT_NAME);
+  if (matching.length !== 1) throw new Error("Stage B publication must have exactly one matching four-image artifact.");
+  const artifact = matching[0];
+  const observed = {
+    workflowRunId: String(runRecord.id),
+    workflowDatabaseId: String(runRecord.workflow_id),
+    workflowFile: runRecord.path,
+    workflowName: runRecord.name,
+    event: runRecord.event,
+    headSha: runRecord.head_sha,
+    headBranch: runRecord.head_branch,
+    conclusion: runRecord.conclusion,
+    artifactId: String(artifact.id),
+    artifactName: artifact.name,
+    artifactExpired: Boolean(artifact.expired),
+    artifactArchiveFilename: null,
+  };
+  assertObservedStageBImagePublicationMetadata(observed, { expectedReleaseSha: releaseSha });
+  return Object.freeze(observed);
+}
+
+export function writeObservedStageBImagePublicationIdentity({ repository, workflowRunId, releaseSha, canonicalArtifactPath, outputPath, repositoryRoot = process.cwd(), run = execFileSync } = {}) {
+  const artifactStat = fs.lstatSync(canonicalArtifactPath);
+  if (!artifactStat.isFile() || artifactStat.isSymbolicLink() || (artifactStat.mode & 0o777) !== 0o600) throw new Error("Stage B canonical image artifact must be a private regular file.");
+  const observed = observeStageBImagePublication({ repository, workflowRunId, releaseSha, run });
+  return writeStageBImagePublicationIdentity({ observed, artifactBytes: fs.readFileSync(canonicalArtifactPath), expectedReleaseSha: releaseSha, outputPath, repositoryRoot });
+}
 
 export const dispatchProductionGreenStageBImages = ({
   releaseSha,
@@ -20,8 +57,8 @@ export const dispatchProductionGreenStageBImages = ({
   const repo = repository || String(runGh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], run)).trim();
   if (!repo) throw new Error("Unable to resolve the Stage B image repository.");
   runGh(["api", `repos/${repo}/commits/${releaseSha}`], run);
-  runGh(["workflow", "run", WORKFLOW, "--repo", repo, "--ref", workflowRef, "-f", `release_sha=${releaseSha}`], run);
-  return { repository: repo, workflow: WORKFLOW, workflowRef, releaseSha };
+  runGh(["workflow", "run", STAGE_B_IMAGE_WORKFLOW, "--repo", repo, "--ref", workflowRef, "-f", `release_sha=${releaseSha}`], run);
+  return { repository: repo, workflow: STAGE_B_IMAGE_WORKFLOW, workflowFile: STAGE_B_IMAGE_WORKFLOW_FILE, workflowName: STAGE_B_IMAGE_WORKFLOW_NAME, workflowRef, artifactName: STAGE_B_IMAGE_ARTIFACT_NAME, artifactFile: STAGE_B_IMAGE_CANONICAL_FILENAME, releaseSha };
 };
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

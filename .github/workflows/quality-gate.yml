@@ -107,8 +107,21 @@ jobs:
       - name: Validate complete Stage B deployment closure
         run: npm run stage-b:deployment-closure:pull-request
 
-      - name: Upload Stage B pre-merge image-impact evidence
+      - name: Record Stage B image-impact evidence availability
         if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/stage-b-image-impact-${GITHUB_RUN_ID}.json"
+          if [[ -f "$report" ]]; then
+            echo "STAGE_B_IMAGE_IMPACT_ARTIFACT_EXISTS=true" >> "$GITHUB_ENV"
+          else
+            echo "STAGE_B_IMAGE_IMPACT_ARTIFACT_EXISTS=false" >> "$GITHUB_ENV"
+            echo "::notice title=Stage B image-impact evidence unavailable::The closure producer failed before generating ${report}; the primary closure failure remains authoritative."
+          fi
+
+      - name: Upload Stage B pre-merge image-impact evidence
+        if: always() && env.STAGE_B_IMAGE_IMPACT_ARTIFACT_EXISTS == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: stage-b-image-impact-${{ github.run_id }}
