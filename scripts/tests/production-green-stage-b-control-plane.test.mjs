@@ -148,3 +148,12 @@ test("Stage B workflow and Docker targets keep the executor fixed and front-end 
   const policy = fs.readFileSync("infra/aws/terraform/production-green-stage-b/broker/invocation-policy.json", "utf8");
   assert.match(policy, /mscqr-production-release-deployer/); assert.doesNotMatch(policy, /root|github-actions-mscqr-deploy|\*/i);
 });
+
+test("closure evidence upload preserves the primary failure when the producer emits no report", () => {
+  const qualityGate = fs.readFileSync(".github/workflows/quality-gate.yml", "utf8");
+  const record = qualityGate.indexOf("Record Stage B image-impact evidence availability");
+  const upload = qualityGate.indexOf("Upload Stage B pre-merge image-impact evidence");
+  assert.ok(record >= 0 && record < upload);
+  assert.match(qualityGate.slice(upload, upload + 500), /env\.STAGE_B_IMAGE_IMPACT_ARTIFACT_EXISTS == 'true'/);
+  assert.match(qualityGate.slice(record, upload), /primary closure failure remains authoritative/);
+});

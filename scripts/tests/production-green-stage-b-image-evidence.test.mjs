@@ -15,6 +15,7 @@ import {
   readImageRepositoryEvidence,
   runCli,
 } from "../aws/production-green-stage-b-image-evidence.mjs";
+import { buildStageBImagePublicationIdentity, publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 
@@ -40,6 +41,12 @@ const records = [
 });
 const artifactBytes = Buffer.from(`${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
 const artifactSha256 = crypto.createHash("sha256").update(artifactBytes).digest("hex");
+const publicationIdentity = buildStageBImagePublicationIdentity({
+  expectedReleaseSha: imageReleaseSha,
+  artifactBytes,
+  observed: { workflowRunId, workflowDatabaseId: "401", workflowFile: ".github/workflows/production-green-stage-b-images.yml", workflowName: "Production Green Stage B Images", event: "workflow_dispatch", headSha: imageReleaseSha, headBranch: "main", conclusion: "success", artifactId: "501", artifactName: "production-green-stage-b-images", artifactExpired: false, artifactArchiveFilename: null },
+  observedAt,
+});
 const repositoryEvidence = ["mscqr-backend", "mscqr-worker"].map((repository) => ({
   repositoryName: repository,
   repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`,
@@ -79,7 +86,15 @@ const imagePlan = (overrides = {}) => {
 };
 
 function reportFixture(overrides = {}) {
-  return generateImageEvidence({ artifactBytes, imageReleaseSha, workflowRunId, artifactSha256, verifierCallerArn, observedAt, describe, repositories: repositoryEvidence, ...overrides });
+  const selectedArtifactBytes = overrides.artifactBytes ?? artifactBytes;
+  const selectedArtifactSha256 = overrides.artifactSha256 ?? crypto.createHash("sha256").update(selectedArtifactBytes).digest("hex");
+  const selectedPublicationIdentity = overrides.publicationIdentity ?? (selectedArtifactBytes === artifactBytes ? publicationIdentity : buildStageBImagePublicationIdentity({
+    expectedReleaseSha: imageReleaseSha,
+    artifactBytes: selectedArtifactBytes,
+    observed: publicationIdentity,
+    observedAt,
+  }));
+  return generateImageEvidence({ artifactBytes: selectedArtifactBytes, imageReleaseSha, workflowRunId, artifactSha256: selectedArtifactSha256, publicationIdentity: selectedPublicationIdentity, verifierCallerArn, observedAt, describe, repositories: repositoryEvidence, ...overrides });
 }
 
 function signatureFixture(report, overrides = {}) {
@@ -117,9 +132,9 @@ test("release role is not an approved image-evidence verifier", () => {
 
 test("missing, duplicate, mismatched, or modified evidence fails closed", () => {
   const missing = Buffer.from(`${records.slice(0, 3).map(JSON.stringify).join("\n")}\n`);
-  assert.throws(() => reportFixture({ artifactBytes: missing, artifactSha256: crypto.createHash("sha256").update(missing).digest("hex") }), /exactly one record/);
+  assert.throws(() => reportFixture({ artifactBytes: missing, artifactSha256: crypto.createHash("sha256").update(missing).digest("hex") }), /exactly the four reviewed services/);
   const duplicate = Buffer.from(`${records.slice(0, 3).map(JSON.stringify).concat(JSON.stringify(records[0])).join("\n")}\n`);
-  assert.throws(() => reportFixture({ artifactBytes: duplicate, artifactSha256: crypto.createHash("sha256").update(duplicate).digest("hex") }), /exactly one record/);
+  assert.throws(() => reportFixture({ artifactBytes: duplicate, artifactSha256: crypto.createHash("sha256").update(duplicate).digest("hex") }), /exactly the four reviewed services/);
   assert.throws(() => reportFixture({ artifactSha256: "0".repeat(64) }), /artifact SHA256/);
   assert.throws(() => reportFixture({ describe: () => ({ digest: `sha256:${"f".repeat(64)}`, imagePushedAt: observedAt }) }), /does not match canonical artifact/);
   const modified = reportFixture(); modified.images[0].digest = `sha256:${"f".repeat(64)}`;
@@ -132,7 +147,7 @@ test("signed evidence is independently bound to key, report, freshness, and rele
   assert.equal(assertValid(report, signature), true);
   assert.throws(() => assertValid(report, { ...signature, reportSha256: imageEvidenceSha256({ changed: true }) }), /different report/);
   assert.throws(() => assertValid(report, { ...signature, keyArn: "arn:aws:kms:eu-west-2:368992683803:key/other" }), /identity or algorithm/);
-  assert.throws(() => assertValid(report, signature, { imageReleaseSha: "a".repeat(40) }), /different image release|different release/);
+  assert.throws(() => assertValid(report, signature, { imageReleaseSha: "a".repeat(40) }), /protected release SHA|different image release|different release/);
   assert.throws(() => assertValid(report, signature, { workflowRunId: "30760808821" }), /different release|different image release/);
   assert.throws(() => assertValid(report, signature, { now: new Date(Date.parse(observedAt) + IMAGE_EVIDENCE_MAX_AGE_MS + 1).toISOString() }), /stale/);
 });
@@ -201,9 +216,11 @@ test("administrator CLI reads DescribeRepositories exactly once per unique repos
     const artifactPath = `${directory}/artifact.jsonl`;
     const outputPath = `${directory}/report.json`;
     const signaturePath = `${directory}/signature.json`;
+    const identityPath = `${directory}/stage-b-image-publication-identity.json`;
     fs.writeFileSync(artifactPath, artifactBytes);
+    fs.writeFileSync(identityPath, `${JSON.stringify(publicationIdentity)}\n`, { mode: 0o600 });
     let calls = 0;
-    const result = runCli(["--artifact", artifactPath, "--image-release-sha", imageReleaseSha, "--workflow-run-id", workflowRunId, "--artifact-sha256", artifactSha256, "--output", outputPath, "--signature-output", signaturePath], {
+    const result = runCli(["--artifact", artifactPath, "--image-release-sha", imageReleaseSha, "--workflow-run-id", workflowRunId, "--artifact-sha256", artifactSha256, "--publication-identity", identityPath, "--publication-identity-sha256", publicationIdentitySha256(publicationIdentity), "--output", outputPath, "--signature-output", signaturePath], {
       getCaller: () => verifierCallerArn,
       observedAt,
       describe: (repository, tag) => describe(repository, tag),

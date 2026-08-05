@@ -218,6 +218,16 @@ test("backend-only and Stage B publishers use disjoint immutable tag namespaces"
   assert.match(JSON.stringify(reusable), /production-green-stage-b-images/);
 });
 
+test("Stage B source identity is checked before ECR or Docker access", () => {
+  const publisher = fs.readFileSync("scripts/aws/publish-ecs-images.sh", "utf8");
+  const guard = publisher.indexOf('if [[ "$SERVICE_SCOPE" == "production-green-stage-b" ]]');
+  const ecrLookup = publisher.indexOf('aws ecr describe-repositories');
+  assert.ok(guard >= 0 && guard < ecrLookup);
+  assert.match(publisher, /Stage B SOURCE_RELEASE_SHA must equal IMAGE_TAG and the checked-out release SHA/);
+  assert.match(publisher, /SOURCE_RELEASE_SHA.*IMAGE_TAG/);
+  assert.match(backendPublisher.jobs["publish-and-verify"].steps.find((step) => step.name === "Publish fixed backend image and bind immutable digest").run, /SOURCE_RELEASE_SHA=\"\$RELEASE_SHA\"/);
+});
+
 test("all four fixed Stage B service identities remain immutable image bindings", () => {
   const releaseSha = "a".repeat(40); const sourceContractSha256 = "b".repeat(64); const migrationSetDigest = "c".repeat(64);
   for (const [service, title] of [["backend", "mscqr-backend"], ["worker", "mscqr-worker"], ["rls-executor", "mscqr-rls-executor"], ["rls-canary", "mscqr-rls-canary"]]) {

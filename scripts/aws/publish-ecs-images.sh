@@ -87,6 +87,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERIFY_SCRIPT="$REPO_ROOT/scripts/aws/verify-image-manifest.sh"
 STAGE_B_BINDING_SCRIPT="$REPO_ROOT/scripts/aws/stage-b-image-bindings.mjs"
 
+if [[ "$SERVICE_SCOPE" == "production-green-stage-b" ]]; then
+  if ! [[ "$IMAGE_TAG" =~ ^[a-f0-9]{40}$ ]] || [[ "$IMAGE_TAG" != "$(git rev-parse HEAD)" ]] || ! [[ "$SOURCE_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || [[ "$SOURCE_RELEASE_SHA" != "$IMAGE_TAG" ]]; then
+    echo "Stage B SOURCE_RELEASE_SHA must equal IMAGE_TAG and the checked-out release SHA." >&2
+    exit 1
+  fi
+fi
+
 if [[ -z "${ECR_REGISTRY:-}" ]]; then
   AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
   ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
@@ -151,10 +158,6 @@ if [[ "$SERVICE_SCOPE" == *"rls"* || "$SERVICE_SCOPE" == "production-green-stage
   fi
 fi
 if [[ "$SERVICE_SCOPE" == "production-green-stage-b" ]]; then
-  if ! [[ "$IMAGE_TAG" =~ ^[a-f0-9]{40}$ ]] || [[ "$IMAGE_TAG" != "$(git rev-parse HEAD)" ]]; then
-    echo "Stage B image publishing requires IMAGE_TAG to equal the checked-out exact release SHA." >&2
-    exit 1
-  fi
   npm run rls:full-verify >/dev/null
   actual_source_contract="$(node -p 'require("./documents/security/rls-program/generated/checksums.json").sourceContractSha256')"
   actual_migration_digest="$(node -p 'require("./documents/security/rls-program/generated/checksums.json").migrationSetDigest')"

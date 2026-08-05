@@ -31,6 +31,7 @@ import { inspectStageBRefreshChecks, STAGE_B_EXPECTED_CHECK_ADDRESSES, STAGE_B_E
 import { generateImageEvidence, imageEvidenceSha256, signImageEvidence, IMAGE_EVIDENCE_MAX_AGE_MS } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
 import { createStageBPlanApprovalReport, createStageBPlanCaptureReport } from "../aws/stage-b-plan-approval-contract.mjs";
+import { buildStageBImagePublicationIdentity } from "../aws/stage-b-image-publication-identity.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const realForbiddenSimulations = JSON.parse(fs.readFileSync("scripts/tests/fixtures/aws-iam-simulate-principal-policy-stage-b-forbidden.json", "utf8"));
@@ -840,8 +841,9 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   const imageArtifactBytes = Buffer.from(`${imageRecords.map((record) => JSON.stringify(record)).join("\n")}\n`);
   const imageArtifactSha256 = crypto.createHash("sha256").update(imageArtifactBytes).digest("hex");
   const imageObservedAt = new Date().toISOString();
+  const publicationIdentity = buildStageBImagePublicationIdentity({ expectedReleaseSha: releaseSha, artifactBytes: imageArtifactBytes, observed: { workflowRunId: "30760789616", workflowDatabaseId: "401", workflowFile: ".github/workflows/production-green-stage-b-images.yml", workflowName: "Production Green Stage B Images", event: "workflow_dispatch", headSha: releaseSha, headBranch: "main", conclusion: "success", artifactId: "501", artifactName: "production-green-stage-b-images", artifactExpired: false, artifactArchiveFilename: null }, observedAt: imageObservedAt });
   const imageRepositories = ["mscqr-backend", "mscqr-worker"].map((repository) => ({ repositoryName: repository, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, registryId: "368992683803", repositoryUri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}`, imageTagMutability: "IMMUTABLE", encryptionConfiguration: { encryptionType: "AES256" }, createdAt: "2026-04-17T15:17:09.210Z", observedAt: imageObservedAt }));
-  const imageEvidence = generateImageEvidence({ artifactBytes: imageArtifactBytes, imageReleaseSha: releaseSha, workflowRunId: "30760789616", artifactSha256: imageArtifactSha256, verifierCallerArn: generatorArn, observedAt: imageObservedAt, repositories: imageRepositories, describe: (repository, tag) => ({ digest: `sha256:${imageRecords.find((record) => record.repository === repository && record.image_tag === tag).image_digest.slice(7)}`, imagePushedAt: "2026-08-02T18:26:34.000Z" }) });
+  const imageEvidence = generateImageEvidence({ artifactBytes: imageArtifactBytes, imageReleaseSha: releaseSha, workflowRunId: "30760789616", artifactSha256: imageArtifactSha256, publicationIdentity, verifierCallerArn: generatorArn, observedAt: imageObservedAt, repositories: imageRepositories, describe: (repository, tag) => ({ digest: `sha256:${imageRecords.find((record) => record.repository === repository && record.image_tag === tag).image_digest.slice(7)}`, imagePushedAt: "2026-08-02T18:26:34.000Z" }) });
   const canonicalImageEvidenceSha256 = imageEvidenceSha256(imageEvidence);
   effectivePlan.variables.canonical_image_evidence_sha256 = { value: canonicalImageEvidenceSha256 };
   const approvedPlanObject = approvedBytes ? JSON.parse(effectiveApprovedBytes) : effectivePlan;
