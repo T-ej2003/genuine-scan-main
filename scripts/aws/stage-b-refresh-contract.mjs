@@ -15,6 +15,18 @@ export const STAGE_B_REFRESH_STATUSES = Object.freeze([
   "MALFORMED_RESULT",
 ]);
 export const STAGE_B_REFRESH_ALLOWED_STATUSES = Object.freeze(["NO_CHANGES", "REVIEWED_OUTPUT_RECONCILIATION"]);
+export const STAGE_B_TERRAFORM_PLAN_FORMAT_VERSION = "1.2";
+export const STAGE_B_REFRESH_ACQUISITION_FAILURES = Object.freeze([
+  "PLAN_COMMAND_FAILED",
+  "PLAN_FILE_MISSING",
+  "PLAN_FILE_EMPTY",
+  "SHOW_COMMAND_FAILED",
+  "SHOW_OUTPUT_EMPTY",
+  "SHOW_OUTPUT_NOT_JSON",
+  "TERRAFORM_DIAGNOSTIC_RESULT",
+  "TERRAFORM_ERRORED_PLAN",
+  "MALFORMED_RESULT",
+]);
 const VARIABLES_SOURCE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b/variables.tf");
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const checkAddressesFromSource = (source) => [...source.matchAll(/check\s+"([^"]+)"\s*\{/g)].map(([, name]) => `check.${name}`).sort();
@@ -32,6 +44,28 @@ const exactJson = (left, right) => canonicalJson(left) === canonicalJson(right);
 function requireObject(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object.`);
   return value;
+}
+
+const semver = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
+
+export function normalizeStageBRefreshPlan(plan) {
+  requireObject(plan, "Terraform refresh plan JSON");
+  if (plan.format_version !== STAGE_B_TERRAFORM_PLAN_FORMAT_VERSION) throw new Error("Terraform refresh plan format_version is unsupported.");
+  if (typeof plan.terraform_version !== "string" || !semver.test(plan.terraform_version)) throw new Error("Terraform refresh plan terraform_version is malformed.");
+  for (const field of ["planned_values", "configuration"]) requireObject(plan[field], `Terraform refresh plan ${field}`);
+  if (plan.prior_state !== undefined) requireObject(plan.prior_state, "Terraform refresh plan prior_state");
+  if (plan.errored !== undefined && plan.errored !== false) throw new Error("Terraform refresh plan is errored.");
+  if (plan.diagnostics !== undefined) {
+    if (!Array.isArray(plan.diagnostics)) throw new Error("Terraform refresh plan diagnostics are malformed.");
+    if (plan.diagnostics.length) throw new Error("Terraform refresh plan contains diagnostics.");
+  }
+  if (plan.resource_changes !== undefined && !Array.isArray(plan.resource_changes)) throw new Error("Terraform refresh plan resource_changes are malformed.");
+  if (plan.resource_drift !== undefined && !Array.isArray(plan.resource_drift)) throw new Error("Terraform refresh plan resource_drift is malformed.");
+  if (plan.output_changes !== undefined && (!plan.output_changes || typeof plan.output_changes !== "object" || Array.isArray(plan.output_changes))) throw new Error("Terraform refresh plan output_changes are malformed.");
+  for (const [name, change] of Object.entries(plan.output_changes || {})) {
+    if (!change || typeof change !== "object" || Array.isArray(change) || !Array.isArray(change.actions) || change.actions.length === 0) throw new Error(`Terraform refresh plan output change ${name} is malformed.`);
+  }
+  return { ...plan, resource_changes: plan.resource_changes || [], resource_drift: plan.resource_drift || [], output_changes: plan.output_changes || {} };
 }
 
 function checkAddress(value) {
@@ -143,11 +177,10 @@ function outputChange(change, name, expected) {
 export function classifyStageBRefreshResult({ plan, terraformExitCode = 0, terraformOutput = "", bindingReport, state, outputsSource } = {}) {
   try {
     if (terraformExitCode !== 0 && terraformExitCode !== 2) return { status: terraformExitCode === 1 ? "FAILED_CHECK" : "PROVIDER_OR_BACKEND_FAILURE", reason: "Terraform refresh-only exited unsuccessfully.", checkCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 0, failedChecks: [], checks: [], resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
-    requireObject(plan, "Terraform refresh result");
-    if (!Array.isArray(plan.resource_changes) || !plan.output_changes || typeof plan.output_changes !== "object") return { status: "MALFORMED_RESULT", reason: "Terraform refresh JSON lacks resource_changes or output_changes.", resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
+    plan = normalizeStageBRefreshPlan(plan);
     const checkResult = inspectStageBRefreshChecks({ checks: plan.checks });
     if (!checkResult.valid) return { status: "FAILED_CHECK", reason: "Terraform refresh-only contains failed or malformed production checks.", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
-    const resourceChanges = plan.resource_changes.filter((change) => !Array.isArray(change.change?.actions) || change.change.actions.some((action) => action !== "no-op"));
+    const resourceChanges = [...plan.resource_changes, ...plan.resource_drift].filter((change) => !Array.isArray(change.change?.actions) || change.change.actions.some((action) => action !== "no-op"));
     if (resourceChanges.length) return { status: "RESOURCE_DRIFT", reason: "Terraform reported managed-resource actions.", ...checkResult, resourceChanges: { nonNoOp: resourceChanges.length, changes: resourceChanges.map(({ address, type, change }) => ({ address, type, actions: change?.actions || [] })) }, outputChanges: [] };
     const expected = { bound_images: expectedImages(bindingReport), task_definition_arns: expectedTaskDefinitionArns(state, outputsSource) };
     const outputChanges = Object.entries(plan.output_changes).filter(([, change]) => change?.actions?.some((action) => action !== "no-op"));
@@ -171,6 +204,7 @@ export function assertStageBRefreshEvidence({ refreshReportPath, refreshReportSh
   const bytes = fs.readFileSync(refreshReportPath); const report = JSON.parse(bytes);
   if (refreshReportSha256 && sha256(bytes) !== refreshReportSha256) throw new Error("Stage B refresh report SHA256 does not match the approved report.");
   if (report.schemaVersion !== STAGE_B_REFRESH_SCHEMA_VERSION || report.deployablePlan !== false || !STAGE_B_REFRESH_ALLOWED_STATUSES.includes(report.status)) throw new Error("Stage B refresh evidence is not an approved non-deployable refresh result.");
+  if (report.acquisitionStatus !== "valid" || ![0, 2].includes(report.planCommandExitCode) || report.showCommandExitCode !== 0 || !path.isAbsolute(report.refreshPlanPath || "") || path.resolve(report.refreshPlanPath || "").startsWith(`${repositoryRoot}${path.sep}`) || !/^[a-f0-9]{64}$/.test(report.refreshPlanSha256 || "") || !/^[a-f0-9]{64}$/.test(report.refreshPlanJsonSha256 || "") || !/^[a-f0-9]{64}$/.test(report.showStdoutSha256 || "") || report.refreshPlanJsonSha256 !== report.showStdoutSha256 || !/^[a-f0-9]{64}$/.test(report.showStderrSha256 || "")) throw new Error("Stage B refresh acquisition evidence is missing or malformed.");
   const checkResult = inspectStageBRefreshChecks({ checks: report.checks });
   if (!checkResult.valid || report.checkCount !== checkResult.checkCount || report.passedCheckCount !== checkResult.passedCheckCount || report.failedCheckCount !== 0 || report.malformedCheckCount !== 0 || !Array.isArray(report.failedChecks) || report.failedChecks.length !== 0 || !exactJson(report.checks, checkResult.checks) || !path.isAbsolute(report.terraformDataDir || "") || path.resolve(report.backendMetadataPath || "") !== path.join(path.resolve(report.terraformDataDir), "terraform.tfstate") || report.backendMetadataMode !== "0600" || report.privateModeValidated !== true || report.workspace !== expectedWorkspace || report.resourceChanges?.nonNoOp !== 0 || !Array.isArray(report.outputChanges)) throw new Error("Stage B refresh evidence check or binding structure is malformed.");
   if (report.status === "NO_CHANGES" && report.outputChanges.length !== 0) throw new Error("Stage B NO_CHANGES evidence contains output changes.");
