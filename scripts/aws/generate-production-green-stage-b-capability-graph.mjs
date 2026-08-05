@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RELEASE_READ_PROBES } from "./production-green-stage-b-identity-capabilities.mjs";
 import { RELEASE_POLICY_SOURCES, canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
+import { STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS } from "./stage-b-evidence-freshness.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -150,7 +151,7 @@ export function buildStageBDeploymentCapabilityGraph() {
     directProbes: RELEASE_READ_PROBES.map(({ id, action }) => ({ id, action })), sourceScan: discoverAwsCliActions(),
     artifactContracts: ["protected-checkout", "image-impact", "schema-v3-image-evidence", "stage-a-handoff", "tfvars-binding-report", "refresh-only", "saved-plan", "canonical-plan-json", "reference-audit", "plan-capability-manifest", "signed-permission-report"],
     stateContracts: ["stage-a-exact-object-lineage-minimum-serial-sha", "stage-b-direct-key-lineage-minimum-serial-sha", "stage-b-serial-stable-plan-to-apply"],
-    freshnessContracts: [{ artifact: "image-evidence", maxAgeSeconds: 86400 }, { artifact: "reference-audit", maxAgeSeconds: 900 }, { artifact: "permission-report", maxAgeSeconds: 900 }],
+    freshnessContracts: [{ artifact: "image-evidence", maxAgeSeconds: 86400 }, { artifact: "reference-audit", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }, { artifact: "permission-report", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }],
     configurationContracts: ["head-equals-origin-main", "clean-non-shallow-checkout", "direct-production-s3-key", "strict-backend-metadata", "tf-workspace-default", "no-workspace-select-or-migration", "73-classified-58-no-op-12-create-3-update-0-destroy", "no-service-database-alb-dns-traffic-or-secret-value-change"],
   };
 }

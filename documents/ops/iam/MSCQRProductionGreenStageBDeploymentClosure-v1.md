@@ -75,11 +75,15 @@ transitions and the full plan/audit/preflight workflow without weakening its sig
 digest joins. It is rejected for a wrong release, workflow, artifact, digest, account,
 region, repository configuration, or unsupported revocation model.
 
-Permission preflight remains live and plan-sensitive with a 15-minute validity window
-(`900000` ms). The reference audit is also live and plan-bound with its independent
-15-minute window. These short windows are intentionally not reused for immutable image
-provenance; the wrapper still requires a fresh permission report and audit plus exact
-plan-to-image digest equality before apply.
+Permission preflight and the plan-bound reference audit use a 60-minute validity window
+(`3600000` ms) to cover the reviewed deployment sequence. This operational window does
+not replace exact hash, caller, policy, state-serial, workspace, reference, and plan
+bindings: any bound-value change invalidates the evidence immediately. Saved-plan
+validity is binding-based rather than time-only. Operators should still move directly
+from permission signing to closure and apply; 60 minutes is a safety window, not a
+reason to pause indefinitely. These live windows are intentionally separate from
+immutable image provenance; the wrapper still requires exact permission, audit, and
+plan-to-image digest joins before apply.
 
 Image reuse is permitted only when the reviewed compatibility report for the exact image
 release and tooling-input tree contains no Dockerfile, dependency lockfile, runtime

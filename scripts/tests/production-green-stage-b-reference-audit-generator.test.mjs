@@ -763,7 +763,8 @@ test("batching is stable, non-mutating, bounded, and empty-safe", () => {
 
 test("generator enforces current, maximum-age, and future-skew timestamps", () => {
   const fixture = makeFixture();
-  assert.doesNotThrow(() => generate(fixture, { auditedAt: new Date(now.getTime() - STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS).toISOString() }));
+  assert.doesNotThrow(() => generate(fixture, { auditedAt: new Date(now.getTime() - STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS + 1).toISOString() }));
+  assert.throws(() => generate(fixture, { auditedAt: new Date(now.getTime() - STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS).toISOString() }), /expired/);
   assert.doesNotThrow(() => generate(fixture, { auditedAt: new Date(now.getTime() + STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS).toISOString() }));
   assert.throws(() => generate(fixture, { auditedAt: new Date(now.getTime() - STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS - 1).toISOString() }), /expired/);
   assert.throws(() => generate(fixture, { auditedAt: new Date(now.getTime() + STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS + 1).toISOString() }), /future/);

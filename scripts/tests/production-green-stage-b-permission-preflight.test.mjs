@@ -445,8 +445,9 @@ test("wrong plan binding and stale reports are rejected", () => {
   assert.throws(() => assertReport(report, { planSha256: "0".repeat(64), savedPlanSha256: report.savedPlanSha256, canonicalPlanJsonSha256: report.canonicalPlanJsonSha256, now }), /different plan/);
   const stale = { ...report, generatedAt: "2026-08-01T11:00:00.000Z" };
   assert.throws(() => assertPermissionReport(stale, { signatureArtifact: reportSignature(stale), verifySignature: () => true, planSha256: report.planSha256, savedPlanSha256: report.savedPlanSha256, canonicalPlanJsonSha256: report.canonicalPlanJsonSha256, now }), /expired/);
-  const oneHourOld = { ...report, generatedAt: new Date(Date.parse(now) - 60 * 60 * 1000).toISOString() };
-  assert.ok(60 * 60 * 1000 > PERMISSION_EVIDENCE_MAX_AGE_MS);
+  const underHour = { ...report, generatedAt: new Date(Date.parse(now) - PERMISSION_EVIDENCE_MAX_AGE_MS + 1).toISOString() };
+  assert.doesNotThrow(() => assertPermissionReport(underHour, { signatureArtifact: reportSignature(underHour), verifySignature: () => true, planSha256: report.planSha256, savedPlanSha256: report.savedPlanSha256, canonicalPlanJsonSha256: report.canonicalPlanJsonSha256, now }));
+  const oneHourOld = { ...report, generatedAt: new Date(Date.parse(now) - PERMISSION_EVIDENCE_MAX_AGE_MS).toISOString() };
   assert.throws(() => assertPermissionReport(oneHourOld, { signatureArtifact: reportSignature(oneHourOld), verifySignature: () => true, planSha256: report.planSha256, savedPlanSha256: report.savedPlanSha256, canonicalPlanJsonSha256: report.canonicalPlanJsonSha256, now }), /expired/);
 });
 
