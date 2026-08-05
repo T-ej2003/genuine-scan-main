@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertStageBPlan } from "../plan-production-green-stage-b.mjs";
+import { assertStageBPlan, assertStageBPlanCapture } from "../plan-production-green-stage-b.mjs";
 import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import {
   createAwsReader,
@@ -1257,6 +1257,22 @@ test("initial broker create passes with plan-only package proof", () => {
 test("initial broker create does not require a reference audit", () => {
   const fixture = makeInitialBrokerCreateFixture();
   assert.doesNotThrow(() => assertStageBPlan(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration }));
+});
+
+test("initial broker create reaches PLAN_CAPTURED without update-only broker validation", () => {
+  const fixture = makeInitialBrokerCreateFixture({
+    mutatePlan: (plan) => {
+      plan.resource_changes.push(
+        { address: "aws_iam_policy.broker", type: "aws_iam_policy", change: { actions: ["create"], before: null, after: { name: "mscqr-production-rls-approval-broker-runtime", path: "/", arn: "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime", id: "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime" }, after_unknown: { policy: true } } },
+        { address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["create"], before: null, after: { function_name: "mscqr-production-rls-approval-broker", name: STAGE_B.brokerAliasQualifier, function_version: "1" } } },
+      );
+    },
+  });
+  const result = assertStageBPlanCapture(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration });
+  assert.equal(result.brokerCapture.brokerOperation, "initial-create");
+  assert.equal(result.brokerCapture.brokerReferenceValidationPending, false);
+  assert.equal(result.brokerCapture.brokerUpdatePresent, false);
+  assert.deepEqual(result.brokerCapture.brokerActions, ["create"]);
 });
 
 test("initial broker create permits retained no-ops during append-only recovery", () => {
