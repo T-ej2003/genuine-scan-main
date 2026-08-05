@@ -187,8 +187,8 @@ function currentCaller() {
   return JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn;
 }
 
-function showSavedPlan(planPath) {
-  return execFileSync("terraform", ["show", "-json", planPath], { cwd: root, encoding: null, stdio: ["ignore", "pipe", "pipe"] });
+export function showSavedPlan(planPath, { env = process.env, execFile = execFileSync } = {}) {
+  return execFile("terraform", [`-chdir=${terraformRoot}`, "show", "-json", planPath], { cwd: root, env, encoding: null, stdio: ["ignore", "pipe", "pipe"] });
 }
 
 function readInitializedBackendMetadata(env = process.env) {
@@ -202,7 +202,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   if (env.MSCQR_STAGE_B_APPLY_ENABLED !== "true" || env.MSCQR_STAGE_B_APPLY_CONFIRM !== requiredConfirmation) throw new Error("Stage B apply gate is not enabled.");
   assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE });
   const artifacts = parseCli(argv); const callerArn = deps.getCaller();
-  const defaultDeps = { getCaller: currentCaller, showPlan: showSavedPlan, validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) };
+  const defaultDeps = { getCaller: currentCaller, showPlan: (planPath) => showSavedPlan(planPath, { env }), validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) };
   const effectiveDeps = { ...defaultDeps, ...deps };
   if (typeof deps.showPlan !== "function" && typeof deps.getBackendMetadata !== "function") {
     const backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: env.TF_DATA_DIR, backendMetadataPath: path.join(path.resolve(env.TF_DATA_DIR || ""), "terraform.tfstate"), repositoryRoot: root });

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, runApply } from "../apply-production-green-stage-b.mjs";
+import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, runApply, showSavedPlan } from "../apply-production-green-stage-b.mjs";
 import {
   canonicalizeJson,
   assertPermissionReportPlanBinding,
@@ -43,6 +43,26 @@ const policyEvidence = (() => {
   return { roleArn, attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: [], inlinePolicies: [], permissionsBoundaryArn: null, policies, status: "valid" };
 })();
 const runPermissionPreflight = (input) => runPermissionPreflightRaw({ policyEvidence, ...input });
+
+test("apply wrapper binds terraform show to the Stage B root and supplied discovery environment", () => {
+  const env = { HOME: "/reviewed/home", PATH: "/reviewed/bin", TF_DATA_DIR: "/private/tmp/reviewed-tf-data", TF_WORKSPACE: "default", TF_CLI_CONFIG_FILE: "/reviewed/.terraformrc" };
+  const planPath = "/private/tmp/reviewed/stage-b.tfplan";
+  let invocation;
+  const result = showSavedPlan(planPath, {
+    env,
+    execFile: (command, args, options) => {
+      invocation = { command, args, options };
+      return Buffer.from("{}");
+    },
+  });
+  assert.deepEqual(result, Buffer.from("{}"));
+  assert.deepEqual(invocation, {
+    command: "terraform",
+    args: ["-chdir=infra/aws/terraform/production-green-stage-b", "show", "-json", planPath],
+    options: { cwd: process.cwd(), env, encoding: null, stdio: ["ignore", "pipe", "pipe"] },
+  });
+});
+
 const brokerFixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-permission-broker-fixture-"));
 const brokerFixture = await packageStageBBroker({ outputPath: path.join(brokerFixtureRoot, "broker.zip"), toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), repositoryRoot: process.cwd() });
 test.after(() => fs.rmSync(brokerFixtureRoot, { recursive: true, force: true }));

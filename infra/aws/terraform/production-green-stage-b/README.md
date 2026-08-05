@@ -78,3 +78,5 @@ MSCQR_STAGE_B_PLAN_ENABLED=true MSCQR_STAGE_B_PLAN_CONFIRM=MSCQR_GENERATE_STAGE_
 ```
 
 Review the saved JSON plan. Stop on any delete or any resource outside the listed control-plane types. A separately approved operator runbook must invoke scripts/apply-production-green-stage-b.mjs with the complete canonical tfvars provenance options; direct Terraform apply is not an approved path.
+
+Both wrapper modes run `terraform -chdir=infra/aws/terraform/production-green-stage-b show -json` against the selected saved plan and pass the reviewed deployment environment, including `TF_DATA_DIR`, `TF_WORKSPACE`, `HOME`, `PATH`, and Terraform CLI configuration. Provider discovery must therefore use the initialized release-local data directory; repository-root or ambient `.terraform` discovery is not an accepted fallback.
