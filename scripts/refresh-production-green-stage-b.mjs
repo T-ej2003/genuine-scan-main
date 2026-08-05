@@ -150,6 +150,7 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
     acquisitionStatus: acquisition.acquisitionStatus,
     acquisitionReason: acquisition.acquisitionReason,
     terraformVersion: acquisition.plan?.terraform_version || null,
+    terraformVersionSha256: acquisition.plan?.terraform_version ? sha256(Buffer.from(acquisition.plan.terraform_version)) : null,
     formatVersion: acquisition.plan?.format_version || null,
     planCommandExitCode: acquisition.planCommandExitCode ?? result.status ?? null,
     showCommandExitCode: acquisition.showCommandExitCode ?? null,

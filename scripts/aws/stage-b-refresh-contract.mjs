@@ -16,7 +16,8 @@ export const STAGE_B_REFRESH_STATUSES = Object.freeze([
 ]);
 export const STAGE_B_REFRESH_ALLOWED_STATUSES = Object.freeze(["NO_CHANGES", "REVIEWED_OUTPUT_RECONCILIATION"]);
 export const STAGE_B_TERRAFORM_PLAN_FORMAT_VERSION = "1.2";
-export const STAGE_B_TERRAFORM_VERSION = "1.15.7";
+export const STAGE_B_TERRAFORM_MIN_VERSION = "1.6.0";
+export const STAGE_B_TERRAFORM_MAX_VERSION_EXCLUSIVE = "2.0.0";
 export const STAGE_B_REFRESH_ACQUISITION_FAILURES = Object.freeze([
   "PLAN_COMMAND_FAILED",
   "PLAN_FILE_MISSING",
@@ -60,12 +61,25 @@ function requireObject(value, label) {
   return value;
 }
 
-const semver = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
+const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+const compareVersion = (left, right) => left.map(Number).map((part, index) => part - right[index]).find((difference) => difference !== 0) || 0;
+
+export function isSupportedStageBTerraformVersion(value) {
+  const match = typeof value === "string" ? semver.exec(value) : null;
+  if (!match || match[4]) return false;
+  const version = match.slice(1, 4);
+  return compareVersion(version, STAGE_B_TERRAFORM_MIN_VERSION.split(".")) >= 0 && compareVersion(version, STAGE_B_TERRAFORM_MAX_VERSION_EXCLUSIVE.split(".")) < 0;
+}
+
+export function assertSupportedStageBTerraformVersion(value) {
+  if (!isSupportedStageBTerraformVersion(value)) throw new Error("Terraform refresh plan terraform_version is outside the supported >= 1.6.0, < 2.0.0 range.");
+  return value;
+}
 
 export function normalizeStageBRefreshPlan(plan) {
   requireObject(plan, "Terraform refresh plan JSON");
   if (plan.format_version !== STAGE_B_TERRAFORM_PLAN_FORMAT_VERSION) throw new Error("Terraform refresh plan format_version is unsupported.");
-  if (plan.terraform_version !== STAGE_B_TERRAFORM_VERSION || !semver.test(plan.terraform_version)) throw new Error("Terraform refresh plan terraform_version is unsupported.");
+  assertSupportedStageBTerraformVersion(plan.terraform_version);
   for (const field of ["planned_values", "configuration"]) requireObject(plan[field], `Terraform refresh plan ${field}`);
   if (plan.prior_state !== undefined) requireObject(plan.prior_state, "Terraform refresh plan prior_state");
   if (plan.errored !== undefined && plan.errored !== false) throw new Error("Terraform refresh plan is errored.");
@@ -269,7 +283,7 @@ export function assertStageBRefreshEvidence({ refreshReportPath, refreshReportSh
   if (report.schemaVersion !== STAGE_B_REFRESH_SCHEMA_VERSION || report.deployablePlan !== false || !STAGE_B_REFRESH_ALLOWED_STATUSES.includes(report.status)) throw new Error("Stage B refresh evidence is not an approved non-deployable refresh result.");
   if (report.acquisitionStatus !== "valid" || ![0, 2].includes(report.planCommandExitCode) || report.showCommandExitCode !== 0 || !path.isAbsolute(report.refreshPlanPath || "") || path.resolve(report.refreshPlanPath || "").startsWith(`${repositoryRoot}${path.sep}`) || !/^[a-f0-9]{64}$/.test(report.refreshPlanSha256 || "") || !/^[a-f0-9]{64}$/.test(report.refreshPlanJsonSha256 || "") || !/^[a-f0-9]{64}$/.test(report.showStdoutSha256 || "") || report.refreshPlanJsonSha256 !== report.showStdoutSha256 || !/^[a-f0-9]{64}$/.test(report.showStderrSha256 || "")) throw new Error("Stage B refresh acquisition evidence is missing or malformed.");
   const checkResult = inspectStageBRefreshChecks({ checks: report.checks });
-  if (!checkResult.valid || report.terraformVersion !== STAGE_B_TERRAFORM_VERSION || report.formatVersion !== STAGE_B_TERRAFORM_PLAN_FORMAT_VERSION || report.checkCount !== checkResult.checkCount || report.infrastructureCheckCount !== checkResult.infrastructureCheckCount || report.variableCheckCount !== checkResult.variableCheckCount || report.passedCheckCount !== checkResult.passedCheckCount || report.failedCheckCount !== checkResult.failedCheckCount || report.malformedCheckCount !== checkResult.malformedCheckCount || report.missingCheckCount !== checkResult.missingCheckCount || report.unknownCheckCount !== checkResult.unknownCheckCount || report.duplicateCheckCount !== checkResult.duplicateCheckCount || report.checkInventoryHash !== checkResult.checkInventoryHash || report.emittedInstanceCount !== checkResult.emittedInstanceCount || report.passedInstanceCount !== checkResult.passedInstanceCount || report.failedInstanceCount !== checkResult.failedInstanceCount || report.malformedInstanceCount !== checkResult.malformedInstanceCount || report.duplicateInstanceCount !== checkResult.duplicateInstanceCount || report.instanceInventoryHash !== checkResult.instanceInventoryHash || report.failedCheckCount !== 0 || report.malformedCheckCount !== 0 || report.missingCheckCount !== 0 || report.unknownCheckCount !== 0 || report.duplicateCheckCount !== 0 || report.failedInstanceCount !== 0 || report.malformedInstanceCount !== 0 || report.duplicateInstanceCount !== 0 || !Array.isArray(report.failedChecks) || report.failedChecks.length !== 0 || !exactJson(report.checks, checkResult.checks) || !path.isAbsolute(report.terraformDataDir || "") || path.resolve(report.backendMetadataPath || "") !== path.join(path.resolve(report.terraformDataDir), "terraform.tfstate") || report.backendMetadataMode !== "0600" || report.privateModeValidated !== true || report.workspace !== expectedWorkspace || report.resourceChanges?.nonNoOp !== 0 || !Array.isArray(report.outputChanges)) throw new Error("Stage B refresh evidence check or binding structure is malformed.");
+  if (!checkResult.valid || !isSupportedStageBTerraformVersion(report.terraformVersion) || !/^[a-f0-9]{64}$/.test(report.terraformVersionSha256 || "") || report.terraformVersionSha256 !== sha256(Buffer.from(report.terraformVersion)) || report.formatVersion !== STAGE_B_TERRAFORM_PLAN_FORMAT_VERSION || report.checkCount !== checkResult.checkCount || report.infrastructureCheckCount !== checkResult.infrastructureCheckCount || report.variableCheckCount !== checkResult.variableCheckCount || report.passedCheckCount !== checkResult.passedCheckCount || report.failedCheckCount !== checkResult.failedCheckCount || report.malformedCheckCount !== checkResult.malformedCheckCount || report.missingCheckCount !== checkResult.missingCheckCount || report.unknownCheckCount !== checkResult.unknownCheckCount || report.duplicateCheckCount !== checkResult.duplicateCheckCount || report.checkInventoryHash !== checkResult.checkInventoryHash || report.emittedInstanceCount !== checkResult.emittedInstanceCount || report.passedInstanceCount !== checkResult.passedInstanceCount || report.failedInstanceCount !== checkResult.failedInstanceCount || report.malformedInstanceCount !== checkResult.malformedInstanceCount || report.duplicateInstanceCount !== checkResult.duplicateInstanceCount || report.instanceInventoryHash !== checkResult.instanceInventoryHash || report.failedCheckCount !== 0 || report.malformedCheckCount !== 0 || report.missingCheckCount !== 0 || report.unknownCheckCount !== 0 || report.duplicateCheckCount !== 0 || report.failedInstanceCount !== 0 || report.malformedInstanceCount !== 0 || report.duplicateInstanceCount !== 0 || !Array.isArray(report.failedChecks) || report.failedChecks.length !== 0 || !exactJson(report.checks, checkResult.checks) || !path.isAbsolute(report.terraformDataDir || "") || path.resolve(report.backendMetadataPath || "") !== path.join(path.resolve(report.terraformDataDir), "terraform.tfstate") || report.backendMetadataMode !== "0600" || report.privateModeValidated !== true || report.workspace !== expectedWorkspace || report.resourceChanges?.nonNoOp !== 0 || !Array.isArray(report.outputChanges)) throw new Error("Stage B refresh evidence check or binding structure is malformed.");
   if (report.status === "NO_CHANGES" && report.outputChanges.length !== 0) throw new Error("Stage B NO_CHANGES evidence contains output changes.");
   if (report.status === "REVIEWED_OUTPUT_RECONCILIATION" && report.outputChanges.length === 0) throw new Error("Stage B reviewed reconciliation evidence contains no reviewed output changes.");
   for (const output of report.outputChanges) {

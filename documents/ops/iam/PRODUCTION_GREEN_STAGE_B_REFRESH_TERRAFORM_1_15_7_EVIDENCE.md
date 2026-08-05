@@ -1,4 +1,11 @@
-# Stage B Terraform 1.15.7 refresh evidence
+# Stage B Terraform refresh evidence and version contract
+
+The preserved production-shaped evidence was observed with Terraform `1.15.7`. That is
+the exact version recorded and bound in the refresh evidence; it is not a global
+production pin. The supported Stage B production constraint is `>= 1.6.0, < 2.0.0`,
+from `infra/aws/terraform/production-green-stage-b/versions.tf`. Refresh validation
+checks that range, preserves the observed version unchanged, and binds its exact value
+through `terraformVersionSha256`.
 
 The sanitized fixture `scripts/tests/fixtures/production-green-stage-b-refresh-terraform-1.15.7.json`
 is derived from the preserved `terraform show -json` output produced by Terraform 1.15.7
