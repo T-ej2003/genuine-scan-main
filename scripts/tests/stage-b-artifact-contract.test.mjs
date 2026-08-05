@@ -7,7 +7,7 @@ import test from "node:test";
 import { runReleaseReadPreflight } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { generateStageBTerraformBackendConfig } from "../aws/generate-production-green-stage-b-backend-config.mjs";
 import { ensureStageBTerraformBackendMetadataPrivate } from "../aws/stage-b-terraform-backend-contract.mjs";
-import { STAGE_B_EXPECTED_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
+import { STAGE_B_EXPECTED_CHECK_ADDRESSES, STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 import { runRefreshOnly } from "../refresh-production-green-stage-b.mjs";
 import { STAGE_B_PRIVATE_FILE_MODE, STAGE_B_PRIVATE_DIRECTORY_MODE, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "../aws/stage-b-artifact-contract.mjs";
 
@@ -58,7 +58,7 @@ test("refresh rehearsal uses one injected Terraform seam and rejects filesystem 
   const metadataPath = path.join(directory, "terraform.tfstate"); fs.writeFileSync(metadataPath, "{}\n", { mode: 0o600 });
   const reportPath = path.join(directory, "binding.json"); fs.writeFileSync(reportPath, "{}\n", { mode: 0o600 });
   const stateHash = sha256(stateBytes); const tfvarsHash = sha256(tfvarsBytes); const report = binding(stateHash, tfvarsHash); let terraformCalls = 0;
-  const plan = { format_version: "1.2", terraform_version: "1.15.7", planned_values: { root_module: {} }, configuration: { root_module: {} }, prior_state: {}, errored: false, diagnostics: [], resource_changes: [], resource_drift: [], output_changes: {}, checks: STAGE_B_EXPECTED_CHECK_ADDRESSES.map((address) => ({ address, status: "pass", instances: [{ address, status: "pass", problems: [] }] })) };
+  const plan = { format_version: "1.2", terraform_version: "1.15.7", planned_values: { root_module: {} }, configuration: { root_module: {} }, prior_state: {}, errored: false, diagnostics: [], resource_changes: [], resource_drift: [], output_changes: {}, checks: [...STAGE_B_EXPECTED_CHECK_ADDRESSES, ...STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES].map((address) => ({ address, status: "pass", instances: [{ address, status: "pass", problems: [] }] })) };
   const result = runRefreshOnly({
     argv: ["--closure-mode", "production", "--tfvars", tfvarsPath, "--binding-report", reportPath, "--binding-report-sha256", "b".repeat(64), "--tooling-sha", "a".repeat(40), "--tooling-tree-sha256", "c".repeat(64), "--stage-b-state-backup", statePath, "--terraform-data-dir", directory, "--backend-metadata", metadataPath, "--output", path.join(directory, "refresh.json")],
     env: { TF_WORKSPACE: "default" },

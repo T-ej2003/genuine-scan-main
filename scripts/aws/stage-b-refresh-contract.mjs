@@ -30,7 +30,20 @@ export const STAGE_B_REFRESH_ACQUISITION_FAILURES = Object.freeze([
 const VARIABLES_SOURCE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b/variables.tf");
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const checkAddressesFromSource = (source) => [...source.matchAll(/check\s+"([^"]+)"\s*\{/g)].map(([, name]) => `check.${name}`).sort();
-export const STAGE_B_EXPECTED_CHECK_ADDRESSES = Object.freeze(checkAddressesFromSource(fs.readFileSync(VARIABLES_SOURCE_PATH, "utf8")));
+const REVIEWED_VARIABLE_VALIDATION_NAMES = Object.freeze(["retained_candidate_task_definitions", "retained_executor_task_definitions"]);
+const variableValidationNamesFromSource = (source) => [...source.matchAll(/variable\s+"([^"]+)"\s*\{/g)]
+  .filter((match) => {
+    const nextVariable = source.indexOf("\nvariable ", match.index + match[0].length);
+    return /\bvalidation\s*\{/.test(source.slice(match.index, nextVariable < 0 ? source.length : nextVariable));
+  })
+  .map(([, name]) => name)
+  .sort();
+const variablesSource = fs.readFileSync(VARIABLES_SOURCE_PATH, "utf8");
+const sourceVariableValidationNames = variableValidationNamesFromSource(variablesSource);
+if (JSON.stringify(sourceVariableValidationNames) !== JSON.stringify([...REVIEWED_VARIABLE_VALIDATION_NAMES].sort())) throw new Error("Stage B Terraform variable-validation inventory requires review.");
+export const STAGE_B_EXPECTED_CHECK_ADDRESSES = Object.freeze(checkAddressesFromSource(variablesSource));
+export const STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES = Object.freeze(REVIEWED_VARIABLE_VALIDATION_NAMES.map((name) => `var.${name}`).sort());
+export const STAGE_B_EXPECTED_CHECK_INVENTORY = Object.freeze([...STAGE_B_EXPECTED_CHECK_ADDRESSES, ...STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES].sort());
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const hasUnknown = (value) => value === true || (value && typeof value === "object" && Object.values(value).some(hasUnknown));
@@ -68,10 +81,28 @@ export function normalizeStageBRefreshPlan(plan) {
   return { ...plan, resource_changes: plan.resource_changes || [], resource_drift: plan.resource_drift || [], output_changes: plan.output_changes || {} };
 }
 
-function checkAddress(value) {
-  if (typeof value === "string") return value;
-  if (value && typeof value.to_string === "string") return value.to_string;
-  return undefined;
+function renderedAddress(value) {
+  return typeof value === "string" && value.length > 0 && value.trim() === value && /^(?:check|var)\.[A-Za-z0-9_-]+$/.test(value) ? value : undefined;
+}
+
+export function checkAddress(value, { instance = false } = {}) {
+  if (typeof value === "string") return renderedAddress(value);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const toDisplay = value.to_display;
+  const toString = value.to_string;
+  if (toDisplay !== undefined && typeof toDisplay !== "string") return undefined;
+  if (toString !== undefined && typeof toString !== "string") return undefined;
+  const display = renderedAddress(toDisplay);
+  const string = renderedAddress(toString);
+  if ((toDisplay !== undefined && !display) || (toString !== undefined && !string) || (display && string && display !== string)) return undefined;
+  const hasStructuredFields = value.kind !== undefined || value.name !== undefined;
+  if (hasStructuredFields) {
+    if (!["check", "var"].includes(value.kind) || typeof value.name !== "string" || !/^[A-Za-z0-9_-]+$/.test(value.name)) return undefined;
+    const structured = `${value.kind}.${value.name}`;
+    if (!display && !string) return structured;
+    return (!display || display === structured) && (!string || string === structured) ? structured : undefined;
+  }
+  return instance ? display || string : undefined;
 }
 
 function checkMessage(value) {
@@ -82,26 +113,36 @@ function checkMessage(value) {
 }
 
 export function inspectStageBRefreshChecks({ checks, checksSource } = {}) {
-  const expectedAddresses = checksSource ? checkAddressesFromSource(checksSource) : STAGE_B_EXPECTED_CHECK_ADDRESSES;
+  const expectedInfrastructureCheckAddresses = checksSource ? checkAddressesFromSource(checksSource) : STAGE_B_EXPECTED_CHECK_ADDRESSES;
+  const expectedVariableCheckAddresses = checksSource ? STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES : STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES;
+  const expectedAddresses = [...expectedInfrastructureCheckAddresses, ...expectedVariableCheckAddresses].sort();
   const failedChecks = [];
   const normalized = [];
   const seen = new Set();
   let passedCheckCount = 0;
   let failedCheckCount = 0;
   let malformedCheckCount = 0;
-  if (!Array.isArray(checks)) return { checkCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 1, failedChecks: [{ address: "<checks>", status: "malformed", message: "Terraform refresh JSON is missing the plan.checks array." }], checks: [], expectedAddresses, valid: false };
+  let missingCheckCount = 0;
+  let unknownCheckCount = 0;
+  let duplicateCheckCount = 0;
+  let infrastructureCheckCount = 0;
+  let variableCheckCount = 0;
+  if (!Array.isArray(checks)) return { checkCount: 0, infrastructureCheckCount: 0, variableCheckCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 1, missingCheckCount: expectedAddresses.length, unknownCheckCount: 0, duplicateCheckCount: 0, checkInventoryHash: sha256(Buffer.from(canonicalJson([]))), failedChecks: [{ address: "<checks>", status: "malformed", message: "Terraform refresh JSON is missing the plan.checks array." }], checks: [], expectedInfrastructureCheckAddresses, expectedVariableCheckAddresses, expectedAddresses, valid: false };
   for (const check of checks) {
     const address = checkAddress(check?.address);
     const issues = [];
     let malformed = false;
     let failed = false;
-    if (!address) { malformed = true; issues.push({ address: "<unknown>", status: "malformed", message: "Terraform check address is missing or malformed." }); }
-    else if (!expectedAddresses.includes(address)) { malformed = true; issues.push({ address, status: "malformed", message: "Terraform check address is not defined by the protected Stage B source." }); }
-    else if (seen.has(address)) { malformed = true; issues.push({ address, status: "malformed", message: "Terraform check address is duplicated." }); }
-    else seen.add(address);
+    const category = address?.startsWith("check.") ? "infrastructure" : address?.startsWith("var.") ? "variable" : undefined;
+    if (!address) { malformed = true; unknownCheckCount += 1; issues.push({ address: "<unknown>", status: "malformed", message: "Terraform check address is missing or malformed." }); }
+    else if (!expectedAddresses.includes(address)) { malformed = true; unknownCheckCount += 1; issues.push({ address, status: "malformed", message: "Terraform check address is not defined by the protected Stage B source." }); }
+    else if (seen.has(address)) { malformed = true; duplicateCheckCount += 1; issues.push({ address, status: "malformed", message: "Terraform check address is duplicated." }); }
+    else { seen.add(address); if (category === "infrastructure") infrastructureCheckCount += 1; if (category === "variable") variableCheckCount += 1; }
     if (check?.status !== "pass") {
       if (["fail", "error", "unknown"].includes(check?.status)) failed = true;
       else malformed = true;
+      if (check?.status === "unknown") unknownCheckCount += 1;
+      if (check?.status === undefined || check?.status === null) missingCheckCount += 1;
       issues.push({ address: address || "<unknown>", status: check?.status ?? "missing", message: checkMessage(check?.message || check?.problem) });
     }
     if (!Array.isArray(check?.instances) || check.instances.length === 0) {
@@ -110,17 +151,22 @@ export function inspectStageBRefreshChecks({ checks, checksSource } = {}) {
     }
     const instances = Array.isArray(check?.instances) ? check.instances : [];
     const normalizedInstances = [];
+    const seenInstanceAddresses = new Set();
     for (const instance of instances) {
-      const instanceAddress = checkAddress(instance?.address);
+      const instanceAddress = checkAddress(instance?.address, { instance: true });
       const problems = instance?.problems;
       normalizedInstances.push({ address: instanceAddress, status: instance?.status, problems });
       if (!instanceAddress || instanceAddress !== address || !Array.isArray(problems)) {
         malformed = true;
         issues.push({ address: instanceAddress || address || "<unknown>", status: "malformed", message: "Terraform check instance shape is malformed." });
       }
+      if (instanceAddress && seenInstanceAddresses.has(instanceAddress)) { malformed = true; duplicateCheckCount += 1; issues.push({ address: instanceAddress, status: "malformed", message: "Terraform check instance address is duplicated." }); }
+      if (instanceAddress) seenInstanceAddresses.add(instanceAddress);
       if (instance?.status !== "pass") {
         if (["fail", "error", "unknown"].includes(instance?.status)) failed = true;
         else malformed = true;
+        if (instance?.status === "unknown") unknownCheckCount += 1;
+        if (instance?.status === undefined || instance?.status === null) missingCheckCount += 1;
         issues.push({ address: instanceAddress || address || "<unknown>", status: instance?.status ?? "missing", message: checkMessage(instance?.message || instance?.problem) });
       }
       if (Array.isArray(problems) && problems.length) {
@@ -136,10 +182,12 @@ export function inspectStageBRefreshChecks({ checks, checksSource } = {}) {
   }
   for (const address of expectedAddresses) if (!seen.has(address)) {
     malformedCheckCount += 1;
+    missingCheckCount += 1;
     failedChecks.push({ address, status: "missing", message: "Expected Terraform check is missing from plan.checks." });
   }
   normalized.sort((left, right) => String(left.address).localeCompare(String(right.address)));
-  return { checkCount: checks.length, passedCheckCount, failedCheckCount, malformedCheckCount, failedChecks, checks: normalized, expectedAddresses, valid: checks.length === expectedAddresses.length && failedCheckCount === 0 && malformedCheckCount === 0 && failedChecks.length === 0 };
+  const checkInventoryHash = sha256(Buffer.from(canonicalJson(normalized.map(({ address }) => address).sort())));
+  return { checkCount: checks.length, infrastructureCheckCount, variableCheckCount, passedCheckCount, failedCheckCount, malformedCheckCount, missingCheckCount, unknownCheckCount, duplicateCheckCount, checkInventoryHash, failedChecks, checks: normalized, expectedInfrastructureCheckAddresses, expectedVariableCheckAddresses, expectedAddresses, valid: checks.length === expectedAddresses.length && infrastructureCheckCount === expectedInfrastructureCheckAddresses.length && variableCheckCount === expectedVariableCheckAddresses.length && failedCheckCount === 0 && malformedCheckCount === 0 && missingCheckCount === 0 && unknownCheckCount === 0 && duplicateCheckCount === 0 && failedChecks.length === 0 };
 }
 
 function expectedImages(bindingReport) {
@@ -206,7 +254,7 @@ export function assertStageBRefreshEvidence({ refreshReportPath, refreshReportSh
   if (report.schemaVersion !== STAGE_B_REFRESH_SCHEMA_VERSION || report.deployablePlan !== false || !STAGE_B_REFRESH_ALLOWED_STATUSES.includes(report.status)) throw new Error("Stage B refresh evidence is not an approved non-deployable refresh result.");
   if (report.acquisitionStatus !== "valid" || ![0, 2].includes(report.planCommandExitCode) || report.showCommandExitCode !== 0 || !path.isAbsolute(report.refreshPlanPath || "") || path.resolve(report.refreshPlanPath || "").startsWith(`${repositoryRoot}${path.sep}`) || !/^[a-f0-9]{64}$/.test(report.refreshPlanSha256 || "") || !/^[a-f0-9]{64}$/.test(report.refreshPlanJsonSha256 || "") || !/^[a-f0-9]{64}$/.test(report.showStdoutSha256 || "") || report.refreshPlanJsonSha256 !== report.showStdoutSha256 || !/^[a-f0-9]{64}$/.test(report.showStderrSha256 || "")) throw new Error("Stage B refresh acquisition evidence is missing or malformed.");
   const checkResult = inspectStageBRefreshChecks({ checks: report.checks });
-  if (!checkResult.valid || report.checkCount !== checkResult.checkCount || report.passedCheckCount !== checkResult.passedCheckCount || report.failedCheckCount !== 0 || report.malformedCheckCount !== 0 || !Array.isArray(report.failedChecks) || report.failedChecks.length !== 0 || !exactJson(report.checks, checkResult.checks) || !path.isAbsolute(report.terraformDataDir || "") || path.resolve(report.backendMetadataPath || "") !== path.join(path.resolve(report.terraformDataDir), "terraform.tfstate") || report.backendMetadataMode !== "0600" || report.privateModeValidated !== true || report.workspace !== expectedWorkspace || report.resourceChanges?.nonNoOp !== 0 || !Array.isArray(report.outputChanges)) throw new Error("Stage B refresh evidence check or binding structure is malformed.");
+  if (!checkResult.valid || report.checkCount !== checkResult.checkCount || report.infrastructureCheckCount !== checkResult.infrastructureCheckCount || report.variableCheckCount !== checkResult.variableCheckCount || report.passedCheckCount !== checkResult.passedCheckCount || report.failedCheckCount !== checkResult.failedCheckCount || report.malformedCheckCount !== checkResult.malformedCheckCount || report.missingCheckCount !== checkResult.missingCheckCount || report.unknownCheckCount !== checkResult.unknownCheckCount || report.duplicateCheckCount !== checkResult.duplicateCheckCount || report.checkInventoryHash !== checkResult.checkInventoryHash || report.failedCheckCount !== 0 || report.malformedCheckCount !== 0 || report.missingCheckCount !== 0 || report.unknownCheckCount !== 0 || report.duplicateCheckCount !== 0 || !Array.isArray(report.failedChecks) || report.failedChecks.length !== 0 || !exactJson(report.checks, checkResult.checks) || !path.isAbsolute(report.terraformDataDir || "") || path.resolve(report.backendMetadataPath || "") !== path.join(path.resolve(report.terraformDataDir), "terraform.tfstate") || report.backendMetadataMode !== "0600" || report.privateModeValidated !== true || report.workspace !== expectedWorkspace || report.resourceChanges?.nonNoOp !== 0 || !Array.isArray(report.outputChanges)) throw new Error("Stage B refresh evidence check or binding structure is malformed.");
   if (report.status === "NO_CHANGES" && report.outputChanges.length !== 0) throw new Error("Stage B NO_CHANGES evidence contains output changes.");
   if (report.status === "REVIEWED_OUTPUT_RECONCILIATION" && report.outputChanges.length === 0) throw new Error("Stage B reviewed reconciliation evidence contains no reviewed output changes.");
   for (const output of report.outputChanges) {
