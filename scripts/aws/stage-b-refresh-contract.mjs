@@ -85,7 +85,7 @@ function renderedAddress(value) {
   return typeof value === "string" && value.length > 0 && value.trim() === value && /^(?:check|var)\.[A-Za-z0-9_-]+$/.test(value) ? value : undefined;
 }
 
-export function checkAddress(value, { instance = false } = {}) {
+export function checkAddress(value) {
   if (typeof value === "string") return renderedAddress(value);
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const toDisplay = value.to_display;
@@ -102,7 +102,7 @@ export function checkAddress(value, { instance = false } = {}) {
     if (!display && !string) return structured;
     return (!display || display === structured) && (!string || string === structured) ? structured : undefined;
   }
-  return instance ? display || string : undefined;
+  return display || string;
 }
 
 function checkMessage(value) {
