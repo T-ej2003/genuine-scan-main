@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
+import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
 import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, deriveContractDigests, deriveRetainedDefinitions, generateStageBTfvars, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
@@ -14,7 +15,10 @@ import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_S
 const releaseSha = "7245a6036492f875654c414473737e33c1422f3c";
 const now = "2026-08-03T12:00:00.000Z";
 const digest = (n) => `sha256:${String(n).repeat(64)}`;
+const repositoryRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-tfvars-test-"));
+const brokerFixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-tfvars-broker-fixture-"));
+const brokerFixture = await packageStageBBroker({ outputPath: path.join(brokerFixtureRoot, "broker.zip"), toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), repositoryRoot });
 
 function repositoryEvidence(repository) {
   return { repositoryName: repository, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, registryId: STAGE_B.account, repositoryUri: `${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/${repository}`, imageTagMutability: "IMMUTABLE", encryptionConfiguration: { encryptionType: "AES256" }, createdAt: "2026-04-17T15:17:09.210Z", observedAt: now };
@@ -49,8 +53,8 @@ const stageA = { schemaVersion: 2, generator: "scripts/aws/generate-production-g
 function files() {
   const dir = fs.mkdtempSync(path.join(tempRoot, "run-"));
   const write = (name, value, mode = 0o600) => { const file = path.join(dir, name); fs.writeFileSync(file, typeof value === "string" || Buffer.isBuffer(value) ? value : `${JSON.stringify(value, null, 2)}\n`, { mode }); return file; };
-  const state = write("state.json", stateFixture()); const stageAState = write("stage-a-state.json", { lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: STAGE_A_MINIMUM_STATE_SERIAL }); const stageAPath = write("stage-a.json", { ...stageA, stageAStateSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAState)).digest("hex") }); const evidencePath = write("evidence.json", evidence); const signaturePath = write("signature.json", signature); const packagePath = write("broker.zip", Buffer.from("broker package fixture"));
-  const packageBytes = fs.readFileSync(packagePath); write("broker.zip.manifest.json", { schemaVersion: 1, format: "stage-b-broker-zip-v2", archiveTimestamp: "1980-01-01T00:00:00.000Z", compression: "DEFLATE", compressionLevel: 9, toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), rawSha256: crypto.createHash("sha256").update(packageBytes).digest("hex"), base64Sha256: crypto.createHash("sha256").update(Buffer.from(packageBytes.toString("base64"))).digest("hex"), entries: [{ path: "fixture", sha256: crypto.createHash("sha256").update(packageBytes).digest("hex"), mode: "0644", timestamp: "1980-01-01T00:00:00.000Z", compression: "DEFLATE", compressionLevel: 9, size: packageBytes.length }] });
+  const state = write("state.json", stateFixture()); const stageAState = write("stage-a-state.json", { lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: STAGE_A_MINIMUM_STATE_SERIAL }); const stageAPath = write("stage-a.json", { ...stageA, stageAStateSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAState)).digest("hex") }); const evidencePath = write("evidence.json", evidence); const signaturePath = write("signature.json", signature); const packagePath = write("broker.zip", fs.readFileSync(brokerFixture.package.path));
+  fs.copyFileSync(brokerFixture.manifest.path, path.join(dir, "broker.zip.manifest.json")); fs.chmodSync(path.join(dir, "broker.zip.manifest.json"), 0o600);
   return { dir, state, stageAState, stageAPath, evidencePath, signaturePath, packagePath };
 }
 
@@ -59,7 +63,7 @@ function input(overrides = {}) {
   return { imageEvidence: f.evidencePath, imageEvidenceSignature: f.signaturePath, stateBackup: f.state, stageAInput: f.stageAPath, stageAStateBackup: f.stageAState, brokerPackagePath: f.packagePath, toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), imageReleaseSha: releaseSha, workflowRunId: evidence.workflowRunId, canonicalArtifactSha256: evidence.canonicalArtifactSha256, outputPath: path.join(f.dir, "out.tfvars"), bindingReportPath: path.join(f.dir, "binding.json"), now, verifySignature: () => true, ...overrides };
 }
 
-test.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+test.after(() => { fs.rmSync(tempRoot, { recursive: true, force: true }); fs.rmSync(brokerFixtureRoot, { recursive: true, force: true }); });
 
 test("production-shaped inputs generate deterministic private tfvars and binding report", () => {
   const args = input();
@@ -141,6 +145,16 @@ test("current broker ZIP bytes are revalidated at the binding gate", () => {
   assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath }), /broker package raw SHA256/);
   fs.rmSync(args.brokerPackagePath);
   assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath }), /broker package must be/);
+});
+
+test("incomplete broker manifests are rejected by the tfvars binding gate", () => {
+  const args = input();
+  const result = generateStageBTfvars(args);
+  const manifestPath = result.bindingReport.brokerPackageManifestPath;
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  delete manifest.deploymentContractSha256;
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+  assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath }), /required field|manifest/);
 });
 
 test("current Stage-A handoff and source state bytes are revalidated at the binding gate", () => {

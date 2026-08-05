@@ -42,7 +42,7 @@ node scripts/aws/package-production-green-stage-b-broker.mjs \
   --tooling-tree-sha256 "$TOOLING_TREE_SHA256"
 ```
 
-The manifest is written beside the ZIP as `broker.zip.manifest.json` and fixes entry order, timestamps (`1980-01-01T00:00:00Z`), modes, DEFLATE level 9, lockfile/source/contract identities, raw ZIP SHA-256, and the SHA-256 of the base64 ZIP representation. The packager rejects symlinks, special files, cache/debug files, lockfile mutation, and non-canonical tooling identities.
+The manifest is written beside the ZIP as `broker.zip.manifest.json` and fixes entry order, timestamps (`1980-01-01T00:00:00Z`), modes, DEFLATE level 9, lockfile/source/contract identities, raw ZIP SHA-256, and `SHA256(Buffer.from(zipBytes.toString("base64")))` rendered as lowercase hex for `base64Sha256`. The shared validator loads the source-controlled manifest schema, recomputes lockfile/source/contract provenance, and compares every manifest entry to the ZIP central directory and extracted bytes. The packager rejects symlinks, special files, cache/debug files, lockfile mutation, and non-canonical tooling identities.
 
 Record the generated tfvars SHA and binding-report SHA. Closure, plan generation, and both wrapper modes must receive --tfvars, --tfvars-binding-report, --tfvars-binding-report-sha256, and --tooling-tree-sha256; a modified tfvars file, missing provenance, or current broker ZIP byte mismatch is rejected before Terraform execution. The real apply path repeats the ZIP check immediately before applying the saved plan.
 

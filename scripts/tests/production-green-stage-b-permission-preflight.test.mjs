@@ -29,6 +29,7 @@ import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit
 import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
 import { STAGE_B_EXPECTED_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 import { generateImageEvidence, imageEvidenceSha256, signImageEvidence, IMAGE_EVIDENCE_MAX_AGE_MS } from "../aws/production-green-stage-b-image-evidence.mjs";
+import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const realForbiddenSimulations = JSON.parse(fs.readFileSync("scripts/tests/fixtures/aws-iam-simulate-principal-policy-stage-b-forbidden.json", "utf8"));
@@ -42,6 +43,9 @@ const policyEvidence = (() => {
   return { roleArn, attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: [], inlinePolicies: [], permissionsBoundaryArn: null, policies, status: "valid" };
 })();
 const runPermissionPreflight = (input) => runPermissionPreflightRaw({ policyEvidence, ...input });
+const brokerFixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-permission-broker-fixture-"));
+const brokerFixture = await packageStageBBroker({ outputPath: path.join(brokerFixtureRoot, "broker.zip"), toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), repositoryRoot: process.cwd() });
+test.after(() => fs.rmSync(brokerFixtureRoot, { recursive: true, force: true }));
 const contextValue = (mapping, key) => mapping.registerContext.find((entry) => entry.key === key).values[0];
 const taskDefinitionAfter = (mapping) => ({
   family: mapping.family,
@@ -810,10 +814,10 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   writePrivate(imageEvidencePath, `${JSON.stringify(imageEvidence, null, 2)}\n`);
   writePrivate(imageEvidenceSignaturePath, JSON.stringify(signImageEvidence(imageEvidence, { sign: () => "AQ==" })));
   const brokerPackagePath = path.join(directory, "broker.zip");
-  fs.writeFileSync(brokerPackagePath, Buffer.from("broker package fixture"), { mode: 0o600 });
+  fs.copyFileSync(brokerFixture.package.path, brokerPackagePath); fs.chmodSync(brokerPackagePath, 0o600);
   const brokerBytes = fs.readFileSync(brokerPackagePath);
   const brokerPackageManifestPath = `${brokerPackagePath}.manifest.json`;
-  fs.writeFileSync(brokerPackageManifestPath, JSON.stringify({ schemaVersion: 1, format: "stage-b-broker-zip-v2", archiveTimestamp: "1980-01-01T00:00:00.000Z", compression: "DEFLATE", compressionLevel: 9, toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), rawSha256: crypto.createHash("sha256").update(brokerBytes).digest("hex"), base64Sha256: crypto.createHash("sha256").update(Buffer.from(brokerBytes.toString("base64"))).digest("hex"), entries: [{ path: "fixture", sha256: crypto.createHash("sha256").update(brokerBytes).digest("hex"), mode: "0644", timestamp: "1980-01-01T00:00:00.000Z", compression: "DEFLATE", compressionLevel: 9, size: brokerBytes.length }] }, null, 2) + "\n", { mode: 0o600 });
+  fs.copyFileSync(brokerFixture.manifest.path, brokerPackageManifestPath); fs.chmodSync(brokerPackageManifestPath, 0o600);
   const stageAStateBackupPath = path.join(directory, "stage-a-state.json");
   fs.writeFileSync(stageAStateBackupPath, JSON.stringify({ lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 35 }), { mode: 0o600 });
   const stageAInputPath = path.join(directory, "stage-a-prerequisites.json");
