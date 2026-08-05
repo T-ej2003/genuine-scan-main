@@ -729,8 +729,16 @@ IAM simulation or mutation APIs as probes.
 The generated graph is verified with `npm run stage-b:capability-graph:verify`; regenerate
 it only with `npm run stage-b:capability-graph:generate`. The reviewed credential order is
 administrator/root preflight and signature, complete credential clearing, bootstrap-user
-MFA `sts:GetSessionToken`, exact `sts:AssumeRole` into
+MFA `aws sts get-session-token --duration-seconds 129600`, exact
+`aws sts assume-role --duration-seconds 3600` into
 `mscqr-production-release-deployer`, bootstrap credential clearing, then release preflight.
+The root `aws login --profile default` lifetime is external and must be checked with
+`aws sts get-caller-identity` immediately before administrator use; an expired token or
+caller mismatch stops the phase. Use `npm run stage-b:administrator-preflight` for the
+administrator producer lifecycle: it records the exact PID, waits for terminal state,
+and classifies the producer as `RUNNING`, `SUCCEEDED`, `FAILED`, or `TIMED_OUT` after
+the bounded 1200-second process timeout. An empty output directory while `RUNNING` is
+not a failed preflight.
 Each public preflight invocation asserts its exact caller. The administrator invocation
 accepts only `--identity administrator --output <new-private-report>
 --signature-output <new-private-signature>`. The release invocation accepts only
