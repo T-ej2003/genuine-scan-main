@@ -390,6 +390,47 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "plan-capture-report",
+      "kind": "file",
+      "producer": "scripts/plan-production-green-stage-b.mjs:captureStageBPlan",
+      "consumers": [
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/aws/validate-production-green-stage-b-permissions.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "plan-capture-report",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "plan-approval-report",
+      "kind": "file",
+      "producer": "scripts/plan-production-green-stage-b.mjs:approveCapturedStageBPlan",
+      "consumers": [
+        "scripts/aws/validate-production-green-stage-b-permissions.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs",
+        "scripts/apply-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "plan-approval-report",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "reference-audit",
       "kind": "file",
       "producer": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs:runCli",

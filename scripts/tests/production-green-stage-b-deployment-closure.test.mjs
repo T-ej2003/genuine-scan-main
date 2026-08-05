@@ -22,6 +22,17 @@ test("production closure hoists backend metadata and validates refresh evidence 
   assert.ok(source.indexOf("let backendMetadata;") < source.indexOf('if (mode === "production")'));
 });
 
+test("plan approval validation is production-only while optional tfvars provenance remains available", () => {
+  const source = fs.readFileSync("scripts/aws/validate-stage-b-deployment-closure.mjs", "utf8");
+  const optionalProvenanceStart = source.indexOf('if (mode === "production" || tfvarsPath || bindingReportPath)');
+  const approvalGate = source.indexOf('if (mode === "production") assertStageBPlanApprovedBinding');
+  assert.ok(optionalProvenanceStart >= 0);
+  assert.ok(approvalGate > optionalProvenanceStart);
+  assert.match(source.slice(optionalProvenanceStart, approvalGate), /assertStageBRefreshEvidence/);
+  assert.doesNotMatch(source.slice(optionalProvenanceStart, approvalGate), /assertStageBPlanApprovedBinding/);
+  assert.match(source.slice(0, optionalProvenanceStart), /if \(mode === "production"\)/);
+});
+
 test("production-shaped Stage B plan is fully classified with zero destroys", () => {
   const result = classifyStageBPlan(fixture, { strict: false });
   assert.deepEqual(result.actionCounts, { "no-op": 58, create: 12, update: 3 });

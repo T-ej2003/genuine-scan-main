@@ -23,6 +23,7 @@ import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformIniti
 import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./aws/stage-b-artifact-contract.mjs";
+import { STAGE_B_PLAN_CAPTURED, assertStageBPlanApprovalReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, readStageBPlanEvidence, stageBPlanHashes, writeStageBPlanEvidence } from "./aws/stage-b-plan-approval-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
@@ -532,7 +533,7 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
 }
 
 export function assertStageBPlan(plan, options = {}) {
-  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence, strictResourceContract = false, protectedMainCheckout, terraformWorkspace } = options;
+  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence, strictResourceContract = false, protectedMainCheckout, terraformWorkspace, requireReferenceAudit = true } = options;
   if (terraformWorkspace) assertStageBTerraformWorkspace(terraformWorkspace);
   const deploymentIdentity = strictResourceContract || imageEvidence ? assertStageBDeploymentIdentity({ plan, imageEvidence }) : undefined;
   if (strictResourceContract) assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity });
@@ -547,7 +548,7 @@ export function assertStageBPlan(plan, options = {}) {
     const brokerActions = brokerChange.change?.actions;
     if (!Array.isArray(brokerActions) || brokerActions.length === 0) throw new Error("Stage B broker actions are missing or malformed.");
     if (exactActions(brokerActions, ["create"])) assertInitialBrokerCreatePlan(plan, terraformConfiguration);
-    else if (exactActions(brokerActions, ["update"])) assertBrokerAuditBinding(plan, brokerChange, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
+    else if (exactActions(brokerActions, ["update"]) && requireReferenceAudit) assertBrokerAuditBinding(plan, brokerChange, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
     else if (!exactActions(brokerActions, ["no-op"])) throw new Error(`Stage B broker actions are unsupported: ${JSON.stringify(brokerActions)}`);
   }
   const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
@@ -555,7 +556,7 @@ export function assertStageBPlan(plan, options = {}) {
     ? assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration)
     : null;
   const brokerActions = brokerChange?.change?.actions || [];
-  if (taskDefinitionClassification && (referenceAudit || exactActions(brokerActions, ["update"]))) {
+  if (taskDefinitionClassification && (referenceAudit || (requireReferenceAudit && exactActions(brokerActions, ["update"])))) {
     assertAppendOnlyReferenceAuditBinding(plan, taskDefinitionClassification, referenceAudit, { referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now });
   }
   for (const change of plan.resource_changes || []) {
@@ -577,28 +578,18 @@ export function assertStageBPlan(plan, options = {}) {
   return { taskDefinitions: taskDefinitionClassification, deploymentIdentity, imageBindings, ...resourceClassification };
 }
 
+export function assertStageBPlanCapture(plan, options = {}) {
+  const result = assertStageBPlan(plan, { ...options, requireReferenceAudit: false });
+  if ((result.actionCounts?.destroy || 0) !== 0 || (result.actionCounts?.replace || 0) !== 0 || result.unclassifiedResources?.length !== 0) throw new Error("Stage B plan capture contains a destructive or unclassified action.");
+  return result;
+}
+
 function readOption(argv, name) {
   const index = argv.indexOf(name);
   return index === -1 ? undefined : argv[index + 1];
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  if (process.env.MSCQR_STAGE_B_PLAN_ENABLED !== "true" || process.env.MSCQR_STAGE_B_PLAN_CONFIRM !== "MSCQR_GENERATE_STAGE_B_PLAN_ONLY") throw new Error("Stage B planning requires both explicit plan-only confirmations.");
-  const tfvars = process.argv[2];
-  if (!tfvars || !path.isAbsolute(tfvars) || !fs.existsSync(tfvars)) throw new Error("Stage B requires an existing absolute private tfvars path.");
-  const cliOptions = process.argv.slice(3);
-  const bindingReportPath = readOption(cliOptions, "--binding-report");
-  const bindingReportSha256 = readOption(cliOptions, "--binding-report-sha256");
-  const toolingTreeSha256 = readOption(cliOptions, "--tooling-tree-sha256");
-  const refreshReportPath = readOption(cliOptions, "--refresh-report");
-  const refreshReportSha256 = readOption(cliOptions, "--refresh-report-sha256");
-  const expectedImageReleaseSha = readOption(cliOptions, "--image-release-sha");
-  const closureMode = readOption(cliOptions, "--closure-mode");
-  const savedPlanPath = readOption(cliOptions, "--saved-plan");
-  const planJsonPath = readOption(cliOptions, "--plan-json");
-  const canonicalPlanJsonPath = readOption(cliOptions, "--canonical-plan-json");
-  const protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true });
-  if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha || !refreshReportPath || !refreshReportSha256 || closureMode !== "production" || !savedPlanPath || !planJsonPath || !canonicalPlanJsonPath) throw new Error("Stage B planning requires canonical tfvars, refresh provenance, and three external private plan outputs.");
+function assertPlanOutputPaths({ savedPlanPath, planJsonPath, canonicalPlanJsonPath }) {
   const outputPaths = [
     assertStageBArtifactPath({ artifactPath: savedPlanPath, repositoryRoot: process.cwd(), label: "Stage B saved plan", allowExisting: false }),
     assertStageBArtifactPath({ artifactPath: planJsonPath, repositoryRoot: process.cwd(), label: "Stage B plan JSON", allowExisting: false }),
@@ -606,31 +597,89 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   ];
   if (new Set(outputPaths).size !== outputPaths.length) throw new Error("Stage B plan outputs must be distinct files.");
   ensureStageBPrivateDirectory({ directory: path.dirname(outputPaths[0]), repositoryRoot: process.cwd(), create: true });
+  return outputPaths;
+}
+
+function readPlanningInputs(tfvars, cliOptions, protectedMainCheckout) {
+  const bindingReportPath = readOption(cliOptions, "--binding-report");
+  const bindingReportSha256 = readOption(cliOptions, "--binding-report-sha256");
+  const toolingTreeSha256 = readOption(cliOptions, "--tooling-tree-sha256");
+  const refreshReportPath = readOption(cliOptions, "--refresh-report");
+  const refreshReportSha256 = readOption(cliOptions, "--refresh-report-sha256");
+  const expectedImageReleaseSha = readOption(cliOptions, "--image-release-sha");
+  const closureMode = readOption(cliOptions, "--closure-mode");
+  if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha || !refreshReportPath || !refreshReportSha256 || closureMode !== "production") throw new Error("Stage B planning requires canonical tfvars, refresh provenance, and production closure mode.");
   const bindingReport = assertStageBTfvarsBinding({ tfvarsPath: tfvars, bindingReportPath, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha });
   const backendMetadata = assertStageBPlanningBackendMetadata();
   assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: bindingReport.imageEvidenceCanonicalSha256, expectedStateSha256: bindingReport.stateBackupSha256, expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir });
-  const out = outputPaths[0];
-  const { workspace } = runStageBTerraformPlanCommand({ argv: process.argv.slice(2), plan: () => execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${out}`], { stdio: "inherit" }) });
-  ensureStageBPrivateFile({ filePath: out, repositoryRoot: process.cwd(), normalize: true, label: "Stage B saved plan" });
-  const planJsonText = execFileSync("terraform", [`-chdir=${root}`, "show", "-json", out], { encoding: "utf8" });
-  const plan = JSON.parse(planJsonText);
+  return { bindingReport, backendMetadata, bindingReportPath, bindingReportSha256, toolingTreeSha256, refreshReportPath, refreshReportSha256, expectedImageReleaseSha };
+}
+
+export function captureStageBPlan({ tfvars, cliOptions, protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true }), plan = () => execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${readOption(cliOptions, "--saved-plan")}`], { stdio: "inherit" }), show = (savedPlanPath) => execFileSync("terraform", [`-chdir=${root}`, "show", "-json", savedPlanPath], { encoding: "utf8" }) } = {}) {
+  const savedPlanPath = readOption(cliOptions, "--saved-plan");
+  const planJsonPath = readOption(cliOptions, "--plan-json");
+  const canonicalPlanJsonPath = readOption(cliOptions, "--canonical-plan-json");
+  const captureReportPath = readOption(cliOptions, "--capture-report");
+  if (!savedPlanPath || !planJsonPath || !canonicalPlanJsonPath || !captureReportPath) throw new Error("Stage B plan capture requires three plan outputs and a capture report.");
+  if (readOption(cliOptions, "--reference-audit")) throw new Error("Stage B plan capture cannot accept a reference audit; approve the captured plan after audit generation.");
+  const outputPaths = assertPlanOutputPaths({ savedPlanPath, planJsonPath, canonicalPlanJsonPath });
+  assertStageBArtifactPath({ artifactPath: captureReportPath, repositoryRoot: process.cwd(), label: "Stage B plan capture report", allowExisting: false });
+  const inputs = readPlanningInputs(tfvars, cliOptions, protectedMainCheckout);
+  const { workspace } = runStageBTerraformPlanCommand({ argv: [tfvars, ...cliOptions], plan: () => plan() });
+  ensureStageBPrivateFile({ filePath: outputPaths[0], repositoryRoot: process.cwd(), normalize: true, label: "Stage B saved plan" });
+  const shown = show(outputPaths[0]);
+  const planJsonText = Buffer.isBuffer(shown) ? shown.toString("utf8") : shown;
+  if (typeof planJsonText !== "string") throw new Error("Terraform show did not return JSON text.");
+  const parsedPlan = JSON.parse(planJsonText);
   const planJsonBytes = Buffer.from(`${planJsonText.trim()}\n`);
-  const canonicalPlanJsonBytes = Buffer.from(`${canonicalJson(plan)}\n`);
+  const canonicalPlanJsonBytes = Buffer.from(`${canonicalJson(parsedPlan)}\n`);
   writeStageBPrivateFileAtomic({ filePath: outputPaths[1], bytes: planJsonBytes, repositoryRoot: process.cwd(), label: "Stage B plan JSON" });
   writeStageBPrivateFileAtomic({ filePath: outputPaths[2], bytes: canonicalPlanJsonBytes, repositoryRoot: process.cwd(), label: "Stage B canonical plan JSON" });
-  const terraformConfiguration = fs.readFileSync(path.resolve(root, "main.tf"), "utf8");
-  const referenceAuditPath = readOption(cliOptions, "--reference-audit");
-  const referenceAuditSha256 = readOption(cliOptions, "--reference-audit-sha256");
-  const planJsonSha256 = readOption(cliOptions, "--plan-json-sha256") || sha256(planJsonBytes);
-  const referenceAuditBytes = referenceAuditPath ? fs.readFileSync(path.resolve(referenceAuditPath)) : undefined;
-  const referenceAudit = referenceAuditBytes ? JSON.parse(referenceAuditBytes) : undefined;
-  let trustedCallerArn;
-  try {
-    trustedCallerArn = JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn;
-  } catch {
-    throw new Error("Stage B trusted caller attestation failed: aws sts get-caller-identity did not return valid identity JSON.");
-  }
-  if (sha256(planJsonBytes) !== planJsonSha256) throw new Error("Stage B plan JSON SHA256 does not match the selected plan JSON.");
-  assertStageBPlan(plan, { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, terraformConfiguration, strictResourceContract: true, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: workspace } });
-  process.stdout.write(JSON.stringify({ status: "approved-plan-only", plan: out, planJson: outputPaths[1], canonicalPlanJson: outputPaths[2], planJsonSha256, canonicalPlanJsonSha256: sha256(canonicalPlanJsonBytes) }) + "\n");
+  const classification = assertStageBPlanCapture(parsedPlan, { terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: workspace } });
+  const hashes = stageBPlanHashes({ savedPlanBytes: fs.readFileSync(outputPaths[0]), planJsonBytes, canonicalPlanJsonBytes });
+  const report = createStageBPlanCaptureReport({ toolingSha: protectedMainCheckout.currentHead, toolingTreeSha256: inputs.toolingTreeSha256, refreshReportSha256: inputs.refreshReportSha256, hashes, capturedAt: new Date().toISOString(), stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial, terraformVersion: parsedPlan.terraform_version, terraformFormatVersion: parsedPlan.format_version, classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replace || 0, unclassified: classification.unclassifiedResources.length } });
+  const reportResult = writeStageBPlanEvidence({ filePath: captureReportPath, report, repositoryRoot: process.cwd(), label: "Stage B plan capture report" });
+  return { status: STAGE_B_PLAN_CAPTURED, ...reportResult, plan: outputPaths[0], planJson: outputPaths[1], canonicalPlanJson: outputPaths[2], planJsonSha256: hashes.planJsonSha256, canonicalPlanJsonSha256: hashes.canonicalPlanFileSha256, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256 };
+}
+
+export function approveCapturedStageBPlan({ tfvars, cliOptions, protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true }) } = {}) {
+  const savedPlanPath = readOption(cliOptions, "--saved-plan");
+  const planJsonPath = readOption(cliOptions, "--plan-json");
+  const canonicalPlanJsonPath = readOption(cliOptions, "--canonical-plan-json");
+  const captureReportPath = readOption(cliOptions, "--capture-report");
+  const captureReportSha256 = readOption(cliOptions, "--capture-report-sha256");
+  const auditPath = readOption(cliOptions, "--reference-audit");
+  const auditSha256 = readOption(cliOptions, "--reference-audit-sha256");
+  const approvalReportPath = readOption(cliOptions, "--approval-report");
+  if (!savedPlanPath || !planJsonPath || !canonicalPlanJsonPath || !captureReportPath || !captureReportSha256 || !auditPath || !auditSha256 || !approvalReportPath) throw new Error("Stage B plan approval requires captured plan artifacts, capture report, reference audit, and approval report.");
+  for (const [filePath, label] of [[savedPlanPath, "Stage B saved plan"], [planJsonPath, "Stage B plan JSON"], [canonicalPlanJsonPath, "Stage B canonical plan JSON"], [auditPath, "Stage B reference audit"]]) ensureStageBPrivateFile({ filePath, repositoryRoot: process.cwd(), label });
+  assertStageBArtifactPath({ artifactPath: approvalReportPath, repositoryRoot: process.cwd(), label: "Stage B plan approval report", allowExisting: false });
+  const inputs = readPlanningInputs(tfvars, cliOptions, protectedMainCheckout);
+  const planBytes = fs.readFileSync(planJsonPath); const savedPlanBytes = fs.readFileSync(savedPlanPath); const canonicalPlanJsonBytes = fs.readFileSync(canonicalPlanJsonPath);
+  const hashes = stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes });
+  const capture = readStageBPlanEvidence(captureReportPath, process.cwd(), "Stage B plan capture report");
+  if (capture.sha256 !== captureReportSha256) throw new Error("Stage B plan capture report SHA256 mismatch.");
+  const auditBytes = fs.readFileSync(auditPath); const audit = JSON.parse(auditBytes);
+  const trustedCallerArn = JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn;
+  if (sha256(planBytes) !== (readOption(cliOptions, "--plan-json-sha256") || hashes.planJsonSha256)) throw new Error("Stage B plan JSON SHA256 does not match the selected plan JSON.");
+  const plan = JSON.parse(planBytes);
+  const classification = assertStageBPlan(plan, { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: auditSha256, planJsonBytes: planBytes, planJsonSha256: hashes.planJsonSha256, trustedCallerArn, terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: assertStageBPlanningWorkspace({ env: process.env, argv: [tfvars, ...cliOptions] }).toString() } });
+  const approval = createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath: path.resolve(auditPath), referenceAuditSha256: auditSha256, referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, toolingSha: capture.report.toolingSha, toolingTreeSha256: capture.report.toolingTreeSha256, refreshReportSha256: capture.report.refreshReportSha256, stageBLineage: capture.report.stageBLineage, stageBSerial: capture.report.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: new Date().toISOString(), classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replace || 0, unclassified: classification.unclassifiedResources.length } });
+  const result = writeStageBPlanEvidence({ filePath: approvalReportPath, report: approval, repositoryRoot: process.cwd(), label: "Stage B plan approval report" });
+  assertStageBPlanApprovalReport(approval, { approvalReportBytes: fs.readFileSync(approvalReportPath), captureReport: capture.report, captureReportBytes: capture.bytes, referenceAudit: audit, referenceAuditBytes: auditBytes, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: auditSha256, trustedCallerArn, stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial });
+  return { status: STAGE_B_PLAN_APPROVED, ...result, plan: savedPlanPath, planJson: planJsonPath, canonicalPlanJson: canonicalPlanJsonPath, planJsonSha256: hashes.planJsonSha256, canonicalPlanJsonSha256: hashes.canonicalPlanFileSha256, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256 };
+}
+
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+  if (process.env.MSCQR_STAGE_B_PLAN_ENABLED !== "true" || process.env.MSCQR_STAGE_B_PLAN_CONFIRM !== "MSCQR_GENERATE_STAGE_B_PLAN_ONLY") throw new Error("Stage B planning requires both explicit plan-only confirmations.");
+  const tfvars = process.argv[2];
+  if (!tfvars || !path.isAbsolute(tfvars) || !fs.existsSync(tfvars)) throw new Error("Stage B requires an existing absolute private tfvars path.");
+  const cliOptions = process.argv.slice(3);
+  const closureMode = readOption(cliOptions, "--closure-mode");
+  const protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true });
+  if (closureMode !== "production") throw new Error("Stage B planning requires --closure-mode production.");
+  const result = cliOptions.includes("--approval-only")
+    ? approveCapturedStageBPlan({ tfvars, cliOptions, protectedMainCheckout })
+    : captureStageBPlan({ tfvars, cliOptions, protectedMainCheckout });
+  process.stdout.write(`${JSON.stringify(result)}\n`);
 }
