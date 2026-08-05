@@ -4,6 +4,13 @@ The Stage B refresh-only command produces a temporary non-deployable Terraform
 refresh plan, reads its JSON with `terraform show -json`, and writes a structured
 refresh report. Console text such as `No changes.` is not authoritative.
 
+Acquisition is fail-closed: the plan command must exit 0 or 2, the exact private
+temporary plan must be non-empty, and a separate successful `terraform show -json`
+must provide the parsed plan bytes. The report records the plan, show stdout, and
+show stderr hashes plus both command exit codes. Diagnostic, errored, truncated,
+wrapper, state, or otherwise incomplete JSON is recorded as a blocked acquisition;
+it is never classified as no-change evidence.
+
 The classifier also requires the eight source-defined `plan.checks` entries to be
 present, unique, and explicitly `pass` at both check and instance level:
 `production_only`, `stage_a_bindings`, `stage_a_runtime_secrets`,
@@ -37,4 +44,6 @@ Production callers must provide the Stage B state backup explicitly:
 The refresh report binds tooling SHA/tree digest, Stage A and Stage B state identity,
 tfvars and binding-report hashes, image-evidence hash, backend metadata hash,
 `TF_DATA_DIR`, and workspace. The planner, production closure, validator, and apply
-wrapper accept the report only when that binding is exact.
+wrapper accept the report only when that binding and the successful acquisition proof
+are exact. Omitted `resource_changes` or `output_changes` are normalized only after
+the complete plan envelope and eight-check inventory are validated.
