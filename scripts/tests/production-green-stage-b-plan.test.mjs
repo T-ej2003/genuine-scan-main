@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
-import { assertStageBPlan, assertStageBTaskDefinitionStateMigrationPreconditions } from "../plan-production-green-stage-b.mjs";
+import { assertStageBPlan, assertStageBPlanCapture, assertStageBBrokerCaptureUpdateContract, assertStageBTaskDefinitionStateMigrationPreconditions } from "../plan-production-green-stage-b.mjs";
 import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 
@@ -137,6 +137,34 @@ test("strict validation joins protected main to the plan tooling SHA before reso
 test("fresh deployment has exactly twelve current creates and no retained creates", () => {
   assert.doesNotThrow(() => assertStageBPlan({ resource_changes: currentCreates() }, { terraformConfiguration }));
   assert.equal(currentCreates().filter((change) => change.address.includes("_retained")).length, 0);
+});
+
+test("PLAN_CAPTURED accepts only the reviewed three-resource broker update", () => {
+  const plan = {
+    resource_changes: [
+      { address: "aws_iam_policy.broker", type: "aws_iam_policy", change: { actions: ["update"], before: { policy: "old" }, after: {} } },
+      { address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "1" }, after: { function_version: "2" } } },
+      { address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: ["update"], before: { filename: "old.zip", source_code_hash: "old", environment: {} }, after: { filename: "new.zip", source_code_hash: "new", environment: {} } } },
+      { address: "aws_iam_role_policy_attachment.broker", type: "aws_iam_role_policy_attachment", change: { actions: ["no-op"], before: {}, after: {} } },
+    ],
+  };
+  assert.deepEqual(assertStageBBrokerCaptureUpdateContract(plan), { brokerUpdatePresent: true, brokerActions: ["update"], brokerResourceAddresses: ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"] });
+});
+
+test("PLAN_CAPTURED rejects broker create, delete, replacement, and unsupported fields", () => {
+  const base = {
+    resource_changes: [
+      { address: "aws_iam_policy.broker", type: "aws_iam_policy", change: { actions: ["update"], before: { policy: "old" }, after: {} } },
+      { address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "1" }, after: { function_version: "2" } } },
+      { address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: ["update"], before: { filename: "old.zip" }, after: { filename: "new.zip" } } },
+    ],
+  };
+  for (const actions of [["create"], ["delete"], ["delete", "create"]]) {
+    const changed = structuredClone(base); changed.resource_changes[2].change.actions = actions;
+    assert.throws(() => assertStageBBrokerCaptureUpdateContract(changed), /exactly the reviewed|unsupported/);
+  }
+  const unsupported = structuredClone(base); unsupported.resource_changes[2].change.after.description = "unexpected";
+  assert.throws(() => assertStageBBrokerCaptureUpdateContract(unsupported), /unsupported mutable field/);
 });
 
 test("partial append-only retries accept safe current create/no-op mixtures", () => {
