@@ -21,6 +21,8 @@ import {
   canonicalizeJson,
   collectLiveReleasePolicyEvidence,
   runPermissionPreflight,
+  assertStageBPermissionEvidenceKind,
+  INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND,
   signPermissionReport,
   verifyPermissionReportSignature,
 } from "./validate-production-green-stage-b-permissions.mjs";
@@ -85,6 +87,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
 } = {}) {
   const identity = value(argv, "--identity"); const output = value(argv, "--output"); const capabilityGraph = validateCapabilityGraph(); const observedCaller = caller();
   if (identity === "administrator") {
+    if (value(argv, "--phase") !== "initial") throw new Error("Administrator capability preflight requires --phase initial.");
     if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(observedCaller)) throw new Error("Administrator production preflight requires the approved root identity.");
     const planPath = path.join(root, "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
     const manifestPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
@@ -92,10 +95,12 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     const generatedAt = new Date().toISOString();
     const report = permissionPreflight({
       reportGeneratorCallerArn: observedCaller, simulatedRoleArn: RELEASE_ROLE_ARN, manifest, plan, planBytes,
-      savedPlanBytes: Buffer.from("stage-b-pre-plan-capability-fixture-v1"), generatedAt, now: generatedAt,
+      generatedAt, now: generatedAt,
       policyPublishedAt: generatedAt, cloudTrailSessionName: "pre-plan-capability", policyEvidence: collectPolicies(),
       cloudTrail: () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] }), purpose: "pre-plan-capability",
+      phase: "initial",
     });
+    assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
     report.capabilityGraph = capabilityGraph;
     if (report.status !== "valid") {
       const reportFile = write(output, report);
@@ -109,6 +114,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     const adminReportBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report"))); const adminReport = JSON.parse(adminReportBytes);
     const signature = JSON.parse(fs.readFileSync(path.resolve(value(argv, "--administrator-report-signature")), "utf8"));
     verify({ report: adminReport, signatureArtifact: signature });
+    assertStageBPermissionEvidenceKind(adminReport, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
     if (adminReport.purpose !== "pre-plan-capability" || adminReport.status !== "valid" || adminReport.simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Administrator pre-plan capability report is invalid.");
     if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
     assertReleasePolicyEvidence(adminReport.policyEvidence);

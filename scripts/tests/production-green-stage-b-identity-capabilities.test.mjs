@@ -96,10 +96,10 @@ test("wrong caller and region fail closed", () => {
 test("one command keeps administrator simulation and release reads on separate identities", () => {
   const directory = temp(); const adminPath = path.join(directory, "admin.json"); const signaturePath = path.join(directory, "admin.signature.json");
   let administratorSimulations = 0;
-  const admin = runProductionPreflightCli(["--identity", "administrator", "--output", adminPath, "--signature-output", signaturePath], {
+  const admin = runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--output", adminPath, "--signature-output", signaturePath], {
     caller: () => "arn:aws:iam::368992683803:root",
     collectPolicies: shapedPolicyEvidence,
-    permissionPreflight: (input) => { administratorSimulations += 1; return { schemaVersion: 1, purpose: input.purpose, status: "valid", deniedCount: 0, simulatedRoleArn: input.simulatedRoleArn, generatedAt: input.generatedAt, policyEvidence: input.policyEvidence }; },
+    permissionPreflight: (input) => { administratorSimulations += 1; return { schemaVersion: 1, evidenceKind: "INITIAL_ADMIN_CAPABILITY", phase: "initial", purpose: input.purpose, status: "valid", deniedCount: 0, simulatedRoleArn: input.simulatedRoleArn, generatedAt: input.generatedAt, policyEvidence: input.policyEvidence }; },
     sign: (report) => ({ schemaVersion: 1, reportSha256: "a".repeat(64), signedAt: report.generatedAt }),
   });
   assert.equal(admin.status, "valid"); assert.equal(administratorSimulations, 1);
@@ -116,7 +116,7 @@ test("one command keeps administrator simulation and release reads on separate i
 test("invalid release capability report stops before backend readiness", () => {
   const directory = temp(); const adminPath = path.join(directory, "admin.json"); const signaturePath = path.join(directory, "signature.json");
   const capabilityGraph = assertStageBDeploymentCapabilityGraph();
-  fs.writeFileSync(adminPath, JSON.stringify({ schemaVersion: 1, purpose: "pre-plan-capability", status: "valid", simulatedRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", policyEvidence: shapedPolicyEvidence(), capabilityGraph }));
+  fs.writeFileSync(adminPath, JSON.stringify({ schemaVersion: 1, evidenceKind: "INITIAL_ADMIN_CAPABILITY", phase: "initial", purpose: "pre-plan-capability", status: "valid", simulatedRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", policyEvidence: shapedPolicyEvidence(), capabilityGraph }));
   fs.writeFileSync(signaturePath, "{}"); let continued = 0;
   const result = runProductionPreflightCli(["--identity", "release-deployer", "--output", path.join(directory, "release.json"), "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
     caller: () => caller, verify: () => true,

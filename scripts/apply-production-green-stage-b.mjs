@@ -15,6 +15,8 @@ import {
   RELEASE_ROLE_ARN,
   canonicalizeJson,
   assertPermissionReportPlanBinding,
+  assertStageBPermissionEvidenceKind,
+  PLAN_BOUND_PERMISSION_EVIDENCE_KIND,
   assertReleasePolicyEvidence,
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./aws/stage-b-evidence-freshness.mjs";
@@ -87,6 +89,7 @@ export function parseCli(argv) {
 
 export function assertPermissionReport(report, { signatureArtifact, verifySignature = verifyPermissionReportSignature, plan, planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, toolingSha, imageReleaseSha, canonicalImageEvidenceSha256, now = new Date().toISOString() } = {}) {
   if (!verifySignature({ report, signatureArtifact, now })) throw new Error("Permission report signature verification failed.");
+  assertStageBPermissionEvidenceKind(report, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, "plan-bound");
   if (report?.schemaVersion !== 1 || report.status !== "valid") throw new Error("A valid permission-preflight report is required.");
   if (report.purpose !== "saved-plan-authorization") throw new Error("A saved-plan authorization permission report is required.");
   assertPermissionEvaluationBindings(report, readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"), { plan });

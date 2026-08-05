@@ -734,14 +734,17 @@ MFA `aws sts get-session-token --duration-seconds 129600`, exact
 `mscqr-production-release-deployer`, bootstrap credential clearing, then release preflight.
 The root `aws login --profile default` lifetime is external and must be checked with
 `aws sts get-caller-identity` immediately before administrator use; an expired token or
-caller mismatch stops the phase. Use `npm run stage-b:administrator-preflight` for the
+caller mismatch stops the phase. Use the explicit phase launcher commands for the
 administrator producer lifecycle: it records the exact PID, waits for terminal state,
 and classifies the producer as `RUNNING`, `SUCCEEDED`, `FAILED`, or `TIMED_OUT` after
 the bounded 1200-second process timeout. An empty output directory while `RUNNING` is
-not a failed preflight.
+not a failed preflight. Invoke the initial phase explicitly with
+`npm run stage-b:administrator-capability-preflight`; invoke the later plan-bound phase
+only with `npm run stage-b:plan-bound-permission-preflight` after `PLAN_APPROVED` exists.
 Each public preflight invocation asserts its exact caller. The administrator invocation
-accepts only `--identity administrator --output <new-private-report>
---signature-output <new-private-signature>`. The release invocation accepts only
+accepts only the explicit initial phase and its output/lifecycle paths. The plan-bound
+permission invocation requires the exact approved plan, audit, and permission-manifest
+inputs. The release invocation accepts only
 `--identity release-deployer` plus those signed administrator artifacts and the canonical
 backend, state, handoff, image-evidence, broker-package, tfvars, and binding-report inputs.
 Invalid administrator evidence is recorded but never signed. The release phase aggregates

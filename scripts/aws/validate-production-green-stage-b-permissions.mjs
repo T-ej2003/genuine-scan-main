@@ -14,6 +14,8 @@ import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidence
 import { assertStageBPlanApprovedBinding } from "./stage-b-plan-approval-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
+export const INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND = "INITIAL_ADMIN_CAPABILITY";
+export const PLAN_BOUND_PERMISSION_EVIDENCE_KIND = "PLAN_BOUND_PERMISSION";
 export const PERMISSION_EVIDENCE_MAX_AGE_MS = STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS;
 export const PERMISSION_PREFLIGHT_CLOCK_SKEW_MS = STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS;
 export const PERMISSION_EVIDENCE_VALIDITY_MODEL = STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL;
@@ -29,6 +31,13 @@ const STAGE_A_LIVE_EVIDENCE_EVALUATIONS = Object.freeze([
 ]);
 export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${ACCOUNT}:root`]);
 export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
+
+export function assertStageBPermissionEvidenceKind(report, expectedKind, expectedPhase) {
+  if (report?.evidenceKind !== expectedKind || report?.phase !== expectedPhase) {
+    throw new Error(`Stage B evidence kind must be ${expectedKind} with phase ${expectedPhase}.`);
+  }
+  return true;
+}
 export const PERMISSION_REPORT_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
 export const PERMISSION_REPORT_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
 const BROKER_ROLE_NAME = STAGE_B_BROKER_POLICY.roleName;
@@ -690,16 +699,19 @@ export function runPermissionPreflight({
   policyPublishedAt,
   cloudTrailSessionName,
   purpose = "saved-plan-authorization",
+  phase = "plan-bound",
   policyEvidence,
   now = new Date().toISOString(),
   simulate = ({ roleArn: sourceArn, evaluation: item }) => simulatePrincipalPolicy({ roleArn: sourceArn, evaluation: item }),
   cloudTrail = ({ sessionName, startTime, endTime, requiredActions }) => inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions }),
 } = {}) {
+  if (!["initial", "plan-bound"].includes(phase)) throw new Error("Permission preflight phase is unsupported.");
+  const planBound = phase === "plan-bound";
   if (expectedAccount !== ACCOUNT || expectedRegion !== REGION) throw new Error("Expected account or region is wrong.");
-  if (!Buffer.isBuffer(savedPlanBytes) || savedPlanBytes.length === 0) throw new Error("Saved binary plan bytes are required for permission preflight.");
-  if (!planApprovalReport || !Buffer.isBuffer(planApprovalReportBytes) || !/^[a-f0-9]{64}$/.test(planApprovalReportSha256 || "")) throw new Error("PLAN_APPROVED evidence is required before permission preflight.");
-  if (!Buffer.isBuffer(canonicalPlanJsonBytes)) throw new Error("Canonical plan JSON bytes are required for permission preflight.");
-  assertStageBPlanApprovedBinding(planApprovalReport, { approvalReportBytes: planApprovalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, now: new Date(now) });
+  if (planBound && (!Buffer.isBuffer(savedPlanBytes) || savedPlanBytes.length === 0)) throw new Error("Saved binary plan bytes are required for permission preflight.");
+  if (planBound && (!planApprovalReport || !Buffer.isBuffer(planApprovalReportBytes) || !/^[a-f0-9]{64}$/.test(planApprovalReportSha256 || ""))) throw new Error("PLAN_APPROVED evidence is required before permission preflight.");
+  if (planBound && !Buffer.isBuffer(canonicalPlanJsonBytes)) throw new Error("Canonical plan JSON bytes are required for permission preflight.");
+  if (planBound) assertStageBPlanApprovedBinding(planApprovalReport, { approvalReportBytes: planApprovalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, now: new Date(now) });
   if (!reportGeneratorCallerArn || !APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(reportGeneratorCallerArn)) throw new Error("Permission preflight generator is not an approved audit/admin principal.");
   if (simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission preflight simulated role ARN is not the production release role.");
   validateManifest(manifest, { account: expectedAccount, region: expectedRegion });
@@ -724,6 +736,8 @@ export function runPermissionPreflight({
   const unresolved = cloudTrailResult.unresolvedDenials || [];
   const report = {
     schemaVersion: PERMISSION_PREFLIGHT_SCHEMA_VERSION,
+    evidenceKind: planBound ? PLAN_BOUND_PERMISSION_EVIDENCE_KIND : INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND,
+    phase,
     purpose,
     toolingSha: deploymentIdentity.toolingSha,
     imageReleaseSha: deploymentIdentity.imageReleaseSha,
@@ -734,10 +748,12 @@ export function runPermissionPreflight({
     applyCallerArn: null,
     applyCallerArnPattern: RELEASE_CALLER_PATTERN,
     manifestSha256: sha256(Buffer.from(canonicalizeJson(manifest))),
-    planSha256: sha256(planBytes),
-    savedPlanSha256: sha256(savedPlanBytes),
-    canonicalPlanJsonSha256: sha256(Buffer.from(canonicalizeJson(plan))),
-    planApprovalReportSha256,
+    ...(planBound ? {
+      planSha256: sha256(planBytes),
+      savedPlanSha256: sha256(savedPlanBytes),
+      canonicalPlanJsonSha256: sha256(Buffer.from(canonicalizeJson(plan))),
+      planApprovalReportSha256,
+    } : {}),
     generatedAt,
     policyPublishedAt,
     cloudTrailWindow: { startTime: policyPublishedAt, endTime: generatedAt, sessionName: cloudTrailSessionName },
@@ -783,6 +799,7 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   const plan = JSON.parse(planBytes);
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
   const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, canonicalPlanJsonBytes, savedPlanBytes, planApprovalReport, planApprovalReportBytes, policyEvidence: collectPolicyEvidence() });
+  assertStageBPermissionEvidenceKind(report, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, "plan-bound");
   process.stdout.write(`${JSON.stringify({ status: report.status, outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
   if (report.status !== "valid") {
     writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), repositoryRoot: stageBRoot, label: "Stage B permission report" });

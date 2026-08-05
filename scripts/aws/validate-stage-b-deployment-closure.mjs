@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
-import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, assertPermissionEvaluationBindings, assertPermissionReportPlanBinding, assertReleasePolicyEvidence, validateManifest, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
+import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, assertPermissionEvaluationBindings, assertPermissionReportPlanBinding, assertReleasePolicyEvidence, validateManifest, verifyPermissionReportSignature, assertStageBPermissionEvidenceKind, PLAN_BOUND_PERMISSION_EVIDENCE_KIND } from "./validate-production-green-stage-b-permissions.mjs";
 import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENCE_REVOCATION_MODEL } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
@@ -78,6 +78,7 @@ if (mode === "production") {
   const permissionReport = JSON.parse(permissionReportBytes);
   const permissionSignature = JSON.parse(fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH, "utf8"));
   if (permissionReport.purpose !== "saved-plan-authorization" || permissionReport.status !== "valid") throw new Error("Production closure requires a valid saved-plan administrator permission report.");
+  assertStageBPermissionEvidenceKind(permissionReport, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, "plan-bound");
   if (crypto.createHash("sha256").update(permissionReportBytes).digest("hex") !== process.env.STAGE_B_PERMISSION_REPORT_SHA256) throw new Error("Production closure permission report SHA256 differs from the selected report.");
   const selectedPlanJsonBytes = fs.readFileSync(process.env.STAGE_B_PLAN_JSON_PATH);
   const planBinding = assertPermissionReportPlanBinding(permissionReport, {
