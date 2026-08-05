@@ -3730,11 +3730,11 @@
     },
     {
       "artifact": "reference-audit",
-      "maxAgeSeconds": 900
+      "maxAgeSeconds": 3600
     },
     {
       "artifact": "permission-report",
-      "maxAgeSeconds": 900
+      "maxAgeSeconds": 3600
     }
   ],
   "configurationContracts": [

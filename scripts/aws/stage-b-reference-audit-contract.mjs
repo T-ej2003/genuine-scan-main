@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { assertStageBDeploymentEvidenceFreshness, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
 
 export const STAGE_B_TASK_DEFINITION_FAMILIES = Object.freeze({
   'aws_ecs_task_definition.candidate["backend"]': "mscqr-production-rls-green-backend-candidate",
@@ -21,9 +22,9 @@ export const STAGE_B_TASK_DEFINITION_FAMILY_NAMES = Object.freeze(
 );
 
 export const STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION = 1;
-export const STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS = 15 * 60 * 1000;
-export const STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS = 60 * 1000;
-export const STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL = "live-plan-bound-15m";
+export const STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS = STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS;
+export const STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS = STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS;
+export const STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL = STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL;
 export const STAGE_B_BROKER_TERRAFORM_ADDRESS = "aws_lambda_function.broker";
 export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.broker_task_definition_arns";
 export const STAGE_B_BROKER_APPROVAL_REFERENCE = "local.broker_approval_expected";
@@ -389,10 +390,5 @@ export function assertStageBBrokerCreatePlan(plan, proof, terraformConfiguration
 }
 
 export function assertStageBReferenceAuditFreshness(auditedAt, now = new Date()) {
-  const nowMs = now instanceof Date ? now.getTime() : NaN;
-  if (!Number.isFinite(nowMs)) throw new Error("Stage B validation clock is malformed.");
-  const auditedAtMs = Date.parse(auditedAt || "");
-  if (!Number.isFinite(auditedAtMs)) throw new Error("Stage B reference audit timestamp is malformed.");
-  if (auditedAtMs > nowMs + STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS) throw new Error("Stage B reference audit timestamp is in the future.");
-  if (nowMs - auditedAtMs > STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS) throw new Error("Stage B reference audit is expired.");
+  return assertStageBDeploymentEvidenceFreshness(auditedAt, { now, evidenceType: "Stage B reference audit" });
 }

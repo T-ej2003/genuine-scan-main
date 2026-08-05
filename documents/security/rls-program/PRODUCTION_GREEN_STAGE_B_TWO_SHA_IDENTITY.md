@@ -25,8 +25,8 @@ separate capability exists. Image evidence authenticates the immutable image pub
 chain, while plan-bound artifacts authenticate the joined deployment.
 
 Image provenance uses a reviewed 24-hour validity window. Permission preflight remains
-independently plan-bound and expires after 15 minutes; the reference audit has its own
-15-minute live-observation window. A longer image window cannot authorize a different
+independently plan-bound with a 60-minute validity window; the reference audit has its
+own 60-minute live-observation window. A longer image window cannot authorize a different
 digest because the canonical report SHA, release/workflow/artifact identity, plan image
 variables, and all twelve current task definitions remain exact joins.
 

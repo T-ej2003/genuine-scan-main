@@ -10,11 +10,12 @@ import { STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS } from "./stage
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidenceTimestamp, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
-export const PERMISSION_EVIDENCE_MAX_AGE_MS = 15 * 60 * 1000;
-export const PERMISSION_PREFLIGHT_CLOCK_SKEW_MS = 60 * 1000;
-export const PERMISSION_EVIDENCE_VALIDITY_MODEL = "live-plan-bound-15m";
+export const PERMISSION_EVIDENCE_MAX_AGE_MS = STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS;
+export const PERMISSION_PREFLIGHT_CLOCK_SKEW_MS = STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS;
+export const PERMISSION_EVIDENCE_VALIDITY_MODEL = STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL;
 export const ACCOUNT = "368992683803";
 export const REGION = "eu-west-2";
 export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
@@ -657,18 +658,14 @@ export function verifyPermissionReportSignature({ report, signatureArtifact, now
   if (!signatureArtifact || signatureArtifact.schemaVersion !== 1 || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm) throw new Error("Permission report signature identity or algorithm is wrong.");
   const reportSha256 = sha256(Buffer.from(canonicalizeJson(report)));
   if (signatureArtifact.reportSha256 !== reportSha256) throw new Error("Permission report signature is bound to a different report.");
-  const signedAtMs = Date.parse(signatureArtifact.signedAt); const nowMs = Date.parse(now);
-  if (!Number.isFinite(signedAtMs) || signedAtMs > nowMs + PERMISSION_PREFLIGHT_CLOCK_SKEW_MS || nowMs - signedAtMs > PERMISSION_EVIDENCE_MAX_AGE_MS) throw new Error("Permission report signature is stale or malformed.");
+  assertStageBDeploymentEvidenceFreshness(signatureArtifact.signedAt, { now, evidenceType: "Permission report signature" });
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureArtifact.signatureBase64 || "")) throw new Error("Permission report signature is malformed.");
   if (!verify({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), reportSha256 })) throw new Error("Permission report signature verification failed.");
   return true;
 }
 
 function validateFreshness(timestamp, now) {
-  const timestampMs = Date.parse(timestamp); const nowMs = Date.parse(now);
-  if (!Number.isFinite(timestampMs)) throw new Error("Permission report generatedAt is malformed.");
-  if (timestampMs > nowMs + PERMISSION_PREFLIGHT_CLOCK_SKEW_MS) throw new Error("Permission report generatedAt is in the future.");
-  if (nowMs - timestampMs > PERMISSION_EVIDENCE_MAX_AGE_MS) throw new Error("Permission report is expired.");
+  return assertStageBDeploymentEvidenceFreshness(timestamp, { now, evidenceType: "Permission report" });
 }
 
 export function runPermissionPreflight({
@@ -697,7 +694,8 @@ export function runPermissionPreflight({
   if (!plan?.variables || plan.variables.account_id?.value !== expectedAccount || plan.variables.aws_region?.value !== expectedRegion) throw new Error("Plan account or region is wrong.");
   const deploymentIdentity = assertStageBDeploymentIdentity({ plan });
   validateFreshness(generatedAt, now);
-  if (!policyPublishedAt || !Number.isFinite(Date.parse(policyPublishedAt))) throw new Error("Policy publication timestamp is required and must be valid.");
+  if (!policyPublishedAt) throw new Error("Policy publication timestamp is required and must be valid.");
+  assertStageBDeploymentEvidenceTimestamp(policyPublishedAt, { now, evidenceType: "Policy publication" });
   if (!cloudTrailSessionName) throw new Error("CloudTrail session name is required.");
   let policyEvidenceError = null;
   try { assertReleasePolicyEvidence(policyEvidence); } catch (error) { policyEvidenceError = error.message; }

@@ -9,8 +9,6 @@ import {
 } from "./plan-production-green-stage-b.mjs";
 import {
   APPROVED_PREFLIGHT_GENERATOR_ARNS,
-  PERMISSION_PREFLIGHT_CLOCK_SKEW_MS,
-  PERMISSION_EVIDENCE_MAX_AGE_MS,
   assertPermissionEvaluationBindings,
   verifyPermissionReportSignature,
   RELEASE_CALLER_PATTERN,
@@ -19,6 +17,7 @@ import {
   assertPermissionReportPlanBinding,
   assertReleasePolicyEvidence,
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
+import { assertStageBDeploymentEvidenceFreshness } from "./aws/stage-b-evidence-freshness.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendPolicy } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
@@ -99,10 +98,7 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   if (report.canonicalPlanJsonSha256 !== canonicalPlanJsonSha256) throw new Error("Permission-preflight report is bound to a different canonical plan JSON.");
   if ((toolingSha !== undefined || imageReleaseSha !== undefined || canonicalImageEvidenceSha256 !== undefined)
     && (report.toolingSha !== toolingSha || report.imageReleaseSha !== imageReleaseSha || report.canonicalImageEvidenceSha256 !== canonicalImageEvidenceSha256)) throw new Error("Permission-preflight report is bound to a different Stage B deployment identity.");
-  const generatedAtMs = Date.parse(report.generatedAt); const nowMs = Date.parse(now);
-  if (!Number.isFinite(generatedAtMs)) throw new Error("Permission-preflight report timestamp is malformed.");
-  if (generatedAtMs > nowMs + PERMISSION_PREFLIGHT_CLOCK_SKEW_MS) throw new Error("Permission-preflight report timestamp is in the future.");
-  if (nowMs - generatedAtMs > PERMISSION_EVIDENCE_MAX_AGE_MS) throw new Error("Permission-preflight report is expired.");
+  assertStageBDeploymentEvidenceFreshness(report.generatedAt, { now, evidenceType: "Permission-preflight report" });
   if (!Array.isArray(report.requiredEvaluations) || report.requiredEvaluations.some((item) => item.decision !== "allowed")) throw new Error("Permission-preflight report has a denied required evaluation.");
   if (!Array.isArray(report.forbiddenEvaluations) || report.forbiddenEvaluations.some((item) => item.decision === "allowed")) throw new Error("Permission-preflight report allowed a forbidden evaluation.");
   if (report.cloudTrail?.status !== "clear" || report.cloudTrail.unresolvedDenials?.length !== 0) throw new Error("Permission-preflight report contains an unresolved CloudTrail denial.");
