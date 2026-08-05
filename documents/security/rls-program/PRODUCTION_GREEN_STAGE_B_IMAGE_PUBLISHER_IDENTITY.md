@@ -7,6 +7,10 @@ a task, invoke the broker, deploy a service, or change traffic.
 
 ## Workflow boundary
 
+The backend-only publisher is a separate producer and must publish only the
+`<release_sha>-backend-only` tag. It cannot occupy the canonical Stage B `<release_sha>`
+tag or satisfy Stage B evidence.
+
 `.github/workflows/production-green-stage-b-images.yml` is the sole manual dispatcher. It
 is loaded from protected `main` and accepts exactly one value, `release_sha`. The
 workflow definition ref and release source are deliberately separate: the dispatcher
@@ -25,6 +29,12 @@ The wrapper dispatches exactly:
 The workflow checks that its definition ref is `refs/heads/main`, verifies the checked-out
 HEAD equals `release_sha`, and calls the fixed reusable workflow
 `.github/workflows/production-green-stage-b-image-build.yml`.
+
+The Stage B publication identity is fixed to workflow file
+`production-green-stage-b-images.yml`, workflow name `Production Green Stage B Images`,
+artifact `production-green-stage-b-images`, and canonical file `stage-b-images.jsonl`.
+The artifact must contain exactly four immutable records for backend, worker, rls-executor,
+and rls-canary. A backend-only one-record artifact is rejected before image evidence.
 
 The reusable job runs in the protected `production-stage-b-image-publish` environment. It
 independently repeats the release and generated-package checks before it requests GitHub

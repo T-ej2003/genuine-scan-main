@@ -185,6 +185,10 @@ test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first
   assert.match(text, /stage-b-release-gate/);
   assert.match(text, /apply-ecr-repository-controls\.sh backend/);
   assert.match(text, /publish-ecs-images\.sh backend/);
+  assert.match(text, /BACKEND_IMAGE_TAG/);
+  assert.match(text, /backend-only/);
+  assert.match(text, /SOURCE_RELEASE_SHA/);
+  assert.doesNotMatch(text, /IMAGE_TAG=\"\$RELEASE_SHA\"/);
   assert.match(text, /@sha256:/);
   assert.equal(job.steps.some((step) => step.uses === "aquasecurity/trivy-action@v0.36.0" && step.with?.severity === "CRITICAL" && step.with?.["exit-code"] === "1"), true);
   assert.equal(job.steps.some((step) => step.uses === "aquasecurity/trivy-action@v0.36.0" && step.with?.severity === "HIGH" && step.with?.output?.endsWith("trivy-high.json")), true);
@@ -202,6 +206,16 @@ test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first
   assert.match(text, /verify-release-artifacts/);
   assert.match(text, /production-green-read-only-rls-canary\.mjs/);
   assert.doesNotMatch(text, /AWS_ROLE_TO_ASSUME|aws-actions\/configure-aws-credentials@v6[\s\S]*AWS_ACCESS_KEY_ID|ecs:(?:UpdateService|RunTask)|lambda:InvokeFunction|deploy-ecs-service|inputs\.(?:role|repository|services|platform)/i);
+});
+
+test("backend-only and Stage B publishers use disjoint immutable tag namespaces", () => {
+  const backendPublish = backendPublisher.jobs["publish-and-verify"].steps.find((step) => step.name === "Publish fixed backend image and bind immutable digest").run;
+  const stageBPublish = reusable.jobs["build-and-attest"].steps.find((step) => /Publish immutable backend/.test(step.name)).run;
+  assert.match(backendPublish, /IMAGE_TAG=\"\$BACKEND_IMAGE_TAG\"/);
+  assert.match(backendPublish, /SOURCE_RELEASE_SHA=\"\$RELEASE_SHA\"/);
+  assert.match(stageBPublish, /publish-ecs-images\.sh production-green-stage-b/);
+  assert.doesNotMatch(stageBPublish, /backend-only/);
+  assert.match(JSON.stringify(reusable), /production-green-stage-b-images/);
 });
 
 test("all four fixed Stage B service identities remain immutable image bindings", () => {

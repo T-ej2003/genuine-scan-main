@@ -1,8 +1,16 @@
 import { execFileSync } from "node:child_process";
 
-const WORKFLOW = "production-green-stage-b-images.yml";
+export const STAGE_B_IMAGE_WORKFLOW = "production-green-stage-b-images.yml";
+export const STAGE_B_IMAGE_WORKFLOW_NAME = "Production Green Stage B Images";
+export const STAGE_B_IMAGE_ARTIFACT_NAME = "production-green-stage-b-images";
+export const STAGE_B_IMAGE_ARTIFACT_FILE = "stage-b-images.jsonl";
 const APPROVED_WORKFLOW_REF = "main";
 const SHA_PATTERN = /^[a-f0-9]{40}$/;
+
+export function assertStageBImagePublicationIdentity({ workflow = STAGE_B_IMAGE_WORKFLOW, workflowName = STAGE_B_IMAGE_WORKFLOW_NAME, artifactName = STAGE_B_IMAGE_ARTIFACT_NAME, artifactFile = STAGE_B_IMAGE_ARTIFACT_FILE } = {}) {
+  if (workflow !== STAGE_B_IMAGE_WORKFLOW || workflowName !== STAGE_B_IMAGE_WORKFLOW_NAME || artifactName !== STAGE_B_IMAGE_ARTIFACT_NAME || artifactFile !== STAGE_B_IMAGE_ARTIFACT_FILE) throw new Error("Stage B image publication must use the reviewed four-image workflow and artifact.");
+  return true;
+}
 
 const runGh = (args, run = execFileSync) => run("gh", args, { encoding: "utf8", stdio: "pipe" });
 
@@ -12,6 +20,7 @@ export const dispatchProductionGreenStageBImages = ({
   repository,
   run = execFileSync,
 } = {}) => {
+  assertStageBImagePublicationIdentity();
   if (!SHA_PATTERN.test(releaseSha || "")) throw new Error("Stage B release SHA must be a full 40-character commit SHA.");
   if (workflowRef !== APPROVED_WORKFLOW_REF || SHA_PATTERN.test(workflowRef)) {
     throw new Error(`Stage B image workflow must be dispatched from ${APPROVED_WORKFLOW_REF}, not a release SHA.`);
@@ -20,8 +29,8 @@ export const dispatchProductionGreenStageBImages = ({
   const repo = repository || String(runGh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], run)).trim();
   if (!repo) throw new Error("Unable to resolve the Stage B image repository.");
   runGh(["api", `repos/${repo}/commits/${releaseSha}`], run);
-  runGh(["workflow", "run", WORKFLOW, "--repo", repo, "--ref", workflowRef, "-f", `release_sha=${releaseSha}`], run);
-  return { repository: repo, workflow: WORKFLOW, workflowRef, releaseSha };
+  runGh(["workflow", "run", STAGE_B_IMAGE_WORKFLOW, "--repo", repo, "--ref", workflowRef, "-f", `release_sha=${releaseSha}`], run);
+  return { repository: repo, workflow: STAGE_B_IMAGE_WORKFLOW, workflowName: STAGE_B_IMAGE_WORKFLOW_NAME, workflowRef, artifactName: STAGE_B_IMAGE_ARTIFACT_NAME, artifactFile: STAGE_B_IMAGE_ARTIFACT_FILE, releaseSha };
 };
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

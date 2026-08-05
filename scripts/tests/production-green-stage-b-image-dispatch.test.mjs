@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import yaml from "js-yaml";
-import { dispatchProductionGreenStageBImages } from "../aws/dispatch-production-green-stage-b-images.mjs";
+import { assertStageBImagePublicationIdentity, dispatchProductionGreenStageBImages, STAGE_B_IMAGE_ARTIFACT_FILE, STAGE_B_IMAGE_ARTIFACT_NAME, STAGE_B_IMAGE_WORKFLOW, STAGE_B_IMAGE_WORKFLOW_NAME } from "../aws/dispatch-production-green-stage-b-images.mjs";
 
 const sha = "a".repeat(40);
 const dispatcher = yaml.load(fs.readFileSync(".github/workflows/production-green-stage-b-images.yml", "utf8"));
@@ -16,12 +16,18 @@ const mockGh = (calls, { commitExists = true } = {}) => (file, args) => {
 test("dispatcher uses protected main as workflow source and passes release SHA separately", () => {
   const calls = [];
   const result = dispatchProductionGreenStageBImages({ releaseSha: sha, run: mockGh(calls) });
-  assert.deepEqual(result, { repository: "T-ej2003/genuine-scan-main", workflow: "production-green-stage-b-images.yml", workflowRef: "main", releaseSha: sha });
+  assert.deepEqual(result, { repository: "T-ej2003/genuine-scan-main", workflow: STAGE_B_IMAGE_WORKFLOW, workflowName: STAGE_B_IMAGE_WORKFLOW_NAME, workflowRef: "main", artifactName: STAGE_B_IMAGE_ARTIFACT_NAME, artifactFile: STAGE_B_IMAGE_ARTIFACT_FILE, releaseSha: sha });
   assert.deepEqual(calls, [
     ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
     ["api", "repos/T-ej2003/genuine-scan-main/commits/" + sha],
     ["workflow", "run", "production-green-stage-b-images.yml", "--repo", "T-ej2003/genuine-scan-main", "--ref", "main", "-f", `release_sha=${sha}`],
   ]);
+});
+
+test("Stage B selection records and rejects publisher identity mismatches", () => {
+  assert.doesNotThrow(() => assertStageBImagePublicationIdentity({ workflow: STAGE_B_IMAGE_WORKFLOW, workflowName: STAGE_B_IMAGE_WORKFLOW_NAME, artifactName: STAGE_B_IMAGE_ARTIFACT_NAME, artifactFile: STAGE_B_IMAGE_ARTIFACT_FILE }));
+  assert.throws(() => assertStageBImagePublicationIdentity({ workflow: "production-green-backend-image-publish.yml", workflowName: STAGE_B_IMAGE_WORKFLOW_NAME, artifactName: STAGE_B_IMAGE_ARTIFACT_NAME, artifactFile: STAGE_B_IMAGE_ARTIFACT_FILE }), /four-image workflow/);
+  assert.throws(() => assertStageBImagePublicationIdentity({ workflow: STAGE_B_IMAGE_WORKFLOW, workflowName: STAGE_B_IMAGE_WORKFLOW_NAME, artifactName: "production-green-backend-image-evidence", artifactFile: STAGE_B_IMAGE_ARTIFACT_FILE }), /four-image workflow/);
 });
 
 test("dispatcher rejects malformed and commit-valued workflow refs", () => {

@@ -5,6 +5,13 @@ connect to PostgreSQL, execute SQL, register an ECS task definition, or switch t
 
 ## Immutable images
 
+The backend-only publisher and the four-image Stage B publisher use disjoint immutable
+tag namespaces. Backend-only publishes `mscqr-backend:<release_sha>-backend-only` while
+retaining source labels bound to `<release_sha>`. Stage B alone owns the canonical
+`<release_sha>` backend tag and the reviewed worker, executor, and canary tags. Missing
+or mismatched Stage B source-contract or migration labels remain a hard reuse failure;
+tags are never overwritten or merged across workflows.
+
 The Stage B image dispatcher is loaded from protected `main`; its `release_sha` input is
 the independent, canonical build source. Use
 `node scripts/aws/dispatch-production-green-stage-b-images.mjs <release_sha>`, which
@@ -19,6 +26,15 @@ both workflow layers require that exact 40-character SHA to be checked out and m
 `origin/main`. A pre-existing SHA tag is reusable only when its image revision,
 source-contract, migration digest, and service identity labels exactly match the reviewed
 Stage B bindings.
+
+The dispatcher records the exact workflow file `production-green-stage-b-images.yml`,
+workflow name `Production Green Stage B Images`, artifact name
+`production-green-stage-b-images`, and canonical file `stage-b-images.jsonl`. Stage B
+evidence accepts only that four-record artifact; the one-record backend-only artifact is
+not a Stage B release. The failed release attempt for SHA
+`3c4c6cd49b1faa5a3521b8f4c419632b74def7a3` is invalidated because its canonical backend
+tag was occupied by the incompatible backend-only publisher. A new merged SHA is
+required for the next Stage B release; the occupied image is not deleted automatically.
 
 `infra/aws/terraform/production-green-stage-b-image-publisher/` is an isolated future
 apply root for the dedicated `mscqr-production-stage-b-image-publisher` role. It trusts

@@ -57,16 +57,17 @@ jobs:
         id: image
         env:
           OUTPUT_FILE: ${{ runner.temp }}/production-green-backend-image.jsonl
+          BACKEND_IMAGE_TAG: ${{ inputs.release_sha }}-backend-only
         run: |
           set -euo pipefail
           : > "$OUTPUT_FILE"
           ./scripts/aws/apply-ecr-repository-controls.sh backend
-          IMAGE_TAG="$RELEASE_SHA" PLATFORMS="$PLATFORMS" AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)" OUTPUT_FILE="$OUTPUT_FILE" ./scripts/aws/publish-ecs-images.sh backend
-          node --input-type=module - "$OUTPUT_FILE" "$GITHUB_ENV" "$GITHUB_OUTPUT" "$RELEASE_SHA" <<'NODE'
+          IMAGE_TAG="$BACKEND_IMAGE_TAG" SOURCE_RELEASE_SHA="$RELEASE_SHA" PLATFORMS="$PLATFORMS" AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)" OUTPUT_FILE="$OUTPUT_FILE" ./scripts/aws/publish-ecs-images.sh backend
+          node --input-type=module - "$OUTPUT_FILE" "$GITHUB_ENV" "$GITHUB_OUTPUT" "$RELEASE_SHA" "$BACKEND_IMAGE_TAG" <<'NODE'
           import fs from "node:fs";
-          const [file, envFile, outputFile, releaseSha] = process.argv.slice(2);
+          const [file, envFile, outputFile, releaseSha, imageTag] = process.argv.slice(2);
           const records = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
-          if (records.length !== 1 || records[0].service !== "backend" || records[0].image_tag !== releaseSha || !records[0].image_ref?.includes("@sha256:")) throw new Error("Expected one immutable backend digest bound to the requested release SHA.");
+          if (records.length !== 1 || records[0].service !== "backend" || records[0].image_tag !== imageTag || !records[0].image_ref?.includes("@sha256:")) throw new Error("Expected one immutable backend-only digest bound to the requested release SHA.");
           fs.appendFileSync(envFile, `BACKEND_IMAGE=${records[0].image_ref}\n`);
           fs.appendFileSync(outputFile, `image_ref=${records[0].image_ref}\n`);
           NODE

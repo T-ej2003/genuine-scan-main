@@ -14,6 +14,7 @@ Environment:
   AWS_ACCOUNT_ID     Optional. Auto-detected via STS when omitted.
   ECR_REGISTRY       Optional. Overrides the computed ECR registry hostname.
   IMAGE_TAG          Optional. Defaults to git rev-parse HEAD.
+  SOURCE_RELEASE_SHA Optional source revision for image labels. Defaults to IMAGE_TAG.
   PLATFORMS          Optional. Defaults to linux/amd64.
   BACKEND_ECR_REPO   Optional. Defaults to mscqr-backend.
   FRONTEND_ECR_REPO  Optional. Defaults to mscqr-web.
@@ -70,6 +71,7 @@ if [[ -z "$AWS_REGION" ]]; then
 fi
 
 IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse HEAD)}"
+SOURCE_RELEASE_SHA="${SOURCE_RELEASE_SHA:-$IMAGE_TAG}"
 PLATFORMS="${PLATFORMS:-linux/amd64}"
 BACKEND_ECR_REPO="${BACKEND_ECR_REPO:-mscqr-backend}"
 FRONTEND_ECR_REPO="${FRONTEND_ECR_REPO:-mscqr-web}"
@@ -267,12 +269,12 @@ NODE
     --builder "$BUILDER_NAME" \
     --platform "$PLATFORMS" \
     --file "$dockerfile" \
-    --build-arg "GIT_SHA=${IMAGE_TAG}" \
-    --build-arg "RELEASE_GIT_SHA=${IMAGE_TAG}" \
+    --build-arg "GIT_SHA=${SOURCE_RELEASE_SHA}" \
+    --build-arg "RELEASE_GIT_SHA=${SOURCE_RELEASE_SHA}" \
     --build-arg "SOURCE_CONTRACT_SHA256=${SOURCE_CONTRACT_SHA256:-unbound}" \
     --build-arg "MIGRATION_SET_DIGEST=${MIGRATION_SET_DIGEST:-unbound}" \
     --build-arg "BUILD_TIMESTAMP=${BUILD_TIMESTAMP}" \
-    --label "org.opencontainers.image.revision=${IMAGE_TAG}" \
+    --label "org.opencontainers.image.revision=${SOURCE_RELEASE_SHA}" \
     --label "org.opencontainers.image.source=${REMOTE_URL}" \
     --label "org.opencontainers.image.created=${BUILD_TIMESTAMP}" \
     --label "com.mscqr.rls.source-contract-sha256=${SOURCE_CONTRACT_SHA256:-unbound}" \
