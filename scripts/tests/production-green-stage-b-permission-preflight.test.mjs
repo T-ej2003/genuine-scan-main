@@ -707,7 +707,7 @@ test("CLI passes its parsed manifest through the same preflight entrypoint", () 
   const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json"); const outputPath = path.join(directory, "report.json"); const signaturePath = path.join(directory, "report.signature.json");
   writePrivate(planPath, planBytes); writePrivate(savedPath, savedPlanBytes); writePrivate(manifestPath, JSON.stringify(manifest));
   let received;
-  runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test", ...cliApprovalArgs(directory)], { getCaller: () => generatorArn, collectPolicyEvidence: () => policyEvidence, runPreflight: (input) => { received = input.manifest; return { status: "valid", generatedAt: now }; }, signReport: (report) => reportSignature(report) });
+  runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test", ...cliApprovalArgs(directory)], { getCaller: () => generatorArn, collectPolicyEvidence: () => policyEvidence, runPreflight: (input) => { received = input.manifest; return { status: "valid", evidenceKind: "PLAN_BOUND_PERMISSION", phase: "plan-bound", generatedAt: now }; }, signReport: (report) => reportSignature(report) });
   assert.deepEqual(received, manifest);
   assert.equal(JSON.parse(fs.readFileSync(outputPath, "utf8")).status, "valid");
   assert.equal(JSON.parse(fs.readFileSync(signaturePath, "utf8")).reportSha256, reportSignature(JSON.parse(fs.readFileSync(outputPath, "utf8"))).reportSha256);
@@ -719,7 +719,7 @@ test("invalid administrator permission evidence is recorded but never signed", (
   writePrivate(planPath, planBytes); writePrivate(savedPath, savedPlanBytes); writePrivate(manifestPath, JSON.stringify(manifest)); let signed = 0;
   runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test", ...cliApprovalArgs(directory)], {
     getCaller: () => generatorArn, collectPolicyEvidence: () => policyEvidence,
-    runPreflight: () => ({ status: "invalid", generatedAt: now, deniedCount: 2 }), signReport: () => { signed += 1; },
+    runPreflight: () => ({ status: "invalid", evidenceKind: "PLAN_BOUND_PERMISSION", phase: "plan-bound", generatedAt: now, deniedCount: 2 }), signReport: () => { signed += 1; },
   });
   assert.equal(signed, 0); assert.equal(fs.existsSync(signaturePath), false); assert.equal(JSON.parse(fs.readFileSync(outputPath)).status, "invalid"); process.exitCode = 0;
 });
@@ -800,6 +800,8 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   });
   const report = {
     schemaVersion: 1,
+    evidenceKind: "PLAN_BOUND_PERMISSION",
+    phase: "plan-bound",
     purpose: "saved-plan-authorization",
     toolingSha: "b".repeat(40),
     imageReleaseSha: "a".repeat(40),

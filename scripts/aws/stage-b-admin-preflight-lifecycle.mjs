@@ -160,6 +160,7 @@ export async function runStageBAdminPreflightLifecycle({
   outputPath,
   signaturePath,
   producerPath,
+  phase = null,
   producerArgs = ["--identity", "administrator"],
   cwd,
   repositoryRoot,
@@ -186,7 +187,7 @@ export async function runStageBAdminPreflightLifecycle({
     child = spawnProducer({ producerPath, producerArgs, cwd, env, spawn });
     const pid = child.pid;
     if (!Number.isInteger(pid) || pid <= 0) throw new Error("Administrator preflight producer did not expose a valid PID.");
-    writeJson(lifecycleStatePath, { schemaVersion: 1, state: "RUNNING", pid, invocationId: crypto.randomUUID(), command: process.execPath, arguments: safeProducerArgs, startedAt, timeoutSeconds: STAGE_B_ADMIN_PREFLIGHT_TIMEOUT_SECONDS });
+    writeJson(lifecycleStatePath, { schemaVersion: 1, phase, state: "RUNNING", pid, invocationId: crypto.randomUUID(), command: process.execPath, arguments: safeProducerArgs, startedAt, timeoutSeconds: STAGE_B_ADMIN_PREFLIGHT_TIMEOUT_SECONDS });
     const stdout = []; const stderr = [];
     child.stdout?.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
     child.stderr?.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
@@ -196,32 +197,32 @@ export async function runStageBAdminPreflightLifecycle({
     const stderrFile = writePrivateBytes(stderrPath, Buffer.from(redact(Buffer.concat(stderr).toString("utf8"))));
     if (result.timedOut) {
       releaseLock = !result.forcedTermination;
-      const lifecycle = { schemaVersion: 1, state: "TIMED_OUT", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: true, stdout: stdoutFile, stderr: stderrFile };
+      const lifecycle = { schemaVersion: 1, phase, state: "TIMED_OUT", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: true, stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
     if (result.error) {
-      const lifecycle = { schemaVersion: 1, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: null, signal: null, timeout: false, failureClass: "LOCAL_RUNTIME", failure: result.error, stdout: stdoutFile, stderr: stderrFile };
+      const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: null, signal: null, timeout: false, failureClass: "LOCAL_RUNTIME", failure: result.error, stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
     if (result.code !== 0) {
-      const lifecycle = { schemaVersion: 1, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, failureClass: "PRODUCER_EXIT", stdout: stdoutFile, stderr: stderrFile };
+      const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, failureClass: "PRODUCER_EXIT", stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
     let pair;
     try { pair = validatePublishedPair({ reportPath: outputPath, signaturePath }); } catch (error) {
-      const lifecycle = { schemaVersion: 1, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, failureClass: "TRANSACTIONAL_PUBLICATION", failure: error.message, stdout: stdoutFile, stderr: stderrFile };
+      const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, failureClass: "TRANSACTIONAL_PUBLICATION", failure: error.message, stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
-    const lifecycle = { schemaVersion: 1, state: "SUCCEEDED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, report: { path: outputPath, ...pair }, signature: { path: signaturePath, sha256: pair.signatureSha256 }, stdout: stdoutFile, stderr: stderrFile };
+    const lifecycle = { schemaVersion: 1, phase, state: "SUCCEEDED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, report: { path: outputPath, ...pair }, signature: { path: signaturePath, sha256: pair.signatureSha256 }, stdout: stdoutFile, stderr: stderrFile };
     writeJson(lifecycleStatePath, lifecycle);
     return lifecycle;
   } catch (error) {
     if (child?.pid && processIsAlive(child.pid, processOps)) { child.kill("SIGTERM"); releaseLock = false; }
-    const lifecycle = { schemaVersion: 1, state: "FAILED", pid: child?.pid ?? null, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt: nowIso(now), exitCode: null, signal: null, timeout: false, failureClass: "LOCAL_RUNTIME", failure: redact(error.message) };
+    const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid: child?.pid ?? null, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt: nowIso(now), exitCode: null, signal: null, timeout: false, failureClass: "LOCAL_RUNTIME", failure: redact(error.message) };
     writeJson(lifecycleStatePath, lifecycle);
     return lifecycle;
   } finally {

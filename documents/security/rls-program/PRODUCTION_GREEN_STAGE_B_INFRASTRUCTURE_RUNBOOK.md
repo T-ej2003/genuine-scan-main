@@ -8,10 +8,10 @@ Deployment-bound evidence remains valid only while its exact bindings remain unc
 
 ## Administrator preflight producer lifecycle
 
-Start exactly one administrator producer through the reviewed lifecycle launcher:
+Start exactly one initial administrator capability producer through the reviewed lifecycle launcher:
 
 ```bash
-npm run stage-b:administrator-preflight -- \
+npm run stage-b:administrator-capability-preflight -- \
   --output <absolute-private-report> \
   --signature-output <absolute-private-signature> \
   --lifecycle-directory <new-private-lifecycle-directory>
@@ -31,6 +31,35 @@ the prior PID is terminal and requires an explicit retry request. Lifecycle meta
 stdout, and stderr are private, atomic, and redacted; they never contain AWS
 credentials, session tokens, policy bodies, or sensitive artifact contents. Lifecycle
 state and evidence freshness are independent controls.
+
+The initial report uses `evidenceKind=INITIAL_ADMIN_CAPABILITY` and `phase=initial`.
+It proves baseline release-role authority only; it cannot authorize closure, verify-only,
+or apply. After refresh, plan capture, reference audit, and `PLAN_APPROVED`, run the
+separate plan-bound permission producer:
+
+```bash
+npm run stage-b:plan-bound-permission-preflight -- \
+  --report-generator-caller-arn <root-caller> \
+  --simulated-role-arn <release-role> \
+  --plan-json <plan-json> \
+  --canonical-plan-json <canonical-plan-json> \
+  --saved-plan <saved-plan> \
+  --plan-approval-report <approval-report> \
+  --plan-approval-report-sha256 <approval-report-sha256> \
+  --manifest <permission-manifest> \
+  --expected-account 368992683803 \
+  --expected-region eu-west-2 \
+  --policy-published-at <iso-timestamp> \
+  --cloudtrail-session-name <session-name> \
+  --output <absolute-private-report> \
+  --signature-output <absolute-private-signature> \
+  --lifecycle-directory <new-private-lifecycle-directory>
+```
+
+This report uses `evidenceKind=PLAN_BOUND_PERMISSION` and `phase=plan-bound`; it always
+requires `PLAN_APPROVED` and binds the exact plan, refresh, audit, state, and identity
+artifacts. The two reports are not substitutable. The base launcher requires an explicit
+`--phase` and rejects ambiguous invocations.
 
 1. Obtain an MFA-backed non-root production release-deployer session and generate one private backend config with `npm run stage-b:generate-backend-config -- --output <absolute-private-path>`. Initialise the dedicated encrypted S3 backend with that exact direct production-state key, `use_lockfile=true`, and `TF_WORKSPACE=default`; this environment variable is the only workspace selector, so production commands may assert `terraform workspace show` but must never run `terraform workspace select`. Do not list workspaces or access the legacy base key. The Terraform `deployment_environment` variable remains `production`. Signed immutable image provenance is valid for 24 hours after administrator observation/signing when its release, workflow, artifact, authoritative per-repository `DescribeRepositories` immutability evidence, digest, account/region, KMS, and `time-bounded-no-supersession-registry` capability joins remain exact. Immediate revocation is not supported until a separately authenticated supersession registry exists. Administrator capability evidence, release-preflight capability evidence, and the plan-bound reference audit use a 60-minute live-evidence window (`3600` seconds) to cover the reviewed sequence. Hash, caller, policy, state-serial, workspace, reference, and plan bindings still invalidate evidence immediately; saved-plan validity is binding-based, not time-only. Move directly from permission signing to closure/apply rather than pausing for the full window.
 2. Confirm Stage A owns and has applied the executor/database security groups, exact database/interface-endpoint/S3/DNS rules, executor/broker log groups, executor/broker roles, approval resources, and runtime-secret ARNs. Write one explicit reviewed prerequisite file matching `infra/aws/terraform/production-green-stage-b/stage-a-prerequisites.schema.json`; do not copy values into tfvars by hand.
