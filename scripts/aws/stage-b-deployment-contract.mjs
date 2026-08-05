@@ -183,10 +183,10 @@ function assertTerraformPolicySource(terraformConfiguration, strict) {
   if (/NotAction|NotResource|Resource\s*=\s*"\*"/.test(source)) throw new Error("Broker managed-policy source contains an unsupported wildcard contract.");
 }
 
-function assertBrokerPolicyChange(change, { strict, terraformConfiguration, validateActions = true }) {
+function assertBrokerPolicyChange(change, { strict, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false }) {
   const actions = change.change?.actions;
   if (change.type !== "aws_iam_policy") throw new Error(`Stage B broker managed policy resource type is outside the exact contract: ${change.type}.`);
-  if (validateActions && (!exactActions(actions, ["no-op"]) && !exactActions(actions, ["update"]))) throw new Error(`Stage B broker managed policy has unsupported actions: ${JSON.stringify(actions)}.`);
+  if (validateActions && (!exactActions(actions, ["no-op"]) && !exactActions(actions, ["update"]) && !(allowBrokerPolicyCreate && exactActions(actions, ["create"])))) throw new Error(`Stage B broker managed policy has unsupported actions: ${JSON.stringify(actions)}.`);
   const before = change.change?.before || {};
   const after = change.change?.after || {};
   for (const [value, label] of [[before.name, "Broker managed-policy name"], [after.name, "Broker managed-policy name"], [before.path, "Broker managed-policy path"], [after.path, "Broker managed-policy path"]]) {
@@ -198,7 +198,7 @@ function assertBrokerPolicyChange(change, { strict, terraformConfiguration, vali
   if (typeof after.policy === "string") normalizedPolicyShape(JSON.parse(after.policy));
   else if (after_unknown_policy(change) !== true) throw new Error("Broker managed-policy document is missing or unprovable.");
   assertTerraformPolicySource(terraformConfiguration, strict);
-  return exactActions(actions, ["update"]) ? "broker-managed-policy-update" : "broker-managed-policy-no-op";
+  return exactActions(actions, ["update"]) ? "broker-managed-policy-update" : exactActions(actions, ["create"]) ? "broker-managed-policy-create" : "broker-managed-policy-no-op";
 }
 
 function after_unknown_policy(change) {
@@ -255,7 +255,7 @@ function assertStageBResourceIdentity(change, kind, key, strict) {
   }
 }
 
-export function assertStageBPlanResourceChange(change, { strict = true, terraformConfiguration, validateActions = true } = {}) {
+export function assertStageBPlanResourceChange(change, { strict = true, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false } = {}) {
   const address = change?.address || "<missing address>";
   const type = change?.type || "<missing type>";
   const actions = change?.change?.actions || [];
@@ -274,7 +274,7 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
     if (validateActions && !exactActions(actions, ["no-op"])) throw new Error(`Stage B resource rejected: ${address} ${type} ${JSON.stringify(actions)}; retained task definitions are append-only no-op only.`);
     return { address, type, actions, classification: "retained-task-definition-no-op" };
   }
-  if (address === policyAddress) return { address, type, actions, classification: assertBrokerPolicyChange(change, { strict, terraformConfiguration, validateActions }) };
+  if (address === policyAddress) return { address, type, actions, classification: assertBrokerPolicyChange(change, { strict, terraformConfiguration, validateActions, allowBrokerPolicyCreate }) };
   if (address === attachmentAddress) return { address, type, actions, classification: assertBrokerAttachmentChange(change, { strict, validateActions }) };
 
   let kind;

@@ -10,6 +10,7 @@ export const STAGE_B_PLAN_APPROVED = "PLAN_APPROVED";
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const STAGE_B_CAPTURE_BROKER_ADDRESSES = ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"];
+const STAGE_B_BROKER_OPERATIONS = new Set(["none", "initial-create", "update"]);
 
 export function stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes }) {
   if (![savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes].every(Buffer.isBuffer)) throw new Error("Stage B plan artifact bytes are required.");
@@ -54,21 +55,27 @@ export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, r
     stageBLineage,
     stageBSerial,
     referenceAuditRequired: true,
+    brokerOperation: brokerEvidence.brokerOperation || "none",
     brokerUpdatePresent: brokerEvidence.brokerUpdatePresent === true,
     brokerActions: Array.isArray(brokerEvidence.brokerActions) ? brokerEvidence.brokerActions : [],
     brokerResourceAddresses: Array.isArray(brokerEvidence.brokerResourceAddresses) ? brokerEvidence.brokerResourceAddresses : [],
-    brokerReferenceValidationPending: true,
+    brokerReferenceValidationPending: brokerEvidence.brokerReferenceValidationPending === true,
     approvedForApply: false,
   };
 }
 
 export function assertStageBPlanCaptureReport(report, { captureReportBytes, hashes, toolingSha, toolingTreeSha256, refreshReportSha256, stageBLineage, stageBSerial } = {}) {
-  if (report?.schemaVersion !== STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION || report.state !== STAGE_B_PLAN_CAPTURED || report.approvedForApply !== false || report.referenceAuditRequired !== true || report.brokerReferenceValidationPending !== true || typeof report.brokerUpdatePresent !== "boolean" || !Array.isArray(report.brokerActions) || !Array.isArray(report.brokerResourceAddresses)) {
+  if (report?.schemaVersion !== STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION || report.state !== STAGE_B_PLAN_CAPTURED || report.approvedForApply !== false || report.referenceAuditRequired !== true || !STAGE_B_BROKER_OPERATIONS.has(report.brokerOperation) || typeof report.brokerReferenceValidationPending !== "boolean" || typeof report.brokerUpdatePresent !== "boolean" || !Array.isArray(report.brokerActions) || !Array.isArray(report.brokerResourceAddresses)) {
     throw new Error("Stage B plan capture report is missing the PLAN_CAPTURED contract.");
   }
-  if (report.brokerUpdatePresent !== (report.brokerActions.length > 0 || report.brokerResourceAddresses.length > 0)
-    || (report.brokerUpdatePresent && (JSON.stringify(report.brokerActions) !== JSON.stringify(["update"]) || JSON.stringify(report.brokerResourceAddresses) !== JSON.stringify(STAGE_B_CAPTURE_BROKER_ADDRESSES)))
-    || (!report.brokerUpdatePresent && (report.brokerActions.length !== 0 || report.brokerResourceAddresses.length !== 0))) {
+  const expectedBrokerEvidence = report.brokerOperation === "initial-create"
+    ? { updatePresent: false, actions: ["create"], pending: false }
+    : report.brokerOperation === "update"
+      ? { updatePresent: true, actions: ["update"], pending: true }
+      : { updatePresent: false, actions: [], pending: false };
+  if (report.brokerUpdatePresent !== expectedBrokerEvidence.updatePresent || report.brokerReferenceValidationPending !== expectedBrokerEvidence.pending || JSON.stringify(report.brokerActions) !== JSON.stringify(expectedBrokerEvidence.actions)
+    || (report.brokerOperation !== "none" && JSON.stringify(report.brokerResourceAddresses) !== JSON.stringify(STAGE_B_CAPTURE_BROKER_ADDRESSES))
+    || (report.brokerOperation === "none" && report.brokerResourceAddresses.length !== 0)) {
     throw new Error("Stage B plan capture broker evidence is malformed.");
   }
   if (!Buffer.isBuffer(captureReportBytes) || sha256(captureReportBytes) !== sha256(Buffer.from(JSON.stringify(report, null, 2) + "\n"))) throw new Error("Stage B plan capture report bytes are not self-consistent.");
@@ -82,7 +89,7 @@ export function assertStageBPlanCaptureReport(report, { captureReportBytes, hash
   return true;
 }
 
-export function createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath, referenceAuditSha256, referenceAuditCallerArn, referenceAuditAt, toolingSha, toolingTreeSha256, refreshReportSha256, stageBLineage, stageBSerial, hashes, logicalCanonicalPlanJsonSha256, approvedAt, classification, brokerUpdatePresent = false, brokerActions = [], brokerResourceAddresses = [] }) {
+export function createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath, referenceAuditSha256, referenceAuditCallerArn, referenceAuditAt, toolingSha, toolingTreeSha256, refreshReportSha256, stageBLineage, stageBSerial, hashes, logicalCanonicalPlanJsonSha256, approvedAt, classification, brokerOperation = "none", brokerUpdatePresent = false, brokerActions = [], brokerResourceAddresses = [] }) {
   return {
     schemaVersion: STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION,
     state: STAGE_B_PLAN_APPROVED,
@@ -99,6 +106,7 @@ export function createStageBPlanApprovalReport({ captureReportSha256, referenceA
     ...hashes,
     logicalCanonicalPlanJsonSha256,
     classification,
+    brokerOperation,
     brokerUpdatePresent,
     brokerActions,
     brokerResourceAddresses,
@@ -114,7 +122,7 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
   if (!Buffer.isBuffer(approvalReportBytes) || sha256(approvalReportBytes) !== sha256(Buffer.from(JSON.stringify(report, null, 2) + "\n"))) throw new Error("Stage B plan approval report bytes are not self-consistent.");
   if (!Buffer.isBuffer(captureReportBytes)) throw new Error("Stage B plan approval report capture binding is missing.");
   assertStageBPlanCaptureReport(captureReport, { captureReportBytes, hashes, stageBLineage, stageBSerial });
-  if (report.brokerUpdatePresent !== captureReport.brokerUpdatePresent || JSON.stringify(report.brokerActions) !== JSON.stringify(captureReport.brokerActions) || JSON.stringify(report.brokerResourceAddresses) !== JSON.stringify(captureReport.brokerResourceAddresses)) throw new Error("Stage B plan approval broker evidence is not bound to the captured plan.");
+  if (report.brokerOperation !== captureReport.brokerOperation || report.brokerUpdatePresent !== captureReport.brokerUpdatePresent || JSON.stringify(report.brokerActions) !== JSON.stringify(captureReport.brokerActions) || JSON.stringify(report.brokerResourceAddresses) !== JSON.stringify(captureReport.brokerResourceAddresses)) throw new Error("Stage B plan approval broker evidence is not bound to the captured plan.");
   if (report.captureReportSha256 !== sha256(captureReportBytes)) throw new Error("Stage B plan approval report is bound to a different capture report.");
   assertPlanHashes(report, hashes);
   for (const [name, value] of Object.entries({ toolingSha: captureReport.toolingSha, toolingTreeSha256: captureReport.toolingTreeSha256, refreshReportSha256: captureReport.refreshReportSha256, stageBLineage: captureReport.stageBLineage, stageBSerial: captureReport.stageBSerial })) {

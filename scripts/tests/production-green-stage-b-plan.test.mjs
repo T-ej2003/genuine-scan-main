@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
-import { assertStageBPlan, assertStageBPlanCapture, assertStageBBrokerCaptureUpdateContract, assertStageBTaskDefinitionStateMigrationPreconditions } from "../plan-production-green-stage-b.mjs";
+import { assertStageBPlan, assertStageBPlanCapture, assertStageBBrokerCaptureUpdateContract, classifyStageBBrokerActionShape, assertStageBTaskDefinitionStateMigrationPreconditions } from "../plan-production-green-stage-b.mjs";
 import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 
@@ -148,7 +148,8 @@ test("PLAN_CAPTURED accepts only the reviewed three-resource broker update", () 
       { address: "aws_iam_role_policy_attachment.broker", type: "aws_iam_role_policy_attachment", change: { actions: ["no-op"], before: {}, after: {} } },
     ],
   };
-  assert.deepEqual(assertStageBBrokerCaptureUpdateContract(plan), { brokerUpdatePresent: true, brokerActions: ["update"], brokerResourceAddresses: ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"] });
+  assert.equal(classifyStageBBrokerActionShape(plan), "update");
+  assert.deepEqual(assertStageBBrokerCaptureUpdateContract(plan), { brokerOperation: "update", brokerUpdatePresent: true, brokerActions: ["update"], brokerResourceAddresses: ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"], brokerReferenceValidationPending: true });
 });
 
 test("PLAN_CAPTURED rejects broker create, delete, replacement, and unsupported fields", () => {
@@ -165,6 +166,27 @@ test("PLAN_CAPTURED rejects broker create, delete, replacement, and unsupported 
   }
   const unsupported = structuredClone(base); unsupported.resource_changes[2].change.after.description = "unexpected";
   assert.throws(() => assertStageBBrokerCaptureUpdateContract(unsupported), /unsupported mutable field/);
+});
+
+test("broker capture action routing rejects partial and mixed initial shapes", () => {
+  const update = {
+    resource_changes: [
+      { address: "aws_iam_policy.broker", type: "aws_iam_policy", change: { actions: ["update"] } },
+      { address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["update"] } },
+      { address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: ["update"] } },
+    ],
+  };
+  const initial = structuredClone(update);
+  for (const change of initial.resource_changes) change.change.actions = ["create"];
+  assert.equal(classifyStageBBrokerActionShape(initial), "initial-create");
+  const partial = structuredClone(initial); partial.resource_changes.pop();
+  assert.equal(classifyStageBBrokerActionShape(partial), "unsupported");
+  const mixed = structuredClone(initial); mixed.resource_changes[2].change.actions = ["update"];
+  assert.equal(classifyStageBBrokerActionShape(mixed), "unsupported");
+  const deleted = structuredClone(initial); deleted.resource_changes[0].change.actions = ["delete"];
+  assert.equal(classifyStageBBrokerActionShape(deleted), "unsupported");
+  const unknown = { resource_changes: [...initial.resource_changes, { address: "aws_lambda_function.unexpected_broker", type: "aws_lambda_function", change: { actions: ["create"] } }] };
+  assert.throws(() => assertStageBPlanCapture(unknown, { terraformConfiguration }), /unsupported resources|no exact contract/);
 });
 
 test("partial append-only retries accept safe current create/no-op mixtures", () => {

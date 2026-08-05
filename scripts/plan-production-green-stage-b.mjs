@@ -39,6 +39,7 @@ const brokerCaptureAllowedChangedFields = new Map([
   ["aws_lambda_alias.reviewed", new Set(["function_version"])],
   ["aws_lambda_function.broker", new Set(["environment", "filename", "source_code_hash", "last_modified", "qualified_arn", "qualified_invoke_arn", "version"])],
 ]);
+const brokerCaptureKnownAddresses = new Set([...brokerCaptureAddresses, "aws_iam_role_policy_attachment.broker"]);
 export const STAGE_B_RELEASE_CALLER_ARN_PATTERN = /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/\r\n]+$/;
 export function assertStageBReleaseCallerArn(value) {
   if (typeof value !== "string" || !STAGE_B_RELEASE_CALLER_ARN_PATTERN.test(value)) {
@@ -352,13 +353,21 @@ function assertBrokerAuditBinding(plan, brokerChange, audit, auditBytes, auditSh
   }
 }
 
+export function classifyStageBBrokerActionShape(plan) {
+  const changes = new Map((plan.resource_changes || []).filter((change) => brokerCaptureKnownAddresses.has(change.address)).map((change) => [change.address, change]));
+  const active = brokerCaptureAddresses.map((address) => changes.get(address)).filter((change) => change && !exactActions(change.change?.actions || [], ["no-op"]));
+  const attachment = changes.get("aws_iam_role_policy_attachment.broker");
+  if (attachment && !["no-op", "create"].some((action) => exactActions(attachment.change?.actions || [], [action]))) return "unsupported";
+  if (active.length === 0) return attachment && exactActions(attachment.change?.actions || [], ["create"]) ? "unsupported" : "no-op";
+  if (active.length === brokerCaptureAddresses.length && active.every((change) => exactActions(change.change?.actions || [], ["create"]))) return "initial-create";
+  if (active.length === brokerCaptureAddresses.length && active.every((change) => exactActions(change.change?.actions || [], ["update"])) && (!attachment || exactActions(attachment.change?.actions || [], ["no-op"]))) return "update";
+  return "unsupported";
+}
+
 export function assertStageBBrokerCaptureUpdateContract(plan) {
+  if (classifyStageBBrokerActionShape(plan) !== "update") throw new Error("Stage B PLAN_CAPTURED broker update must contain exactly the reviewed policy, alias, and function updates.");
   const changes = new Map((plan.resource_changes || []).filter((change) => brokerCaptureAddresses.includes(change.address)).map((change) => [change.address, change]));
   const active = brokerCaptureAddresses.map((address) => changes.get(address)).filter((change) => change && !exactActions(change.change?.actions || [], ["no-op"]));
-  if (active.length === 0) return { brokerUpdatePresent: false, brokerActions: [], brokerResourceAddresses: [] };
-  if (active.length !== brokerCaptureAddresses.length || active.some((change) => !exactActions(change.change?.actions || [], ["update"]))) {
-    throw new Error("Stage B PLAN_CAPTURED broker update must contain exactly the reviewed policy, alias, and function updates.");
-  }
   for (const change of active) {
     const before = change.change?.before || {};
     const after = change.change?.after || {};
@@ -369,7 +378,7 @@ export function assertStageBBrokerCaptureUpdateContract(plan) {
   }
   const attachment = (plan.resource_changes || []).find((change) => change.address === "aws_iam_role_policy_attachment.broker");
   if (attachment && !exactActions(attachment.change?.actions || [], ["no-op"])) throw new Error("Stage B PLAN_CAPTURED broker policy attachment must remain no-op.");
-  return { brokerUpdatePresent: true, brokerActions: ["update"], brokerResourceAddresses: [...brokerCaptureAddresses] };
+  return { brokerOperation: "update", brokerUpdatePresent: true, brokerActions: ["update"], brokerResourceAddresses: [...brokerCaptureAddresses], brokerReferenceValidationPending: true };
 }
 
 function assertInitialBrokerCreatePlan(plan, terraformConfiguration) {
@@ -563,14 +572,27 @@ export function assertStageBPlan(plan, options = {}) {
   if (terraformWorkspace) assertStageBTerraformWorkspace(terraformWorkspace);
   const deploymentIdentity = strictResourceContract || imageEvidence ? assertStageBDeploymentIdentity({ plan, imageEvidence }) : undefined;
   if (strictResourceContract) assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity });
-  const resourceClassification = classifyStageBPlan(plan, { strict: strictResourceContract, terraformConfiguration });
+  const resourceClassification = classifyStageBPlan(plan, { strict: strictResourceContract, terraformConfiguration, allowBrokerPolicyCreate: captureMode });
   const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence }) : undefined;
   const brokerChange = (plan.resource_changes || []).find((change) => change.address === "aws_lambda_function.broker");
   const brokerMutationAddresses = new Set(["aws_lambda_function.broker", "aws_lambda_alias.reviewed", "aws_iam_policy.broker"]);
   const brokerMutation = (plan.resource_changes || []).find((change) => brokerMutationAddresses.has(change.address)
     && !exactActions(change.change?.actions || [], ["no-op"]));
   if (brokerMutation) assertStageBBrokerTaskDefinitionMapping(plan, terraformConfiguration);
-  const brokerCapture = captureMode ? assertStageBBrokerCaptureUpdateContract(plan) : undefined;
+  const brokerActionShape = captureMode ? classifyStageBBrokerActionShape(plan) : undefined;
+  let brokerCapture;
+  if (captureMode) {
+    if (brokerActionShape === "initial-create") {
+      assertInitialBrokerCreatePlan(plan, terraformConfiguration);
+      brokerCapture = { brokerOperation: "initial-create", brokerUpdatePresent: false, brokerActions: ["create"], brokerResourceAddresses: [...brokerCaptureAddresses], brokerReferenceValidationPending: false };
+    } else if (brokerActionShape === "update") {
+      brokerCapture = assertStageBBrokerCaptureUpdateContract(plan);
+    } else if (brokerActionShape === "unsupported") {
+      throw new Error("Stage B broker capture action shape is unsupported.");
+    } else {
+      brokerCapture = { brokerOperation: "none", brokerUpdatePresent: false, brokerActions: [], brokerResourceAddresses: [], brokerReferenceValidationPending: false };
+    }
+  }
   if (brokerChange) {
     const brokerActions = brokerChange.change?.actions;
     if (!Array.isArray(brokerActions) || brokerActions.length === 0) throw new Error("Stage B broker actions are missing or malformed.");
@@ -720,7 +742,7 @@ export function approveCapturedStageBPlan({ tfvars, cliOptions, protectedMainChe
   if (sha256(planBytes) !== (readOption(cliOptions, "--plan-json-sha256") || hashes.planJsonSha256)) throw new Error("Stage B plan JSON SHA256 does not match the selected plan JSON.");
   const plan = JSON.parse(planBytes);
   const classification = assertStageBPlan(plan, { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: auditSha256, planJsonBytes: planBytes, planJsonSha256: hashes.planJsonSha256, trustedCallerArn, terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: assertStageBPlanningWorkspace({ env: process.env, argv: [tfvars, ...cliOptions] }).toString() } });
-  const approval = createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath: path.resolve(auditPath), referenceAuditSha256: auditSha256, referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, toolingSha: capture.report.toolingSha, toolingTreeSha256: capture.report.toolingTreeSha256, refreshReportSha256: capture.report.refreshReportSha256, stageBLineage: capture.report.stageBLineage, stageBSerial: capture.report.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: new Date().toISOString(), classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replace || 0, unclassified: classification.unclassifiedResources.length }, brokerUpdatePresent: capture.report.brokerUpdatePresent, brokerActions: capture.report.brokerActions, brokerResourceAddresses: capture.report.brokerResourceAddresses });
+  const approval = createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath: path.resolve(auditPath), referenceAuditSha256: auditSha256, referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, toolingSha: capture.report.toolingSha, toolingTreeSha256: capture.report.toolingTreeSha256, refreshReportSha256: capture.report.refreshReportSha256, stageBLineage: capture.report.stageBLineage, stageBSerial: capture.report.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: new Date().toISOString(), classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replace || 0, unclassified: classification.unclassifiedResources.length }, brokerOperation: capture.report.brokerOperation, brokerUpdatePresent: capture.report.brokerUpdatePresent, brokerActions: capture.report.brokerActions, brokerResourceAddresses: capture.report.brokerResourceAddresses });
   const result = writeStageBPlanEvidence({ filePath: approvalReportPath, report: approval, repositoryRoot: process.cwd(), label: "Stage B plan approval report" });
   assertStageBPlanApprovalReport(approval, { approvalReportBytes: fs.readFileSync(approvalReportPath), captureReport: capture.report, captureReportBytes: capture.bytes, referenceAudit: audit, referenceAuditBytes: auditBytes, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: auditSha256, trustedCallerArn, stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial });
   return { status: STAGE_B_PLAN_APPROVED, ...result, plan: savedPlanPath, planJson: planJsonPath, canonicalPlanJson: canonicalPlanJsonPath, planJsonSha256: hashes.planJsonSha256, canonicalPlanJsonSha256: hashes.canonicalPlanFileSha256, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256 };

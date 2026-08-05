@@ -35,6 +35,7 @@ test("preserved production plan recovers to PLAN_CAPTURED without Terraform", { 
     });
     assert.equal(result.status, "PLAN_CAPTURED");
     const report = JSON.parse(fs.readFileSync(capturePath));
+    assert.equal(report.brokerOperation, "update");
     assert.equal(report.brokerUpdatePresent, true);
     assert.deepEqual(report.brokerActions, ["update"]);
     assert.equal(report.brokerReferenceValidationPending, true);
