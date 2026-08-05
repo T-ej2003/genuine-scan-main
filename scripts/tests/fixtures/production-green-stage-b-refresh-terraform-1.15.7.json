@@ -12,15 +12,15 @@
   "diagnostics": [],
   "output_changes": {},
   "checks": [
-    {"address":{"kind":"check","name":"immutable_images","to_display":"check.immutable_images"},"status":"pass","instances":[{"address":{"to_display":"check.immutable_images"},"status":"pass","problems":[]}]},
-    {"address":{"kind":"check","name":"production_only","to_display":"check.production_only"},"status":"pass","instances":[{"address":{"to_display":"check.production_only"},"status":"pass","problems":[]}]},
-    {"address":{"kind":"check","name":"read_only_canary_secret","to_display":"check.read_only_canary_secret"},"status":"pass","instances":[{"address":{"to_display":"check.read_only_canary_secret"},"status":"pass","problems":[]}]},
-    {"address":{"kind":"check","name":"release_bindings","to_display":"check.release_bindings"},"status":"pass","instances":[{"address":{"to_display":"check.release_bindings"},"status":"pass","problems":[]}]},
-    {"address":{"kind":"check","name":"retained_task_definition_families","to_display":"check.retained_task_definition_families"},"status":"pass","instances":[{"address":{"to_display":"check.retained_task_definition_families"},"status":"pass","problems":[]}]},
-    {"address":{"kind":"check","name":"stage_a_bindings","to_display":"check.stage_a_bindings"},"status":"pass","instances":[{"address":{"to_display":"check.stage_a_bindings"},"status":"pass","problems":[]}]},
-    {"address":{"kind":"check","name":"stage_a_release_resources","to_display":"check.stage_a_release_resources"},"status":"pass","instances":[{"address":{"to_display":"check.stage_a_release_resources"},"status":"pass","problems":[]}]},
-    {"address":{"kind":"check","name":"stage_a_runtime_secrets","to_display":"check.stage_a_runtime_secrets"},"status":"pass","instances":[{"address":{"to_display":"check.stage_a_runtime_secrets"},"status":"pass","problems":[]}]},
-    {"address":{"kind":"var","name":"retained_candidate_task_definitions","to_display":"var.retained_candidate_task_definitions"},"status":"pass","instances":[{"address":{"to_display":"var.retained_candidate_task_definitions"},"status":"pass","problems":[]}]},
-    {"address":{"kind":"var","name":"retained_executor_task_definitions","to_display":"var.retained_executor_task_definitions"},"status":"pass","instances":[{"address":{"to_display":"var.retained_executor_task_definitions"},"status":"pass","problems":[]}]}
+    {"address":{"kind":"check","name":"immutable_images","to_display":"check.immutable_images"},"status":"pass","instances":[{"address":{"to_display":"check.immutable_images"},"status":"pass"}]},
+    {"address":{"kind":"check","name":"production_only","to_display":"check.production_only"},"status":"pass","instances":[{"address":{"to_display":"check.production_only"},"status":"pass"}]},
+    {"address":{"kind":"check","name":"read_only_canary_secret","to_display":"check.read_only_canary_secret"},"status":"pass","instances":[{"address":{"to_display":"check.read_only_canary_secret"},"status":"pass"}]},
+    {"address":{"kind":"check","name":"release_bindings","to_display":"check.release_bindings"},"status":"pass","instances":[{"address":{"to_display":"check.release_bindings"},"status":"pass"}]},
+    {"address":{"kind":"check","name":"retained_task_definition_families","to_display":"check.retained_task_definition_families"},"status":"pass","instances":[{"address":{"to_display":"check.retained_task_definition_families"},"status":"pass"}]},
+    {"address":{"kind":"check","name":"stage_a_bindings","to_display":"check.stage_a_bindings"},"status":"pass","instances":[{"address":{"to_display":"check.stage_a_bindings"},"status":"pass"}]},
+    {"address":{"kind":"check","name":"stage_a_release_resources","to_display":"check.stage_a_release_resources"},"status":"pass","instances":[{"address":{"to_display":"check.stage_a_release_resources"},"status":"pass"}]},
+    {"address":{"kind":"check","name":"stage_a_runtime_secrets","to_display":"check.stage_a_runtime_secrets"},"status":"pass","instances":[{"address":{"to_display":"check.stage_a_runtime_secrets"},"status":"pass"}]},
+    {"address":{"kind":"var","name":"retained_candidate_task_definitions","to_display":"var.retained_candidate_task_definitions"},"status":"pass","instances":[{"address":{"to_display":"var.retained_candidate_task_definitions"},"status":"pass"}]},
+    {"address":{"kind":"var","name":"retained_executor_task_definitions","to_display":"var.retained_executor_task_definitions"},"status":"pass","instances":[{"address":{"to_display":"var.retained_executor_task_definitions"},"status":"pass"}]}
   ]
 }
