@@ -28,6 +28,7 @@ import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspac
 import { assertStageBDeploymentCapabilityGraph } from "./aws/generate-production-green-stage-b-capability-graph.mjs";
 import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBPrivateFile } from "./aws/stage-b-artifact-contract.mjs";
+import { assertStageBPlanApprovedBinding } from "./aws/stage-b-plan-approval-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -56,6 +57,9 @@ export function parseCli(argv) {
     closureMode,
     planPath: requireOption(argv, "--plan"),
     planJsonPath: requireOption(argv, "--plan-json"),
+    canonicalPlanJsonPath: requireOption(argv, "--canonical-plan-json"),
+    planApprovalReportPath: requireOption(argv, "--plan-approval-report"),
+    planApprovalReportSha256: requireOption(argv, "--plan-approval-report-sha256"),
     auditPath: requireOption(argv, "--reference-audit"),
     permissionReportPath: requireOption(argv, "--permission-report"),
     permissionReportSha256: requireOption(argv, "--permission-report-sha256"),
@@ -106,21 +110,22 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   return true;
 }
 
-export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, toolingTreeSha256, imageReleaseSha, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
+export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJsonPath, planApprovalReportPath, planApprovalReportSha256, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, toolingTreeSha256, imageReleaseSha, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
   assertStageBDeploymentCapabilityGraph();
   assertStageBTerraformBackendPolicy(readJson("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json"));
   if (!tfvarsPath || !tfvarsBindingReportPath || !tfvarsBindingReportSha256 || !refreshReportPath || !refreshReportSha256 || !toolingTreeSha256) throw new Error("Canonical Stage B tfvars, binding report, refresh report, binding-report SHA256, refresh-report SHA256, and tooling-tree SHA256 are required.");
   const bindingReport = assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath: tfvarsBindingReportPath, bindingReportSha256: tfvarsBindingReportSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha: imageReleaseSha, expectedImageEvidenceSha256: imageEvidenceSha256 });
   assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256: tfvarsBindingReportSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: imageEvidenceSha256, expectedStateSha256: bindingReport.stateBackupSha256 });
-  if (!path.isAbsolute(planPath) || !path.isAbsolute(planJsonPath) || !path.isAbsolute(auditPath) || !path.isAbsolute(permissionReportPath) || !path.isAbsolute(permissionReportSignaturePath) || !path.isAbsolute(imageEvidencePath) || !path.isAbsolute(imageEvidenceSignaturePath)) throw new Error("All Stage B apply artifacts must use absolute paths.");
+  if (!path.isAbsolute(planPath) || !path.isAbsolute(planJsonPath) || !path.isAbsolute(canonicalPlanJsonPath) || !path.isAbsolute(planApprovalReportPath) || !path.isAbsolute(auditPath) || !path.isAbsolute(permissionReportPath) || !path.isAbsolute(permissionReportSignaturePath) || !path.isAbsolute(imageEvidencePath) || !path.isAbsolute(imageEvidenceSignaturePath)) throw new Error("All Stage B apply artifacts must use absolute paths.");
   if (!fs.existsSync(planPath)) throw new Error("Saved Terraform plan is missing.");
   if (!fs.existsSync(permissionReportPath)) throw new Error("Permission-preflight report is missing.");
   if (!fs.existsSync(permissionReportSignaturePath)) throw new Error("Permission-preflight report signature is missing.");
   if (!fs.existsSync(imageEvidencePath)) throw new Error("Authenticated image evidence is missing.");
   if (!fs.existsSync(imageEvidenceSignaturePath)) throw new Error("Authenticated image evidence signature is missing.");
-  for (const [filePath, label] of [[planPath, "Stage B saved plan"], [planJsonPath, "Stage B plan JSON"], [auditPath, "Stage B reference audit"], [permissionReportPath, "Stage B permission report"], [permissionReportSignaturePath, "Stage B permission-report signature"], [imageEvidencePath, "Stage B image evidence"], [imageEvidenceSignaturePath, "Stage B image-evidence signature"]]) assertStageBPrivateFile({ filePath, repositoryRoot: root, label });
-  const planBytes = fs.readFileSync(planJsonPath); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReportBytes = fs.readFileSync(permissionReportPath); const permissionReport = JSON.parse(permissionReportBytes); const signatureArtifact = JSON.parse(fs.readFileSync(permissionReportSignaturePath, "utf8")); const imageEvidenceBytes = fs.readFileSync(imageEvidencePath); const imageEvidence = JSON.parse(imageEvidenceBytes); const imageEvidenceSignatureArtifact = JSON.parse(fs.readFileSync(imageEvidenceSignaturePath, "utf8"));
+  for (const [filePath, label] of [[planPath, "Stage B saved plan"], [planJsonPath, "Stage B plan JSON"], [canonicalPlanJsonPath, "Stage B canonical plan JSON"], [planApprovalReportPath, "Stage B plan approval report"], [auditPath, "Stage B reference audit"], [permissionReportPath, "Stage B permission report"], [permissionReportSignaturePath, "Stage B permission-report signature"], [imageEvidencePath, "Stage B image evidence"], [imageEvidenceSignaturePath, "Stage B image-evidence signature"]]) assertStageBPrivateFile({ filePath, repositoryRoot: root, label });
+  const planBytes = fs.readFileSync(planJsonPath); const canonicalPlanJsonBytes = fs.readFileSync(canonicalPlanJsonPath); const approvalReportBytes = fs.readFileSync(planApprovalReportPath); const approvalReport = JSON.parse(approvalReportBytes); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReportBytes = fs.readFileSync(permissionReportPath); const permissionReport = JSON.parse(permissionReportBytes); const signatureArtifact = JSON.parse(fs.readFileSync(permissionReportSignaturePath, "utf8")); const imageEvidenceBytes = fs.readFileSync(imageEvidencePath); const imageEvidence = JSON.parse(imageEvidenceBytes); const imageEvidenceSignatureArtifact = JSON.parse(fs.readFileSync(imageEvidenceSignaturePath, "utf8"));
   if (!/^[a-f0-9]{64}$/.test(savedPlanSha256) || sha256(savedPlanBytes) !== savedPlanSha256) throw new Error("Saved Terraform plan SHA256 does not match the approved digest.");
+  assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedRefreshReportSha256: refreshReportSha256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial, now: new Date(now) });
   if (!/^[a-f0-9]{64}$/.test(canonicalPlanJsonSha256)) throw new Error("Canonical plan JSON SHA256 is missing or malformed.");
   if (sha256(planBytes) !== planSha256) throw new Error("Plan JSON SHA256 does not match the approved digest.");
   if (sha256(auditBytes) !== auditSha256) throw new Error("Reference audit SHA256 does not match the approved digest.");
@@ -149,7 +154,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, auditPath, permis
     if (broker.resolvedVersionArn !== brokerIdentity.resolvedVersionArn) throw new Error("Stage B broker resolved version identity does not match the configuration evidence.");
   }
   const manifest = readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
-  const reportBinding = assertPermissionReportPlanBinding(permissionReport, { planJsonBytes: planBytes, savedPlanBytes, manifest });
+  const reportBinding = assertPermissionReportPlanBinding(permissionReport, { planJsonBytes: planBytes, savedPlanBytes, manifest, planApprovalReportSha256 });
   if (reportBinding.planSha256 !== planSha256 || reportBinding.savedPlanSha256 !== savedPlanSha256 || reportBinding.canonicalPlanJsonSha256 !== canonicalPlanJsonSha256) throw new Error("Permission report deployment hashes differ from the selected plan inputs.");
   const manifestSha256 = reportBinding.manifestSha256;
   if (typeof showPlan !== "function") throw new Error("Terraform show dependency is required to bind the saved plan.");

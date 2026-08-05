@@ -16,6 +16,7 @@ import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mj
 import { assertStageBDeploymentCapabilityGraph } from "./generate-production-green-stage-b-capability-graph.mjs";
 import { assertStageBRefreshEvidence } from "./stage-b-refresh-contract.mjs";
 import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
+import { assertStageBPlanApprovedBinding } from "./stage-b-plan-approval-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -53,19 +54,23 @@ const bindingReportPath = process.env.STAGE_B_TFVARS_BINDING_REPORT_PATH;
 if (mode === "production") {
   const requiredProductionEvidence = [
     "STAGE_B_IMAGE_EVIDENCE_PATH", "STAGE_B_IMAGE_EVIDENCE_SIGNATURE_PATH", "STAGE_B_IMAGE_EVIDENCE_SHA256", "STAGE_B_IMAGE_EVIDENCE_WORKFLOW_RUN_ID", "STAGE_B_IMAGE_EVIDENCE_ARTIFACT_SHA256",
-    "STAGE_B_PLAN_PATH", "STAGE_B_PLAN_JSON_PATH", "STAGE_B_PLAN_SHA256", "STAGE_B_SAVED_PLAN_SHA256", "STAGE_B_CANONICAL_PLAN_JSON_SHA256",
+    "STAGE_B_PLAN_PATH", "STAGE_B_PLAN_JSON_PATH", "STAGE_B_CANONICAL_PLAN_JSON_PATH", "STAGE_B_PLAN_SHA256", "STAGE_B_SAVED_PLAN_SHA256", "STAGE_B_CANONICAL_PLAN_JSON_SHA256", "STAGE_B_PLAN_APPROVAL_REPORT_PATH", "STAGE_B_PLAN_APPROVAL_REPORT_SHA256",
     "STAGE_B_REFERENCE_AUDIT_PATH", "STAGE_B_REFERENCE_AUDIT_SHA256",
     "STAGE_B_PERMISSION_REPORT_PATH", "STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH", "STAGE_B_PERMISSION_REPORT_SHA256", "STAGE_B_TERRAFORM_BACKEND_METADATA_PATH", "STAGE_B_REFRESH_REPORT_PATH", "STAGE_B_REFRESH_REPORT_SHA256",
   ];
   if (requiredProductionEvidence.some((name) => !process.env[name])) throw new Error("Production Stage B closure requires complete fresh deployment evidence.");
   if (!process.env.TF_DATA_DIR) throw new Error("Production Stage B closure requires the reviewed TF_DATA_DIR.");
-  for (const name of ["STAGE_B_IMAGE_EVIDENCE_PATH", "STAGE_B_IMAGE_EVIDENCE_SIGNATURE_PATH", "STAGE_B_PLAN_PATH", "STAGE_B_PLAN_JSON_PATH", "STAGE_B_REFERENCE_AUDIT_PATH", "STAGE_B_PERMISSION_REPORT_PATH", "STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH", "STAGE_B_REFRESH_REPORT_PATH"]) {
+  for (const name of ["STAGE_B_IMAGE_EVIDENCE_PATH", "STAGE_B_IMAGE_EVIDENCE_SIGNATURE_PATH", "STAGE_B_PLAN_PATH", "STAGE_B_PLAN_JSON_PATH", "STAGE_B_CANONICAL_PLAN_JSON_PATH", "STAGE_B_PLAN_APPROVAL_REPORT_PATH", "STAGE_B_REFERENCE_AUDIT_PATH", "STAGE_B_PERMISSION_REPORT_PATH", "STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH", "STAGE_B_REFRESH_REPORT_PATH"]) {
     assertStageBPrivateFile({ filePath: process.env[name], repositoryRoot: root, label: name });
   }
   const backendMetadataPath = path.resolve(process.env.STAGE_B_TERRAFORM_BACKEND_METADATA_PATH);
   backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: process.env.TF_DATA_DIR, backendMetadataPath, repositoryRoot: root });
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(backendMetadataPath, "utf8"))?.backend);
   const permissionReportBytes = fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_PATH);
+  const approvalReportBytes = fs.readFileSync(process.env.STAGE_B_PLAN_APPROVAL_REPORT_PATH);
+  const approvalReport = JSON.parse(approvalReportBytes);
+  const closureAuditBytes = fs.readFileSync(process.env.STAGE_B_REFERENCE_AUDIT_PATH);
+  const closureAudit = JSON.parse(closureAuditBytes);
   const permissionReport = JSON.parse(permissionReportBytes);
   const permissionSignature = JSON.parse(fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH, "utf8"));
   if (permissionReport.purpose !== "saved-plan-authorization" || permissionReport.status !== "valid") throw new Error("Production closure requires a valid saved-plan administrator permission report.");
@@ -75,6 +80,7 @@ if (mode === "production") {
     planJsonBytes: selectedPlanJsonBytes,
     savedPlanBytes: fs.readFileSync(process.env.STAGE_B_PLAN_PATH),
     manifest: permissionManifest,
+    planApprovalReportSha256: process.env.STAGE_B_PLAN_APPROVAL_REPORT_SHA256,
   });
   if (planBinding.planSha256 !== process.env.STAGE_B_PLAN_SHA256 || planBinding.savedPlanSha256 !== process.env.STAGE_B_SAVED_PLAN_SHA256 || planBinding.canonicalPlanJsonSha256 !== process.env.STAGE_B_CANONICAL_PLAN_JSON_SHA256) throw new Error("Production closure permission report is bound to different plan hashes.");
   assertPermissionEvaluationBindings(permissionReport, permissionManifest, { plan: JSON.parse(selectedPlanJsonBytes) });
@@ -85,6 +91,7 @@ if (mode === "production" || tfvarsPath || bindingReportPath) {
   if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256 || !process.env.STAGE_B_TOOLING_TREE_SHA256 || !process.env.STAGE_B_IMAGE_RELEASE_SHA || !process.env.STAGE_B_IMAGE_EVIDENCE_SHA256) throw new Error("Production Stage B closure requires canonical tfvars provenance and complete deployment identity.");
   const bindingReport = assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedImageReleaseSha: process.env.STAGE_B_IMAGE_RELEASE_SHA, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256 });
   assertStageBRefreshEvidence({ refreshReportPath: process.env.STAGE_B_REFRESH_REPORT_PATH, refreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, bindingReport, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256, expectedStateSha256: bindingReport.stateBackupSha256, ...(backendMetadata ? { expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir } : {}) });
+  assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: process.env.STAGE_B_PLAN_APPROVAL_REPORT_SHA256, savedPlanBytes: fs.readFileSync(process.env.STAGE_B_PLAN_PATH), planJsonBytes: fs.readFileSync(process.env.STAGE_B_PLAN_JSON_PATH), canonicalPlanJsonBytes: fs.readFileSync(process.env.STAGE_B_CANONICAL_PLAN_JSON_PATH), referenceAudit: closureAudit, referenceAuditBytes: closureAuditBytes, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedRefreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial });
 }
 const imageImpactReport = mode === "pull-request" ? JSON.parse(fs.readFileSync(process.env.STAGE_B_IMAGE_IMPACT_REPORT_PATH || path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH), "utf8")) : undefined;
 if (mode === "pull-request") assertImageImpactReport({ report: imageImpactReport, imageReleaseSha: imageImpactReport.imageReleaseSha, toolingSha: currentHead, toolingInputTreeSha256: imageImpactReport.toolingInputTreeSha256, changedFiles: imageImpactReport.classifiedChangedFiles });

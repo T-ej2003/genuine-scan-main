@@ -11,6 +11,7 @@ import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mj
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidenceTimestamp, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
+import { assertStageBPlanApprovedBinding } from "./stage-b-plan-approval-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_EVIDENCE_MAX_AGE_MS = STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS;
@@ -94,10 +95,13 @@ export function parseCli(argv) {
     reportGeneratorCallerArn: requireOption(argv, "--report-generator-caller-arn"),
     simulatedRoleArn: requireOption(argv, "--simulated-role-arn"),
     planJsonPath: requireOption(argv, "--plan-json"),
+    canonicalPlanJsonPath: requireOption(argv, "--canonical-plan-json"),
     manifestPath: requireOption(argv, "--manifest"),
     outputPath: requireOption(argv, "--output"),
     signatureOutputPath: requireOption(argv, "--signature-output"),
     savedPlanPath: requireOption(argv, "--saved-plan"),
+    planApprovalReportPath: requireOption(argv, "--plan-approval-report"),
+    planApprovalReportSha256: requireOption(argv, "--plan-approval-report-sha256"),
     expectedAccount: requireOption(argv, "--expected-account"),
     expectedRegion: requireOption(argv, "--expected-region"),
     generatedAt: readOption(argv, "--generated-at") || new Date().toISOString(),
@@ -112,7 +116,7 @@ export function canonicalizeJson(value) {
   return JSON.stringify(value);
 }
 
-export function assertPermissionReportPlanBinding(report, { planJsonBytes, savedPlanBytes, manifest } = {}) {
+export function assertPermissionReportPlanBinding(report, { planJsonBytes, savedPlanBytes, manifest, planApprovalReportSha256 } = {}) {
   if (!Buffer.isBuffer(planJsonBytes) || !Buffer.isBuffer(savedPlanBytes) || !manifest) throw new Error("Permission report plan-binding inputs are incomplete.");
   let plan;
   try { plan = JSON.parse(planJsonBytes); } catch { throw new Error("Permission report plan JSON is malformed."); }
@@ -123,6 +127,7 @@ export function assertPermissionReportPlanBinding(report, { planJsonBytes, saved
     manifestSha256: sha256(Buffer.from(canonicalizeJson(manifest))),
   };
   for (const [field, value] of Object.entries(expected)) if (report?.[field] !== value) throw new Error(`Permission report ${field} does not match the selected deployment artifact.`);
+  if (planApprovalReportSha256 !== undefined && report?.planApprovalReportSha256 !== planApprovalReportSha256) throw new Error("Permission report is not bound to the approved Stage B plan.");
   return expected;
 }
 
@@ -674,7 +679,11 @@ export function runPermissionPreflight({
   manifest,
   plan,
   planBytes,
+  canonicalPlanJsonBytes,
   savedPlanBytes,
+  planApprovalReport,
+  planApprovalReportBytes,
+  planApprovalReportSha256,
   expectedAccount = ACCOUNT,
   expectedRegion = REGION,
   generatedAt = new Date().toISOString(),
@@ -688,6 +697,9 @@ export function runPermissionPreflight({
 } = {}) {
   if (expectedAccount !== ACCOUNT || expectedRegion !== REGION) throw new Error("Expected account or region is wrong.");
   if (!Buffer.isBuffer(savedPlanBytes) || savedPlanBytes.length === 0) throw new Error("Saved binary plan bytes are required for permission preflight.");
+  if (!planApprovalReport || !Buffer.isBuffer(planApprovalReportBytes) || !/^[a-f0-9]{64}$/.test(planApprovalReportSha256 || "")) throw new Error("PLAN_APPROVED evidence is required before permission preflight.");
+  if (!Buffer.isBuffer(canonicalPlanJsonBytes)) throw new Error("Canonical plan JSON bytes are required for permission preflight.");
+  assertStageBPlanApprovedBinding(planApprovalReport, { approvalReportBytes: planApprovalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, now: new Date(now) });
   if (!reportGeneratorCallerArn || !APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(reportGeneratorCallerArn)) throw new Error("Permission preflight generator is not an approved audit/admin principal.");
   if (simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission preflight simulated role ARN is not the production release role.");
   validateManifest(manifest, { account: expectedAccount, region: expectedRegion });
@@ -725,6 +737,7 @@ export function runPermissionPreflight({
     planSha256: sha256(planBytes),
     savedPlanSha256: sha256(savedPlanBytes),
     canonicalPlanJsonSha256: sha256(Buffer.from(canonicalizeJson(plan))),
+    planApprovalReportSha256,
     generatedAt,
     policyPublishedAt,
     cloudTrailWindow: { startTime: policyPublishedAt, endTime: generatedAt, sessionName: cloudTrailSessionName },
@@ -753,7 +766,9 @@ export function runPermissionPreflight({
 export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn, collectPolicyEvidence = collectLiveReleasePolicyEvidence, runPreflight = runPermissionPreflight, signReport = signPermissionReport } = {}) {
   const options = parseCli(argv);
   assertStageBPrivateFile({ filePath: options.planJsonPath, repositoryRoot: stageBRoot, label: "Stage B plan JSON" });
+  assertStageBPrivateFile({ filePath: options.canonicalPlanJsonPath, repositoryRoot: stageBRoot, label: "Stage B canonical plan JSON" });
   assertStageBPrivateFile({ filePath: options.savedPlanPath, repositoryRoot: stageBRoot, label: "Stage B saved plan" });
+  assertStageBPrivateFile({ filePath: options.planApprovalReportPath, repositoryRoot: stageBRoot, label: "Stage B plan approval report" });
   const outputPath = assertStageBArtifactPath({ artifactPath: options.outputPath, repositoryRoot: stageBRoot, label: "Stage B permission report", allowExisting: false });
   const signatureOutputPath = assertStageBArtifactPath({ artifactPath: options.signatureOutputPath, repositoryRoot: stageBRoot, label: "Stage B permission-report signature", allowExisting: false });
   if (path.dirname(outputPath) !== path.dirname(signatureOutputPath)) throw new Error("Stage B permission report and signature must use one private directory.");
@@ -761,10 +776,13 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   const observedCallerArn = getCaller();
   if (observedCallerArn !== options.reportGeneratorCallerArn) throw new Error("Report generator caller does not match the current AWS identity.");
   const planBytes = fs.readFileSync(path.resolve(options.planJsonPath));
+  const canonicalPlanJsonBytes = fs.readFileSync(path.resolve(options.canonicalPlanJsonPath));
   const savedPlanBytes = fs.readFileSync(path.resolve(options.savedPlanPath));
+  const planApprovalReportBytes = fs.readFileSync(path.resolve(options.planApprovalReportPath));
+  const planApprovalReport = JSON.parse(planApprovalReportBytes);
   const plan = JSON.parse(planBytes);
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
-  const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, savedPlanBytes, policyEvidence: collectPolicyEvidence() });
+  const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, canonicalPlanJsonBytes, savedPlanBytes, planApprovalReport, planApprovalReportBytes, policyEvidence: collectPolicyEvidence() });
   process.stdout.write(`${JSON.stringify({ status: report.status, outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
   if (report.status !== "valid") {
     writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), repositoryRoot: stageBRoot, label: "Stage B permission report" });
