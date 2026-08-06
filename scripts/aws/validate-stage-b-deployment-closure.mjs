@@ -60,7 +60,7 @@ if (mode === "production") {
     "STAGE_B_IMAGE_EVIDENCE_PATH", "STAGE_B_IMAGE_EVIDENCE_SIGNATURE_PATH", "STAGE_B_IMAGE_EVIDENCE_SHA256", "STAGE_B_IMAGE_EVIDENCE_WORKFLOW_RUN_ID", "STAGE_B_IMAGE_EVIDENCE_ARTIFACT_SHA256",
     "STAGE_B_PLAN_PATH", "STAGE_B_PLAN_JSON_PATH", "STAGE_B_CANONICAL_PLAN_JSON_PATH", "STAGE_B_PLAN_SHA256", "STAGE_B_SAVED_PLAN_SHA256", "STAGE_B_CANONICAL_PLAN_JSON_SHA256", "STAGE_B_PLAN_APPROVAL_REPORT_PATH", "STAGE_B_PLAN_APPROVAL_REPORT_SHA256",
     "STAGE_B_REFERENCE_AUDIT_PATH", "STAGE_B_REFERENCE_AUDIT_SHA256",
-    "STAGE_B_PERMISSION_REPORT_PATH", "STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH", "STAGE_B_PERMISSION_REPORT_SHA256", "STAGE_B_TERRAFORM_BACKEND_METADATA_PATH", "STAGE_B_REFRESH_REPORT_PATH", "STAGE_B_REFRESH_REPORT_SHA256",
+    "STAGE_B_PERMISSION_REPORT_PATH", "STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH", "STAGE_B_PERMISSION_REPORT_SHA256", "STAGE_B_PERMISSION_REPORT_SIGNATURE_SHA256", "STAGE_B_TERRAFORM_BACKEND_METADATA_PATH", "STAGE_B_REFRESH_REPORT_PATH", "STAGE_B_REFRESH_REPORT_SHA256",
   ];
   if (requiredProductionEvidence.some((name) => !process.env[name])) throw new Error("Production Stage B closure requires complete fresh deployment evidence.");
   if (!process.env.TF_DATA_DIR) throw new Error("Production Stage B closure requires the reviewed TF_DATA_DIR.");
@@ -76,10 +76,12 @@ if (mode === "production") {
   closureAuditBytes = fs.readFileSync(process.env.STAGE_B_REFERENCE_AUDIT_PATH);
   closureAudit = JSON.parse(closureAuditBytes);
   const permissionReport = JSON.parse(permissionReportBytes);
-  const permissionSignature = JSON.parse(fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH, "utf8"));
+  const permissionSignatureBytes = fs.readFileSync(process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_PATH);
+  const permissionSignature = JSON.parse(permissionSignatureBytes);
   if (permissionReport.purpose !== "saved-plan-authorization" || permissionReport.status !== "valid") throw new Error("Production closure requires a valid saved-plan administrator permission report.");
   assertStageBPermissionEvidenceKind(permissionReport, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, "plan-bound");
   if (crypto.createHash("sha256").update(permissionReportBytes).digest("hex") !== process.env.STAGE_B_PERMISSION_REPORT_SHA256) throw new Error("Production closure permission report SHA256 differs from the selected report.");
+  if (crypto.createHash("sha256").update(permissionSignatureBytes).digest("hex") !== process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_SHA256) throw new Error("Production closure permission signature SHA256 differs from the selected signature.");
   const selectedPlanJsonBytes = fs.readFileSync(process.env.STAGE_B_PLAN_JSON_PATH);
   const planBinding = assertPermissionReportPlanBinding(permissionReport, {
     planJsonBytes: selectedPlanJsonBytes,
@@ -90,7 +92,7 @@ if (mode === "production") {
   if (planBinding.planSha256 !== process.env.STAGE_B_PLAN_SHA256 || planBinding.savedPlanSha256 !== process.env.STAGE_B_SAVED_PLAN_SHA256 || planBinding.canonicalPlanJsonSha256 !== process.env.STAGE_B_CANONICAL_PLAN_JSON_SHA256) throw new Error("Production closure permission report is bound to different plan hashes.");
   assertPermissionEvaluationBindings(permissionReport, permissionManifest, { plan: JSON.parse(selectedPlanJsonBytes) });
   assertReleasePolicyEvidence(permissionReport.policyEvidence);
-  verifyPermissionReportSignature({ report: permissionReport, signatureArtifact: permissionSignature });
+  verifyPermissionReportSignature({ report: permissionReport, signatureArtifact: permissionSignature, reportBytes: permissionReportBytes, signatureBytes: permissionSignatureBytes, expectedReportFileSha256: process.env.STAGE_B_PERMISSION_REPORT_SHA256, expectedSignatureFileSha256: process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_SHA256 });
 }
 if (mode === "production" || tfvarsPath || bindingReportPath) {
   if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256 || !process.env.STAGE_B_TOOLING_TREE_SHA256 || !process.env.STAGE_B_IMAGE_RELEASE_SHA || !process.env.STAGE_B_IMAGE_EVIDENCE_SHA256) throw new Error("Production Stage B closure requires canonical tfvars provenance and complete deployment identity.");

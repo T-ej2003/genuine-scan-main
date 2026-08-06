@@ -9,7 +9,8 @@ const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 test("production closure binds signed permission evidence to every selected plan artifact", () => {
   const source = fs.readFileSync("scripts/aws/validate-stage-b-deployment-closure.mjs", "utf8");
   assert.match(source, /assertPermissionReportPlanBinding/);
-  for (const name of ["STAGE_B_PLAN_SHA256", "STAGE_B_SAVED_PLAN_SHA256", "STAGE_B_CANONICAL_PLAN_JSON_SHA256", "STAGE_B_PERMISSION_REPORT_SHA256"]) assert.match(source, new RegExp(name));
+  for (const name of ["STAGE_B_PLAN_SHA256", "STAGE_B_SAVED_PLAN_SHA256", "STAGE_B_CANONICAL_PLAN_JSON_SHA256", "STAGE_B_PERMISSION_REPORT_SHA256", "STAGE_B_PERMISSION_REPORT_SIGNATURE_SHA256"]) assert.match(source, new RegExp(name));
+  assert.match(source, /verifyPermissionReportSignature/);
 });
 
 test("production closure hoists backend metadata and validates refresh evidence once", () => {

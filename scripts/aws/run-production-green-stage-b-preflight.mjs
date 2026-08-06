@@ -106,14 +106,16 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
       const reportFile = write(output, report);
       return { identity, status: "blocked", administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: report.policySourceLiveMismatchCount, report: reportFile, capabilityGraph };
     }
-    const signature = sign(report, { now: generatedAt }); const files = writePair(output, value(argv, "--signature-output"), report, signature);
+    const reportBytes = Buffer.from(`${JSON.stringify(report, null, 2)}\n`);
+    const signature = sign(report, { now: generatedAt, reportBytes }); const files = writePair(output, value(argv, "--signature-output"), report, signature);
     return { identity, status: report.status, administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: 0, report: files.report, signature: files.signature, capabilityGraph };
   }
   if (identity === "release-deployer") {
     if (!new RegExp(`^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`).test(observedCaller)) throw new Error("Release production preflight requires the exact release-deployer identity.");
     const adminReportBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report"))); const adminReport = JSON.parse(adminReportBytes);
-    const signature = JSON.parse(fs.readFileSync(path.resolve(value(argv, "--administrator-report-signature")), "utf8"));
-    verify({ report: adminReport, signatureArtifact: signature });
+    const administratorSignatureBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report-signature")));
+    const signature = JSON.parse(administratorSignatureBytes);
+    verify({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
     assertStageBPermissionEvidenceKind(adminReport, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
     if (adminReport.purpose !== "pre-plan-capability" || adminReport.status !== "valid" || adminReport.simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Administrator pre-plan capability report is invalid.");
     if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
