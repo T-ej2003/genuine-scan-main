@@ -206,7 +206,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_PROTECTED_BRANCH: main
-          REQUIRED_RELEASE_CHECKS: Release Candidate Gate / rc-trust-critical,Release Candidate Gate / rc-staging-smoke
+          REQUIRED_RELEASE_CHECKS: rc-trust-critical,rc-staging-smoke
         run: node scripts/check-release-governance.mjs
 
   rc-release-checklist:
