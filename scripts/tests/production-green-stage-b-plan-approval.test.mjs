@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes } from "../aws/stage-b-plan-approval-contract.mjs";
+import { readStageBApprovalPlanArtifacts } from "../plan-production-green-stage-b.mjs";
 
 const fixture = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-plan-approval-"));
@@ -22,6 +23,23 @@ const approval = createStageBPlanApprovalReport({ captureReportSha256: hash(capt
 const approvalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
 
 test.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+test("approval-only loads all plan artifacts as raw bytes for hashing", () => {
+  const paths = {
+    savedPlanPath: path.join(directory, "saved.tfplan"),
+    planJsonPath: path.join(directory, "plan.json"),
+    canonicalPlanJsonPath: path.join(directory, "canonical.json"),
+  };
+  fs.writeFileSync(paths.savedPlanPath, savedPlanBytes);
+  fs.writeFileSync(paths.planJsonPath, planJsonBytes);
+  fs.writeFileSync(paths.canonicalPlanJsonPath, canonicalPlanJsonBytes);
+  const loaded = readStageBApprovalPlanArtifacts(paths);
+  assert.deepEqual(loaded.savedPlanBytes, savedPlanBytes);
+  assert.deepEqual(loaded.planJsonBytes, planJsonBytes);
+  assert.deepEqual(loaded.canonicalPlanJsonBytes, canonicalPlanJsonBytes);
+  assert.deepEqual(stageBPlanHashes(loaded), hashes);
+  assert.deepEqual(JSON.parse(loaded.planJsonBytes.toString("utf8")), fixture);
+});
 
 test("capture proves the one-plan structural boundary but is not deployable", () => {
   assert.equal(capture.brokerOperation, "update");
