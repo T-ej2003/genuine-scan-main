@@ -1442,7 +1442,7 @@
         "sid": "PruneExactStageBBrokerManagedPolicyVersions",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
+        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
       },
       "required": true,
       "mutation": true
@@ -1496,7 +1496,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
+        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
       },
       "required": true,
       "mutation": true
@@ -2239,7 +2239,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
+        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
       },
       "required": true,
       "mutation": true
@@ -2293,7 +2293,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
+        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
       },
       "required": true,
       "mutation": true
@@ -2318,7 +2318,7 @@
         "sid": "UpdateExactStageBBrokerManagedPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
+        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
       },
       "required": true,
       "mutation": true
@@ -2357,7 +2357,7 @@
       "sourceFunction": "update-reviewed-broker-alias",
       "action": "lambda:UpdateAlias",
       "resources": [
-        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
       ],
       "context": [
         {
@@ -2397,7 +2397,7 @@
         "sid": "UpdateExactStageBBrokerReviewedAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b"
+        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
       },
       "required": true,
       "mutation": true

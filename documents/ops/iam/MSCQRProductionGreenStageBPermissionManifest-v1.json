@@ -355,7 +355,7 @@
       "phase": "apply",
       "action": "lambda:UpdateAlias",
       "plan": {"type": "aws_lambda_alias", "actions": ["update"], "address": "aws_lambda_alias.reviewed"},
-      "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"],
+      "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
       "context": [
         {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
         {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},

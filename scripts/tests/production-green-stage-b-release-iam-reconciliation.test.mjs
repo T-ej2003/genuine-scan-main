@@ -48,18 +48,17 @@ test("release-role ownership is exactly eight managed policies and no inline aut
   assert.equal(new Set(RELEASE_POLICY_SOURCES.map(({ arn }) => arn)).size, 8);
 });
 
-test("broker alias update is authorized only on the exact reviewed alias", () => {
+test("broker alias update is authorized on the exact broker function resource", () => {
   const functionArn = STAGE_B.brokerFunctionArn;
-  const exactAlias = STAGE_B.brokerAliasArn;
   const finalWrite = policies.find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").document;
   const statements = finalWrite.Statement.filter((statement) => list(statement.Action).includes("lambda:UpdateAlias"));
   const context = manifest.required.find(({ action }) => action === "lambda:UpdateAlias").context;
-  assert.deepEqual(statements.map(({ Sid, Resource }) => ({ Sid, Resource })), [{ Sid: "UpdateExactStageBBrokerReviewedAlias", Resource: exactAlias }]);
-  assert.equal(allows({ action: "lambda:UpdateAlias", resource: exactAlias, context }), true);
-  assert.equal(allows({ action: "lambda:UpdateAlias", resource: functionArn, context }), false);
+  assert.deepEqual(statements.map(({ Sid, Resource }) => ({ Sid, Resource })), [{ Sid: "UpdateExactStageBBrokerReviewedAlias", Resource: functionArn }]);
+  assert.equal(allows({ action: "lambda:UpdateAlias", resource: functionArn, context }), true);
+  assert.equal(allows({ action: "lambda:UpdateAlias", resource: STAGE_B.brokerAliasArn, context }), false);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: `${functionArn}:other`, context }), false);
   assert.equal(finalWrite.Statement.some((statement) => list(statement.Action).some((action) => ["lambda:CreateAlias", "lambda:DeleteAlias"].includes(action))), false);
-  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b");
+  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee");
 });
 
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
@@ -84,8 +83,8 @@ test("IAM condition evaluation fails closed for missing context and unknown oper
   assert.throws(() => conditionsMatch({ ArnLike: { key: "*" } }, { context: [] }), /Unsupported IAM condition operator/);
 });
 
-test("generated capability graph binds UpdateAlias to the exact alias policy statement", () => {
+test("generated capability graph binds UpdateAlias to the broker function policy statement", () => {
   const capability = buildStageBDeploymentCapabilityGraph().capabilities.find(({ id }) => id === "manifest-update-reviewed-broker-alias");
-  assert.equal(capability.resources[0], STAGE_B.brokerAliasArn);
+  assert.equal(capability.resources[0], STAGE_B.brokerFunctionArn);
   assert.equal(capability.policy.sid, "UpdateExactStageBBrokerReviewedAlias");
 });

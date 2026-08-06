@@ -396,9 +396,7 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
       throw new Error(`${entry.id} may declare expectedDecision only for forbidden evaluations.`);
     }
     if (lambdaWriteActions.has(entry.action)) {
-      const expectedResource = entry.action === "lambda:UpdateAlias"
-        ? STAGE_B.brokerAliasArn
-        : STAGE_B.brokerFunctionArn;
+      const expectedResource = STAGE_B.brokerFunctionArn;
       if (entry.resources.length !== 1 || entry.resources[0] !== expectedResource) {
         throw new Error(`${entry.id} must target only the reviewed broker function.`);
       }
