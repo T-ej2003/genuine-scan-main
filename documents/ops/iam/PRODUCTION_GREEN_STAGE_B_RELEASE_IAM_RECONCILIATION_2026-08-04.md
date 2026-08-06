@@ -7,22 +7,23 @@ policies. Live IAM publication is a separate administrator operation after this
 source change is reviewed and merged.
 
 The production-shaped plan updates
-`aws_lambda_alias.reviewed`. The permission manifest therefore evaluates
-`lambda:UpdateAlias` against the exact qualified resource:
+`aws_lambda_alias.reviewed`. AWS authorizes `lambda:UpdateAlias` against the
+underlying Lambda function resource, so the permission manifest evaluates the
+action against:
 
-    arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed
+    arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker
 
 AWS documents `UpdateAlias` as the operation that updates a named function
 alias, with the function and alias name both present in the request path. The
-Lambda service-authorization contract supports resource-level authorization for
-this action. IAM custom-policy simulation rejected the unqualified function ARN
-for the plan's qualified resource and allowed the exact `reviewed` alias ARN.
-No wildcard alias is required.
+Lambda service-authorization contract maps this action to the function resource
+type; the alias name remains an API request field and is enforced by the
+Terraform plan, closure, and apply bindings. No wildcard Lambda resource is
+required.
 
 The canonical FinalApplyWrite SHA-256 changes from
-`c6a199ee44124979416af1893878a09bcca227dc0f1fd41d1075b571e96728ca`
+`0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b`
 to
-`0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b`.
+`04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`.
 
 Primary references:
 
@@ -34,8 +35,9 @@ Primary references:
 `UpdateExactStageBBrokerFunctionRelease` remains limited to code,
 configuration, and version operations on the unqualified function.
 `UpdateExactStageBBrokerReviewedAlias` separately permits only
-`lambda:UpdateAlias` on the exact `reviewed` alias and retains the reviewed
-region and resource-tag conditions. Alias creation, deletion, invocation, and
+`lambda:UpdateAlias` on the broker function resource and retains the reviewed
+region and resource-tag conditions. The Terraform alias binding restricts the
+operation to the `reviewed` alias. Alias creation, deletion, invocation, and
 wildcard Lambda authority remain absent.
 
 ## ECS task-definition simulation context

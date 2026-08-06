@@ -58,7 +58,7 @@
       "Sid": "UpdateExactStageBBrokerReviewedAlias",
       "Effect": "Allow",
       "Action": "lambda:UpdateAlias",
-      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
+      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "eu-west-2",

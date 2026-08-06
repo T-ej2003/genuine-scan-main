@@ -208,10 +208,10 @@ test("retry write companion is exact and tag-constrained", () => {
     Sid: "UpdateExactStageBBrokerReviewedAlias",
     Effect: "Allow",
     Action: "lambda:UpdateAlias",
-    Resource: `${broker}:reviewed`,
+    Resource: broker,
     Condition: brokerStatement.Condition,
   });
-  assert.equal(statementsForAction(policies.finalWrite, "lambda:UpdateAlias").some(({ Resource }) => Resource === broker), false);
+  assert.equal(statementsForAction(policies.finalWrite, "lambda:UpdateAlias").some(({ Resource }) => Resource === broker), true);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:UpdateAlias").some(({ Resource }) => String(Resource).includes("*")), false);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:CreateAlias").length, 0);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:DeleteAlias").length, 0);
