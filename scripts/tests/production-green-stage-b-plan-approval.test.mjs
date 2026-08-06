@@ -6,7 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes } from "../aws/stage-b-plan-approval-contract.mjs";
-import { readStageBApprovalPlanArtifacts } from "../plan-production-green-stage-b.mjs";
+import { finalizeCapturedStageBPlanApproval, readStageBApprovalPlanArtifacts } from "../plan-production-green-stage-b.mjs";
+import { writeStageBPrivateFileAtomic } from "../aws/stage-b-artifact-contract.mjs";
 
 const fixture = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-plan-approval-"));
@@ -21,8 +22,108 @@ const audit = { schemaVersion: 1, planJsonSha256: hashes.planJsonSha256, callerA
 const auditBytes = Buffer.from(`${JSON.stringify(audit)}\n`);
 const approval = createStageBPlanApprovalReport({ captureReportSha256: hash(captureBytes), referenceAuditPath: path.join(directory, "audit.json"), referenceAuditSha256: hash(auditBytes), referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, stageBLineage: capture.stageBLineage, stageBSerial: capture.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: "2026-08-05T14:02:00.000Z", classification: capture.classification, brokerOperation: capture.brokerOperation, brokerUpdatePresent: capture.brokerUpdatePresent, brokerActions: capture.brokerActions, brokerResourceAddresses: capture.brokerResourceAddresses });
 const approvalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
+const plannerSource = fs.readFileSync("scripts/plan-production-green-stage-b.mjs", "utf8");
+const approvalPathSource = plannerSource.slice(plannerSource.indexOf("export function approveCapturedStageBPlan"), plannerSource.indexOf("\n}\n\nif (process.argv[1]"));
 
 test.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+function outputDirectory(name) {
+  const output = path.join(directory, name);
+  fs.mkdirSync(output, { recursive: true, mode: 0o700 });
+  return output;
+}
+
+function finalizeOptions(approvalReportPath, overrides = {}) {
+  return {
+    approval,
+    approvalReportPath,
+    repositoryRoot: process.cwd(),
+    captureReport: capture,
+    captureReportBytes: captureBytes,
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    hashes,
+    logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256,
+    referenceAuditSha256: hash(auditBytes),
+    trustedCallerArn: audit.callerArn,
+    stageBLineage: capture.stageBLineage,
+    stageBSerial: capture.stageBSerial,
+    savedPlanPath: path.join(directory, "saved.tfplan"),
+    planJsonPath: path.join(directory, "plan.json"),
+    canonicalPlanJsonPath: path.join(directory, "canonical.json"),
+    ...overrides,
+  };
+}
+
+test("approval imports PLAN_APPROVED from the canonical contract and keeps approval-only Terraform-free", () => {
+  assert.match(plannerSource, /import \{[^}]*STAGE_B_PLAN_APPROVED[^}]*\} from "\.\/aws\/stage-b-plan-approval-contract\.mjs";/);
+  assert.doesNotMatch(plannerSource, /(?:const|let|var)\s+STAGE_B_PLAN_APPROVED\s*=/);
+  assert.doesNotMatch(approvalPathSource, /execFileSync\("terraform"[^)]*\bplan\b/);
+  assert.doesNotMatch(approvalPathSource, /execFileSync\("terraform"[^)]*\bshow\b/);
+  assert.doesNotMatch(approvalPathSource, /console\.(log|error|warn)\s*\(/);
+});
+
+test("approval finalization returns PLAN_APPROVED and constructs the complete result before publication", () => {
+  const output = path.join(outputDirectory("result-before-publication"), "approval.json");
+  let published = 0;
+  const result = finalizeCapturedStageBPlanApproval(finalizeOptions(output, {
+    publish: ({ filePath, report }) => {
+      published += 1;
+      assert.equal(filePath, output);
+      assert.deepEqual(report, approval);
+      assert.equal(fs.existsSync(output), false);
+    },
+  }));
+  assert.equal(published, 1);
+  assert.equal(result.status, "PLAN_APPROVED");
+  assert.equal(result.state, "PLAN_APPROVED");
+  assert.equal(result.approvedForApply, true);
+  assert.equal(result.savedPlanSha256, hashes.savedPlanSha256);
+  assert.equal(result.planJsonSha256, hashes.planJsonSha256);
+  assert.equal(result.canonicalPlanFileSha256, hashes.canonicalPlanFileSha256);
+  assert.equal(result.canonicalPlanJsonSha256, hashes.canonicalPlanFileSha256);
+  assert.equal(result.logicalCanonicalPlanJsonSha256, hashes.logicalCanonicalPlanJsonSha256);
+  assert.equal(fs.existsSync(output), false);
+});
+
+test("approval validation failure after object construction publishes no report", () => {
+  const parent = outputDirectory("validation-failure");
+  const output = path.join(parent, "approval.json");
+  const invalidApproval = { ...approval, approvedForApply: false };
+  assert.throws(() => finalizeCapturedStageBPlanApproval(finalizeOptions(output, { approval: invalidApproval })), /PLAN_CAPTURED|PLAN_APPROVED/);
+  assert.equal(fs.existsSync(output), false);
+  assert.deepEqual(fs.readdirSync(parent), []);
+});
+
+test("atomic publication failure removes temporary artifacts and final report", () => {
+  const parent = outputDirectory("publication-failure");
+  const output = path.join(parent, "approval.json");
+  const failingFs = {
+    ...fs,
+    renameSync: (source, destination) => {
+      if (path.basename(path.dirname(source)).startsWith(".stage-b-artifact-")) throw new Error("simulated approval publication failure");
+      return fs.renameSync(source, destination);
+    },
+  };
+  assert.throws(() => finalizeCapturedStageBPlanApproval(finalizeOptions(output, {
+    publish: ({ filePath, report, repositoryRoot, label }) => writeStageBPrivateFileAtomic({ filePath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), repositoryRoot, label, fsOps: failingFs }),
+  })), /simulated approval publication failure/);
+  assert.equal(fs.existsSync(output), false);
+  assert.deepEqual(fs.readdirSync(parent), []);
+});
+
+test("successful approval publishes one private regular report", () => {
+  const parent = outputDirectory("successful-publication");
+  const output = path.join(parent, "approval.json");
+  const result = finalizeCapturedStageBPlanApproval(finalizeOptions(output));
+  const stat = fs.lstatSync(output);
+  assert.equal(result.state, "PLAN_APPROVED");
+  assert.equal(result.approvedForApply, true);
+  assert.equal(stat.isFile(), true);
+  assert.equal(stat.isSymbolicLink(), false);
+  assert.equal(stat.mode & 0o777, 0o600);
+  assert.deepEqual(fs.readdirSync(parent), ["approval.json"]);
+});
 
 test("approval-only loads all plan artifacts as raw bytes for hashing", () => {
   const paths = {
