@@ -3,13 +3,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import crypto from "node:crypto";
 import {
   RELEASE_READ_PROBES,
   readIdentityCapabilityMatrix,
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
-import { sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
+import { canonicalizeJson, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 
 const caller = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test";
@@ -100,7 +101,7 @@ test("one command keeps administrator simulation and release reads on separate i
     caller: () => "arn:aws:iam::368992683803:root",
     collectPolicies: shapedPolicyEvidence,
     permissionPreflight: (input) => { administratorSimulations += 1; return { schemaVersion: 1, evidenceKind: "INITIAL_ADMIN_CAPABILITY", phase: "initial", purpose: input.purpose, status: "valid", deniedCount: 0, simulatedRoleArn: input.simulatedRoleArn, generatedAt: input.generatedAt, policyEvidence: input.policyEvidence }; },
-    sign: (report) => ({ schemaVersion: 1, reportSha256: "a".repeat(64), signedAt: report.generatedAt }),
+    sign: (report, { reportBytes }) => ({ schemaVersion: PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, hashDomain: PERMISSION_REPORT_HASH_DOMAIN, canonicalPayloadSha256: crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(report))).digest("hex"), reportFileSha256: crypto.createHash("sha256").update(reportBytes).digest("hex"), signedAt: report.generatedAt }),
   });
   assert.equal(admin.status, "valid"); assert.equal(administratorSimulations, 1);
   const releasePath = path.join(directory, "release.json"); let releaseReads = 0;

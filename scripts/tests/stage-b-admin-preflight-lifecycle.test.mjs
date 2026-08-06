@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import crypto from "node:crypto";
 import {
   classifyStageBAdminPreflightDeadline,
   runStageBAdminPreflightLifecycle,
@@ -18,23 +19,26 @@ const canonicalizeJson = (value) => Array.isArray(value)
   : value && typeof value === "object"
     ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalizeJson(value[key])}`).join(",")}}`
     : JSON.stringify(value);
-const hash = (value) => import("node:crypto").then(({ createHash }) => createHash("sha256").update(value).digest("hex"));
+const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const validPair = async (reportPath, signaturePath) => {
   const report = { status: "valid", nested: { source: "fixture" } };
-  const reportSha256 = await hash(Buffer.from(canonicalizeJson(report)));
-  fs.writeFileSync(reportPath, `${JSON.stringify(report)}\n`, { mode: 0o600 });
-  fs.writeFileSync(signaturePath, `${JSON.stringify({ reportSha256 })}\n`, { mode: 0o600 });
+  const reportBytes = Buffer.from(`${JSON.stringify(report, null, 2)}\n`);
+  const canonicalPayloadSha256 = hash(Buffer.from(canonicalizeJson(report)));
+  const signature = { schemaVersion: 2, hashDomain: "canonicalPayloadSha256", canonicalPayloadSha256, reportFileSha256: hash(reportBytes), signatureBase64: "AQ==", signedAt: "2026-08-01T12:00:00.000Z" };
+  const signatureBytes = Buffer.from(`${JSON.stringify(signature, null, 2)}\n`);
+  fs.writeFileSync(reportPath, reportBytes, { mode: 0o600 });
+  fs.writeFileSync(signaturePath, signatureBytes, { mode: 0o600 });
 };
 const fakeProcessOps = { kill: () => undefined };
 
-function fakeSpawn({ reportPath, signaturePath, code = 0, delayMs = 5, stderr = "", publish = true, closeOnKill = true }) {
+function fakeSpawn({ reportPath, signaturePath, code = 0, delayMs = 5, stderr = "", publish = true, publishPair = validPair, closeOnKill = true }) {
   return () => {
     const child = new EventEmitter();
     child.pid = 73001;
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
     let timer = setTimeout(async () => {
-      if (publish) await validPair(reportPath, signaturePath);
+      if (publish) await publishPair(reportPath, signaturePath);
       child.stdout.emit("data", Buffer.from("safe producer output\n"));
       child.stderr.emit("data", Buffer.from(stderr));
       child.emit("close", code, null);
@@ -75,6 +79,48 @@ test("delayed publication remains RUNNING until the exact producer exits, then s
   assert.equal(result.state, "SUCCEEDED");
   assert.equal(result.exitCode, 0);
   assert.equal(fs.statSync(path.join(fixture.lifecycleDirectory, "lifecycle.json")).mode & 0o777, 0o600);
+});
+
+test("lifecycle records canonical, raw report, and raw signature hash domains", async () => {
+  const fixture = paths();
+  const result = await runStageBAdminPreflightLifecycle({ ...fixture, producerPath: "/reviewed/producer.mjs", cwd: "/reviewed", spawn: fakeSpawn({ reportPath: fixture.outputPath, signaturePath: fixture.signaturePath }), processOps: fakeProcessOps, timeoutMs: 500 });
+  assert.equal(result.state, "SUCCEEDED");
+  const reportBytes = fs.readFileSync(fixture.outputPath);
+  const signatureBytes = fs.readFileSync(fixture.signaturePath);
+  const report = JSON.parse(reportBytes);
+  const canonicalPayloadSha256 = hash(Buffer.from(canonicalizeJson(report)));
+  assert.equal(result.report.canonicalPayloadSha256, canonicalPayloadSha256);
+  assert.equal(result.report.reportFileSha256, hash(reportBytes));
+  assert.equal(result.signature.signatureFileSha256, hash(signatureBytes));
+  assert.notEqual(result.report.canonicalPayloadSha256, result.report.reportFileSha256);
+  assert.equal("reportSha256" in result.report, false);
+});
+
+test("a modified report after signing fails raw-file binding and leaves no final pair", async () => {
+  const fixture = paths();
+  const publishModified = async (reportPath, signaturePath) => {
+    await validPair(reportPath, signaturePath);
+    fs.appendFileSync(reportPath, " \n");
+  };
+  const result = await runStageBAdminPreflightLifecycle({ ...fixture, producerPath: "/reviewed/producer.mjs", cwd: "/reviewed", spawn: fakeSpawn({ reportPath: fixture.outputPath, signaturePath: fixture.signaturePath, publishPair: publishModified }), processOps: fakeProcessOps, timeoutMs: 500 });
+  assert.equal(result.state, "FAILED");
+  assert.equal(result.failureClass, "TRANSACTIONAL_PUBLICATION");
+  assert.equal(fs.existsSync(fixture.outputPath), false);
+  assert.equal(fs.existsSync(fixture.signaturePath), false);
+});
+
+test("report-only and signature-only publication fail closed and are cleaned", async () => {
+  for (const publishPair of [
+    async (reportPath) => fs.writeFileSync(reportPath, "{\"status\":\"valid\"}\n", { mode: 0o600 }),
+    async (_, signaturePath) => fs.writeFileSync(signaturePath, "{}\n", { mode: 0o600 }),
+  ]) {
+    const fixture = paths();
+    const result = await runStageBAdminPreflightLifecycle({ ...fixture, producerPath: "/reviewed/producer.mjs", cwd: "/reviewed", spawn: fakeSpawn({ reportPath: fixture.outputPath, signaturePath: fixture.signaturePath, publishPair }), processOps: fakeProcessOps, timeoutMs: 500 });
+    assert.equal(result.state, "FAILED");
+    assert.equal(result.failureClass, "TRANSACTIONAL_PUBLICATION");
+    assert.equal(fs.existsSync(fixture.outputPath), false);
+    assert.equal(fs.existsSync(fixture.signaturePath), false);
+  }
 });
 
 test("a second invocation is rejected while the first PID is active", async () => {

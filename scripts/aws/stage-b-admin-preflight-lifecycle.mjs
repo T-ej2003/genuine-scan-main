@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn as defaultSpawn } from "node:child_process";
+import { assertPermissionReportHashDomains } from "./validate-production-green-stage-b-permissions.mjs";
 
 export const STAGE_B_ADMIN_PREFLIGHT_TIMEOUT_SECONDS = 1200;
 export const STAGE_B_ADMIN_PREFLIGHT_TIMEOUT_MS = STAGE_B_ADMIN_PREFLIGHT_TIMEOUT_SECONDS * 1000;
@@ -64,12 +65,13 @@ const writePrivateBytes = (filePath, bytes) => {
 };
 const writeJson = (filePath, value) => writeAtomic(filePath, Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, "utf8"));
+const removePublishedPair = (paths) => {
+  for (const filePath of paths) {
+    const stat = fs.lstatSync(filePath, { throwIfNoEntry: false });
+    if (stat?.isFile() || stat?.isSymbolicLink()) fs.unlinkSync(filePath);
+  }
+};
 const nowIso = (now) => new Date(now()).toISOString();
-const canonicalizeJson = (value) => Array.isArray(value)
-  ? `[${value.map(canonicalizeJson).join(",")}]`
-  : value && typeof value === "object"
-    ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalizeJson(value[key])}`).join(",")}}`
-    : JSON.stringify(value);
 const processIsAlive = (pid, processOps = process) => {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -116,12 +118,12 @@ function validatePublishedPair({ reportPath, signaturePath }) {
     const stat = fs.lstatSync(filePath);
     if (mode(stat) !== 0o600) throw new Error(`${label} must have mode 0600 after producer exit.`);
   }
-  const report = readJson(reportPath);
-  const signature = readJson(signaturePath);
+  const reportBytes = fs.readFileSync(reportPath);
+  const signatureBytes = fs.readFileSync(signaturePath);
+  const report = JSON.parse(reportBytes);
+  const signature = JSON.parse(signatureBytes);
   if (report?.status !== "valid") throw new Error("Administrator capability report is not valid after producer exit.");
-  const reportHash = sha256(Buffer.from(canonicalizeJson(report)));
-  if (signature?.reportSha256 !== reportHash) throw new Error("Administrator capability signature is not bound to the published report.");
-  return { reportSha256: reportHash, signatureSha256: sha256(fs.readFileSync(signaturePath)) };
+  return assertPermissionReportHashDomains({ report, signatureArtifact: signature, reportBytes, signatureBytes });
 }
 
 function spawnProducer({ producerPath, producerArgs, cwd, env, spawn }) {
@@ -196,28 +198,32 @@ export async function runStageBAdminPreflightLifecycle({
     const stdoutFile = writePrivateBytes(stdoutPath, Buffer.from(redact(Buffer.concat(stdout).toString("utf8"))));
     const stderrFile = writePrivateBytes(stderrPath, Buffer.from(redact(Buffer.concat(stderr).toString("utf8"))));
     if (result.timedOut) {
+      removePublishedPair([outputPath, signaturePath]);
       releaseLock = !result.forcedTermination;
       const lifecycle = { schemaVersion: 1, phase, state: "TIMED_OUT", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: true, stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
     if (result.error) {
+      removePublishedPair([outputPath, signaturePath]);
       const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: null, signal: null, timeout: false, failureClass: "LOCAL_RUNTIME", failure: result.error, stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
     if (result.code !== 0) {
+      removePublishedPair([outputPath, signaturePath]);
       const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, failureClass: "PRODUCER_EXIT", stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
     let pair;
     try { pair = validatePublishedPair({ reportPath: outputPath, signaturePath }); } catch (error) {
+      removePublishedPair([outputPath, signaturePath]);
       const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, failureClass: "TRANSACTIONAL_PUBLICATION", failure: error.message, stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
-    const lifecycle = { schemaVersion: 1, phase, state: "SUCCEEDED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, report: { path: outputPath, ...pair }, signature: { path: signaturePath, sha256: pair.signatureSha256 }, stdout: stdoutFile, stderr: stderrFile };
+    const lifecycle = { schemaVersion: 1, phase, state: "SUCCEEDED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, report: { path: outputPath, canonicalPayloadSha256: pair.canonicalPayloadSha256, reportFileSha256: pair.reportFileSha256 }, signature: { path: signaturePath, signatureFileSha256: pair.signatureFileSha256 }, stdout: stdoutFile, stderr: stderrFile };
     writeJson(lifecycleStatePath, lifecycle);
     return lifecycle;
   } catch (error) {

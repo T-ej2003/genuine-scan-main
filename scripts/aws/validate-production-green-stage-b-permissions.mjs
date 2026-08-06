@@ -9,11 +9,13 @@ import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-
 import { STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
-import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidenceTimestamp, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
 import { assertStageBPlanApprovedBinding } from "./stage-b-plan-approval-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
+export const PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION = 2;
+export const PERMISSION_REPORT_HASH_DOMAIN = "canonicalPayloadSha256";
 export const INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND = "INITIAL_ADMIN_CAPABILITY";
 export const PLAN_BOUND_PERMISSION_EVIDENCE_KIND = "PLAN_BOUND_PERMISSION";
 export const PERMISSION_EVIDENCE_MAX_AGE_MS = STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS;
@@ -86,6 +88,7 @@ export const RELEASE_POLICY_SOURCES = Object.freeze([
 ].map(([name, sourcePath]) => Object.freeze({ name, arn: `arn:aws:iam::${ACCOUNT}:policy/${name}`, sourcePath })));
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+export const serializePermissionReport = (report) => Buffer.from(`${JSON.stringify(report, null, 2)}\n`);
 const exactActions = (actual, expected) => JSON.stringify(actual || []) === JSON.stringify(expected);
 
 function readOption(argv, option) {
@@ -654,27 +657,47 @@ export function signPermissionReport(report, {
   now = new Date().toISOString(),
   keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN,
   signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM,
+  reportBytes = serializePermissionReport(report),
   sign = ({ digest }) => withTempBytes("mscqr-stage-b-permission-sign-", { digest }, ({ digest: digestPath }) => JSON.parse(execFileSync("aws", [
     "kms", "sign", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signing-algorithm", signingAlgorithm, "--output", "json",
   ], { encoding: "utf8" })).Signature),
 } = {}) {
   if (report?.schemaVersion !== PERMISSION_PREFLIGHT_SCHEMA_VERSION || report.status !== "valid") throw new Error("Only a valid permission report may be signed.");
   if (keyArn !== PERMISSION_REPORT_SIGNING_KEY_ARN || signingAlgorithm !== PERMISSION_REPORT_SIGNING_ALGORITHM) throw new Error("Permission report signing contract is wrong.");
-  const reportSha256 = sha256(Buffer.from(canonicalizeJson(report)));
-  const signatureBase64 = String(sign({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), reportSha256 }) || "");
+  const canonicalPayloadSha256 = sha256(Buffer.from(canonicalizeJson(report)));
+  const reportFileSha256 = sha256(reportBytes);
+  const signatureBase64 = String(sign({ keyArn, signingAlgorithm, digest: Buffer.from(canonicalPayloadSha256, "hex"), canonicalPayloadSha256, reportFileSha256 }) || "");
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureBase64)) throw new Error("Permission report signing returned an invalid signature.");
-  return { schemaVersion: 1, keyId: keyArn, keyArn, signingAlgorithm, reportSha256, signatureBase64, signedAt: now };
+  return { schemaVersion: PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, hashDomain: PERMISSION_REPORT_HASH_DOMAIN, keyId: keyArn, keyArn, signingAlgorithm, canonicalPayloadSha256, reportFileSha256, signatureBase64, signedAt: now };
 }
 
-export function verifyPermissionReportSignature({ report, signatureArtifact, now = new Date().toISOString(), keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM, verify = ({ digest, signature }) => withTempBytes("mscqr-stage-b-permission-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(execFileSync("aws", [
+export function assertPermissionReportHashDomains({ report, signatureArtifact, reportBytes, signatureBytes, expectedReportFileSha256, expectedSignatureFileSha256, expectedCanonicalPayloadSha256 } = {}) {
+  if (!Buffer.isBuffer(reportBytes) || !Buffer.isBuffer(signatureBytes)) throw new Error("Permission report and signature bytes are required for hash-domain validation.");
+  let parsedReport;
+  let parsedSignature;
+  try { parsedReport = JSON.parse(reportBytes); parsedSignature = JSON.parse(signatureBytes); } catch { throw new Error("Permission report or signature bytes are malformed."); }
+  if (canonicalizeJson(parsedReport) !== canonicalizeJson(report) || canonicalizeJson(parsedSignature) !== canonicalizeJson(signatureArtifact)) throw new Error("Permission report/signature bytes do not match their parsed artifacts.");
+  const canonicalPayloadSha256 = sha256(Buffer.from(canonicalizeJson(parsedReport)));
+  const reportFileSha256 = sha256(reportBytes);
+  const signatureFileSha256 = sha256(signatureBytes);
+  if (signatureArtifact?.schemaVersion !== PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION || signatureArtifact.hashDomain !== PERMISSION_REPORT_HASH_DOMAIN) throw new Error("Permission report signature hash-domain schema is unsupported.");
+  if (signatureArtifact.canonicalPayloadSha256 !== canonicalPayloadSha256) throw new Error("Permission report signature is bound to a different canonical payload.");
+  if (signatureArtifact.reportFileSha256 !== reportFileSha256) throw new Error("Permission report signature is bound to different report bytes.");
+  if (expectedCanonicalPayloadSha256 !== undefined && expectedCanonicalPayloadSha256 !== canonicalPayloadSha256) throw new Error("Permission report canonical payload SHA256 differs from the selected report.");
+  if (expectedReportFileSha256 !== undefined && expectedReportFileSha256 !== reportFileSha256) throw new Error("Permission report file SHA256 differs from the selected report.");
+  if (expectedSignatureFileSha256 !== undefined && expectedSignatureFileSha256 !== signatureFileSha256) throw new Error("Permission report signature file SHA256 differs from the selected signature.");
+  return { canonicalPayloadSha256, reportFileSha256, signatureFileSha256 };
+}
+
+export function verifyPermissionReportSignature({ report, signatureArtifact, reportBytes = serializePermissionReport(report), signatureBytes, expectedReportFileSha256, expectedSignatureFileSha256, now = new Date().toISOString(), keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM, verify = ({ digest, signature }) => withTempBytes("mscqr-stage-b-permission-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(execFileSync("aws", [
   "kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json",
 ], { encoding: "utf8" })).SignatureValid === true) }) {
-  if (!signatureArtifact || signatureArtifact.schemaVersion !== 1 || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm) throw new Error("Permission report signature identity or algorithm is wrong.");
-  const reportSha256 = sha256(Buffer.from(canonicalizeJson(report)));
-  if (signatureArtifact.reportSha256 !== reportSha256) throw new Error("Permission report signature is bound to a different report.");
+  if (!signatureArtifact || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm) throw new Error("Permission report signature identity or algorithm is wrong.");
+  const effectiveSignatureBytes = signatureBytes || serializePermissionReport(signatureArtifact);
+  const domains = assertPermissionReportHashDomains({ report, signatureArtifact, reportBytes, signatureBytes: effectiveSignatureBytes, expectedReportFileSha256, expectedSignatureFileSha256 });
   assertStageBDeploymentEvidenceFreshness(signatureArtifact.signedAt, { now, evidenceType: "Permission report signature" });
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureArtifact.signatureBase64 || "")) throw new Error("Permission report signature is malformed.");
-  if (!verify({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), reportSha256 })) throw new Error("Permission report signature verification failed.");
+  if (!verify({ keyArn, signingAlgorithm, digest: Buffer.from(domains.canonicalPayloadSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), canonicalPayloadSha256: domains.canonicalPayloadSha256 })) throw new Error("Permission report signature verification failed.");
   return true;
 }
 
@@ -802,14 +825,17 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   assertStageBPermissionEvidenceKind(report, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, "plan-bound");
   process.stdout.write(`${JSON.stringify({ status: report.status, outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
   if (report.status !== "valid") {
-    writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), repositoryRoot: stageBRoot, label: "Stage B permission report" });
     process.exitCode = 1; return report;
   }
-  const signatureArtifact = signReport(report, { now: options.generatedAt });
+  const reportBytes = serializePermissionReport(report);
+  const signatureArtifact = signReport(report, { now: options.generatedAt, reportBytes });
+  const signatureBytes = Buffer.from(`${JSON.stringify(signatureArtifact, null, 2)}\n`);
+  assertPermissionReportHashDomains({ report, signatureArtifact, reportBytes, signatureBytes });
   writeStageBPrivateFilesAtomic({ repositoryRoot: stageBRoot, files: [
-    { filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), label: "Stage B permission report" },
-    { filePath: signatureOutputPath, bytes: Buffer.from(`${JSON.stringify(signatureArtifact, null, 2)}\n`), label: "Stage B permission-report signature" },
+    { filePath: outputPath, bytes: reportBytes, label: "Stage B permission report" },
+    { filePath: signatureOutputPath, bytes: signatureBytes, label: "Stage B permission-report signature" },
   ] });
+  assertPermissionReportHashDomains({ report, signatureArtifact, reportBytes: fs.readFileSync(outputPath), signatureBytes: fs.readFileSync(signatureOutputPath) });
   return report;
 }
 
