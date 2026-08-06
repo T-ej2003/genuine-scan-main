@@ -14,8 +14,10 @@ import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidence
 import { assertStageBPlanApprovedBinding } from "./stage-b-plan-approval-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
-export const PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION = 2;
-export const PERMISSION_REPORT_HASH_DOMAIN = "canonicalPayloadSha256";
+export const PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION = 3;
+export const PERMISSION_REPORT_BINDING_SCHEMA_VERSION = 2;
+export const PERMISSION_REPORT_BINDING_DOMAIN = "MSCQR_STAGE_B_PERMISSION_EVIDENCE_V2";
+export const PERMISSION_REPORT_HASH_DOMAIN = "signedBindingSha256";
 export const INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND = "INITIAL_ADMIN_CAPABILITY";
 export const PLAN_BOUND_PERMISSION_EVIDENCE_KIND = "PLAN_BOUND_PERMISSION";
 export const PERMISSION_EVIDENCE_MAX_AGE_MS = STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS;
@@ -666,10 +668,18 @@ export function signPermissionReport(report, {
   if (keyArn !== PERMISSION_REPORT_SIGNING_KEY_ARN || signingAlgorithm !== PERMISSION_REPORT_SIGNING_ALGORITHM) throw new Error("Permission report signing contract is wrong.");
   const canonicalPayloadSha256 = sha256(Buffer.from(canonicalizeJson(report)));
   const reportFileSha256 = sha256(reportBytes);
-  const signatureBase64 = String(sign({ keyArn, signingAlgorithm, digest: Buffer.from(canonicalPayloadSha256, "hex"), canonicalPayloadSha256, reportFileSha256 }) || "");
+  const bindingPayload = buildPermissionReportBinding({ report, canonicalPayloadSha256, reportFileSha256, keyArn, signingAlgorithm });
+  const signedBindingSha256 = sha256(Buffer.from(canonicalizeJson(bindingPayload)));
+  const signatureBase64 = String(sign({ keyArn, signingAlgorithm, digest: Buffer.from(signedBindingSha256, "hex"), canonicalPayloadSha256, reportFileSha256, signedBindingSha256, bindingPayload }) || "");
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureBase64)) throw new Error("Permission report signing returned an invalid signature.");
-  return { schemaVersion: PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, hashDomain: PERMISSION_REPORT_HASH_DOMAIN, keyId: keyArn, keyArn, signingAlgorithm, canonicalPayloadSha256, reportFileSha256, signatureBase64, signedAt: now };
+  return { schemaVersion: PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, hashDomain: PERMISSION_REPORT_HASH_DOMAIN, bindingDomain: PERMISSION_REPORT_BINDING_DOMAIN, bindingSchemaVersion: PERMISSION_REPORT_BINDING_SCHEMA_VERSION, evidenceKind: report.evidenceKind, phase: report.phase, purpose: report.purpose, accountId: ACCOUNT, region: REGION, keyId: keyArn, keyArn, signingAlgorithm, canonicalPayloadSha256, reportFileSha256, signedBindingSha256, signatureBase64, signedAt: now };
 }
+
+export function buildPermissionReportBinding({ report, canonicalPayloadSha256, reportFileSha256, keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM, accountId = ACCOUNT, region = REGION } = {}) {
+  return { domain: PERMISSION_REPORT_BINDING_DOMAIN, schemaVersion: PERMISSION_REPORT_BINDING_SCHEMA_VERSION, evidenceKind: report?.evidenceKind, phase: report?.phase, purpose: report?.purpose, canonicalPayloadSha256, reportFileSha256, accountId, region, keyArn, signingAlgorithm };
+}
+
+export const signedPermissionReportBindingSha256 = (bindingPayload) => sha256(Buffer.from(canonicalizeJson(bindingPayload)));
 
 export function assertPermissionReportHashDomains({ report, signatureArtifact, reportBytes, signatureBytes, expectedReportFileSha256, expectedSignatureFileSha256, expectedCanonicalPayloadSha256 } = {}) {
   if (!Buffer.isBuffer(reportBytes) || !Buffer.isBuffer(signatureBytes)) throw new Error("Permission report and signature bytes are required for hash-domain validation.");
@@ -680,13 +690,19 @@ export function assertPermissionReportHashDomains({ report, signatureArtifact, r
   const canonicalPayloadSha256 = sha256(Buffer.from(canonicalizeJson(parsedReport)));
   const reportFileSha256 = sha256(reportBytes);
   const signatureFileSha256 = sha256(signatureBytes);
-  if (signatureArtifact?.schemaVersion !== PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION || signatureArtifact.hashDomain !== PERMISSION_REPORT_HASH_DOMAIN) throw new Error("Permission report signature hash-domain schema is unsupported.");
+  if (signatureArtifact?.schemaVersion !== PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION || signatureArtifact.hashDomain !== PERMISSION_REPORT_HASH_DOMAIN || signatureArtifact.bindingDomain !== PERMISSION_REPORT_BINDING_DOMAIN || signatureArtifact.bindingSchemaVersion !== PERMISSION_REPORT_BINDING_SCHEMA_VERSION) throw new Error("Permission report signature hash-domain schema is unsupported.");
   if (signatureArtifact.canonicalPayloadSha256 !== canonicalPayloadSha256) throw new Error("Permission report signature is bound to a different canonical payload.");
   if (signatureArtifact.reportFileSha256 !== reportFileSha256) throw new Error("Permission report signature is bound to different report bytes.");
+  const bindingPayload = buildPermissionReportBinding({ report: parsedReport, canonicalPayloadSha256, reportFileSha256, keyArn: signatureArtifact.keyArn, signingAlgorithm: signatureArtifact.signingAlgorithm });
+  for (const field of ["evidenceKind", "phase", "purpose", "accountId", "region", "keyArn", "signingAlgorithm"]) {
+    if (signatureArtifact[field] !== bindingPayload[field]) throw new Error(`Permission report signature binding field ${field} does not match the report contract.`);
+  }
+  const signedBindingSha256 = signedPermissionReportBindingSha256(bindingPayload);
+  if (signatureArtifact.signedBindingSha256 !== signedBindingSha256) throw new Error("Permission report signature is bound to a different signed binding.");
   if (expectedCanonicalPayloadSha256 !== undefined && expectedCanonicalPayloadSha256 !== canonicalPayloadSha256) throw new Error("Permission report canonical payload SHA256 differs from the selected report.");
   if (expectedReportFileSha256 !== undefined && expectedReportFileSha256 !== reportFileSha256) throw new Error("Permission report file SHA256 differs from the selected report.");
   if (expectedSignatureFileSha256 !== undefined && expectedSignatureFileSha256 !== signatureFileSha256) throw new Error("Permission report signature file SHA256 differs from the selected signature.");
-  return { canonicalPayloadSha256, reportFileSha256, signatureFileSha256 };
+  return { canonicalPayloadSha256, reportFileSha256, signedBindingSha256, signatureFileSha256, bindingPayload };
 }
 
 export function verifyPermissionReportSignature({ report, signatureArtifact, reportBytes = serializePermissionReport(report), signatureBytes, expectedReportFileSha256, expectedSignatureFileSha256, now = new Date().toISOString(), keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM, verify = ({ digest, signature }) => withTempBytes("mscqr-stage-b-permission-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(execFileSync("aws", [
@@ -697,7 +713,7 @@ export function verifyPermissionReportSignature({ report, signatureArtifact, rep
   const domains = assertPermissionReportHashDomains({ report, signatureArtifact, reportBytes, signatureBytes: effectiveSignatureBytes, expectedReportFileSha256, expectedSignatureFileSha256 });
   assertStageBDeploymentEvidenceFreshness(signatureArtifact.signedAt, { now, evidenceType: "Permission report signature" });
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureArtifact.signatureBase64 || "")) throw new Error("Permission report signature is malformed.");
-  if (!verify({ keyArn, signingAlgorithm, digest: Buffer.from(domains.canonicalPayloadSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), canonicalPayloadSha256: domains.canonicalPayloadSha256 })) throw new Error("Permission report signature verification failed.");
+  if (!verify({ keyArn, signingAlgorithm, digest: Buffer.from(domains.signedBindingSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), canonicalPayloadSha256: domains.canonicalPayloadSha256, reportFileSha256: domains.reportFileSha256, signedBindingSha256: domains.signedBindingSha256, bindingPayload: domains.bindingPayload })) throw new Error("Permission report signature verification failed.");
   return true;
 }
 

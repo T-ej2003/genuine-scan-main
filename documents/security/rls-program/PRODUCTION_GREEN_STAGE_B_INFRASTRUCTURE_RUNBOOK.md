@@ -61,17 +61,27 @@ requires `PLAN_APPROVED` and binds the exact plan, refresh, audit, state, and id
 artifacts. The two reports are not substitutable. The base launcher requires an explicit
 `--phase` and rejects ambiguous invocations.
 
-Permission evidence has three distinct hash domains. `canonicalPayloadSha256` is the
-immutable canonical JSON payload digest signed by KMS and is carried by the signature
-envelope. `reportFileSha256` is the digest of the exact mode-0600 report bytes published
-to disk; it is carried by the signature envelope and recomputed by lifecycle, closure,
-verify-only, and apply. `signatureFileSha256` is the digest of the exact published
-signature-envelope bytes and is recorded by lifecycle and supplied to downstream
-consumers. The report never embeds its own raw-file digest. The producer constructs and
-validates both files in memory, publishes the pair through the reviewed atomic writer,
-and lifecycle reaches `SUCCEEDED` only after recomputing all three domains from the
-published files. Any report/signature substitution, whitespace rewrite, partial pair,
-or temporary-file residue fails closed.
+Permission evidence has four distinct hash domains. `canonicalPayloadSha256` is the
+immutable canonical JSON payload digest. `reportFileSha256` is the digest of the exact
+mode-0600 report bytes. `signedBindingSha256` is the digest of the canonical,
+domain-separated `MSCQR_STAGE_B_PERMISSION_EVIDENCE_V2` binding payload signed by KMS;
+that payload contains signature schema/binding versions, evidence kind, phase, purpose,
+both report hashes, protected account/region, key ARN, and signing algorithm.
+`signatureFileSha256` is the digest of the exact published mode-0600 signature-envelope
+bytes and is external lifecycle metadata, not part of the KMS message. The report never
+embeds its own raw-file digest, the signature envelope is not signed, and legacy or
+unknown signature schemas are rejected. The producer constructs and validates both files
+in memory, publishes them only through the reviewed atomic pair writer, and lifecycle
+recomputes `canonicalPayloadSha256`, `reportFileSha256`, `signedBindingSha256`, and
+`signatureFileSha256` from the final files before `SUCCEEDED`.
+
+The lifecycle launcher resolves and validates absolute output paths outside the
+repository, rejects pre-existing or symlink outputs before spawning, and runs the
+producer inside a new mode-0700 invocation-owned staging directory. Failure cleanup can
+remove only that directory, identified by its private ownership token; it never unlinks
+operator-owned final report or signature paths. A retry is permitted only after the
+prior lifecycle is terminal and its owned staging paths are clear. Any report/signature
+substitution, whitespace rewrite, partial pair, or temporary-file residue fails closed.
 
 1. Obtain an MFA-backed non-root production release-deployer session and generate one private backend config with `npm run stage-b:generate-backend-config -- --output <absolute-private-path>`. Initialise the dedicated encrypted S3 backend with that exact direct production-state key, `use_lockfile=true`, and `TF_WORKSPACE=default`; this environment variable is the only workspace selector, so production commands may assert `terraform workspace show` but must never run `terraform workspace select`. Do not list workspaces or access the legacy base key. The Terraform `deployment_environment` variable remains `production`. Signed immutable image provenance is valid for 24 hours after administrator observation/signing when its release, workflow, artifact, authoritative per-repository `DescribeRepositories` immutability evidence, digest, account/region, KMS, and `time-bounded-no-supersession-registry` capability joins remain exact. Immediate revocation is not supported until a separately authenticated supersession registry exists. Administrator capability evidence, release-preflight capability evidence, and the plan-bound reference audit use a 60-minute live-evidence window (`3600` seconds) to cover the reviewed sequence. Hash, caller, policy, state-serial, workspace, reference, and plan bindings still invalidate evidence immediately; saved-plan validity is binding-based, not time-only. Move directly from permission signing to closure/apply rather than pausing for the full window.
 2. Confirm Stage A owns and has applied the executor/database security groups, exact database/interface-endpoint/S3/DNS rules, executor/broker log groups, executor/broker roles, approval resources, and runtime-secret ARNs. Write one explicit reviewed prerequisite file matching `infra/aws/terraform/production-green-stage-b/stage-a-prerequisites.schema.json`; do not copy values into tfvars by hand.

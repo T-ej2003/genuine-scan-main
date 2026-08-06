@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn as defaultSpawn } from "node:child_process";
 import { assertPermissionReportHashDomains } from "./validate-production-green-stage-b-permissions.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 
 export const STAGE_B_ADMIN_PREFLIGHT_TIMEOUT_SECONDS = 1200;
 export const STAGE_B_ADMIN_PREFLIGHT_TIMEOUT_MS = STAGE_B_ADMIN_PREFLIGHT_TIMEOUT_SECONDS * 1000;
@@ -65,11 +66,61 @@ const writePrivateBytes = (filePath, bytes) => {
 };
 const writeJson = (filePath, value) => writeAtomic(filePath, Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, "utf8"));
-const removePublishedPair = (paths) => {
-  for (const filePath of paths) {
-    const stat = fs.lstatSync(filePath, { throwIfNoEntry: false });
-    if (stat?.isFile() || stat?.isSymbolicLink()) fs.unlinkSync(filePath);
+const lifecycleError = (failureClass, message) => Object.assign(new Error(message), { failureClass });
+const fileIdentity = (filePath) => {
+  const stat = fs.lstatSync(filePath, { throwIfNoEntry: false });
+  return stat?.isFile() && !stat.isSymbolicLink() ? { dev: stat.dev, ino: stat.ino } : null;
+};
+const sameFileIdentity = (left, right) => Boolean(left && right && left.dev === right.dev && left.ino === right.ino);
+const removeOwnedFinalFiles = (published) => {
+  for (const { path: filePath, identity } of published) {
+    if (sameFileIdentity(fileIdentity(filePath), identity)) fs.unlinkSync(filePath);
   }
+};
+const cleanupInvocationStaging = ({ stagingDirectory: directory, token }) => {
+  if (!directory || !token) return;
+  const markerPath = path.join(directory, ".ownership-token");
+  const marker = fs.lstatSync(markerPath, { throwIfNoEntry: false });
+  if (!marker?.isFile() || marker.isSymbolicLink() || fs.readFileSync(markerPath, "utf8") !== `${token}\n`) return;
+  fs.rmSync(directory, { recursive: true, force: true });
+};
+const prepareInvocationPublication = ({ outputPath, signaturePath, producerArgs, repositoryRoot }) => {
+  for (const [value, label] of [[outputPath, "Stage B administrator capability report"], [signaturePath, "Stage B administrator capability signature"]]) {
+    if (!path.isAbsolute(value) || path.normalize(value) !== value) throw lifecycleError("INVALID_OUTPUT_PATH", `${label} must be an absolute, normalized path.`);
+    assertStageBArtifactPath({ artifactPath: value, repositoryRoot, label, allowExisting: true });
+  }
+  const reportPath = path.resolve(outputPath);
+  const finalSignaturePath = path.resolve(signaturePath);
+  if (reportPath === finalSignaturePath || path.dirname(reportPath) !== path.dirname(finalSignaturePath)) throw lifecycleError("INVALID_OUTPUT_PATH", "Stage B administrator capability report and signature must be distinct files in one private directory.");
+  const parent = ensureStageBPrivateDirectory({ directory: path.dirname(reportPath), repositoryRoot, create: true, label: "Stage B administrator capability output directory" });
+  for (const [filePath, label] of [[reportPath, "Stage B administrator capability report"], [finalSignaturePath, "Stage B administrator capability signature"]]) {
+    const stat = fs.lstatSync(filePath, { throwIfNoEntry: false });
+    if (stat) throw lifecycleError("PREEXISTING_OUTPUT", `${label} already exists; preserving the pre-existing output.`);
+  }
+  const token = crypto.randomUUID();
+  const stagingDirectory = fs.mkdtempSync(path.join(parent, ".stage-b-admin-preflight-"));
+  fs.chmodSync(stagingDirectory, 0o700);
+  fs.writeFileSync(path.join(stagingDirectory, ".ownership-token"), `${token}\n`, { flag: "wx", mode: 0o600 });
+  const stagedReportPath = path.join(stagingDirectory, path.basename(reportPath));
+  const stagedSignaturePath = path.join(stagingDirectory, path.basename(finalSignaturePath));
+  const normalizedArgs = [...producerArgs];
+  let reportArguments = 0;
+  let signatureArguments = 0;
+  for (let index = 0; index < normalizedArgs.length; index += 1) {
+    if (normalizedArgs[index] === "--output" && normalizedArgs[index + 1]) {
+      if (!path.isAbsolute(normalizedArgs[index + 1]) || path.normalize(normalizedArgs[index + 1]) !== normalizedArgs[index + 1] || path.resolve(normalizedArgs[index + 1]) !== reportPath) throw lifecycleError("INVALID_OUTPUT_PATH", "Administrator preflight producer output argument does not match the validated report path.");
+      normalizedArgs[index + 1] = stagedReportPath; reportArguments += 1; index += 1;
+    }
+    if (normalizedArgs[index] === "--signature-output" && normalizedArgs[index + 1]) {
+      if (!path.isAbsolute(normalizedArgs[index + 1]) || path.normalize(normalizedArgs[index + 1]) !== normalizedArgs[index + 1] || path.resolve(normalizedArgs[index + 1]) !== finalSignaturePath) throw lifecycleError("INVALID_OUTPUT_PATH", "Administrator preflight producer signature argument does not match the validated signature path.");
+      normalizedArgs[index + 1] = stagedSignaturePath; signatureArguments += 1; index += 1;
+    }
+  }
+  if (reportArguments !== 1 || signatureArguments !== 1) {
+    cleanupInvocationStaging({ stagingDirectory, token });
+    throw lifecycleError("INVALID_OUTPUT_PATH", "Administrator preflight producer arguments must contain exactly one output and signature-output pair.");
+  }
+  return { reportPath, signaturePath: finalSignaturePath, stagedReportPath, stagedSignaturePath, stagingDirectory, token, normalizedArgs, reportExistedBefore: false, signatureExistedBefore: false };
 };
 const nowIso = (now) => new Date(now()).toISOString();
 const processIsAlive = (pid, processOps = process) => {
@@ -163,7 +214,7 @@ export async function runStageBAdminPreflightLifecycle({
   signaturePath,
   producerPath,
   phase = null,
-  producerArgs = ["--identity", "administrator"],
+  producerArgs = ["--identity", "administrator", "--output", outputPath, "--signature-output", signaturePath],
   cwd,
   repositoryRoot,
   env = process.env,
@@ -182,14 +233,26 @@ export async function runStageBAdminPreflightLifecycle({
   const stderrPath = path.join(directory, "stderr.log");
   const lockPath = acquireLifecycleLock({ lifecycleDirectory: directory, lifecycleStatePath, retry, now, processOps });
   const startedAt = nowIso(now);
+  const invocationId = readJson(lockPath).invocationId;
   const safeProducerArgs = producerArgs.map((argument) => redact(argument));
+  let publication;
+  try {
+    publication = prepareInvocationPublication({ outputPath, signaturePath, producerArgs, repositoryRoot });
+  } catch (error) {
+    const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid: null, invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt: nowIso(now), exitCode: null, signal: null, timeout: false, failureClass: error.failureClass || "INVALID_OUTPUT_PATH", failure: redact(error.message) };
+    writeJson(lifecycleStatePath, lifecycle);
+    fs.unlinkSync(lockPath);
+    return lifecycle;
+  }
+  const publicationRecord = { reportPath: publication.reportPath, signaturePath: publication.signaturePath, reportExistedBefore: publication.reportExistedBefore, signatureExistedBefore: publication.signatureExistedBefore };
+  const published = [];
   let child;
   let releaseLock = true;
   try {
-    child = spawnProducer({ producerPath, producerArgs, cwd, env, spawn });
+    child = spawnProducer({ producerPath, producerArgs: publication.normalizedArgs, cwd, env, spawn });
     const pid = child.pid;
     if (!Number.isInteger(pid) || pid <= 0) throw new Error("Administrator preflight producer did not expose a valid PID.");
-    writeJson(lifecycleStatePath, { schemaVersion: 1, phase, state: "RUNNING", pid, invocationId: crypto.randomUUID(), command: process.execPath, arguments: safeProducerArgs, startedAt, timeoutSeconds: STAGE_B_ADMIN_PREFLIGHT_TIMEOUT_SECONDS });
+    writeJson(lifecycleStatePath, { schemaVersion: 1, phase, state: "RUNNING", pid, invocationId, command: process.execPath, arguments: publication.normalizedArgs.map((argument) => redact(argument)), startedAt, timeoutSeconds: STAGE_B_ADMIN_PREFLIGHT_TIMEOUT_SECONDS, publication: { reportPath: publication.reportPath, signaturePath: publication.signaturePath, stagingDirectory: publication.stagingDirectory, ownershipToken: publication.token, reportExistedBefore: publication.reportExistedBefore, signatureExistedBefore: publication.signatureExistedBefore } });
     const stdout = []; const stderr = [];
     child.stdout?.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
     child.stderr?.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
@@ -198,37 +261,51 @@ export async function runStageBAdminPreflightLifecycle({
     const stdoutFile = writePrivateBytes(stdoutPath, Buffer.from(redact(Buffer.concat(stdout).toString("utf8"))));
     const stderrFile = writePrivateBytes(stderrPath, Buffer.from(redact(Buffer.concat(stderr).toString("utf8"))));
     if (result.timedOut) {
-      removePublishedPair([outputPath, signaturePath]);
+      cleanupInvocationStaging(publication);
       releaseLock = !result.forcedTermination;
-      const lifecycle = { schemaVersion: 1, phase, state: "TIMED_OUT", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: true, stdout: stdoutFile, stderr: stderrFile };
+      const lifecycle = { schemaVersion: 1, phase, state: "TIMED_OUT", pid, invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: true, failureClass: "TIMED_OUT", publication: publicationRecord, stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
     if (result.error) {
-      removePublishedPair([outputPath, signaturePath]);
-      const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: null, signal: null, timeout: false, failureClass: "LOCAL_RUNTIME", failure: result.error, stdout: stdoutFile, stderr: stderrFile };
+      cleanupInvocationStaging(publication);
+      const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: null, signal: null, timeout: false, failureClass: "PRODUCER_EXIT", failure: result.error, publication: publicationRecord, stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
     if (result.code !== 0) {
-      removePublishedPair([outputPath, signaturePath]);
-      const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, failureClass: "PRODUCER_EXIT", stdout: stdoutFile, stderr: stderrFile };
+      cleanupInvocationStaging(publication);
+      const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, failureClass: "PRODUCER_EXIT", publication: publicationRecord, stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
     let pair;
-    try { pair = validatePublishedPair({ reportPath: outputPath, signaturePath }); } catch (error) {
-      removePublishedPair([outputPath, signaturePath]);
-      const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, failureClass: "TRANSACTIONAL_PUBLICATION", failure: error.message, stdout: stdoutFile, stderr: stderrFile };
+    try {
+      pair = validatePublishedPair({ reportPath: publication.stagedReportPath, signaturePath: publication.stagedSignaturePath });
+      const reportBytes = fs.readFileSync(publication.stagedReportPath);
+      const signatureBytes = fs.readFileSync(publication.stagedSignaturePath);
+      writeStageBPrivateFilesAtomic({ repositoryRoot, files: [
+        { filePath: publication.reportPath, bytes: reportBytes, label: "Stage B administrator capability report" },
+        { filePath: publication.signaturePath, bytes: signatureBytes, label: "Stage B administrator capability signature" },
+      ] });
+      published.push({ path: publication.reportPath, identity: fileIdentity(publication.reportPath) }, { path: publication.signaturePath, identity: fileIdentity(publication.signaturePath) });
+      pair = validatePublishedPair({ reportPath: publication.reportPath, signaturePath: publication.signaturePath });
+    } catch (error) {
+      removeOwnedFinalFiles(published);
+      cleanupInvocationStaging(publication);
+      const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid, invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, failureClass: "TRANSACTIONAL_PUBLICATION", failure: error.message, publication: publicationRecord, stdout: stdoutFile, stderr: stderrFile };
       writeJson(lifecycleStatePath, lifecycle);
       return lifecycle;
     }
-    const lifecycle = { schemaVersion: 1, phase, state: "SUCCEEDED", pid, invocationId: readJson(lifecycleStatePath).invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, report: { path: outputPath, canonicalPayloadSha256: pair.canonicalPayloadSha256, reportFileSha256: pair.reportFileSha256 }, signature: { path: signaturePath, signatureFileSha256: pair.signatureFileSha256 }, stdout: stdoutFile, stderr: stderrFile };
+    cleanupInvocationStaging(publication);
+    const lifecycle = { schemaVersion: 1, phase, state: "SUCCEEDED", pid, invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt, exitCode: result.code, signal: result.signal, timeout: false, publication: publicationRecord, report: { path: publication.reportPath, canonicalPayloadSha256: pair.canonicalPayloadSha256, reportFileSha256: pair.reportFileSha256 }, signature: { path: publication.signaturePath, signatureFileSha256: pair.signatureFileSha256 }, stdout: stdoutFile, stderr: stderrFile };
     writeJson(lifecycleStatePath, lifecycle);
     return lifecycle;
   } catch (error) {
     if (child?.pid && processIsAlive(child.pid, processOps)) { child.kill("SIGTERM"); releaseLock = false; }
-    const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid: child?.pid ?? null, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt: nowIso(now), exitCode: null, signal: null, timeout: false, failureClass: "LOCAL_RUNTIME", failure: redact(error.message) };
+    removeOwnedFinalFiles(published);
+    cleanupInvocationStaging(publication);
+    const lifecycle = { schemaVersion: 1, phase, state: "FAILED", pid: child?.pid ?? null, invocationId, command: process.execPath, arguments: safeProducerArgs, startedAt, endedAt: nowIso(now), exitCode: null, signal: null, timeout: false, failureClass: error.failureClass || "LOCAL_RUNTIME", failure: redact(error.message), publication: publicationRecord };
     writeJson(lifecycleStatePath, lifecycle);
     return lifecycle;
   } finally {

@@ -13,8 +13,13 @@ import {
   PERMISSION_REPORT_SIGNING_KEY_ARN,
   PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION,
   PERMISSION_REPORT_HASH_DOMAIN,
+  PERMISSION_REPORT_BINDING_DOMAIN,
+  PERMISSION_REPORT_BINDING_SCHEMA_VERSION,
+  buildPermissionReportBinding,
+  signedPermissionReportBindingSha256,
   serializePermissionReport,
   assertPermissionReportHashDomains,
+  verifyPermissionReportSignature,
   PERMISSION_EVIDENCE_MAX_AGE_MS,
   sourcePolicyEvidence,
   sourcePolicyConditionKeyOrigins,
@@ -160,18 +165,29 @@ const allowRequiredDenyForbidden = ({ evaluation }) => ({
 });
 const reportSignature = (report, overrides = {}) => {
   const { reportBytes = serializePermissionReport(report), ...fields } = overrides;
-  return {
+  const canonicalPayloadSha256 = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(report))).digest("hex");
+  const reportFileSha256 = crypto.createHash("sha256").update(reportBytes).digest("hex");
+  const bindingPayload = buildPermissionReportBinding({ report, canonicalPayloadSha256, reportFileSha256, keyArn: PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm: PERMISSION_REPORT_SIGNING_ALGORITHM });
+  return Object.fromEntries(Object.entries({
   schemaVersion: PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION,
   hashDomain: PERMISSION_REPORT_HASH_DOMAIN,
+  bindingDomain: PERMISSION_REPORT_BINDING_DOMAIN,
+  bindingSchemaVersion: PERMISSION_REPORT_BINDING_SCHEMA_VERSION,
+  evidenceKind: report.evidenceKind,
+  phase: report.phase,
+  purpose: report.purpose,
+  accountId: "368992683803",
+  region: "eu-west-2",
   keyId: PERMISSION_REPORT_SIGNING_KEY_ARN,
   keyArn: PERMISSION_REPORT_SIGNING_KEY_ARN,
   signingAlgorithm: PERMISSION_REPORT_SIGNING_ALGORITHM,
-  canonicalPayloadSha256: crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(report))).digest("hex"),
-  reportFileSha256: crypto.createHash("sha256").update(reportBytes).digest("hex"),
+  canonicalPayloadSha256,
+  reportFileSha256,
+  signedBindingSha256: signedPermissionReportBindingSha256(bindingPayload),
   signatureBase64: "AQ==",
   signedAt: report.generatedAt,
   ...fields,
-  };
+  }).filter(([, value]) => value !== undefined));
 };
 const writePermissionPair = (reportPath, signaturePath, report) => {
   const reportBytes = serializePermissionReport(report);
@@ -705,7 +721,7 @@ test("permission report hash domains are explicit and whitespace-bound", () => {
   const artifact = signPermissionReport(report, { now, reportBytes, sign: () => "AQ==" });
   const signatureBytes = Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`);
   const domains = assertPermissionReportHashDomains({ report, signatureArtifact: artifact, reportBytes, signatureBytes });
-  assert.equal(artifact.hashDomain, "canonicalPayloadSha256");
+  assert.equal(artifact.hashDomain, "signedBindingSha256");
   assert.equal(artifact.canonicalPayloadSha256, domains.canonicalPayloadSha256);
   assert.equal(artifact.reportFileSha256, domains.reportFileSha256);
   assert.equal("reportSha256" in artifact, false);
@@ -732,8 +748,33 @@ test("unsigned, modified, wrong-key, wrong-algorithm, wrong-hash, and stale repo
   assert.throws(() => assertPermissionReport({ ...report, status: "valid", deniedCount: 1 }, { ...reportBinding(report), signatureArtifact: artifact }), /different canonical payload/);
   assert.throws(() => assertPermissionReport(report, { ...reportBinding(report), signatureArtifact: { ...artifact, keyArn: "arn:aws:kms:eu-west-2:368992683803:key/other" } }), /identity or algorithm/);
   assert.throws(() => assertPermissionReport(report, { ...reportBinding(report), signatureArtifact: { ...artifact, signingAlgorithm: "RSASSA_PKCS1_V1_5_SHA_256" } }), /identity or algorithm/);
-  assert.throws(() => assertPermissionReport(report, { ...reportBinding(report), signatureArtifact: { ...artifact, canonicalPayloadSha256: "0".repeat(64) } }), /different canonical payload/);
+  assert.throws(() => assertPermissionReport(report, { ...reportBinding(report), signatureArtifact: { ...artifact, canonicalPayloadSha256: "0".repeat(64) } }), /different canonical payload|different signed binding/);
   assert.throws(() => assertPermissionReport(report, { ...reportBinding(report), signatureArtifact: { ...artifact, signedAt: "2026-08-01T11:00:00.000Z" } }), /stale/);
+});
+
+test("versioned binding authenticates both report hash domains and evidence identity", () => {
+  const report = validReport(); const reportBytes = serializePermissionReport(report); let artifactDigest; const artifact = signPermissionReport(report, { now, reportBytes, sign: ({ digest }) => { artifactDigest = digest.toString("hex"); return "AQ=="; } });
+  assert.equal(artifactDigest, artifact.signedBindingSha256);
+  const signatureBytes = Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`);
+  assert.doesNotThrow(() => verifyPermissionReportSignature({ report, signatureArtifact: artifact, reportBytes, signatureBytes, now, verify: ({ digest }) => digest.toString("hex") === artifact.signedBindingSha256 }));
+  assert.throws(() => verifyPermissionReportSignature({ report, signatureArtifact: artifact, reportBytes, signatureBytes, expectedSignatureFileSha256: "0".repeat(64), now, verify: () => true }), /signature file SHA256/);
+  for (const mutation of [
+    (value) => ({ ...value, reportFileSha256: "0".repeat(64) }),
+    (value) => ({ ...value, canonicalPayloadSha256: "0".repeat(64) }),
+    (value) => ({ ...value, signedBindingSha256: "0".repeat(64) }),
+    (value) => ({ ...value, evidenceKind: "INITIAL_ADMIN_CAPABILITY" }),
+    (value) => ({ ...value, phase: "initial" }),
+    (value) => ({ ...value, purpose: "other-purpose" }),
+    (value) => ({ ...value, accountId: "000000000000" }),
+    (value) => ({ ...value, region: "us-east-1" }),
+    (value) => ({ ...value, keyArn: "arn:aws:kms:eu-west-2:368992683803:key/other", keyId: "arn:aws:kms:eu-west-2:368992683803:key/other" }),
+    (value) => ({ ...value, signingAlgorithm: "RSASSA_PKCS1_V1_5_SHA_256" }),
+    (value) => ({ ...value, schemaVersion: 2 }),
+    (value) => ({ ...value, hashDomain: "canonicalPayloadSha256" }),
+  ]) assert.throws(() => verifyPermissionReportSignature({ report, signatureArtifact: mutation(artifact), reportBytes, signatureBytes: Buffer.from(`${JSON.stringify(mutation(artifact), null, 2)}\n`), now, verify: () => true }), /unsupported|different|binding|identity|algorithm/);
+  assert.throws(() => verifyPermissionReportSignature({ report, signatureArtifact: artifact, reportBytes: Buffer.from(`${reportBytes} \n`), signatureBytes, now, verify: () => true }), /different report bytes/);
+  const legacyArtifact = { ...artifact, schemaVersion: 2, hashDomain: "canonicalPayloadSha256" }; const legacyBytes = Buffer.from(`${JSON.stringify(legacyArtifact, null, 2)}\n`);
+  assert.throws(() => verifyPermissionReportSignature({ report, signatureArtifact: legacyArtifact, reportBytes, signatureBytes: legacyBytes, now, verify: () => true }), /unsupported/);
 });
 
 test("release-deployer cannot generate a report or sign through the CLI", () => {
