@@ -31,6 +31,7 @@ import {
   runPermissionPreflight as runPermissionPreflightRaw,
   signPermissionReport,
   simulatePrincipalPolicy,
+  assertSimulationContextCardinality,
   validateSimulationResult,
   validateManifest,
 } from "../aws/validate-production-green-stage-b-permissions.mjs";
@@ -227,6 +228,24 @@ test("reviewed simulator registry fails closed on missing, extra, or malformed k
   assert.throws(() => assertReviewedSimulationContextRegistry({ registry: extra }), /extra=new:ConditionKey/);
   const malformed = REVIEWED_SIMULATION_CONTEXT_REGISTRY.map((entry) => entry.key === "aws:RequestedRegion" ? { ...entry, values: ["*"] } : entry);
   assert.throws(() => assertReviewedSimulationContextRegistry({ registry: malformed }), /wildcard/);
+});
+
+test("scalar simulator context values fail closed while list values remain multi-valued", () => {
+  for (const type of ["string", "boolean", "numeric"]) {
+    assert.throws(() => assertSimulationContextCardinality([{ key: `test:${type}`, type, values: ["one", "two"] }]), /exactly one value/);
+  }
+  assert.doesNotThrow(() => assertSimulationContextCardinality([{ key: "test:list", type: "stringList", values: ["one", "two"] }]));
+  assert.doesNotThrow(() => assertSimulationContextCardinality([{ key: "test:numeric", type: "numeric", values: ["1"] }]));
+});
+
+test("IAM simulation rejects scalar multi-values before invoking AWS", () => {
+  let invoked = false;
+  assert.throws(() => simulatePrincipalPolicy({
+    roleArn,
+    evaluation: { id: "numeric-context", action: "iam:PassRole", resource: "arn:aws:iam::368992683803:role/example", context: [{ key: "ecs:task-cpu", type: "numeric", values: ["512", "1024"] }] },
+    run: () => { invoked = true; return JSON.stringify(simulatorAllowed); },
+  }), /exactly one value/);
+  assert.equal(invoked, false);
 });
 
 test("GetContextKeysForPrincipalPolicy is discovery-only and cannot synthesize values", () => {
@@ -436,23 +455,12 @@ test("exact canary create derives Register, TagResource, and both PassRole evalu
 
 test("exact broker managed-policy update derives version actions for the exact policy", () => {
   const derived = deriveRequiredEvaluations({ ...plan, resource_changes: [plan.resource_changes[1]] }, manifest);
-  assert.deepEqual(derived.required.filter((item) => ["update-broker-managed-policy", "prune-broker-managed-policy-versions"].includes(item.manifestId)), [{
-    id: "prune-broker-managed-policy-versions:arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime",
-    manifestId: "prune-broker-managed-policy-versions",
-    action: "iam:DeletePolicyVersion",
-    resource: brokerPolicyArn,
-    context: [...REVIEWED_SIMULATION_CONTEXT_REGISTRY].sort((left, right) => left.key.localeCompare(right.key)),
-    expectedMissingContextValues: [],
-    phase: "apply",
-  }, {
-    id: "update-broker-managed-policy:arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime",
-    manifestId: "update-broker-managed-policy",
-    action: "iam:CreatePolicyVersion",
-    resource: brokerPolicyArn,
-    context: [...REVIEWED_SIMULATION_CONTEXT_REGISTRY].sort((left, right) => left.key.localeCompare(right.key)),
-    expectedMissingContextValues: [],
-    phase: "apply",
-  }]);
+  const brokerEvaluations = derived.required.filter((item) => ["update-broker-managed-policy", "prune-broker-managed-policy-versions"].includes(item.manifestId));
+  assert.deepEqual(brokerEvaluations.map(({ action }) => action), ["iam:DeletePolicyVersion", "iam:CreatePolicyVersion"]);
+  for (const item of brokerEvaluations) {
+    assert.equal(item.context.some(({ key }) => key === "ecs:task-cpu"), false);
+    assert.equal(item.context.some(({ key }) => key === "ecs:task-memory"), false);
+  }
 });
 
 test("broker managed-policy coverage fails for missing, wrong, wildcard, unrelated, create, delete, or replacement mappings", () => {
@@ -681,12 +689,22 @@ test("task-definition registration context is complete and bound to each planned
   assert.equal(registrations.length, 12);
   for (const registration of registrations) {
     assert.deepEqual(registration.context.filter(({ key }) => key.startsWith("ecs:")).map(({ key, type, values }) => ({ key, type, values })), [
-      { key: "ecs:cluster", type: "string", values: ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"] },
       { key: "ecs:compute-compatibility", type: "stringList", values: ["FARGATE"] },
       { key: "ecs:privileged", type: "string", values: ["false"] },
       { key: "ecs:task-cpu", type: "numeric", values: [registration.manifestId === "worker-register" ? "512" : registration.manifestId === "read-only-canary-register" ? "256" : "1024"] },
       { key: "ecs:task-memory", type: "numeric", values: [registration.manifestId === "worker-register" ? "1024" : registration.manifestId === "read-only-canary-register" ? "512" : "2048"] },
     ]);
+  }
+});
+
+test("operation context uses one ECS scalar per request and omits task scalars elsewhere", () => {
+  const productionPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json"));
+  const derived = deriveRequiredEvaluations(productionPlan, manifest).required;
+  for (const item of derived.filter(({ action }) => action === "ecs:RegisterTaskDefinition")) {
+    for (const context of item.context.filter(({ key }) => ["ecs:task-cpu", "ecs:task-memory"].includes(key))) assert.equal(context.values.length, 1);
+  }
+  for (const item of derived.filter(({ action }) => ["ecs:TagResource", "iam:PassRole"].includes(action))) {
+    assert.equal(item.context.some(({ key }) => ["ecs:task-cpu", "ecs:task-memory"].includes(key)), false);
   }
 });
 

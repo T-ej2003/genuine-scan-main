@@ -61,6 +61,14 @@ authorization types and the IAM simulation API. Region, exact request tags,
 and the exact tag-key set remain mandatory. Missing, duplicate, unknown, or
 cross-family values fail before report signing.
 
+The simulator filters this reviewed union to condition keys applicable to the
+specific action being evaluated. CPU and memory are supplied exactly once for
+each `ecs:RegisterTaskDefinition` evaluation from its selected plan family and
+are omitted from `ecs:TagResource` and `iam:PassRole` requests, where those
+request-context keys do not exist. Scalar context serialization rejects any
+remaining multi-value input before AWS is invoked; list types retain their
+documented multi-value behavior.
+
 ## Administrator preflight denial context
 
 The production-shaped plan fixture carries the reviewed Terraform variable
