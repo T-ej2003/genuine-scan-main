@@ -1,9 +1,9 @@
 # Release Candidate Gate Setup
 
-This repository now includes `.github/workflows/release-candidate-gate.yml` with two merge-gate jobs:
+This repository now includes `.github/workflows/release-candidate-gate.yml` with two merge-gate jobs. GitHub Actions publishes the job names as the required check contexts:
 
-- `Release Candidate Gate / rc-trust-critical`
-- `Release Candidate Gate / rc-staging-smoke`
+- `rc-trust-critical`
+- `rc-staging-smoke`
 
 ## What this gate enforces
 
@@ -47,8 +47,8 @@ If branch protection is available for your plan:
 4. Enable `Require a pull request before merging`.
 5. Enable `Require status checks to pass before merging`.
 6. Mark both checks as required:
-   - `Release Candidate Gate / rc-trust-critical`
-   - `Release Candidate Gate / rc-staging-smoke`
+   - `rc-trust-critical`
+   - `rc-staging-smoke`
 7. Save changes.
 
 If branch protection is not available on your current plan, the workflow still runs and reports failures, but GitHub cannot hard-block merges until branch protection/rulesets are enabled.
