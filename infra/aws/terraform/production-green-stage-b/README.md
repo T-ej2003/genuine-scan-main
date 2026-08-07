@@ -64,6 +64,14 @@ fresh authoritative plan must independently contain the exact reviewed alias upd
 must bind the attestation through the audit, approval, permission, closure, validator,
 and verify-only chain. Unknown drift remains fatal and the old saved plan is invalid.
 
+Every security-sensitive recovery consumer independently verifies the attestation report
+and signature bytes, their SHA-256 domains, the administrator KMS signature, and the
+exact source, lineage, serial, refresh, and alias bindings; audit and approval stages
+propagate that verified digest through their signed/bound artifacts. The unsigned
+recovery classification is derived/cache evidence only; `attestationVerified` is not
+an authorization signal.
+Pull-request provenance mode never turns recovery inputs into production authorization.
+
 Future apply wrappers should publish a structured signed failure artifact at failure time,
 including source and plan hashes, state identity, failed resource/provider operation,
 target identity, result classification, and stdout/stderr hashes. That forward-looking

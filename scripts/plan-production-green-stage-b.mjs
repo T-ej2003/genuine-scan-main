@@ -24,7 +24,7 @@ import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments
 import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./aws/stage-b-artifact-contract.mjs";
 import { STAGE_B_PLAN_APPROVED, STAGE_B_PLAN_CAPTURED, assertStageBPlanApprovalReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, readStageBPlanEvidence, stageBPlanHashes, writeStageBPlanEvidence } from "./aws/stage-b-plan-approval-contract.mjs";
-import { assertRecoveryClassification, assertRecoveryPlanDelta } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
+import { assertRecoveryPlanDelta, assertVerifiedStageBRecovery } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
@@ -668,17 +668,20 @@ function readPlanningInputs(tfvars, cliOptions, protectedMainCheckout) {
   const backendMetadata = assertStageBPlanningBackendMetadata();
   if (Boolean(recoveryClassificationPath) !== Boolean(recoveryClassificationSha256)) throw new Error("Recovery classification path and SHA256 are required together.");
   const refreshReport = JSON.parse(fs.readFileSync(refreshReportPath, "utf8"));
-  assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: bindingReport.imageEvidenceCanonicalSha256, expectedStateSha256: bindingReport.stateBackupSha256, expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir, allowReviewedResourceDrift: refreshReport.status === "RESOURCE_DRIFT" });
   const recoveryAttestationReportPath = readOption(cliOptions, "--recovery-attestation-report");
-  if (recoveryAttestationSha256 && (!/^[a-f0-9]{64}$/.test(recoveryAttestationSha256) || !recoveryAttestationReportPath)) throw new Error("Recovery attestation report and SHA256 are required together.");
+  const recoveryAttestationSignaturePath = readOption(cliOptions, "--recovery-attestation-signature");
+  const recoveryAttestationSignatureSha256 = readOption(cliOptions, "--recovery-attestation-signature-sha256");
+  if (Boolean(recoveryAttestationSha256) !== Boolean(recoveryAttestationReportPath) || Boolean(recoveryAttestationSha256) !== Boolean(recoveryAttestationSignaturePath) || Boolean(recoveryAttestationSha256) !== Boolean(recoveryAttestationSignatureSha256)) throw new Error("Recovery attestation report, signature, and SHA256 values are required together.");
   if (refreshReport.status === "RESOURCE_DRIFT") {
     if (!recoveryClassificationPath || !recoveryAttestationSha256) throw new Error("RESOURCE_DRIFT requires a separately verified recovery classification and attestation.");
     const classificationBytes = fs.readFileSync(recoveryClassificationPath);
     if (crypto.createHash("sha256").update(classificationBytes).digest("hex") !== recoveryClassificationSha256) throw new Error("Recovery classification SHA256 mismatch.");
-    const classification = JSON.parse(classificationBytes);
-    assertRecoveryClassification(classification, { refreshReportSha256, recoveryAttestationSha256, expectedSourceSha: protectedMainCheckout.currentHead, expectedLineage: bindingReport.stateLineage, expectedSerial: bindingReport.stateSerial });
-  }
-  return { bindingReport, backendMetadata, bindingReportPath, bindingReportSha256, toolingTreeSha256, refreshReportPath, refreshReportSha256, recoveryAttestationSha256, recoveryAttestationReportPath, recoveryClassificationPath, recoveryClassificationSha256, expectedImageReleaseSha };
+    const recoveryBytes = fs.readFileSync(recoveryAttestationReportPath); const signatureBytes = fs.readFileSync(recoveryAttestationSignaturePath); const classification = JSON.parse(classificationBytes); const recovery = JSON.parse(recoveryBytes); const signature = JSON.parse(signatureBytes);
+    assertVerifiedStageBRecovery({ refreshReport, refreshReportBytes: fs.readFileSync(refreshReportPath), refreshReportSha256, classification, classificationBytes, classificationSha256: recoveryClassificationSha256, attestation: recovery, attestationBytes: recoveryBytes, attestationSha256: recoveryAttestationSha256, signature, signatureBytes, signatureSha256: recoveryAttestationSignatureSha256, expectedSourceSha: protectedMainCheckout.currentHead, expectedLineage: bindingReport.stateLineage, expectedSerial: bindingReport.stateSerial });
+    assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: bindingReport.imageEvidenceCanonicalSha256, expectedStateSha256: bindingReport.stateBackupSha256, expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir, allowReviewedResourceDrift: true });
+  } else if (recoveryAttestationSha256 || recoveryClassificationPath) throw new Error("Recovery artifacts are permitted only for RESOURCE_DRIFT refresh evidence.");
+  if (refreshReport.status !== "RESOURCE_DRIFT") assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: bindingReport.imageEvidenceCanonicalSha256, expectedStateSha256: bindingReport.stateBackupSha256, expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir });
+  return { bindingReport, backendMetadata, bindingReportPath, bindingReportSha256, toolingTreeSha256, refreshReportPath, refreshReportSha256, recoveryAttestationSha256, recoveryAttestationReportPath, recoveryAttestationSignaturePath, recoveryAttestationSignatureSha256, recoveryClassificationPath, recoveryClassificationSha256, expectedImageReleaseSha };
 }
 
 export function captureStageBPlan({ tfvars, cliOptions, protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true }), plan = () => execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${readOption(cliOptions, "--saved-plan")}`], { stdio: "inherit" }), show = (savedPlanPath) => execFileSync("terraform", [`-chdir=${root}`, "show", "-json", savedPlanPath], { encoding: "utf8" }) } = {}) {

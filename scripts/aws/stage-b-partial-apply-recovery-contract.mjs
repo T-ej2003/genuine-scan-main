@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { canonicalJson, STAGE_B } from "./production-green-stage-b-contract.mjs";
@@ -102,15 +103,40 @@ export function verifyRecoveryAttestation({ report, signature, reportBytes = Buf
 
 export function classifyRecoveryResidue({ refreshReport, refreshReportSha256, attestation, attestationSignature, attestationBytes, attestationSignatureBytes, expected, verify, now = new Date() } = {}) {
   if (refreshReport?.status !== "RESOURCE_DRIFT" || refreshReportSha256 !== attestation?.currentObservedEvidence?.refreshReportSha256) throw new Error("Recovery classification requires the immutable matching RESOURCE_DRIFT report.");
-  const current = verifyRecoveryAttestation({ report: attestation, signature: attestationSignature, reportBytes: attestationBytes, signatureBytes: attestationSignatureBytes, expected, verify, now });
+  verifyRecoveryAttestation({ report: attestation, signature: attestationSignature, reportBytes: attestationBytes, signatureBytes: attestationSignatureBytes, expected, verify, now });
+  const current = assertCurrentEvidence(attestation.currentObservedEvidence);
   if (!Array.isArray(refreshReport.resourceChanges?.changes) || refreshReport.resourceChanges.nonNoOp !== 1 || refreshReport.resourceChanges.changes.length !== 1) throw new Error("Recovery classification requires exactly one refresh resource change.");
   const change = refreshReport.resourceChanges.changes[0]; if (change.address !== current.terraformAddress || change.type !== current.resourceType || !exact(change.actions, ["update"])) throw new Error("Recovery refresh resource change is not the attested root-managed alias update.");
-  return { schemaVersion: 1, status: STAGE_B_PARTIAL_APPLY_RECOVERY_REFRESH_STATUS, deployablePlan: false, attestationVerified: true, refreshReportSha256, recoveryAttestationSha256: sha256(attestationBytes), state: { lineage: current.terraformLineage, serial: current.terraformSerial }, sourceSha: current.protectedSourceSha, resource: { address: current.terraformAddress, functionVersion: { live: current.liveVersion, desired: current.configuredDesiredVersion } } };
+  return { schemaVersion: 1, status: STAGE_B_PARTIAL_APPLY_RECOVERY_REFRESH_STATUS, deployablePlan: false, refreshReportSha256, recoveryAttestationSha256: sha256(attestationBytes), state: { lineage: current.terraformLineage, serial: current.terraformSerial }, sourceSha: current.protectedSourceSha, resource: { address: current.terraformAddress, functionVersion: { live: current.liveVersion, desired: current.configuredDesiredVersion } } };
 }
 
 export function assertRecoveryClassification(classification, { refreshReportSha256, recoveryAttestationSha256, expectedSourceSha, expectedLineage, expectedSerial } = {}) {
-  if (!classification || classification.schemaVersion !== 1 || classification.status !== STAGE_B_PARTIAL_APPLY_RECOVERY_REFRESH_STATUS || classification.deployablePlan !== false || classification.attestationVerified !== true || !/^[a-f0-9]{40}$/.test(classification.sourceSha || "") || !/^[a-f0-9]{64}$/.test(classification.refreshReportSha256 || "") || !/^[a-f0-9]{64}$/.test(classification.recoveryAttestationSha256 || "") || classification.refreshReportSha256 !== refreshReportSha256 || classification.recoveryAttestationSha256 !== recoveryAttestationSha256 || classification.sourceSha !== expectedSourceSha || classification.resource?.address !== STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS || classification.state?.lineage !== expectedLineage || String(classification.state?.serial) !== String(expectedSerial)) throw new Error("Stage B recovery classification binding is invalid.");
+  if (!classification || classification.schemaVersion !== 1 || classification.status !== STAGE_B_PARTIAL_APPLY_RECOVERY_REFRESH_STATUS || classification.deployablePlan !== false || Object.hasOwn(classification, "attestationVerified") || !/^[a-f0-9]{40}$/.test(classification.sourceSha || "") || !/^[a-f0-9]{64}$/.test(classification.refreshReportSha256 || "") || !/^[a-f0-9]{64}$/.test(classification.recoveryAttestationSha256 || "") || classification.refreshReportSha256 !== refreshReportSha256 || classification.recoveryAttestationSha256 !== recoveryAttestationSha256 || classification.sourceSha !== expectedSourceSha || classification.resource?.address !== STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS || classification.state?.lineage !== expectedLineage || String(classification.state?.serial) !== String(expectedSerial)) throw new Error("Stage B recovery classification binding is invalid.");
   return true;
+}
+
+export function verifyStageBRecoverySignatureWithKms({ digest, signature } = {}) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-recovery-verify-"));
+  try {
+    const digestPath = path.join(directory, "digest"); const signaturePath = path.join(directory, "signature");
+    fs.writeFileSync(digestPath, digest, { mode: 0o600, flag: "wx" }); fs.writeFileSync(signaturePath, signature, { mode: 0o600, flag: "wx" });
+    const result = JSON.parse(execFileSync("aws", ["kms", "verify", "--key-id", STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM, "--output", "json"], { encoding: "utf8" }));
+    return result.SignatureValid === true;
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+}
+
+export function assertVerifiedStageBRecovery({ refreshReport, refreshReportBytes, refreshReportSha256, classification, classificationBytes, classificationSha256, attestation, attestationBytes, attestationSha256, signature, signatureBytes, signatureSha256, expectedSourceSha, expectedLineage, expectedSerial, now = new Date(), verifySignature = verifyStageBRecoverySignatureWithKms } = {}) {
+  for (const [label, bytes, expectedSha] of [["refresh report", refreshReportBytes, refreshReportSha256], ["recovery classification", classificationBytes, classificationSha256], ["recovery attestation", attestationBytes, attestationSha256], ["recovery signature", signatureBytes, signatureSha256]]) {
+    if (!Buffer.isBuffer(bytes) || sha256(bytes) !== expectedSha) throw new Error(`Stage B ${label} bytes do not match their approved SHA256.`);
+  }
+  const parsedRefresh = JSON.parse(refreshReportBytes); const parsedClassification = JSON.parse(classificationBytes); const parsedAttestation = JSON.parse(attestationBytes); const parsedSignature = JSON.parse(signatureBytes);
+  if (!exact(parsedRefresh, refreshReport) || !exact(parsedClassification, classification) || !exact(parsedAttestation, attestation) || !exact(parsedSignature, signature)) throw new Error("Stage B recovery inputs are not byte-bound to their parsed values.");
+  if (refreshReportSha256 !== parsedClassification.refreshReportSha256 || attestationSha256 !== parsedClassification.recoveryAttestationSha256) throw new Error("Stage B recovery classification is bound to different recovery bytes.");
+  const verified = verifyRecoveryAttestation({ report: parsedAttestation, signature: parsedSignature, reportBytes: attestationBytes, signatureBytes, expected: { protectedSourceSha: expectedSourceSha, terraformLineage: expectedLineage, terraformSerial: expectedSerial, refreshReportSha256 }, verify: verifySignature, now });
+  const derived = classifyRecoveryResidue({ refreshReport: parsedRefresh, refreshReportSha256, attestation: parsedAttestation, attestationSignature: parsedSignature, attestationBytes, attestationSignatureBytes: signatureBytes, expected: { protectedSourceSha: expectedSourceSha, terraformLineage: expectedLineage, terraformSerial: expectedSerial, refreshReportSha256 }, verify: verifySignature, now });
+  assertRecoveryClassification(parsedClassification, { refreshReportSha256, recoveryAttestationSha256: attestationSha256, expectedSourceSha, expectedLineage, expectedSerial });
+  if (!exact(parsedClassification, derived)) throw new Error("Stage B recovery classification is not the verified derivation of the signed attestation.");
+  return { refreshReport: parsedRefresh, classification: parsedClassification, attestation: parsedAttestation, signature: parsedSignature, attestationSha256, signatureSha256, classificationSha256, refreshReportSha256, ...verified, derivedClassification: derived };
 }
 
 export function assertRecoveryPlanDelta(plan, attestation) {

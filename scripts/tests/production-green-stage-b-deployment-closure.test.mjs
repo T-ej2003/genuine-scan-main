@@ -34,6 +34,26 @@ test("plan approval validation is production-only while optional tfvars provenan
   assert.match(source.slice(0, optionalProvenanceStart), /if \(mode === "production"\)/);
 });
 
+test("recovery consumers use the canonical signed verifier, never the unsigned classification flag", () => {
+  const closure = fs.readFileSync("scripts/aws/validate-stage-b-deployment-closure.mjs", "utf8");
+  const planner = fs.readFileSync("scripts/plan-production-green-stage-b.mjs", "utf8");
+  const apply = fs.readFileSync("scripts/apply-production-green-stage-b.mjs", "utf8");
+  for (const source of [closure, planner, apply]) {
+    assert.match(source, /assertVerifiedStageBRecovery/);
+    assert.doesNotMatch(source, /attestationVerified/);
+  }
+  assert.match(apply, /allowReviewedResourceDrift: trustedRecovery !== null/);
+  assert.match(closure, /allowReviewedResourceDrift: trustedRecovery !== null/);
+  assert.ok(planner.indexOf("assertVerifiedStageBRecovery") < planner.indexOf("allowReviewedResourceDrift: true"));
+});
+
+test("pull-request closure rejects recovery inputs without production approval", () => {
+  const source = fs.readFileSync("scripts/aws/validate-stage-b-deployment-closure.mjs", "utf8");
+  assert.match(source, /Recovery artifacts are not authorization inputs in pull-request provenance mode/);
+  const branch = source.slice(source.indexOf('if (mode === "production") {'), source.indexOf('} else if (hasRecoveryInputs)'));
+  assert.match(branch, /approvalReport\.recoveryAttestationSha256/);
+});
+
 test("production-shaped Stage B plan is fully classified with zero destroys", () => {
   const result = classifyStageBPlan(fixture, { strict: false });
   assert.deepEqual(result.actionCounts, { "no-op": 58, create: 12, update: 3 });
