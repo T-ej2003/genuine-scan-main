@@ -75,6 +75,7 @@ const taskDefinitionRegisterContext = ({ cpu, memory }) => [
   { key: "ecs:task-cpu", type: "numeric", values: [cpu] },
   { key: "ecs:task-memory", type: "numeric", values: [memory] },
 ];
+const taskDefinitionTagContext = (context) => context.filter(({ key }) => !["ecs:task-cpu", "ecs:task-memory"].includes(key));
 const stageBRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const arnPattern = /^(?:arn:aws:[^:]+:[^:]*:368992683803:.+|arn:aws:s3:::[^/]+(?:\/.*)?)$/;
 
@@ -216,7 +217,7 @@ function assertContext(context, label) {
   if (!Array.isArray(context)) throw new Error(`${label} context must be an array.`);
   const keys = new Set();
   for (const entry of context) {
-    if (!entry || typeof entry.key !== "string" || !entry.key || !["string", "stringList", "boolean", "numeric"].includes(entry.type)) {
+    if (!entry || typeof entry.key !== "string" || !entry.key || !["string", "stringList", "boolean", "numeric", "date", "ip", "binary", "numericList"].includes(entry.type)) {
       throw new Error(`${label} has malformed context.`);
     }
     if (keys.has(entry.key)) throw new Error(`${label} has duplicate context key ${entry.key}.`);
@@ -319,31 +320,30 @@ export function assertDiscoveredSimulationContextKeys(contextKeyNames, { conditi
   return true;
 }
 
-function actionMatchesPattern(action, pattern) {
-  return pattern === "*" || pattern === action || (pattern.endsWith("*") && action.startsWith(pattern.slice(0, -1)));
-}
-
-function conditionKeyAppliesToAction(key, action, conditionKeyOrigins) {
-  if (!action) return true;
-  const origins = conditionKeyOrigins.get(key) || [];
-  return origins.some(({ actions = [] }) => actions.some((pattern) => actionMatchesPattern(action, pattern)));
-}
-
-function mergeReviewedSimulationContext(operationContext, registry = REVIEWED_SIMULATION_CONTEXT_REGISTRY, { action, conditionKeyOrigins = sourcePolicyConditionKeyOrigins() } = {}) {
+function mergeReviewedSimulationContext(operationContext, registry = REVIEWED_SIMULATION_CONTEXT_REGISTRY) {
   const reviewed = assertReviewedSimulationContextRegistry({ registry });
   assertContext(operationContext, "Operation-specific simulator context");
   const registryKeys = new Set(reviewed.map(({ key }) => key));
   for (const { key } of operationContext) {
     if (!registryKeys.has(key)) throw new Error(`Operation-specific simulator context key is not in the reviewed registry: ${key}.`);
   }
-  const merged = new Map(reviewed
-    .filter(({ key }) => conditionKeyAppliesToAction(key, action, conditionKeyOrigins))
-    .map((entry) => [entry.key, entry]));
+  const operation = new Map(operationContext.map((entry) => [entry.key, { key: entry.key, type: entry.type, values: [...entry.values] }]));
+  const merged = new Map();
+  for (const entry of reviewed) {
+    const bound = operation.get(entry.key);
+    if (bound) {
+      merged.set(entry.key, bound);
+      continue;
+    }
+    const scalar = entry.type !== "stringList" && entry.type !== "numericList";
+    if (scalar && entry.values.length !== 1) continue;
+    merged.set(entry.key, { key: entry.key, type: entry.type, values: [...entry.values] });
+  }
   for (const entry of operationContext) {
-    if (!conditionKeyAppliesToAction(entry.key, action, conditionKeyOrigins)) continue;
     merged.set(entry.key, { key: entry.key, type: entry.type, values: [...entry.values] });
   }
   const complete = [...merged.values()].sort((left, right) => left.key.localeCompare(right.key));
+  assertSimulationContextCardinality(complete);
   return complete;
 }
 
@@ -377,7 +377,8 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, con
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
   const entries = new Map([...manifest.required, ...manifest.forbidden].map((entry) => [entry.id, { entry, forbidden: manifest.forbidden.includes(entry) }]));
   for (const mapping of manifest.taskDefinitionMappings) {
-    for (const suffix of ["register", "tag"]) entries.set(`${mapping.id}-${suffix}`, { entry: { context: mapping.registerContext }, forbidden: false });
+    entries.set(`${mapping.id}-register`, { entry: { context: mapping.registerContext }, forbidden: false });
+    entries.set(`${mapping.id}-tag`, { entry: { context: taskDefinitionTagContext(mapping.registerContext) }, forbidden: false });
     for (const suffix of ["pass-execution", "pass-task"]) entries.set(`${mapping.id}-${suffix}`, { entry: { context: mapping.passRoleContext }, forbidden: false });
   }
   for (const [items, forbidden] of [[report.requiredEvaluations, false], [report.forbiddenEvaluations, true]]) {
@@ -385,7 +386,9 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, con
     for (const item of items) {
       const binding = entries.get(item.manifestId);
       if (!binding || binding.forbidden !== forbidden) throw new Error(`Permission-preflight evaluation ${item.id} is not bound to the current manifest section.`);
-      const expectedContext = mergeReviewedSimulationContext(binding.entry.context, contextRegistry, { action: item.action, conditionKeyOrigins });
+      const expectedContext = binding.forbidden
+        ? binding.entry.context.map(({ key, type, values }) => ({ key, type, values: [...values] }))
+        : mergeReviewedSimulationContext(binding.entry.context, contextRegistry);
       if (JSON.stringify(item.context) !== JSON.stringify(expectedContext)) throw new Error(`Permission-preflight evaluation ${item.id} has different context from the current reviewed registry.`);
       const expected = normalizeExpectedMissingContextValues(binding.entry, { forbidden, label: item.manifestId });
       if (JSON.stringify(item.expectedMissingContextValues || []) !== JSON.stringify(expected)) throw new Error(`Permission-preflight evaluation ${item.id} has different expected missing context.`);
@@ -442,7 +445,6 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
   if (manifest.accountId !== account || manifest.region !== region) throw new Error("Permission manifest account or region is wrong.");
   if (!Array.isArray(manifest.required) || !Array.isArray(manifest.forbidden)) throw new Error("Permission manifest sections are malformed.");
   const reviewedContextRegistry = assertReviewedSimulationContextRegistry({ conditionKeyOrigins, registry: contextRegistry });
-  const reviewedContextKeys = new Set(reviewedContextRegistry.map(({ key }) => key));
   assertStageBTerraformBackendManifest(manifest);
   for (const [id, action] of STAGE_A_LIVE_EVIDENCE_EVALUATIONS) {
     const entry = manifest.required.find((candidate) => candidate.id === id);
@@ -464,7 +466,7 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
       if (!["explicitDeny", "implicitDeny"].includes(entry.expectedDecision)) throw new Error(`${entry.id} must declare its exact forbidden expectedDecision.`);
       const unexplained = expectedMissing.filter((key) => !conditionKeyOrigins.has(key));
       if (unexplained.length) throw new Error(`${entry.id} expectedMissingContextValues has no reviewed source-policy origin: ${unexplained.join(", ")}.`);
-      const suppliedKeys = new Set([...reviewedContextKeys, ...entry.context.map(({ key }) => key)]);
+      const suppliedKeys = new Set(entry.context.map(({ key }) => key));
       const sourceExpected = entry.expectedDecision === "implicitDeny"
         ? [...conditionKeyOrigins.keys()].filter((key) => !suppliedKeys.has(key)).sort()
         : [];
@@ -525,7 +527,7 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
   if (mappingAddresses.size !== expectedMappings.size) throw new Error("Permission manifest task-definition mapping set is incomplete.");
   const generatedRequired = manifest.taskDefinitionMappings.flatMap((mapping) => [
     { id: `${mapping.id}-register`, action: "ecs:RegisterTaskDefinition", resources: [mapping.resource], context: mapping.registerContext, generated: true },
-    { id: `${mapping.id}-tag`, action: "ecs:TagResource", resources: [mapping.resource], context: mapping.registerContext, generated: true },
+    { id: `${mapping.id}-tag`, action: "ecs:TagResource", resources: [mapping.resource], context: taskDefinitionTagContext(mapping.registerContext), generated: true },
     { id: `${mapping.id}-pass-execution`, action: "iam:PassRole", resources: [mapping.executionRoleArn], context: mapping.passRoleContext, generated: true },
     { id: `${mapping.id}-pass-task`, action: "iam:PassRole", resources: [mapping.taskRoleArn], context: mapping.passRoleContext, generated: true },
   ]);
@@ -602,13 +604,15 @@ export function assertTaskDefinitionRegistrationContexts(plan, manifest) {
   return true;
 }
 
-function evaluation(entry, resource, { forbidden = false, contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY, conditionKeyOrigins = sourcePolicyConditionKeyOrigins() } = {}) {
+function evaluation(entry, resource, { forbidden = false, contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY } = {}) {
   const result = {
     id: `${entry.id}:${resource}`,
     manifestId: entry.id,
     action: entry.action,
     resource,
-    context: mergeReviewedSimulationContext(entry.context, contextRegistry, { action: entry.action, conditionKeyOrigins }),
+    context: forbidden
+      ? entry.context.map(({ key, type, values }) => ({ key, type, values: [...values] }))
+      : mergeReviewedSimulationContext(entry.context, contextRegistry),
     expectedMissingContextValues: normalizeExpectedMissingContextValues(entry, { forbidden }),
     phase: entry.phase || "unspecified",
   };
@@ -620,7 +624,7 @@ function evaluation(entry, resource, { forbidden = false, contextRegistry = REVI
 export function deriveRequiredEvaluations(plan, manifest, { contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY, conditionKeyOrigins = sourcePolicyConditionKeyOrigins() } = {}) {
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
-  const required = manifest.required.filter((entry) => !entry.plan).flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource, { contextRegistry, conditionKeyOrigins })));
+  const required = manifest.required.filter((entry) => !entry.plan).flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource, { contextRegistry })));
   const coveredChanges = new Set();
   const matchedPlanEntries = new Set();
   for (const change of changes) {
@@ -633,10 +637,10 @@ export function deriveRequiredEvaluations(plan, manifest, { contextRegistry = RE
     if (change.type === "aws_ecs_task_definition" && !taskMapping) throw new Error(`No permission manifest entry covers ${change.address} ${JSON.stringify(actions)}.`);
     if (taskMapping) {
       const registerContext = contextFromTaskDefinitionPlan(change, taskMapping);
-      required.push(evaluation({ id: `${taskMapping.id}-register`, action: "ecs:RegisterTaskDefinition", context: registerContext, phase: "apply" }, taskMapping.resource, { contextRegistry, conditionKeyOrigins }));
-      required.push(evaluation({ id: `${taskMapping.id}-tag`, action: "ecs:TagResource", context: registerContext, phase: "apply" }, taskMapping.resource, { contextRegistry, conditionKeyOrigins }));
-      required.push(evaluation({ id: `${taskMapping.id}-pass-execution`, action: "iam:PassRole", context: taskMapping.passRoleContext, phase: "apply" }, taskMapping.executionRoleArn, { contextRegistry, conditionKeyOrigins }));
-      required.push(evaluation({ id: `${taskMapping.id}-pass-task`, action: "iam:PassRole", context: taskMapping.passRoleContext, phase: "apply" }, taskMapping.taskRoleArn, { contextRegistry, conditionKeyOrigins }));
+      required.push(evaluation({ id: `${taskMapping.id}-register`, action: "ecs:RegisterTaskDefinition", context: registerContext, phase: "apply" }, taskMapping.resource, { contextRegistry }));
+      required.push(evaluation({ id: `${taskMapping.id}-tag`, action: "ecs:TagResource", context: taskDefinitionTagContext(registerContext), phase: "apply" }, taskMapping.resource, { contextRegistry }));
+      required.push(evaluation({ id: `${taskMapping.id}-pass-execution`, action: "iam:PassRole", context: taskMapping.passRoleContext, phase: "apply" }, taskMapping.executionRoleArn, { contextRegistry }));
+      required.push(evaluation({ id: `${taskMapping.id}-pass-task`, action: "iam:PassRole", context: taskMapping.passRoleContext, phase: "apply" }, taskMapping.taskRoleArn, { contextRegistry }));
       coveredChanges.add(change.address);
       continue;
     }
@@ -645,13 +649,13 @@ export function deriveRequiredEvaluations(plan, manifest, { contextRegistry = RE
     coveredChanges.add(change.address);
     for (const entry of matches) {
       matchedPlanEntries.add(entry.id);
-      for (const resource of entry.resources) required.push(evaluation(entry, resource, { contextRegistry, conditionKeyOrigins }));
+      for (const resource of entry.resources) required.push(evaluation(entry, resource, { contextRegistry }));
     }
   }
   for (const entry of manifest.required.filter((candidate) => candidate.plan?.coverageRequired)) {
     if (!matchedPlanEntries.has(entry.id)) throw new Error(`Permission manifest mapping has no matching plan change: ${entry.id}.`);
   }
-  const forbidden = manifest.forbidden.flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource, { forbidden: true, contextRegistry, conditionKeyOrigins })));
+  const forbidden = manifest.forbidden.flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource, { forbidden: true, contextRegistry })));
   return {
     required: required.sort((left, right) => left.id.localeCompare(right.id)),
     forbidden: forbidden.sort((left, right) => left.id.localeCompare(right.id)),
@@ -660,7 +664,7 @@ export function deriveRequiredEvaluations(plan, manifest, { contextRegistry = RE
 }
 
 export function assertSimulationContextCardinality(context) {
-  const scalarTypes = new Set(["string", "boolean", "numeric"]);
+  const scalarTypes = new Set(["string", "boolean", "numeric", "date", "ip", "binary"]);
   for (const { key, type, values } of context) {
     if (scalarTypes.has(type) && values.length !== 1) throw new Error(`IAM simulation scalar context ${key} of type ${type} must contain exactly one value.`);
   }

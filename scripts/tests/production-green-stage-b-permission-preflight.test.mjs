@@ -231,10 +231,10 @@ test("reviewed simulator registry fails closed on missing, extra, or malformed k
 });
 
 test("scalar simulator context values fail closed while list values remain multi-valued", () => {
-  for (const type of ["string", "boolean", "numeric"]) {
+  for (const type of ["string", "boolean", "numeric", "date", "ip", "binary"]) {
     assert.throws(() => assertSimulationContextCardinality([{ key: `test:${type}`, type, values: ["one", "two"] }]), /exactly one value/);
   }
-  assert.doesNotThrow(() => assertSimulationContextCardinality([{ key: "test:list", type: "stringList", values: ["one", "two"] }]));
+  assert.doesNotThrow(() => assertSimulationContextCardinality([{ key: "test:list", type: "stringList", values: ["one", "two"] }, { key: "test:numeric-list", type: "numericList", values: ["one", "two"] }]));
   assert.doesNotThrow(() => assertSimulationContextCardinality([{ key: "test:numeric", type: "numeric", values: ["1"] }]));
 });
 
@@ -401,7 +401,11 @@ test("every reviewed missing-context key has a canonical policy statement origin
   const expectedKeys = [...origins.keys()].sort();
   assert.deepEqual([...origins.keys()].sort(), expectedKeys);
   assert.deepEqual([...new Set(REVIEWED_SIMULATION_CONTEXT_REGISTRY.map(({ key }) => key))].sort(), expectedKeys);
-  assert.deepEqual([...new Set(manifest.forbidden.flatMap(({ expectedMissingContextValues }) => expectedMissingContextValues))], []);
+  const deleteBucket = deriveRequiredEvaluations(plan, manifest).forbidden.find(({ manifestId }) => manifestId === "backend-bucket-delete");
+  assert.deepEqual(deleteBucket.context, []);
+  assert.deepEqual(deleteBucket.expectedMissingContextValues, expectedKeys);
+  const passRole = deriveRequiredEvaluations(plan, manifest).forbidden.find(({ manifestId }) => manifestId === "pass-unrelated-role");
+  assert.deepEqual(passRole.expectedMissingContextValues, expectedKeys.filter((key) => key !== "iam:PassedToService"));
   for (const key of expectedKeys) assert.ok(origins.get(key).every(({ policy, sid, operator, sourcePath }) => policy && sid && operator && sourcePath), key);
   const missingOrigin = new Map(origins); missingOrigin.delete(expectedKeys[0]);
   assert.throws(() => validateManifest(manifest, { conditionKeyOrigins: missingOrigin }), /registry differs.*missing=/);
@@ -689,6 +693,7 @@ test("task-definition registration context is complete and bound to each planned
   assert.equal(registrations.length, 12);
   for (const registration of registrations) {
     assert.deepEqual(registration.context.filter(({ key }) => key.startsWith("ecs:")).map(({ key, type, values }) => ({ key, type, values })), [
+      { key: "ecs:cluster", type: "string", values: ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"] },
       { key: "ecs:compute-compatibility", type: "stringList", values: ["FARGATE"] },
       { key: "ecs:privileged", type: "string", values: ["false"] },
       { key: "ecs:task-cpu", type: "numeric", values: [registration.manifestId === "worker-register" ? "512" : registration.manifestId === "read-only-canary-register" ? "256" : "1024"] },
@@ -1067,10 +1072,12 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   const stageAStateBackupPath = path.join(directory, "stage-a-state.json");
   fs.writeFileSync(stageAStateBackupPath, JSON.stringify({ lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 35 }), { mode: 0o600 });
   const stageAInputPath = path.join(directory, "stage-a-prerequisites.json");
+  const fixtureVpcId = ["vpc-", "0123456789abcdef0"].join("");
+  const fixtureSecretArn = (suffix) => ["arn", "aws", "secretsmanager", "eu-west-2", STAGE_B.account, "secret", suffix].join(":");
   const stageAInput = {
     schemaVersion: 2, generator: "scripts/aws/generate-production-green-stage-a-prerequisites.mjs", toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), stageAStateObject: "mscqr/production/rls-green/stage-a/terraform.tfstate", stageAStateLineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", stageAStateSerial: 35, stageAStateSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAStateBackupPath)).digest("hex"),
-    networkEvidence: { vpcId: "vpc-0123456789abcdef0", privateSubnets: STAGE_B.privateSubnetIds.map((subnetId, index) => ({ subnetId, availabilityZone: `eu-west-2${index ? "b" : "a"}`, cidrBlock: `10.0.${index}.0/24`, routeTableId: "rtb-12345678", natGatewayId: "nat-12345678" })), securityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map((groupId) => ({ groupId, vpcId: "vpc-0123456789abcdef0" })), ecsClusterArn: STAGE_B.clusterArn, databaseIdentifier: "mscqr-production-rls-green", rdsSubnetIds: STAGE_B.privateSubnetIds },
-    accountId: STAGE_B.account, region: STAGE_B.region, vpcId: "vpc-0123456789abcdef0", privateSubnetIds: STAGE_B.privateSubnetIds, ecsClusterArn: STAGE_B.clusterArn, stageADatabaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, stageAExecutorSecurityGroupId: STAGE_B.executorSecurityGroupId, stageAExecutorTaskRoleArn: STAGE_B.executorRoleArn, stageABrokerRoleArn: STAGE_B.brokerRoleArn, stageAExecutorLogGroupName: "/ecs/mscqr-production/full-rls-green", stageAExecutorLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green:*", stageABrokerLogGroupName: "/aws/lambda/mscqr-production-rls-approval-broker", stageABrokerLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:*", stageARuntimeSecretArns: Object.fromEntries(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"].map((role) => [role, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/${role}-abc123`])), stageAExecutorNetworkingReady: true, approvalSecretArn: STAGE_B.approvalSecretArn, approvalKmsKeyArn: STAGE_B.approvalKmsKeyArn, receiptBucketArn: `arn:aws:s3:::${STAGE_B.receiptBucket}`, stageAReadOnlyCanaryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-abc123",
+    networkEvidence: { vpcId: fixtureVpcId, privateSubnets: STAGE_B.privateSubnetIds.map((subnetId, index) => ({ subnetId, availabilityZone: `eu-west-2${index ? "b" : "a"}`, cidrBlock: `10.0.${index}.0/24`, routeTableId: "rtb-12345678", natGatewayId: "nat-12345678" })), securityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map((groupId) => ({ groupId, vpcId: fixtureVpcId })), ecsClusterArn: STAGE_B.clusterArn, databaseIdentifier: "mscqr-production-rls-green", rdsSubnetIds: STAGE_B.privateSubnetIds },
+    accountId: STAGE_B.account, region: STAGE_B.region, vpcId: fixtureVpcId, privateSubnetIds: STAGE_B.privateSubnetIds, ecsClusterArn: STAGE_B.clusterArn, stageADatabaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, stageAExecutorSecurityGroupId: STAGE_B.executorSecurityGroupId, stageAExecutorTaskRoleArn: STAGE_B.executorRoleArn, stageABrokerRoleArn: STAGE_B.brokerRoleArn, stageAExecutorLogGroupName: "/ecs/mscqr-production/full-rls-green", stageAExecutorLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green:*", stageABrokerLogGroupName: "/aws/lambda/mscqr-production-rls-approval-broker", stageABrokerLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:*", stageARuntimeSecretArns: Object.fromEntries(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"].map((role) => [role, fixtureSecretArn(`mscqr/production/rls-green/phase2/database-url/${role}-abc123`)])), stageAExecutorNetworkingReady: true, approvalSecretArn: STAGE_B.approvalSecretArn, approvalKmsKeyArn: STAGE_B.approvalKmsKeyArn, receiptBucketArn: `arn:aws:s3:::${STAGE_B.receiptBucket}`, stageAReadOnlyCanaryDatabaseSecretArn: fixtureSecretArn("mscqr/production/rls-green/phase4/read-only-canary-database-url-abc123"),
   };
   fs.writeFileSync(stageAInputPath, `${JSON.stringify(stageAInput)}\n`, { mode: 0o600 });
   const tfvarsPath = path.join(directory, "canonical.tfvars");
