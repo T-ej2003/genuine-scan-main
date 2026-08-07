@@ -85,12 +85,17 @@ substitution, whitespace rewrite, partial pair, or temporary-file residue fails 
 
 ## Simulator context registry
 
-The administrator permission producer supplies a complete, source-controlled simulator
-context registry. Its keys are the union of condition keys found in the reviewed Stage B
-policy sources, and every key has an explicit type and reviewed value. Operation-specific
-manifest context is merged over the global registry only where the operation requires a
-more specific value; unknown keys, wildcard values, missing registry entries, and
-duplicate entries fail before `SimulatePrincipalPolicy` is called.
+The administrator permission producer keeps a complete, source-controlled simulator
+context-key registry whose keys are the union of condition keys found in the reviewed
+Stage B policy sources. The registry may contain reviewed candidate values for a key used
+by several resource families, but a scalar candidate is never serialized as a multi-value
+request entry. Operation-specific manifest context supplies the exact scalar for the
+request when one exists; otherwise a multi-candidate scalar remains unbound and AWS
+MissingContextValues is enforced rather than guessed. Forbidden evaluations use their
+manifest context unchanged and retain the captured policy-wide FULL-14/PASSROLE-13
+MissingContextValues sets. Unknown keys, wildcard values, missing registry entries,
+duplicate entries, and invalid scalar cardinality fail before `SimulatePrincipalPolicy`
+is called.
 
 `iam:GetContextKeysForPrincipalPolicy` is an optional discovery-only completeness check.
 It may return required key names, but it never supplies or synthesizes values. The
