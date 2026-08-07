@@ -8,8 +8,8 @@ Use this checklist for production releases. It aligns with Release Train, the De
 - [ ] Environment-specific configuration updated (no credential changes in code).
 - [ ] `.github/workflows` deployment controls are committed and enabled in remote repository.
 - [ ] Normal production deployment is started from `Release Train`, not direct `Release Gate`.
-- [ ] `Release Candidate Gate / rc-trust-critical` passed on the release candidate branch.
-- [ ] `Release Candidate Gate / rc-staging-smoke` passed against staging.
+- [ ] `rc-trust-critical` passed on the release candidate branch.
+- [ ] `rc-staging-smoke` passed against staging.
 - [ ] `main` branch protection requires both Release Candidate Gate checks before merge.
 - [ ] `release-checklist-artifact` JSON uploaded and reviewed.
 

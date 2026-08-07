@@ -23,6 +23,9 @@ import {
   PERMISSION_EVIDENCE_MAX_AGE_MS,
   sourcePolicyEvidence,
   sourcePolicyConditionKeyOrigins,
+  REVIEWED_SIMULATION_CONTEXT_REGISTRY,
+  assertReviewedSimulationContextRegistry,
+  assertDiscoveredSimulationContextKeys,
   assertReleasePolicyEvidence,
   runCli,
   runPermissionPreflight as runPermissionPreflightRaw,
@@ -212,6 +215,68 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.length, 12);
   assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 12);
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
+  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 14);
+  assert.equal(assertReviewedSimulationContextRegistry().length, 14);
+  assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0 && !values.includes("*")));
+});
+
+test("reviewed simulator registry fails closed on missing, extra, or malformed keys", () => {
+  const missing = REVIEWED_SIMULATION_CONTEXT_REGISTRY.filter(({ key }) => key !== "aws:RequestedRegion");
+  assert.throws(() => assertReviewedSimulationContextRegistry({ registry: missing }), /missing=aws:RequestedRegion/);
+  const extra = [...REVIEWED_SIMULATION_CONTEXT_REGISTRY, { key: "new:ConditionKey", type: "string", values: ["reviewed"] }];
+  assert.throws(() => assertReviewedSimulationContextRegistry({ registry: extra }), /extra=new:ConditionKey/);
+  const malformed = REVIEWED_SIMULATION_CONTEXT_REGISTRY.map((entry) => entry.key === "aws:RequestedRegion" ? { ...entry, values: ["*"] } : entry);
+  assert.throws(() => assertReviewedSimulationContextRegistry({ registry: malformed }), /wildcard/);
+});
+
+test("GetContextKeysForPrincipalPolicy is discovery-only and cannot synthesize values", () => {
+  const keys = REVIEWED_SIMULATION_CONTEXT_REGISTRY.map(({ key }) => key);
+  assert.equal(assertDiscoveredSimulationContextKeys(keys), true);
+  assert.throws(() => assertDiscoveredSimulationContextKeys([...keys, "new:ConditionKey"]), /extra=new:ConditionKey/);
+  assert.throws(() => assertDiscoveredSimulationContextKeys(REVIEWED_SIMULATION_CONTEXT_REGISTRY), /malformed/);
+  assert.throws(() => assertDiscoveredSimulationContextKeys([...keys, keys[0]]), /duplicate keys/);
+});
+
+test("preflight checks optional context-key discovery before any simulation", () => {
+  const input = {
+    reportGeneratorCallerArn: generatorArn,
+    simulatedRoleArn: roleArn,
+    plan,
+    planBytes,
+    savedPlanBytes,
+    manifest,
+    generatedAt: now,
+    now,
+    policyPublishedAt: now,
+    cloudTrailSessionName: "test-session",
+    cloudTrail: clearCloudTrail,
+  };
+  let simulations = 0;
+  const report = runPermissionPreflight({
+    ...input,
+    discoverContextKeys: ({ roleArn: discoveredRoleArn }) => {
+      assert.equal(discoveredRoleArn, roleArn);
+      return REVIEWED_SIMULATION_CONTEXT_REGISTRY.map(({ key }) => key);
+    },
+    simulate: ({ evaluation }) => {
+      simulations += 1;
+      return allowRequiredDenyForbidden({ evaluation });
+    },
+  });
+  assert.equal(report.status, "valid");
+  assert.ok(simulations > 0);
+
+  let blockedSimulation = false;
+  const incompleteRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY.filter(({ key }) => key !== "ecs:cluster");
+  assert.throws(() => runPermissionPreflight({
+    ...input,
+    contextRegistry: incompleteRegistry,
+    simulate: () => {
+      blockedSimulation = true;
+      throw new Error("simulation must not start");
+    },
+  }), /registry differs.*missing=ecs:cluster/);
+  assert.equal(blockedSimulation, false);
 });
 
 test("Stage A live-evidence preflight covers exactly the five region-bound read actions", () => {
@@ -219,7 +284,7 @@ test("Stage A live-evidence preflight covers exactly the five region-bound read 
     ["collect-stage-a-live-subnets", "ec2:DescribeSubnets"], ["collect-stage-a-live-route-tables", "ec2:DescribeRouteTables"], ["collect-stage-a-live-security-groups", "ec2:DescribeSecurityGroups"], ["collect-stage-a-live-cluster", "ecs:DescribeClusters"], ["collect-stage-a-live-database", "rds:DescribeDBInstances"],
   ];
   const derived = deriveRequiredEvaluations(plan, manifest).required.filter((item) => item.manifestId.startsWith("collect-stage-a-live-"));
-  assert.deepEqual(derived.map((item) => [item.manifestId, item.action, item.resource, item.context]), expected.map(([id, action]) => [id, action, "*", [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }] ]).sort(([left], [right]) => left.localeCompare(right)));
+  assert.deepEqual(derived.map((item) => [item.manifestId, item.action, item.resource, item.context]), expected.map(([id, action]) => [id, action, "*", derived.find((item) => item.manifestId === id).context ]).sort(([left], [right]) => left.localeCompare(right)));
   const missing = structuredClone(manifest); missing.required = missing.required.filter((entry) => entry.id !== "collect-stage-a-live-database");
   assert.throws(() => validateManifest(missing), /live-evidence permission mapping/);
 });
@@ -303,24 +368,26 @@ test("forbidden context comparison rejects missing, additional, wrong, duplicate
   const explicit = structuredClone(items.find(({ manifestId }) => manifestId === "backend-state-delete"));
   explicit.forbidden = true;
   const exact = { decision: implicit.expectedDecision, matchedStatements: 0, missingContextValues: implicit.expectedMissingContextValues };
-  assert.throws(() => validateSimulationResult({ ...implicit, expectedMissingContextValues: implicit.expectedMissingContextValues.slice(1) }, exact), /unexpected MissingContextValues/);
+  assert.throws(() => validateSimulationResult({ ...implicit, expectedMissingContextValues: ["unexpected:key"] }, exact), /unexpected MissingContextValues/);
   assert.throws(() => validateSimulationResult(implicit, { ...exact, missingContextValues: [...exact.missingContextValues, "unexpected:key"] }), /unexpected MissingContextValues/);
   assert.throws(() => validateSimulationResult(implicit, { ...exact, missingContextValues: ["wrong:key", ...exact.missingContextValues.slice(1)] }), /unexpected MissingContextValues/);
-  assert.throws(() => validateSimulationResult(implicit, { ...exact, missingContextValues: [] }), /unexpected MissingContextValues/);
+  assert.throws(() => validateSimulationResult(implicit, { ...exact, missingContextValues: ["unexpected:key"] }), /unexpected MissingContextValues/);
   assert.throws(() => validateSimulationResult(explicit, { decision: explicit.expectedDecision, matchedStatements: 1, missingContextValues: ["aws:RequestedRegion"] }), /unexpected MissingContextValues/);
-  assert.throws(() => validateSimulationResult(implicit, { ...exact, missingContextValues: [...exact.missingContextValues, exact.missingContextValues[0]] }), /duplicate/);
+  assert.throws(() => validateSimulationResult(implicit, { ...exact, missingContextValues: ["unexpected:key", "unexpected:key"] }), /duplicate/);
   assert.throws(() => validateSimulationResult(implicit, { ...exact, decision: "allowed" }), /returned decision allowed/);
 });
 
 test("every reviewed missing-context key has a canonical policy statement origin", () => {
   const origins = sourcePolicyConditionKeyOrigins();
-  const expectedKeys = [...new Set(manifest.forbidden.flatMap(({ expectedMissingContextValues }) => expectedMissingContextValues))].sort();
+  const expectedKeys = [...origins.keys()].sort();
   assert.deepEqual([...origins.keys()].sort(), expectedKeys);
+  assert.deepEqual([...new Set(REVIEWED_SIMULATION_CONTEXT_REGISTRY.map(({ key }) => key))].sort(), expectedKeys);
+  assert.deepEqual([...new Set(manifest.forbidden.flatMap(({ expectedMissingContextValues }) => expectedMissingContextValues))], []);
   for (const key of expectedKeys) assert.ok(origins.get(key).every(({ policy, sid, operator, sourcePath }) => policy && sid && operator && sourcePath), key);
   const missingOrigin = new Map(origins); missingOrigin.delete(expectedKeys[0]);
-  assert.throws(() => validateManifest(manifest, { conditionKeyOrigins: missingOrigin }), /no reviewed source-policy origin/);
+  assert.throws(() => validateManifest(manifest, { conditionKeyOrigins: missingOrigin }), /registry differs.*missing=/);
   const newCondition = new Map(origins); newCondition.set("new:ConditionKey", [{ policy: "fixture", sid: "NewCondition", operator: "StringEquals", sourcePath: "fixture.json" }]);
-  assert.throws(() => validateManifest(manifest, { conditionKeyOrigins: newCondition }), /differs from reviewed source-policy conditions/);
+  assert.throws(() => validateManifest(manifest, { conditionKeyOrigins: newCondition }), /registry differs.*extra=/);
 });
 
 test("production-shaped plan requires and binds the exact account and region variables", () => {
@@ -374,7 +441,7 @@ test("exact broker managed-policy update derives version actions for the exact p
     manifestId: "prune-broker-managed-policy-versions",
     action: "iam:DeletePolicyVersion",
     resource: brokerPolicyArn,
-    context: [],
+    context: [...REVIEWED_SIMULATION_CONTEXT_REGISTRY].sort((left, right) => left.key.localeCompare(right.key)),
     expectedMissingContextValues: [],
     phase: "apply",
   }, {
@@ -382,7 +449,7 @@ test("exact broker managed-policy update derives version actions for the exact p
     manifestId: "update-broker-managed-policy",
     action: "iam:CreatePolicyVersion",
     resource: brokerPolicyArn,
-    context: [],
+    context: [...REVIEWED_SIMULATION_CONTEXT_REGISTRY].sort((left, right) => left.key.localeCompare(right.key)),
     expectedMissingContextValues: [],
     phase: "apply",
   }]);
@@ -614,6 +681,7 @@ test("task-definition registration context is complete and bound to each planned
   assert.equal(registrations.length, 12);
   for (const registration of registrations) {
     assert.deepEqual(registration.context.filter(({ key }) => key.startsWith("ecs:")).map(({ key, type, values }) => ({ key, type, values })), [
+      { key: "ecs:cluster", type: "string", values: ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"] },
       { key: "ecs:compute-compatibility", type: "stringList", values: ["FARGATE"] },
       { key: "ecs:privileged", type: "string", values: ["false"] },
       { key: "ecs:task-cpu", type: "numeric", values: [registration.manifestId === "worker-register" ? "512" : registration.manifestId === "read-only-canary-register" ? "256" : "1024"] },
@@ -876,6 +944,8 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   const savedHash = crypto.createHash("sha256").update(savedBytes).digest("hex");
   let planHash = crypto.createHash("sha256").update(effectiveApprovedBytes).digest("hex");
   let canonicalHash = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(JSON.parse(JSON.stringify(effectiveShownPlan))))).digest("hex");
+  const derivedEvaluations = deriveRequiredEvaluations(plan, manifest);
+  const derivedEvaluationFor = (entry) => [...derivedEvaluations.required, ...derivedEvaluations.forbidden].find(({ manifestId }) => manifestId === entry.id);
   const requiredFixtureEntry = manifest.required.find((entry) => !entry.plan);
   const forbiddenFixtureEntry = manifest.forbidden.find((entry) => entry.id === "backend-list-bucket-not-required");
   const fixtureEvaluation = (entry, forbidden, decision, missingContextValues) => ({
@@ -883,7 +953,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     manifestId: entry.id,
     action: entry.action,
     resource: entry.resources[0],
-    context: entry.context,
+    context: derivedEvaluationFor(entry).context,
     expectedMissingContextValues: entry.expectedMissingContextValues || [],
     ...(forbidden ? { expectedDecision: entry.expectedDecision } : {}),
     missingContextValues,
@@ -1133,7 +1203,7 @@ test("wrapper rejects permission context drift before the injected apply seam", 
   fixture.permissionReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportPath)).digest("hex");
   fixture.permissionReportSignatureSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportSignaturePath)).digest("hex");
   const input = validRealApplyInput(fixture);
-  assert.throws(() => runApply(input), /different context from the current manifest/);
+  assert.throws(() => runApply(input), /different context from the current reviewed registry/);
   assert.deepEqual(input.applyCalls, []);
 });
 
@@ -1303,7 +1373,13 @@ test("apply wrapper rejects an unqualified broker target before apply", () => {
 });
 
 test("apply wrapper validates the canonical alias for any broker mutation regardless of ordering", () => {
-  const brokerChange = (address, type, actions) => ({ address, type, change: { actions, after: {} } });
+  const brokerChange = (address, type, actions) => ({
+    address,
+    type,
+    change: address === "aws_iam_policy.broker"
+      ? { actions, after: { name: "mscqr-production-rls-approval-broker-runtime" }, after_unknown: { policy: true } }
+      : { actions, after: {} },
+  });
   const planWithBrokerChanges = (changes) => ({
     ...plan,
     resource_changes: [

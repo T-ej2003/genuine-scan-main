@@ -72,7 +72,7 @@ test("production-shaped required and forbidden resources reconcile to the source
   const registrations = evaluations.required.filter(({ action }) => action === "ecs:RegisterTaskDefinition");
   assert.equal(registrations.length, 12);
   assert.equal(registrations.filter(allows).length, 12);
-  assert.deepEqual(registrations.flatMap(({ context }) => context).filter(({ key }) => key.startsWith("ecs:")).map(({ key }) => key).filter((key, index, keys) => keys.indexOf(key) === index).sort(), ["ecs:compute-compatibility", "ecs:privileged", "ecs:task-cpu", "ecs:task-memory"]);
+  assert.deepEqual(registrations.flatMap(({ context }) => context).filter(({ key }) => key.startsWith("ecs:")).map(({ key }) => key).filter((key, index, keys) => keys.indexOf(key) === index).sort(), ["ecs:cluster", "ecs:compute-compatibility", "ecs:privileged", "ecs:task-cpu", "ecs:task-memory"]);
 });
 
 test("IAM condition evaluation fails closed for missing context and unknown operators", () => {

@@ -4,8 +4,8 @@ All items below are required before premium-client launch approval.
 
 ## 1) CI gate evidence
 
-- Green run link for `Release Candidate Gate / rc-trust-critical`
-- Green run link for `Release Candidate Gate / rc-staging-smoke`
+- Green run link for `rc-trust-critical`
+- Green run link for `rc-staging-smoke`
 - `release-checklist-artifact` JSON from the same run
 
 ## 2) Staging smoke evidence
@@ -53,4 +53,3 @@ Documented drill notes with owner and timestamp for:
 - Security sign-off
 - Operations/on-call sign-off
 - Product/CTO release approval
-

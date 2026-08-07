@@ -2,7 +2,7 @@ const repo = String(process.env.GITHUB_REPOSITORY || "").trim();
 const token = String(process.env.GITHUB_TOKEN || "").trim();
 const branch = String(process.env.RELEASE_PROTECTED_BRANCH || "main").trim();
 const requiredChecks = String(
-  process.env.REQUIRED_RELEASE_CHECKS || "Release Candidate Gate / rc-trust-critical,Release Candidate Gate / rc-staging-smoke"
+  process.env.REQUIRED_RELEASE_CHECKS || "rc-trust-critical,rc-staging-smoke"
 )
   .split(",")
   .map((entry) => entry.trim())

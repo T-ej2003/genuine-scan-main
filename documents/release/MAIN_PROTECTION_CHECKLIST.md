@@ -4,8 +4,8 @@ Use this checklist to confirm GitHub is enforcing release-critical checks before
 
 ## Required checks
 
-- `Release Candidate Gate / rc-trust-critical`
-- `Release Candidate Gate / rc-staging-smoke`
+- `rc-trust-critical`
+- `rc-staging-smoke`
 
 ## Click-by-click (GitHub UI)
 
@@ -35,4 +35,3 @@ Expected result JSON includes:
 - `configuredChecks` contains both RC checks.
 
 If `missing` is non-empty, treat as a release blocker.
-

@@ -11,22 +11,7 @@
             "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -40,22 +25,7 @@
             "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -69,22 +39,7 @@
             "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -202,22 +157,7 @@
             "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -231,22 +171,7 @@
             "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/other/terraform.tfstate",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -260,22 +185,7 @@
             "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/other.tfstate",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -315,22 +225,7 @@
             "EvalResourceName": "arn:aws:s3:::unrelated-bucket/state.tfstate",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -344,22 +239,7 @@
             "EvalResourceName": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -373,22 +253,7 @@
             "EvalResourceName": "*",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -402,22 +267,7 @@
             "EvalResourceName": "*",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -431,22 +281,7 @@
             "EvalResourceName": "*",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -460,22 +295,7 @@
             "EvalResourceName": "*",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -489,22 +309,7 @@
             "EvalResourceName": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -518,21 +323,7 @@
             "EvalResourceName": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -546,21 +337,7 @@
             "EvalResourceName": "arn:aws:iam::368992683803:role/mscqr-production-unrelated-role",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
@@ -574,22 +351,7 @@
             "EvalResourceName": "*",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }
