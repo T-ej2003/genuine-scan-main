@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertStageBReferenceAuditFreshness } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertCanonicalTerraformSerial } from "./stage-b-partial-apply-recovery-contract.mjs";
 
 export const STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION = 1;
 export const STAGE_B_PLAN_CAPTURED = "PLAN_CAPTURED";
@@ -43,6 +44,7 @@ function assertPlanHashes(report, hashes) {
 }
 
 export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, refreshReportSha256, recoveryAttestationSha256, hashes, capturedAt, stageBLineage, stageBSerial, terraformVersion, terraformFormatVersion, planExitCode = 0, showExitCode = 0, classification, brokerEvidence = {} }) {
+  assertCanonicalTerraformSerial(stageBSerial, "Stage B serial");
   return {
     schemaVersion: STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION,
     state: STAGE_B_PLAN_CAPTURED,
@@ -70,6 +72,7 @@ export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, r
 }
 
 export function assertStageBPlanCaptureReport(report, { captureReportBytes, hashes, toolingSha, toolingTreeSha256, refreshReportSha256, recoveryAttestationSha256, stageBLineage, stageBSerial } = {}) {
+  assertCanonicalTerraformSerial(report?.stageBSerial, "Stage B plan capture serial");
   if (report?.schemaVersion !== STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION || report.state !== STAGE_B_PLAN_CAPTURED || report.approvedForApply !== false || report.referenceAuditRequired !== true || !STAGE_B_BROKER_OPERATIONS.has(report.brokerOperation) || typeof report.brokerReferenceValidationPending !== "boolean" || typeof report.brokerUpdatePresent !== "boolean" || !Array.isArray(report.brokerActions) || !Array.isArray(report.brokerResourceAddresses)) {
     throw new Error("Stage B plan capture report is missing the PLAN_CAPTURED contract.");
   }

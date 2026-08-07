@@ -25,7 +25,7 @@ export function assertStageAStateIdentity(state, { stateObject = STAGE_A_STATE_O
   if (stateObject !== STAGE_A_STATE_OBJECT) throw new Error(`Stage A state object is wrong: expected ${STAGE_A_STATE_OBJECT}, got ${stateObject}.`);
   if (!state || typeof state !== "object") throw new Error("Stage A state is malformed.");
   if (state.lineage !== STAGE_A_EXPECTED_STATE_LINEAGE) throw new Error(`Stage A state lineage is wrong: expected ${STAGE_A_EXPECTED_STATE_LINEAGE}, got ${state.lineage || "missing"}.`);
-  if (!Number.isInteger(state.serial) || state.serial < STAGE_A_MINIMUM_STATE_SERIAL) throw new Error(`Stage A state serial is stale: minimum ${STAGE_A_MINIMUM_STATE_SERIAL}, got ${Number.isInteger(state.serial) ? state.serial : "missing"}.`);
+  if (!Number.isSafeInteger(state.serial) || state.serial < STAGE_A_MINIMUM_STATE_SERIAL) throw new Error(`Stage A state serial is stale: minimum ${STAGE_A_MINIMUM_STATE_SERIAL}, got ${Number.isSafeInteger(state.serial) ? state.serial : "missing"}.`);
   return state;
 }
 

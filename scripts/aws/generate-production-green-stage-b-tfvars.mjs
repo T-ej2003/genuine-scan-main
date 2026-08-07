@@ -198,7 +198,7 @@ function validateCurrentTaskDefinitionState(resources) {
 export function deriveRetainedDefinitions(state) {
   if (!state || typeof state !== "object" || state.lineage !== STAGE_B_EXPECTED_STATE_LINEAGE) throw new Error(`Stage B state lineage is wrong: expected ${STAGE_B_EXPECTED_STATE_LINEAGE}, got ${state?.lineage || "missing"}.`);
   if (state.workspace && ![STAGE_B_EXPECTED_ENVIRONMENT, "default"].includes(state.workspace)) throw new Error("Terraform state provenance is not production.");
-  if (!Number.isInteger(state.serial) || state.serial < STAGE_B_MINIMUM_STATE_SERIAL) throw new Error(`Stage B state serial is stale: minimum ${STAGE_B_MINIMUM_STATE_SERIAL}, got ${Number.isInteger(state?.serial) ? state.serial : "missing"}.`);
+  if (!Number.isSafeInteger(state.serial) || state.serial < STAGE_B_MINIMUM_STATE_SERIAL) throw new Error(`Stage B state serial is stale: minimum ${STAGE_B_MINIMUM_STATE_SERIAL}, got ${Number.isSafeInteger(state?.serial) ? state.serial : "missing"}.`);
   const resources = state.resources || [];
   validateCurrentTaskDefinitionState(resources);
   const candidates = {};

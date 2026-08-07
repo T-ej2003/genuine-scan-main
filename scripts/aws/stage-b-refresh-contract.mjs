@@ -239,7 +239,7 @@ export function assertStageBRefreshStateBinding({ stateBackupPath, bindingReport
   const bytes = fs.readFileSync(stateBackupPath);
   const state = JSON.parse(bytes);
   if (sha256(bytes) !== bindingReport.stateBackupSha256) throw new Error("Stage B refresh state backup SHA256 does not match the tfvars binding report.");
-  if (state.lineage !== bindingReport.stateLineage || state.serial !== bindingReport.stateSerial) throw new Error("Stage B refresh state identity does not match the tfvars binding report.");
+  if (state.lineage !== bindingReport.stateLineage || !Number.isSafeInteger(state.serial) || !Number.isSafeInteger(bindingReport.stateSerial) || state.serial !== bindingReport.stateSerial) throw new Error("Stage B refresh state identity does not match the tfvars binding report.");
   if (!Array.isArray(state.resources)) throw new Error("Stage B refresh state resources are malformed.");
   return { state, sha256: sha256(bytes) };
 }

@@ -145,6 +145,13 @@ addresses, families, or duplicate mappings fail closed. Valid current addresses 
 excluded from retained history before the mandatory fresh refresh and plan; current
 state is never reused as saved-plan evidence.
 
+Terraform state serials are canonical non-negative safe-integer JSON numbers throughout
+the Stage B evidence chain. CLI text is normalized exactly once at the CLI boundary using
+the strict decimal-integer contract; leading whitespace/zeroes, fractions, exponents,
+partial values, negative values, and unsafe integers fail closed. Attestation,
+classification, plan, approval, closure, verify-only, and apply bindings compare the
+normalized numeric value without coercive equality.
+
 An initial broker Lambda create is validated entirely from the plan and Terraform
 configuration; it has no live reference audit requirement. Every non-no-op broker
 Lambda update requires a fresh, plan-bound reference audit. The
