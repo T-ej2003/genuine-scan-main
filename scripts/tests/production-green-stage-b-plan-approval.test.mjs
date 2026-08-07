@@ -95,6 +95,16 @@ test("approval validation failure after object construction publishes no report"
   assert.deepEqual(fs.readdirSync(parent), []);
 });
 
+test("plan and approval evidence require canonical numeric serials", () => {
+  assert.doesNotThrow(() => createStageBPlanCaptureReport({ ...capture, stageBSerial: Number.MAX_SAFE_INTEGER }));
+  assert.throws(() => createStageBPlanCaptureReport({ ...capture, stageBSerial: "76" }), /serial/);
+  assert.throws(() => createStageBPlanCaptureReport({ ...capture, stageBSerial: -1 }), /serial/);
+  assert.throws(() => createStageBPlanCaptureReport({ ...capture, stageBSerial: 76.5 }), /serial/);
+  assert.throws(() => createStageBPlanCaptureReport({ ...capture, stageBSerial: Number.MAX_SAFE_INTEGER + 1 }), /serial/);
+  assert.throws(() => assertStageBPlanApprovedBinding({ ...approval, stageBSerial: "76" }, { approvalReportBytes: approvalBytes, approvalReportSha256: hash(approvalBytes), savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes }), /serial/);
+  assert.throws(() => assertStageBPlanApprovedBinding({ ...approval, stageBSerial: -1 }, { approvalReportBytes: approvalBytes, approvalReportSha256: hash(approvalBytes), savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes }), /serial/);
+});
+
 test("atomic publication failure removes temporary artifacts and final report", () => {
   const parent = outputDirectory("publication-failure");
   const output = path.join(parent, "approval.json");

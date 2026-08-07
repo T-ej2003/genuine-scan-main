@@ -6,7 +6,7 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
-import { assertCanonicalTerraformSerial, assertRecoveryClassification, classifyRecoveryResidue, STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM, STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN } from "./stage-b-partial-apply-recovery-contract.mjs";
+import { assertRecoveryClassification, classifyRecoveryResidue, parseCanonicalTerraformSerialCliText, STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM, STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN } from "./stage-b-partial-apply-recovery-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -38,7 +38,7 @@ export function runCli(argv = process.argv.slice(2), { verifySignature = kmsVeri
   for (const [filePath, label] of [[refreshPath, "refresh report"], [attestationPath, "recovery attestation"], [signaturePath, "recovery signature"]]) assertStageBPrivateFile({ filePath, repositoryRoot: root, label });
   const refreshBytes = fs.readFileSync(refreshPath); const attestationBytes = fs.readFileSync(attestationPath); const signatureBytes = fs.readFileSync(signaturePath);
   if (sha256(refreshBytes) !== refreshSha || sha256(attestationBytes) !== attestationSha || sha256(signatureBytes) !== signatureSha) throw new Error("Recovery classification input SHA256 mismatch.");
-  const sourceSha = required(argv, "--source-sha"); const lineage = required(argv, "--lineage"); const serial = assertCanonicalTerraformSerial(required(argv, "--serial"), "--serial");
+  const sourceSha = required(argv, "--source-sha"); const lineage = required(argv, "--lineage"); const serial = parseCanonicalTerraformSerialCliText(required(argv, "--serial"), "--serial");
   const result = classifyStageBPartialApplyRecovery({ refreshReport: JSON.parse(refreshBytes), refreshReportSha256: refreshSha, attestation: JSON.parse(attestationBytes), attestationSignature: JSON.parse(signatureBytes), attestationBytes, attestationSignatureBytes: signatureBytes, expected: { protectedSourceSha: sourceSha, terraformLineage: lineage, terraformSerial: serial }, verify: verifySignature, now: new Date() });
   assertRecoveryClassification(result, { refreshReportSha256: refreshSha, recoveryAttestationSha256: attestationSha, expectedSourceSha: sourceSha, expectedLineage: lineage, expectedSerial: serial });
   ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root, create: true });

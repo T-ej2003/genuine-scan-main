@@ -16,6 +16,7 @@ import { assertStageBBrokerPackageManifest } from "./package-production-green-st
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageAStateIdentity, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 
 export const STAGE_B_TFVARS_SCHEMA_VERSION = 1;
 export const STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION = 2;
@@ -198,7 +199,8 @@ function validateCurrentTaskDefinitionState(resources) {
 export function deriveRetainedDefinitions(state) {
   if (!state || typeof state !== "object" || state.lineage !== STAGE_B_EXPECTED_STATE_LINEAGE) throw new Error(`Stage B state lineage is wrong: expected ${STAGE_B_EXPECTED_STATE_LINEAGE}, got ${state?.lineage || "missing"}.`);
   if (state.workspace && ![STAGE_B_EXPECTED_ENVIRONMENT, "default"].includes(state.workspace)) throw new Error("Terraform state provenance is not production.");
-  if (!Number.isSafeInteger(state.serial) || state.serial < STAGE_B_MINIMUM_STATE_SERIAL) throw new Error(`Stage B state serial is stale: minimum ${STAGE_B_MINIMUM_STATE_SERIAL}, got ${Number.isSafeInteger(state?.serial) ? state.serial : "missing"}.`);
+  assertCanonicalTerraformSerialNumber(state.serial, "Stage B state serial");
+  if (state.serial < STAGE_B_MINIMUM_STATE_SERIAL) throw new Error(`Stage B state serial is stale: minimum ${STAGE_B_MINIMUM_STATE_SERIAL}, got ${state.serial}.`);
   const resources = state.resources || [];
   validateCurrentTaskDefinitionState(resources);
   const candidates = {};
@@ -374,7 +376,8 @@ export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindi
   assertBrokerPackageBinding(tfvarsBytes, report);
   assertStageAPrerequisiteBinding(report);
   for (const [key, expected] of [["toolingSha", expectedToolingSha], ["toolingTreeSha256", expectedToolingTreeSha256], ["imageReleaseSha", expectedImageReleaseSha], ["imageEvidenceCanonicalSha256", expectedImageEvidenceSha256]]) if (expected !== undefined && report[key] !== expected) throw new Error(`Stage B tfvars binding report ${key} does not match the current deployment identity.`);
-  if (report.stateLineage !== STAGE_B_EXPECTED_STATE_LINEAGE || !Number.isInteger(report.stateSerial)) throw new Error("Stage B tfvars binding report state identity is malformed.");
+  assertCanonicalTerraformSerialNumber(report.stateSerial, "Stage B tfvars binding state serial");
+  if (report.stateLineage !== STAGE_B_EXPECTED_STATE_LINEAGE) throw new Error("Stage B tfvars binding report state identity is malformed.");
   const expectedImages = ["backend", "worker", "executor", "canary", "readOnlyCanary"];
   if (JSON.stringify(Object.keys(report.images || {}).sort()) !== JSON.stringify([...expectedImages].sort())) throw new Error("Stage B tfvars binding report does not contain exactly the five image bindings.");
   for (const image of Object.values(report.images)) {

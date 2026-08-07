@@ -24,15 +24,14 @@ const exact = (a, b) => canonicalJson(a) === canonicalJson(b);
 const requiredSha = (value, label) => { if (!/^[a-f0-9]{64}$/.test(value || "")) throw new Error(`${label} must be a SHA256.`); return value; };
 const requiredVersion = (value, label) => { if (!/^[1-9][0-9]*$/.test(String(value || ""))) throw new Error(`${label} must be a positive version.`); return String(value); };
 
-export function assertCanonicalTerraformSerial(value, label = "Terraform serial") {
-  if (typeof value === "number") {
-    if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${label} must be a safe non-negative integer.`);
-    return value;
-  }
+export function assertCanonicalTerraformSerialNumber(value, label = "Terraform serial") {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error(`${label} must be a safe non-negative integer number.`);
+  return value;
+}
+
+export function parseCanonicalTerraformSerialCliText(value, label = "Terraform serial") {
   if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) throw new Error(`${label} must be a canonical decimal integer.`);
-  const serial = Number(value);
-  if (!Number.isSafeInteger(serial)) throw new Error(`${label} must be a safe non-negative integer.`);
-  return serial;
+  return assertCanonicalTerraformSerialNumber(Number(value), label);
 }
 
 export function inventoryHistoricalInput({ name, filePath, trust, required = true } = {}) {
@@ -56,7 +55,7 @@ function assertHistoricalEvidence(value) {
   for (const name of ["savedPlan", "planJson", "logicalPlan", "planApproved", "planBoundPermission", "applyStdout", "applyStderr"]) if (!names.has(name)) throw new Error(`Historical input ${name} is required.`);
   if (!/^[a-f0-9]{40}$/.test(value.protectedSourceSha || "")) throw new Error("Historical protected source SHA is malformed.");
   if (!/^[0-9a-f-]{36}$/i.test(value.terraformLineage || "")) throw new Error("Historical Terraform lineage is malformed.");
-  if (typeof value.preApplySerial !== "number" || assertCanonicalTerraformSerial(value.preApplySerial) !== value.preApplySerial) throw new Error("Historical pre-apply serial is malformed.");
+  assertCanonicalTerraformSerialNumber(value.preApplySerial, "Historical pre-apply serial");
   const mutation = value.failedMutation;
   if (mutation?.terraformAddress !== STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS || mutation.awsService !== "lambda" || mutation.operation !== "UpdateAlias" || mutation.result !== "FAILED" || mutation.failureClass !== "AUTHORIZATION" || mutation.awsErrorClass !== "AccessDeniedException" || !/^[1-9][0-9]*$/.test(String(mutation.attemptedTargetVersion || ""))) throw new Error("Historical failed UpdateAlias evidence is missing or unsupported.");
   return value;
@@ -65,7 +64,7 @@ function assertHistoricalEvidence(value) {
 function assertCurrentEvidence(value) {
   if (!value || typeof value !== "object") throw new Error("Current recovery evidence is malformed.");
   for (const [name, pattern] of [["protectedSourceSha", /^[a-f0-9]{40}$/], ["terraformLineage", /^[0-9a-f-]{36}$/i], ["refreshReportSha256", /^[a-f0-9]{64}$/]]) if (!pattern.test(String(value[name] || ""))) throw new Error(`Current ${name} is malformed.`);
-  if (typeof value.terraformSerial !== "number" || assertCanonicalTerraformSerial(value.terraformSerial) !== value.terraformSerial) throw new Error("Current Terraform serial must be a canonical number.");
+  assertCanonicalTerraformSerialNumber(value.terraformSerial, "Current Terraform serial");
   if (value.terraformAddress !== STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS || value.resourceMode !== "managed" || value.resourceModule !== null || value.resourceType !== "aws_lambda_alias" || value.resourceName !== "reviewed") throw new Error("Current recovery resource identity is not the exact root-managed alias.");
   if (value.functionName !== "mscqr-production-rls-approval-broker" || value.aliasName !== "reviewed") throw new Error("Current recovery Lambda identity is invalid.");
   for (const name of ["stateVersion", "configuredDesiredVersion", "liveVersion"]) requiredVersion(value[name], `Current ${name}`);
@@ -89,7 +88,7 @@ export function assertRecoveryAttestation(report, { expected = {}, now = new Dat
   if (report?.schemaVersion !== STAGE_B_PARTIAL_APPLY_RECOVERY_SCHEMA_VERSION || report.evidenceKind !== STAGE_B_PARTIAL_APPLY_RECOVERY_EVIDENCE_KIND || report.producerCallerArn !== STAGE_B_PARTIAL_APPLY_RECOVERY_CALLER) throw new Error("Recovery attestation identity/schema is invalid.");
   assertStageBDeploymentEvidenceFreshness(report.generatedAt, { now, evidenceType: "Recovery attestation" });
   const current = assertCurrentEvidence(report.currentObservedEvidence); assertHistoricalEvidence(report.historicalObservedEvidence);
-  const expectedSerial = expected.terraformSerial === undefined ? undefined : assertCanonicalTerraformSerial(expected.terraformSerial, "Expected Terraform serial");
+  const expectedSerial = expected.terraformSerial === undefined ? undefined : assertCanonicalTerraformSerialNumber(expected.terraformSerial, "Expected Terraform serial");
   for (const [field, value] of Object.entries(expected)) if (value !== undefined && current[field] !== (field === "terraformSerial" ? expectedSerial : value)) throw new Error(`Recovery attestation ${field} binding mismatch.`);
   return current;
 }
@@ -124,8 +123,8 @@ export function classifyRecoveryResidue({ refreshReport, refreshReportSha256, at
 }
 
 export function assertRecoveryClassification(classification, { refreshReportSha256, recoveryAttestationSha256, expectedSourceSha, expectedLineage, expectedSerial } = {}) {
-  const expected = assertCanonicalTerraformSerial(expectedSerial, "Expected Terraform serial");
-  if (!classification || classification.schemaVersion !== 1 || classification.status !== STAGE_B_PARTIAL_APPLY_RECOVERY_REFRESH_STATUS || classification.deployablePlan !== false || Object.hasOwn(classification, "attestationVerified") || !/^[a-f0-9]{40}$/.test(classification.sourceSha || "") || !/^[a-f0-9]{64}$/.test(classification.refreshReportSha256 || "") || !/^[a-f0-9]{64}$/.test(classification.recoveryAttestationSha256 || "") || classification.refreshReportSha256 !== refreshReportSha256 || classification.recoveryAttestationSha256 !== recoveryAttestationSha256 || classification.sourceSha !== expectedSourceSha || classification.resource?.address !== STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS || classification.state?.lineage !== expectedLineage || typeof classification.state?.serial !== "number" || assertCanonicalTerraformSerial(classification.state.serial) !== classification.state.serial || classification.state.serial !== expected) throw new Error("Stage B recovery classification binding is invalid.");
+  const expected = assertCanonicalTerraformSerialNumber(expectedSerial, "Expected Terraform serial");
+  if (!classification || classification.schemaVersion !== 1 || classification.status !== STAGE_B_PARTIAL_APPLY_RECOVERY_REFRESH_STATUS || classification.deployablePlan !== false || Object.hasOwn(classification, "attestationVerified") || !/^[a-f0-9]{40}$/.test(classification.sourceSha || "") || !/^[a-f0-9]{64}$/.test(classification.refreshReportSha256 || "") || !/^[a-f0-9]{64}$/.test(classification.recoveryAttestationSha256 || "") || classification.refreshReportSha256 !== refreshReportSha256 || classification.recoveryAttestationSha256 !== recoveryAttestationSha256 || classification.sourceSha !== expectedSourceSha || classification.resource?.address !== STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS || classification.state?.lineage !== expectedLineage || classification.state?.serial !== expected) throw new Error("Stage B recovery classification binding is invalid.");
   return true;
 }
 
@@ -140,7 +139,7 @@ export function verifyStageBRecoverySignatureWithKms({ digest, signature } = {})
 }
 
 export function assertVerifiedStageBRecovery({ refreshReport, refreshReportBytes, refreshReportSha256, classification, classificationBytes, classificationSha256, attestation, attestationBytes, attestationSha256, signature, signatureBytes, signatureSha256, expectedSourceSha, expectedLineage, expectedSerial, now = new Date(), verifySignature = verifyStageBRecoverySignatureWithKms } = {}) {
-  const canonicalExpectedSerial = assertCanonicalTerraformSerial(expectedSerial, "Expected Terraform serial");
+  const canonicalExpectedSerial = assertCanonicalTerraformSerialNumber(expectedSerial, "Expected Terraform serial");
   for (const [label, bytes, expectedSha] of [["refresh report", refreshReportBytes, refreshReportSha256], ["recovery classification", classificationBytes, classificationSha256], ["recovery attestation", attestationBytes, attestationSha256], ["recovery signature", signatureBytes, signatureSha256]]) {
     if (!Buffer.isBuffer(bytes) || sha256(bytes) !== expectedSha) throw new Error(`Stage B ${label} bytes do not match their approved SHA256.`);
   }

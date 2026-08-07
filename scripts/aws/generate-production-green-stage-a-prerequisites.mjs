@@ -5,6 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
 export const STAGE_A_PREREQUISITES_GENERATOR = "scripts/aws/generate-production-green-stage-a-prerequisites.mjs";
@@ -25,7 +26,8 @@ export function assertStageAStateIdentity(state, { stateObject = STAGE_A_STATE_O
   if (stateObject !== STAGE_A_STATE_OBJECT) throw new Error(`Stage A state object is wrong: expected ${STAGE_A_STATE_OBJECT}, got ${stateObject}.`);
   if (!state || typeof state !== "object") throw new Error("Stage A state is malformed.");
   if (state.lineage !== STAGE_A_EXPECTED_STATE_LINEAGE) throw new Error(`Stage A state lineage is wrong: expected ${STAGE_A_EXPECTED_STATE_LINEAGE}, got ${state.lineage || "missing"}.`);
-  if (!Number.isSafeInteger(state.serial) || state.serial < STAGE_A_MINIMUM_STATE_SERIAL) throw new Error(`Stage A state serial is stale: minimum ${STAGE_A_MINIMUM_STATE_SERIAL}, got ${Number.isSafeInteger(state.serial) ? state.serial : "missing"}.`);
+  assertCanonicalTerraformSerialNumber(state.serial, "Stage A state serial");
+  if (state.serial < STAGE_A_MINIMUM_STATE_SERIAL) throw new Error(`Stage A state serial is stale: minimum ${STAGE_A_MINIMUM_STATE_SERIAL}, got ${state.serial}.`);
   return state;
 }
 

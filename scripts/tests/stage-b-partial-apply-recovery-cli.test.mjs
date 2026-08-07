@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { assertCanonicalTerraformSerial, createRecoveryAttestation, signRecoveryAttestation } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
+import { parseCanonicalTerraformSerialCliText, createRecoveryAttestation, signRecoveryAttestation } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
 import { runCli } from "../aws/classify-stage-b-partial-apply-recovery.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
@@ -67,5 +67,5 @@ test("executable CLI accepts numeric state serial supplied as text and rejects m
     assert.notEqual(result.status, 0, `serial ${JSON.stringify(serial)} unexpectedly accepted`);
     assert.equal(fs.existsSync(output), false);
   }
-  assert.equal(assertCanonicalTerraformSerial("78"), 78);
+  assert.equal(parseCanonicalTerraformSerialCliText("78"), 78);
 });
