@@ -43,8 +43,8 @@ function stateFixture(overrides = {}) {
   const candidates = ["backend", "worker", "canary"].map((kind) => ({ index_key: `60b782b-${kind}`, attributes: taskAttributes(kind === "canary" ? "mscqr-production-full-rls-green-application-canary" : `mscqr-production-rls-green-${kind}-candidate`) }));
   const modes = ["admin-bootstrap", "admin-ownership", "capability-preflight", "role-provision", "role-verify", "rollback", "runtime-policy", "verification"].map((mode) => ({ index_key: `60b782b-full-rls-${mode}`, attributes: taskAttributes(`mscqr-production-full-rls-green-full-rls-${mode}`) }));
   return { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 76, resources: [
-    { type: "aws_ecs_task_definition", name: "candidate_retained", instances: candidates },
-    { type: "aws_ecs_task_definition", name: "executor_retained", instances: modes },
+    { mode: "managed", type: "aws_ecs_task_definition", name: "candidate_retained", instances: candidates },
+    { mode: "managed", type: "aws_ecs_task_definition", name: "executor_retained", instances: modes },
     { type: "aws_iam_policy", name: "broker", instances: [{ attributes: { arn: STAGE_B_BROKER_POLICY.arn } }] },
     { type: "aws_iam_role_policy_attachment", name: "broker", instances: [{ attributes: { policy_arn: STAGE_B_BROKER_POLICY.arn, role: STAGE_B_BROKER_POLICY.roleName } }] },
   ], ...overrides };
@@ -52,8 +52,8 @@ function stateFixture(overrides = {}) {
 
 function currentTaskDefinitionState() {
   return [
-    { type: "aws_ecs_task_definition", name: "candidate", instances: ["backend", "worker", "canary", "read_only_canary"].map((kind) => ({ index_key: kind, attributes: taskAttributes(kind === "backend" || kind === "worker" ? `mscqr-production-rls-green-${kind}-candidate` : kind === "canary" ? "mscqr-production-full-rls-green-application-canary" : "mscqr-production-full-rls-green-read-only-canary", 4) })) },
-    { type: "aws_ecs_task_definition", name: "executor", instances: ["admin-bootstrap", "admin-ownership", "capability-preflight", "role-provision", "role-verify", "rollback", "runtime-policy", "verification"].map((mode) => ({ index_key: `full-rls-${mode}`, attributes: taskAttributes(`mscqr-production-full-rls-green-full-rls-${mode}`, 4) })) },
+    { mode: "managed", type: "aws_ecs_task_definition", name: "candidate", instances: ["backend", "worker", "canary", "read_only_canary"].map((kind) => ({ index_key: kind, attributes: taskAttributes(kind === "backend" || kind === "worker" ? `mscqr-production-rls-green-${kind}-candidate` : kind === "canary" ? "mscqr-production-full-rls-green-application-canary" : "mscqr-production-full-rls-green-read-only-canary", 4) })) },
+    { mode: "managed", type: "aws_ecs_task_definition", name: "executor", instances: ["admin-bootstrap", "admin-ownership", "capability-preflight", "role-provision", "role-verify", "rollback", "runtime-policy", "verification"].map((mode) => ({ index_key: `full-rls-${mode}`, attributes: taskAttributes(`mscqr-production-full-rls-green-full-rls-${mode}`, 4) })) },
   ];
 }
 
@@ -159,8 +159,36 @@ test("current task-definition family and address mismatches fail closed", () => 
   const state = stateFixture({ resources: [...stateFixture().resources, ...currentTaskDefinitionState()] });
   state.resources.find(({ name }) => name === "candidate").instances[0].attributes.family = "unexpected-family";
   assert.throws(() => deriveRetainedDefinitions(state), /current task-definition family/);
-  const unknown = stateFixture({ resources: [...stateFixture().resources, { type: "aws_ecs_task_definition", name: "legacy", instances: [] }] });
+  const unknown = stateFixture({ resources: [...stateFixture().resources, { mode: "managed", type: "aws_ecs_task_definition", name: "legacy", instances: [] }] });
   assert.throws(() => deriveRetainedDefinitions(unknown), /unexpected Stage B task-definition collection/);
+});
+
+for (const [label, mutate] of [
+  ["data candidate", (state) => { state.resources.find(({ name }) => name === "candidate").mode = "data"; }],
+  ["data executor", (state) => { state.resources.find(({ name }) => name === "executor").mode = "data"; }],
+  ["child-module candidate", (state) => { state.resources.find(({ name }) => name === "candidate").module = "module.foo"; }],
+  ["child-module executor", (state) => { state.resources.find(({ name }) => name === "executor").module = "module.foo"; }],
+  ["child-module retained collection", (state) => { state.resources.find(({ name }) => name === "candidate_retained").module = "module.foo"; }],
+  ["data retained collection", (state) => { state.resources.find(({ name }) => name === "executor_retained").mode = "data"; }],
+  ["missing mode", (state) => { delete state.resources.find(({ name }) => name === "candidate").mode; }],
+  ["malformed mode", (state) => { state.resources.find(({ name }) => name === "executor").mode = "unknown"; }],
+  ["unexpected module", (state) => { state.resources.find(({ name }) => name === "candidate").module = ""; }],
+]) test(`task-definition identity rejects ${label}`, () => {
+  const state = stateFixture({ serial: 78, resources: [...stateFixture().resources, ...currentTaskDefinitionState()] });
+  mutate(state);
+  assert.throws(() => deriveRetainedDefinitions(state), /not a root managed resource/);
+});
+
+test("root managed task-definition with explicit null module remains valid", () => {
+  const state = stateFixture({ serial: 78, resources: [...stateFixture().resources, ...currentTaskDefinitionState()] });
+  for (const resource of state.resources.filter(({ type }) => type === "aws_ecs_task_definition")) resource.module = null;
+  assert.equal(deriveRetainedDefinitions(state).serial, 78);
+});
+
+test("duplicate exact root task-definition address fails closed", () => {
+  const state = stateFixture({ serial: 78, resources: [...stateFixture().resources, ...currentTaskDefinitionState()] });
+  state.resources.push(structuredClone(state.resources.find(({ name }) => name === "candidate")));
+  assert.throws(() => deriveRetainedDefinitions(state), /duplicate current Stage B task-definition address/);
 });
 
 test("current broker ZIP bytes are revalidated at the binding gate", () => {
