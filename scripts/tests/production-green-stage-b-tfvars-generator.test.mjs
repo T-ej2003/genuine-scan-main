@@ -50,6 +50,13 @@ function stateFixture(overrides = {}) {
   ], ...overrides };
 }
 
+function currentTaskDefinitionState() {
+  return [
+    { type: "aws_ecs_task_definition", name: "candidate", instances: ["backend", "worker", "canary", "read_only_canary"].map((kind) => ({ index_key: kind, attributes: taskAttributes(kind === "backend" || kind === "worker" ? `mscqr-production-rls-green-${kind}-candidate` : kind === "canary" ? "mscqr-production-full-rls-green-application-canary" : "mscqr-production-full-rls-green-read-only-canary", 4) })) },
+    { type: "aws_ecs_task_definition", name: "executor", instances: ["admin-bootstrap", "admin-ownership", "capability-preflight", "role-provision", "role-verify", "rollback", "runtime-policy", "verification"].map((mode) => ({ index_key: `full-rls-${mode}`, attributes: taskAttributes(`mscqr-production-full-rls-green-full-rls-${mode}`, 4) })) },
+  ];
+}
+
 const stageA = { schemaVersion: 2, generator: "scripts/aws/generate-production-green-stage-a-prerequisites.mjs", toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: STAGE_A_EXPECTED_STATE_LINEAGE, stageAStateSerial: STAGE_A_MINIMUM_STATE_SERIAL, stageAStateSha256: "0".repeat(64), networkEvidence: { vpcId: "vpc-0123456789abcdef0", privateSubnets: [...STAGE_B.privateSubnetIds].map((subnetId, index) => ({ subnetId, availabilityZone: `eu-west-2${index ? "b" : "a"}`, cidrBlock: `10.0.${index}.0/24`, routeTableId: `rtb-${String(index + 1).repeat(8)}`, natGatewayId: `nat-${String(index + 1).repeat(8)}` })), securityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map((groupId) => ({ groupId, vpcId: "vpc-0123456789abcdef0" })), ecsClusterArn: STAGE_B.clusterArn, databaseIdentifier: "mscqr-production-rls-green", rdsSubnetIds: [...STAGE_B.privateSubnetIds] }, accountId: STAGE_B.account, region: STAGE_B.region, vpcId: "vpc-0123456789abcdef0", privateSubnetIds: [...STAGE_B.privateSubnetIds], ecsClusterArn: STAGE_B.clusterArn, stageADatabaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, stageAExecutorSecurityGroupId: STAGE_B.executorSecurityGroupId, stageAExecutorTaskRoleArn: STAGE_B.executorRoleArn, stageABrokerRoleArn: STAGE_B.brokerRoleArn, stageAExecutorLogGroupName: "/ecs/mscqr-production/full-rls-green", stageAExecutorLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green:*", stageABrokerLogGroupName: "/aws/lambda/mscqr-production-rls-approval-broker", stageABrokerLogGroupArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:*", stageARuntimeSecretArns: Object.fromEntries(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"].map((role) => [role, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/${role}-abc123`])), stageAExecutorNetworkingReady: true, approvalSecretArn: STAGE_B.approvalSecretArn, approvalKmsKeyArn: STAGE_B.approvalKmsKeyArn, receiptBucketArn: `arn:aws:s3:::${STAGE_B.receiptBucket}`, stageAReadOnlyCanaryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-abc123" };
 
 function files() {
@@ -138,6 +145,22 @@ test("retained 12-family state generates valid tfvars", () => {
   fs.writeFileSync(f.state, `${JSON.stringify(state)}\n`);
   const result = generateStageBTfvars(input({ stateBackup: f.state }));
   assert.equal(result.bindingReport.retainedDefinitions.candidate, 4);
+});
+
+test("partial-apply state accepts current candidate and executor addresses", () => {
+  const state = stateFixture({ serial: 78, resources: [...stateFixture().resources, ...currentTaskDefinitionState()] });
+  const result = deriveRetainedDefinitions(state);
+  assert.equal(result.serial, 78);
+  assert.equal(result.counts.candidate, 3);
+  assert.equal(result.counts.executor, 8);
+});
+
+test("current task-definition family and address mismatches fail closed", () => {
+  const state = stateFixture({ resources: [...stateFixture().resources, ...currentTaskDefinitionState()] });
+  state.resources.find(({ name }) => name === "candidate").instances[0].attributes.family = "unexpected-family";
+  assert.throws(() => deriveRetainedDefinitions(state), /current task-definition family/);
+  const unknown = stateFixture({ resources: [...stateFixture().resources, { type: "aws_ecs_task_definition", name: "legacy", instances: [] }] });
+  assert.throws(() => deriveRetainedDefinitions(unknown), /unexpected Stage B task-definition collection/);
 });
 
 test("current broker ZIP bytes are revalidated at the binding gate", () => {

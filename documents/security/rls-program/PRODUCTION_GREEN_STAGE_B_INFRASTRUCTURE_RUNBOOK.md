@@ -136,6 +136,13 @@ families; multiple complete eleven-family generations are valid. After read-only
 exists, each newly rotated generation contains all twelve families, while older
 eleven-family generations remain preserved and valid.
 
+After a partial apply, current source-declared `candidate` and `executor` task-definition
+addresses may already be present in state. Recovery classifies those addresses from the
+source-controlled task-definition registry, validates their exact index and family, and
+excludes them from retained history before the mandatory fresh refresh and plan. Only
+unknown collections, addresses, families, or duplicate mappings fail closed; current
+state is never reused as saved-plan evidence.
+
 An initial broker Lambda create is validated entirely from the plan and Terraform
 configuration; it has no live reference audit requirement. Every non-no-op broker
 Lambda update requires a fresh, plan-bound reference audit. The
