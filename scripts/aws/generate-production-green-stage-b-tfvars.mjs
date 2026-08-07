@@ -163,12 +163,44 @@ function taskDefinitionFamily(kind, category) {
   return STAGE_B_TASK_DEFINITION_FAMILIES[address];
 }
 
+const currentTaskDefinitionCollections = new Set(Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES)
+  .map((address) => /^aws_ecs_task_definition\.([^.]+)\["[^"]+"\]$/.exec(address)?.[1])
+  .filter(Boolean));
+const retainedTaskDefinitionCollections = new Set(["candidate_retained", "executor_retained"]);
+
+function isRootManagedTaskDefinition(resource) {
+  return resource.mode === "managed" && (!Object.hasOwn(resource, "module") || resource.module === null);
+}
+
+function validateCurrentTaskDefinitionState(resources) {
+  const seen = new Set();
+  for (const resource of resources.filter(({ type }) => type === "aws_ecs_task_definition")) {
+    if (!isRootManagedTaskDefinition(resource)) throw new Error(`Terraform state task-definition resource is not a root managed resource: ${resource.name}.`);
+    if (!currentTaskDefinitionCollections.has(resource.name)) {
+      if (retainedTaskDefinitionCollections.has(resource.name)) continue;
+      throw new Error(`Terraform state contains an unexpected Stage B task-definition collection: ${resource.name}.`);
+    }
+    if (!Array.isArray(resource.instances) || resource.instances.length === 0) throw new Error(`Terraform state current task-definition collection is empty or malformed: ${resource.name}.`);
+    for (const instance of resource.instances) {
+      if (typeof instance.index_key !== "string") throw new Error(`Terraform state current task-definition index is malformed: ${resource.name}.`);
+      const address = `aws_ecs_task_definition.${resource.name}["${instance.index_key}"]`;
+      const expectedFamily = STAGE_B_TASK_DEFINITION_FAMILIES[address];
+      if (!expectedFamily) throw new Error(`Terraform state contains an unexpected current Stage B task-definition address: ${address}.`);
+      if (seen.has(address)) throw new Error(`Terraform state contains a duplicate current Stage B task-definition address: ${address}.`);
+      const { definition, arn } = retainedDefinition(instance.attributes, `Current task definition ${address}`);
+      const arnFamily = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):/.exec(arn)?.[1];
+      if (definition.family !== expectedFamily || arnFamily !== expectedFamily) throw new Error(`Terraform state current task-definition family does not match ${address}.`);
+      seen.add(address);
+    }
+  }
+}
+
 export function deriveRetainedDefinitions(state) {
   if (!state || typeof state !== "object" || state.lineage !== STAGE_B_EXPECTED_STATE_LINEAGE) throw new Error(`Stage B state lineage is wrong: expected ${STAGE_B_EXPECTED_STATE_LINEAGE}, got ${state?.lineage || "missing"}.`);
   if (state.workspace && ![STAGE_B_EXPECTED_ENVIRONMENT, "default"].includes(state.workspace)) throw new Error("Terraform state provenance is not production.");
   if (!Number.isInteger(state.serial) || state.serial < STAGE_B_MINIMUM_STATE_SERIAL) throw new Error(`Stage B state serial is stale: minimum ${STAGE_B_MINIMUM_STATE_SERIAL}, got ${Number.isInteger(state?.serial) ? state.serial : "missing"}.`);
   const resources = state.resources || [];
-  if (resources.some((resource) => resource.type === "aws_ecs_task_definition" && ["candidate", "executor"].includes(resource.name))) throw new Error("Terraform state still contains current Stage B task-definition addresses.");
+  validateCurrentTaskDefinitionState(resources);
   const candidates = {};
   const familyRevisions = new Set();
   for (const instance of resourceInstances(state, "aws_ecs_task_definition", "candidate_retained")) {
