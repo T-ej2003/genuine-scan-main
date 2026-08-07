@@ -48,6 +48,35 @@ Record the generated tfvars SHA and binding-report SHA. Closure, plan generation
 
 Refresh-only is available only through `npm run stage-b:refresh-only -- --closure-mode production ...`. It validates the canonical `.tfvars` contract, initialized backend metadata, protected checkout, and `TF_WORKSPACE=default` before running one untargeted refresh-only plan. `--terraform-data-dir` must be an existing private directory, `--backend-metadata` must be its exact `terraform.tfstate` child, and both Terraform subprocesses receive that same directory as `TF_DATA_DIR`. It never accepts an output plan path or Terraform `-out` flag.
 
+## Partial-apply recovery
+
+A failed approved apply can leave Terraform state and configuration ahead of one remote
+mutation. The original refresh report remains immutable and reports `RESOURCE_DRIFT`.
+Only a separately published, administrator-produced
+`STAGE_B_PARTIAL_APPLY_RECOVERY_ATTESTATION` may produce a
+`REVIEWED_PARTIAL_APPLY_RESIDUE` result, and only for its exact root-managed resource,
+lineage, serial, source SHA, refresh SHA, and state/live/configuration values.
+
+This attestation is a retrospective administrator review. Preserved historical apply
+logs remain `RAW_FORENSIC`; signing their hashes later does not claim they were signed
+when the failure occurred. The attestation authorizes neither a plan nor an apply. A
+fresh authoritative plan must independently contain the exact reviewed alias update and
+must bind the attestation through the audit, approval, permission, closure, validator,
+and verify-only chain. Unknown drift remains fatal and the old saved plan is invalid.
+
+Every security-sensitive recovery consumer independently verifies the attestation report
+and signature bytes, their SHA-256 domains, the administrator KMS signature, and the
+exact source, lineage, serial, refresh, and alias bindings; audit and approval stages
+propagate that verified digest through their signed/bound artifacts. The unsigned
+recovery classification is derived/cache evidence only; `attestationVerified` is not
+an authorization signal.
+Pull-request provenance mode never turns recovery inputs into production authorization.
+
+Future apply wrappers should publish a structured signed failure artifact at failure time,
+including source and plan hashes, state identity, failed resource/provider operation,
+target identity, result classification, and stdout/stderr hashes. That forward-looking
+artifact does not change the trust classification of historical logs.
+
 ## Generator input inventory
 
 | Terraform inputs | Authoritative source | Emitted/logged |
