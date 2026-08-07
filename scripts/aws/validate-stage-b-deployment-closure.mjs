@@ -17,6 +17,7 @@ import { assertStageBDeploymentCapabilityGraph } from "./generate-production-gre
 import { assertStageBRefreshEvidence } from "./stage-b-refresh-contract.mjs";
 import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 import { assertStageBPlanApprovedBinding } from "./stage-b-plan-approval-contract.mjs";
+import { assertRecoveryClassification } from "./stage-b-partial-apply-recovery-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -97,7 +98,16 @@ if (mode === "production") {
 if (mode === "production" || tfvarsPath || bindingReportPath) {
   if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256 || !process.env.STAGE_B_TOOLING_TREE_SHA256 || !process.env.STAGE_B_IMAGE_RELEASE_SHA || !process.env.STAGE_B_IMAGE_EVIDENCE_SHA256) throw new Error("Production Stage B closure requires canonical tfvars provenance and complete deployment identity.");
   const bindingReport = assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedImageReleaseSha: process.env.STAGE_B_IMAGE_RELEASE_SHA, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256 });
-  assertStageBRefreshEvidence({ refreshReportPath: process.env.STAGE_B_REFRESH_REPORT_PATH, refreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, bindingReport, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256, expectedStateSha256: bindingReport.stateBackupSha256, ...(backendMetadata ? { expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir } : {}) });
+  const recoveryClassificationPath = process.env.STAGE_B_RECOVERY_CLASSIFICATION_PATH;
+  const recoveryClassificationSha256 = process.env.STAGE_B_RECOVERY_CLASSIFICATION_SHA256;
+  if (approvalReport.recoveryAttestationSha256 && (!recoveryClassificationPath || !/^[a-f0-9]{64}$/.test(recoveryClassificationSha256 || ""))) throw new Error("Recovery closure requires the exact recovery classification binding.");
+  if (recoveryClassificationPath) {
+    assertStageBPrivateFile({ filePath: recoveryClassificationPath, repositoryRoot: root, label: "Stage B recovery classification" });
+    const recoveryBytes = fs.readFileSync(recoveryClassificationPath);
+    if (crypto.createHash("sha256").update(recoveryBytes).digest("hex") !== recoveryClassificationSha256) throw new Error("Recovery classification SHA256 mismatch.");
+    assertRecoveryClassification(JSON.parse(recoveryBytes), { refreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, recoveryAttestationSha256: approvalReport.recoveryAttestationSha256, expectedSourceSha: currentHead, expectedLineage: bindingReport.stateLineage, expectedSerial: bindingReport.stateSerial });
+  }
+  assertStageBRefreshEvidence({ refreshReportPath: process.env.STAGE_B_REFRESH_REPORT_PATH, refreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, bindingReport, bindingReportSha256: process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: process.env.STAGE_B_IMAGE_EVIDENCE_SHA256, expectedStateSha256: bindingReport.stateBackupSha256, allowReviewedResourceDrift: Boolean(recoveryClassificationPath), ...(backendMetadata ? { expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir } : {}) });
   if (mode === "production") assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: process.env.STAGE_B_PLAN_APPROVAL_REPORT_SHA256, savedPlanBytes: fs.readFileSync(process.env.STAGE_B_PLAN_PATH), planJsonBytes: fs.readFileSync(process.env.STAGE_B_PLAN_JSON_PATH), canonicalPlanJsonBytes: fs.readFileSync(process.env.STAGE_B_CANONICAL_PLAN_JSON_PATH), referenceAudit: closureAudit, referenceAuditBytes: closureAuditBytes, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedRefreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial });
 }
 const imageImpactReport = mode === "pull-request" ? JSON.parse(fs.readFileSync(process.env.STAGE_B_IMAGE_IMPACT_REPORT_PATH || path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH), "utf8")) : undefined;

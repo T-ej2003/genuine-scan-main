@@ -332,6 +332,62 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "partial-apply-recovery-attestation",
+      "kind": "file",
+      "producer": "scripts/aws/create-stage-b-partial-apply-recovery-attestation.mjs:produceRecoveryAttestation",
+      "consumers": [
+        "scripts/aws/classify-stage-b-partial-apply-recovery.mjs",
+        "scripts/plan-production-green-stage-b.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "partial-apply-recovery-attestation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "partial-apply-recovery-signature",
+      "kind": "file",
+      "producer": "scripts/aws/create-stage-b-partial-apply-recovery-attestation.mjs:produceRecoveryAttestation",
+      "consumers": [
+        "scripts/aws/classify-stage-b-partial-apply-recovery.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "partial-apply-recovery-signature",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "partial-apply-recovery-classification",
+      "kind": "file",
+      "producer": "scripts/aws/classify-stage-b-partial-apply-recovery.mjs:runCli",
+      "consumers": [
+        "scripts/plan-production-green-stage-b.mjs",
+        "scripts/aws/validate-stage-b-deployment-closure.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "partial-apply-recovery-classification",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "refresh-temporary-plan",
       "kind": "file",
       "producer": "scripts/refresh-production-green-stage-b.mjs:terraform plan -refresh-only",

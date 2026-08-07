@@ -402,6 +402,7 @@ export function generateReferenceAudit({
   reader,
   callerArn,
   terraformConfiguration,
+  recoveryAttestationSha256,
   auditedAt = new Date().toISOString(),
   now = new Date(),
 }) {
@@ -415,6 +416,7 @@ export function generateReferenceAudit({
   classifyStageBPlan(plan, { strict: false, validateActions: false, terraformConfiguration });
   const deploymentIdentity = assertStageBDeploymentIdentity({ plan });
   const planSha = ensurePlanHash(planBytes, planJsonSha256);
+  if (recoveryAttestationSha256 !== undefined && !/^[a-f0-9]{64}$/.test(recoveryAttestationSha256)) throw new Error("Recovery attestation SHA256 is malformed.");
   const {
     rolloverByAddress,
     createOnlyByAddress,
@@ -593,6 +595,7 @@ export function generateReferenceAudit({
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
     planJsonSha256: planSha,
+    ...(recoveryAttestationSha256 ? { recoveryAttestationSha256 } : {}),
   };
 }
 
@@ -618,7 +621,9 @@ export function parseCli(argv) {
   const clusterArn = requireOption(argv, "--cluster-arn");
   const expectedPackageChecksumSha256 = requireOption(argv, "--expected-package-checksum-sha256");
   if (!path.isAbsolute(planJsonPath) || !path.isAbsolute(outputPath)) throw new Error("Plan and output paths must be absolute.");
-  return { planJsonPath, planJsonSha256, outputPath, region, clusterArn, brokerAliasArn: STAGE_B.brokerAliasArn, expectedPackageChecksumSha256, auditedAt: readOption(argv, "--audited-at") || new Date().toISOString() };
+  const recoveryAttestationSha256 = readOption(argv, "--recovery-attestation-sha256");
+  if (recoveryAttestationSha256 !== undefined && !/^[a-f0-9]{64}$/.test(recoveryAttestationSha256)) throw new Error("Recovery attestation SHA256 is malformed.");
+  return { planJsonPath, planJsonSha256, outputPath, region, clusterArn, brokerAliasArn: STAGE_B.brokerAliasArn, expectedPackageChecksumSha256, recoveryAttestationSha256, auditedAt: readOption(argv, "--audited-at") || new Date().toISOString() };
 }
 
 export async function runCli(argv = process.argv.slice(2)) {
