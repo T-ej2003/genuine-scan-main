@@ -48,5 +48,6 @@ export function runCli(argv = process.argv.slice(2), { verifySignature = kmsVeri
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  runCli().then((result) => process.stdout.write(`${JSON.stringify(result)}\n`)).catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
+  try { process.stdout.write(`${JSON.stringify(runCli())}\n`); }
+  catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
 }
