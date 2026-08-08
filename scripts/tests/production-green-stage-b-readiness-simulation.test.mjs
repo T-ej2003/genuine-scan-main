@@ -26,7 +26,9 @@ function rotationChange(address, revision) {
     execution_role_arn: `arn:aws:iam::368992683803:role/${family}-execution`,
     task_role_arn: `arn:aws:iam::368992683803:role/${family}-task`,
     runtime_platform: { operating_system_family: "LINUX", cpu_architecture: "X86_64" },
-    volumes: [],
+    volume: [],
+    ipc_mode: "",
+    pid_mode: "",
     tags: { ManagedBy: "Terraform" },
   };
   const provenance = executor

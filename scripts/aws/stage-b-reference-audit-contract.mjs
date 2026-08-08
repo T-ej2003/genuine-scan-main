@@ -46,7 +46,7 @@ const rotationMutableEnvironment = Object.freeze(new Map([
 ]));
 export const STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS = Object.freeze([
   "family", "network_mode", "requires_compatibilities", "cpu", "memory",
-  "execution_role_arn", "task_role_arn", "runtime_platform", "volumes", "tags",
+  "execution_role_arn", "task_role_arn", "runtime_platform", "volume", "ipc_mode", "pid_mode", "tags",
 ]);
 const rotationStableFields = STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS;
 
@@ -64,6 +64,48 @@ const stableTaskDefinitionValue = (value) => {
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, item]) => [key, stableTaskDefinitionValue(item)]));
 };
+const ecsTaskDefinitionVolumeKeys = new Set([
+  "configure_at_launch", "docker_volume_configuration", "efs_volume_configuration",
+  "fsx_windows_file_server_volume_configuration", "host_path", "name", "s3files_volume_configuration",
+]);
+const ecsTaskDefinitionNestedVolumeKeys = Object.freeze([
+  "docker_volume_configuration", "efs_volume_configuration",
+  "fsx_windows_file_server_volume_configuration", "s3files_volume_configuration",
+]);
+const canonicalizeEcsTaskDefinitionNullableMode = (value, label) => {
+  if (value === null || value === "") return null;
+  throw new Error(`Stage B task-definition ${label} is outside the reviewed empty-provider shape.`);
+};
+
+export function canonicalizeEcsTaskDefinitionVolumes(value) {
+  if (!Array.isArray(value)) throw new Error("Stage B task-definition volume must be an array.");
+  const names = new Set();
+  return value.map((volume, index) => {
+    if (!volume || typeof volume !== "object" || Array.isArray(volume)) throw new Error(`Stage B task-definition volume[${index}] is malformed.`);
+    const unknownKeys = Object.keys(volume).filter((key) => !ecsTaskDefinitionVolumeKeys.has(key));
+    if (unknownKeys.length) throw new Error(`Stage B task-definition volume[${index}] has an unsupported field: ${unknownKeys[0]}.`);
+    if (typeof volume.name !== "string" || volume.name.length === 0 || names.has(volume.name)) throw new Error(`Stage B task-definition volume[${index}] has a missing or duplicate name.`);
+    if (volume.configure_at_launch !== undefined && volume.configure_at_launch !== false) throw new Error(`Stage B task-definition volume[${index}].configure_at_launch is outside the reviewed empty-provider shape.`);
+    if (volume.host_path !== undefined && volume.host_path !== "") throw new Error(`Stage B task-definition volume[${index}].host_path is outside the reviewed empty-provider shape.`);
+    for (const field of ecsTaskDefinitionNestedVolumeKeys) {
+      if (volume[field] !== undefined && (!Array.isArray(volume[field]) || volume[field].length !== 0)) throw new Error(`Stage B task-definition volume[${index}].${field} is outside the reviewed empty-provider shape.`);
+    }
+    names.add(volume.name);
+    return stableTaskDefinitionValue({
+      ...volume,
+      configure_at_launch: volume.configure_at_launch ?? false,
+      host_path: volume.host_path ?? "",
+      ...Object.fromEntries(ecsTaskDefinitionNestedVolumeKeys.map((field) => [field, volume[field] ?? []])),
+    });
+  });
+}
+
+const canonicalTaskDefinitionStableField = (field, value) => {
+  if (field === "volume") return canonicalizeEcsTaskDefinitionVolumes(value);
+  if (field === "ipc_mode" || field === "pid_mode") return canonicalizeEcsTaskDefinitionNullableMode(value, field);
+  return stableTaskDefinitionValue(parsedTaskDefinitionValue(value));
+};
+const rotationContainerEmptyArrayDefaults = Object.freeze(["environment", "mountPoints", "portMappings", "systemControls", "volumesFrom"]);
 const imageVariableForAddress = (address) => {
   const key = /\["([^\"]+)"\]$/.exec(address)?.[1];
   return address.startsWith("aws_ecs_task_definition.executor[") ? "executor_image" : `${key}_image`;
@@ -103,6 +145,7 @@ function assertRotationContainers(beforeValue, afterValue, plan, address, strict
     const normalize = (container) => {
       const copy = structuredClone(container);
       delete copy.image;
+      for (const field of rotationContainerEmptyArrayDefaults) if (copy[field] === undefined || copy[field] === null) copy[field] = [];
       if (Array.isArray(copy.environment)) copy.environment = copy.environment.map((item) => rotationMutableEnvironment.has(item?.name) ? { ...item, value: "<reviewed-provenance>" } : item);
       return stableTaskDefinitionValue(copy);
     };
@@ -126,7 +169,7 @@ export function assertStageBTaskDefinitionRotation(change, plan, { strict = true
   const afterIdentity = after.arn === undefined || after.arn === null ? undefined : currentTaskDefinitionArnPattern.exec(after.arn);
   if (after.arn !== undefined && after.arn !== null && (!afterIdentity || afterIdentity[1] !== expectedFamily)) throw new Error(`Stage B task-definition rotation new identity is invalid: ${address}`);
   for (const field of rotationStableFields) {
-    if (before[field] === undefined || after[field] === undefined || JSON.stringify(stableTaskDefinitionValue(parsedTaskDefinitionValue(before[field]))) !== JSON.stringify(stableTaskDefinitionValue(parsedTaskDefinitionValue(after[field])))) {
+    if ((field !== "volume" && before[field] === undefined) || (field !== "volume" && after[field] === undefined) || JSON.stringify(canonicalTaskDefinitionStableField(field, before[field])) !== JSON.stringify(canonicalTaskDefinitionStableField(field, after[field]))) {
       throw new Error(`Stage B task-definition rotation changes an immutable field: ${address}.${field}`);
     }
   }
@@ -175,14 +218,14 @@ export function assertStageBCurrentTaskDefinitionNoOp(change, plan, retainedArns
 
   const planned = plannedResources(plan?.planned_values?.root_module).find((resource) => resource.address === change.address);
   if (!planned?.values || planned.values.family !== expectedFamily) throw new Error(`Stage B current task-definition no-op planned values are missing: ${change.address}`);
-  for (const field of ["family", "network_mode", "requires_compatibilities", "cpu", "memory", "execution_role_arn", "task_role_arn", "runtime_platform", "volumes", "tags", "container_definitions"]) {
+  for (const field of ["family", "network_mode", "requires_compatibilities", "cpu", "memory", "execution_role_arn", "task_role_arn", "runtime_platform", "volume", "ipc_mode", "pid_mode", "tags", "container_definitions"]) {
     if (before[field] === undefined || after[field] === undefined || planned.values[field] === undefined) {
       throw new Error(`Stage B current task-definition no-op immutable field is missing: ${change.address}.${field}`);
     }
-    if (JSON.stringify(stableTaskDefinitionValue(taskDefinitionValues(before[field]))) !== JSON.stringify(stableTaskDefinitionValue(taskDefinitionValues(after[field])))) {
+    if (JSON.stringify(canonicalTaskDefinitionStableField(field, taskDefinitionValues(before[field]))) !== JSON.stringify(canonicalTaskDefinitionStableField(field, taskDefinitionValues(after[field])))) {
       throw new Error(`Stage B current task-definition no-op immutable field drift: ${change.address}.${field}`);
     }
-    if (JSON.stringify(stableTaskDefinitionValue(taskDefinitionValues(after[field]))) !== JSON.stringify(stableTaskDefinitionValue(taskDefinitionValues(planned.values[field])))) {
+    if (JSON.stringify(canonicalTaskDefinitionStableField(field, taskDefinitionValues(after[field]))) !== JSON.stringify(canonicalTaskDefinitionStableField(field, taskDefinitionValues(planned.values[field])))) {
       throw new Error(`Stage B current task-definition no-op planned value drift: ${change.address}.${field}`);
     }
   }

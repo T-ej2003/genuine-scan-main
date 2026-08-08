@@ -86,7 +86,9 @@ const rotationDefinitionFor = (address, family, index) => {
     execution_role_arn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
     task_role_arn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
     runtime_platform: { operating_system_family: "LINUX", cpu_architecture: "X86_64" },
-    volumes: [],
+    volume: [],
+    ipc_mode: "",
+    pid_mode: "",
     tags: { Environment: "production", ManagedBy: "Terraform", Component: "full-rls-green-stage-b" },
   };
   return {
@@ -340,7 +342,9 @@ function makeBrokerLagRetryFixture(mode = "full-rls-admin-bootstrap") {
     execution_role_arn: `arn:aws:iam::368992683803:role/${key}-execution`,
     task_role_arn: `arn:aws:iam::368992683803:role/${key}-task`,
     runtime_platform: { operating_system_family: "LINUX", cpu_architecture: "X86_64" },
-    volumes: [],
+    volume: [],
+    ipc_mode: "",
+    pid_mode: "",
     tags: { Environment: "production", ManagedBy: "Terraform", Component: "full-rls-green-stage-b" },
     container_definitions: definitions,
     arn: newArnFor(family),
@@ -538,7 +542,9 @@ test("append-only retry records twelve current create/no-op definitions", () => 
         execution_role_arn: "arn:aws:iam::368992683803:role/backend-execution",
         task_role_arn: "arn:aws:iam::368992683803:role/backend-task",
         runtime_platform: { operating_system_family: "LINUX", cpu_architecture: "X86_64" },
-        volumes: [],
+        volume: [],
+        ipc_mode: "",
+        pid_mode: "",
         tags: { Environment: "production", ManagedBy: "Terraform", Component: "full-rls-green-stage-b" },
       };
       change.change.actions = ["no-op"];
