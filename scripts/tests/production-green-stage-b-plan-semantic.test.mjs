@@ -141,7 +141,7 @@ function baselinePlan() {
     after: {
       function_name: "mscqr-production-rls-approval-broker", role: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
       handler: "index.handler", runtime: "nodejs24.x", filename: "/private/tmp/broker.zip", source_code_hash: "baseline-source-code-hash",
-      timeout: 30, publish: true, environment: [{ variables: Object.fromEntries(envNames.map((name) => [name, `baseline-${name}`])) }], tags,
+      timeout: 30, publish: true, environment: [{}], tags,
     },
     after_unknown: { architectures: [true], environment: [{ variables: true }], last_modified: true, qualified_arn: true, qualified_invoke_arn: true, version: true },
     before_sensitive: {}, after_sensitive: { architectures: [true] },
@@ -311,6 +311,26 @@ test("baseline broker profiles reject non-root, unknown, and partial semantic sh
   mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_iam_policy.broker").module = "module.untrusted"; }, /UNCLASSIFIED_RESOURCE_ACTION/);
   mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_iam_policy.broker").mode = "data"; }, /UNCLASSIFIED_RESOURCE_ACTION/);
   mutateBaseline((value) => { value.resource_changes.push(structuredClone(value.resource_changes.find((change) => change.address === "aws_iam_policy.broker"))); }, /UNCLASSIFIED_RESOURCE_ACTION/);
+});
+
+test("initial broker computed environment uses only the reviewed structural placeholder", () => {
+  const mutateBaseline = (mutator, expected = /UNCLASSIFIED/) => {
+    const value = baselinePlan();
+    mutator(value);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(value), expected);
+  };
+  assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(baselinePlan()));
+  const concrete = baselinePlan();
+  const concreteChange = concrete.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change;
+  concreteChange.after.environment = [{ variables: { BROKER_TASK_DEFINITIONS_JSON: "concrete" } }];
+  delete concreteChange.after_unknown.environment;
+  assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(concrete));
+  mutateBaseline((value) => { delete value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after_unknown.environment[0].variables; }, /UNCLASSIFIED_CHANGED_PATH/);
+  mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after_unknown.environment[0].unexpected = true; }, /UNCLASSIFIED_(?:AFTER_UNKNOWN|CHANGED_PATH)/);
+  mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after.environment[0].unexpected = {}; }, /UNCLASSIFIED_CHANGED_PATH/);
+  mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after.environment.push({}); }, /UNCLASSIFIED_CHANGED_PATH/);
+  mutateBaseline((value) => { const change = value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change; change.after.environment = [{ variables: { BROKER_TASK_DEFINITIONS_JSON: "concrete" } }]; }, /UNCLASSIFIED_CHANGED_PATH/);
+  mutateBaseline((value) => { const change = value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change; change.after.environment = [{ variables: {} }]; change.after_unknown.environment = [{ variables: true }]; }, /UNCLASSIFIED_CHANGED_PATH/);
 });
 
 test("semantic census exposes recursive changed, unknown, sensitive and reference paths", () => {

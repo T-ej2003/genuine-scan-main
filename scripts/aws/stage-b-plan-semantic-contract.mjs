@@ -61,6 +61,7 @@ const BROKER_FUNCTION_INITIAL_CHANGED_PATHS = new Set([
   "function_name", "role", "handler", "runtime", "filename", "source_code_hash", "timeout", "publish",
   "environment[0].variables", ...BROKER_INITIAL_TAG_PATHS,
 ]);
+const BROKER_ENVIRONMENT_PLACEHOLDER_PATH = "environment[0]";
 const BROKER_ALIAS_INITIAL_CHANGED_PATHS = new Set(["name", "function_name", "function_version"]);
 const ECS_METADATA_PATHS = new Set(["arn", "arn_without_revision", "enable_fault_injection", "id", "revision"]);
 const ECS_UNKNOWN_PATHS = new Set([...ECS_METADATA_PATHS, "volume[0].configure_at_launch"]);
@@ -219,6 +220,32 @@ function isBrokerInitialCreate(change) {
   return BROKER_ADDRESSES.has(change.address) && exactJson(change.change?.actions, ["create"]);
 }
 
+function assertInitialBrokerEnvironment(change) {
+  if (change.address !== "aws_lambda_function.broker" || !isBrokerInitialCreate(change)) return;
+  if (change.change?.before !== null && change.change?.before !== undefined) {
+    throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.environment`);
+  }
+  const environment = change.change?.after?.environment;
+  const unknownEnvironment = change.change?.after_unknown?.environment;
+  if (!Array.isArray(environment) || environment.length !== 1 || !environment[0] || typeof environment[0] !== "object" || Array.isArray(environment[0])) {
+    throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.environment`);
+  }
+  const environmentKeys = Object.keys(environment[0]);
+  const unknownKeys = Array.isArray(unknownEnvironment) && unknownEnvironment.length === 1 && unknownEnvironment[0] && typeof unknownEnvironment[0] === "object" && !Array.isArray(unknownEnvironment[0])
+    ? Object.keys(unknownEnvironment[0]) : null;
+  const structuralPlaceholder = environmentKeys.length === 0
+    && unknownKeys?.length === 1
+    && unknownKeys[0] === "variables"
+    && unknownEnvironment[0].variables === true;
+  const concreteVariables = environmentKeys.length === 1
+    && environmentKeys[0] === "variables"
+    && environment[0].variables
+    && typeof environment[0].variables === "object"
+    && !Array.isArray(environment[0].variables)
+    && (unknownEnvironment === undefined || (Array.isArray(unknownEnvironment) && unknownEnvironment.length === 1 && unknownEnvironment[0] && Object.keys(unknownEnvironment[0]).length === 0));
+  if (!structuralPlaceholder && !concreteVariables) throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.environment`);
+}
+
 function assertInitialEcsSemanticDomain(change) {
   const after = change.change?.after || {};
   try {
@@ -291,6 +318,10 @@ function classifyChangedPath(change, path) {
   }
   if (change.address === "aws_iam_policy.broker" && BROKER_POLICY_CHANGED_PATHS.has(path)) return "REVIEWED_CONCRETE_CHANGE";
   if (change.address === "aws_lambda_function.broker" && isBrokerInitialCreate(change)) {
+    if (path === BROKER_ENVIRONMENT_PLACEHOLDER_PATH) {
+      assertInitialBrokerEnvironment(change);
+      return "REVIEWED_COMPUTED_CHANGE";
+    }
     if (BROKER_FUNCTION_INITIAL_CHANGED_PATHS.has(path)) return "REVIEWED_CONCRETE_CHANGE";
     throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
   }
@@ -400,6 +431,7 @@ export function censusStageBPlanSemantics(plan) {
     seenAddresses.add(change.address);
     const classification = classifyResource(change);
     if (ECS_ADDRESSES.has(change.address)) assertEcsSemanticDomain(change);
+    assertInitialBrokerEnvironment(change);
     const changedPaths = diffPaths(change.change?.before, change.change?.after).filter(Boolean).map((path) => ({ path, classification: assertClass(classifyChangedPath(change, path), "CHANGED_PATH") }));
     const afterUnknownPaths = truePaths(change.change?.after_unknown).filter(Boolean).map((path) => ({ path, classification: assertClass(classifyUnknownPath(change, path), "AFTER_UNKNOWN") }));
     const beforeSensitivePaths = assertSensitivePaths(change, "BEFORE", truePaths(change.change?.before_sensitive));
