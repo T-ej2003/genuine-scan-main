@@ -278,7 +278,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"backend\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -298,7 +299,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"worker\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -318,7 +320,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"application-canary\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -338,7 +341,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"read-only-canary\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -358,7 +362,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -378,7 +383,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -398,7 +404,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -418,7 +425,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -438,7 +446,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -458,7 +467,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -478,7 +488,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -498,7 +509,8 @@
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {

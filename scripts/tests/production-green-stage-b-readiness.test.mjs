@@ -61,4 +61,7 @@ test("readiness matrix is complete and uses only the source-controlled status vo
   assert.deepEqual(semantic.supportedProfiles[0].brokerPolicyActions, [["create"]]);
   assert.deepEqual(semantic.supportedProfiles[0].brokerFunctionActions, [["create"]]);
   assert.deepEqual(semantic.supportedProfiles[0].brokerAliasActions, [["create"]]);
+  assert.deepEqual(semantic.fidelityCounters, ["unrepresentedSupportedProfiles", "unfaithfulSupportedProfileFixtures", "unfaithfulProviderComputedFields"]);
+  assert.equal(semantic.providerSchemaSnapshot?.source, "registry.terraform.io/hashicorp/aws");
+  assert.equal(semantic.providerSchemaSnapshot?.version, "6.56.0");
 });

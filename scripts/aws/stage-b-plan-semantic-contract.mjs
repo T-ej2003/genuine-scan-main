@@ -4,6 +4,10 @@ import {
   STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS,
   STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS,
 } from "./stage-b-reference-audit-contract.mjs";
+import {
+  assertStageBProviderSemanticSnapshot,
+  STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT,
+} from "./stage-b-provider-semantic-snapshot.mjs";
 
 export const STAGE_B_PLAN_SEMANTIC_CLASSES = Object.freeze([
   "STABLE_REQUIRED",
@@ -88,6 +92,13 @@ const BROKER_FUNCTION_SENSITIVE_PATHS = new Set(["architectures[0]"]);
 const ALIAS_CHANGED_PATHS = new Set(["function_version"]);
 const ALIAS_UNKNOWN_PATHS = new Set(["function_version"]);
 const ALIAS_SENSITIVE_PATHS = new Set();
+
+const providerAttributes = (resourceType) => new Map(STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT.resources[resourceType].attributes.map((entry) => [entry.attributePath, entry]));
+const providerComputedOnlyPaths = (resourceType) => [...providerAttributes(resourceType).values()].filter((entry) => entry.computed && !entry.optional && !entry.required).map((entry) => entry.attributePath);
+const BROKER_POLICY_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_iam_policy"), "id", "policy"]);
+const BROKER_FUNCTION_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_lambda_function"), "architectures[0]", "environment[0].variables", "id"]);
+const BROKER_ALIAS_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_lambda_alias"), "function_version", "id"]);
+const ECS_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_ecs_task_definition"), "enable_fault_injection", "id"]);
 
 const CONFIGURATION_REFERENCE_RULES = Object.freeze({
   "aws_ecs_task_definition.candidate": {
@@ -246,6 +257,24 @@ function assertInitialBrokerEnvironment(change) {
   if (!structuralPlaceholder && !concreteVariables) throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.environment`);
 }
 
+function assertInitialProviderComputedShape(change) {
+  let expected = change.address === "aws_iam_policy.broker" ? BROKER_POLICY_INITIAL_PROVIDER_UNKNOWN_PATHS
+    : change.address === "aws_lambda_function.broker" ? BROKER_FUNCTION_INITIAL_PROVIDER_UNKNOWN_PATHS
+      : change.address === "aws_lambda_alias.reviewed" ? BROKER_ALIAS_INITIAL_PROVIDER_UNKNOWN_PATHS
+        : ECS_ADDRESSES.has(change.address) ? ECS_INITIAL_PROVIDER_UNKNOWN_PATHS : null;
+  if (!expected) return;
+  const actual = new Set(truePaths(change.change?.after_unknown).filter(Boolean));
+  if (actual.has("volume[0].configure_at_launch")) {
+    if (!change.change?.after?.volume) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.volume`);
+    expected = new Set([...expected, "volume[0].configure_at_launch"]);
+  }
+  if (actual.size !== expected.size || [...expected].some((path) => !actual.has(path)) || [...actual].some((path) => !expected.has(path))) {
+    throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}`);
+  }
+  const concretePaths = new Set(leafPaths(change.change?.after).filter(Boolean));
+  for (const path of expected) if (concretePaths.has(path)) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${path}`);
+}
+
 function assertInitialEcsSemanticDomain(change) {
   const after = change.change?.after || {};
   try {
@@ -350,9 +379,18 @@ function classifyUnknownPath(change, path) {
   if (ECS_ADDRESSES.has(change.address) && ECS_UNKNOWN_PATHS.has(path)) {
     return path === "volume[0].configure_at_launch" ? "REVIEWED_PROVIDER_NORMALIZATION" : "DIAGNOSTIC_ONLY";
   }
+  if (change.address === "aws_iam_policy.broker" && isBrokerInitialCreate(change) && BROKER_POLICY_INITIAL_PROVIDER_UNKNOWN_PATHS.has(path)) {
+    return path === "policy" ? "REVIEWED_COMPUTED_CHANGE" : "DIAGNOSTIC_ONLY";
+  }
   if (change.address === "aws_iam_policy.broker" && BROKER_POLICY_UNKNOWN_PATHS.has(path)) return "REVIEWED_COMPUTED_CHANGE";
+  if (change.address === "aws_lambda_function.broker" && isBrokerInitialCreate(change) && BROKER_FUNCTION_INITIAL_PROVIDER_UNKNOWN_PATHS.has(path)) {
+    return ["architectures[0]", "environment[0].variables", "version"].includes(path) ? "REVIEWED_COMPUTED_CHANGE" : "DIAGNOSTIC_ONLY";
+  }
   if (change.address === "aws_lambda_function.broker" && BROKER_FUNCTION_UNKNOWN_PATHS.has(path)) {
     return ["environment[0].variables", "version"].includes(path) ? "REVIEWED_COMPUTED_CHANGE" : "DIAGNOSTIC_ONLY";
+  }
+  if (change.address === "aws_lambda_alias.reviewed" && isBrokerInitialCreate(change) && BROKER_ALIAS_INITIAL_PROVIDER_UNKNOWN_PATHS.has(path)) {
+    return path === "function_version" ? "REVIEWED_COMPUTED_CHANGE" : "DIAGNOSTIC_ONLY";
   }
   if (change.address === "aws_lambda_alias.reviewed" && ALIAS_UNKNOWN_PATHS.has(path)) return "REVIEWED_COMPUTED_CHANGE";
   throw new Error(`UNCLASSIFIED_AFTER_UNKNOWN: ${change.address}.${path}`);
@@ -421,6 +459,7 @@ function assertComputedAliasBinding(plan) {
 
 export function censusStageBPlanSemantics(plan) {
   if (!plan || !Array.isArray(plan.resource_changes)) throw new Error("Stage B semantic census requires Terraform plan resource_changes.");
+  assertStageBProviderSemanticSnapshot();
   assertBrokerActionProfile(plan);
   const resources = [];
   const seenAddresses = new Set();
@@ -432,6 +471,7 @@ export function censusStageBPlanSemantics(plan) {
     const classification = classifyResource(change);
     if (ECS_ADDRESSES.has(change.address)) assertEcsSemanticDomain(change);
     assertInitialBrokerEnvironment(change);
+    if (isBrokerInitialCreate(change) || isEcsInitialCreate(change)) assertInitialProviderComputedShape(change);
     const changedPaths = diffPaths(change.change?.before, change.change?.after).filter(Boolean).map((path) => ({ path, classification: assertClass(classifyChangedPath(change, path), "CHANGED_PATH") }));
     const afterUnknownPaths = truePaths(change.change?.after_unknown).filter(Boolean).map((path) => ({ path, classification: assertClass(classifyUnknownPath(change, path), "AFTER_UNKNOWN") }));
     const beforeSensitivePaths = assertSensitivePaths(change, "BEFORE", truePaths(change.change?.before_sensitive));
@@ -468,6 +508,7 @@ export function censusStageBPlanSemantics(plan) {
     unclassifiedAfterUnknownPaths: 0,
     unclassifiedReplacePaths: 0,
     unclassifiedConfigurationReferences: 0,
+    unfaithfulProviderComputedFields: 0,
   };
   return { schemaVersion: 1, resources, counts };
 }

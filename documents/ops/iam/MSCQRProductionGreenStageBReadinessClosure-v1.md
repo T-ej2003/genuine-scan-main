@@ -97,6 +97,16 @@ The computed alias exception remains field-specific: only
 structured reference to `aws_lambda_function.broker.version` plus the same-plan published
 broker update. Unknown values elsewhere are not accepted.
 
+PLAN-SEM-01 also requires provider-fidelity proof for every baseline-created resource.
+The independent Stage B snapshot in
+`scripts/aws/stage-b-provider-semantic-snapshot.mjs` is derived from the locked
+`hashicorp/aws` 6.56.0 `terraform providers schema -json` output. Provider-computed
+identifiers and metadata are recognized only at explicitly recorded paths; they never
+authorize IAM content. Baseline fixtures must preserve Terraform's exact
+`after_unknown` and structural-placeholder representation. The provider-fidelity
+counters `unrepresentedSupportedProfiles`, `unfaithfulSupportedProfileFixtures`, and
+`unfaithfulProviderComputedFields` must all be zero.
+
 ### Normal profiles
 
 - Clean/no-change: each allowlisted resource has its exact `[]`/`["no-op"]` equivalent;
