@@ -24,7 +24,7 @@ import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments
 import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./aws/stage-b-artifact-contract.mjs";
 import { STAGE_B_PLAN_APPROVED, STAGE_B_PLAN_CAPTURED, assertStageBPlanApprovalReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, readStageBPlanEvidence, stageBPlanHashes, writeStageBPlanEvidence } from "./aws/stage-b-plan-approval-contract.mjs";
-import { assertRecoveryPlanDelta, assertVerifiedStageBRecovery } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
+import { assertRecoveryPlanDelta, assertVerifiedStageBRecovery, parseCanonicalTerraformSerialCliText } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
@@ -722,7 +722,7 @@ export function recoverCapturedStageBPlan({ tfvars, cliOptions, protectedMainChe
     planJsonSha256: readOption(cliOptions, "--plan-json-sha256"),
     canonicalPlanFileSha256: readOption(cliOptions, "--canonical-plan-file-sha256"),
     stageBLineage: readOption(cliOptions, "--stage-b-lineage"),
-    stageBSerial: readOption(cliOptions, "--stage-b-serial"),
+    stageBSerial: parseCanonicalTerraformSerialCliText(readOption(cliOptions, "--stage-b-serial"), "--stage-b-serial"),
     recoveryAttestationSha256: readOption(cliOptions, "--recovery-attestation-sha256"),
   };
   if (!savedPlanPath || !planJsonPath || !canonicalPlanJsonPath || !captureReportPath || Object.values(expected).some((value) => !value)) throw new Error("Stage B captured-plan recovery requires exact plan hashes and Stage B identity bindings.");
@@ -732,7 +732,7 @@ export function recoverCapturedStageBPlan({ tfvars, cliOptions, protectedMainChe
   const savedPlanBytes = fs.readFileSync(savedPlanPath); const planJsonBytes = fs.readFileSync(planJsonPath); const canonicalPlanJsonBytes = fs.readFileSync(canonicalPlanJsonPath);
   const hashes = stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes });
   for (const [name, value] of Object.entries({ savedPlanSha256: hashes.savedPlanSha256, planJsonSha256: hashes.planJsonSha256, canonicalPlanFileSha256: hashes.canonicalPlanFileSha256 })) if (expected[name] !== value) throw new Error(`Stage B preserved plan ${name} does not match the authoritative artifact.`);
-  if (inputs.bindingReport.stateLineage !== expected.stageBLineage || String(inputs.bindingReport.stateSerial) !== String(expected.stageBSerial)) throw new Error("Stage B preserved plan state identity does not match the authoritative binding.");
+  if (inputs.bindingReport.stateLineage !== expected.stageBLineage || inputs.bindingReport.stateSerial !== expected.stageBSerial) throw new Error("Stage B preserved plan state identity does not match the authoritative binding.");
   const plan = JSON.parse(planJsonBytes);
   const classification = assertStageBPlanCapture(plan, { terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: process.env.TF_WORKSPACE } });
   if (inputs.recoveryAttestationSha256 !== expected.recoveryAttestationSha256) throw new Error("Stage B recovery plan cannot be recovered without the exact recovery-attestation binding.");

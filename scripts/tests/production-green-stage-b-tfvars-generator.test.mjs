@@ -117,6 +117,17 @@ test("canonical tfvars binding rejects a JSON-looking file and metadata tamperin
   assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: (() => { const p = path.join(path.dirname(args.outputPath), "bad-binding.json"); fs.writeFileSync(p, `${JSON.stringify(report)}\n`, { mode: 0o600 }); return p; })() }), /format must be hcl/);
 });
 
+test("tfvars binding requires a canonical non-negative numeric state serial", () => {
+  const args = input();
+  const result = generateStageBTfvars(args);
+  for (const stateSerial of ["78", -1, 76.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const reportPath = path.join(path.dirname(args.bindingReportPath), `serial-${String(stateSerial).replace(/[^a-z0-9]/gi, "_")}.json`);
+    const report = { ...result.bindingReport, stateSerial };
+    fs.writeFileSync(reportPath, `${JSON.stringify(report)}\n`, { mode: 0o600 });
+    assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: reportPath }), /serial/);
+  }
+});
+
 test("all five emitted image variables are byte-for-byte bound to signed evidence", () => {
   const result = generateStageBTfvars(input());
   for (const image of Object.values(result.bindingReport.images)) assert.equal(image.digest, evidence.images.find((record) => record.service === image.service).digest);

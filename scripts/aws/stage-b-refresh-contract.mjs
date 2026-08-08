@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
+import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 
 export const STAGE_B_REFRESH_SCHEMA_VERSION = 1;
 export const STAGE_B_REFRESH_STATUSES = Object.freeze([
@@ -239,6 +240,8 @@ export function assertStageBRefreshStateBinding({ stateBackupPath, bindingReport
   const bytes = fs.readFileSync(stateBackupPath);
   const state = JSON.parse(bytes);
   if (sha256(bytes) !== bindingReport.stateBackupSha256) throw new Error("Stage B refresh state backup SHA256 does not match the tfvars binding report.");
+  assertCanonicalTerraformSerialNumber(state.serial, "Stage B state serial");
+  assertCanonicalTerraformSerialNumber(bindingReport.stateSerial, "Stage B binding state serial");
   if (state.lineage !== bindingReport.stateLineage || state.serial !== bindingReport.stateSerial) throw new Error("Stage B refresh state identity does not match the tfvars binding report.");
   if (!Array.isArray(state.resources)) throw new Error("Stage B refresh state resources are malformed.");
   return { state, sha256: sha256(bytes) };

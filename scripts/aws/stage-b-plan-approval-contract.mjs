@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertStageBReferenceAuditFreshness } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 
 export const STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION = 1;
 export const STAGE_B_PLAN_CAPTURED = "PLAN_CAPTURED";
@@ -43,6 +44,7 @@ function assertPlanHashes(report, hashes) {
 }
 
 export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, refreshReportSha256, recoveryAttestationSha256, hashes, capturedAt, stageBLineage, stageBSerial, terraformVersion, terraformFormatVersion, planExitCode = 0, showExitCode = 0, classification, brokerEvidence = {} }) {
+  assertCanonicalTerraformSerialNumber(stageBSerial, "Stage B serial");
   return {
     schemaVersion: STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION,
     state: STAGE_B_PLAN_CAPTURED,
@@ -70,6 +72,7 @@ export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, r
 }
 
 export function assertStageBPlanCaptureReport(report, { captureReportBytes, hashes, toolingSha, toolingTreeSha256, refreshReportSha256, recoveryAttestationSha256, stageBLineage, stageBSerial } = {}) {
+  assertCanonicalTerraformSerialNumber(report?.stageBSerial, "Stage B plan capture serial");
   if (report?.schemaVersion !== STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION || report.state !== STAGE_B_PLAN_CAPTURED || report.approvedForApply !== false || report.referenceAuditRequired !== true || !STAGE_B_BROKER_OPERATIONS.has(report.brokerOperation) || typeof report.brokerReferenceValidationPending !== "boolean" || typeof report.brokerUpdatePresent !== "boolean" || !Array.isArray(report.brokerActions) || !Array.isArray(report.brokerResourceAddresses)) {
     throw new Error("Stage B plan capture report is missing the PLAN_CAPTURED contract.");
   }
@@ -96,6 +99,7 @@ export function assertStageBPlanCaptureReport(report, { captureReportBytes, hash
 }
 
 export function createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath, referenceAuditSha256, referenceAuditCallerArn, referenceAuditAt, toolingSha, toolingTreeSha256, refreshReportSha256, recoveryAttestationSha256, stageBLineage, stageBSerial, hashes, logicalCanonicalPlanJsonSha256, approvedAt, classification, brokerOperation = "none", brokerUpdatePresent = false, brokerActions = [], brokerResourceAddresses = [] }) {
+  assertCanonicalTerraformSerialNumber(stageBSerial, "Stage B serial");
   return {
     schemaVersion: STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION,
     state: STAGE_B_PLAN_APPROVED,
@@ -125,6 +129,7 @@ export function createStageBPlanApprovalReport({ captureReportSha256, referenceA
 }
 
 export function assertStageBPlanApprovalReport(report, { approvalReportBytes, captureReport, captureReportBytes, referenceAudit, referenceAuditBytes, hashes, logicalCanonicalPlanJsonSha256, referenceAuditSha256, trustedCallerArn, stageBLineage, stageBSerial } = {}) {
+  assertCanonicalTerraformSerialNumber(report?.stageBSerial, "Stage B plan approval serial");
   if (report?.schemaVersion !== STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION || report.state !== STAGE_B_PLAN_APPROVED || report.approvedForApply !== true || report.brokerReferenceValidationPending !== false || report.brokerReferenceValidationPassed !== true) throw new Error("Stage B plan approval report is required; PLAN_CAPTURED is not deployable.");
   if (!Buffer.isBuffer(approvalReportBytes) || sha256(approvalReportBytes) !== sha256(Buffer.from(JSON.stringify(report, null, 2) + "\n"))) throw new Error("Stage B plan approval report bytes are not self-consistent.");
   if (!Buffer.isBuffer(captureReportBytes)) throw new Error("Stage B plan approval report capture binding is missing.");
@@ -147,6 +152,7 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
 }
 
 export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, approvalReportSha256, savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes, referenceAudit, referenceAuditBytes, expectedToolingSha, expectedToolingTreeSha256, expectedRefreshReportSha256, expectedRecoveryAttestationSha256, expectedStageBLineage, expectedStageBSerial, now = new Date() } = {}) {
+  assertCanonicalTerraformSerialNumber(report?.stageBSerial, "Stage B plan approval serial");
   if (report?.schemaVersion !== STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION || report.state !== STAGE_B_PLAN_APPROVED || report.approvedForApply !== true || report.brokerReferenceValidationPending !== false || report.brokerReferenceValidationPassed !== true) throw new Error("PLAN_APPROVED evidence is required; PLAN_CAPTURED is not deployable.");
   if (!Buffer.isBuffer(approvalReportBytes) || sha256(approvalReportBytes) !== approvalReportSha256) throw new Error("Stage B plan approval report SHA256 mismatch.");
   const hashes = stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes });
