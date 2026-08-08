@@ -141,6 +141,7 @@ function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planB
   if (!beforeArn || !arnPattern.test(beforeArn)) throw new Error(`Stage B old task-definition ARN rejected: ${change.address}`);
   const entry = (audit.oldTaskDefinitions || []).find((item) => item.terraformAddress === change.address);
   if (!entry || entry.oldTaskDefinitionArn !== beforeArn) throw new Error(`Stage B reference audit old ARN mismatch: ${change.address}`);
+  if (entry.classification !== "rollover") throw new Error(`Stage B reference audit rollover classification is missing: ${change.address}`);
   if (entry.family !== expectedFamily || entry.proposedFamily !== expectedFamily || entry.sameFamilyAsReplacement !== true) throw new Error(`Stage B reference audit family mismatch: ${change.address}`);
   if (!exactReplacePaths(entry.replacePaths)) throw new Error(`Stage B reference audit replace path mismatch: ${change.address}`);
   if (!Array.isArray(entry.serviceReferences) || entry.serviceReferences.length !== 0) throw new Error(`Stage B service reference exists: ${change.address}`);
@@ -565,7 +566,7 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
     const atomicByMode = new Map();
     for (const rollover of referenceAudit.plannedAtomicBrokerRollovers) {
       const currentEntry = current.find((entry) => entry.address === rollover?.taskDefinitionTerraformAddress);
-      if (!currentEntry || !["create-only", "no-op"].includes(currentEntry.classification)) throw new Error("Stage B append-only reference audit broker rollover classification is not bound to the current plan.");
+      if (!currentEntry || !["create-only", "no-op", "rollover"].includes(currentEntry.classification)) throw new Error("Stage B append-only reference audit broker rollover classification is not bound to the current plan.");
       if (mappingByMode.get(rollover.mode)?.arn !== rollover.oldTaskDefinitionArn
         || mappingByMode.get(rollover.mode)?.family !== currentEntry.family
         || expectedBrokerAddress(rollover.mode) !== currentEntry.address

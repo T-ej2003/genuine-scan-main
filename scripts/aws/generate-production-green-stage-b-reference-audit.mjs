@@ -497,6 +497,7 @@ export function generateReferenceAudit({
       oldTaskDefinitionArn: entry.oldArn,
       family: entry.family,
       proposedFamily: entry.proposedFamily,
+      classification: entry.classification,
       replacePaths: entry.replacePaths,
       currentStatus: entry.currentStatus,
       serviceReferences: serviceRefs,

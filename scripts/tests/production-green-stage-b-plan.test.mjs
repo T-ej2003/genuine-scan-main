@@ -87,6 +87,7 @@ const auditFor = (overrides = {}) => ({
     oldTaskDefinitionArn: oldArn,
     family,
     proposedFamily: family,
+    classification: "rollover",
     replacePaths: [["container_definitions"]],
     serviceReferences: [],
     runningTaskReferences: [],

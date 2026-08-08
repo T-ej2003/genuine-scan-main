@@ -397,6 +397,7 @@ test("exact 12-family allowlist passes and output is deterministic", () => {
   const second = generate(fixture);
   assert.equal(first.oldTaskDefinitions.length, 12);
   assert.deepEqual([...first.oldTaskDefinitions.map((item) => item.family)].sort(), [...Object.values(STAGE_B_TASK_DEFINITION_FAMILIES)].sort());
+  assert.deepEqual(first.oldTaskDefinitions.map((item) => item.classification), Array(12).fill("rollover"));
   assert.deepEqual(first, second);
 });
 
@@ -1471,6 +1472,36 @@ test("atomic broker rollover in the same plan passes and is recorded explicitly"
   const canary = audit.retainedTaskDefinitions.find((entry) => entry.terraformAddress === canaryRetainedAddress);
   assert.deepEqual(canary.brokerReferenceModes, ["full-rls-application-canary"]);
   assert.equal(canary.brokerReferenceStatus, "planned-atomic-broker-rollover-v1");
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    trustedCallerArn: callerArn,
+    now,
+  }));
+});
+
+test("current rollover broker mapping preserves rollover classification through plan binding", () => {
+  const fixture = makeAtomicBrokerFixture({
+    mutatePlan: (plan) => {
+      const current = plan.resource_changes.find((item) => item.address === canaryAddress);
+      const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(canaryAddress));
+      current.change = {
+        ...current.change,
+        actions: ["delete", "create"],
+        before: structuredClone(retained.change.before),
+        replace_paths: [["container_definitions"]],
+      };
+    },
+  });
+  const audit = generate(fixture);
+  assert.equal(audit.oldTaskDefinitions.length, 1);
+  assert.equal(audit.oldTaskDefinitions.every((entry) => entry.classification === "rollover"), true);
+  assert.equal(audit.oldTaskDefinitions.filter((entry) => entry.brokerReferenceStatus === "planned-atomic-broker-rollover-v1").length, 1);
   const auditBytes = Buffer.from(JSON.stringify(audit));
   assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
     referenceAudit: audit,
