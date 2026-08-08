@@ -11,6 +11,7 @@ import { assertStageBProviderSemanticSnapshot, STAGE_B_PROVIDER_SEMANTIC_SNAPSHO
 import { assertRecoveryPlanDelta } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
 import { classifyStageBPlan } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
+import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
 const addresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
 const image = (n) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr@sha256:${String(n).repeat(64)}`;
@@ -154,6 +155,58 @@ function baselinePlan() {
     after_unknown: { arn: true, function_version: true, id: true, invoke_arn: true }, before_sensitive: {}, after_sensitive: {},
   };
   for (const change of value.resource_changes) if (change.change?.actions?.some((action) => action !== "no-op")) change.mode = "managed";
+  return value;
+}
+
+function canonicalBrokerPolicy() {
+  const taskDefinitionArn = (family) => `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${family}:1`;
+  const executorFamilies = addresses.filter((address) => address.includes(".executor[")).map((address) => STAGE_B_TASK_DEFINITION_FAMILIES[address]);
+  return {
+    Version: "2012-10-17",
+    Statement: [
+      { Sid: "RunOnlyApprovedExecutorAndCanaryRevisions", Effect: "Allow", Action: ["ecs:RunTask"], Resource: [STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]'], ...executorFamilies].map(taskDefinitionArn) },
+      { Sid: "PassOnlyApprovedTaskRoles", Effect: "Allow", Action: ["iam:PassRole"], Resource: [STAGE_B.executorRoleArn, STAGE_B.executorExecutionRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution"], Condition: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } } },
+      { Sid: "ClaimOnlyStageBReplayRows", Effect: "Allow", Action: ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem"], Resource: "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay" },
+      { Sid: "ReadOnlyStageAApproval", Effect: "Allow", Action: ["secretsmanager:GetSecretValue"], Resource: STAGE_B.approvalSecretArn },
+      { Sid: "VerifyOnlyStageAApprovalKey", Effect: "Allow", Action: ["kms:Verify"], Resource: STAGE_B.approvalKmsKeyArn },
+      { Sid: "WriteOnlyBrokerReceipts", Effect: "Allow", Action: ["s3:PutObject"], Resource: `arn:aws:s3:::${STAGE_B.receiptBucket}/rls-broker-receipts/*` },
+      { Sid: "WriteOnlyStageABrokerLogs", Effect: "Allow", Action: ["logs:CreateLogStream", "logs:PutLogEvents"], Resource: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:log-stream:*" },
+    ],
+  };
+}
+
+function resolvedBrokerEnvironment() {
+  const taskDefinitions = Object.fromEntries([
+    ["full-rls-application-canary", STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']],
+    ...addresses.filter((address) => address.includes(".executor[")).map((address) => [address.match(/\["([^"]+)"\]$/)[1], STAGE_B_TASK_DEFINITION_FAMILIES[address]]),
+  ].map(([mode, family]) => [mode, `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${family}:1`]));
+  return {
+    BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify({ releaseSha: "a".repeat(40), sourceContractSha256: "b".repeat(64), migrationSetDigest: "c".repeat(64), packageChecksumSha256: "d".repeat(64), deploymentId: "phase2", greenDatabaseName: "mscqr_production_rls_green_phase2", administratorIdentity: "mscqr_prod_admin", databaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, executorSecurityGroupId: STAGE_B.executorSecurityGroupId }),
+    BROKER_APPROVAL_SECRET_ARN: STAGE_B.approvalSecretArn,
+    BROKER_CLUSTER_ARN: STAGE_B.clusterArn,
+    BROKER_EXECUTOR_SECURITY_GROUP_ID: STAGE_B.executorSecurityGroupId,
+    BROKER_IMAGES_JSON: JSON.stringify({ backendImageDigest: image("1"), workerImageDigest: image("2"), executorImageDigest: image("3"), canaryImageDigest: image("4") }),
+    BROKER_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds),
+    BROKER_RECEIPT_BUCKET: STAGE_B.receiptBucket,
+    BROKER_REPLAY_TABLE: "mscqr-production-rls-stage-b-replay",
+    BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskDefinitions),
+    BROKER_TASK_TEMPLATE_HASHES_JSON: JSON.stringify({ backend: "e".repeat(64), worker: "f".repeat(64), executor: "1".repeat(64), canary: "2".repeat(64) }),
+  };
+}
+
+function dependencyResolvedRetryPlan() {
+  const value = baselinePlan();
+  for (const change of value.resource_changes.filter((item) => addresses.includes(item.address))) {
+    change.change.actions = ["no-op"];
+    change.change.before = structuredClone(change.change.after);
+    delete change.change.after_unknown;
+  }
+  const policy = value.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change;
+  policy.after.policy = JSON.stringify(canonicalBrokerPolicy());
+  delete policy.after_unknown.policy;
+  const lambda = value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change;
+  lambda.after.environment = [{ variables: resolvedBrokerEnvironment() }];
+  delete lambda.after_unknown.environment;
   return value;
 }
 
@@ -326,6 +379,85 @@ test("append-only create/no-op retry remains represented without broadening brok
   for (const [key, count] of Object.entries(census.counts)) if (key.startsWith("unclassified") || key.startsWith("unfaithful")) assert.equal(count, 0, key);
 });
 
+test("dependency-resolved partial initial apply retry permits only exact concrete broker values", () => {
+  const retry = dependencyResolvedRetryPlan();
+  const census = assertStageBPlanSemanticCompleteness(retry);
+  assert.equal(census.resources.length, 3);
+  assert.deepEqual(census.resources.map((item) => item.classification).sort(), [
+    STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_ALIAS_INITIAL_CREATE,
+    STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_FUNCTION_INITIAL_CREATE,
+    STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_POLICY_INITIAL_CREATE,
+  ].sort());
+  const policy = structuredClone(retry);
+  const policyDocument = canonicalBrokerPolicy();
+  policyDocument.Statement[0].Action = ["iam:DeleteRole"];
+  policy.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after.policy = JSON.stringify(policyDocument);
+  assert.throws(() => assertStageBPlanSemanticCompleteness(policy), /UNCLASSIFIED_CHANGED_PATH/);
+  for (const mutatePolicy of [
+    (document) => { document.Statement[0].Resource[0] = "arn:aws:ecs:eu-west-2:368992683803:task-definition/unrelated:1"; },
+    (document) => { document.Statement[0].Resource = "*"; },
+    (document) => { document.Statement.pop(); },
+  ]) {
+    const invalidPolicy = structuredClone(retry);
+    const document = canonicalBrokerPolicy();
+    mutatePolicy(document);
+    invalidPolicy.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after.policy = JSON.stringify(document);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(invalidPolicy), /UNCLASSIFIED_CHANGED_PATH/);
+  }
+  const environment = structuredClone(retry);
+  const variables = environment.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after.environment[0].variables;
+  variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify({ ...JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON), "full-rls-application-canary": "arn:aws:ecs:eu-west-2:368992683803:task-definition/unrelated:1" });
+  assert.throws(() => assertStageBPlanSemanticCompleteness(environment), /UNCLASSIFIED_CHANGED_PATH/);
+  for (const mutateEnvironment of [
+    (value) => { delete value.BROKER_TASK_DEFINITIONS_JSON; },
+    (value) => { value.UNEXPECTED = "nope"; },
+  ]) {
+    const invalidEnvironment = structuredClone(retry);
+    const target = invalidEnvironment.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after.environment[0].variables;
+    mutateEnvironment(target);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(invalidEnvironment), /UNCLASSIFIED_CHANGED_PATH/);
+  }
+});
+
+test("dependency-computed broker paths resolve independently", () => {
+  const policyResolved = dependencyResolvedRetryPlan();
+  const lambda = policyResolved.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change;
+  lambda.after.environment = [{}];
+  lambda.after_unknown.environment = [{ variables: true }];
+  assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(policyResolved));
+
+  const environmentResolved = dependencyResolvedRetryPlan();
+  const policy = environmentResolved.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change;
+  delete policy.after.policy;
+  policy.after_unknown.policy = true;
+  assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(environmentResolved));
+});
+
+test("dependency-computed broker values require exactly one resolved representation", () => {
+  const policyMissing = dependencyResolvedRetryPlan();
+  const policyChange = policyMissing.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change;
+  delete policyChange.after.policy;
+  delete policyChange.after_unknown.policy;
+  assert.throws(() => assertStageBPlanSemanticCompleteness(policyMissing), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
+  const policyBoth = dependencyResolvedRetryPlan();
+  policyBoth.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after_unknown.policy = true;
+  assert.throws(() => assertStageBPlanSemanticCompleteness(policyBoth), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
+  const providerIdentifierConcrete = dependencyResolvedRetryPlan();
+  providerIdentifierConcrete.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after.arn = "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime";
+  assert.throws(() => assertStageBPlanSemanticCompleteness(providerIdentifierConcrete), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
+  const providerIdentifierMissing = dependencyResolvedRetryPlan();
+  delete providerIdentifierMissing.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after_unknown.arn;
+  assert.throws(() => assertStageBPlanSemanticCompleteness(providerIdentifierMissing), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
+  const environmentMissing = dependencyResolvedRetryPlan();
+  const lambda = environmentMissing.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change;
+  delete lambda.after.environment;
+  delete lambda.after_unknown.environment;
+  assert.throws(() => assertStageBPlanSemanticCompleteness(environmentMissing), /UNCLASSIFIED_CHANGED_PATH/);
+  const environmentBoth = dependencyResolvedRetryPlan();
+  environmentBoth.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after_unknown.environment = [{ variables: true }];
+  assert.throws(() => assertStageBPlanSemanticCompleteness(environmentBoth), /UNCLASSIFIED_CHANGED_PATH/);
+});
+
 test("supported profile matrix is explicit and includes baseline broker creation", () => {
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES.map(({ profile }) => profile), [
     "BASELINE_INITIAL_CREATE", "ROLLOVER_RECOVERY", "NO_CHANGE_OR_APPEND_ONLY_RETRY",
@@ -333,6 +465,7 @@ test("supported profile matrix is explicit and includes baseline broker creation
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerPolicyActions, [["create"]]);
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerFunctionActions, [["create"]]);
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerAliasActions, [["create"]]);
+  assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[2].brokerPolicyActions, [["create"], ["no-op"]]);
 });
 
 test("baseline broker profiles reject non-root, unknown, and partial semantic shapes", () => {
@@ -360,7 +493,7 @@ test("initial broker computed environment uses only the reviewed structural plac
   const concreteChange = concrete.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change;
   concreteChange.after.environment = [{ variables: { BROKER_TASK_DEFINITIONS_JSON: "concrete" } }];
   delete concreteChange.after_unknown.environment;
-  assert.throws(() => assertStageBPlanSemanticCompleteness(concrete), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
+  assert.throws(() => assertStageBPlanSemanticCompleteness(concrete), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_CHANGED_PATH/);
   mutateBaseline((value) => { delete value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after_unknown.environment[0].variables; }, /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_CHANGED_PATH/);
   mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after_unknown.environment[0].unexpected = true; }, /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_(?:AFTER_UNKNOWN|CHANGED_PATH)/);
   mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after.environment[0].unexpected = {}; }, /UNCLASSIFIED_CHANGED_PATH/);

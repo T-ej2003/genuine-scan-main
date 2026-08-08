@@ -8,6 +8,8 @@ import {
   assertStageBProviderSemanticSnapshot,
   STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT,
 } from "./stage-b-provider-semantic-snapshot.mjs";
+import { assertStageBBrokerPolicyDocument } from "./stage-b-deployment-contract.mjs";
+import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 
 export const STAGE_B_PLAN_SEMANTIC_CLASSES = Object.freeze([
   "STABLE_REQUIRED",
@@ -32,7 +34,7 @@ export const STAGE_B_PLAN_SEMANTIC_PROFILES = Object.freeze({
 export const STAGE_B_SUPPORTED_PLAN_PROFILES = Object.freeze([
   Object.freeze({ profile: "BASELINE_INITIAL_CREATE", ecsActions: [["create"]], brokerPolicyActions: [["create"]], brokerFunctionActions: [["create"]], brokerAliasActions: [["create"]], recoveryRequired: false, fixture: "production-green-stage-b-production-shaped.plan.json" }),
   Object.freeze({ profile: "ROLLOVER_RECOVERY", ecsActions: [["create", "delete"], ["delete", "create"]], brokerPolicyActions: [["update"]], brokerFunctionActions: [["update"]], brokerAliasActions: [["update"]], recoveryRequired: true, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
-  Object.freeze({ profile: "NO_CHANGE_OR_APPEND_ONLY_RETRY", ecsActions: [["create"], ["no-op"]], brokerPolicyActions: [["no-op"]], brokerFunctionActions: [["no-op"]], brokerAliasActions: [["no-op"]], recoveryRequired: false, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
+  Object.freeze({ profile: "NO_CHANGE_OR_APPEND_ONLY_RETRY", ecsActions: [["create"], ["no-op"]], brokerPolicyActions: [["create"], ["no-op"]], brokerFunctionActions: [["create"], ["no-op"]], brokerAliasActions: [["create"], ["no-op"]], recoveryRequired: false, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
 ]);
 
 const ECS_ADDRESSES = new Set(Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES));
@@ -95,9 +97,11 @@ const ALIAS_SENSITIVE_PATHS = new Set();
 
 const providerAttributes = (resourceType) => new Map(STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT.resources[resourceType].attributes.map((entry) => [entry.attributePath, entry]));
 const providerComputedOnlyPaths = (resourceType) => [...providerAttributes(resourceType).values()].filter((entry) => entry.computed && !entry.optional && !entry.required).map((entry) => entry.attributePath);
-const BROKER_POLICY_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_iam_policy"), "id", "policy"]);
-const BROKER_FUNCTION_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_lambda_function"), "architectures[0]", "environment[0].variables", "id"]);
+const BROKER_POLICY_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_iam_policy"), "id"]);
+const BROKER_FUNCTION_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_lambda_function"), "architectures[0]", "id"]);
 const BROKER_ALIAS_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_lambda_alias"), "function_version", "id"]);
+const BROKER_POLICY_INITIAL_DEPENDENCY_COMPUTED_PATHS = new Set(["policy"]);
+const BROKER_FUNCTION_INITIAL_DEPENDENCY_COMPUTED_PATHS = new Set(["environment[0].variables"]);
 const ECS_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_ecs_task_definition"), "enable_fault_injection", "id"]);
 
 const CONFIGURATION_REFERENCE_RULES = Object.freeze({
@@ -253,8 +257,63 @@ function assertInitialBrokerEnvironment(change) {
     && environment[0].variables
     && typeof environment[0].variables === "object"
     && !Array.isArray(environment[0].variables)
-    && (unknownEnvironment === undefined || (Array.isArray(unknownEnvironment) && unknownEnvironment.length === 1 && unknownEnvironment[0] && Object.keys(unknownEnvironment[0]).length === 0));
+    && unknownEnvironment === undefined;
   if (!structuralPlaceholder && !concreteVariables) throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.environment`);
+  if (concreteVariables) assertConcreteBrokerEnvironment(environment[0].variables);
+  return concreteVariables ? "resolved" : "unresolved";
+}
+
+const BROKER_ENVIRONMENT_VARIABLES = Object.freeze([
+  "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
+  "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
+  "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
+]);
+const brokerTaskDefinitionModes = Object.freeze(Object.fromEntries([
+  ["full-rls-application-canary", STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']],
+  ...Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES)
+    .filter(([address]) => address.startsWith("aws_ecs_task_definition.executor["))
+    .map(([address, family]) => [address.match(/\["([^"]+)"\]$/)[1], family]),
+]));
+const exactObjectKeys = (value, expected) => JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expected].sort());
+const parseEnvironmentJson = (value, label) => {
+  if (typeof value !== "string") throw new Error(`UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables.${label}`);
+  try { return JSON.parse(value); } catch { throw new Error(`UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables.${label}`); }
+};
+
+function assertConcreteBrokerEnvironment(variables) {
+  if (!variables || typeof variables !== "object" || Array.isArray(variables) || !exactObjectKeys(variables, BROKER_ENVIRONMENT_VARIABLES)) {
+    throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables");
+  }
+  if (variables.BROKER_REPLAY_TABLE !== "mscqr-production-rls-stage-b-replay"
+    || variables.BROKER_RECEIPT_BUCKET !== STAGE_B.receiptBucket
+    || variables.BROKER_CLUSTER_ARN !== STAGE_B.clusterArn
+    || variables.BROKER_APPROVAL_SECRET_ARN !== STAGE_B.approvalSecretArn
+    || variables.BROKER_EXECUTOR_SECURITY_GROUP_ID !== STAGE_B.executorSecurityGroupId) {
+    throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables");
+  }
+  const taskDefinitions = parseEnvironmentJson(variables.BROKER_TASK_DEFINITIONS_JSON, "BROKER_TASK_DEFINITIONS_JSON");
+  if (!exactObjectKeys(taskDefinitions, Object.keys(brokerTaskDefinitionModes))) throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables.BROKER_TASK_DEFINITIONS_JSON");
+  for (const [mode, family] of Object.entries(brokerTaskDefinitionModes)) {
+    if (typeof taskDefinitions[mode] !== "string" || !new RegExp(`^arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${family}:[1-9][0-9]*$`).test(taskDefinitions[mode])) {
+      throw new Error(`UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables.BROKER_TASK_DEFINITIONS_JSON.${mode}`);
+    }
+  }
+  const templates = parseEnvironmentJson(variables.BROKER_TASK_TEMPLATE_HASHES_JSON, "BROKER_TASK_TEMPLATE_HASHES_JSON");
+  if (!exactObjectKeys(templates, ["backend", "worker", "executor", "canary"]) || Object.values(templates).some((value) => !/^[a-f0-9]{64}$/.test(value))) throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables.BROKER_TASK_TEMPLATE_HASHES_JSON");
+  const approval = parseEnvironmentJson(variables.BROKER_APPROVAL_EXPECTED_JSON, "BROKER_APPROVAL_EXPECTED_JSON");
+  if (!exactObjectKeys(approval, ["releaseSha", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "deploymentId", "greenDatabaseName", "administratorIdentity", "databaseSecurityGroupId", "executorSecurityGroupId"])
+    || !/^[a-f0-9]{40}$/.test(approval.releaseSha) || [approval.sourceContractSha256, approval.migrationSetDigest, approval.packageChecksumSha256].some((value) => !/^[a-f0-9]{64}$/.test(value))
+    || approval.deploymentId !== "phase2" || approval.greenDatabaseName !== "mscqr_production_rls_green_phase2" || approval.administratorIdentity !== "mscqr_prod_admin"
+    || approval.databaseSecurityGroupId !== STAGE_B.databaseSecurityGroupId || approval.executorSecurityGroupId !== STAGE_B.executorSecurityGroupId) {
+    throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables.BROKER_APPROVAL_EXPECTED_JSON");
+  }
+  const images = parseEnvironmentJson(variables.BROKER_IMAGES_JSON, "BROKER_IMAGES_JSON");
+  if (!exactObjectKeys(images, ["backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest"])
+    || Object.values(images).some((value) => !/^\d{12}\.dkr\.ecr\.[^@]+@sha256:[a-f0-9]{64}$/.test(value))) {
+    throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables.BROKER_IMAGES_JSON");
+  }
+  const subnets = parseEnvironmentJson(variables.BROKER_PRIVATE_SUBNETS_JSON, "BROKER_PRIVATE_SUBNETS_JSON");
+  if (JSON.stringify(subnets) !== JSON.stringify(STAGE_B.privateSubnetIds)) throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables.BROKER_PRIVATE_SUBNETS_JSON");
 }
 
 function assertInitialProviderComputedShape(change) {
@@ -268,10 +327,24 @@ function assertInitialProviderComputedShape(change) {
     if (!change.change?.after?.volume) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.volume`);
     expected = new Set([...expected, "volume[0].configure_at_launch"]);
   }
+  const dependencyPaths = change.address === "aws_iam_policy.broker" ? BROKER_POLICY_INITIAL_DEPENDENCY_COMPUTED_PATHS
+    : change.address === "aws_lambda_function.broker" ? BROKER_FUNCTION_INITIAL_DEPENDENCY_COMPUTED_PATHS : new Set();
+  const dependencyPath = [...dependencyPaths][0] || null;
+  const dependencyUnknown = dependencyPath !== null && actual.has(dependencyPath);
+  const concretePaths = new Set(leafPaths(change.change?.after).filter(Boolean));
+  const dependencyConcrete = dependencyPath !== null && concretePaths.has(dependencyPath);
+  if (dependencyPath !== null && dependencyUnknown === dependencyConcrete) {
+    throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${dependencyPath}`);
+  }
+  if (dependencyPath === "policy" && dependencyConcrete) {
+    if (Object.hasOwn(change.change?.after_unknown || {}, "policy")) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.policy`);
+    try { assertStageBBrokerPolicyDocument(JSON.parse(change.change.after.policy)); } catch { throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.policy`); }
+  }
+  if (dependencyPath === "environment[0].variables" && dependencyConcrete) assertInitialBrokerEnvironment(change);
+  expected = dependencyUnknown ? new Set([...expected, dependencyPath]) : expected;
   if (actual.size !== expected.size || [...expected].some((path) => !actual.has(path)) || [...actual].some((path) => !expected.has(path))) {
     throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}`);
   }
-  const concretePaths = new Set(leafPaths(change.change?.after).filter(Boolean));
   for (const path of expected) if (concretePaths.has(path)) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${path}`);
 }
 
@@ -390,11 +463,13 @@ function classifyUnknownPath(change, path) {
   if (ECS_ADDRESSES.has(change.address) && ECS_UNKNOWN_PATHS.has(path)) {
     return path === "volume[0].configure_at_launch" ? "REVIEWED_PROVIDER_NORMALIZATION" : "DIAGNOSTIC_ONLY";
   }
-  if (change.address === "aws_iam_policy.broker" && isBrokerInitialCreate(change) && BROKER_POLICY_INITIAL_PROVIDER_UNKNOWN_PATHS.has(path)) {
+  if (change.address === "aws_iam_policy.broker" && isBrokerInitialCreate(change)
+    && (BROKER_POLICY_INITIAL_PROVIDER_UNKNOWN_PATHS.has(path) || BROKER_POLICY_INITIAL_DEPENDENCY_COMPUTED_PATHS.has(path))) {
     return path === "policy" ? "REVIEWED_COMPUTED_CHANGE" : "DIAGNOSTIC_ONLY";
   }
   if (change.address === "aws_iam_policy.broker" && BROKER_POLICY_UNKNOWN_PATHS.has(path)) return "REVIEWED_COMPUTED_CHANGE";
-  if (change.address === "aws_lambda_function.broker" && isBrokerInitialCreate(change) && BROKER_FUNCTION_INITIAL_PROVIDER_UNKNOWN_PATHS.has(path)) {
+  if (change.address === "aws_lambda_function.broker" && isBrokerInitialCreate(change)
+    && (BROKER_FUNCTION_INITIAL_PROVIDER_UNKNOWN_PATHS.has(path) || BROKER_FUNCTION_INITIAL_DEPENDENCY_COMPUTED_PATHS.has(path))) {
     return ["architectures[0]", "environment[0].variables", "version"].includes(path) ? "REVIEWED_COMPUTED_CHANGE" : "DIAGNOSTIC_ONLY";
   }
   if (change.address === "aws_lambda_function.broker" && BROKER_FUNCTION_UNKNOWN_PATHS.has(path)) {

@@ -142,6 +142,11 @@ function normalizedPolicyShape(document) {
   return canonicalJson(actual.sort((left, right) => left.Sid.localeCompare(right.Sid)));
 }
 
+export function assertStageBBrokerPolicyDocument(document) {
+  normalizedPolicyShape(document);
+  return true;
+}
+
 function assertTerraformPolicySource(terraformConfiguration, strict) {
   if (!strict) return;
   if (typeof terraformConfiguration !== "string") throw new Error("Broker managed-policy source contract is missing.");

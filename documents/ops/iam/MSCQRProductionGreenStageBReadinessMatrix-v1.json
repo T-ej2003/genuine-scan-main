@@ -344,6 +344,7 @@
         "providerBinarySha256": "9a5d52a253efb9c223e2f709749ed8b6db0d6e8b5710e6eabfed8de7b2a159fd"
       },
       "fidelityCounters": ["unrepresentedSupportedProfiles", "unfaithfulSupportedProfileFixtures", "unfaithfulProviderComputedFields"],
+      "dependencyComputedPaths": ["aws_iam_policy.broker.policy", "aws_lambda_function.broker.environment[0].variables"],
       "identity": "exact non-noop root-managed resource, address, action, path, and reference",
       "freshness": "same authoritative plan and protected source bindings",
       "hashBinding": "plan JSON, canonical plan, and saved-plan downstream bindings",

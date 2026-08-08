@@ -110,6 +110,11 @@ Provider nested-block shape is part of the same fidelity gate: the locked AWS 6.
 `runtime_platform` block is a one-element list, so baseline ECS paths are explicitly
 indexed as `runtime_platform[0].operating_system_family` and
 `runtime_platform[0].cpu_architecture`; object-shaped or unindexed substitutes fail closed.
+The broker policy and Lambda environment are configuration-dependent values rather than
+provider-owned outputs: a fresh create may carry their exact unknown shape, while a
+partial-initial-apply retry may carry concrete values only after exact policy, variable,
+task-definition ARN, and structured-reference validation. Provider-owned identifiers remain
+mandatory unknowns in both cases.
 
 ### Normal profiles
 
