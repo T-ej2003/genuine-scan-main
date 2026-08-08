@@ -10,6 +10,8 @@ import {
   assertStageBAtomicBrokerPlan,
   assertStageBAtomicBrokerPackagePlan,
   assertStageBCurrentTaskDefinitionNoOp,
+  assertStageBTaskDefinitionRotation,
+  isStageBTaskDefinitionRotationActionsValue,
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
 } from "./stage-b-reference-audit-contract.mjs";
@@ -23,7 +25,6 @@ export { batch, createAwsReader } from "./production-green-stage-b-ecs-observati
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const taskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([A-Za-z0-9_-]+):([1-9][0-9]*)$/;
 const assumedReleaseRolePattern = /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[A-Za-z0-9+=,.@_-]{2,64}$/;
-const exactReplacePaths = (paths) => JSON.stringify(paths) === JSON.stringify([["container_definitions"]]);
 const sorted = (items, key) => [...items].sort((left, right) => String(key(left)).localeCompare(String(key(right))));
 const stageBTerraformConfigurationPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b/main.tf");
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -130,14 +131,9 @@ function planTaskDefinitions(plan) {
       noOpByAddress.set(address, { address, family, priorArn: before.arn, currentArn: after.arn || before.arn, proposedFamily: after.family, change });
       continue;
     }
-    if (actions.includes("delete")) {
-      if (JSON.stringify(actions) !== JSON.stringify(["delete", "create"]) || !exactReplacePaths(change.change?.replace_paths)) {
-        throw new Error(`Terraform plan task-definition rollover is outside the reviewed contract: ${address}`);
-      }
-      if (!oldArn) throw new Error(`Terraform plan rollover is missing its prior task-definition ARN: ${address}`);
-      const old = familyFromArn(oldArn, `${address} old task definition`);
-      if (old.family !== family) throw new Error(`Terraform plan old task-definition family mismatch: ${address}`);
-      rolloverByAddress.set(address, { address, family, oldArn, replacePaths: change.change.replace_paths, proposedFamily: after.family, classification: "rollover" });
+    if (isStageBTaskDefinitionRotationActionsValue(actions)) {
+      const rollover = assertStageBTaskDefinitionRotation(change, plan, { strict: true });
+      rolloverByAddress.set(address, { ...rollover, proposedFamily: after.family });
       continue;
     }
     throw new Error(`Terraform plan task-definition change must be create-only or rollover: ${address}`);
@@ -501,6 +497,7 @@ export function generateReferenceAudit({
       oldTaskDefinitionArn: entry.oldArn,
       family: entry.family,
       proposedFamily: entry.proposedFamily,
+      classification: entry.classification,
       replacePaths: entry.replacePaths,
       currentStatus: entry.currentStatus,
       serviceReferences: serviceRefs,
@@ -590,7 +587,7 @@ export function generateReferenceAudit({
     currentTaskDefinitions: {
       currentCreates: createOnlyTaskDefinitions.length,
       currentNoOps: noOpTaskDefinitions.length,
-      total: createOnlyTaskDefinitions.length + noOpTaskDefinitions.length,
+      total: createOnlyTaskDefinitions.length + noOpTaskDefinitions.length + oldDefinitions.filter((entry) => entry.classification === "rollover").length,
     },
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,

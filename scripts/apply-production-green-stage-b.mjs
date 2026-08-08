@@ -203,7 +203,9 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
     protectedMainCheckout,
     now: new Date(now),
   });
-  if ((plan.resource_changes || []).some((change) => (change.change?.actions || []).includes("delete"))) throw new Error("Stage B apply plan contains a delete action.");
+  const approvedRotationAddresses = new Set(resourceClassification?.taskDefinitions?.currentRotations?.map((rotation) => rotation.address) || []);
+  const deleteChanges = (plan.resource_changes || []).filter((change) => (change.change?.actions || []).includes("delete"));
+  if (deleteChanges.length !== approvedRotationAddresses.size || deleteChanges.some((change) => !approvedRotationAddresses.has(change.address))) throw new Error("Stage B apply plan contains a delete action outside the exact task-definition rotation contract.");
   return { plan, audit, permissionReport, imageEvidence, deploymentIdentity, imageBindings, resourceClassification, trustedRecovery, savedPlanSha256, canonicalPlanJsonSha256, derivedPlanJsonSha256: sha256(derivedPlanBytes) };
 }
 
@@ -240,7 +242,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
       : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
   const verified = assertApplyArtifacts({ ...artifacts, callerArn, protectedMainCheckout, currentHead: protectedMainCheckout.currentHead, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature, verifyImageEvidence: effectiveDeps.verifyImageEvidence });
   assertStageBTerraformInitializedBackendMetadata(effectiveDeps.getBackendMetadata(env));
-  if (artifacts.verifyOnly) return { status: "ready-to-apply", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
+  if (artifacts.verifyOnly) return { status: "ready-to-apply", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
   const applyCheckout = effectiveDeps.getProtectedMainCheckout
     ? effectiveDeps.getProtectedMainCheckout()
     : effectiveDeps.currentHead
@@ -250,7 +252,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   assertStageBTfvarsBinding({ tfvarsPath: artifacts.tfvarsPath, bindingReportPath: artifacts.tfvarsBindingReportPath, bindingReportSha256: artifacts.tfvarsBindingReportSha256, expectedToolingSha: artifacts.toolingSha, expectedToolingTreeSha256: artifacts.toolingTreeSha256, expectedImageReleaseSha: artifacts.imageReleaseSha, expectedImageEvidenceSha256: artifacts.imageEvidenceSha256 });
   const result = effectiveDeps.apply(artifacts.planPath);
   if (result?.status !== undefined && result.status !== 0) throw new Error("Terraform apply failed; stop without retry.");
-  return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: (verified.plan.resource_changes || []).reduce((counts, change) => { const action = (change.change?.actions || []).join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
+  return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -10,6 +10,8 @@ import {
   assertStageBBrokerTaskDefinitionMapping,
   assertStageBReferenceAuditFreshness,
   assertStageBCurrentTaskDefinitionNoOp,
+  assertStageBTaskDefinitionRotation,
+  isStageBTaskDefinitionRotationActionsValue,
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
@@ -139,6 +141,7 @@ function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planB
   if (!beforeArn || !arnPattern.test(beforeArn)) throw new Error(`Stage B old task-definition ARN rejected: ${change.address}`);
   const entry = (audit.oldTaskDefinitions || []).find((item) => item.terraformAddress === change.address);
   if (!entry || entry.oldTaskDefinitionArn !== beforeArn) throw new Error(`Stage B reference audit old ARN mismatch: ${change.address}`);
+  if (entry.classification !== "rollover") throw new Error(`Stage B reference audit rollover classification is missing: ${change.address}`);
   if (entry.family !== expectedFamily || entry.proposedFamily !== expectedFamily || entry.sameFamilyAsReplacement !== true) throw new Error(`Stage B reference audit family mismatch: ${change.address}`);
   if (!exactReplacePaths(entry.replacePaths)) throw new Error(`Stage B reference audit replace path mismatch: ${change.address}`);
   if (!Array.isArray(entry.serviceReferences) || entry.serviceReferences.length !== 0) throw new Error(`Stage B service reference exists: ${change.address}`);
@@ -167,7 +170,7 @@ function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planB
   if (typeof entry.rollbackArn !== "string" || !arnPattern.test(entry.rollbackArn)) throw new Error(`Stage B rollback ARN missing: ${change.address}`);
 }
 
-function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
+function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration, { strict = true } = {}) {
   const changes = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
   const current = [];
   const retainedAddresses = new Set();
@@ -206,6 +209,7 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
     throw new Error("Stage B append-only plan must contain exactly the twelve current task-definition addresses.");
   }
   const currentArnByAddress = new Map();
+  const currentRotations = [];
   for (const change of current) {
     assertTaskDefinitionScope(change);
     if (exactActions(change.change?.actions || [], ["create"])) continue;
@@ -214,7 +218,11 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
       currentArnByAddress.set(change.address, validated.arn);
       continue;
     }
-    throw new Error(`Stage B append-only current task-definition must be create-only or no-op: ${change.address}`);
+    if (isStageBTaskDefinitionRotationActionsValue(change.change?.actions || [])) {
+      currentRotations.push(assertStageBTaskDefinitionRotation(change, plan, { strict }));
+      continue;
+    }
+    throw new Error(`Stage B current task-definition must be create-only, no-op, or an exact reviewed rotation: ${change.address}`);
   }
   if (retainedAddresses.size > 0) {
     const readOnlyCanaryFamily = taskDefinitionFamilies.get('aws_ecs_task_definition.candidate["read_only_canary"]');
@@ -266,18 +274,19 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration) {
   const classification = {
     currentCreates,
     currentNoOps,
-    total: currentCreates + currentNoOps,
+    total: currentCreates + currentNoOps + currentRotations.length,
   };
   const currentEntries = current.map((change) => ({
       address: change.address,
       family: taskDefinitionFamilies.get(change.address),
-      classification: exactActions(change.change?.actions || [], ["create"]) ? "create-only" : "no-op",
-      priorTaskDefinitionArn: exactActions(change.change?.actions || [], ["no-op"]) ? currentArnByAddress.get(change.address) : null,
+      classification: exactActions(change.change?.actions || [], ["create"]) ? "create-only" : exactActions(change.change?.actions || [], ["no-op"]) ? "no-op" : "rollover",
+      priorTaskDefinitionArn: exactActions(change.change?.actions || [], ["no-op"]) ? currentArnByAddress.get(change.address) : currentRotations.find((entry) => entry.address === change.address)?.oldArn || null,
     }));
   const retainedEntries = [...retainedByFamily.values()].flat().map((entry) => ({ address: entry.address, historyKey: entry.historyKey, family: entry.family, oldTaskDefinitionArn: entry.arn, revision: entry.revision, classification: "retained-no-op" }));
   Object.defineProperties(classification, {
     currentEntries: { value: currentEntries, enumerable: false },
     retainedEntries: { value: retainedEntries, enumerable: false },
+    currentRotations: { value: currentRotations, enumerable: false },
   });
   return classification;
 }
@@ -427,7 +436,7 @@ function assertExactAuditEntries(actual, expected, label, project) {
 }
 
 function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAudit, options = {}) {
-  const { referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date() } = options;
+  const { referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration } = options;
   if (!referenceAudit || !referenceAuditBytes || !referenceAuditSha256 || !planJsonBytes || !planJsonSha256) {
     throw new Error("Stage B append-only plan requires an explicit plan-bound reference audit.");
   }
@@ -443,10 +452,12 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
 
   const current = classification.currentEntries;
   const retained = classification.retainedEntries;
+  const rotations = classification.currentRotations || [];
   if (!Array.isArray(current) || current.length !== Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length) throw new Error("Stage B append-only plan classification is incomplete.");
   if (!referenceAudit.currentTaskDefinitions || typeof referenceAudit.currentTaskDefinitions !== "object") throw new Error("Stage B append-only reference audit currentTaskDefinitions evidence is missing.");
   if (referenceAudit.currentTaskDefinitions.currentCreates !== classification.currentCreates
     || referenceAudit.currentTaskDefinitions.currentNoOps !== classification.currentNoOps
+    || (referenceAudit.currentTaskDefinitions.currentRollovers ?? (referenceAudit.oldTaskDefinitions || []).filter((entry) => entry?.classification === "rollover").length) !== rotations.length
     || referenceAudit.currentTaskDefinitions.total !== classification.total) {
     throw new Error("Stage B append-only reference audit current classification counts do not match the plan.");
   }
@@ -457,9 +468,16 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
     classification: entry.classification,
     priorTaskDefinitionArn: entry.priorTaskDefinitionArn,
   }));
+  for (const rotation of rotations) {
+    const change = (plan.resource_changes || []).find((item) => item.address === rotation.address);
+    assertBoundRollover(plan, change, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
+  }
   const currentActual = [
     ...(referenceAudit.createOnlyTaskDefinitions || []),
     ...(referenceAudit.noOpTaskDefinitions || []),
+    ...(referenceAudit.oldTaskDefinitions || [])
+      .filter((entry) => entry?.classification === "rollover")
+      .map((entry) => ({ ...entry, priorTaskDefinitionArn: entry.oldTaskDefinitionArn })),
   ];
   assertExactAuditEntries(currentActual, currentExpected, "current task definitions", (entry) => `${entry?.terraformAddress}|${entry?.family}|${entry?.classification}|${entry?.priorTaskDefinitionArn ?? ""}`);
   for (const expected of currentExpected) {
@@ -503,6 +521,8 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
   }
   const retainedArnsByFamily = new Map();
   for (const entry of retained) retainedArnsByFamily.set(entry.family, new Set([...(retainedArnsByFamily.get(entry.family) || []), entry.oldTaskDefinitionArn]));
+  const rolloverArnsByFamily = new Map();
+  for (const entry of rotations) rolloverArnsByFamily.set(entry.family, new Set([...(rolloverArnsByFamily.get(entry.family) || []), entry.oldArn]));
   const allowedArnsByFamily = new Map(STAGE_B_TASK_DEFINITION_FAMILY_NAMES.map((family) => [family, new Set([...(currentArnsByFamily.get(family) || []), ...(retainedArnsByFamily.get(family) || [])])]));
   if (!Array.isArray(referenceAudit.services) || !Array.isArray(referenceAudit.runningTasks) || !Array.isArray(referenceAudit.pendingTasks) || !Array.isArray(referenceAudit.transitionalTasks) || !Array.isArray(referenceAudit.taskDefinitions)) throw new Error("Stage B append-only reference audit service/task evidence is missing.");
   const checkReferences = (items, arnKey, name) => {
@@ -546,12 +566,12 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
     const atomicByMode = new Map();
     for (const rollover of referenceAudit.plannedAtomicBrokerRollovers) {
       const currentEntry = current.find((entry) => entry.address === rollover?.taskDefinitionTerraformAddress);
-      if (!currentEntry || !["create-only", "no-op"].includes(currentEntry.classification)) throw new Error("Stage B append-only reference audit broker rollover classification is not bound to the current plan.");
+      if (!currentEntry || !["create-only", "no-op", "rollover"].includes(currentEntry.classification)) throw new Error("Stage B append-only reference audit broker rollover classification is not bound to the current plan.");
       if (mappingByMode.get(rollover.mode)?.arn !== rollover.oldTaskDefinitionArn
         || mappingByMode.get(rollover.mode)?.family !== currentEntry.family
         || expectedBrokerAddress(rollover.mode) !== currentEntry.address
         || atomicByMode.has(rollover.mode)
-        || !retainedArnsByFamily.get(currentEntry.family)?.has(rollover.oldTaskDefinitionArn)
+        || !(retainedArnsByFamily.get(currentEntry.family)?.has(rollover.oldTaskDefinitionArn) || rolloverArnsByFamily.get(currentEntry.family)?.has(rollover.oldTaskDefinitionArn))
         || rollover.taskDefinitionArnReference !== `${currentEntry.address}.arn`
         || rollover.planJsonSha256 !== planJsonSha256) {
         throw new Error("Stage B append-only reference audit broker rollover is not bound to exact per-mode retained/current plan addresses.");
@@ -562,7 +582,7 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
       const mapping = mappingByMode.get(mode);
       const family = expectedBrokerFamily(mode);
       if (!mapping || mapping.family !== family) throw new Error(`Stage B append-only reference audit broker mode mapping is missing: ${mode}`);
-      if (retainedArnsByFamily.get(family)?.has(mapping.arn) && (!atomicByMode.has(mode) || atomicByMode.get(mode).oldTaskDefinitionArn !== mapping.arn)) {
+      if ((retainedArnsByFamily.get(family)?.has(mapping.arn) || rolloverArnsByFamily.get(family)?.has(mapping.arn)) && (!atomicByMode.has(mode) || atomicByMode.get(mode).oldTaskDefinitionArn !== mapping.arn)) {
         throw new Error(`Stage B append-only reference audit broker retained mapping lacks atomic rollover evidence: ${mode}`);
       }
     }
@@ -606,11 +626,11 @@ export function assertStageBPlan(plan, options = {}) {
   }
   const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
   const taskDefinitionClassification = taskDefinitionChanges.length
-    ? assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration)
+    ? assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration, { strict: strictResourceContract })
     : null;
   const brokerActions = brokerChange?.change?.actions || [];
   if (taskDefinitionClassification && (referenceAudit || (requireReferenceAudit && exactActions(brokerActions, ["update"])))) {
-    assertAppendOnlyReferenceAuditBinding(plan, taskDefinitionClassification, referenceAudit, { referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now });
+    assertAppendOnlyReferenceAuditBinding(plan, taskDefinitionClassification, referenceAudit, { referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now, terraformConfiguration });
   }
   for (const change of plan.resource_changes || []) {
     const actions = change.change.actions || [];
@@ -620,7 +640,7 @@ export function assertStageBPlan(plan, options = {}) {
         assertRetainedTaskDefinition(change);
       } else {
         assertTaskDefinitionScope(change);
-        if (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"])) throw new Error(`Stage B append-only task-definition plan rejected: ${change.address}`);
+        if (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"]) && !isStageBTaskDefinitionRotationActionsValue(actions)) throw new Error(`Stage B task-definition plan rejected: ${change.address}`);
       }
     } else if (actions.includes("delete")) {
       throw new Error(`Stage B plan rejected: ${change.address}`);
@@ -633,7 +653,7 @@ export function assertStageBPlan(plan, options = {}) {
 
 export function assertStageBPlanCapture(plan, options = {}) {
   const result = assertStageBPlan(plan, { ...options, requireReferenceAudit: false, captureMode: true });
-  if ((result.actionCounts?.destroy || 0) !== 0 || (result.actionCounts?.replace || 0) !== 0 || result.unclassifiedResources?.length !== 0) throw new Error("Stage B plan capture contains a destructive or unclassified action.");
+  if ((result.actionCounts?.destroy || 0) !== 0 || result.unclassifiedResources?.length !== 0 || (result.actionCounts?.replacement || 0) !== (result.taskDefinitionRotations?.length || 0)) throw new Error("Stage B plan capture contains an unauthorized destructive or unclassified action.");
   return result;
 }
 
@@ -708,7 +728,7 @@ export function captureStageBPlan({ tfvars, cliOptions, protectedMainCheckout = 
   const classification = assertStageBPlanCapture(parsedPlan, { terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: workspace } });
   if (inputs.recoveryAttestationSha256) { const recoveryReport = JSON.parse(fs.readFileSync(inputs.recoveryAttestationReportPath, "utf8")); assertRecoveryPlanDelta(parsedPlan, recoveryReport); }
   const hashes = stageBPlanHashes({ savedPlanBytes: fs.readFileSync(outputPaths[0]), planJsonBytes, canonicalPlanJsonBytes });
-  const report = createStageBPlanCaptureReport({ toolingSha: protectedMainCheckout.currentHead, toolingTreeSha256: inputs.toolingTreeSha256, refreshReportSha256: inputs.refreshReportSha256, recoveryAttestationSha256: inputs.recoveryAttestationSha256, hashes, capturedAt: new Date().toISOString(), stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial, terraformVersion: parsedPlan.terraform_version, terraformFormatVersion: parsedPlan.format_version, classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replace || 0, unclassified: classification.unclassifiedResources.length }, brokerEvidence: classification.brokerCapture });
+  const report = createStageBPlanCaptureReport({ toolingSha: protectedMainCheckout.currentHead, toolingTreeSha256: inputs.toolingTreeSha256, refreshReportSha256: inputs.refreshReportSha256, recoveryAttestationSha256: inputs.recoveryAttestationSha256, hashes, capturedAt: new Date().toISOString(), stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial, terraformVersion: parsedPlan.terraform_version, terraformFormatVersion: parsedPlan.format_version, planProfile: classification.planProfile, taskDefinitionRotations: classification.taskDefinitionRotations, classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replacement || 0, unclassified: classification.unclassifiedResources.length }, brokerEvidence: classification.brokerCapture });
   const reportResult = writeStageBPlanEvidence({ filePath: captureReportPath, report, repositoryRoot: process.cwd(), label: "Stage B plan capture report" });
   return { status: STAGE_B_PLAN_CAPTURED, ...reportResult, plan: outputPaths[0], planJson: outputPaths[1], canonicalPlanJson: outputPaths[2], planJsonSha256: hashes.planJsonSha256, canonicalPlanJsonSha256: hashes.canonicalPlanFileSha256, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256 };
 }
@@ -738,7 +758,7 @@ export function recoverCapturedStageBPlan({ tfvars, cliOptions, protectedMainChe
   const classification = assertStageBPlanCapture(plan, { terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: process.env.TF_WORKSPACE } });
   if (inputs.recoveryAttestationSha256 !== expected.recoveryAttestationSha256) throw new Error("Stage B recovery plan cannot be recovered without the exact recovery-attestation binding.");
   if (inputs.recoveryAttestationSha256) assertRecoveryPlanDelta(plan, JSON.parse(fs.readFileSync(inputs.recoveryAttestationReportPath, "utf8")));
-  const report = createStageBPlanCaptureReport({ toolingSha: protectedMainCheckout.currentHead, toolingTreeSha256: inputs.toolingTreeSha256, refreshReportSha256: inputs.refreshReportSha256, recoveryAttestationSha256: inputs.recoveryAttestationSha256, hashes, capturedAt: new Date().toISOString(), stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial, terraformVersion: plan.terraform_version, terraformFormatVersion: plan.format_version, planExitCode: 2, showExitCode: 0, classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replace || 0, unclassified: classification.unclassifiedResources.length }, brokerEvidence: classification.brokerCapture });
+  const report = createStageBPlanCaptureReport({ toolingSha: protectedMainCheckout.currentHead, toolingTreeSha256: inputs.toolingTreeSha256, refreshReportSha256: inputs.refreshReportSha256, recoveryAttestationSha256: inputs.recoveryAttestationSha256, hashes, capturedAt: new Date().toISOString(), stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial, terraformVersion: plan.terraform_version, terraformFormatVersion: plan.format_version, planExitCode: 2, showExitCode: 0, planProfile: classification.planProfile, taskDefinitionRotations: classification.taskDefinitionRotations, classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replacement || 0, unclassified: classification.unclassifiedResources.length }, brokerEvidence: classification.brokerCapture });
   const result = writeStageBPlanEvidence({ filePath: captureReportPath, report, repositoryRoot: process.cwd(), label: "Stage B plan capture report" });
   return { status: STAGE_B_PLAN_CAPTURED, ...result, plan: savedPlanPath, planJson: planJsonPath, canonicalPlanJson: canonicalPlanJsonPath, planJsonSha256: hashes.planJsonSha256, canonicalPlanJsonSha256: hashes.canonicalPlanFileSha256, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256 };
 }
@@ -801,7 +821,7 @@ export function approveCapturedStageBPlan({ tfvars, cliOptions, protectedMainChe
   if (sha256(planJsonBytes) !== (readOption(cliOptions, "--plan-json-sha256") || hashes.planJsonSha256)) throw new Error("Stage B plan JSON SHA256 does not match the selected plan JSON.");
   const plan = JSON.parse(planJsonBytes.toString("utf8"));
   const classification = assertStageBPlan(plan, { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: auditSha256, planJsonBytes, planJsonSha256: hashes.planJsonSha256, trustedCallerArn, terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: assertStageBPlanningWorkspace({ env: process.env, argv: [tfvars, ...cliOptions] }).toString() } });
-  const approval = createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath: path.resolve(auditPath), referenceAuditSha256: auditSha256, referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, toolingSha: capture.report.toolingSha, toolingTreeSha256: capture.report.toolingTreeSha256, refreshReportSha256: capture.report.refreshReportSha256, recoveryAttestationSha256: capture.report.recoveryAttestationSha256, stageBLineage: capture.report.stageBLineage, stageBSerial: capture.report.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: new Date().toISOString(), classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replace || 0, unclassified: classification.unclassifiedResources.length }, brokerOperation: capture.report.brokerOperation, brokerUpdatePresent: capture.report.brokerUpdatePresent, brokerActions: capture.report.brokerActions, brokerResourceAddresses: capture.report.brokerResourceAddresses });
+  const approval = createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath: path.resolve(auditPath), referenceAuditSha256: auditSha256, referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, toolingSha: capture.report.toolingSha, toolingTreeSha256: capture.report.toolingTreeSha256, refreshReportSha256: capture.report.refreshReportSha256, recoveryAttestationSha256: capture.report.recoveryAttestationSha256, stageBLineage: capture.report.stageBLineage, stageBSerial: capture.report.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: new Date().toISOString(), planProfile: classification.planProfile, taskDefinitionRotations: classification.taskDefinitionRotations, classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replacement || 0, unclassified: classification.unclassifiedResources.length }, brokerOperation: capture.report.brokerOperation, brokerUpdatePresent: capture.report.brokerUpdatePresent, brokerActions: capture.report.brokerActions, brokerResourceAddresses: capture.report.brokerResourceAddresses });
   return finalizeCapturedStageBPlanApproval({ approval, approvalReportPath, repositoryRoot: process.cwd(), captureReport: capture.report, captureReportBytes: capture.bytes, referenceAudit: audit, referenceAuditBytes: auditBytes, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: auditSha256, trustedCallerArn, stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial, savedPlanPath, planJsonPath, canonicalPlanJsonPath });
 }
 

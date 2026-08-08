@@ -65,7 +65,8 @@
     "post-canary-rollover": "create-only current definitions plus retained canary history and broker rollover",
     "broker-policy-migrated": "managed broker policy and exact attachment; legacy inline policy rejected",
     "zero-current-refresh-checkpoint": "retained definitions and persistent broker resources refresh as no-op",
-    "normal-subsequent-release": "append-only current creates/no-ops with broker mutation when mappings change",
+    "normal-subsequent-release": "current creates/no-ops, exact task-definition rotations, with broker mutation when mappings change",
+    "ecs-task-definition-rotation": "exact twelve root-managed versioned task definitions may replace only through the reviewed container-definition rollover contract",
     "current-production-shaped-plan": "58 no-ops, 12 creates, 3 updates, zero deletes/replacements"
   },
   "actionLifecycle": {
@@ -73,7 +74,16 @@
     "update": ["post-canary-rollover", "broker-policy-migrated", "normal-subsequent-release"],
     "no-op": ["initial-stage-b", "partial-apply-retry", "pre-canary-retained-rollover", "post-canary-rollover", "broker-policy-migrated", "zero-current-refresh-checkpoint", "normal-subsequent-release", "current-production-shaped-plan"],
     "delete": [],
-    "replacement": []
+    "replacement": ["ecs-task-definition-rotation"]
+  },
+  "taskDefinitionRotation": {
+    "scope": "exact twelve root-managed Stage B task-definition addresses",
+    "actions": [["create", "delete"], ["delete", "create"]],
+    "replacePaths": [["container_definitions"]],
+    "immutableFields": ["family", "network_mode", "requires_compatibilities", "cpu", "memory", "execution_role_arn", "task_role_arn", "runtime_platform", "volumes", "tags"],
+    "imageBinding": "after container images are immutable digests bound to current signed image evidence",
+    "deleteOnlyForbidden": true,
+    "recoveryIndependent": true
   },
   "resources": [
     {"addressPattern":"aws_cloudwatch_log_group.stage_b[\"backend|worker|canary|read_only_canary\"]","type":"aws_cloudwatch_log_group","actions":["create","no-op"],"identity":"exact Stage B log-group name","layers":["plan-validator","permission-manifest","apply-wrapper","post-apply"]},
@@ -82,8 +92,8 @@
     {"addressPattern":"aws_iam_role_policy.execution[\"backend|worker|executor|canary|read_only_canary\"]","type":"aws_iam_role_policy","actions":["create","no-op"],"identity":"exact role and stage-b-exact-image-logs-and-secrets policy","layers":["plan-validator","permission-manifest","apply-wrapper"]},
     {"addressPattern":"aws_iam_role_policy.candidate_object_storage[\"backend|worker|canary\"]","type":"aws_iam_role_policy","actions":["create","no-op"],"identity":"exact task role and stage-b-object-storage policy","layers":["plan-validator","permission-manifest","apply-wrapper"]},
     {"addressPattern":"aws_iam_role_policy.executor_runtime","type":"aws_iam_role_policy","actions":["create","no-op"],"identity":"exact Stage A executor task role and stage-b-executor-runtime policy","layers":["plan-validator","permission-manifest","apply-wrapper"]},
-    {"addressPattern":"aws_ecs_task_definition.candidate[\"backend|worker|canary|read_only_canary\"]","type":"aws_ecs_task_definition","actions":["create","no-op"],"identity":"exact current candidate family and image binding","layers":["plan-validator","reference-audit","permission-manifest","apply-wrapper","post-apply"]},
-    {"addressPattern":"aws_ecs_task_definition.executor[\"full-rls-*\"]","type":"aws_ecs_task_definition","actions":["create","no-op"],"identity":"exact current executor family and image binding","layers":["plan-validator","reference-audit","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_ecs_task_definition.candidate[\"backend|worker|canary|read_only_canary\"]","type":"aws_ecs_task_definition","actions":["create","no-op","replacement"],"identity":"exact current candidate family, image binding, and reviewed container-definition rollover","layers":["plan-validator","reference-audit","permission-manifest","apply-wrapper","post-apply"]},
+    {"addressPattern":"aws_ecs_task_definition.executor[\"full-rls-*\"]","type":"aws_ecs_task_definition","actions":["create","no-op","replacement"],"identity":"exact current executor family, image binding, and reviewed container-definition rollover","layers":["plan-validator","reference-audit","permission-manifest","apply-wrapper","post-apply"]},
     {"addressPattern":"aws_ecs_task_definition.candidate_retained[\"<generation>-backend|worker|canary\"]","type":"aws_ecs_task_definition","actions":["no-op"],"identity":"exact pre-canary revision-keyed retained family","layers":["plan-validator","reference-audit","apply-wrapper","post-apply"]},
     {"addressPattern":"aws_ecs_task_definition.executor_retained[\"<generation>-full-rls-*\"]","type":"aws_ecs_task_definition","actions":["no-op"],"identity":"exact revision-keyed retained executor family","layers":["plan-validator","reference-audit","apply-wrapper","post-apply"]},
     {"addressPattern":"aws_dynamodb_table.replay","type":"aws_dynamodb_table","actions":["create","no-op"],"identity":"arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay","layers":["plan-validator","permission-manifest","apply-wrapper","post-apply"]},
@@ -97,7 +107,7 @@
     "aws_iam_role_policy.broker",
     "aws_iam_policy.* except aws_iam_policy.broker",
     "aws_iam_role_policy_attachment.* except aws_iam_role_policy_attachment.broker",
-    "all delete and replacement actions",
+    "all delete-only actions and all replacement actions outside taskDefinitionRotation",
     "aws_ecs_service, aws_ecs_cluster, aws_ecs_run_task, aws_db_*, aws_rds_*, aws_lb_*, aws_route53_*"
   ]
 }

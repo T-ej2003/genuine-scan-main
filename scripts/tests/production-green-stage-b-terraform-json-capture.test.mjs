@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { captureStageBTerraformJson } from "../aws/capture-stage-b-terraform-json.mjs";
+import { captureStageBTerraformJson, runStageBTerraformJson } from "../aws/capture-stage-b-terraform-json.mjs";
 
 const cwd = process.cwd();
 const runNode = (script, value) => ({ terraform: process.execPath, args: ["-e", script, ...(value === undefined ? [] : [value])], cwd });
@@ -13,6 +13,14 @@ test("large terraform show JSON is captured without child-process stdout bufferi
   const bytes = captureStageBTerraformJson({ ...runNode("process.stdout.write(JSON.stringify({ format_version: '1.2', payload: 'x'.repeat(Number(process.argv[1])) }))", String(2 * 1024 * 1024)) });
   assert.equal(bytes.toString("utf8"), payload);
   assert.ok(bytes.length > 1024 * 1024);
+});
+
+test("file-backed command result preserves large stdout and bounded diagnostics for refresh consumers", () => {
+  const payload = JSON.stringify({ format_version: "1.2", payload: "x".repeat(2 * 1024 * 1024) });
+  const result = runStageBTerraformJson({ ...runNode("process.stdout.write(JSON.stringify({ format_version: '1.2', payload: 'x'.repeat(Number(process.argv[1])) })); process.stderr.write('diagnostic')", String(2 * 1024 * 1024)) });
+  assert.equal(result.status, 0);
+  assert.deepEqual(result.stdout, Buffer.from(payload));
+  assert.deepEqual(result.stderr, Buffer.from("diagnostic"));
 });
 
 test("malformed JSON, nonzero exit, spawn failure, and signals fail closed", () => {
