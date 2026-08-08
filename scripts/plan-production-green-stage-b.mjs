@@ -19,7 +19,7 @@ import {
 import { assertStageBBrokerConfigurationIdentity, canonicalJson, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-stage-b-image-evidence.mjs";
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
-import { classifyStageBPlan } from "./aws/stage-b-deployment-contract.mjs";
+import { assertStageBBrokerFunctionUpdate, classifyStageBPlan } from "./aws/stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments } from "./aws/stage-b-terraform-workspace.mjs";
@@ -380,6 +380,7 @@ export function assertStageBBrokerCaptureUpdateContract(plan) {
   const changes = new Map((plan.resource_changes || []).filter((change) => brokerCaptureAddresses.includes(change.address)).map((change) => [change.address, change]));
   const active = brokerCaptureAddresses.map((address) => changes.get(address)).filter((change) => change && !exactActions(change.change?.actions || [], ["no-op"]));
   for (const change of active) {
+    if (change.address === "aws_lambda_function.broker") assertStageBBrokerFunctionUpdate(change);
     const before = change.change?.before || {};
     const after = change.change?.after || {};
     const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])]

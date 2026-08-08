@@ -255,6 +255,24 @@ function assertStageBResourceIdentity(change, kind, key, strict) {
   }
 }
 
+const brokerFunctionAllowedChangedFields = new Set(["environment", "filename", "source_code_hash", "last_modified", "qualified_arn", "qualified_invoke_arn", "version"]);
+
+export function assertStageBBrokerFunctionUpdate(change) {
+  if (change?.address !== "aws_lambda_function.broker" || change?.type !== "aws_lambda_function" || !exactActions(change.change?.actions, ["update"])) {
+    throw new Error("Stage B broker function must be the exact root-managed update.");
+  }
+  const before = change.change?.before || {};
+  const after = change.change?.after || {};
+  for (const value of [before.function_name, after.function_name]) if (value !== undefined && value !== STAGE_B.brokerFunctionArn.split(":function:")[1]) {
+    throw new Error("Stage B broker function identity is outside the exact contract.");
+  }
+  const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+  const unsupported = changed.find((key) => !brokerFunctionAllowedChangedFields.has(key));
+  if (unsupported) throw new Error(`Stage B broker function update contains an unsupported mutable field: ${unsupported}.`);
+  return true;
+}
+
 export function assertStageBPlanResourceChange(change, { strict = true, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false, plan } = {}) {
   const address = change?.address || "<missing address>";
   const type = change?.type || "<missing type>";

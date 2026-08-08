@@ -120,6 +120,15 @@ recovery verifier rechecks raw bytes, hashes, signature, source, lineage, serial
 refresh SHA, resource identity, versions, and freshness at each security-sensitive
 consumer.
 
+For the recovery plan delta, the reviewed alias target may be concrete only when it
+equals the attested configured version, or computed when Terraform marks only
+`aws_lambda_alias.reviewed.function_version` unknown. The computed form is accepted
+only when structured Terraform configuration metadata binds that expression exactly to
+`aws_lambda_function.broker.version`, the same plan contains the exact publishing
+broker update, and no conflicting concrete target or other unknown alias field exists.
+Post-apply verification must read the actual broker configuration and reviewed alias
+and prove that the alias resolves to the published broker version.
+
 ## Historical failure coverage
 
 The following previously encountered blockers are now guarded by source and tests:

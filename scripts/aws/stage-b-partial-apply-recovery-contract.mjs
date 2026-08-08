@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { canonicalJson, STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { assertStageBBrokerFunctionUpdate } from "./stage-b-deployment-contract.mjs";
 import { assertStageBPrivateFile, assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 
@@ -153,12 +154,62 @@ export function assertVerifiedStageBRecovery({ refreshReport, refreshReportBytes
   return { refreshReport: parsedRefresh, classification: parsedClassification, attestation: parsedAttestation, signature: parsedSignature, attestationSha256, signatureSha256, classificationSha256, refreshReportSha256, ...verified, derivedClassification: derived };
 }
 
+function rootConfigurationResource(plan, address, type) {
+  const resources = plan?.configuration?.root_module?.resources;
+  if (!Array.isArray(resources)) throw new Error("Recovery plan Terraform configuration metadata is missing.");
+  const matches = resources.filter((resource) => resource?.address === address);
+  if (matches.length !== 1 || matches[0]?.mode !== "managed" || matches[0]?.type !== type) throw new Error(`Recovery plan configuration identity is not the exact root-managed ${address}.`);
+  return matches[0];
+}
+
+function assertAliasUnknownShape(change, computed) {
+  const unknown = change.change?.after_unknown;
+  if (unknown === undefined) {
+    if (computed) throw new Error("Recovery plan computed alias target is missing after_unknown.function_version.");
+    return;
+  }
+  if (!unknown || typeof unknown !== "object" || Array.isArray(unknown)) throw new Error("Recovery plan alias unknown-value metadata is malformed.");
+  for (const [field, value] of Object.entries(unknown)) {
+    if (field === "function_version" && value === true) continue;
+    if (field === "routing_config" && exact(value, [])) continue;
+    throw new Error(`Recovery plan alias contains an unreviewed unknown field: ${field}.`);
+  }
+  if (computed && unknown.function_version !== true) throw new Error("Recovery plan computed alias target is not explicitly unknown.");
+  if (!computed && unknown.function_version === true) throw new Error("Recovery plan alias target is both concrete and unknown.");
+}
+
+function assertComputedAliasTarget(plan, alias) {
+  const after = alias.change?.after || {};
+  if (after.function_version !== undefined && after.function_version !== null) throw new Error("Recovery plan computed alias target contains a conflicting concrete function version.");
+  assertAliasUnknownShape(alias, true);
+  const configuration = rootConfigurationResource(plan, STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS, "aws_lambda_alias");
+  const references = configuration.expressions?.function_version?.references;
+  const expectedReferences = ["aws_lambda_function.broker", "aws_lambda_function.broker.version"];
+  if (!Array.isArray(references) || !exact([...references].sort(), [...expectedReferences].sort())) throw new Error("Recovery plan alias function_version is not bound exactly to aws_lambda_function.broker.version.");
+  const brokerChanges = (plan.resource_changes || []).filter((change) => change?.address === "aws_lambda_function.broker");
+  if (brokerChanges.length !== 1) throw new Error("Recovery plan computed alias target requires exactly one broker function update.");
+  const broker = brokerChanges[0];
+  if (broker.mode !== "managed" || broker.module) throw new Error("Recovery plan broker update is not root-managed.");
+  assertStageBBrokerFunctionUpdate(broker);
+  if (broker.change?.after_unknown?.version !== true) throw new Error("Recovery plan broker update does not prove a computed published version.");
+  const brokerConfiguration = rootConfigurationResource(plan, "aws_lambda_function.broker", "aws_lambda_function");
+  if (brokerConfiguration.expressions?.publish?.constant_value !== true) throw new Error("Recovery plan broker publish behavior is not enabled by the exact Terraform configuration.");
+}
+
 export function assertRecoveryPlanDelta(plan, attestation) {
   const current = assertCurrentEvidence(attestation?.currentObservedEvidence);
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
-  const alias = changes.find((change) => change?.address === current.terraformAddress);
-  if (!alias || !exact(alias.change?.actions, ["update"]) || String(alias.change?.before?.function_version || "") !== current.liveVersion || String(alias.change?.after?.function_version || "") !== current.configuredDesiredVersion) throw new Error("Recovery plan must contain the exact attested alias live-to-configured update.");
-  if (changes.some((change) => change?.address === current.terraformAddress && (change.type !== current.resourceType || change.mode === "data" || change.module))) throw new Error("Recovery plan alias identity is not root-managed.");
+  const aliases = changes.filter((change) => change?.address === current.terraformAddress);
+  const alias = aliases[0];
+  if (aliases.length !== 1 || !alias || !exact(alias.change?.actions, ["update"]) || alias.mode !== "managed" || alias.module || alias.type !== current.resourceType || alias.change?.before?.function_version !== current.liveVersion) throw new Error("Recovery plan must contain the exact attested alias live-to-configured update.");
+  const afterVersion = alias.change?.after?.function_version;
+  const hasConcreteTarget = afterVersion !== undefined && afterVersion !== null;
+  if (hasConcreteTarget) {
+    assertAliasUnknownShape(alias, false);
+    if (afterVersion !== current.configuredDesiredVersion) throw new Error("Recovery plan must contain the exact attested alias live-to-configured update.");
+  } else {
+    assertComputedAliasTarget(plan, alias);
+  }
   return { address: alias.address, action: "update", beforeVersion: current.liveVersion, afterVersion: current.configuredDesiredVersion };
 }
 
