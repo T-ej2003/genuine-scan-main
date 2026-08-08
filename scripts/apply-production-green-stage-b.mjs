@@ -32,6 +32,7 @@ import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs"
 import { assertStageBPrivateFile } from "./aws/stage-b-artifact-contract.mjs";
 import { assertStageBPlanApprovedBinding } from "./aws/stage-b-plan-approval-contract.mjs";
 import { assertVerifiedStageBRecovery } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
+import { captureStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -211,6 +212,7 @@ function currentCaller() {
 }
 
 export function showSavedPlan(planPath, { env = process.env, execFile = execFileSync } = {}) {
+  if (execFile === execFileSync) return captureStageBTerraformJson({ args: [`-chdir=${terraformRoot}`, "show", "-json", planPath], cwd: root, env });
   return execFile("terraform", [`-chdir=${terraformRoot}`, "show", "-json", planPath], { cwd: root, env, encoding: null, stdio: ["ignore", "pipe", "pipe"] });
 }
 
