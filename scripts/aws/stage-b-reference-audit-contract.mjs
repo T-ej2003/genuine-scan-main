@@ -74,8 +74,7 @@ const ecsTaskDefinitionNestedVolumeKeys = Object.freeze([
 ]);
 const canonicalizeEcsTaskDefinitionNullableMode = (value, label) => {
   if (value === null || value === "") return null;
-  if (typeof value !== "string") throw new Error(`Stage B task-definition ${label} must be a string or provider-empty value.`);
-  return value;
+  throw new Error(`Stage B task-definition ${label} is outside the reviewed empty-provider shape.`);
 };
 
 export function canonicalizeEcsTaskDefinitionVolumes(value) {
@@ -86,12 +85,18 @@ export function canonicalizeEcsTaskDefinitionVolumes(value) {
     const unknownKeys = Object.keys(volume).filter((key) => !ecsTaskDefinitionVolumeKeys.has(key));
     if (unknownKeys.length) throw new Error(`Stage B task-definition volume[${index}] has an unsupported field: ${unknownKeys[0]}.`);
     if (typeof volume.name !== "string" || volume.name.length === 0 || names.has(volume.name)) throw new Error(`Stage B task-definition volume[${index}] has a missing or duplicate name.`);
-    if (volume.configure_at_launch !== undefined && typeof volume.configure_at_launch !== "boolean") throw new Error(`Stage B task-definition volume[${index}].configure_at_launch is malformed.`);
+    if (volume.configure_at_launch !== undefined && volume.configure_at_launch !== false) throw new Error(`Stage B task-definition volume[${index}].configure_at_launch is outside the reviewed empty-provider shape.`);
+    if (volume.host_path !== undefined && volume.host_path !== "") throw new Error(`Stage B task-definition volume[${index}].host_path is outside the reviewed empty-provider shape.`);
     for (const field of ecsTaskDefinitionNestedVolumeKeys) {
       if (volume[field] !== undefined && (!Array.isArray(volume[field]) || volume[field].length !== 0)) throw new Error(`Stage B task-definition volume[${index}].${field} is outside the reviewed empty-provider shape.`);
     }
     names.add(volume.name);
-    return stableTaskDefinitionValue({ ...volume, configure_at_launch: volume.configure_at_launch ?? false });
+    return stableTaskDefinitionValue({
+      ...volume,
+      configure_at_launch: volume.configure_at_launch ?? false,
+      host_path: volume.host_path ?? "",
+      ...Object.fromEntries(ecsTaskDefinitionNestedVolumeKeys.map((field) => [field, volume[field] ?? []])),
+    });
   });
 }
 

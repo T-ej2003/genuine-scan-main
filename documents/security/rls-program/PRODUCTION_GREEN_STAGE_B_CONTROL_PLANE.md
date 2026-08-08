@@ -72,10 +72,12 @@ the image root filesystem writable. No other Stage B task receives that mount.
 During a reviewed task-definition rollover, Terraform plan JSON uses the provider's
 singular `volume` field. The rotation contract compares its semantic volume shape, not
 provider-empty representation details: an omitted `configure_at_launch` is equivalent
-only to `false`, and the empty nested Docker/EFS/FSx/S3 configuration arrays are the only
-accepted nested shape in this contract. Volume names, mounts, paths, configured volume
-drivers, EFS settings, duplicate names, and unsupported fields remain fatal. The same
-provider-empty normalization applies to `ipc_mode` and `pid_mode` (`""` and `null` only),
+only to `false`; `true` is outside the reviewed domain. `host_path` is limited to the
+observed provider-empty `""` representation (or omission), and each nested Docker/EFS/FSx/S3
+configuration is limited to omission or an empty array. Volume names, mounts, paths, configured volume drivers, EFS settings, duplicate
+names, and unsupported fields remain fatal. The same provider-empty normalization applies
+to `ipc_mode` and `pid_mode` (`""` and `null` only); nonempty process-sharing modes are
+outside the reviewed domain and remain fatal.
 and to omitted empty container arrays. This normalization does not authorize a delete-only
 operation or any ECS address outside the exact twelve root-managed task definitions.
 

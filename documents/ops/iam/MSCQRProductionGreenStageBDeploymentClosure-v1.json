@@ -80,7 +80,7 @@
     "scope": "exact twelve root-managed Stage B task-definition addresses",
     "actions": [["create", "delete"], ["delete", "create"]],
     "replacePaths": [["container_definitions"]],
-    "immutableFields": ["family", "network_mode", "requires_compatibilities", "cpu", "memory", "execution_role_arn", "task_role_arn", "runtime_platform", "volumes", "tags"],
+    "immutableFields": ["family", "network_mode", "requires_compatibilities", "cpu", "memory", "execution_role_arn", "task_role_arn", "runtime_platform", "volume", "ipc_mode", "pid_mode", "tags"],
     "imageBinding": "after container images are immutable digests bound to current signed image evidence",
     "deleteOnlyForbidden": true,
     "recoveryIndependent": true

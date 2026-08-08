@@ -151,6 +151,66 @@ test("provider-normalized task-definition volumes preserve semantic equality", (
   assert.deepEqual(canonicalizeEcsTaskDefinitionVolumes([{ name: "tmp", docker_volume_configuration: [], efs_volume_configuration: [], fsx_windows_file_server_volume_configuration: [], host_path: "", s3files_volume_configuration: [] }]), canonicalizeEcsTaskDefinitionVolumes([{ configure_at_launch: false, name: "tmp", docker_volume_configuration: [], efs_volume_configuration: [], fsx_windows_file_server_volume_configuration: [], host_path: "", s3files_volume_configuration: [] }]));
 });
 
+test("provider-empty volume domain rejects configured values before equality", () => {
+  const configureCases = [
+    [false, false, false],
+    [undefined, false, false],
+    [false, undefined, false],
+    [true, true, true],
+    [true, undefined, true],
+    [undefined, true, true],
+  ];
+  for (const [beforeValue, afterValue, rejected] of configureCases) {
+    const plan = rotationPlan();
+    for (const change of plan.resource_changes) {
+      const beforeVolume = change.change.before.volume[0];
+      const afterVolume = change.change.after.volume[0];
+      if (beforeValue === undefined) delete beforeVolume.configure_at_launch;
+      else beforeVolume.configure_at_launch = beforeValue;
+      if (afterValue === undefined) delete afterVolume.configure_at_launch;
+      else afterVolume.configure_at_launch = afterValue;
+    }
+    if (rejected) assert.throws(() => classifyStageBPlan(plan, { strict: true }), /configure_at_launch.*outside/);
+    else assert.equal(classifyStageBPlan(plan, { strict: true }).taskDefinitionRotations.length, 12);
+  }
+  const omittedHostPath = rotationPlan();
+  for (const change of omittedHostPath.resource_changes) delete change.change.before.volume[0].host_path;
+  assert.equal(classifyStageBPlan(omittedHostPath, { strict: true }).taskDefinitionRotations.length, 12);
+  const configuredHostPath = rotationPlan();
+  for (const change of configuredHostPath.resource_changes) {
+    change.change.before.volume[0].host_path = "/tmp";
+    change.change.after.volume[0].host_path = "/tmp";
+  }
+  assert.throws(() => classifyStageBPlan(configuredHostPath, { strict: true }), /host_path.*outside/);
+});
+
+test("provider-empty nested volume configuration rejects nonempty equal values", () => {
+  for (const field of ["docker_volume_configuration", "efs_volume_configuration", "fsx_windows_file_server_volume_configuration", "s3files_volume_configuration"]) {
+    const plan = rotationPlan();
+    for (const change of plan.resource_changes) {
+      change.change.before.volume[0][field] = [{}];
+      change.change.after.volume[0][field] = [{}];
+    }
+    assert.throws(() => classifyStageBPlan(plan, { strict: true }), new RegExp(`${field}.*outside`));
+  }
+});
+
+test("provider-empty process-sharing modes allow only null and empty string", () => {
+  for (const field of ["ipc_mode", "pid_mode"]) {
+    const plan = rotationPlan();
+    for (const change of plan.resource_changes) change.change.before[field] = null;
+    assert.equal(classifyStageBPlan(plan, { strict: true }).taskDefinitionRotations.length, 12);
+    for (const value of ["host", "task", "none", "unknown"]) {
+      const rejected = rotationPlan();
+      for (const change of rejected.resource_changes) {
+        change.change.before[field] = value;
+        change.change.after[field] = value;
+      }
+      assert.throws(() => classifyStageBPlan(rejected, { strict: true }), new RegExp(`${field}.*outside`));
+    }
+  }
+});
+
 test("volume semantic changes fail closed", () => {
   const mutations = [
     (volume) => volume.push({ ...volume[0], name: "extra" }),
