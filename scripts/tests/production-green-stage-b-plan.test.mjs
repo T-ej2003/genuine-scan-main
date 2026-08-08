@@ -15,6 +15,7 @@ const terraformConfiguration = fs.readFileSync("infra/aws/terraform/production-g
 const change = (type, actions = ["create"], after = {}, before = {}) => ({ address: type === "aws_ecs_task_definition" ? address : `test.${type}`, type, change: { actions, after, before } });
 const rollover = () => {
   const value = change("aws_ecs_task_definition", ["delete", "create"], { family }, { family, arn: oldArn });
+  value.mode = "managed";
   value.change.replace_paths = [["container_definitions"]];
   return value;
 };
@@ -303,7 +304,7 @@ test("append-only current create plus retained no-op passes", () => {
   const { plan, options } = validAppendOnly();
   assert.doesNotThrow(() => assertStageBPlan(plan, options));
   const replacement = { resource_changes: [rollover()] };
-  assert.throws(() => assertStageBPlan(replacement, options), /append-only/);
+  assert.throws(() => assertStageBPlan(replacement, options), /rotation changes an immutable field/);
 });
 
 test("unknown task-definition address and family are rejected", () => {
@@ -335,13 +336,13 @@ test("append-only contract covers current and retained task-definition collectio
 test("task-definition delete, replacement, and update actions are rejected", () => {
   const { plan, options } = validAppendOnly();
   plan.resource_changes[0].change.actions = ["delete"];
-  assert.throws(() => assertStageBPlan(plan, options), /append-only|create-only/);
+  assert.throws(() => assertStageBPlan(plan, options), /exact reviewed.*rotation/);
   const alternate = validAppendOnly();
   alternate.plan.resource_changes[0].change.actions = ["create", "delete"];
-  assert.throws(() => assertStageBPlan(alternate.plan, alternate.options), /append-only/);
+  assert.throws(() => assertStageBPlan(alternate.plan, alternate.options), /rotation (identity or action|action|replace paths)|exact reviewed.*rotation/);
   const update = validAppendOnly();
   update.plan.resource_changes[0].change.actions = ["update"];
-  assert.throws(() => assertStageBPlan(update.plan, update.options), /append-only/);
+  assert.throws(() => assertStageBPlan(update.plan, update.options), /exact reviewed.*rotation/);
 });
 
 test("Stage B plan wrapper rejects forbidden destroys and mutable images", () => {

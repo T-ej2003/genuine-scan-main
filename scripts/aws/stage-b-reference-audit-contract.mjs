@@ -32,6 +32,30 @@ export const STAGE_B_BROKER_APPROVAL_INPUT = "var.package_checksum_sha256";
 export const STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION = "aws_ecs_task_definition.executor";
 const currentTaskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):([1-9][0-9]*)$/;
 
+export const STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS = Object.freeze([
+  Object.freeze(["create", "delete"]),
+  Object.freeze(["delete", "create"]),
+]);
+export const STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS = Object.freeze([["container_definitions"]]);
+
+const rotationMutableEnvironment = Object.freeze(new Map([
+  ["RELEASE_GIT_SHA", "image_release_sha"],
+  ["MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256", "source_contract_sha256"],
+  ["MSCQR_FULL_RLS_MIGRATION_SET_DIGEST", "migration_set_digest"],
+  ["MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256", "package_checksum_sha256"],
+]));
+export const STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS = Object.freeze([
+  "family", "network_mode", "requires_compatibilities", "cpu", "memory",
+  "execution_role_arn", "task_role_arn", "runtime_platform", "volumes", "tags",
+]);
+const rotationStableFields = STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS;
+
+const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
+const isRotationActions = (actions) => STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS.some((expected) => exactActions(actions, expected));
+const parsedTaskDefinitionValue = (value) => {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return value; }
+};
 const stableTaskDefinitionValue = (value) => {
   if (Array.isArray(value)) return value.map(stableTaskDefinitionValue);
   if (!value || typeof value !== "object") return value;
@@ -40,18 +64,82 @@ const stableTaskDefinitionValue = (value) => {
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, item]) => [key, stableTaskDefinitionValue(item)]));
 };
-
-const taskDefinitionValues = (value) => {
-  if (typeof value !== "string") return value;
-  try { return JSON.parse(value); } catch { return value; }
-};
-
-const taskDefinitionImageVariable = (address) => {
+const imageVariableForAddress = (address) => {
   const key = /\["([^\"]+)"\]$/.exec(address)?.[1];
-  if (!key) return undefined;
-  if (address.startsWith("aws_ecs_task_definition.executor[")) return "executor_image";
-  return `${key}_image`;
+  return address.startsWith("aws_ecs_task_definition.executor[") ? "executor_image" : `${key}_image`;
 };
+const digestImage = (value, label) => {
+  if (typeof value !== "string" || !/^.+@sha256:[a-f0-9]{64}$/.test(value)) throw new Error(`${label} must be an immutable image digest.`);
+  return value;
+};
+
+function assertRotationContainers(beforeValue, afterValue, plan, address, strict) {
+  const before = parsedTaskDefinitionValue(beforeValue);
+  const after = parsedTaskDefinitionValue(afterValue);
+  if (!Array.isArray(before) || !Array.isArray(after) || before.length === 0 || before.length !== after.length) {
+    throw new Error(`Stage B task-definition rotation container definitions are malformed: ${address}`);
+  }
+  const beforeByName = new Map(before.map((container) => [container?.name, container]));
+  const afterByName = new Map(after.map((container) => [container?.name, container]));
+  if (beforeByName.size !== before.length || afterByName.size !== after.length || [...beforeByName.keys()].some((name) => !afterByName.has(name))) {
+    throw new Error(`Stage B task-definition rotation changes container identity: ${address}`);
+  }
+  const expectedImage = plan?.variables?.[imageVariableForAddress(address)]?.value;
+  for (const [name, afterContainer] of afterByName) {
+    const beforeContainer = beforeByName.get(name);
+    digestImage(beforeContainer?.image, `${address}.${name} before image`);
+    const actualImage = digestImage(afterContainer?.image, `${address}.${name} after image`);
+    if (strict && actualImage !== expectedImage) throw new Error(`Stage B task-definition rotation image is not bound to the plan input: ${address}`);
+    const beforeEnvironment = new Map((beforeContainer.environment || []).map((item) => [item?.name, item?.value]));
+    const afterEnvironment = new Map((afterContainer.environment || []).map((item) => [item?.name, item?.value]));
+    if (beforeEnvironment.size !== (beforeContainer.environment || []).length || afterEnvironment.size !== (afterContainer.environment || []).length
+      || [...beforeEnvironment.keys()].some((name) => !afterEnvironment.has(name))) throw new Error(`Stage B task-definition rotation changes environment identity: ${address}`);
+    for (const [environmentName, beforeEnvironmentValue] of beforeEnvironment) {
+      const afterEnvironmentValue = afterEnvironment.get(environmentName);
+      const variable = rotationMutableEnvironment.get(environmentName);
+      if (!variable && beforeEnvironmentValue !== afterEnvironmentValue) throw new Error(`Stage B task-definition rotation changes an unreviewed environment value: ${address}.${environmentName}`);
+      if (variable && strict && afterEnvironmentValue !== plan?.variables?.[variable]?.value) throw new Error(`Stage B task-definition rotation provenance is not bound to the plan: ${address}.${environmentName}`);
+    }
+    const normalize = (container) => {
+      const copy = structuredClone(container);
+      delete copy.image;
+      if (Array.isArray(copy.environment)) copy.environment = copy.environment.map((item) => rotationMutableEnvironment.has(item?.name) ? { ...item, value: "<reviewed-provenance>" } : item);
+      return stableTaskDefinitionValue(copy);
+    };
+    if (JSON.stringify(normalize(beforeContainer)) !== JSON.stringify(normalize(afterContainer))) throw new Error(`Stage B task-definition rotation contains an unreviewed container field change: ${address}`);
+    if (JSON.stringify(stableTaskDefinitionValue(beforeContainer.secrets)) !== JSON.stringify(stableTaskDefinitionValue(afterContainer.secrets))) throw new Error(`Stage B task-definition rotation changes secret sources: ${address}`);
+  }
+  if (JSON.stringify(stableTaskDefinitionValue(before)) === JSON.stringify(stableTaskDefinitionValue(after))) throw new Error(`Stage B task-definition rotation has no semantic container change: ${address}`);
+}
+
+export function assertStageBTaskDefinitionRotation(change, plan, { strict = true } = {}) {
+  const address = change?.address;
+  const expectedFamily = STAGE_B_TASK_DEFINITION_FAMILIES[address];
+  if (!expectedFamily || change?.type !== "aws_ecs_task_definition" || change?.mode !== "managed" || (change.module !== undefined && change.module !== null) || !isRotationActions(change.change?.actions)) throw new Error(`Stage B task-definition rotation identity or action is outside the exact root-managed contract: ${address}`);
+  if (!exactActions(change.change?.replace_paths, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS)) throw new Error(`Stage B task-definition rotation replace paths are outside the exact contract: ${address}`);
+  const before = change.change?.before;
+  const after = change.change?.after;
+  const beforeArn = before?.arn || before?.id || "";
+  if (!beforeArn) throw new Error(`Stage B task-definition rollover is missing its prior task-definition ARN: ${address}`);
+  const beforeIdentity = currentTaskDefinitionArnPattern.exec(beforeArn);
+  if (!beforeIdentity || beforeIdentity[1] !== expectedFamily || before.family !== expectedFamily || after?.family !== expectedFamily) throw new Error(`Stage B task-definition rotation family or prior identity is invalid: ${address}`);
+  const afterIdentity = after.arn === undefined || after.arn === null ? undefined : currentTaskDefinitionArnPattern.exec(after.arn);
+  if (after.arn !== undefined && after.arn !== null && (!afterIdentity || afterIdentity[1] !== expectedFamily)) throw new Error(`Stage B task-definition rotation new identity is invalid: ${address}`);
+  for (const field of rotationStableFields) {
+    if (before[field] === undefined || after[field] === undefined || JSON.stringify(stableTaskDefinitionValue(parsedTaskDefinitionValue(before[field]))) !== JSON.stringify(stableTaskDefinitionValue(parsedTaskDefinitionValue(after[field])))) {
+      throw new Error(`Stage B task-definition rotation changes an immutable field: ${address}.${field}`);
+    }
+  }
+  assertRotationContainers(before.container_definitions, after.container_definitions, plan, address, strict);
+  return { address, family: expectedFamily, actions: [...change.change.actions], oldArn: beforeIdentity[0], replacePaths: STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS.map((path) => [...path]), classification: "rollover" };
+}
+
+export function isStageBTaskDefinitionRotationActionsValue(actions) {
+  return isRotationActions(actions);
+}
+
+const taskDefinitionValues = parsedTaskDefinitionValue;
+const taskDefinitionImageVariable = imageVariableForAddress;
 
 export function assertStageBCurrentTaskDefinitionNoOp(change, plan, retainedArns = new Set()) {
   const expectedFamily = STAGE_B_TASK_DEFINITION_FAMILIES[change?.address];

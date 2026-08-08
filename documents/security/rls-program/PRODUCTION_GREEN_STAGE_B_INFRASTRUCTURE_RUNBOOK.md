@@ -107,7 +107,7 @@ they are not ignored or converted into defaults.
 2. Confirm Stage A owns and has applied the executor/database security groups, exact database/interface-endpoint/S3/DNS rules, executor/broker log groups, executor/broker roles, approval resources, and runtime-secret ARNs. Write one explicit reviewed prerequisite file matching `infra/aws/terraform/production-green-stage-b/stage-a-prerequisites.schema.json`; do not copy values into tfvars by hand.
 3. Build the reviewed broker package with `node scripts/aws/package-production-green-stage-b-broker.mjs /absolute/private/broker.zip --tooling-sha "$TOOLING_SHA" --tooling-tree-sha256 "$TOOLING_TREE_SHA256"`. The packager performs locked production installation, emits the deterministic ZIP and adjacent `broker.zip.manifest.json` as one mode-0600 transaction, and fixes entry order, timestamps, modes, compression, lockfile/source/contract identities, and raw/base64 ZIP hashes. `base64Sha256` means `SHA256(Buffer.from(zipBytes.toString("base64")))` rendered as lowercase hex; it is distinct from the raw ZIP digest and from the tfvars binding report's existing base64-rendered raw digest. The shared validator applies the source-controlled schema, recomputes provenance, and checks every ZIP entry's path, order, timestamp, mode, compression, size, and extracted bytes before any binding is trusted. Then run only `npm run stage-b:generate-tfvars -- ...` with the signed image evidence, state backup, prerequisite file, broker ZIP, exact tooling/image identities, and private output paths. The canonical tfvars output must be HCL at a filename ending exactly in `.tfvars`; `.json` and `.tfvars.json` are rejected. The generator derives package/source/migration checksums and retained definitions, verifies every image digest byte-for-byte, records the canonical broker manifest path/SHA, records format/filename/extension in the binding report, and commits tfvars/report as one mode-0600 pair. Plan, refresh-only, closure, verify-only, and apply require the complete canonical tfvars provenance; each binding gate rereads the current broker ZIP and manifest bytes, and the apply path repeats that check immediately before Terraform.
 4. Run the single reviewed refresh boundary with `npm run stage-b:refresh-only -- --closure-mode production ...`. It validates the canonical tfvars filename/content contract before Terraform and never writes a deployable plan. `--terraform-data-dir` is the sole Terraform data-directory authority; it is an external mode-0700 directory and its exact `<terraform-data-dir>/terraform.tfstate` metadata file is normalized by preflight to mode 0600 before `ready-for-plan`. Refresh, plan, closure, verify-only, and apply revalidate that same path, mode, and content binding; `--backend-metadata` must be exactly `<terraform-data-dir>/terraform.tfstate`, and the same private directory is passed as `TF_DATA_DIR` to workspace observation and refresh execution. Do not chmod failed artifacts or assemble raw `terraform plan -refresh-only` commands.
-5. Capture exactly one deployment plan with `scripts/plan-production-green-stage-b.mjs` and write the binary plan, plan JSON, canonical plan JSON, and a private capture report with `state=PLAN_CAPTURED`. Capture validates the complete classification (`58` no-op, `12` create, `3` update, `0` destroy, `0` unclassified) and the reviewed broker policy/alias/function `update` set, but records broker reference validation as pending and is not deployable. Preserved artifacts may use the planner's recovery phase to emit `PLAN_CAPTURED` without another Terraform plan.
+5. Capture exactly one deployment plan with `scripts/plan-production-green-stage-b.mjs` and write the binary plan, plan JSON, canonical plan JSON, and a private capture report with `state=PLAN_CAPTURED`. The baseline profile validates the reviewed classification (`58` no-op, `12` create, `3` update, `0` destroy, `0` unclassified) and broker policy/alias/function `update` set. A task-definition rotation uses the separate exact address/action/field contract documented below; it is not authorized by changing aggregate counts. Capture records broker reference validation as pending and is not deployable. Preserved artifacts may use the planner's recovery phase to emit `PLAN_CAPTURED` without another Terraform plan.
 6. Generate the reference audit from that exact plan JSON. Then run the planner's explicit approval phase with `--approval-only`; it performs no Terraform plan, re-hashes every captured artifact, validates the broker references, and writes `state=PLAN_APPROVED` with the logical canonical-plan hash. Only this approval state may proceed to plan-bound permission evidence, closure, verify-only, or apply.
 7. Apply the reviewed saved plan only after explicit change approval. Verify task-definition revisions, role ARNs, Stage A log/SG bindings, replay table, numeric broker version and `reviewed` alias, secret references by ARN only, and exact image digests. Do not run a task or update a service.
 8. Infrastructure rollback is limited to a separately reviewed Terraform change that removes only unused Stage B control-plane resources; never destroy a live task definition, secret, database, or service as rollback.
@@ -199,3 +199,42 @@ The generator and validator accept only these families: backend candidate, worke
 candidate, application canary, read-only canary, and the eight fixed full-RLS
 executor families (`admin-bootstrap`, `admin-ownership`, `capability-preflight`,
 `role-provision`, `role-verify`, `rollback`, `runtime-policy`, and `verification`).
+
+## Readiness closure and task-definition rotation
+
+Before generating administrator evidence, run the source-controlled local readiness
+check with the exact protected SHA and private output paths:
+
+```sh
+npm run stage-b:readiness:check -- \
+  --protected-sha <full-origin-main-sha> \
+  --artifact-parent <absolute-mode-0700-parent> \
+  --backend-config <absolute-non-existing-backend-output>
+```
+
+This check performs no AWS API call and no Terraform refresh, plan, or apply. It proves
+the local runtime, Terraform child-process spawn, dependencies, region, KMS contract,
+clean protected checkout, disk, and producer-owned backend-output preconditions before
+the evidence clock starts.
+
+The current task-definition collection is versioned ECS infrastructure, not a generic
+delete allowance. A fresh generation may replace only the exact four candidate and
+eight executor families when the plan has `create,delete` or `delete,create`, exactly
+`[["container_definitions"]]` as `replace_paths`, unchanged family/roles/CPU/memory/
+network/runtime/secrets/logging fields, unchanged container identity, and immutable
+current image digests bound to the plan evidence. Delete-only actions, unknown
+families, family/module/address migration, and `ecs:DeregisterTaskDefinition` remain
+forbidden. The plan, reference audit, permission manifest, closure, verify-only, and
+apply wrapper all consume this same explicit rotation profile; aggregate counts are
+diagnostics rather than authorization.
+
+Partial-apply recovery remains orthogonal. A present-time administrator-signed
+`STAGE_B_PARTIAL_APPLY_RECOVERY_ATTESTATION` can classify only the exact root-managed
+`aws_lambda_alias.reviewed` update after independent verification. It cannot authorize
+ECS rotations, arbitrary deletes, or any other drift. The historical refresh report
+remains immutable, and a fresh authoritative plan is mandatory.
+
+The complete source-readiness state machine, identity/TTL boundaries, requirements
+matrix, historical failure coverage, and post-apply success definition are maintained
+in `documents/ops/iam/MSCQRProductionGreenStageBReadinessClosure-v1.md` and its JSON
+matrix companion.

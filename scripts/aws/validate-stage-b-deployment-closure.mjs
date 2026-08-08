@@ -9,7 +9,7 @@ import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvid
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
 import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, assertPermissionEvaluationBindings, assertPermissionReportPlanBinding, assertReleasePolicyEvidence, validateManifest, verifyPermissionReportSignature, assertStageBPermissionEvidenceKind, PLAN_BOUND_PERMISSION_EVIDENCE_KIND } from "./validate-production-green-stage-b-permissions.mjs";
 import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENCE_REVOCATION_MODEL } from "./production-green-stage-b-image-evidence.mjs";
-import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL } from "./stage-b-reference-audit-contract.mjs";
+import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { IMAGE_IMPACT_REPORT_REPO_PATH, assertImageImpactReport, parseStageBClosureMode } from "./validate-stage-b-image-reuse.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
@@ -146,7 +146,14 @@ assert.equal(matrix.deploymentIdentity?.splitSupported, true);
 assert.deepEqual(matrix.deploymentIdentity?.requiredPlanVariables, ["tooling_sha", "image_release_sha", "canonical_image_evidence_sha256"]);
 for (const entry of matrix.resources) for (const action of entry.actions) assert(Array.isArray(matrix.actionLifecycle[action]), `Matrix action has no lifecycle contract: ${action}`);
 assert.deepEqual(matrix.actionLifecycle.delete, []);
-assert.deepEqual(matrix.actionLifecycle.replacement, []);
+assert.deepEqual(matrix.actionLifecycle.replacement, ["ecs-task-definition-rotation"]);
+assert.equal(matrix.taskDefinitionRotation?.scope, "exact twelve root-managed Stage B task-definition addresses");
+assert.deepEqual(matrix.taskDefinitionRotation?.actions, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS);
+assert.deepEqual(matrix.taskDefinitionRotation?.replacePaths, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS);
+assert.deepEqual(matrix.taskDefinitionRotation?.immutableFields, STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS);
+assert.equal(matrix.taskDefinitionRotation?.deleteOnlyForbidden, true);
+assert.equal(matrix.taskDefinitionRotation?.recoveryIndependent, true);
+for (const address of Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES)) assert.match(address, /^aws_ecs_task_definition\.(candidate|executor)\[".+"\]$/);
 
 const declarations = filesUnder(terraformRoot)
   .filter((file) => file.endsWith(".tf"))

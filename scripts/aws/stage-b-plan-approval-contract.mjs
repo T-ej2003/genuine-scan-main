@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { assertStageBReferenceAuditFreshness } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBReferenceAuditFreshness, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 
@@ -25,13 +25,40 @@ export function stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJ
   };
 }
 
+function assertTaskDefinitionRotations(rotations) {
+  const expectedAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
+  if (!Array.isArray(rotations) || rotations.length !== expectedAddresses.length) throw new Error("Stage B task-definition rotation metadata must cover the exact twelve-address collection.");
+  const seen = new Set();
+  for (const rotation of rotations) {
+    const expectedFamily = STAGE_B_TASK_DEFINITION_FAMILIES[rotation?.address];
+    if (!expectedFamily || seen.has(rotation.address) || rotation.classification !== "rollover"
+      || !STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS.some((actions) => JSON.stringify(actions) === JSON.stringify(rotation.actions))
+      || JSON.stringify(rotation.replacePaths) !== JSON.stringify(STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS)
+      || rotation.family !== expectedFamily || !new RegExp(`^arn:aws:ecs:eu-west-2:368992683803:task-definition/${expectedFamily.replace(/[.*+?^${}()|[\]\\]/g, "\\\\$&")}:\\d+$`).test(rotation.oldArn || "")) {
+      throw new Error(`Stage B task-definition rotation metadata is malformed: ${rotation?.address || "<missing>"}`);
+    }
+    seen.add(rotation.address);
+  }
+  if (seen.size !== expectedAddresses.length || expectedAddresses.some((address) => !seen.has(address))) throw new Error("Stage B task-definition rotation metadata must cover the exact twelve-address collection.");
+}
+
 function assertClassification(report) {
   const classification = report?.classification;
+  const profile = report?.planProfile || "BASELINE";
+  const validCounts = classification && ["noOp", "create", "update", "destroy", "replacement", "unclassified"].every((key) => Number.isSafeInteger(classification[key]) && classification[key] >= 0);
+  if (!validCounts) throw new Error("Stage B plan evidence classification counters are malformed.");
+  if (profile === "ECS_TASK_DEFINITION_ROTATION") {
+    assertTaskDefinitionRotations(report.taskDefinitionRotations);
+    if (classification.replacement !== report.taskDefinitionRotations.length || classification.destroy !== 0 || classification.unclassified !== 0) throw new Error("Stage B task-definition rotation classification is not exact and non-destructive.");
+  } else if (profile !== "BASELINE") {
+    throw new Error(`Stage B plan evidence profile is unsupported: ${profile}`);
+  }
   if (report?.recoveryAttestationSha256 !== undefined) {
-    if (!/^[a-f0-9]{64}$/.test(report.recoveryAttestationSha256) || report.recoveryPlan !== true || !classification || classification.unclassified !== 0 || classification.destroy !== 0 || classification.replacement !== 0 || Object.values(classification).some((value) => !Number.isInteger(value) || value < 0)) throw new Error("Stage B recovery plan evidence classification is not exact and non-destructive.");
+    if (!/^[a-f0-9]{64}$/.test(report.recoveryAttestationSha256) || report.recoveryPlan !== true || classification.destroy !== 0 || classification.unclassified !== 0) throw new Error("Stage B recovery plan evidence classification is not exact and non-destructive.");
     return;
   }
-  if (!classification || classification.noOp !== 58 || classification.create !== 12 || classification.update !== 3
+  if (profile === "ECS_TASK_DEFINITION_ROTATION") return;
+  if (profile !== "BASELINE" || classification.noOp !== 58 || classification.create !== 12 || classification.update !== 3
     || classification.destroy !== 0 || classification.replacement !== 0 || classification.unclassified !== 0) {
     throw new Error("Stage B plan evidence classification is not the reviewed 58/12/3/0/0 contract.");
   }
@@ -43,7 +70,7 @@ function assertPlanHashes(report, hashes) {
   }
 }
 
-export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, refreshReportSha256, recoveryAttestationSha256, hashes, capturedAt, stageBLineage, stageBSerial, terraformVersion, terraformFormatVersion, planExitCode = 0, showExitCode = 0, classification, brokerEvidence = {} }) {
+export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, refreshReportSha256, recoveryAttestationSha256, hashes, capturedAt, stageBLineage, stageBSerial, terraformVersion, terraformFormatVersion, planExitCode = 0, showExitCode = 0, classification, planProfile = "BASELINE", taskDefinitionRotations = [], brokerEvidence = {} }) {
   assertCanonicalTerraformSerialNumber(stageBSerial, "Stage B serial");
   return {
     schemaVersion: STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION,
@@ -52,6 +79,7 @@ export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, r
     toolingTreeSha256,
     refreshReportSha256,
     ...(recoveryAttestationSha256 ? { recoveryAttestationSha256, recoveryPlan: true } : {}),
+    ...(planProfile === "ECS_TASK_DEFINITION_ROTATION" ? { planProfile, taskDefinitionRotations } : {}),
     ...hashes,
     classification,
     terraformVersion,
@@ -98,7 +126,7 @@ export function assertStageBPlanCaptureReport(report, { captureReportBytes, hash
   return true;
 }
 
-export function createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath, referenceAuditSha256, referenceAuditCallerArn, referenceAuditAt, toolingSha, toolingTreeSha256, refreshReportSha256, recoveryAttestationSha256, stageBLineage, stageBSerial, hashes, logicalCanonicalPlanJsonSha256, approvedAt, classification, brokerOperation = "none", brokerUpdatePresent = false, brokerActions = [], brokerResourceAddresses = [] }) {
+export function createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath, referenceAuditSha256, referenceAuditCallerArn, referenceAuditAt, toolingSha, toolingTreeSha256, refreshReportSha256, recoveryAttestationSha256, stageBLineage, stageBSerial, hashes, logicalCanonicalPlanJsonSha256, approvedAt, classification, planProfile = "BASELINE", taskDefinitionRotations = [], brokerOperation = "none", brokerUpdatePresent = false, brokerActions = [], brokerResourceAddresses = [] }) {
   assertCanonicalTerraformSerialNumber(stageBSerial, "Stage B serial");
   return {
     schemaVersion: STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION,
@@ -108,6 +136,7 @@ export function createStageBPlanApprovalReport({ captureReportSha256, referenceA
     toolingTreeSha256,
     refreshReportSha256,
     ...(recoveryAttestationSha256 ? { recoveryAttestationSha256, recoveryPlan: true } : {}),
+    ...(planProfile === "ECS_TASK_DEFINITION_ROTATION" ? { planProfile, taskDefinitionRotations } : {}),
     stageBLineage,
     stageBSerial,
     referenceAuditPath,
@@ -135,6 +164,7 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
   if (!Buffer.isBuffer(captureReportBytes)) throw new Error("Stage B plan approval report capture binding is missing.");
   assertStageBPlanCaptureReport(captureReport, { captureReportBytes, hashes, stageBLineage, stageBSerial, recoveryAttestationSha256: report.recoveryAttestationSha256 });
   if (report.brokerOperation !== captureReport.brokerOperation || report.brokerUpdatePresent !== captureReport.brokerUpdatePresent || JSON.stringify(report.brokerActions) !== JSON.stringify(captureReport.brokerActions) || JSON.stringify(report.brokerResourceAddresses) !== JSON.stringify(captureReport.brokerResourceAddresses)) throw new Error("Stage B plan approval broker evidence is not bound to the captured plan.");
+  if ((report.planProfile || "BASELINE") !== (captureReport.planProfile || "BASELINE") || JSON.stringify(report.taskDefinitionRotations || []) !== JSON.stringify(captureReport.taskDefinitionRotations || [])) throw new Error("Stage B plan approval task-definition rotation profile is not bound to the captured plan.");
   if (report.captureReportSha256 !== sha256(captureReportBytes)) throw new Error("Stage B plan approval report is bound to a different capture report.");
   if (report.recoveryAttestationSha256 !== captureReport.recoveryAttestationSha256) throw new Error("Stage B approval recovery-attestation binding is not inherited from the capture report.");
   assertPlanHashes(report, hashes);

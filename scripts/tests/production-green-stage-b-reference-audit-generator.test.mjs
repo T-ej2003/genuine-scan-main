@@ -57,15 +57,52 @@ const taskDefinitionAddressForMode = (mode) => mode === "full-rls-application-ca
 const familyForMode = (mode) => mode === "full-rls-application-canary"
   ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
   : `mscqr-production-full-rls-green-${mode}`;
+const rotationDefinitionFor = (address, family, index) => {
+  const key = /\["([^\"]+)"\]$/.exec(address)?.[1];
+  const executor = address.startsWith(executorCollectionAddress);
+  const imageVariable = executor ? "executor_image" : `${key}_image`;
+  const environmentNames = executor
+    ? ["RELEASE_GIT_SHA", "MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256", "MSCQR_FULL_RLS_MIGRATION_SET_DIGEST", "MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256"]
+    : key === "canary" ? ["RELEASE_GIT_SHA", "MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256", "MSCQR_FULL_RLS_MIGRATION_SET_DIGEST"]
+      : key === "read_only_canary" ? [] : ["RELEASE_GIT_SHA"];
+  const environmentVariables = new Map([
+    ["RELEASE_GIT_SHA", releaseSha],
+    ["MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256", sourceContractSha256],
+    ["MSCQR_FULL_RLS_MIGRATION_SET_DIGEST", migrationSetDigest],
+    ["MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256", packageChecksum],
+  ]);
+  const container = {
+    name: executor ? "production-rls-executor" : key === "canary" ? "production-green-canary" : key === "read_only_canary" ? "production-green-read-only-rls-canary" : key,
+    image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"e".repeat(64)}`,
+    environment: environmentNames.map((name) => ({ name, value: `old-${name}` })),
+  };
+  const afterContainer = { ...container, image: imageFor(imageVariable === "worker_image" ? "mscqr-worker" : "mscqr-backend"), environment: environmentNames.map((name) => ({ name, value: environmentVariables.get(name) })) };
+  const stable = {
+    family,
+    network_mode: "awsvpc",
+    requires_compatibilities: ["FARGATE"],
+    cpu: key === "worker" ? "512" : key === "read_only_canary" ? "256" : "1024",
+    memory: key === "worker" ? "1024" : key === "read_only_canary" ? "512" : "2048",
+    execution_role_arn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
+    task_role_arn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
+    runtime_platform: { operating_system_family: "LINUX", cpu_architecture: "X86_64" },
+    volumes: [],
+    tags: { Environment: "production", ManagedBy: "Terraform", Component: "full-rls-green-stage-b" },
+  };
+  return {
+    before: { ...stable, arn: oldArnFor(family), container_definitions: JSON.stringify([container]) },
+    after: { ...stable, arn: newArnFor(family), container_definitions: JSON.stringify([afterContainer]) },
+  };
+};
 
 function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum, terraformConfiguration = terraformConfigurationSource, appendOnly = false } = {}) {
   let changes = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([address, family]) => ({
     address,
+    mode: "managed",
     type: "aws_ecs_task_definition",
     change: {
       actions: ["delete", "create"],
-      before: { family, arn: oldArnFor(family) },
-      after: { family },
+      ...rotationDefinitionFor(address, family, 1),
       replace_paths: [["container_definitions"]],
     },
   }));

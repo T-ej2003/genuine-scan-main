@@ -11,6 +11,7 @@ import { assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProte
 import { assertStageBRefreshStateBinding, classifyStageBRefreshResult, STAGE_B_REFRESH_ALLOWED_STATUSES } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./aws/stage-b-artifact-contract.mjs";
 import { normalizeStageBRefreshPlan } from "./aws/stage-b-refresh-contract.mjs";
+import { runStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -112,7 +113,7 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
   const observedWorkspace = String(showWorkspace({ cwd: root, env: terraformEnv })).trim();
   assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE, observedWorkspace });
   const runTerraform = deps.runTerraform || ((args, options) => spawnSync("terraform", args, { ...options, encoding: "utf8" }));
-  const showPlanJson = deps.showPlanJson || ((planPath, options) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "show", "-json", planPath], { ...options, encoding: "utf8" }));
+  const showPlanJson = deps.showPlanJson || ((planPath, options) => runStageBTerraformJson({ terraform: "terraform", args: [`-chdir=${terraformRoot}`, "show", "-json", planPath], cwd: options.cwd, env: options.env }));
   const refreshDirectory = fs.mkdtempSync(path.join(path.dirname(artifacts.outputPath), ".stage-b-refresh-"));
   fs.chmodSync(refreshDirectory, 0o700);
   const refreshPlanPath = path.join(refreshDirectory, "refresh-only.tfplan");

@@ -12,6 +12,7 @@ import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backen
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidenceTimestamp, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
 import { assertStageBPlanApprovedBinding } from "./stage-b-plan-approval-contract.mjs";
+import { assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION = 3;
@@ -506,6 +507,12 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
     }
   }
   if (!Array.isArray(manifest.taskDefinitionMappings) || manifest.taskDefinitionMappings.length !== TASK_DEFINITION_MAPPINGS.length) throw new Error("Permission manifest must contain exactly twelve task-definition mappings.");
+  if (JSON.stringify(manifest.taskDefinitionRotationContract?.actions) !== JSON.stringify(STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS)
+    || JSON.stringify(manifest.taskDefinitionRotationContract?.replacePaths) !== JSON.stringify(STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS)
+    || manifest.taskDefinitionRotationContract?.authorization !== "ecs:RegisterTaskDefinition only; ecs:DeregisterTaskDefinition remains forbidden"
+    || manifest.taskDefinitionRotationContract?.scope !== "exact twelve root-managed Stage B task-definition addresses") {
+    throw new Error("Permission manifest task-definition rotation contract is not exact.");
+  }
   const expectedMappings = new Map(TASK_DEFINITION_MAPPINGS.map((mapping) => [mapping.address, mapping]));
   const mappingAddresses = new Set();
   for (const mapping of manifest.taskDefinitionMappings) {
@@ -575,6 +582,7 @@ function assertBrokerManagedPolicyChange(change) {
 function contextFromTaskDefinitionPlan(change, manifestMapping) {
   const mapping = TASK_DEFINITION_MAPPINGS.find(({ address }) => address === manifestMapping.address);
   const after = change.change?.after;
+  if (isStageBTaskDefinitionRotationActionsValue(change.change?.actions)) assertStageBTaskDefinitionRotation(change, { variables: {} }, { strict: false });
   if (!after || after.family !== mapping.family || String(after.cpu) !== mapping.cpu || String(after.memory) !== mapping.memory
     || JSON.stringify(after.requires_compatibilities) !== JSON.stringify(["FARGATE"])
     || after.execution_role_arn !== mapping.executionRoleArn || after.task_role_arn !== mapping.taskRoleArn
@@ -594,7 +602,7 @@ function contextFromTaskDefinitionPlan(change, manifestMapping) {
 export function assertTaskDefinitionRegistrationContexts(plan, manifest) {
   validateManifest(manifest);
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
-  const registrations = changes.filter((change) => change.type === "aws_ecs_task_definition" && exactActions(change.change?.actions, ["create"]));
+  const registrations = changes.filter((change) => change.type === "aws_ecs_task_definition" && (exactActions(change.change?.actions, ["create"]) || isStageBTaskDefinitionRotationActionsValue(change.change?.actions)));
   for (const mapping of manifest.taskDefinitionMappings) {
     const matches = registrations.filter((change) => change.address === mapping.address);
     if (matches.length !== 1) throw new Error(`Selected plan must contain exactly one reviewed task-definition registration for ${mapping.address}.`);
@@ -631,7 +639,7 @@ export function deriveRequiredEvaluations(plan, manifest, { contextRegistry = RE
     const actions = change.change?.actions || [];
     if (["aws_iam_role_policy.broker", "aws_iam_policy.broker", "aws_iam_role_policy_attachment.broker"].includes(change.address)) assertBrokerManagedPolicyChange(change);
     if (exactActions(actions, ["no-op"])) continue;
-    const taskMapping = change.type === "aws_ecs_task_definition" && exactActions(actions, ["create"])
+    const taskMapping = change.type === "aws_ecs_task_definition" && (exactActions(actions, ["create"]) || isStageBTaskDefinitionRotationActionsValue(actions))
       ? manifest.taskDefinitionMappings.find((mapping) => mapping.address === change.address)
       : undefined;
     if (change.type === "aws_ecs_task_definition" && !taskMapping) throw new Error(`No permission manifest entry covers ${change.address} ${JSON.stringify(actions)}.`);

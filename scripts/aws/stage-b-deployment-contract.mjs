@@ -1,5 +1,5 @@
 import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 
 const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 const taskDefinitionAddress = /^(aws_ecs_task_definition\.(candidate|executor))\["([^"]+)"\]$/;
@@ -92,8 +92,8 @@ export const STAGE_B_RESOURCE_ACTION_MATRIX = Object.freeze({
   "aws_iam_role_policy.execution[*]": Object.freeze({ type: "aws_iam_role_policy", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact execution role and policy name" }),
   "aws_iam_role_policy.candidate_object_storage[*]": Object.freeze({ type: "aws_iam_role_policy", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact candidate task role and policy name" }),
   "aws_iam_role_policy.executor_runtime": Object.freeze({ type: "aws_iam_role_policy", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact Stage A executor task role and policy name" }),
-  "aws_ecs_task_definition.candidate[*]": Object.freeze({ type: "aws_ecs_task_definition", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact current candidate family/address" }),
-  "aws_ecs_task_definition.executor[*]": Object.freeze({ type: "aws_ecs_task_definition", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact current executor family/address" }),
+  "aws_ecs_task_definition.candidate[*]": Object.freeze({ type: "aws_ecs_task_definition", actions: Object.freeze([["create"], ["no-op"], ["create", "delete"], ["delete", "create"]]), identity: "exact current candidate family/address; replacement only for reviewed container-definition rotation" }),
+  "aws_ecs_task_definition.executor[*]": Object.freeze({ type: "aws_ecs_task_definition", actions: Object.freeze([["create"], ["no-op"], ["create", "delete"], ["delete", "create"]]), identity: "exact current executor family/address; replacement only for reviewed container-definition rotation" }),
   "aws_ecs_task_definition.candidate_retained[*]": Object.freeze({ type: "aws_ecs_task_definition", actions: Object.freeze([["no-op"]]), identity: "exact revision-keyed retained candidate" }),
   "aws_ecs_task_definition.executor_retained[*]": Object.freeze({ type: "aws_ecs_task_definition", actions: Object.freeze([["no-op"]]), identity: "exact revision-keyed retained executor" }),
   "aws_dynamodb_table.replay": Object.freeze({ type: "aws_dynamodb_table", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact replay table ARN/name" }),
@@ -255,7 +255,7 @@ function assertStageBResourceIdentity(change, kind, key, strict) {
   }
 }
 
-export function assertStageBPlanResourceChange(change, { strict = true, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false } = {}) {
+export function assertStageBPlanResourceChange(change, { strict = true, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false, plan } = {}) {
   const address = change?.address || "<missing address>";
   const type = change?.type || "<missing type>";
   const actions = change?.change?.actions || [];
@@ -264,8 +264,9 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
   const task = taskDefinitionAddress.exec(address);
   if (task && Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, address)) {
     if (type !== "aws_ecs_task_definition") throw new Error(`Stage B resource rejected at address ${address} ${type}; resource type does not match the exact task-definition contract.`);
-    if (validateActions && (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"]))) throw new Error(`Stage B resource rejected: ${address} ${type} ${JSON.stringify(actions)}; current task definitions are append-only create/no-op only.`);
-    return { address, type, actions, classification: "current-task-definition" };
+    if (validateActions && (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"]) && !isStageBTaskDefinitionRotationActionsValue(actions))) throw new Error(`Stage B resource rejected: ${address} ${type} ${JSON.stringify(actions)}; current task definitions permit only create, no-op, or an exact reviewed container-definition rotation.`);
+    const rotation = isStageBTaskDefinitionRotationActionsValue(actions) ? assertStageBTaskDefinitionRotation(change, plan, { strict }) : undefined;
+    return { address, type, actions, classification: rotation ? "current-task-definition-rotation" : "current-task-definition", ...(rotation ? { rotation } : {}) };
   }
   const retainedPrefix = address.startsWith("aws_ecs_task_definition.candidate_retained[") || address.startsWith("aws_ecs_task_definition.executor_retained[");
   if (retainedTaskDefinitionAddress.test(address) || retainedPrefix) {
@@ -305,7 +306,7 @@ export function classifyStageBPlan(plan, options = {}) {
   const errors = [];
   for (const change of plan?.resource_changes || []) {
     try {
-      classifiedResources.push(assertStageBPlanResourceChange(change, options));
+      classifiedResources.push(assertStageBPlanResourceChange(change, { ...options, plan }));
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
     }
@@ -313,5 +314,17 @@ export function classifyStageBPlan(plan, options = {}) {
   if (errors.length) throw new Error(`Stage B plan contains unsupported resources:\n${errors.map((error, index) => `${index + 1}. ${error}`).join("\n")}`);
   const unclassifiedResources = classifiedResources.filter((item) => !item.classification).map((item) => item.address);
   if (unclassifiedResources.length) throw new Error(`Stage B plan contains unclassified resources: ${unclassifiedResources.join(", ")}`);
-  return { classifiedResources, unclassifiedResources, actionCounts: classifiedResources.reduce((counts, item) => { const action = item.actions.join(","); counts[action] = (counts[action] || 0) + 1; return counts; }, {}) };
+  const actionCounts = classifiedResources.reduce((counts, item) => {
+    const action = isStageBTaskDefinitionRotationActionsValue(item.actions) ? "replacement" : item.actions.join(",");
+    counts[action] = (counts[action] || 0) + 1;
+    return counts;
+  }, {});
+  const taskDefinitionRotations = classifiedResources.filter((item) => item.rotation).map((item) => item.rotation);
+  return {
+    classifiedResources,
+    unclassifiedResources,
+    actionCounts,
+    taskDefinitionRotations,
+    planProfile: taskDefinitionRotations.length ? "ECS_TASK_DEFINITION_ROTATION" : "BASELINE",
+  };
 }
