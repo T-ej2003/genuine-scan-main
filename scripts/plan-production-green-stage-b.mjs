@@ -25,6 +25,7 @@ import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs"
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./aws/stage-b-artifact-contract.mjs";
 import { STAGE_B_PLAN_APPROVED, STAGE_B_PLAN_CAPTURED, assertStageBPlanApprovalReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, readStageBPlanEvidence, stageBPlanHashes, writeStageBPlanEvidence } from "./aws/stage-b-plan-approval-contract.mjs";
 import { assertRecoveryPlanDelta, assertVerifiedStageBRecovery, parseCanonicalTerraformSerialCliText } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
+import { captureStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
@@ -684,7 +685,7 @@ function readPlanningInputs(tfvars, cliOptions, protectedMainCheckout) {
   return { bindingReport, backendMetadata, bindingReportPath, bindingReportSha256, toolingTreeSha256, refreshReportPath, refreshReportSha256, recoveryAttestationSha256, recoveryAttestationReportPath, recoveryAttestationSignaturePath, recoveryAttestationSignatureSha256, recoveryClassificationPath, recoveryClassificationSha256, expectedImageReleaseSha };
 }
 
-export function captureStageBPlan({ tfvars, cliOptions, protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true }), plan = () => execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${readOption(cliOptions, "--saved-plan")}`], { stdio: "inherit" }), show = (savedPlanPath) => execFileSync("terraform", [`-chdir=${root}`, "show", "-json", savedPlanPath], { encoding: "utf8" }) } = {}) {
+export function captureStageBPlan({ tfvars, cliOptions, protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true }), plan = () => execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${readOption(cliOptions, "--saved-plan")}`], { stdio: "inherit" }), show = (savedPlanPath) => captureStageBTerraformJson({ args: [`-chdir=${root}`, "show", "-json", savedPlanPath], cwd: process.cwd() }) } = {}) {
   const savedPlanPath = readOption(cliOptions, "--saved-plan");
   const planJsonPath = readOption(cliOptions, "--plan-json");
   const canonicalPlanJsonPath = readOption(cliOptions, "--canonical-plan-json");
