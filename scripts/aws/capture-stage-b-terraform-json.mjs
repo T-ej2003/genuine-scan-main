@@ -15,11 +15,13 @@ export function captureStageBTerraformJson({
   if (!Array.isArray(args) || !cwd) throw new Error("Terraform JSON capture requires explicit arguments and cwd.");
   const ownsDirectory = !tempDirectory;
   const directory = tempDirectory || fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-terraform-show-"));
-  fs.chmodSync(directory, 0o700);
+  if (ownsDirectory) fs.chmodSync(directory, 0o700);
   const outputPath = path.join(directory, "stdout.json");
   let descriptor;
+  let outputCreatedByInvocation = false;
   try {
     descriptor = fs.openSync(outputPath, "wx", 0o600);
+    outputCreatedByInvocation = true;
     const result = spawnSync(terraform, args, { cwd, env, encoding: null, stdio: ["ignore", descriptor, "pipe"], maxBuffer: STDERR_MAX_BYTES });
     fs.fsyncSync(descriptor);
     fs.closeSync(descriptor);
@@ -36,6 +38,6 @@ export function captureStageBTerraformJson({
   } finally {
     if (descriptor !== undefined) fs.closeSync(descriptor);
     if (ownsDirectory) fs.rmSync(directory, { recursive: true, force: true });
-    else fs.rmSync(outputPath, { force: true });
+    else if (outputCreatedByInvocation) fs.rmSync(outputPath, { force: true });
   }
 }
