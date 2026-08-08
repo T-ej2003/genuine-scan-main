@@ -15,6 +15,7 @@ import {
   assertStageBPlanApprovalReport,
   stageBPlanHashes,
 } from "../aws/stage-b-plan-approval-contract.mjs";
+import { canonicalizeEcsTaskDefinitionVolumes } from "../aws/stage-b-reference-audit-contract.mjs";
 
 const image = (character) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${character.repeat(64)}`;
 const variables = {
@@ -53,14 +54,30 @@ function taskChange(address, index) {
     execution_role_arn: `arn:aws:iam::368992683803:role/${family}-execution`,
     task_role_arn: `arn:aws:iam::368992683803:role/${family}-task`,
     runtime_platform: { operating_system_family: "LINUX", cpu_architecture: "X86_64" },
-    volumes: [{ name: "tmp" }],
+    volume: [{
+      configure_at_launch: false,
+      docker_volume_configuration: [],
+      efs_volume_configuration: [],
+      fsx_windows_file_server_volume_configuration: [],
+      host_path: "",
+      name: "tmp",
+      s3files_volume_configuration: [],
+    }],
+    ipc_mode: "",
+    pid_mode: "",
     tags: { Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" },
   };
   const environment = mutableEnvironment.map((name) => ({ name, value: `old-${name}` }));
   const after = structuredClone(before);
   after.arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${index + 1}`;
   after.container_definitions = JSON.stringify([{ name: containerName, image: variables[imageVariable].value, environment: mutableEnvironment.map((name) => ({ name, value: variables[{ RELEASE_GIT_SHA: "image_release_sha", MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256: "source_contract_sha256", MSCQR_FULL_RLS_MIGRATION_SET_DIGEST: "migration_set_digest", MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256: "package_checksum_sha256" }[name]].value })) }]);
-  before.container_definitions = JSON.stringify([{ name: containerName, image: image("f"), environment }]);
+  before.container_definitions = JSON.stringify([{ name: containerName, image: image("f"), environment, mountPoints: [], portMappings: [], systemControls: [], volumesFrom: [] }]);
+  const afterContainers = JSON.parse(after.container_definitions);
+  for (const field of ["environment", "mountPoints", "portMappings", "systemControls", "volumesFrom"]) {
+    if (Array.isArray(afterContainers[0][field]) && afterContainers[0][field].length === 0) delete afterContainers[0][field];
+  }
+  after.container_definitions = JSON.stringify(afterContainers);
+  if (after.volume.length) delete after.volume[0].configure_at_launch;
   return { address, mode: "managed", type: "aws_ecs_task_definition", change: { actions: ["create", "delete"], replace_paths: [["container_definitions"]], before, after } };
 }
 
@@ -123,6 +140,38 @@ function addBrokerMappingMetadata(plan) {
   })) } };
   return plan;
 }
+
+test("provider-normalized task-definition volumes preserve semantic equality", () => {
+  const plan = rotationPlan();
+  for (const change of plan.resource_changes) {
+    const afterVolume = change.change.after.volume;
+    if (afterVolume.length) delete afterVolume[0].configure_at_launch;
+  }
+  assert.equal(classifyStageBPlan(plan, { strict: true }).taskDefinitionRotations.length, 12);
+  assert.deepEqual(canonicalizeEcsTaskDefinitionVolumes([{ name: "tmp", docker_volume_configuration: [], efs_volume_configuration: [], fsx_windows_file_server_volume_configuration: [], host_path: "", s3files_volume_configuration: [] }]), canonicalizeEcsTaskDefinitionVolumes([{ configure_at_launch: false, name: "tmp", docker_volume_configuration: [], efs_volume_configuration: [], fsx_windows_file_server_volume_configuration: [], host_path: "", s3files_volume_configuration: [] }]));
+});
+
+test("volume semantic changes fail closed", () => {
+  const mutations = [
+    (volume) => volume.push({ ...volume[0], name: "extra" }),
+    (volume) => volume.splice(0, 1),
+    (volume) => { volume[0].name = "changed"; },
+    (volume) => { volume[0].host_path = "/unexpected"; },
+    (volume) => { volume[0].efs_volume_configuration = [{ file_system_id: "fs-1" }]; },
+    (volume) => { volume[0].efs_volume_configuration = [{ root_directory: "/unexpected" }]; },
+    (volume) => { volume[0].efs_volume_configuration = [{ transit_encryption: "ENABLED" }]; },
+    (volume) => { volume[0].efs_volume_configuration = [{ authorization_config: { access_point_id: "fsap-1" } }]; },
+    (volume) => { volume[0].docker_volume_configuration = [{ scope: "shared" }]; },
+    (volume) => { volume.push({ ...volume[0] }); },
+    (volume) => { volume[0].unsupported = true; },
+    (volume) => { volume[0].efs_volume_configuration = { file_system_id: "fs-1" }; },
+  ];
+  for (const mutate of mutations) {
+    const plan = rotationPlan();
+    mutate(plan.resource_changes[0].change.after.volume);
+    assert.throws(() => classifyStageBPlan(plan, { strict: true }));
+  }
+});
 
 test("exact twelve ECS task-definition rotations form the explicit normal rotation profile", () => {
   const result = classifyStageBPlan(rotationPlan(), { strict: true });

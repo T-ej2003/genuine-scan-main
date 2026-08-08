@@ -69,6 +69,16 @@ The backend alone mounts a Fargate ephemeral `backend-uploads` volume at `/app/u
 which covers incident attachments, compliance packs, and legacy QR reports without making
 the image root filesystem writable. No other Stage B task receives that mount.
 
+During a reviewed task-definition rollover, Terraform plan JSON uses the provider's
+singular `volume` field. The rotation contract compares its semantic volume shape, not
+provider-empty representation details: an omitted `configure_at_launch` is equivalent
+only to `false`, and the empty nested Docker/EFS/FSx/S3 configuration arrays are the only
+accepted nested shape in this contract. Volume names, mounts, paths, configured volume
+drivers, EFS settings, duplicate names, and unsupported fields remain fatal. The same
+provider-empty normalization applies to `ipc_mode` and `pid_mode` (`""` and `null` only),
+and to omitted empty container arrays. This normalization does not authorize a delete-only
+operation or any ECS address outside the exact twelve root-managed task definitions.
+
 The broker Lambda source is under `infra/aws/terraform/lambda/production-rls-approval-broker`.
 Its `reviewed` alias must receive the separately deployed policy represented by
 `broker/invocation-policy.json`; that file is a design contract, not an `AddPermission`

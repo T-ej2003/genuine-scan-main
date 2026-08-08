@@ -52,7 +52,9 @@ const retryChange = (address, family, actions, revision = 7) => {
     execution_role_arn: `arn:aws:iam::368992683803:role/${key}-execution`,
     task_role_arn: `arn:aws:iam::368992683803:role/${key}-task`,
     runtime_platform: { operating_system_family: "LINUX", cpu_architecture: "X86_64" },
-    volumes: [],
+    volume: [],
+    ipc_mode: "",
+    pid_mode: "",
     tags: { Environment: "production", ManagedBy: "Terraform", Component: "full-rls-green-stage-b" },
     container_definitions: JSON.stringify([{ image: retryVariables[imageVariable].value, environment: [
       { name: "RELEASE_GIT_SHA", value: retryVariables.image_release_sha.value },
