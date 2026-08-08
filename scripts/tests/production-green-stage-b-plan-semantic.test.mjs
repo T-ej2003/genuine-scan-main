@@ -46,7 +46,7 @@ function taskChange(address, index) {
     region: "eu-west-2",
     requires_compatibilities: ["FARGATE"],
     revision: index,
-    runtime_platform: { operating_system_family: "LINUX", cpu_architecture: "X86_64" },
+    runtime_platform: [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }],
     skip_destroy: true,
     tags: { Environment: "production" },
     tags_all: { Environment: "production" },
@@ -220,7 +220,7 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
   assert.deepEqual(census.counts, {
     nonNoopResources: 15,
     resourceActions: 15,
-    changedPaths: 139,
+    changedPaths: 163,
     afterUnknownPaths: 82,
     replacePaths: 0,
     configurationReferences: 117,
@@ -257,6 +257,37 @@ test("baseline initial-create semantics fail closed on action, identity, path, a
   mutateBaseline((value) => { baselineEcsChange(value).change.replace_paths = [["cpu"]]; }, /UNCLASSIFIED_REPLACE_PATH/);
 });
 
+test("baseline ECS runtime platform uses the provider list shape and indexed semantic paths", () => {
+  const value = baselinePlan();
+  const ecs = value.resource_changes.filter((change) => addresses.includes(change.address));
+  assert.equal(ecs.length, 12);
+  for (const change of ecs) {
+    assert.deepEqual(change.change.after.runtime_platform, [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }]);
+    assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(structuredClone(value)));
+  }
+  const census = assertStageBPlanSemanticCompleteness(value);
+  for (const resource of census.resources.filter((item) => addresses.includes(item.address))) {
+    assert.deepEqual(resource.changedPaths.filter(({ path }) => path.startsWith("runtime_platform")), [
+      { path: "runtime_platform[0].cpu_architecture", classification: "REVIEWED_CONCRETE_CHANGE" },
+      { path: "runtime_platform[0].operating_system_family", classification: "REVIEWED_CONCRETE_CHANGE" },
+    ]);
+  }
+});
+
+test("baseline runtime platform rejects object, unindexed, extra, and multi-element shapes", () => {
+  const mutateBaseline = (mutator) => {
+    const value = baselinePlan();
+    mutator(value.resource_changes.filter((change) => addresses.includes(change.address))[0]);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(value), /UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES|UNCLASSIFIED_CHANGED_PATH/);
+  };
+  mutateBaseline((change) => { change.change.after.runtime_platform = { operating_system_family: "LINUX", cpu_architecture: "X86_64" }; });
+  mutateBaseline((change) => { change.change.after.runtime_platform[0].unexpected = "value"; });
+  mutateBaseline((change) => { change.change.after.runtime_platform.push({ operating_system_family: "LINUX", cpu_architecture: "X86_64" }); });
+  mutateBaseline((change) => { delete change.change.after.runtime_platform; });
+  mutateBaseline((change) => { change.change.after.runtime_platform[0].operating_system_family = "WINDOWS_SERVER_2022_CORE"; });
+  mutateBaseline((change) => { change.change.after.runtime_platform[0].cpu_architecture = "ARM64"; });
+});
+
 test("baseline broker creates are atomic and broker mutations cannot consume recovery authorization", () => {
   for (const address of ["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]) {
     const value = baselinePlan();
@@ -282,6 +313,7 @@ test("append-only create/no-op retry remains represented without broadening brok
   for (const change of taskChanges.slice(0, -1)) {
     change.change.actions = ["create"];
     change.change.before = null;
+    change.change.after.runtime_platform = [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }];
     delete change.change.replace_paths;
   }
   taskChanges.at(-1).change.actions = ["no-op"];
@@ -345,6 +377,27 @@ test("locked provider semantic snapshot is independently validated", () => {
   const missing = structuredClone(STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT);
   missing.resources.aws_lambda_alias.attributes = missing.resources.aws_lambda_alias.attributes.filter((entry) => entry.attributePath !== "invoke_arn");
   assert.throws(() => assertStageBProviderSemanticSnapshot(missing), /PROVIDER_SCHEMA_SEMANTICS_CHANGED/);
+  const wrongNesting = structuredClone(STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT);
+  wrongNesting.resources.aws_ecs_task_definition.blocks.find((entry) => entry.blockPath === "runtime_platform").nestingMode = "single";
+  assert.throws(() => assertStageBProviderSemanticSnapshot(wrongNesting), /PROVIDER_SCHEMA_NESTING_CHANGED/);
+});
+
+test("supported nested blocks retain their provider JSON shapes", () => {
+  const baseline = baselinePlan();
+  for (const change of baseline.resource_changes.filter((item) => addresses.includes(item.address))) {
+    assert.ok(Array.isArray(change.change.after.runtime_platform));
+    assert.equal(change.change.after.runtime_platform.length, 1);
+  }
+  const rollover = plan();
+  const task = rollover.resource_changes.find((item) => addresses.includes(item.address));
+  assert.ok(Array.isArray(task.change.before.runtime_platform));
+  assert.ok(Array.isArray(task.change.after.runtime_platform));
+  assert.ok(Array.isArray(task.change.after.ephemeral_storage));
+  assert.ok(Array.isArray(task.change.after.placement_constraints));
+  assert.ok(Array.isArray(task.change.after.proxy_configuration));
+  assert.ok(Array.isArray(task.change.after.volume));
+  assert.ok(Array.isArray(rollover.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.after.environment));
+  assert.ok(Array.isArray(rollover.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed").change.after.routing_config));
 });
 
 test("baseline provider-computed fidelity covers all fifteen created resources", () => {

@@ -334,7 +334,7 @@
       "producer": "assertStageBPlanSemanticCompleteness",
       "consumer": "plan capture, approval, permission, closure, validator, verify-only, and apply precheck",
       "inputs": ["Terraform show JSON", "structured Terraform configuration metadata", "source-controlled semantic matrix"],
-      "outputs": ["deterministic plan semantic census", "zero-unclassified counters", "zero provider-fidelity counters"],
+      "outputs": ["deterministic plan semantic census", "zero-unclassified counters", "zero provider-fidelity counters", "provider nested-block shape fidelity"],
       "providerSchemaSnapshot": {
         "source": "registry.terraform.io/hashicorp/aws",
         "version": "6.56.0",

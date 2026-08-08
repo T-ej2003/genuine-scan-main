@@ -135,6 +135,21 @@ const EXPECTED_BLOCK_ATTRIBUTE_FLAGS = Object.freeze({
     "volume[].efs_volume_configuration[].file_system_id": [true, false, false],
   }),
 });
+const EXPECTED_BLOCK_SEMANTICS = Object.freeze({
+  aws_lambda_function: Object.freeze({ environment: ["list", null, 1] }),
+  aws_lambda_alias: Object.freeze({ routing_config: ["list", null, 1] }),
+  aws_ecs_task_definition: Object.freeze({
+    ephemeral_storage: ["list", null, 1],
+    placement_constraints: ["set", null, 10],
+    proxy_configuration: ["list", null, 1],
+    runtime_platform: ["list", null, 1],
+    volume: ["set", null, null],
+    "volume[].docker_volume_configuration": ["list", null, 1],
+    "volume[].efs_volume_configuration": ["list", null, 1],
+    "volume[].fsx_windows_file_server_volume_configuration": ["list", null, 1],
+    "volume[].s3files_volume_configuration": ["list", null, 1],
+  }),
+});
 
 export function assertStageBProviderSemanticSnapshot(snapshot = STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT) {
   if (snapshot.providerSource !== PROVIDER_SOURCE || snapshot.providerVersion !== PROVIDER_VERSION) {
@@ -151,6 +166,12 @@ export function assertStageBProviderSemanticSnapshot(snapshot = STAGE_B_PROVIDER
       if (!entry || entry.required !== required || entry.optional !== optional || entry.computed !== computed || entry.sensitive !== false || entry.nestingMode !== null) throw new Error(`PROVIDER_SCHEMA_SEMANTICS_CHANGED: ${type}.${attributePath}`);
     }
     const nested = new Map(schema.blocks.flatMap((entry) => entry.attributes.map((attributeEntry) => [attributeEntry.attributePath, attributeEntry])));
+    for (const [blockPath, [nestingMode, minItems, maxItems]] of Object.entries(EXPECTED_BLOCK_SEMANTICS[type] || {})) {
+      const entry = schema.blocks.find((candidate) => candidate.blockPath === blockPath);
+      if (!entry || entry.nestingMode !== nestingMode || entry.minItems !== minItems || entry.maxItems !== maxItems) {
+        throw new Error(`PROVIDER_SCHEMA_NESTING_CHANGED: ${type}.${blockPath}`);
+      }
+    }
     for (const [attributePath, [required, optional, computed]] of Object.entries(EXPECTED_BLOCK_ATTRIBUTE_FLAGS[type] || {})) {
       const entry = nested.get(attributePath);
       if (!entry || entry.required !== required || entry.optional !== optional || entry.computed !== computed || entry.sensitive !== false || entry.nestingMode !== null) throw new Error(`PROVIDER_SCHEMA_SEMANTICS_CHANGED: ${type}.${attributePath}`);

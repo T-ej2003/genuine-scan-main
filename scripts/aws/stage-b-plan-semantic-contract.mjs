@@ -41,8 +41,8 @@ const ECS_INITIAL_CREATE_PATHS = new Set([
   "container_definitions", "cpu", "enable_fault_injection", "ephemeral_storage",
   "execution_role_arn", "family", "ipc_mode", "memory", "network_mode", "pid_mode",
   "placement_constraints", "proxy_configuration", "region", "requires_compatibilities",
-  "requires_compatibilities[0]", "runtime_platform", "runtime_platform.operating_system_family",
-  "runtime_platform.cpu_architecture", "skip_destroy", "task_role_arn", "track_latest",
+  "requires_compatibilities[0]", "runtime_platform[0].operating_system_family",
+  "runtime_platform[0].cpu_architecture", "skip_destroy", "task_role_arn", "track_latest",
   "tags.Component", "tags.Environment", "tags.ManagedBy", "tags_all.Component",
   "tags_all.Environment", "tags_all.ManagedBy",
 ]);
@@ -277,6 +277,17 @@ function assertInitialProviderComputedShape(change) {
 
 function assertInitialEcsSemanticDomain(change) {
   const after = change.change?.after || {};
+  const runtimePlatform = after.runtime_platform;
+  const runtimePlatformBlock = STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT.resources.aws_ecs_task_definition.blocks
+    .find((entry) => entry.blockPath === "runtime_platform");
+  if (runtimePlatformBlock?.nestingMode !== "list" || runtimePlatformBlock.maxItems !== 1
+    || !Array.isArray(runtimePlatform) || runtimePlatform.length !== 1
+    || !runtimePlatform[0] || Array.isArray(runtimePlatform[0])
+    || !exactJson(Object.keys(runtimePlatform[0]).sort(), ["cpu_architecture", "operating_system_family"])
+    || runtimePlatform[0].operating_system_family !== "LINUX"
+    || runtimePlatform[0].cpu_architecture !== "X86_64") {
+    throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES: ${change.address}.runtime_platform`);
+  }
   try {
     if (after.volume !== undefined) canonicalizeEcsTaskDefinitionVolumes(after.volume);
   } catch {

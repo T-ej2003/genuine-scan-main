@@ -106,6 +106,10 @@ authorize IAM content. Baseline fixtures must preserve Terraform's exact
 `after_unknown` and structural-placeholder representation. The provider-fidelity
 counters `unrepresentedSupportedProfiles`, `unfaithfulSupportedProfileFixtures`, and
 `unfaithfulProviderComputedFields` must all be zero.
+Provider nested-block shape is part of the same fidelity gate: the locked AWS 6.56.0
+`runtime_platform` block is a one-element list, so baseline ECS paths are explicitly
+indexed as `runtime_platform[0].operating_system_family` and
+`runtime_platform[0].cpu_architecture`; object-shaped or unindexed substitutes fail closed.
 
 ### Normal profiles
 
