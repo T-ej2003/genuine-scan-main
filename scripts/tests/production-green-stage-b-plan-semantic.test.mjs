@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import {
   assertStageBPlanSemanticCompleteness,
   censusStageBPlanSemantics,
+  STAGE_B_PLAN_SEMANTIC_PROFILES,
 } from "../aws/stage-b-plan-semantic-contract.mjs";
 import { assertRecoveryPlanDelta } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
 import { classifyStageBPlan } from "../aws/stage-b-deployment-contract.mjs";
@@ -125,6 +127,17 @@ function plan() {
   return { configuration: configuration(), resource_changes: [...addresses.map((address, index) => taskChange(address, index + 1)), ...brokerChanges()] };
 }
 
+function baselinePlan() {
+  const value = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
+  value.configuration = configuration();
+  for (const change of value.resource_changes) if (change.change?.actions?.some((action) => action !== "no-op")) change.mode = "managed";
+  return value;
+}
+
+function baselineEcsChange(value) {
+  return value.resource_changes.find((change) => addresses.includes(change.address));
+}
+
 function mutate(mutator, expected = /UNCLASSIFIED/) {
   const value = structuredClone(plan());
   mutator(value);
@@ -176,6 +189,44 @@ test("real-plan-shaped semantic census has zero unclassified semantics", () => {
   assert.equal(new Set(census.resources.map((item) => item.classification)).size, 4);
   assert.equal(census.resources.filter((item) => item.classification === "ECS_REVIEWED_ROLLOVER").length, 12);
   assert.equal(census.resources.filter((item) => item.classification === "REVIEWED_RECOVERY_ALIAS_UPDATE").length, 1);
+});
+
+test("baseline production-shaped fixture has an exact initial-create profile", () => {
+  const census = assertStageBPlanSemanticCompleteness(baselinePlan());
+  assert.deepEqual(census.counts, {
+    nonNoopResources: 15,
+    resourceActions: 15,
+    changedPaths: 120,
+    afterUnknownPaths: 1,
+    replacePaths: 0,
+    configurationReferences: 117,
+    unclassifiedResourceActions: 0,
+    unclassifiedChangedPaths: 0,
+    unclassifiedAfterUnknownPaths: 0,
+    unclassifiedReplacePaths: 0,
+    unclassifiedConfigurationReferences: 0,
+  });
+  assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_INITIAL_CREATE).length, 12);
+  assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_REVIEWED_ROLLOVER).length, 0);
+});
+
+test("baseline initial-create semantics fail closed on action, identity, path, and reference drift", () => {
+  const mutateBaseline = (mutator, expected = /UNCLASSIFIED/) => {
+    const value = baselinePlan();
+    mutator(value);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(value), expected);
+  };
+  mutateBaseline((value) => { baselineEcsChange(value).address = 'aws_ecs_task_definition.candidate["unknown"]'; }, /UNCLASSIFIED_RESOURCE_ACTION/);
+  mutateBaseline((value) => { baselineEcsChange(value).module = "module.untrusted"; }, /UNCLASSIFIED_RESOURCE_ACTION/);
+  mutateBaseline((value) => { baselineEcsChange(value).mode = "data"; }, /UNCLASSIFIED_RESOURCE_ACTION/);
+  mutateBaseline((value) => { baselineEcsChange(value).type = "aws_lambda_function"; }, /UNCLASSIFIED_RESOURCE_ACTION/);
+  mutateBaseline((value) => { baselineEcsChange(value).change.actions = ["delete"]; }, /UNCLASSIFIED_RESOURCE_ACTION/);
+  mutateBaseline((value) => { baselineEcsChange(value).change.actions = ["create", "delete"]; }, /UNCLASSIFIED_/);
+  mutateBaseline((value) => { value.resource_changes.push(structuredClone(baselineEcsChange(value))); }, /UNCLASSIFIED_RESOURCE_ACTION/);
+  mutateBaseline((value) => { baselineEcsChange(value).change.after.unreviewed = true; }, /UNCLASSIFIED_CHANGED_PATH/);
+  mutateBaseline((value) => { baselineEcsChange(value).change.after_unknown = { unreviewed: true }; }, /UNCLASSIFIED_AFTER_UNKNOWN/);
+  mutateBaseline((value) => { value.configuration.root_module.resources.find((item) => item.address === "aws_ecs_task_definition.candidate").expressions.family.references = ["var.unreviewed"]; }, /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+  mutateBaseline((value) => { baselineEcsChange(value).change.replace_paths = [["cpu"]]; }, /UNCLASSIFIED_REPLACE_PATH/);
 });
 
 test("semantic census exposes recursive changed, unknown, sensitive and reference paths", () => {

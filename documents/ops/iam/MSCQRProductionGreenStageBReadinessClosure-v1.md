@@ -82,6 +82,12 @@ walks every non-no-op resource recursively. It records changed leaves, every tru
 references. Each item must be one of the explicit semantic classes in
 `scripts/aws/stage-b-plan-semantic-contract.mjs`; any unclassified path fails closed with
 its address and path. This is PLAN-SEM-01 and is required for `ONE_SHOT_DEPLOYMENT_READY`.
+The contract covers both supported twelve-address ECS profiles: `ECS_INITIAL_CREATE`
+(`actions=["create"]`) for a baseline deployment and `ECS_REVIEWED_ROLLOVER`
+(`actions=["create","delete"]` or `["delete","create"]`) for an approved immutable
+task-definition rotation. The baseline and recovery-shaped fixtures must each produce
+zero unclassified resource actions, changed paths, unknown paths, replacement paths, and
+configuration references.
 The computed alias exception remains field-specific: only
 `aws_lambda_alias.reviewed.function_version` may be unknown, and only with the exact
 structured reference to `aws_lambda_function.broker.version` plus the same-plan published

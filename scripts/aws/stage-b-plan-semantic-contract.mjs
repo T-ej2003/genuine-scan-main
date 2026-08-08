@@ -14,7 +14,29 @@ export const STAGE_B_PLAN_SEMANTIC_CLASSES = Object.freeze([
   "DIAGNOSTIC_ONLY",
 ]);
 
+export const STAGE_B_PLAN_SEMANTIC_PROFILES = Object.freeze({
+  ECS_INITIAL_CREATE: "ECS_INITIAL_CREATE",
+  ECS_REVIEWED_ROLLOVER: "ECS_REVIEWED_ROLLOVER",
+});
+
 const ECS_ADDRESSES = new Set(Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES));
+const ECS_INITIAL_CREATE_ACTIONS = ["create"];
+const ECS_INITIAL_CREATE_PATHS = new Set([
+  "container_definitions", "cpu", "enable_fault_injection", "ephemeral_storage",
+  "execution_role_arn", "family", "ipc_mode", "memory", "network_mode", "pid_mode",
+  "placement_constraints", "proxy_configuration", "region", "requires_compatibilities",
+  "requires_compatibilities[0]", "runtime_platform", "runtime_platform.operating_system_family",
+  "runtime_platform.cpu_architecture", "skip_destroy", "task_role_arn", "track_latest",
+  "tags.Component", "tags.Environment", "tags.ManagedBy", "tags_all.Component",
+  "tags_all.Environment", "tags_all.ManagedBy",
+]);
+const ECS_INITIAL_CREATE_PROVIDER_PATHS = new Set([
+  "ipc_mode", "pid_mode", "volume", "volume[0].configure_at_launch",
+  "volume[0].docker_volume_configuration", "volume[0].efs_volume_configuration",
+  "volume[0].fsx_windows_file_server_volume_configuration", "volume[0].host_path",
+  "volume[0].s3files_volume_configuration",
+]);
+const DIFF_ATOMIC_PATHS = new Set(["environment[0].variables"]);
 const BROKER_PROFILES = new Map([
   ["aws_iam_policy.broker", { actions: [["update"]], classification: "BROKER_POLICY_UPDATE" }],
   ["aws_lambda_function.broker", { actions: [["update"]], classification: "BROKER_FUNCTION_PUBLISH_UPDATE" }],
@@ -97,11 +119,23 @@ const pathFor = (base, key) => typeof key === "number" ? `${base}[${key}]` : (ba
 
 function diffPaths(before, after, base = "") {
   if (exactJson(before, after)) return [];
+  if (DIFF_ATOMIC_PATHS.has(base)) return [base];
+  if (before === null || before === undefined) return leafPaths(after, base);
+  if (after === null || after === undefined) return leafPaths(before, base);
   if (!isObject(before) || !isObject(after) || Array.isArray(before) !== Array.isArray(after)) return [base];
   const keys = Array.isArray(before) || Array.isArray(after)
     ? [...new Set([...Array(Math.max(before.length, after.length)).keys()])]
     : [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
   return keys.flatMap((key) => diffPaths(before[key], after[key], pathFor(base, key)));
+}
+
+function leafPaths(value, base = "") {
+  if (!isObject(value)) return [base];
+  if (Array.isArray(value)) return value.length === 0
+    ? [base]
+    : value.flatMap((item, index) => leafPaths(item, pathFor(base, index)));
+  const keys = Object.keys(value);
+  return keys.length === 0 ? [base] : keys.sort().flatMap((key) => leafPaths(value[key], pathFor(base, key)));
 }
 
 function truePaths(value, base = "") {
@@ -156,7 +190,35 @@ function assertClass(value, label) {
   return value;
 }
 
+function isEcsInitialCreate(change) {
+  return ECS_ADDRESSES.has(change.address) && exactJson(change.change?.actions, ECS_INITIAL_CREATE_ACTIONS);
+}
+
+function assertInitialEcsSemanticDomain(change) {
+  const after = change.change?.after || {};
+  try {
+    if (after.volume !== undefined) canonicalizeEcsTaskDefinitionVolumes(after.volume);
+  } catch {
+    throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.volume`);
+  }
+  for (const field of ["ipc_mode", "pid_mode"]) {
+    if (after[field] !== undefined && ![null, ""].includes(after[field])) {
+      throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${field}`);
+    }
+  }
+}
+
+function classifyEcsInitialChangedPath(change, path) {
+  if (ECS_INITIAL_CREATE_PROVIDER_PATHS.has(path) || /^volume\[\d+\]\.(?:configure_at_launch|docker_volume_configuration|efs_volume_configuration|fsx_windows_file_server_volume_configuration|host_path|s3files_volume_configuration)$/.test(path)) {
+    assertInitialEcsSemanticDomain(change);
+    return "REVIEWED_PROVIDER_NORMALIZATION";
+  }
+  if (ECS_INITIAL_CREATE_PATHS.has(path) || /^volume\[\d+\]\.name$/.test(path)) return "REVIEWED_CONCRETE_CHANGE";
+  throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
+}
+
 function classifyEcsChangedPath(change, path) {
+  if (isEcsInitialCreate(change)) return classifyEcsInitialChangedPath(change, path);
   if (path === "container_definitions") return "REVIEWED_CONCRETE_CHANGE";
   if (ECS_METADATA_PATHS.has(path)) return "DIAGNOSTIC_ONLY";
   if (path === "ipc_mode" || path === "pid_mode") {
@@ -179,6 +241,10 @@ function classifyEcsChangedPath(change, path) {
 }
 
 function assertEcsSemanticDomain(change) {
+  if (isEcsInitialCreate(change)) {
+    assertInitialEcsSemanticDomain(change);
+    return;
+  }
   try {
     canonicalizeEcsTaskDefinitionVolumes(change.change.before.volume);
     canonicalizeEcsTaskDefinitionVolumes(change.change.after.volume);
@@ -232,8 +298,10 @@ function assertSensitivePaths(change, kind, paths) {
 function classifyResource(change) {
   const actions = change?.change?.actions;
   if (ECS_ADDRESSES.has(change?.address) && change.type === "aws_ecs_task_definition" && change.mode === "managed"
-    && (change.module === undefined || change.module === null)
-    && STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS.some((expected) => exactJson(actions, expected))) return "ECS_REVIEWED_ROLLOVER";
+    && (change.module === undefined || change.module === null)) {
+    if (exactJson(actions, ECS_INITIAL_CREATE_ACTIONS)) return STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_INITIAL_CREATE;
+    if (STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS.some((expected) => exactJson(actions, expected))) return STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_REVIEWED_ROLLOVER;
+  }
   const profile = BROKER_PROFILES.get(change?.address);
   if (profile && change.type === ({
     "aws_iam_policy.broker": "aws_iam_policy",
@@ -245,6 +313,7 @@ function classifyResource(change) {
 
 function classifyReplacePaths(change) {
   const paths = change.change?.replace_paths || [];
+  if (isEcsInitialCreate(change) && paths.length === 0) return [];
   if (ECS_ADDRESSES.has(change.address) && exactJson(paths, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS)) {
     return paths.map((path) => ({ path: path.join("."), classification: "REVIEWED_REPLACEMENT_TRIGGER" }));
   }

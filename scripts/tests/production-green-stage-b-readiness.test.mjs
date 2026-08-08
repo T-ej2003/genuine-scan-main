@@ -52,4 +52,6 @@ test("readiness matrix is complete and uses only the source-controlled status vo
   const semantic = matrix.rows.find((row) => row.id === "PLAN-SEM-01");
   assert.equal(semantic?.implementationStatus, "SATISFIED");
   assert.match(semantic?.ciCoverage || "", /test:production-green-stage-b-control-plane/);
+  assert.match(semantic?.expectedResourceActions || "", /initial creates/);
+  assert.match(semantic?.testCoverage || "", /baseline production-shaped initial-create/);
 });
