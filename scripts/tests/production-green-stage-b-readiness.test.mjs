@@ -49,4 +49,7 @@ test("readiness matrix is complete and uses only the source-controlled status vo
     assert.ok(matrix.statusVocabulary.includes(row.implementationStatus), `${row.id} has unsupported status`);
     assert.ok(typeof row.requirement === "string" && row.requirement.length > 0);
   }
+  const semantic = matrix.rows.find((row) => row.id === "PLAN-SEM-01");
+  assert.equal(semantic?.implementationStatus, "SATISFIED");
+  assert.match(semantic?.ciCoverage || "", /test:production-green-stage-b-control-plane/);
 });

@@ -76,6 +76,17 @@ refreshes or extends evidence.
 Authorization is derived from exact root-managed Terraform address, type, action, and
 field delta. Aggregate counts are diagnostics only.
 
+Before any plan evidence can enter the approval chain, `assertStageBPlanSemanticCompleteness`
+walks every non-no-op resource recursively. It records changed leaves, every true
+`after_unknown` and sensitive marker, replacement paths, and structured configuration
+references. Each item must be one of the explicit semantic classes in
+`scripts/aws/stage-b-plan-semantic-contract.mjs`; any unclassified path fails closed with
+its address and path. This is PLAN-SEM-01 and is required for `ONE_SHOT_DEPLOYMENT_READY`.
+The computed alias exception remains field-specific: only
+`aws_lambda_alias.reviewed.function_version` may be unknown, and only with the exact
+structured reference to `aws_lambda_function.broker.version` plus the same-plan published
+broker update. Unknown values elsewhere are not accepted.
+
 ### Normal profiles
 
 - Clean/no-change: each allowlisted resource has its exact `[]`/`["no-op"]` equivalent;
