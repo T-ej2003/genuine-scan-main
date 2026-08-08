@@ -339,9 +339,41 @@
       "freshness": "same authoritative plan and protected source bindings",
       "hashBinding": "plan JSON, canonical plan, and saved-plan downstream bindings",
       "signatureBinding": "downstream approval, permission, and recovery signatures",
-      "expectedResourceActions": "either exact twelve ECS initial creates or exact twelve ECS rollovers, plus reviewed broker policy/function/alias updates",
+      "expectedResourceActions": "BASELINE_INITIAL_CREATE: exact twelve ECS creates plus exact broker policy/function/alias creates; ROLLOVER_RECOVERY: exact twelve ECS rollovers plus exact broker policy/function/alias updates; NO_CHANGE_OR_APPEND_ONLY_RETRY: current task-definition create/no-op mix with broker no-op",
+      "supportedProfiles": [
+        {
+          "profile": "BASELINE_INITIAL_CREATE",
+          "ecsActions": [["create"]],
+          "brokerPolicyActions": [["create"]],
+          "brokerFunctionActions": [["create"]],
+          "brokerAliasActions": [["create"]],
+          "recoveryRequired": false,
+          "fixture": "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json",
+          "zeroUnclassified": true
+        },
+        {
+          "profile": "ROLLOVER_RECOVERY",
+          "ecsActions": [["create", "delete"], ["delete", "create"]],
+          "brokerPolicyActions": [["update"]],
+          "brokerFunctionActions": [["update"]],
+          "brokerAliasActions": [["update"]],
+          "recoveryRequired": true,
+          "fixture": "scripts/tests/production-green-stage-b-plan-semantic.test.mjs",
+          "zeroUnclassified": true
+        },
+        {
+          "profile": "NO_CHANGE_OR_APPEND_ONLY_RETRY",
+          "ecsActions": [["create"], ["no-op"]],
+          "brokerPolicyActions": [["no-op"]],
+          "brokerFunctionActions": [["no-op"]],
+          "brokerAliasActions": [["no-op"]],
+          "recoveryRequired": false,
+          "fixture": "scripts/tests/production-green-stage-b-plan-semantic.test.mjs",
+          "zeroUnclassified": true
+        }
+      ],
       "failClosedBehavior": "PLAN_UNEXPECTED with the exact unclassified path",
-      "testCoverage": "baseline production-shaped initial-create census, recovery-shaped rollover census, and one-semantic-element mutation matrix",
+      "testCoverage": "baseline production-shaped initial-create census including the full broker profile, recovery-shaped rollover census, no-op/append-only retry census, and one-semantic-element mutation matrix",
       "ciCoverage": "quality-gate.yml -> stage-b:deployment-closure:pull-request -> npm run test:production-green-stage-b-control-plane",
       "implementationStatus": "SATISFIED",
       "gap": null,

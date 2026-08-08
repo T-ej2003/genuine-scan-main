@@ -88,6 +88,10 @@ The contract covers both supported twelve-address ECS profiles: `ECS_INITIAL_CRE
 task-definition rotation. The baseline and recovery-shaped fixtures must each produce
 zero unclassified resource actions, changed paths, unknown paths, replacement paths, and
 configuration references.
+The baseline profile also requires an atomic broker policy/function/alias create shape;
+the rollover profile requires the corresponding exact all-update shape. Partial or mixed
+broker action shapes fail closed, while the no-change/append-only retry profile permits
+only the canonical broker no-op shape.
 The computed alias exception remains field-specific: only
 `aws_lambda_alias.reviewed.function_version` may be unknown, and only with the exact
 structured reference to `aws_lambda_function.broker.version` plus the same-plan published

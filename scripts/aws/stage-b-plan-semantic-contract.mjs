@@ -17,7 +17,19 @@ export const STAGE_B_PLAN_SEMANTIC_CLASSES = Object.freeze([
 export const STAGE_B_PLAN_SEMANTIC_PROFILES = Object.freeze({
   ECS_INITIAL_CREATE: "ECS_INITIAL_CREATE",
   ECS_REVIEWED_ROLLOVER: "ECS_REVIEWED_ROLLOVER",
+  BROKER_POLICY_INITIAL_CREATE: "BROKER_POLICY_INITIAL_CREATE",
+  BROKER_FUNCTION_INITIAL_CREATE: "BROKER_FUNCTION_INITIAL_CREATE",
+  BROKER_ALIAS_INITIAL_CREATE: "BROKER_ALIAS_INITIAL_CREATE",
+  BROKER_POLICY_UPDATE: "BROKER_POLICY_UPDATE",
+  BROKER_FUNCTION_PUBLISH_UPDATE: "BROKER_FUNCTION_PUBLISH_UPDATE",
+  REVIEWED_RECOVERY_ALIAS_UPDATE: "REVIEWED_RECOVERY_ALIAS_UPDATE",
 });
+
+export const STAGE_B_SUPPORTED_PLAN_PROFILES = Object.freeze([
+  Object.freeze({ profile: "BASELINE_INITIAL_CREATE", ecsActions: [["create"]], brokerPolicyActions: [["create"]], brokerFunctionActions: [["create"]], brokerAliasActions: [["create"]], recoveryRequired: false, fixture: "production-green-stage-b-production-shaped.plan.json" }),
+  Object.freeze({ profile: "ROLLOVER_RECOVERY", ecsActions: [["create", "delete"], ["delete", "create"]], brokerPolicyActions: [["update"]], brokerFunctionActions: [["update"]], brokerAliasActions: [["update"]], recoveryRequired: true, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
+  Object.freeze({ profile: "NO_CHANGE_OR_APPEND_ONLY_RETRY", ecsActions: [["create"], ["no-op"]], brokerPolicyActions: [["no-op"]], brokerFunctionActions: [["no-op"]], brokerAliasActions: [["no-op"]], recoveryRequired: false, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
+]);
 
 const ECS_ADDRESSES = new Set(Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES));
 const ECS_INITIAL_CREATE_ACTIONS = ["create"];
@@ -38,10 +50,18 @@ const ECS_INITIAL_CREATE_PROVIDER_PATHS = new Set([
 ]);
 const DIFF_ATOMIC_PATHS = new Set(["environment[0].variables"]);
 const BROKER_PROFILES = new Map([
-  ["aws_iam_policy.broker", { actions: [["update"]], classification: "BROKER_POLICY_UPDATE" }],
-  ["aws_lambda_function.broker", { actions: [["update"]], classification: "BROKER_FUNCTION_PUBLISH_UPDATE" }],
-  ["aws_lambda_alias.reviewed", { actions: [["update"]], classification: "REVIEWED_RECOVERY_ALIAS_UPDATE" }],
+  ["aws_iam_policy.broker", { type: "aws_iam_policy", profiles: [{ actions: ["create"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_POLICY_INITIAL_CREATE }, { actions: ["update"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_POLICY_UPDATE }] }],
+  ["aws_lambda_function.broker", { type: "aws_lambda_function", profiles: [{ actions: ["create"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_FUNCTION_INITIAL_CREATE }, { actions: ["update"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_FUNCTION_PUBLISH_UPDATE }] }],
+  ["aws_lambda_alias.reviewed", { type: "aws_lambda_alias", profiles: [{ actions: ["create"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_ALIAS_INITIAL_CREATE }, { actions: ["update"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.REVIEWED_RECOVERY_ALIAS_UPDATE }] }],
 ]);
+const BROKER_ADDRESSES = new Set(BROKER_PROFILES.keys());
+const BROKER_INITIAL_TAG_PATHS = new Set(["tags.Component", "tags.Environment", "tags.ManagedBy", "tags_all.Component", "tags_all.Environment", "tags_all.ManagedBy"]);
+const BROKER_POLICY_INITIAL_CHANGED_PATHS = new Set(["name", "path", "arn", "id", "policy", ...BROKER_INITIAL_TAG_PATHS]);
+const BROKER_FUNCTION_INITIAL_CHANGED_PATHS = new Set([
+  "function_name", "role", "handler", "runtime", "filename", "source_code_hash", "timeout", "publish",
+  "environment[0].variables", ...BROKER_INITIAL_TAG_PATHS,
+]);
+const BROKER_ALIAS_INITIAL_CHANGED_PATHS = new Set(["name", "function_name", "function_version"]);
 const ECS_METADATA_PATHS = new Set(["arn", "arn_without_revision", "enable_fault_injection", "id", "revision"]);
 const ECS_UNKNOWN_PATHS = new Set([...ECS_METADATA_PATHS, "volume[0].configure_at_launch"]);
 const ECS_SENSITIVE_PATHS = new Set(["requires_compatibilities[0]"]);
@@ -130,6 +150,7 @@ function diffPaths(before, after, base = "") {
 }
 
 function leafPaths(value, base = "") {
+  if (DIFF_ATOMIC_PATHS.has(base)) return [base];
   if (!isObject(value)) return [base];
   if (Array.isArray(value)) return value.length === 0
     ? [base]
@@ -192,6 +213,10 @@ function assertClass(value, label) {
 
 function isEcsInitialCreate(change) {
   return ECS_ADDRESSES.has(change.address) && exactJson(change.change?.actions, ECS_INITIAL_CREATE_ACTIONS);
+}
+
+function isBrokerInitialCreate(change) {
+  return BROKER_ADDRESSES.has(change.address) && exactJson(change.change?.actions, ["create"]);
 }
 
 function assertInitialEcsSemanticDomain(change) {
@@ -260,10 +285,25 @@ function assertEcsSemanticDomain(change) {
 
 function classifyChangedPath(change, path) {
   if (ECS_ADDRESSES.has(change.address)) return classifyEcsChangedPath(change, path);
+  if (change.address === "aws_iam_policy.broker" && isBrokerInitialCreate(change)) {
+    if (BROKER_POLICY_INITIAL_CHANGED_PATHS.has(path)) return "REVIEWED_CONCRETE_CHANGE";
+    throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
+  }
   if (change.address === "aws_iam_policy.broker" && BROKER_POLICY_CHANGED_PATHS.has(path)) return "REVIEWED_CONCRETE_CHANGE";
+  if (change.address === "aws_lambda_function.broker" && isBrokerInitialCreate(change)) {
+    if (BROKER_FUNCTION_INITIAL_CHANGED_PATHS.has(path)) return "REVIEWED_CONCRETE_CHANGE";
+    throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
+  }
   if (change.address === "aws_lambda_function.broker" && BROKER_FUNCTION_CHANGED_PATHS.has(path)) {
     return ["last_modified", "qualified_arn", "qualified_invoke_arn", "version"].includes(path)
       ? "DIAGNOSTIC_ONLY" : "REVIEWED_CONCRETE_CHANGE";
+  }
+  if (change.address === "aws_lambda_alias.reviewed" && isBrokerInitialCreate(change)) {
+    if (BROKER_ALIAS_INITIAL_CHANGED_PATHS.has(path)) {
+      if (path === "function_version" && change.change.after?.function_version === undefined && change.change.after_unknown?.function_version !== true) throw new Error(`UNCLASSIFIED_COMPUTED_CHANGE: ${change.address}.${path}`);
+      return path === "function_version" ? "REVIEWED_COMPUTED_CHANGE" : "REVIEWED_CONCRETE_CHANGE";
+    }
+    throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
   }
   if (change.address === "aws_lambda_alias.reviewed" && ALIAS_CHANGED_PATHS.has(path)) {
     const after = change.change.after?.function_version;
@@ -303,12 +343,19 @@ function classifyResource(change) {
     if (STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS.some((expected) => exactJson(actions, expected))) return STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_REVIEWED_ROLLOVER;
   }
   const profile = BROKER_PROFILES.get(change?.address);
-  if (profile && change.type === ({
-    "aws_iam_policy.broker": "aws_iam_policy",
-    "aws_lambda_function.broker": "aws_lambda_function",
-    "aws_lambda_alias.reviewed": "aws_lambda_alias",
-  })[change.address] && exactJson(actions, profile.actions[0])) return profile.classification;
+  const brokerProfile = profile?.profiles.find((candidate) => exactJson(actions, candidate.actions));
+  if (profile && change.type === profile.type && change.mode === "managed"
+    && (change.module === undefined || change.module === null) && brokerProfile) return brokerProfile.classification;
   throw new Error(`UNCLASSIFIED_RESOURCE_ACTION: ${change?.address}`);
+}
+
+function assertBrokerActionProfile(plan) {
+  const active = plan.resource_changes.filter((change) => BROKER_ADDRESSES.has(change?.address)
+    && !exactJson(change.change?.actions, ["no-op"]));
+  if (active.length === 0) return;
+  if (active.length !== BROKER_ADDRESSES.size || !active.every((change) => exactJson(change.change?.actions, active[0].change.actions))) {
+    throw new Error("UNCLASSIFIED_RESOURCE_ACTION: broker initial/update profile is not atomic.");
+  }
 }
 
 function classifyReplacePaths(change) {
@@ -323,12 +370,13 @@ function classifyReplacePaths(change) {
 
 function assertComputedAliasBinding(plan) {
   const alias = plan.resource_changes.find((change) => change?.address === "aws_lambda_alias.reviewed");
-  if (alias?.change?.after_unknown?.function_version !== true) return;
+  if (!alias || exactJson(alias.change?.actions, ["no-op"]) || alias.change?.after_unknown?.function_version !== true) return;
   if (alias.change.after?.function_version !== undefined && alias.change.after?.function_version !== null) {
     throw new Error("UNCLASSIFIED_COMPUTED_CHANGE: aws_lambda_alias.reviewed.function_version");
   }
+  const expectedBrokerAction = exactJson(alias.change?.actions, ["create"]) ? ["create"] : ["update"];
   const brokerChanges = plan.resource_changes.filter((change) => change?.address === "aws_lambda_function.broker");
-  if (brokerChanges.length !== 1 || !exactJson(brokerChanges[0].change?.actions, ["update"])) {
+  if (brokerChanges.length !== 1 || !exactJson(brokerChanges[0].change?.actions, expectedBrokerAction)) {
     throw new Error("UNCLASSIFIED_COMPUTED_CHANGE: aws_lambda_alias.reviewed.function_version");
   }
   if (brokerChanges[0].change?.after_unknown?.version !== true) {
@@ -342,6 +390,7 @@ function assertComputedAliasBinding(plan) {
 
 export function censusStageBPlanSemantics(plan) {
   if (!plan || !Array.isArray(plan.resource_changes)) throw new Error("Stage B semantic census requires Terraform plan resource_changes.");
+  assertBrokerActionProfile(plan);
   const resources = [];
   const seenAddresses = new Set();
   for (const change of plan.resource_changes) {

@@ -5,6 +5,7 @@ import {
   assertStageBPlanSemanticCompleteness,
   censusStageBPlanSemantics,
   STAGE_B_PLAN_SEMANTIC_PROFILES,
+  STAGE_B_SUPPORTED_PLAN_PROFILES,
 } from "../aws/stage-b-plan-semantic-contract.mjs";
 import { assertRecoveryPlanDelta } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
 import { classifyStageBPlan } from "../aws/stage-b-deployment-contract.mjs";
@@ -130,6 +131,27 @@ function plan() {
 function baselinePlan() {
   const value = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
   value.configuration = configuration();
+  const tags = { Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" };
+  const policy = value.resource_changes.find((change) => change.address === "aws_iam_policy.broker");
+  policy.change = { actions: ["create"], before: null, after: { name: "mscqr-production-rls-approval-broker-runtime", path: "/", arn: "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime", id: "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime", tags }, after_unknown: { policy: true }, before_sensitive: {}, after_sensitive: {} };
+  const lambda = value.resource_changes.find((change) => change.address === "aws_lambda_function.broker");
+  lambda.change = {
+    actions: ["create"],
+    before: null,
+    after: {
+      function_name: "mscqr-production-rls-approval-broker", role: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+      handler: "index.handler", runtime: "nodejs24.x", filename: "/private/tmp/broker.zip", source_code_hash: "baseline-source-code-hash",
+      timeout: 30, publish: true, environment: [{ variables: Object.fromEntries(envNames.map((name) => [name, `baseline-${name}`])) }], tags,
+    },
+    after_unknown: { architectures: [true], environment: [{ variables: true }], last_modified: true, qualified_arn: true, qualified_invoke_arn: true, version: true },
+    before_sensitive: {}, after_sensitive: { architectures: [true] },
+  };
+  const alias = value.resource_changes.find((change) => change.address === "aws_lambda_alias.reviewed");
+  alias.change = {
+    actions: ["create"], before: null,
+    after: { name: "reviewed", function_name: "mscqr-production-rls-approval-broker" },
+    after_unknown: { function_version: true }, before_sensitive: {}, after_sensitive: {},
+  };
   for (const change of value.resource_changes) if (change.change?.actions?.some((action) => action !== "no-op")) change.mode = "managed";
   return value;
 }
@@ -196,8 +218,8 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
   assert.deepEqual(census.counts, {
     nonNoopResources: 15,
     resourceActions: 15,
-    changedPaths: 120,
-    afterUnknownPaths: 1,
+    changedPaths: 141,
+    afterUnknownPaths: 8,
     replacePaths: 0,
     configurationReferences: 117,
     unclassifiedResourceActions: 0,
@@ -208,6 +230,9 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
   });
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_INITIAL_CREATE).length, 12);
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_REVIEWED_ROLLOVER).length, 0);
+  assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_POLICY_INITIAL_CREATE).length, 1);
+  assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_FUNCTION_INITIAL_CREATE).length, 1);
+  assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_ALIAS_INITIAL_CREATE).length, 1);
 });
 
 test("baseline initial-create semantics fail closed on action, identity, path, and reference drift", () => {
@@ -227,6 +252,65 @@ test("baseline initial-create semantics fail closed on action, identity, path, a
   mutateBaseline((value) => { baselineEcsChange(value).change.after_unknown = { unreviewed: true }; }, /UNCLASSIFIED_AFTER_UNKNOWN/);
   mutateBaseline((value) => { value.configuration.root_module.resources.find((item) => item.address === "aws_ecs_task_definition.candidate").expressions.family.references = ["var.unreviewed"]; }, /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
   mutateBaseline((value) => { baselineEcsChange(value).change.replace_paths = [["cpu"]]; }, /UNCLASSIFIED_REPLACE_PATH/);
+});
+
+test("baseline broker creates are atomic and broker mutations cannot consume recovery authorization", () => {
+  for (const address of ["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]) {
+    const value = baselinePlan();
+    value.resource_changes.find((change) => change.address === address).change.actions = ["update"];
+    assert.throws(() => assertStageBPlanSemanticCompleteness(value), /UNCLASSIFIED_RESOURCE_ACTION/);
+  }
+  for (const actions of [["create"], ["update"]]) {
+    const value = actions[0] === "create" ? baselinePlan() : plan();
+    for (const address of ["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]) value.resource_changes.find((change) => change.address === address).change.actions = actions;
+    assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(value));
+  }
+  for (const actions of [["create", "delete"], ["delete", "create"], ["read"], ["create", "update"]]) {
+    const value = baselinePlan();
+    value.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.actions = actions;
+    assert.throws(() => assertStageBPlanSemanticCompleteness(value), /UNCLASSIFIED_RESOURCE_ACTION/);
+  }
+  mutateRecovery((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_alias.reviewed").change.actions = ["create"]; });
+});
+
+test("append-only create/no-op retry remains represented without broadening broker profiles", () => {
+  const value = plan();
+  const taskChanges = value.resource_changes.filter((change) => addresses.includes(change.address));
+  for (const change of taskChanges.slice(0, -1)) {
+    change.change.actions = ["create"];
+    change.change.before = null;
+    delete change.change.replace_paths;
+  }
+  taskChanges.at(-1).change.actions = ["no-op"];
+  for (const address of ["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]) {
+    value.resource_changes.find((change) => change.address === address).change.actions = ["no-op"];
+  }
+  const census = assertStageBPlanSemanticCompleteness(value);
+  assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_INITIAL_CREATE).length, 11);
+  assert.equal(census.resources.filter((item) => item.address.startsWith("aws_")).length, 11);
+});
+
+test("supported profile matrix is explicit and includes baseline broker creation", () => {
+  assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES.map(({ profile }) => profile), [
+    "BASELINE_INITIAL_CREATE", "ROLLOVER_RECOVERY", "NO_CHANGE_OR_APPEND_ONLY_RETRY",
+  ]);
+  assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerPolicyActions, [["create"]]);
+  assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerFunctionActions, [["create"]]);
+  assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerAliasActions, [["create"]]);
+});
+
+test("baseline broker profiles reject non-root, unknown, and partial semantic shapes", () => {
+  const mutateBaseline = (mutator, expected = /UNCLASSIFIED/) => {
+    const value = baselinePlan();
+    mutator(value);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(value), expected);
+  };
+  mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after.unreviewed = true; }, /UNCLASSIFIED_CHANGED_PATH/);
+  mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after_unknown.timeout = true; }, /UNCLASSIFIED_AFTER_UNKNOWN/);
+  mutateBaseline((value) => { value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed").expressions.function_version.references = ["aws_lambda_function.other.version"]; }, /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+  mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_iam_policy.broker").module = "module.untrusted"; }, /UNCLASSIFIED_RESOURCE_ACTION/);
+  mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_iam_policy.broker").mode = "data"; }, /UNCLASSIFIED_RESOURCE_ACTION/);
+  mutateBaseline((value) => { value.resource_changes.push(structuredClone(value.resource_changes.find((change) => change.address === "aws_iam_policy.broker"))); }, /UNCLASSIFIED_RESOURCE_ACTION/);
 });
 
 test("semantic census exposes recursive changed, unknown, sensitive and reference paths", () => {
@@ -257,7 +341,7 @@ test("future unknown and reference drift fails closed", () => {
   mutate((value) => { value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed").expressions.function_version.references.push("aws_lambda_function.other.version"); }, /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
   mutate((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.after_unknown.version = false; }, /UNCLASSIFIED_COMPUTED_CHANGE/);
   mutate((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed").change.after.function_version = "3"; }, /UNCLASSIFIED_COMPUTED_CHANGE/);
-  mutate((value) => { value.resource_changes = value.resource_changes.filter((item) => item.address !== "aws_lambda_function.broker"); }, /UNCLASSIFIED_COMPUTED_CHANGE/);
+  mutate((value) => { value.resource_changes = value.resource_changes.filter((item) => item.address !== "aws_lambda_function.broker"); }, /UNCLASSIFIED_(?:COMPUTED_CHANGE|RESOURCE_ACTION)/);
 });
 
 test("stable ECS security domains are validated before equality", () => {
@@ -273,7 +357,7 @@ test("stable ECS security domains are validated before equality", () => {
 });
 
 test("computed alias requires same-plan published broker and exact configuration identity", () => {
-  mutate((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.actions = ["no-op"]; }, /UNCLASSIFIED_COMPUTED_CHANGE/);
+  mutate((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.actions = ["no-op"]; }, /UNCLASSIFIED_(?:COMPUTED_CHANGE|RESOURCE_ACTION)/);
   mutate((value) => { value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_function.broker").expressions.publish.constant_value = false; }, /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
   mutateRecovery((value) => { const alias = value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed"); alias.change.after.function_version = "wrong"; delete alias.change.after_unknown.function_version; });
 });
