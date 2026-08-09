@@ -399,7 +399,8 @@ function collectConfigurationReferences(plan, address) {
       ...item,
       references,
       classification: address === "aws_lambda_alias.reviewed" && item.field === "function_version"
-        ? "REVIEWED_COMPUTED_CHANGE" : "STABLE_REQUIRED",
+        ? (plan?.variables?.stage_b_recovery_only?.value === true ? "REVIEWED_CONCRETE_CHANGE" : "REVIEWED_COMPUTED_CHANGE")
+        : "STABLE_REQUIRED",
     };
   });
 }

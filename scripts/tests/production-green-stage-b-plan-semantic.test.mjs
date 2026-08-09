@@ -557,6 +557,15 @@ test("supported profile matrix is explicit and includes baseline broker creation
 test("recovery-only semantic profile contains only the exact concrete alias target", () => {
   const census = assertStageBPlanSemanticCompleteness(recoveryPlan());
   assert.equal(census.counts.unclassifiedConfigurationReferences, 0);
+  assert.deepEqual(census.resources[0].configurationReferences, [{
+    field: "function_name",
+    references: ["aws_lambda_function.broker", "aws_lambda_function.broker.function_name"].sort(),
+    classification: "STABLE_REQUIRED",
+  }, {
+    field: "function_version",
+    references: ["var.stage_b_recovery_alias_target_version"],
+    classification: "REVIEWED_CONCRETE_CHANGE",
+  }]);
 });
 
 test("recovery alias reference classification is profile-bound and fail-closed", () => {
