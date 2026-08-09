@@ -373,6 +373,15 @@ function configurationBase(address) {
   return address;
 }
 
+function allowedConfigurationReferences(plan, address, field) {
+  if (address === "aws_lambda_alias.reviewed" && field === "function_version") {
+    return plan?.variables?.stage_b_recovery_only?.value === true
+      ? ["var.stage_b_recovery_alias_target_version"]
+      : CONFIGURATION_REFERENCE_RULES[address][field];
+  }
+  return CONFIGURATION_REFERENCE_RULES[address][field];
+}
+
 function collectConfigurationReferences(plan, address) {
   const base = configurationBase(address);
   const resource = rootConfigurationResources(plan).find((item) => item?.address === base);
@@ -383,7 +392,7 @@ function collectConfigurationReferences(plan, address) {
   const actualKeys = actual.map(({ field }) => field).sort();
   if (!exactJson(expectedKeys, actualKeys)) throw new Error(`UNCLASSIFIED_CONFIGURATION_REFERENCES: ${address}`);
   return actual.sort((left, right) => left.field.localeCompare(right.field)).map((item) => {
-    const allowed = [...expected[item.field]].sort();
+    const allowed = [...allowedConfigurationReferences(plan, base, item.field)].sort();
     const references = [...item.references].sort();
     if (!exactJson(references, allowed)) throw new Error(`UNCLASSIFIED_CONFIGURATION_REFERENCES: ${address}.${item.field}`);
     return {
