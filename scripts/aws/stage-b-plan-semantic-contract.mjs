@@ -66,8 +66,19 @@ const BROKER_INITIAL_TAG_PATHS = new Set(["tags.Component", "tags.Environment", 
 const BROKER_POLICY_INITIAL_CHANGED_PATHS = new Set(["name", "path", "arn", "id", "policy", ...BROKER_INITIAL_TAG_PATHS]);
 const BROKER_FUNCTION_INITIAL_CHANGED_PATHS = new Set([
   "function_name", "role", "handler", "runtime", "filename", "source_code_hash", "timeout", "publish",
-  "environment[0].variables", ...BROKER_INITIAL_TAG_PATHS,
+  "memory_size", "package_type", "region", "environment[0].variables", ...BROKER_INITIAL_TAG_PATHS,
 ]);
+export const STAGE_B_LAMBDA_INITIAL_CREATE_REPRESENTATION = Object.freeze({
+  memory_size: Object.freeze({ category: "PROVIDER_DEFAULTED_CONCRETE", expected: 128 }),
+  package_type: Object.freeze({ category: "PROVIDER_DEFAULTED_CONCRETE", expected: "Zip" }),
+  region: Object.freeze({ category: "PROVIDER_OPTIONAL_COMPUTED_CONCRETE", expected: STAGE_B.region }),
+  tags_all: Object.freeze({ category: "PROVIDER_OPTIONAL_COMPUTED_CONCRETE", expected: "tags" }),
+  architectures: Object.freeze({ category: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", expectedUnknown: [true] }),
+  code_sha256: Object.freeze({ category: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", expectedUnknown: true }),
+  id: Object.freeze({ category: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", expectedUnknown: true }),
+  source_code_hash: Object.freeze({ category: "CONFIGURATION_BOUND_INPUT", expected: "concrete" }),
+  environment: Object.freeze({ category: "CONFIGURATION_DEPENDENCY_COMPUTED", expected: "unresolved-or-resolved" }),
+});
 const BROKER_ENVIRONMENT_PLACEHOLDER_PATH = "environment[0]";
 const BROKER_ALIAS_INITIAL_CHANGED_PATHS = new Set(["name", "function_name", "function_version"]);
 const ECS_METADATA_PATHS = new Set(["arn", "arn_without_revision", "enable_fault_injection", "id", "revision"]);
@@ -100,7 +111,7 @@ const ALIAS_SENSITIVE_PATHS = new Set();
 const providerAttributes = (resourceType) => new Map(STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT.resources[resourceType].attributes.map((entry) => [entry.attributePath, entry]));
 const providerComputedOnlyPaths = (resourceType) => [...providerAttributes(resourceType).values()].filter((entry) => entry.computed && !entry.optional && !entry.required).map((entry) => entry.attributePath);
 const BROKER_POLICY_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_iam_policy"), "id"]);
-const BROKER_FUNCTION_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_lambda_function"), "architectures[0]", "id"]);
+const BROKER_FUNCTION_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_lambda_function"), "architectures[0]", "code_sha256", "id"]);
 const BROKER_ALIAS_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_lambda_alias"), "function_version", "id"]);
 const BROKER_POLICY_INITIAL_DEPENDENCY_COMPUTED_PATHS = new Set(["policy"]);
 const BROKER_FUNCTION_INITIAL_DEPENDENCY_COMPUTED_PATHS = new Set(["environment[0].variables"]);
@@ -265,6 +276,31 @@ function assertInitialBrokerEnvironment(change) {
   return concreteVariables ? "resolved" : "unresolved";
 }
 
+function assertInitialLambdaCreateRepresentation(change) {
+  if (change.address !== "aws_lambda_function.broker" || !isBrokerInitialCreate(change)) return;
+  const { after = {}, after_unknown: unknown = {} } = change.change || {};
+  if (after.memory_size !== STAGE_B_LAMBDA_INITIAL_CREATE_REPRESENTATION.memory_size.expected
+    || after.package_type !== STAGE_B_LAMBDA_INITIAL_CREATE_REPRESENTATION.package_type.expected
+    || after.region !== STAGE_B_LAMBDA_INITIAL_CREATE_REPRESENTATION.region.expected) {
+    throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.defaulted_fields`);
+  }
+  if (typeof after.source_code_hash !== "string" || after.source_code_hash.length === 0) {
+    throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.source_code_hash`);
+  }
+  if (after.code_sha256 !== undefined || unknown.code_sha256 !== STAGE_B_LAMBDA_INITIAL_CREATE_REPRESENTATION.code_sha256.expectedUnknown) {
+    throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.code_sha256`);
+  }
+  if (after.architectures !== undefined || JSON.stringify(unknown.architectures) !== JSON.stringify(STAGE_B_LAMBDA_INITIAL_CREATE_REPRESENTATION.architectures.expectedUnknown)) {
+    throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.architectures`);
+  }
+  if (after.id !== undefined || unknown.id !== STAGE_B_LAMBDA_INITIAL_CREATE_REPRESENTATION.id.expectedUnknown) {
+    throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.id`);
+  }
+  if (!after.tags || JSON.stringify(after.tags_all) !== JSON.stringify(after.tags)) {
+    throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.tags_all`);
+  }
+}
+
 const BROKER_ENVIRONMENT_VARIABLES = Object.freeze([
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
@@ -324,6 +360,7 @@ function assertInitialProviderComputedShape(change) {
       : change.address === "aws_lambda_alias.reviewed" ? BROKER_ALIAS_INITIAL_PROVIDER_UNKNOWN_PATHS
         : ECS_ADDRESSES.has(change.address) ? ECS_INITIAL_PROVIDER_UNKNOWN_PATHS : null;
   if (!expected) return;
+  assertInitialLambdaCreateRepresentation(change);
   const actual = new Set(truePaths(change.change?.after_unknown).filter(Boolean));
   if (actual.has("volume[0].configure_at_launch")) {
     if (!change.change?.after?.volume) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.volume`);

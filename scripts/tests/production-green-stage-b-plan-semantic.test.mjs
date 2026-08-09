@@ -143,9 +143,10 @@ function baselinePlan() {
     after: {
       function_name: "mscqr-production-rls-approval-broker", role: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
       handler: "index.handler", runtime: "nodejs24.x", filename: "/private/tmp/broker.zip", source_code_hash: "baseline-source-code-hash",
-      timeout: 30, publish: true, environment: [{}], tags,
+      memory_size: 128, package_type: "Zip", timeout: 30, publish: true, region: "eu-west-2",
+      environment: [{}], tags, tags_all: { ...tags },
     },
-    after_unknown: { architectures: [true], arn: true, environment: [{ variables: true }], id: true, invoke_arn: true, last_modified: true, qualified_arn: true, qualified_invoke_arn: true, response_streaming_invoke_arn: true, signing_job_arn: true, signing_profile_version_arn: true, source_code_size: true, version: true },
+    after_unknown: { architectures: [true], arn: true, code_sha256: true, environment: [{ variables: true }], id: true, invoke_arn: true, last_modified: true, qualified_arn: true, qualified_invoke_arn: true, response_streaming_invoke_arn: true, signing_job_arn: true, signing_profile_version_arn: true, source_code_size: true, version: true },
     before_sensitive: {}, after_sensitive: { architectures: [true] },
   };
   const alias = value.resource_changes.find((change) => change.address === "aws_lambda_alias.reviewed");
@@ -273,8 +274,8 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
   assert.deepEqual(census.counts, {
     nonNoopResources: 15,
     resourceActions: 15,
-    changedPaths: 163,
-    afterUnknownPaths: 82,
+    changedPaths: 169,
+    afterUnknownPaths: 83,
     replacePaths: 0,
     configurationReferences: 117,
     unclassifiedResourceActions: 0,
@@ -500,6 +501,27 @@ test("initial broker computed environment uses only the reviewed structural plac
   mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after.environment.push({}); }, /UNCLASSIFIED_CHANGED_PATH/);
   mutateBaseline((value) => { const change = value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change; change.after.environment = [{ variables: { BROKER_TASK_DEFINITIONS_JSON: "concrete" } }]; }, /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_CHANGED_PATH/);
   mutateBaseline((value) => { const change = value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change; change.after.environment = [{ variables: {} }]; change.after_unknown.environment = [{ variables: true }]; }, /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_CHANGED_PATH/);
+});
+
+test("initial broker Lambda uses exact default and optional-computed provider shapes", () => {
+  const lambdaChange = (value) => value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change;
+  assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(baselinePlan()));
+  for (const mutate of [
+    (change) => { delete change.after.memory_size; },
+    (change) => { change.after.memory_size = 256; },
+    (change) => { delete change.after.package_type; },
+    (change) => { change.after.package_type = "Image"; },
+    (change) => { delete change.after.code_sha256; delete change.after_unknown.code_sha256; },
+    (change) => { change.after.code_sha256 = "provider-output"; delete change.after_unknown.code_sha256; },
+    (change) => { delete change.after.source_code_hash; change.after_unknown.source_code_hash = true; },
+    (change) => { change.after.tags_all.ManagedBy = "unreviewed"; },
+    (change) => { delete change.after.region; },
+    (change) => { change.after_unknown.unreviewed_optional = true; },
+  ]) {
+    const value = baselinePlan();
+    mutate(lambdaChange(value));
+    assert.throws(() => assertStageBPlanSemanticCompleteness(value), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_/);
+  }
 });
 
 test("locked provider semantic snapshot is independently validated", () => {

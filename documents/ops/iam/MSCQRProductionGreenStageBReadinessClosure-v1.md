@@ -117,6 +117,13 @@ partial-initial-apply retry may carry concrete values only after exact policy, v
 task-definition ARN, and structured-reference validation. Provider-owned identifiers remain
 mandatory unknowns in both cases.
 
+For the baseline broker Lambda create, the source-controlled representation contract also
+requires the provider's reviewed defaults `memory_size=128` and `package_type="Zip"`, the
+configured region and `tags_all` value, a concrete `source_code_hash`, and the exact
+optional-computed unknown `code_sha256`. These are separate categories: defaults and the
+package digest are not interchangeable with provider diagnostics, and no unlisted optional
+or optional-computed field is admitted.
+
 ### Normal profiles
 
 - Clean/no-change: each allowlisted resource has its exact `[]`/`["no-op"]` equivalent;
