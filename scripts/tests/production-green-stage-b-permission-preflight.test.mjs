@@ -8,6 +8,7 @@ import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli
 import {
   canonicalizeJson,
   assertPermissionReportPlanBinding,
+  assertPermissionEvaluationBindings,
   deriveRequiredEvaluations,
   resolveStageBPermissionProfile,
   PERMISSION_REPORT_SIGNING_ALGORITHM,
@@ -531,9 +532,15 @@ test("recovery alias-only permission profile covers only the approved alias muta
   assert.equal(report.status, "valid");
   assert.equal(report.planProfile, "RECOVERY_ALIAS_ONLY");
   assert.equal(report.permissionProfile, "RECOVERY_ALIAS_ONLY");
+  assert.doesNotThrow(() => assertPermissionEvaluationBindings(report, manifest, { plan: recoveryPlan, permissionProfile: "RECOVERY_ALIAS_ONLY" }));
+  assert.doesNotThrow(() => assertPermissionReport(report, {
+    signatureArtifact: reportSignature(report), verifySignature: () => true, plan: recoveryPlan,
+    planSha256: report.planSha256, savedPlanSha256: report.savedPlanSha256, canonicalPlanJsonSha256: report.canonicalPlanJsonSha256, now,
+  }));
   const planEvaluations = report.requiredEvaluations.filter(({ manifestId }) => manifest.required.find((entry) => entry.id === manifestId)?.plan);
   assert.deepEqual(planEvaluations.map(({ manifestId }) => manifestId), ["update-reviewed-broker-alias"]);
   assert.equal(planEvaluations[0].action, "lambda:UpdateAlias");
+  assert.throws(() => assertPermissionEvaluationBindings({ ...report, requiredEvaluations: [...report.requiredEvaluations, { manifestId: "backend-register" }] }, manifest, { plan: recoveryPlan, permissionProfile: "RECOVERY_ALIAS_ONLY" }), /cannot contain ECS task-definition evaluations/);
 });
 
 test("permission profile selection fails closed across recovery and normal plan shapes", () => {
@@ -809,6 +816,15 @@ test("missing or mismatched task registration context fails before simulation", 
     mutate(candidate.resource_changes.find(({ address }) => address === manifest.taskDefinitionMappings[0].address).change.after);
     assert.throws(() => deriveRequiredEvaluations(candidate, manifest), /registration context|ecs:privileged|No permission manifest entry/);
   }
+});
+
+test("normal permission profile still requires every ECS registration context", () => {
+  const productionPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
+  const report = { requiredEvaluations: [], forbiddenEvaluations: [], planCapabilities: { schemaVersion: 1, required: [], forbidden: [] } };
+  assert.doesNotThrow(() => assertPermissionEvaluationBindings(report, manifest, { plan: productionPlan, permissionProfile: "NORMAL_STAGE_B_RELEASE" }));
+  const missing = structuredClone(productionPlan);
+  missing.resource_changes = missing.resource_changes.filter(({ address }) => address !== manifest.taskDefinitionMappings[0].address);
+  assert.throws(() => assertPermissionEvaluationBindings(report, manifest, { plan: missing, permissionProfile: "NORMAL_STAGE_B_RELEASE" }), /exactly one reviewed task-definition registration/);
 });
 
 test("manifest rejects missing, duplicate, and cross-family ECS registration context", () => {

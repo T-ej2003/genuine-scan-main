@@ -37,6 +37,10 @@ const STAGE_A_LIVE_EVIDENCE_EVALUATIONS = Object.freeze([
 export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${ACCOUNT}:root`]);
 export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
 export const STAGE_B_PERMISSION_PROFILES = Object.freeze(["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY"]);
+export const STAGE_B_PERMISSION_PROFILE_CAPABILITIES = Object.freeze({
+  NORMAL_STAGE_B_RELEASE: Object.freeze({ requiresTaskDefinitionRegistrationContexts: true }),
+  RECOVERY_ALIAS_ONLY: Object.freeze({ requiresTaskDefinitionRegistrationContexts: false }),
+});
 
 export function assertStageBPermissionEvidenceKind(report, expectedKind, expectedPhase) {
   if (report?.evidenceKind !== expectedKind || report?.phase !== expectedPhase) {
@@ -100,6 +104,11 @@ const appliesToPermissionProfile = (entry, profile) => Array.isArray(entry.profi
 export function assertStageBPermissionProfile(profile) {
   if (!STAGE_B_PERMISSION_PROFILES.includes(profile)) throw new Error(`Stage B permission profile is unsupported: ${profile}`);
   return profile;
+}
+
+export function stageBPermissionProfileCapabilities(profile) {
+  assertStageBPermissionProfile(profile);
+  return STAGE_B_PERMISSION_PROFILE_CAPABILITIES[profile];
 }
 
 export function resolveStageBPermissionProfile({ plan, approvedPlanProfile, phase = "plan-bound" } = {}) {
@@ -394,7 +403,7 @@ export function validateSimulationResult(item, result) {
 }
 
 export function assertPermissionEvaluationBindings(report, manifest, { plan, permissionProfile = "NORMAL_STAGE_B_RELEASE", contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY } = {}) {
-  assertStageBPermissionProfile(permissionProfile);
+  const capabilities = stageBPermissionProfileCapabilities(permissionProfile);
   const conditionKeyOrigins = sourcePolicyConditionKeyOrigins();
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
   const entries = new Map([...manifest.required, ...manifest.forbidden].map((entry) => [entry.id, { entry, forbidden: manifest.forbidden.includes(entry) }]));
@@ -403,8 +412,10 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
     entries.set(`${mapping.id}-tag`, { entry: { context: taskDefinitionTagContext(mapping.registerContext) }, forbidden: false });
     for (const suffix of ["pass-execution", "pass-task"]) entries.set(`${mapping.id}-${suffix}`, { entry: { context: mapping.passRoleContext }, forbidden: false });
   }
+  const taskDefinitionEvaluationIds = new Set(manifest.taskDefinitionMappings.flatMap((mapping) => [mapping.id, `${mapping.id}-register`, `${mapping.id}-tag`, `${mapping.id}-pass-execution`, `${mapping.id}-pass-task`]));
   for (const [items, forbidden] of [[report.requiredEvaluations, false], [report.forbiddenEvaluations, true]]) {
     if (!Array.isArray(items)) throw new Error("Permission-preflight evaluation results are missing.");
+    if (!capabilities.requiresTaskDefinitionRegistrationContexts && items.some((item) => taskDefinitionEvaluationIds.has(item.manifestId))) throw new Error("RECOVERY_ALIAS_ONLY permission evidence cannot contain ECS task-definition evaluations.");
     for (const item of items) {
       const binding = entries.get(item.manifestId);
       if (!binding || binding.forbidden !== forbidden) throw new Error(`Permission-preflight evaluation ${item.id} is not bound to the current manifest section.`);
@@ -426,7 +437,7 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
   if (report.planCapabilities?.schemaVersion !== 1
     || JSON.stringify(report.planCapabilities.required) !== JSON.stringify(project(report.requiredEvaluations))
     || JSON.stringify(report.planCapabilities.forbidden) !== JSON.stringify(project(report.forbiddenEvaluations))) throw new Error("Permission-preflight plan capability manifest is incomplete or stale.");
-  if (plan) assertTaskDefinitionRegistrationContexts(plan, manifest);
+  if (plan && capabilities.requiresTaskDefinitionRegistrationContexts) assertTaskDefinitionRegistrationContexts(plan, manifest);
   return true;
 }
 
