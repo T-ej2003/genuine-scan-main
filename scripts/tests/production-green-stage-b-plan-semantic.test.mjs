@@ -150,7 +150,12 @@ function recoveryPlan() {
   alias.change.after.function_version = "3";
   delete alias.change.after_unknown.function_version;
   value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed")
-    .expressions.function_version = ref(["var.stage_b_recovery_alias_target_version"]);
+    .expressions.function_version = ref([
+      "aws_lambda_function.broker",
+      "aws_lambda_function.broker.version",
+      "var.stage_b_recovery_alias_target_version",
+      "var.stage_b_recovery_only",
+    ]);
   return value;
 }
 
@@ -563,7 +568,12 @@ test("recovery-only semantic profile contains only the exact concrete alias targ
     classification: "STABLE_REQUIRED",
   }, {
     field: "function_version",
-    references: ["var.stage_b_recovery_alias_target_version"],
+    references: [
+      "aws_lambda_function.broker",
+      "aws_lambda_function.broker.version",
+      "var.stage_b_recovery_alias_target_version",
+      "var.stage_b_recovery_only",
+    ],
     classification: "REVIEWED_CONCRETE_CHANGE",
   }]);
 });
@@ -578,6 +588,13 @@ test("recovery alias reference classification is profile-bound and fail-closed",
     ["var.other_version"],
     ["aws_lambda_function.other.version"],
     ["var.stage_b_recovery_alias_target_version", "aws_lambda_function.broker.version"],
+    [
+      "aws_lambda_function.broker",
+      "aws_lambda_function.broker.version",
+      "var.stage_b_recovery_alias_target_version",
+      "var.stage_b_recovery_only",
+      "var.unreviewed",
+    ],
   ]) {
     const invalid = recoveryPlan();
     invalid.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed")

@@ -376,7 +376,12 @@ function configurationBase(address) {
 function allowedConfigurationReferences(plan, address, field) {
   if (address === "aws_lambda_alias.reviewed" && field === "function_version") {
     return plan?.variables?.stage_b_recovery_only?.value === true
-      ? ["var.stage_b_recovery_alias_target_version"]
+      ? [
+        "aws_lambda_function.broker",
+        "aws_lambda_function.broker.version",
+        "var.stage_b_recovery_alias_target_version",
+        "var.stage_b_recovery_only",
+      ]
       : CONFIGURATION_REFERENCE_RULES[address][field];
   }
   return CONFIGURATION_REFERENCE_RULES[address][field];
