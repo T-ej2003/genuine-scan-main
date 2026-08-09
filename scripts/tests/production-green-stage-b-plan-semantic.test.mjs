@@ -135,7 +135,7 @@ function baselinePlan() {
   value.configuration = configuration();
   const tags = { Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" };
   const policy = value.resource_changes.find((change) => change.address === "aws_iam_policy.broker");
-  policy.change = { actions: ["create"], before: null, after: { name: "mscqr-production-rls-approval-broker-runtime", path: "/", tags }, after_unknown: { arn: true, attachment_count: true, id: true, policy: true, policy_id: true }, before_sensitive: {}, after_sensitive: {} };
+  policy.change = { actions: ["create"], before: null, after: { description: null, name: "mscqr-production-rls-approval-broker-runtime", name_prefix: null, path: "/", tags, tags_all: { ...tags } }, after_unknown: { arn: true, attachment_count: true, id: true, policy: true, policy_id: true, tags: {}, tags_all: {} }, before_sensitive: {}, after_sensitive: {} };
   const lambda = value.resource_changes.find((change) => change.address === "aws_lambda_function.broker");
   lambda.change = {
     actions: ["create"],
@@ -152,9 +152,19 @@ function baselinePlan() {
   const alias = value.resource_changes.find((change) => change.address === "aws_lambda_alias.reviewed");
   alias.change = {
     actions: ["create"], before: null,
-    after: { name: "reviewed", function_name: "mscqr-production-rls-approval-broker" },
-    after_unknown: { arn: true, function_version: true, id: true, invoke_arn: true }, before_sensitive: {}, after_sensitive: {},
+    after: { description: null, name: "reviewed", function_name: "mscqr-production-rls-approval-broker", region: "eu-west-2", routing_config: [] },
+    after_unknown: { arn: true, function_version: true, id: true, invoke_arn: true, routing_config: [] }, before_sensitive: {}, after_sensitive: {},
   };
+  for (const [index, change] of value.resource_changes.filter((item) => addresses.includes(item.address)).entries()) {
+    const typed = taskChange(change.address, index + 1).change;
+    for (const field of ["ephemeral_storage", "ipc_mode", "network_mode", "pid_mode", "placement_constraints", "proxy_configuration", "region", "skip_destroy", "tags_all", "track_latest", "volume"]) {
+      if (typed.after[field] !== undefined && field !== "tags_all") change.change.after[field] = structuredClone(typed.after[field]);
+    }
+    change.change.after.tags_all = { ...tags };
+    for (const field of ["ephemeral_storage", "placement_constraints", "proxy_configuration", "requires_compatibilities", "runtime_platform", "tags", "tags_all", "volume"]) {
+      if (typed.after_unknown[field] !== undefined) change.change.after_unknown[field] = structuredClone(typed.after_unknown[field]);
+    }
+  }
   for (const change of value.resource_changes) if (change.change?.actions?.some((action) => action !== "no-op")) change.mode = "managed";
   return value;
 }
@@ -204,10 +214,10 @@ function dependencyResolvedRetryPlan() {
   }
   const policy = value.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change;
   policy.after.policy = JSON.stringify(canonicalBrokerPolicy());
-  delete policy.after_unknown.policy;
+  policy.after_unknown.policy = false;
   const lambda = value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change;
   lambda.after.environment = [{ variables: resolvedBrokerEnvironment() }];
-  delete lambda.after_unknown.environment;
+  lambda.after_unknown.environment = [{ variables: false }];
   return value;
 }
 
@@ -263,6 +273,9 @@ test("real-plan-shaped semantic census has zero unclassified semantics", () => {
     unclassifiedReplacePaths: 0,
     unclassifiedConfigurationReferences: 0,
     unfaithfulProviderComputedFields: 0,
+    unmodeledTypedAfterFields: 0,
+    unmodeledAfterUnknownMarkers: 0,
+    unmodeledEmptyStructures: 0,
   });
   assert.equal(new Set(census.resources.map((item) => item.classification)).size, 4);
   assert.equal(census.resources.filter((item) => item.classification === "ECS_REVIEWED_ROLLOVER").length, 12);
@@ -274,8 +287,8 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
   assert.deepEqual(census.counts, {
     nonNoopResources: 15,
     resourceActions: 15,
-    changedPaths: 169,
-    afterUnknownPaths: 83,
+    changedPaths: 383,
+    afterUnknownPaths: 93,
     replacePaths: 0,
     configurationReferences: 117,
     unclassifiedResourceActions: 0,
@@ -284,6 +297,9 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
     unclassifiedReplacePaths: 0,
     unclassifiedConfigurationReferences: 0,
     unfaithfulProviderComputedFields: 0,
+    unmodeledTypedAfterFields: 0,
+    unmodeledAfterUnknownMarkers: 0,
+    unmodeledEmptyStructures: 0,
   });
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_INITIAL_CREATE).length, 12);
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_REVIEWED_ROLLOVER).length, 0);
@@ -459,6 +475,32 @@ test("dependency-computed broker values require exactly one resolved representat
   assert.throws(() => assertStageBPlanSemanticCompleteness(environmentBoth), /UNCLASSIFIED_CHANGED_PATH/);
 });
 
+test("typed Terraform envelope admits exact nulls, false markers, and resolved dependencies only", () => {
+  const retry = dependencyResolvedRetryPlan();
+  const census = assertStageBPlanSemanticCompleteness(retry);
+  const policyCensus = census.resources.find((item) => item.address === "aws_iam_policy.broker");
+  const lambdaCensus = census.resources.find((item) => item.address === "aws_lambda_function.broker");
+  assert.equal(policyCensus.afterUnknownPaths.some(({ path }) => path === "policy"), false);
+  assert.equal(lambdaCensus.afterUnknownPaths.some(({ path }) => path === "environment[0].variables"), false);
+
+  const rejectBaseline = (mutator, expected = /UNFAITHFUL|UNCLASSIFIED|UNMODELED/) => {
+    const value = baselinePlan();
+    mutator(value);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(value), expected);
+  };
+  rejectBaseline((value) => { value.resource_changes.find((item) => item.address === "aws_iam_policy.broker").change.after.description = "unexpected"; });
+  rejectBaseline((value) => { value.resource_changes.find((item) => item.address === "aws_iam_policy.broker").change.after.name_prefix = "unexpected"; });
+  rejectBaseline((value) => { value.resource_changes.find((item) => item.address === "aws_iam_policy.broker").change.after.unreviewed = null; });
+  rejectBaseline((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed").change.after.routing_config = [{ additional_version_weights: { other: 1 } }]; });
+
+  const contradictoryPolicy = structuredClone(retry);
+  contradictoryPolicy.resource_changes.find((item) => item.address === "aws_iam_policy.broker").change.after_unknown.policy = true;
+  assert.throws(() => assertStageBPlanSemanticCompleteness(contradictoryPolicy), /UNFAITHFUL|UNCLASSIFIED/);
+  const contradictoryEnvironment = structuredClone(retry);
+  contradictoryEnvironment.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.after_unknown.environment = [{ variables: true }];
+  assert.throws(() => assertStageBPlanSemanticCompleteness(contradictoryEnvironment), /UNFAITHFUL|UNCLASSIFIED/);
+});
+
 test("supported profile matrix is explicit and includes baseline broker creation", () => {
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES.map(({ profile }) => profile), [
     "BASELINE_INITIAL_CREATE", "ROLLOVER_RECOVERY", "NO_CHANGE_OR_APPEND_ONLY_RETRY",
@@ -495,10 +537,10 @@ test("initial broker computed environment uses only the reviewed structural plac
   concreteChange.after.environment = [{ variables: { BROKER_TASK_DEFINITIONS_JSON: "concrete" } }];
   delete concreteChange.after_unknown.environment;
   assert.throws(() => assertStageBPlanSemanticCompleteness(concrete), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_CHANGED_PATH/);
-  mutateBaseline((value) => { delete value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after_unknown.environment[0].variables; }, /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_CHANGED_PATH/);
+  mutateBaseline((value) => { delete value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after_unknown.environment[0].variables; }, /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_(?:AFTER_UNKNOWN|CHANGED_PATH)/);
   mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after_unknown.environment[0].unexpected = true; }, /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_(?:AFTER_UNKNOWN|CHANGED_PATH)/);
-  mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after.environment[0].unexpected = {}; }, /UNCLASSIFIED_CHANGED_PATH/);
-  mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after.environment.push({}); }, /UNCLASSIFIED_CHANGED_PATH/);
+  mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after.environment[0].unexpected = {}; }, /UNFAITHFUL_(?:PROVIDER_COMPUTED_FIELDS|SUPPORTED_PROFILE_FIXTURES)|UNCLASSIFIED_CHANGED_PATH/);
+  mutateBaseline((value) => { value.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after.environment.push({}); }, /UNFAITHFUL_(?:PROVIDER_COMPUTED_FIELDS|SUPPORTED_PROFILE_FIXTURES)|UNCLASSIFIED_CHANGED_PATH/);
   mutateBaseline((value) => { const change = value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change; change.after.environment = [{ variables: { BROKER_TASK_DEFINITIONS_JSON: "concrete" } }]; }, /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_CHANGED_PATH/);
   mutateBaseline((value) => { const change = value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change; change.after.environment = [{ variables: {} }]; change.after_unknown.environment = [{ variables: true }]; }, /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_CHANGED_PATH/);
 });

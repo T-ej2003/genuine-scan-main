@@ -124,6 +124,18 @@ optional-computed unknown `code_sha256`. These are separate categories: defaults
 package digest are not interchangeable with provider diagnostics, and no unlisted optional
 or optional-computed field is admitted.
 
+The semantic engine evaluates a typed Terraform representation envelope before security
+authorization. The envelope admits only the recorded categories in
+`STAGE_B_TYPED_REPRESENTATION_MANIFEST`: configured concrete values, dependency-computed
+unknown/resolved values, provider-computed unknowns, provider defaults/normalization, typed
+nulls, false markers, and exact empty structures. A false `after_unknown` marker is known
+and is never counted as an unknown path; a true leaf is the only unknown authorization
+input. Nulls and empty blocks are representation-valid only at their exact reviewed paths
+and grant no authority to a non-null or non-empty value. The counters
+`unmodeledTypedAfterFields`, `unmodeledAfterUnknownMarkers`, and `unmodeledEmptyStructures`
+are required to remain zero alongside the PLAN-SEM-01 counters, so provider or Terraform
+typed-shape drift identifies the exact resource/path and fails closed.
+
 ### Normal profiles
 
 - Clean/no-change: each allowlisted resource has its exact `[]`/`["no-op"]` equivalent;

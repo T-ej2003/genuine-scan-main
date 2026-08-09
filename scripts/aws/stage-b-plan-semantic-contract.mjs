@@ -50,10 +50,17 @@ const ECS_INITIAL_CREATE_PATHS = new Set([
   "tags_all.Environment", "tags_all.ManagedBy",
 ]);
 const ECS_INITIAL_CREATE_PROVIDER_PATHS = new Set([
-  "ipc_mode", "pid_mode", "volume", "volume[0].configure_at_launch",
+  "ipc_mode", "pid_mode", "ephemeral_storage", "placement_constraints", "proxy_configuration",
+  "volume", "volume[0].configure_at_launch",
   "volume[0].docker_volume_configuration", "volume[0].efs_volume_configuration",
   "volume[0].fsx_windows_file_server_volume_configuration", "volume[0].host_path",
   "volume[0].s3files_volume_configuration",
+]);
+export const STAGE_B_TYPED_REPRESENTATION_CATEGORIES = Object.freeze([
+  "CONFIGURED_CONCRETE", "CONFIGURATION_DEPENDENCY_UNKNOWN", "CONFIGURATION_DEPENDENCY_CONCRETE",
+  "CONFIGURATION_DEPENDENCY_COMPUTED",
+  "PROVIDER_COMPUTED_UNKNOWN", "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", "PROVIDER_DEFAULTED_CONCRETE",
+  "PROVIDER_NORMALIZED_CONCRETE", "KNOWN_UNSET_NULL", "KNOWN_FALSE_MARKER", "KNOWN_EMPTY_LIST", "KNOWN_EMPTY_OBJECT",
 ]);
 const DIFF_ATOMIC_PATHS = new Set(["environment[0].variables"]);
 const BROKER_PROFILES = new Map([
@@ -63,7 +70,7 @@ const BROKER_PROFILES = new Map([
 ]);
 const BROKER_ADDRESSES = new Set(BROKER_PROFILES.keys());
 const BROKER_INITIAL_TAG_PATHS = new Set(["tags.Component", "tags.Environment", "tags.ManagedBy", "tags_all.Component", "tags_all.Environment", "tags_all.ManagedBy"]);
-const BROKER_POLICY_INITIAL_CHANGED_PATHS = new Set(["name", "path", "arn", "id", "policy", ...BROKER_INITIAL_TAG_PATHS]);
+const BROKER_POLICY_INITIAL_CHANGED_PATHS = new Set(["description", "name", "name_prefix", "path", "arn", "id", "policy", ...BROKER_INITIAL_TAG_PATHS]);
 const BROKER_FUNCTION_INITIAL_CHANGED_PATHS = new Set([
   "function_name", "role", "handler", "runtime", "filename", "source_code_hash", "timeout", "publish",
   "memory_size", "package_type", "region", "environment[0].variables", ...BROKER_INITIAL_TAG_PATHS,
@@ -80,7 +87,7 @@ export const STAGE_B_LAMBDA_INITIAL_CREATE_REPRESENTATION = Object.freeze({
   environment: Object.freeze({ category: "CONFIGURATION_DEPENDENCY_COMPUTED", expected: "unresolved-or-resolved" }),
 });
 const BROKER_ENVIRONMENT_PLACEHOLDER_PATH = "environment[0]";
-const BROKER_ALIAS_INITIAL_CHANGED_PATHS = new Set(["name", "function_name", "function_version"]);
+const BROKER_ALIAS_INITIAL_CHANGED_PATHS = new Set(["description", "name", "function_name", "function_version", "region", "routing_config"]);
 const ECS_METADATA_PATHS = new Set(["arn", "arn_without_revision", "enable_fault_injection", "id", "revision"]);
 const ECS_UNKNOWN_PATHS = new Set([...ECS_METADATA_PATHS, "volume[0].configure_at_launch"]);
 const ECS_SENSITIVE_PATHS = new Set(["requires_compatibilities[0]"]);
@@ -109,6 +116,38 @@ const ALIAS_UNKNOWN_PATHS = new Set(["function_version"]);
 const ALIAS_SENSITIVE_PATHS = new Set();
 
 const providerAttributes = (resourceType) => new Map(STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT.resources[resourceType].attributes.map((entry) => [entry.attributePath, entry]));
+const providerTopLevelPaths = (resourceType) => new Set([
+  ...STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT.resources[resourceType].attributes.map((entry) => entry.attributePath),
+  ...STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT.resources[resourceType].blocks.map((entry) => entry.blockPath.split(".")[0].replace(/\[\]$/, "")),
+]);
+const TYPED_NULL_PATHS = Object.freeze({
+  aws_iam_policy: new Set(["description", "name_prefix"]),
+  aws_lambda_function: new Set(),
+  aws_lambda_alias: new Set(["description"]),
+  aws_ecs_task_definition: new Set(["ipc_mode", "pid_mode"]),
+});
+const TYPED_EMPTY_PATHS = Object.freeze({
+  aws_iam_policy: new Set(["tags", "tags_all"]),
+  aws_lambda_function: new Set(["tags", "tags_all"]),
+  aws_lambda_alias: new Set(["routing_config"]),
+  aws_ecs_task_definition: new Set(["ephemeral_storage", "placement_constraints", "proxy_configuration", "tags", "tags_all"]),
+});
+const TYPED_MARKER_PATHS = Object.freeze({
+  aws_iam_policy: new Set(["arn", "attachment_count", "id", "policy", "policy_id", "tags", "tags_all"]),
+  aws_lambda_function: new Set([
+    "architectures[0]", "arn", "code_sha256", "environment[0].variables", "id", "invoke_arn", "last_modified",
+    "qualified_arn", "qualified_invoke_arn", "response_streaming_invoke_arn", "signing_job_arn",
+    "signing_profile_version_arn", "source_code_size", "version", "tags", "tags_all",
+  ]),
+  aws_lambda_alias: new Set(["arn", "function_version", "id", "invoke_arn", "routing_config"]),
+  aws_ecs_task_definition: new Set([
+    "arn", "arn_without_revision", "enable_fault_injection", "id", "revision", "ephemeral_storage",
+    "placement_constraints", "proxy_configuration", "requires_compatibilities[0]", "runtime_platform",
+    "tags", "tags_all", "volume", "volume[0].configure_at_launch", "volume[0].docker_volume_configuration",
+    "volume[0].efs_volume_configuration", "volume[0].fsx_windows_file_server_volume_configuration",
+    "volume[0].s3files_volume_configuration",
+  ]),
+});
 const providerComputedOnlyPaths = (resourceType) => [...providerAttributes(resourceType).values()].filter((entry) => entry.computed && !entry.optional && !entry.required).map((entry) => entry.attributePath);
 const BROKER_POLICY_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_iam_policy"), "id"]);
 const BROKER_FUNCTION_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_lambda_function"), "architectures[0]", "code_sha256", "id"]);
@@ -194,6 +233,103 @@ function truePaths(value, base = "") {
   return Object.entries(value).flatMap(([key, nested]) => truePaths(nested, pathFor(base, Array.isArray(value) ? Number(key) : key)));
 }
 
+export const STAGE_B_TYPED_REPRESENTATION_MANIFEST = Object.freeze({
+  aws_iam_policy: Object.freeze({
+    description: "KNOWN_UNSET_NULL", name: "CONFIGURED_CONCRETE", name_prefix: "KNOWN_UNSET_NULL", path: "CONFIGURED_CONCRETE", policy: "CONFIGURATION_DEPENDENCY_COMPUTED",
+    arn: "PROVIDER_COMPUTED_UNKNOWN", attachment_count: "PROVIDER_COMPUTED_UNKNOWN", id: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN",
+    policy_id: "PROVIDER_COMPUTED_UNKNOWN", tags: "CONFIGURED_CONCRETE", tags_all: "PROVIDER_NORMALIZED_CONCRETE",
+  }),
+  aws_lambda_function: Object.freeze({
+    function_name: "CONFIGURED_CONCRETE", role: "CONFIGURED_CONCRETE", handler: "CONFIGURED_CONCRETE", runtime: "CONFIGURED_CONCRETE", filename: "CONFIGURED_CONCRETE", timeout: "CONFIGURED_CONCRETE", publish: "CONFIGURED_CONCRETE",
+    memory_size: "PROVIDER_DEFAULTED_CONCRETE", package_type: "PROVIDER_DEFAULTED_CONCRETE", region: "PROVIDER_NORMALIZED_CONCRETE",
+    source_code_hash: "CONFIGURED_CONCRETE", environment: "CONFIGURATION_DEPENDENCY_COMPUTED", "environment[0].variables": "CONFIGURATION_DEPENDENCY_COMPUTED",
+    architectures: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", code_sha256: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", id: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN",
+    arn: "PROVIDER_COMPUTED_UNKNOWN", invoke_arn: "PROVIDER_COMPUTED_UNKNOWN", last_modified: "PROVIDER_COMPUTED_UNKNOWN",
+    qualified_arn: "PROVIDER_COMPUTED_UNKNOWN", qualified_invoke_arn: "PROVIDER_COMPUTED_UNKNOWN", response_streaming_invoke_arn: "PROVIDER_COMPUTED_UNKNOWN",
+    signing_job_arn: "PROVIDER_COMPUTED_UNKNOWN", signing_profile_version_arn: "PROVIDER_COMPUTED_UNKNOWN", source_code_size: "PROVIDER_COMPUTED_UNKNOWN", version: "PROVIDER_COMPUTED_UNKNOWN",
+    tags: "CONFIGURED_CONCRETE", tags_all: "PROVIDER_NORMALIZED_CONCRETE",
+  }),
+  aws_lambda_alias: Object.freeze({
+    description: "KNOWN_UNSET_NULL", name: "CONFIGURED_CONCRETE", function_name: "CONFIGURED_CONCRETE", region: "PROVIDER_NORMALIZED_CONCRETE", routing_config: "KNOWN_EMPTY_LIST", function_version: "CONFIGURATION_DEPENDENCY_COMPUTED",
+    arn: "PROVIDER_COMPUTED_UNKNOWN", id: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", invoke_arn: "PROVIDER_COMPUTED_UNKNOWN",
+  }),
+  aws_ecs_task_definition: Object.freeze({
+    family: "CONFIGURED_CONCRETE", container_definitions: "CONFIGURED_CONCRETE", cpu: "CONFIGURED_CONCRETE", memory: "CONFIGURED_CONCRETE", network_mode: "CONFIGURED_CONCRETE", requires_compatibilities: "CONFIGURED_CONCRETE", execution_role_arn: "CONFIGURED_CONCRETE", task_role_arn: "CONFIGURED_CONCRETE", region: "PROVIDER_NORMALIZED_CONCRETE", skip_destroy: "CONFIGURED_CONCRETE", track_latest: "PROVIDER_DEFAULTED_CONCRETE", tags: "CONFIGURED_CONCRETE",
+    ipc_mode: "KNOWN_UNSET_NULL", pid_mode: "KNOWN_UNSET_NULL", ephemeral_storage: "KNOWN_EMPTY_LIST",
+    placement_constraints: "KNOWN_EMPTY_LIST", proxy_configuration: "KNOWN_EMPTY_LIST", tags_all: "PROVIDER_NORMALIZED_CONCRETE",
+    arn: "PROVIDER_COMPUTED_UNKNOWN", arn_without_revision: "PROVIDER_COMPUTED_UNKNOWN", enable_fault_injection: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN",
+    id: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", revision: "PROVIDER_COMPUTED_UNKNOWN", runtime_platform: "CONFIGURED_CONCRETE",
+    volume: "PROVIDER_NORMALIZED_CONCRETE",
+  }),
+});
+
+function typedMarkerPaths(value, base = "") {
+  if (value === true || value === false) return [{ path: base, value }];
+  if (!isObject(value)) return [{ path: base, value }];
+  if (Array.isArray(value)) {
+    if (value.length === 0) return [{ path: base, value }];
+    return value.flatMap((item, index) => typedMarkerPaths(item, pathFor(base, index)));
+  }
+  const keys = Object.keys(value);
+  if (keys.length === 0) return [{ path: base, value }];
+  return keys.flatMap((key) => typedMarkerPaths(value[key], pathFor(base, key)));
+}
+
+function assertTypedNestedShape(change, field, value, unknown) {
+  if (field === "environment" || field === "routing_config" || field === "runtime_platform") {
+    if (!Array.isArray(value)) throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}`);
+    if (field === "routing_config" && value.length === 0) return;
+    if (value.length !== 1 || !value[0] || typeof value[0] !== "object" || Array.isArray(value[0])) throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}`);
+    const allowed = field === "environment" ? ["variables"] : field === "routing_config" ? ["additional_version_weights"] : ["cpu_architecture", "operating_system_family"];
+    if (Object.keys(value[0]).some((key) => !allowed.includes(key))) throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}`);
+    if (field === "runtime_platform" && !exactJson(Object.keys(value[0]).sort(), allowed.sort())) throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}`);
+    if (field === "environment" && value[0].variables !== undefined && (!value[0].variables || typeof value[0].variables !== "object" || Array.isArray(value[0].variables))) throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}.variables`);
+    return;
+  }
+  if (["ephemeral_storage", "placement_constraints", "proxy_configuration", "volume"].includes(field) && !Array.isArray(value)) {
+    throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}`);
+  }
+  if (field === "volume" && Array.isArray(value)) {
+    for (const item of value) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.volume`);
+      const allowed = ["configure_at_launch", "name", "host_path", "docker_volume_configuration", "efs_volume_configuration", "fsx_windows_file_server_volume_configuration", "s3files_volume_configuration"];
+      if (Object.keys(item).some((key) => !allowed.includes(key))) throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.volume`);
+      for (const nested of ["docker_volume_configuration", "efs_volume_configuration", "fsx_windows_file_server_volume_configuration", "s3files_volume_configuration"]) {
+        if (item[nested] !== undefined && !Array.isArray(item[nested])) throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.volume.${nested}`);
+      }
+    }
+  }
+  if (unknown !== undefined && field === "routing_config" && !Array.isArray(unknown)) throw new Error(`UNCLASSIFIED_AFTER_UNKNOWN (UNMODELED_AFTER_UNKNOWN_MARKERS): ${change.address}.${field}`);
+}
+
+function assertTypedRepresentationEnvelope(change) {
+  const type = change.type;
+  const after = change.change?.after;
+  const unknown = change.change?.after_unknown;
+  if (!BROKER_ADDRESSES.has(change.address) && !ECS_ADDRESSES.has(change.address)) return;
+  if (after !== null && after !== undefined && (typeof after !== "object" || Array.isArray(after))) throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}`);
+  const allowed = providerTopLevelPaths(type);
+  for (const field of Object.keys(after || {})) {
+    if (!allowed.has(field)) throw new Error(`UNCLASSIFIED_CHANGED_PATH (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}`);
+    const category = STAGE_B_TYPED_REPRESENTATION_MANIFEST[type]?.[field];
+    if (!STAGE_B_TYPED_REPRESENTATION_CATEGORIES.includes(category)) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}`);
+    assertTypedNestedShape(change, field, after[field], unknown?.[field]);
+  }
+  for (const marker of typedMarkerPaths(unknown)) {
+    if (!marker.path) continue;
+    if (![...TYPED_MARKER_PATHS[type]].some((allowedPath) => marker.path === allowedPath || marker.path.startsWith(`${allowedPath}.`) || marker.path.startsWith(`${allowedPath}[`))) {
+      throw new Error(`UNCLASSIFIED_AFTER_UNKNOWN (UNMODELED_AFTER_UNKNOWN_MARKERS): ${change.address}.${marker.path}`);
+    }
+  }
+  if (isBrokerInitialCreate(change) || isEcsInitialCreate(change)) {
+    for (const field of TYPED_NULL_PATHS[type] || []) if (Object.hasOwn(after || {}, field) && after[field] !== null) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}`);
+  }
+  for (const field of TYPED_EMPTY_PATHS[type] || []) if (Object.hasOwn(after || {}, field) && !((Array.isArray(after[field]) && after[field].length === 0) || (isObject(after[field]) && !Array.isArray(after[field]) && Object.keys(after[field]).length === 0))) {
+    if (field === "tags" || field === "tags_all") continue;
+    throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS (UNMODELED_EMPTY_STRUCTURES): ${change.address}.${field}`);
+  }
+}
+
 function referenceExpressions(value, base = "") {
   if (!isObject(value)) return [];
   const results = [];
@@ -270,7 +406,9 @@ function assertInitialBrokerEnvironment(change) {
     && environment[0].variables
     && typeof environment[0].variables === "object"
     && !Array.isArray(environment[0].variables)
-    && unknownEnvironment === undefined;
+    && (unknownEnvironment === undefined
+      || (Array.isArray(unknownEnvironment) && unknownEnvironment.length === 1
+        && exactJson(unknownEnvironment[0], { variables: false })));
   if (!structuralPlaceholder && !concreteVariables) throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.environment`);
   if (concreteVariables) assertConcreteBrokerEnvironment(environment[0].variables);
   return concreteVariables ? "resolved" : "unresolved";
@@ -298,6 +436,19 @@ function assertInitialLambdaCreateRepresentation(change) {
   }
   if (!after.tags || JSON.stringify(after.tags_all) !== JSON.stringify(after.tags)) {
     throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.tags_all`);
+  }
+}
+
+function assertInitialTypedDefaults(change) {
+  const after = change.change?.after || {};
+  if (change.address === "aws_iam_policy.broker") {
+    if (after.description !== null || after.name_prefix !== null) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.unset_fields`);
+    if (!after.tags_all || !exactJson(after.tags_all, after.tags)) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.tags_all`);
+  }
+  if (change.address === "aws_lambda_alias.reviewed") {
+    if (after.description !== null || after.region !== STAGE_B.region || !Array.isArray(after.routing_config) || after.routing_config.length !== 0) {
+      throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.typed_defaults`);
+    }
   }
 }
 
@@ -361,6 +512,7 @@ function assertInitialProviderComputedShape(change) {
         : ECS_ADDRESSES.has(change.address) ? ECS_INITIAL_PROVIDER_UNKNOWN_PATHS : null;
   if (!expected) return;
   assertInitialLambdaCreateRepresentation(change);
+  assertInitialTypedDefaults(change);
   const actual = new Set(truePaths(change.change?.after_unknown).filter(Boolean));
   if (actual.has("volume[0].configure_at_launch")) {
     if (!change.change?.after?.volume) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.volume`);
@@ -376,7 +528,7 @@ function assertInitialProviderComputedShape(change) {
     throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${dependencyPath}`);
   }
   if (dependencyPath === "policy" && dependencyConcrete) {
-    if (Object.hasOwn(change.change?.after_unknown || {}, "policy")) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.policy`);
+    if (truePaths(change.change?.after_unknown).includes("policy")) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.policy`);
     try { assertStageBBrokerPolicyDocument(JSON.parse(change.change.after.policy)); } catch { throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.policy`); }
   }
   if (dependencyPath === "environment[0].variables" && dependencyConcrete) assertInitialBrokerEnvironment(change);
@@ -595,6 +747,7 @@ export function censusStageBPlanSemantics(plan) {
     if (seenAddresses.has(change.address)) throw new Error(`UNCLASSIFIED_RESOURCE_ACTION: ${change.address}`);
     seenAddresses.add(change.address);
     const classification = classifyResource(change);
+    assertTypedRepresentationEnvelope(change);
     if (ECS_ADDRESSES.has(change.address)) assertEcsSemanticDomain(change);
     assertInitialBrokerEnvironment(change);
     if (isBrokerInitialCreate(change) || isEcsInitialCreate(change)) assertInitialProviderComputedShape(change);
@@ -635,13 +788,16 @@ export function censusStageBPlanSemantics(plan) {
     unclassifiedReplacePaths: 0,
     unclassifiedConfigurationReferences: 0,
     unfaithfulProviderComputedFields: 0,
+    unmodeledTypedAfterFields: 0,
+    unmodeledAfterUnknownMarkers: 0,
+    unmodeledEmptyStructures: 0,
   };
   return { schemaVersion: 1, resources, counts };
 }
 
 export function assertStageBPlanSemanticCompleteness(plan) {
   const census = censusStageBPlanSemantics(plan);
-  if (Object.entries(census.counts).some(([key, value]) => key.startsWith("unclassified") && value !== 0)) {
+  if (Object.entries(census.counts).some(([key, value]) => (key.startsWith("unclassified") || key.startsWith("unfaithful") || key.startsWith("unmodeled")) && value !== 0)) {
     throw new Error("Stage B plan semantic completeness contains unclassified semantics.");
   }
   return census;
