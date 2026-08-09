@@ -332,6 +332,24 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "refresh-diagnostic",
+      "kind": "file",
+      "producer": "scripts/refresh-production-green-stage-b.mjs:writeDiagnostic",
+      "consumers": [
+        "documents/ops/iam/MSCQRProductionGreenStageBReadinessClosure-v1.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "refresh-diagnostic",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "partial-apply-recovery-attestation",
       "kind": "file",
       "producer": "scripts/aws/create-stage-b-partial-apply-recovery-attestation.mjs:produceRecoveryAttestation",

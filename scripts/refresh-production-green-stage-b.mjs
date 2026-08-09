@@ -16,37 +16,79 @@ import { runStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+export const STAGE_B_REFRESH_DIAGNOSTIC_SCHEMA_VERSION = 1;
+export const STAGE_B_REFRESH_DIAGNOSTIC_MAX_EXCERPT_CHARS = 4096;
+
+const SENSITIVE_ASSIGNMENT = /((?:["']?)(?:password|passwd|secret|token|access[_-]?key|private[_-]?key|session[_-]?token|aws_access_key_id|aws_secret_access_key|aws_session_token)(?:["']?\s*(?:=|:)\s*))((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*')|[^\s,;}]+)/gi;
+const PRIVATE_KEY = /-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]*PRIVATE KEY-----/gi;
+const AUTHORIZATION_VALUE = /((?:proxy-)?authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+/gi;
+const SECRET_ARN = /arn:aws:(?:secretsmanager|ssm):[^\s,;"']+/gi;
+
+const toBytes = (value) => Buffer.isBuffer(value) ? value : Buffer.from(String(value ?? ""));
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export function redactStageBRefreshDiagnostic(value, { maxChars = STAGE_B_REFRESH_DIAGNOSTIC_MAX_EXCERPT_CHARS, sensitiveValues = [] } = {}) {
+  if (!Number.isInteger(maxChars) || maxChars < 1) throw new Error("Stage B refresh diagnostic excerpt limit is malformed.");
+  let text = toBytes(value).toString("utf8").replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+  const exactValues = [...new Set(sensitiveValues.filter((candidate) => typeof candidate === "string" && candidate.length > 0))].sort((left, right) => right.length - left.length);
+  for (const candidate of exactValues) text = text.replace(new RegExp(escapeRegExp(candidate), "g"), "[REDACTED]");
+  const redacted = text
+    .replace(PRIVATE_KEY, "[REDACTED_PRIVATE_KEY]")
+    .replace(SECRET_ARN, "[REDACTED_SECRET_REFERENCE]")
+    .replace(AUTHORIZATION_VALUE, "$1[REDACTED]")
+    .replace(SENSITIVE_ASSIGNMENT, "$1[REDACTED]");
+  return redacted.slice(0, maxChars) + (redacted.length > maxChars ? "\n[TRUNCATED]" : "");
+}
+
+export function createStageBRefreshDiagnostic({ failureClass, failureReason, planCommandExitCode = null, showCommandExitCode = null, stdout = "", stderr = "", capturedAt = new Date().toISOString(), sensitiveValues = [] } = {}) {
+  const stdoutBytes = toBytes(stdout); const stderrBytes = toBytes(stderr);
+  return {
+    schemaVersion: STAGE_B_REFRESH_DIAGNOSTIC_SCHEMA_VERSION,
+    commandPhase: "refresh-only-plan",
+    failureClass: String(failureClass || "MALFORMED_RESULT"),
+    failureReason: redactStageBRefreshDiagnostic(failureReason || "", { maxChars: 512, sensitiveValues }),
+    exitCode: Number.isInteger(planCommandExitCode) ? planCommandExitCode : null,
+    showExitCode: Number.isInteger(showCommandExitCode) ? showCommandExitCode : null,
+    stdoutSha256: sha256(stdoutBytes),
+    stderrSha256: sha256(stderrBytes),
+    stdoutExcerptRedacted: redactStageBRefreshDiagnostic(stdoutBytes, { sensitiveValues }),
+    stderrExcerptRedacted: redactStageBRefreshDiagnostic(stderrBytes, { sensitiveValues }),
+    capturedAt,
+  };
+}
 
 function acquisitionFailure(status, reason, extra = {}) {
   return { acquisitionStatus: status, acquisitionReason: reason, plan: undefined, ...extra };
 }
 
 function safeDiagnostic(diagnostic = {}) {
-  const redact = (value) => String(value || "").replace(/(password|secret|token|access[_-]?key|private[_-]?key)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]").slice(0, 512);
+  const redact = (value) => redactStageBRefreshDiagnostic(value, { maxChars: 512 });
   return { severity: redact(diagnostic.severity), summary: redact(diagnostic.summary), detail: redact(diagnostic.detail), address: diagnostic.address, range: diagnostic.range };
 }
 
 export function acquireStageBRefreshPlan({ planPath, planResult, showPlanJson, showOptions, repositoryRoot = root } = {}) {
-  if (![0, 2].includes(planResult?.status)) return acquisitionFailure("PLAN_COMMAND_FAILED", "Terraform refresh-only plan command failed.", { planCommandExitCode: planResult?.status ?? null });
+  const planCommandDiagnostic = { stdout: planResult?.stdout || "", stderr: planResult?.stderr || "", planCommandExitCode: planResult?.status ?? null, showCommandExitCode: null };
+  if (![0, 2].includes(planResult?.status)) return acquisitionFailure("PLAN_COMMAND_FAILED", "Terraform refresh-only plan command failed.", { planCommandExitCode: planResult?.status ?? null, diagnosticCapture: planCommandDiagnostic });
   const planStat = fs.lstatSync(planPath, { throwIfNoEntry: false });
-  if (!planStat) return acquisitionFailure("PLAN_FILE_MISSING", "Terraform refresh-only did not produce its temporary plan.", { planCommandExitCode: planResult.status });
-  if (!planStat.isFile() || planStat.isSymbolicLink()) return acquisitionFailure("MALFORMED_RESULT", "Terraform refresh-only temporary plan is not a regular non-symlink file.", { planCommandExitCode: planResult.status });
+  if (!planStat) return acquisitionFailure("PLAN_FILE_MISSING", "Terraform refresh-only did not produce its temporary plan.", { planCommandExitCode: planResult.status, diagnosticCapture: planCommandDiagnostic });
+  if (!planStat.isFile() || planStat.isSymbolicLink()) return acquisitionFailure("MALFORMED_RESULT", "Terraform refresh-only temporary plan is not a regular non-symlink file.", { planCommandExitCode: planResult.status, diagnosticCapture: planCommandDiagnostic });
   const planBytes = fs.readFileSync(planPath);
-  if (planBytes.length === 0) return acquisitionFailure("PLAN_FILE_EMPTY", "Terraform refresh-only temporary plan is empty.", { planCommandExitCode: planResult.status });
+  if (planBytes.length === 0) return acquisitionFailure("PLAN_FILE_EMPTY", "Terraform refresh-only temporary plan is empty.", { planCommandExitCode: planResult.status, diagnosticCapture: planCommandDiagnostic });
   const privatePlan = ensureStageBPrivateFile({ filePath: planPath, repositoryRoot, normalize: true, label: "Stage B refresh-only temporary plan" });
   let shown;
-  try { shown = showPlanJson(planPath, showOptions); } catch (error) { return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json failed.", { planCommandExitCode: planResult.status, showCommandExitCode: null, showError: error.message, refreshPlanSha256: privatePlan.sha256 }); }
-  if (!shown || typeof shown.status !== "number") return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json did not return a command result.", { planCommandExitCode: planResult.status, refreshPlanSha256: privatePlan.sha256 });
+  try { shown = showPlanJson(planPath, showOptions); } catch (error) { return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json failed.", { planCommandExitCode: planResult.status, showCommandExitCode: null, showError: error.message, refreshPlanSha256: privatePlan.sha256, diagnosticCapture: { ...planCommandDiagnostic, stderr: error.message } }); }
+  if (!shown || typeof shown.status !== "number") return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json did not return a command result.", { planCommandExitCode: planResult.status, refreshPlanSha256: privatePlan.sha256, diagnosticCapture: planCommandDiagnostic });
   const stdout = Buffer.isBuffer(shown.stdout) ? shown.stdout : Buffer.from(shown.stdout || "");
   const stderr = Buffer.isBuffer(shown.stderr) ? shown.stderr : Buffer.from(shown.stderr || "");
+  const showDiagnostic = { stdout, stderr, planCommandExitCode: planResult.status, showCommandExitCode: shown.status };
   const hashes = { planCommandExitCode: planResult.status, showCommandExitCode: shown.status, refreshPlanSha256: privatePlan.sha256, refreshPlanJsonSha256: sha256(stdout), showStdoutSha256: sha256(stdout), showStderrSha256: sha256(stderr) };
-  if (shown.status !== 0) return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json failed.", hashes);
-  if (stdout.length === 0) return acquisitionFailure("SHOW_OUTPUT_EMPTY", "Terraform show -json returned empty stdout.", hashes);
+  if (shown.status !== 0) return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json failed.", { ...hashes, diagnosticCapture: showDiagnostic });
+  if (stdout.length === 0) return acquisitionFailure("SHOW_OUTPUT_EMPTY", "Terraform show -json returned empty stdout.", { ...hashes, diagnosticCapture: showDiagnostic });
   let plan;
-  try { plan = JSON.parse(stdout.toString("utf8")); } catch { return acquisitionFailure("SHOW_OUTPUT_NOT_JSON", "Terraform show -json returned non-JSON stdout.", hashes); }
-  if (plan?.errored === true) return acquisitionFailure("TERRAFORM_ERRORED_PLAN", "Terraform show -json returned an errored plan.", { ...hashes, diagnostics: [] });
-  if (Array.isArray(plan?.diagnostics) && plan.diagnostics.length) return acquisitionFailure("TERRAFORM_DIAGNOSTIC_RESULT", "Terraform show -json returned diagnostics.", { ...hashes, diagnostics: plan.diagnostics.map(safeDiagnostic) });
-  try { plan = normalizeStageBRefreshPlan(plan); } catch (error) { return acquisitionFailure("MALFORMED_RESULT", error.message, hashes); }
+  try { plan = JSON.parse(stdout.toString("utf8")); } catch { return acquisitionFailure("SHOW_OUTPUT_NOT_JSON", "Terraform show -json returned non-JSON stdout.", { ...hashes, diagnosticCapture: showDiagnostic }); }
+  if (plan?.errored === true) return acquisitionFailure("TERRAFORM_ERRORED_PLAN", "Terraform show -json returned an errored plan.", { ...hashes, diagnostics: [], diagnosticCapture: showDiagnostic });
+  if (Array.isArray(plan?.diagnostics) && plan.diagnostics.length) return acquisitionFailure("TERRAFORM_DIAGNOSTIC_RESULT", "Terraform show -json returned diagnostics.", { ...hashes, diagnostics: plan.diagnostics.map(safeDiagnostic), diagnosticCapture: showDiagnostic });
+  try { plan = normalizeStageBRefreshPlan(plan); } catch (error) { return acquisitionFailure("MALFORMED_RESULT", error.message, { ...hashes, diagnosticCapture: showDiagnostic }); }
   return { acquisitionStatus: "valid", acquisitionReason: "Terraform show -json returned a validated refresh-only plan.", plan, ...hashes };
 }
 
@@ -82,6 +124,10 @@ function assertPrivateNewOutput(outputPath) {
 
 function writeOutput(outputPath, output) {
   return writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(output, null, 2)}\n`), repositoryRoot: root, label: "Stage B refresh report" }).path;
+}
+
+function writeDiagnostic(outputPath, diagnostic) {
+  return writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(diagnostic, null, 2)}\n`), repositoryRoot: root, label: "Stage B refresh diagnostic" });
 }
 
 export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env, deps = {} } = {}) {
@@ -120,6 +166,16 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
   const argsForTerraform = [`-chdir=${terraformRoot}`, "plan", "-refresh-only", `-var-file=${artifacts.tfvarsPath}`, `-out=${refreshPlanPath}`, "-input=false", "-lock=true", "-no-color", "-detailed-exitcode"];
   const result = runTerraform(argsForTerraform, { cwd: root, env: terraformEnv });
   const acquisition = acquireStageBRefreshPlan({ planPath: refreshPlanPath, planResult: result, showPlanJson, showOptions: { cwd: root, env: terraformEnv }, repositoryRoot: root });
+  const diagnosticArtifact = acquisition.diagnosticCapture
+    ? writeDiagnostic(path.join(path.dirname(artifacts.outputPath), "terraform-plan-diagnostic.json"), createStageBRefreshDiagnostic({
+      failureClass: acquisition.acquisitionStatus,
+      failureReason: acquisition.acquisitionReason,
+      planCommandExitCode: acquisition.diagnosticCapture.planCommandExitCode,
+      showCommandExitCode: acquisition.diagnosticCapture.showCommandExitCode,
+      stdout: acquisition.diagnosticCapture.stdout,
+      stderr: acquisition.diagnosticCapture.stderr,
+    }))
+    : null;
   const classification = acquisition.acquisitionStatus === "valid"
     ? classifyStageBRefreshResult({ plan: acquisition.plan, terraformExitCode: result.status, terraformOutput: result.stdout || "", bindingReport, state, outputsSource: fs.readFileSync(path.join(root, terraformRoot, "outputs.tf"), "utf8") })
     : { status: "MALFORMED_RESULT", reason: acquisition.acquisitionReason, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
@@ -150,6 +206,8 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
     terraformStderrSha256: sha256(Buffer.from(result.stderr || "")),
     acquisitionStatus: acquisition.acquisitionStatus,
     acquisitionReason: acquisition.acquisitionReason,
+    diagnosticArtifactPath: diagnosticArtifact?.path || null,
+    diagnosticArtifactSha256: diagnosticArtifact?.sha256 || null,
     terraformVersion: acquisition.plan?.terraform_version || null,
     terraformVersionSha256: acquisition.plan?.terraform_version ? sha256(Buffer.from(acquisition.plan.terraform_version)) : null,
     formatVersion: acquisition.plan?.format_version || null,

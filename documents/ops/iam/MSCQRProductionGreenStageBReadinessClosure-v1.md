@@ -254,6 +254,11 @@ return to ROOT only for a required recovery attestation or plan-bound permission
 Move directly from permission signing through closure and verify-only to the final
 apply decision; do not pause near the 3600-second TTL.
 
+If the single refresh-only Terraform command fails, the producer retains a private
+`terraform-plan-diagnostic.json` beside the refresh report. It contains only bounded,
+redacted excerpts plus hashes of the complete command streams; it is forensic evidence
+and never permits a retry or deployment.
+
 ## Post-apply success contract
 
 `STAGE_B_INFRASTRUCTURE_APPLIED_AND_VERIFIED=true` is permitted only after the

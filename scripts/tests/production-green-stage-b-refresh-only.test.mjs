@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { acquireStageBRefreshPlan, parseCli, runRefreshOnly } from "../refresh-production-green-stage-b.mjs";
+import { acquireStageBRefreshPlan, parseCli, redactStageBRefreshDiagnostic, runRefreshOnly } from "../refresh-production-green-stage-b.mjs";
 import { assertStageBRefreshEvidence, assertStageBRefreshStateBinding, classifyStageBRefreshResult, inspectStageBRefreshChecks, isSupportedStageBTerraformVersion, normalizeStageBRefreshPlan, STAGE_B_EXPECTED_CHECK_ADDRESSES, STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 
 const toolingSha = "8d9b8d820afa161d410490678661266d7c9e1345";
@@ -61,11 +61,62 @@ test("Terraform version validation follows the supported production range", () =
 test("refresh evidence rejects a supported version that no longer matches its observed binding", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); const result = runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: validDeps() }); const report = JSON.parse(fs.readFileSync(result.outputPath)); report.terraformVersion = "1.6.0"; fs.writeFileSync(result.outputPath, `${JSON.stringify(report)}\n`, { mode: 0o600 }); assert.throws(() => assertStageBRefreshEvidence({ refreshReportPath: result.outputPath, bindingReport: bindingReport() }), /check or binding structure/); });
 
 test("valid Terraform show JSON is acquired from the exact plan path", () => { const planPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-acquisition-")), "refresh.tfplan"); fs.writeFileSync(planPath, "opaque", { mode: 0o600 }); const seen = []; const result = acquireStageBRefreshPlan({ planPath, planResult: { status: 2 }, showOptions: {}, showPlanJson: (actualPath) => { seen.push(actualPath); return { status: 0, stdout: JSON.stringify(noChangePlan()), stderr: "diagnostic stream is kept separate" }; } }); assert.equal(result.acquisitionStatus, "valid"); assert.deepEqual(seen, [planPath]); });
-test("failed plan command never invokes show", () => { let calls = 0; const result = acquireStageBRefreshPlan({ planPath: path.join(os.tmpdir(), "missing-refresh.tfplan"), planResult: { status: 1 }, showPlanJson: () => { calls += 1; return { status: 0, stdout: "{}", stderr: "" }; } }); assert.equal(result.acquisitionStatus, "PLAN_COMMAND_FAILED"); assert.equal(calls, 0); });
+test("failed plan command never invokes show and keeps an in-memory diagnostic capture", () => { let calls = 0; const result = acquireStageBRefreshPlan({ planPath: path.join(os.tmpdir(), "missing-refresh.tfplan"), planResult: { status: 1, stdout: "plan output", stderr: "Error: Invalid index" }, showPlanJson: () => { calls += 1; return { status: 0, stdout: "{}", stderr: "" }; } }); assert.equal(result.acquisitionStatus, "PLAN_COMMAND_FAILED"); assert.equal(result.diagnosticCapture.stderr, "Error: Invalid index"); assert.equal(calls, 0); });
+
+test("refresh diagnostic redaction removes credential material but preserves a bounded error summary", () => {
+  const diagnostic = redactStageBRefreshDiagnostic([
+    "Error: Invalid index",
+    "password=fixture-password",
+    "secret: fixture-secret",
+    "token=fixture-token",
+    "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
+    "AWS_SECRET_ACCESS_KEY=fixture-secret-key",
+    "AWS_SESSION_TOKEN=fixture-session-token",
+    "Authorization: Bearer fixture-bearer-token",
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:fixture",
+    "-----BEGIN PRIVATE KEY-----\nfixture-private-key\n-----END PRIVATE KEY-----",
+    "known-tfvar-secret",
+  ].join("\n"), { sensitiveValues: ["known-tfvar-secret"] });
+  assert.match(diagnostic, /Invalid index/);
+  for (const secret of ["fixture-password", "fixture-secret", "fixture-token", "AKIAIOSFODNN7EXAMPLE", "fixture-secret-key", "fixture-session-token", "fixture-bearer-token", "fixture-private-key", "known-tfvar-secret"]) assert.doesNotMatch(diagnostic, new RegExp(secret));
+  assert.doesNotMatch(diagnostic, /arn:aws:(?:secretsmanager|ssm):/);
+});
+
+test("failed plan command writes a private bounded diagnostic without raw stderr or retry", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-diagnostic-"));
+  const stderr = "Error: Invalid index\npassword=fixture-password\nAWS_SESSION_TOKEN=fixture-session-token";
+  let calls = 0;
+  assert.throws(() => runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: { ...validDeps(), runTerraform: () => { calls += 1; return { status: 1, stdout: "plan stdout", stderr }; } } }), /MALFORMED_RESULT/);
+  const report = JSON.parse(fs.readFileSync(path.join(directory, "refresh-only.json"), "utf8"));
+  const diagnosticPath = report.diagnosticArtifactPath;
+  const diagnostic = JSON.parse(fs.readFileSync(diagnosticPath, "utf8"));
+  assert.equal(report.status, "MALFORMED_RESULT");
+  assert.equal(report.deployablePlan, false);
+  assert.equal(report.terraformExitCode, 1);
+  assert.equal(calls, 1);
+  assert.match(report.diagnosticArtifactSha256, /^[a-f0-9]{64}$/);
+  assert.equal(report.diagnosticArtifactSha256, crypto.createHash("sha256").update(fs.readFileSync(diagnosticPath)).digest("hex"));
+  assert.equal(fs.statSync(diagnosticPath).mode & 0o777, 0o600);
+  assert.equal(diagnostic.exitCode, 1);
+  assert.equal(diagnostic.stderrSha256, crypto.createHash("sha256").update(stderr).digest("hex"));
+  assert.match(diagnostic.stderrExcerptRedacted, /Invalid index/);
+  assert.doesNotMatch(JSON.stringify(diagnostic), /fixture-password|fixture-session-token/);
+  assert.equal(Object.hasOwn(diagnostic, "stderr"), false);
+});
+
+test("show command failure writes a private diagnostic and preserves the show exit code", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-diagnostic-"));
+  assert.throws(() => runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: { ...validDeps(), showPlanJson: () => ({ status: 1, stdout: "", stderr: "Error: provider diagnostic" }) } }), /MALFORMED_RESULT/);
+  const report = JSON.parse(fs.readFileSync(path.join(directory, "refresh-only.json"), "utf8"));
+  const diagnostic = JSON.parse(fs.readFileSync(report.diagnosticArtifactPath, "utf8"));
+  assert.equal(report.acquisitionStatus, "SHOW_COMMAND_FAILED");
+  assert.equal(diagnostic.showExitCode, 1);
+  assert.match(diagnostic.stderrExcerptRedacted, /provider diagnostic/);
+});
 test("missing, empty, and wrong plan paths fail before classification", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-acquisition-")); const missing = acquireStageBRefreshPlan({ planPath: path.join(directory, "missing.tfplan"), planResult: { status: 2 }, showPlanJson: () => ({ status: 0, stdout: "{}", stderr: "" }) }); assert.equal(missing.acquisitionStatus, "PLAN_FILE_MISSING"); const emptyPath = path.join(directory, "empty.tfplan"); fs.writeFileSync(emptyPath, "", { mode: 0o600 }); const empty = acquireStageBRefreshPlan({ planPath: emptyPath, planResult: { status: 2 }, showPlanJson: () => ({ status: 0, stdout: "{}", stderr: "" }) }); assert.equal(empty.acquisitionStatus, "PLAN_FILE_EMPTY"); });
 test("valid plan shape narrowly normalizes omitted zero-change collections", () => { const plan = noChangePlan(); delete plan.resource_changes; delete plan.output_changes; assert.equal(classifyStageBRefreshResult({ plan, terraformExitCode: 0, bindingReport: bindingReport(), state, outputsSource }).status, "NO_CHANGES"); assert.equal(classifyStageBRefreshResult({ plan, terraformExitCode: 2, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"); });
 test("state JSON and incomplete plan envelopes remain malformed", () => { for (const plan of [{ version: 4, terraform_version: "1.15.7", resources: [] }, { format_version: "1.2", terraform_version: "1.15.7", planned_values: {}, checks: passingChecks() }, { ...noChangePlan(), diagnostics: {} }]) assert.equal(classifyStageBRefreshResult({ plan, bindingReport: bindingReport(), state, outputsSource }).status, "MALFORMED_RESULT"); });
-for (const [label, showResult, expected] of [["show failure", { status: 1, stdout: "", stderr: "failed" }, "SHOW_COMMAND_FAILED"], ["empty stdout", { status: 0, stdout: "", stderr: "" }, "SHOW_OUTPUT_EMPTY"], ["non-JSON stdout", { status: 0, stdout: "No changes.", stderr: "" }, "SHOW_OUTPUT_NOT_JSON"], ["wrapper JSON", { status: 0, stdout: JSON.stringify({ status: "NO_CHANGES", resourceChanges: [] }), stderr: "" }, "MALFORMED_RESULT"], ["diagnostic JSON", { status: 0, stdout: JSON.stringify({ diagnostics: [{ severity: "error", summary: "invalid", detail: "invalid" }] }), stderr: "" }, "TERRAFORM_DIAGNOSTIC_RESULT"], ["errored plan", { status: 0, stdout: JSON.stringify({ errored: true }), stderr: "" }, "TERRAFORM_ERRORED_PLAN"], ["truncated plan", { status: 0, stdout: "{", stderr: "" }, "SHOW_OUTPUT_NOT_JSON"]]) test(`${label} fails closed`, () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-acquisition-")); const planPath = path.join(directory, "refresh.tfplan"); fs.writeFileSync(planPath, "opaque", { mode: 0o600 }); const result = acquireStageBRefreshPlan({ planPath, planResult: { status: 2 }, showPlanJson: () => showResult }); assert.equal(result.acquisitionStatus, expected); });
+for (const [label, showResult, expected] of [["show failure", { status: 1, stdout: "", stderr: "failed" }, "SHOW_COMMAND_FAILED"], ["empty stdout", { status: 0, stdout: "", stderr: "" }, "SHOW_OUTPUT_EMPTY"], ["non-JSON stdout", { status: 0, stdout: "No changes.", stderr: "" }, "SHOW_OUTPUT_NOT_JSON"], ["wrapper JSON", { status: 0, stdout: JSON.stringify({ status: "NO_CHANGES", resourceChanges: [] }), stderr: "" }, "MALFORMED_RESULT"], ["diagnostic JSON", { status: 0, stdout: JSON.stringify({ diagnostics: [{ severity: "error", summary: "invalid", detail: "invalid" }] }), stderr: "" }, "TERRAFORM_DIAGNOSTIC_RESULT"], ["errored plan", { status: 0, stdout: JSON.stringify({ errored: true }), stderr: "" }, "TERRAFORM_ERRORED_PLAN"], ["truncated plan", { status: 0, stdout: "{", stderr: "" }, "SHOW_OUTPUT_NOT_JSON"]]) test(`${label} fails closed`, () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-acquisition-")); const planPath = path.join(directory, "refresh.tfplan"); fs.writeFileSync(planPath, "opaque", { mode: 0o600 }); const result = acquireStageBRefreshPlan({ planPath, planResult: { status: 2 }, showPlanJson: () => showResult }); assert.equal(result.acquisitionStatus, expected); assert.ok(result.diagnosticCapture); });
 
 test("exact no-change refresh passes", () => assert.equal(classifyStageBRefreshResult({ plan: noChangePlan(), bindingReport: bindingReport(), state, outputsSource }).status, "NO_CHANGES"));
 test("all source-defined checks and variable validations pass before no-change classification", () => { const result = classifyStageBRefreshResult({ plan: noChangePlan(), bindingReport: bindingReport(), state, outputsSource }); assert.equal(result.checkCount, 10); assert.equal(result.infrastructureCheckCount, 8); assert.equal(result.variableCheckCount, 2); assert.equal(result.passedCheckCount, 10); assert.equal(result.failedCheckCount, 0); assert.equal(result.malformedCheckCount, 0); assert.equal(result.missingCheckCount, 0); assert.equal(result.unknownCheckCount, 0); assert.equal(result.duplicateCheckCount, 0); assert.deepEqual(result.failedChecks, []); });
