@@ -178,10 +178,10 @@ function assertConcreteRecoveryBrokerVersion(plan, current) {
   if (broker.mode !== "managed" || broker.module || broker.type !== "aws_lambda_function" || !exact(broker.change?.actions, ["update"])) {
     throw new Error("Recovery plan broker publication is not the exact root-managed update.");
   }
-  assertStageBBrokerFunctionUpdate(broker);
   if (broker.change?.after?.version !== current.configuredDesiredVersion || broker.change?.after_unknown?.version === true) {
     throw new Error("Recovery plan broker publication does not prove the exact attested desired version.");
   }
+  assertStageBBrokerFunctionUpdate(broker);
 }
 
 export function assertRecoveryPlanDelta(plan, attestation) {

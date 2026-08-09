@@ -2,6 +2,7 @@ import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs"
 import { assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 
 const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
+const exactJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const taskDefinitionAddress = /^(aws_ecs_task_definition\.(candidate|executor))\["([^"]+)"\]$/;
 const retainedTaskDefinitionAddress = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([a-f0-9]{7,40})-([^"]+)"\]$/;
 const policyAddress = "aws_iam_policy.broker";
@@ -261,22 +262,56 @@ function assertStageBResourceIdentity(change, kind, key, strict) {
 }
 
 const STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA = Object.freeze({
-  code_sha256: "unknown",
-  source_code_size: "unknown",
-  last_modified: "unknown",
-  qualified_arn: "unknown",
-  qualified_invoke_arn: "unknown",
-  version: "unknown",
+  code_sha256: Object.freeze({ unknown: true, stable: true, type: "string" }),
+  source_code_size: Object.freeze({ unknown: true, stable: true, type: "number" }),
+  last_modified: Object.freeze({ unknown: true, stable: false, type: "string" }),
+  qualified_arn: Object.freeze({ unknown: true, stable: false, type: "arn" }),
+  qualified_invoke_arn: Object.freeze({ unknown: true, stable: false, type: "arn" }),
+  version: Object.freeze({ unknown: true, stable: true, type: "string" }),
 });
 export const STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS = Object.freeze(Object.keys(STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA));
 export const STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS = Object.freeze(
   Object.entries(STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA)
-    .filter(([, representation]) => representation === "unknown")
+    .filter(([, representation]) => representation.unknown)
+    .map(([field]) => field),
+);
+export const STAGE_B_BROKER_PUBLISH_PROVIDER_STABLE_METADATA_FIELDS = Object.freeze(
+  Object.entries(STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA)
+    .filter(([, representation]) => representation.stable)
     .map(([field]) => field),
 );
 const brokerFunctionAllowedChangedFields = new Set([
   "environment", "filename", "source_code_hash", ...STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
 ]);
+
+function validProviderMetadataValue(value, type) {
+  if (type === "number") return typeof value === "number" && Number.isFinite(value);
+  if (type === "arn") return typeof value === "string" && /^arn:[^:\s]+:[^:\s]+:[^:\s]*:[^:\s]*:.+$/.test(value);
+  return typeof value === "string" && value.length > 0;
+}
+
+export function assertStageBBrokerPublishProviderMetadataRepresentation(change) {
+  if (change?.address !== "aws_lambda_function.broker" || !exactActions(change.change?.actions, ["update"])) return true;
+  const before = change.change?.before || {};
+  const after = change.change?.after || {};
+  const afterUnknown = change.change?.after_unknown || {};
+  for (const field of STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS) {
+    const rule = STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA[field];
+    const beforeValue = before[field];
+    const afterValue = after[field];
+    const marker = afterUnknown[field];
+    if (marker !== undefined && marker !== false && marker !== true) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+    if (marker === true) {
+      if (afterValue !== undefined && afterValue !== null) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+      continue;
+    }
+    if (!rule.stable || beforeValue === undefined || beforeValue === null || afterValue === undefined || afterValue === null
+      || !exactJson(beforeValue, afterValue) || !validProviderMetadataValue(afterValue, rule.type)) {
+      throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+    }
+  }
+  return true;
+}
 
 export function assertStageBBrokerFunctionUpdate(change) {
   if (change?.address !== "aws_lambda_function.broker" || change?.type !== "aws_lambda_function" || !exactActions(change.change?.actions, ["update"])) {
@@ -291,6 +326,7 @@ export function assertStageBBrokerFunctionUpdate(change) {
     .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
   const unsupported = changed.find((key) => !brokerFunctionAllowedChangedFields.has(key));
   if (unsupported) throw new Error(`Stage B broker function update contains an unsupported mutable field: ${unsupported}.`);
+  assertStageBBrokerPublishProviderMetadataRepresentation(change);
   return true;
 }
 

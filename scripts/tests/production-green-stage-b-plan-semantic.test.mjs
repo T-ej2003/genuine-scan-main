@@ -139,6 +139,22 @@ function plan() {
   return { configuration: configuration(), resource_changes: [...addresses.map((address, index) => taskChange(address, index + 1)), ...brokerChanges()] };
 }
 
+function productionForensicPlan() {
+  const value = structuredClone(plan());
+  const change = value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change;
+  change.before.filename = "/private/tmp/stage-b-release.axLefW/broker.zip";
+  change.after.filename = "/private/tmp/stage-b-artifacts-ebe6dc8.nqJe40/broker.zip";
+  change.before.source_code_hash = "ae1k3DKou3501fyfAJR7SZNJRtiqM2gNtSY+Q30DkQo=";
+  change.after.source_code_hash = change.before.source_code_hash;
+  change.before.code_sha256 = change.before.source_code_hash;
+  change.after.code_sha256 = change.before.code_sha256;
+  change.before.source_code_size = 5086022;
+  change.after.source_code_size = change.before.source_code_size;
+  delete change.after_unknown.code_sha256;
+  delete change.after_unknown.source_code_size;
+  return value;
+}
+
 function baselinePlan() {
   const value = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
   value.configuration = configuration();
@@ -758,6 +774,29 @@ test("broker publish updates admit source-bound package digest and exact provide
   concreteSizeChange.after.source_code_size = 200;
   delete concreteSizeChange.after_unknown.source_code_size;
   assert.throws(() => assertStageBPlanSemanticCompleteness(concreteSize), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
+
+  const stable = structuredClone(metadata);
+  const stableChange = stable.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change;
+  stableChange.after.code_sha256 = stableChange.before.code_sha256;
+  stableChange.after.source_code_size = stableChange.before.source_code_size;
+  delete stableChange.after_unknown.code_sha256;
+  delete stableChange.after_unknown.source_code_size;
+  assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(stable));
+  assert.doesNotThrow(() => assertStageBBrokerFunctionUpdate(stable.resource_changes.find((item) => item.address === "aws_lambda_function.broker")));
+
+  assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(productionForensicPlan()));
+  const malformed = structuredClone(productionForensicPlan());
+  const malformedChange = malformed.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change;
+  malformedChange.after.code_sha256 = 42;
+  assert.throws(() => assertStageBPlanSemanticCompleteness(malformed), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
+  const missing = structuredClone(productionForensicPlan());
+  const missingChange = missing.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change;
+  delete missingChange.after.code_sha256;
+  assert.throws(() => assertStageBPlanSemanticCompleteness(missing), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
+  const contradiction = structuredClone(productionForensicPlan());
+  const contradictionChange = contradiction.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change;
+  contradictionChange.after_unknown.code_sha256 = true;
+  assert.throws(() => assertStageBPlanSemanticCompleteness(contradiction), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
 });
 
 test("semantic census feeds the normal offline action classifier without widening recovery", () => {
