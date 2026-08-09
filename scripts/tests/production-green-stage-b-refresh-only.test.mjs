@@ -85,18 +85,31 @@ test("refresh diagnostic redaction removes credential material but preserves a b
 });
 
 test("refresh diagnostic redacts complete and truncated PEM blocks without consuming surrounding text", () => {
-  const label = ["PRIVATE", "KEY"].join(" ");
-  const begin = ["-----BEGIN ", label, "-----"].join("");
-  const end = ["-----END ", label, "-----"].join("");
-  const complete = redactStageBRefreshDiagnostic(["before", begin, "payload", end, "after"].join("\n"));
-  const truncated = redactStageBRefreshDiagnostic(["before", begin, "payload", "EOF"].join("\n"));
-  assert.match(complete, /before/);
-  assert.match(complete, /\[REDACTED_PRIVATE_KEY\]/);
-  assert.match(complete, /after/);
+  const marker = (boundary, label) => ["-----", boundary, " ", label, "-----"].join("");
+  const labels = ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "DSA PRIVATE KEY", "ENCRYPTED PRIVATE KEY", "OPENSSH PRIVATE KEY", "AES-256 GCM PRIVATE KEY"];
+  for (const label of labels) {
+    const begin = marker("BEGIN", label);
+    const end = marker("END", label);
+    const complete = redactStageBRefreshDiagnostic(["before", begin, `payload-${label}`, end, "after"].join("\n"));
+    assert.match(complete, /before/);
+    assert.match(complete, /\[REDACTED_PRIVATE_KEY\]/);
+    assert.match(complete, /after/);
+    assert.doesNotMatch(complete, new RegExp(`payload-${label.replaceAll(" ", "\\s")}`));
+  }
+  const encryptedBegin = marker("BEGIN", "ENCRYPTED PRIVATE KEY");
+  const truncated = redactStageBRefreshDiagnostic(["before", encryptedBegin, "truncated-encrypted-payload", "EOF"].join("\n"));
   assert.match(truncated, /before/);
   assert.match(truncated, /\[REDACTED_PRIVATE_KEY\]/);
-  assert.doesNotMatch(truncated, /payload|EOF/);
-  assert.equal(redactStageBRefreshDiagnostic(begin), "[REDACTED_PRIVATE_KEY]");
+  assert.doesNotMatch(truncated, /truncated-encrypted-payload|EOF/);
+  for (const label of ["PUBLIC KEY", "CERTIFICATE"]) {
+    const value = ["before", marker("BEGIN", label), "safe-payload", marker("END", label), "after"].join("\n");
+    assert.equal(redactStageBRefreshDiagnostic(value), value);
+  }
+  assert.equal(redactStageBRefreshDiagnostic("PRIVATE KEY value"), "PRIVATE KEY value");
+  for (const label of ["lowercase PRIVATE KEY", "RSA/PRIVATE KEY", " RSA PRIVATE KEY", `${"A".repeat(120)} PRIVATE KEY`]) {
+    const value = ["-----BEGIN ", label, "-----payload"].join("");
+    assert.equal(redactStageBRefreshDiagnostic(value), value);
+  }
   assert.equal(redactStageBRefreshDiagnostic("x".repeat(100), { maxChars: 16 }).length <= 29, true);
 });
 
@@ -126,6 +139,20 @@ test("diagnostic destination collisions fail before Terraform and preserve the e
   assert.equal(calls, 0);
   assert.equal(fs.readFileSync(diagnosticPath, "utf8"), existing);
   assert.equal(fs.existsSync(path.join(directory, "refresh-only.json")), false);
+  assert.deepEqual(fs.readdirSync(directory).filter((name) => name.startsWith(".stage-b-refresh-")), []);
+});
+
+test("report and diagnostic paths must differ before workspace or refresh Terraform", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-same-path-"));
+  const outputPath = path.join(directory, "terraform-plan-diagnostic.json");
+  const argv = args(directory);
+  argv[argv.indexOf("--output") + 1] = outputPath;
+  let workspaceCalls = 0;
+  let refreshPlanCalls = 0;
+  assert.throws(() => runRefreshOnly({ argv, env: { TF_WORKSPACE: "default" }, deps: { ...validDeps(), showWorkspace: () => { workspaceCalls += 1; return "default\n"; }, runTerraform: () => { refreshPlanCalls += 1; return { status: 1, stdout: "", stderr: "unexpected" }; } } }), /report path must differ from diagnostic artifact path/);
+  assert.equal(workspaceCalls, 0);
+  assert.equal(refreshPlanCalls, 0);
+  assert.equal(fs.existsSync(outputPath), false);
   assert.deepEqual(fs.readdirSync(directory).filter((name) => name.startsWith(".stage-b-refresh-")), []);
 });
 

@@ -25,16 +25,33 @@ const SENSITIVE_KEYS = new Set([
   "password", "passwd", "secret", "token", "access_key", "access-key", "private_key", "private-key",
   "session_token", "session-token", "aws_access_key_id", "aws_secret_access_key", "aws_session_token",
 ]);
-const PRIVATE_KEY_LABELS = Object.freeze(["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "OPENSSH PRIVATE KEY"]);
-const privateKeyMarker = (boundary, label) => `-----${boundary} ${label}-----`;
-const PRIVATE_KEY_MARKERS = Object.freeze(PRIVATE_KEY_LABELS.map((label) => [privateKeyMarker("BEGIN", label), privateKeyMarker("END", label)]));
+const PEM_BEGIN_PREFIX = "-----BEGIN ";
+const PEM_MARKER_SUFFIX = "-----";
+const PRIVATE_KEY_SUFFIX = " PRIVATE KEY";
+const MAX_PEM_LABEL_CHARS = 128;
 
 const toBytes = (value) => Buffer.isBuffer(value) ? value : Buffer.from(String(value ?? ""));
 
-function findPrivateKeyMarker(text, from, markerIndex) {
-  const [begin] = PRIVATE_KEY_MARKERS[markerIndex];
-  const position = text.indexOf(begin, from);
-  return position === -1 ? null : { position, markerIndex };
+function isSafePemLabelCharacter(value) {
+  return (value >= "A" && value <= "Z") || (value >= "0" && value <= "9") || value === " " || value === "-";
+}
+
+function isPrivateKeyLabel(label) {
+  if (label === "PRIVATE KEY") return true;
+  if (!label.endsWith(PRIVATE_KEY_SUFFIX)) return false;
+  const prefix = label.slice(0, -PRIVATE_KEY_SUFFIX.length);
+  return prefix.length > 0 && prefix.length <= MAX_PEM_LABEL_CHARS - PRIVATE_KEY_SUFFIX.length
+    && prefix[0] !== " " && prefix.at(-1) !== " " && !prefix.includes("  ") && [...prefix].every(isSafePemLabelCharacter);
+}
+
+function findPrivateKeyMarker(text, from) {
+  const position = text.indexOf(PEM_BEGIN_PREFIX, from);
+  if (position === -1) return null;
+  const markerEnd = text.indexOf(PEM_MARKER_SUFFIX, position + PEM_BEGIN_PREFIX.length);
+  if (markerEnd === -1) return null;
+  const label = text.slice(position + PEM_BEGIN_PREFIX.length, markerEnd);
+  if (!isPrivateKeyLabel(label)) return { nextSearchFrom: markerEnd + PEM_MARKER_SUFFIX.length };
+  return { position, label, markerEnd: markerEnd + PEM_MARKER_SUFFIX.length };
 }
 
 function redactPrivateKeyBlocks(text) {
@@ -42,14 +59,15 @@ function redactPrivateKeyBlocks(text) {
   let cursor = 0;
   let searchFrom = 0;
   while (searchFrom < text.length) {
-    const next = PRIVATE_KEY_MARKERS.map((_, markerIndex) => findPrivateKeyMarker(text, searchFrom, markerIndex))
-      .filter(Boolean)
-      .sort((left, right) => left.position - right.position)[0];
+    const next = findPrivateKeyMarker(text, searchFrom);
     if (!next) break;
-    const [begin, end] = PRIVATE_KEY_MARKERS[next.markerIndex];
-    const contentStart = next.position + begin.length;
-    const endPosition = text.indexOf(end, contentStart);
-    const blockEnd = endPosition === -1 ? text.length : endPosition + end.length;
+    if (next.position === undefined) {
+      searchFrom = next.nextSearchFrom;
+      continue;
+    }
+    const endMarker = `-----END ${next.label}-----`;
+    const endPosition = text.indexOf(endMarker, next.markerEnd);
+    const blockEnd = endPosition === -1 ? text.length : endPosition + endMarker.length;
     output += text.slice(cursor, next.position) + "[REDACTED_PRIVATE_KEY]";
     cursor = blockEnd;
     searchFrom = blockEnd;
@@ -220,8 +238,10 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
   if (env.TF_DATA_DIR !== undefined && path.resolve(env.TF_DATA_DIR) !== resolvedDataDir) throw new Error("Ambient TF_DATA_DIR conflicts with --terraform-data-dir.");
   const backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: resolvedDataDir, backendMetadataPath: artifacts.backendMetadataPath, repositoryRoot: root });
   const { backendMetadataPath: expectedMetadataPath } = backendMetadata;
-  assertPrivateNewOutput(artifacts.outputPath);
-  const diagnosticPath = path.join(path.dirname(artifacts.outputPath), "terraform-plan-diagnostic.json");
+  const reportPath = path.resolve(artifacts.outputPath);
+  const diagnosticPath = path.resolve(path.join(path.dirname(reportPath), "terraform-plan-diagnostic.json"));
+  if (reportPath === diagnosticPath) throw new Error("Stage B refresh report path must differ from diagnostic artifact path.");
+  assertPrivateNewOutput(reportPath);
   assertPrivateNewOutput(diagnosticPath, "Stage B refresh diagnostic");
   const validateTfvarsBinding = deps.validateTfvarsBinding || assertStageBTfvarsBinding;
   const bindingReport = validateTfvarsBinding({
