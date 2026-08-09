@@ -11,7 +11,7 @@ import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mj
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidenceTimestamp, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
-import { assertStageBPlanApprovedBinding } from "./stage-b-plan-approval-contract.mjs";
+import { assertStageBPlanApprovedBinding, STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
 import { assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
@@ -36,6 +36,11 @@ const STAGE_A_LIVE_EVIDENCE_EVALUATIONS = Object.freeze([
 ]);
 export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${ACCOUNT}:root`]);
 export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
+export const STAGE_B_PERMISSION_PROFILES = Object.freeze(["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY"]);
+export const STAGE_B_PERMISSION_PROFILE_CAPABILITIES = Object.freeze({
+  NORMAL_STAGE_B_RELEASE: Object.freeze({ requiresTaskDefinitionRegistrationContexts: true }),
+  RECOVERY_ALIAS_ONLY: Object.freeze({ requiresTaskDefinitionRegistrationContexts: false }),
+});
 
 export function assertStageBPermissionEvidenceKind(report, expectedKind, expectedPhase) {
   if (report?.evidenceKind !== expectedKind || report?.phase !== expectedPhase) {
@@ -94,6 +99,30 @@ export const RELEASE_POLICY_SOURCES = Object.freeze([
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 export const serializePermissionReport = (report) => Buffer.from(`${JSON.stringify(report, null, 2)}\n`);
 const exactActions = (actual, expected) => JSON.stringify(actual || []) === JSON.stringify(expected);
+const appliesToPermissionProfile = (entry, profile) => Array.isArray(entry.profiles) && entry.profiles.includes(profile);
+
+export function assertStageBPermissionProfile(profile) {
+  if (!STAGE_B_PERMISSION_PROFILES.includes(profile)) throw new Error(`Stage B permission profile is unsupported: ${profile}`);
+  return profile;
+}
+
+export function stageBPermissionProfileCapabilities(profile) {
+  assertStageBPermissionProfile(profile);
+  return STAGE_B_PERMISSION_PROFILE_CAPABILITIES[profile];
+}
+
+export function resolveStageBPermissionProfile({ plan, approvedPlanProfile, phase = "plan-bound" } = {}) {
+  const planProfile = approvedPlanProfile || "BASELINE";
+  if (!STAGE_B_PLAN_PROFILES.includes(planProfile)) throw new Error(`Stage B approved plan profile is unsupported: ${planProfile}`);
+  if (phase === "plan-bound" && !approvedPlanProfile) throw new Error("PLAN_BOUND_PERMISSION requires the approved plan profile.");
+  const recoveryOnly = planProfile === "RECOVERY_ALIAS_ONLY";
+  const recoveryVariable = plan?.variables?.stage_b_recovery_only?.value;
+  if (recoveryOnly !== (recoveryVariable === true)) throw new Error("Stage B approved plan profile does not match the recovery-only Terraform input.");
+  return {
+    planProfile,
+    permissionProfile: assertStageBPermissionProfile(recoveryOnly ? "RECOVERY_ALIAS_ONLY" : "NORMAL_STAGE_B_RELEASE"),
+  };
+}
 
 function readOption(argv, option) {
   const index = argv.indexOf(option);
@@ -373,7 +402,8 @@ export function validateSimulationResult(item, result) {
   return { ...result, missingContextValues: actualMissing };
 }
 
-export function assertPermissionEvaluationBindings(report, manifest, { plan, contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY } = {}) {
+export function assertPermissionEvaluationBindings(report, manifest, { plan, permissionProfile = "NORMAL_STAGE_B_RELEASE", contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY } = {}) {
+  const capabilities = stageBPermissionProfileCapabilities(permissionProfile);
   const conditionKeyOrigins = sourcePolicyConditionKeyOrigins();
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
   const entries = new Map([...manifest.required, ...manifest.forbidden].map((entry) => [entry.id, { entry, forbidden: manifest.forbidden.includes(entry) }]));
@@ -382,11 +412,14 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, con
     entries.set(`${mapping.id}-tag`, { entry: { context: taskDefinitionTagContext(mapping.registerContext) }, forbidden: false });
     for (const suffix of ["pass-execution", "pass-task"]) entries.set(`${mapping.id}-${suffix}`, { entry: { context: mapping.passRoleContext }, forbidden: false });
   }
+  const taskDefinitionEvaluationIds = new Set(manifest.taskDefinitionMappings.flatMap((mapping) => [mapping.id, `${mapping.id}-register`, `${mapping.id}-tag`, `${mapping.id}-pass-execution`, `${mapping.id}-pass-task`]));
   for (const [items, forbidden] of [[report.requiredEvaluations, false], [report.forbiddenEvaluations, true]]) {
     if (!Array.isArray(items)) throw new Error("Permission-preflight evaluation results are missing.");
+    if (!capabilities.requiresTaskDefinitionRegistrationContexts && items.some((item) => taskDefinitionEvaluationIds.has(item.manifestId))) throw new Error("RECOVERY_ALIAS_ONLY permission evidence cannot contain ECS task-definition evaluations.");
     for (const item of items) {
       const binding = entries.get(item.manifestId);
       if (!binding || binding.forbidden !== forbidden) throw new Error(`Permission-preflight evaluation ${item.id} is not bound to the current manifest section.`);
+      if (binding.entry.plan && !appliesToPermissionProfile(binding.entry, permissionProfile)) throw new Error(`Permission-preflight evaluation ${item.id} is outside the authenticated permission profile.`);
       const expectedContext = binding.forbidden
         ? binding.entry.context.map(({ key, type, values }) => ({ key, type, values: [...values] }))
         : mergeReviewedSimulationContext(binding.entry.context, contextRegistry);
@@ -404,7 +437,7 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, con
   if (report.planCapabilities?.schemaVersion !== 1
     || JSON.stringify(report.planCapabilities.required) !== JSON.stringify(project(report.requiredEvaluations))
     || JSON.stringify(report.planCapabilities.forbidden) !== JSON.stringify(project(report.forbiddenEvaluations))) throw new Error("Permission-preflight plan capability manifest is incomplete or stale.");
-  if (plan) assertTaskDefinitionRegistrationContexts(plan, manifest);
+  if (plan && capabilities.requiresTaskDefinitionRegistrationContexts) assertTaskDefinitionRegistrationContexts(plan, manifest);
   return true;
 }
 
@@ -490,6 +523,9 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
       }
     }
     if (entry.plan) {
+      if (!Array.isArray(entry.profiles) || entry.profiles.length === 0 || new Set(entry.profiles).size !== entry.profiles.length || entry.profiles.some((profile) => !STAGE_B_PERMISSION_PROFILES.includes(profile))) {
+        throw new Error(`${entry.id} plan permission profiles are malformed.`);
+      }
       if (!entry.plan.type || !Array.isArray(entry.plan.actions)) throw new Error(`Permission manifest plan selector is malformed: ${entry.id}.`);
       if (entry.plan.address && typeof entry.plan.address !== "string") throw new Error(`Permission manifest plan address is malformed: ${entry.id}.`);
       for (const key of ["roleName", "inlinePolicyName"]) {
@@ -629,7 +665,8 @@ function evaluation(entry, resource, { forbidden = false, contextRegistry = REVI
   return result;
 }
 
-export function deriveRequiredEvaluations(plan, manifest, { contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY, conditionKeyOrigins = sourcePolicyConditionKeyOrigins() } = {}) {
+export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = "NORMAL_STAGE_B_RELEASE", contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY, conditionKeyOrigins = sourcePolicyConditionKeyOrigins() } = {}) {
+  assertStageBPermissionProfile(permissionProfile);
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
   const required = manifest.required.filter((entry) => !entry.plan).flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource, { contextRegistry })));
@@ -644,6 +681,7 @@ export function deriveRequiredEvaluations(plan, manifest, { contextRegistry = RE
       : undefined;
     if (change.type === "aws_ecs_task_definition" && !taskMapping) throw new Error(`No permission manifest entry covers ${change.address} ${JSON.stringify(actions)}.`);
     if (taskMapping) {
+      if (permissionProfile === "RECOVERY_ALIAS_ONLY") throw new Error(`RECOVERY_ALIAS_ONLY rejects ECS task-definition mutation: ${change.address}.`);
       const registerContext = contextFromTaskDefinitionPlan(change, taskMapping);
       required.push(evaluation({ id: `${taskMapping.id}-register`, action: "ecs:RegisterTaskDefinition", context: registerContext, phase: "apply" }, taskMapping.resource, { contextRegistry }));
       required.push(evaluation({ id: `${taskMapping.id}-tag`, action: "ecs:TagResource", context: taskDefinitionTagContext(registerContext), phase: "apply" }, taskMapping.resource, { contextRegistry }));
@@ -652,7 +690,7 @@ export function deriveRequiredEvaluations(plan, manifest, { contextRegistry = RE
       coveredChanges.add(change.address);
       continue;
     }
-    const matches = manifest.required.filter((entry) => entry.plan && planMatches(entry.plan, change));
+    const matches = manifest.required.filter((entry) => entry.plan && appliesToPermissionProfile(entry, permissionProfile) && planMatches(entry.plan, change));
     if (matches.length === 0) throw new Error(`No permission manifest entry covers ${change.address} ${JSON.stringify(actions)}.`);
     coveredChanges.add(change.address);
     for (const entry of matches) {
@@ -660,7 +698,7 @@ export function deriveRequiredEvaluations(plan, manifest, { contextRegistry = RE
       for (const resource of entry.resources) required.push(evaluation(entry, resource, { contextRegistry }));
     }
   }
-  for (const entry of manifest.required.filter((candidate) => candidate.plan?.coverageRequired)) {
+  for (const entry of manifest.required.filter((candidate) => candidate.plan?.coverageRequired && appliesToPermissionProfile(candidate, permissionProfile))) {
     if (!matchedPlanEntries.has(entry.id)) throw new Error(`Permission manifest mapping has no matching plan change: ${entry.id}.`);
   }
   const forbidden = manifest.forbidden.flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource, { forbidden: true, contextRegistry })));
@@ -849,6 +887,7 @@ export function runPermissionPreflight({
   if (planBound && (!planApprovalReport || !Buffer.isBuffer(planApprovalReportBytes) || !/^[a-f0-9]{64}$/.test(planApprovalReportSha256 || ""))) throw new Error("PLAN_APPROVED evidence is required before permission preflight.");
   if (planBound && !Buffer.isBuffer(canonicalPlanJsonBytes)) throw new Error("Canonical plan JSON bytes are required for permission preflight.");
   if (planBound) assertStageBPlanApprovedBinding(planApprovalReport, { approvalReportBytes: planApprovalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, now: new Date(now) });
+  const permissionProfileBinding = resolveStageBPermissionProfile({ plan, approvedPlanProfile: planApprovalReport?.planProfile, phase });
   if (!reportGeneratorCallerArn || !APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(reportGeneratorCallerArn)) throw new Error("Permission preflight generator is not an approved audit/admin principal.");
   if (simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission preflight simulated role ARN is not the production release role.");
   const conditionKeyOrigins = sourcePolicyConditionKeyOrigins();
@@ -863,7 +902,7 @@ export function runPermissionPreflight({
   let policyEvidenceError = null;
   try { assertReleasePolicyEvidence(policyEvidence); } catch (error) { policyEvidenceError = error.message; }
   if (discoverContextKeys) assertDiscoveredSimulationContextKeys(discoverContextKeys({ roleArn: simulatedRoleArn }), { conditionKeyOrigins, registry: reviewedContextRegistry });
-  const derived = deriveRequiredEvaluations(plan, manifest, { contextRegistry: reviewedContextRegistry, conditionKeyOrigins });
+  const derived = deriveRequiredEvaluations(plan, manifest, { permissionProfile: permissionProfileBinding.permissionProfile, contextRegistry: reviewedContextRegistry, conditionKeyOrigins });
   const runSimulation = (item) => {
     const result = validateSimulationResult(item, simulate({ roleArn: simulatedRoleArn, evaluation: item }));
     return { ...item, ...result, missingContextExactMatch: true, validation: item.forbidden ? (result.decision === "allowed" ? "rejected" : "accepted") : (result.decision === "allowed" ? "accepted" : "rejected") };
@@ -879,6 +918,8 @@ export function runPermissionPreflight({
     evidenceKind: planBound ? PLAN_BOUND_PERMISSION_EVIDENCE_KIND : INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND,
     phase,
     purpose,
+    planProfile: permissionProfileBinding.planProfile,
+    permissionProfile: permissionProfileBinding.permissionProfile,
     toolingSha: deploymentIdentity.toolingSha,
     imageReleaseSha: deploymentIdentity.imageReleaseSha,
     canonicalImageEvidenceSha256: deploymentIdentity.canonicalImageEvidenceSha256,

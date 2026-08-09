@@ -11,6 +11,8 @@ test("production closure binds signed permission evidence to every selected plan
   assert.match(source, /assertPermissionReportPlanBinding/);
   for (const name of ["STAGE_B_PLAN_SHA256", "STAGE_B_SAVED_PLAN_SHA256", "STAGE_B_CANONICAL_PLAN_JSON_SHA256", "STAGE_B_PERMISSION_REPORT_SHA256", "STAGE_B_PERMISSION_REPORT_SIGNATURE_SHA256"]) assert.match(source, new RegExp(name));
   assert.match(source, /verifyPermissionReportSignature/);
+  assert.match(source, /resolveStageBPermissionProfile/);
+  assert.match(source, /permissionProfile: permissionReport\.permissionProfile/);
 });
 
 test("production closure hoists backend metadata and validates refresh evidence once", () => {

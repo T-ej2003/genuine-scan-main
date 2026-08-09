@@ -15,6 +15,7 @@ import {
   RELEASE_ROLE_ARN,
   canonicalizeJson,
   assertPermissionReportPlanBinding,
+  resolveStageBPermissionProfile,
   assertStageBPermissionEvidenceKind,
   PLAN_BOUND_PERMISSION_EVIDENCE_KIND,
   assertReleasePolicyEvidence,
@@ -103,7 +104,9 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   assertStageBPermissionEvidenceKind(report, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, "plan-bound");
   if (report?.schemaVersion !== 1 || report.status !== "valid") throw new Error("A valid permission-preflight report is required.");
   if (report.purpose !== "saved-plan-authorization") throw new Error("A saved-plan authorization permission report is required.");
-  assertPermissionEvaluationBindings(report, readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"), { plan });
+  const permissionProfileBinding = resolveStageBPermissionProfile({ plan, approvedPlanProfile: report.planProfile });
+  if (report.permissionProfile !== permissionProfileBinding.permissionProfile) throw new Error("Permission report permission profile is not bound to the approved plan.");
+  assertPermissionEvaluationBindings(report, readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"), { plan, permissionProfile: report.permissionProfile });
   if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(report.reportGeneratorCallerArn)) throw new Error("Permission-preflight report generator is not approved.");
   if (report.simulatedRoleArn !== RELEASE_ROLE_ARN || report.applyRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission-preflight report role contract is wrong.");
   if (report.applyCallerArn !== null && report.applyCallerArn !== callerArn) throw new Error("Permission-preflight report apply caller is wrong.");
@@ -138,6 +141,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   for (const [filePath, label] of [[planPath, "Stage B saved plan"], [planJsonPath, "Stage B plan JSON"], [canonicalPlanJsonPath, "Stage B canonical plan JSON"], [planApprovalReportPath, "Stage B plan approval report"], [auditPath, "Stage B reference audit"], [permissionReportPath, "Stage B permission report"], [permissionReportSignaturePath, "Stage B permission-report signature"], [imageEvidencePath, "Stage B image evidence"], [imageEvidenceSignaturePath, "Stage B image-evidence signature"]]) assertStageBPrivateFile({ filePath, repositoryRoot: root, label });
   const planBytes = fs.readFileSync(planJsonPath); const canonicalPlanJsonBytes = fs.readFileSync(canonicalPlanJsonPath); const approvalReportBytes = fs.readFileSync(planApprovalReportPath); const approvalReport = JSON.parse(approvalReportBytes); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReportBytes = fs.readFileSync(permissionReportPath); const permissionReport = JSON.parse(permissionReportBytes); const permissionReportSignatureBytes = fs.readFileSync(permissionReportSignaturePath); const signatureArtifact = JSON.parse(permissionReportSignatureBytes); const imageEvidenceBytes = fs.readFileSync(imageEvidencePath); const imageEvidence = JSON.parse(imageEvidenceBytes); const imageEvidenceSignatureArtifact = JSON.parse(fs.readFileSync(imageEvidenceSignaturePath, "utf8"));
   const recoveryPlan = approvalReport.planProfile === "RECOVERY_ALIAS_ONLY";
+  if (permissionReport.planProfile !== approvalReport.planProfile) throw new Error("Permission report plan profile is not bound to PLAN_APPROVED.");
   if (recoveryPlan && (!refreshBindingReportPath || !refreshBindingReportSha256)) throw new Error("Recovery apply requires the original observation binding report and SHA256.");
   const recoveryInputs = [recoveryAttestationPath, recoveryAttestationSha256, recoverySignaturePath, recoverySignatureSha256, recoveryClassificationPath, recoveryClassificationSha256];
   const hasRecoveryInputs = recoveryInputs.some((value) => value !== undefined);

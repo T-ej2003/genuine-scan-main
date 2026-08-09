@@ -263,6 +263,7 @@
       "phase": "apply",
       "action": "logs:CreateLogGroup",
       "plan": {"type": "aws_cloudwatch_log_group", "actions": ["create"]},
+      "profiles": ["NORMAL_STAGE_B_RELEASE"],
       "resources": [
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
@@ -279,6 +280,7 @@
       "phase": "apply",
       "action": "logs:TagResource",
       "plan": {"type": "aws_cloudwatch_log_group", "actions": ["create"]},
+      "profiles": ["NORMAL_STAGE_B_RELEASE"],
       "resources": [
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
@@ -299,6 +301,7 @@
       "phase": "apply",
       "action": "logs:PutRetentionPolicy",
       "plan": {"type": "aws_cloudwatch_log_group", "actions": ["create"]},
+      "profiles": ["NORMAL_STAGE_B_RELEASE"],
       "resources": [
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
@@ -313,6 +316,7 @@
       "phase": "apply",
       "action": "lambda:UpdateFunctionConfiguration",
       "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
+      "profiles": ["NORMAL_STAGE_B_RELEASE"],
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
       "context": [
         {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
@@ -327,6 +331,7 @@
       "phase": "apply",
       "action": "lambda:UpdateFunctionCode",
       "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
+      "profiles": ["NORMAL_STAGE_B_RELEASE"],
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
       "context": [
         {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
@@ -341,6 +346,7 @@
       "phase": "apply",
       "action": "lambda:PublishVersion",
       "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
+      "profiles": ["NORMAL_STAGE_B_RELEASE"],
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
       "context": [
         {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
@@ -355,6 +361,7 @@
       "phase": "apply",
       "action": "lambda:UpdateAlias",
       "plan": {"type": "aws_lambda_alias", "actions": ["update"], "address": "aws_lambda_alias.reviewed"},
+      "profiles": ["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY"],
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
       "context": [
         {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
@@ -407,6 +414,7 @@
         "policyName": "mscqr-production-rls-approval-broker-runtime",
         "coverageRequired": true
       },
+      "profiles": ["NORMAL_STAGE_B_RELEASE"],
       "resources": ["arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"],
       "context": [],
       "evidence": "locked hashicorp/aws 6.56.0 aws_iam_policy update calls iam:CreatePolicyVersion with SetAsDefault=true"
@@ -422,6 +430,7 @@
         "policyName": "mscqr-production-rls-approval-broker-runtime",
         "coverageRequired": true
       },
+      "profiles": ["NORMAL_STAGE_B_RELEASE"],
       "resources": ["arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"],
       "context": [],
       "evidence": "locked hashicorp/aws 6.56.0 aws_iam_policy update prunes the oldest non-default version when five versions exist"
