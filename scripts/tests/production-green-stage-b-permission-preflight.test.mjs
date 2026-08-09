@@ -9,6 +9,7 @@ import {
   canonicalizeJson,
   assertPermissionReportPlanBinding,
   deriveRequiredEvaluations,
+  resolveStageBPermissionProfile,
   PERMISSION_REPORT_SIGNING_ALGORITHM,
   PERMISSION_REPORT_SIGNING_KEY_ARN,
   PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION,
@@ -219,6 +220,14 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 14);
   assert.equal(assertReviewedSimulationContextRegistry().length, 14);
   assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0 && !values.includes("*")));
+});
+
+test("permission manifest declares the exact normal and recovery mutation matrix", () => {
+  const profilesFor = (id) => manifest.required.find((entry) => entry.id === id)?.profiles;
+  assert.deepEqual(profilesFor("update-broker-managed-policy"), ["NORMAL_STAGE_B_RELEASE"]);
+  assert.deepEqual(profilesFor("prune-broker-managed-policy-versions"), ["NORMAL_STAGE_B_RELEASE"]);
+  assert.deepEqual(profilesFor("update-reviewed-broker-alias"), ["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY"]);
+  for (const entry of manifest.required.filter((candidate) => !candidate.plan)) assert.equal(entry.profiles, undefined);
 });
 
 test("reviewed simulator registry fails closed on missing, extra, or malformed keys", () => {
@@ -465,6 +474,78 @@ test("exact broker managed-policy update derives version actions for the exact p
     assert.equal(item.context.some(({ key }) => key === "ecs:task-cpu"), false);
     assert.equal(item.context.some(({ key }) => key === "ecs:task-memory"), false);
   }
+});
+
+test("recovery alias-only permission profile covers only the approved alias mutation", () => {
+  const recoveryPlan = {
+    ...structuredClone(plan),
+    variables: { ...plan.variables, stage_b_recovery_only: { value: true } },
+    resource_changes: [
+      ...Array.from({ length: 72 }, (_, index) => ({
+        address: `aws_lambda_alias.noop[${index}]`,
+        type: "aws_lambda_alias",
+        change: { actions: ["no-op"] },
+      })),
+      {
+        address: "aws_lambda_alias.reviewed",
+        type: "aws_lambda_alias",
+        change: { actions: ["update"], before: { function_version: "2" }, after: { function_version: "3" }, after_unknown: {} },
+      },
+    ],
+  };
+  const selectedPlanBytes = Buffer.from(JSON.stringify(recoveryPlan));
+  const selectedSavedPlanBytes = Buffer.from("recovery-saved-plan");
+  const selectedCanonicalPlanJsonBytes = Buffer.from(`${canonicalizeJson(recoveryPlan)}\n`);
+  const planHashes = {
+    savedPlanSha256: crypto.createHash("sha256").update(selectedSavedPlanBytes).digest("hex"),
+    planJsonSha256: crypto.createHash("sha256").update(selectedPlanBytes).digest("hex"),
+    canonicalPlanFileSha256: crypto.createHash("sha256").update(selectedCanonicalPlanJsonBytes).digest("hex"),
+    logicalCanonicalPlanJsonSha256: crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(recoveryPlan))).digest("hex"),
+  };
+  const recoveryAttestationSha256 = "d".repeat(64);
+  const refreshBindingReportSha256 = "e".repeat(64);
+  const capture = createStageBPlanCaptureReport({
+    toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), refreshReportSha256: "f".repeat(64), refreshBindingReportSha256,
+    recoveryAttestationSha256, hashes: planHashes, capturedAt: now, stageBLineage: "lineage", stageBSerial: 76,
+    terraformVersion: "1.15.7", terraformFormatVersion: "1.2", planProfile: "RECOVERY_ALIAS_ONLY",
+    classification: { noOp: 72, create: 0, update: 1, destroy: 0, replacement: 0, unclassified: 0 },
+    brokerEvidence: { brokerOperation: "recovery-alias-only", brokerUpdatePresent: false, brokerActions: ["no-op"], brokerResourceAddresses: ["aws_lambda_alias.reviewed"] },
+  });
+  const captureBytes = Buffer.from(`${JSON.stringify(capture, null, 2)}\n`);
+  const approval = createStageBPlanApprovalReport({
+    captureReportSha256: crypto.createHash("sha256").update(captureBytes).digest("hex"), referenceAuditPath: "/private/tmp/recovery-audit.json", referenceAuditSha256: "a".repeat(64),
+    referenceAuditCallerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", referenceAuditAt: now,
+    toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, refreshBindingReportSha256,
+    recoveryAttestationSha256, stageBLineage: capture.stageBLineage, stageBSerial: capture.stageBSerial, hashes: planHashes,
+    logicalCanonicalPlanJsonSha256: planHashes.logicalCanonicalPlanJsonSha256, approvedAt: now,
+    classification: capture.classification, planProfile: "RECOVERY_ALIAS_ONLY", brokerOperation: "recovery-alias-only",
+    brokerUpdatePresent: false, brokerActions: ["no-op"], brokerResourceAddresses: ["aws_lambda_alias.reviewed"],
+  });
+  const approvalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
+  const report = runPermissionPreflightRaw({
+    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, manifest, plan: recoveryPlan, planBytes: selectedPlanBytes,
+    canonicalPlanJsonBytes: selectedCanonicalPlanJsonBytes, savedPlanBytes: selectedSavedPlanBytes, planApprovalReport: approval,
+    planApprovalReportBytes: approvalBytes, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex"),
+    generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "recovery-test", policyEvidence, simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail,
+  });
+  assert.equal(report.status, "valid");
+  assert.equal(report.planProfile, "RECOVERY_ALIAS_ONLY");
+  assert.equal(report.permissionProfile, "RECOVERY_ALIAS_ONLY");
+  const planEvaluations = report.requiredEvaluations.filter(({ manifestId }) => manifest.required.find((entry) => entry.id === manifestId)?.plan);
+  assert.deepEqual(planEvaluations.map(({ manifestId }) => manifestId), ["update-reviewed-broker-alias"]);
+  assert.equal(planEvaluations[0].action, "lambda:UpdateAlias");
+});
+
+test("permission profile selection fails closed across recovery and normal plan shapes", () => {
+  const recoveryPlan = { ...structuredClone(plan), variables: { ...plan.variables, stage_b_recovery_only: { value: true } }, resource_changes: [{ address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["update"] } }] };
+  assert.throws(() => deriveRequiredEvaluations({ ...recoveryPlan, resource_changes: [{ ...plan.resource_changes[1] }] }, manifest, { permissionProfile: "RECOVERY_ALIAS_ONLY" }), /No permission manifest entry/);
+  assert.throws(() => deriveRequiredEvaluations({ ...recoveryPlan, resource_changes: [{ address: "aws_ecs_task_definition.candidate[\"backend\"]", type: "aws_ecs_task_definition", change: { actions: ["create"], after: {} } }] }, manifest, { permissionProfile: "RECOVERY_ALIAS_ONLY" }), /RECOVERY_ALIAS_ONLY rejects ECS/);
+  assert.throws(() => deriveRequiredEvaluations({ ...recoveryPlan, resource_changes: [{ address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: ["update"], after: {} } }] }, manifest, { permissionProfile: "RECOVERY_ALIAS_ONLY" }), /No permission manifest entry/);
+  assert.throws(() => deriveRequiredEvaluations({ ...recoveryPlan, resource_changes: [{ address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["update"] } }, { address: "aws_lambda_alias.other", type: "aws_lambda_alias", change: { actions: ["update"] } }] }, manifest, { permissionProfile: "RECOVERY_ALIAS_ONLY" }), /No permission manifest entry/);
+  assert.throws(() => resolveStageBPermissionProfile({ plan: recoveryPlan, approvedPlanProfile: "BASELINE" }), /does not match/);
+  assert.throws(() => resolveStageBPermissionProfile({ plan, approvedPlanProfile: "RECOVERY_ALIAS_ONLY" }), /does not match/);
+  assert.throws(() => resolveStageBPermissionProfile({ plan, approvedPlanProfile: "UNKNOWN_PROFILE" }), /unsupported/);
+  assert.equal(resolveStageBPermissionProfile({ plan, approvedPlanProfile: "BASELINE" }).permissionProfile, "NORMAL_STAGE_B_RELEASE");
 });
 
 test("broker managed-policy coverage fails for missing, wrong, wildcard, unrelated, create, delete, or replacement mappings", () => {
@@ -989,7 +1070,9 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     schemaVersion: 1,
     evidenceKind: "PLAN_BOUND_PERMISSION",
     phase: "plan-bound",
-    purpose: "saved-plan-authorization",
+  purpose: "saved-plan-authorization",
+    planProfile: "BASELINE",
+    permissionProfile: "NORMAL_STAGE_B_RELEASE",
     toolingSha: "b".repeat(40),
     imageReleaseSha: "a".repeat(40),
     canonicalImageEvidenceSha256: "c".repeat(64),

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
-import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, assertPermissionEvaluationBindings, assertPermissionReportPlanBinding, assertReleasePolicyEvidence, validateManifest, verifyPermissionReportSignature, assertStageBPermissionEvidenceKind, PLAN_BOUND_PERMISSION_EVIDENCE_KIND } from "./validate-production-green-stage-b-permissions.mjs";
+import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, assertPermissionEvaluationBindings, assertPermissionReportPlanBinding, assertReleasePolicyEvidence, validateManifest, verifyPermissionReportSignature, assertStageBPermissionEvidenceKind, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, resolveStageBPermissionProfile } from "./validate-production-green-stage-b-permissions.mjs";
 import { IMAGE_EVIDENCE_MAX_AGE_MS, IMAGE_EVIDENCE_VALIDITY_MODEL, IMAGE_EVIDENCE_REVOCATION_MODEL } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS, STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
@@ -91,7 +91,10 @@ if (mode === "production") {
     planApprovalReportSha256: process.env.STAGE_B_PLAN_APPROVAL_REPORT_SHA256,
   });
   if (planBinding.planSha256 !== process.env.STAGE_B_PLAN_SHA256 || planBinding.savedPlanSha256 !== process.env.STAGE_B_SAVED_PLAN_SHA256 || planBinding.canonicalPlanJsonSha256 !== process.env.STAGE_B_CANONICAL_PLAN_JSON_SHA256) throw new Error("Production closure permission report is bound to different plan hashes.");
-  assertPermissionEvaluationBindings(permissionReport, permissionManifest, { plan: JSON.parse(selectedPlanJsonBytes) });
+  const selectedPlan = JSON.parse(selectedPlanJsonBytes);
+  const permissionProfileBinding = resolveStageBPermissionProfile({ plan: selectedPlan, approvedPlanProfile: approvalReport.planProfile });
+  if (permissionReport.planProfile !== approvalReport.planProfile || permissionReport.permissionProfile !== permissionProfileBinding.permissionProfile) throw new Error("Production closure permission profile is not bound to PLAN_APPROVED.");
+  assertPermissionEvaluationBindings(permissionReport, permissionManifest, { plan: selectedPlan, permissionProfile: permissionReport.permissionProfile });
   assertReleasePolicyEvidence(permissionReport.policyEvidence);
   verifyPermissionReportSignature({ report: permissionReport, signatureArtifact: permissionSignature, reportBytes: permissionReportBytes, signatureBytes: permissionSignatureBytes, expectedReportFileSha256: process.env.STAGE_B_PERMISSION_REPORT_SHA256, expectedSignatureFileSha256: process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_SHA256 });
 }

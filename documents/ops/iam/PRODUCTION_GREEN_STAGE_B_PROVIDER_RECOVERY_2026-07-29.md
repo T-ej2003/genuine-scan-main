@@ -811,3 +811,11 @@ Recovery Terraform derives `BROKER_TASK_DEFINITIONS_JSON` and the broker IAM
 In recovery-only mode that mapping is the verified state-derived recovery input; in
 normal mode it is the planned broker mapping. This keeps the broker environment and
 policy on one exact task-definition identity set.
+
+Plan-bound administrator permission selection is profile-aware and authenticated by
+the approved plan evidence. `NORMAL_STAGE_B_RELEASE` retains the existing broker
+function, ECS, and managed-policy mutation mappings. `RECOVERY_ALIAS_ONLY` requires
+the shared backend/apply mechanics plus the exact reviewed alias update mapping; it
+does not require broker-policy, broker-function, or ECS mutation permissions because
+those actions are forbidden by the approved recovery plan. A missing or mismatched
+profile binding remains a fail-closed error.
