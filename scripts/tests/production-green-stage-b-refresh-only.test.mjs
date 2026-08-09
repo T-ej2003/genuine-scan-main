@@ -113,6 +113,26 @@ test("refresh diagnostic redacts complete and truncated PEM blocks without consu
   assert.equal(redactStageBRefreshDiagnostic("x".repeat(100), { maxChars: 16 }).length <= 29, true);
 });
 
+test("malformed PEM headers never skip a later valid private-key block", () => {
+  const marker = (boundary, label) => ["-----", boundary, " ", label, "-----"].join("");
+  const validBlock = (label) => [marker("BEGIN", label), `payload-${label}`, marker("END", label)].join("\n");
+  const cases = [
+    ["PRIVATE KEY", "-----BEGIN garbage\n"],
+    ["ENCRYPTED PRIVATE KEY", "-----BEGIN malformed\n"],
+    ["RSA PRIVATE KEY", "-----BEGIN one\n-----BEGIN two\n"],
+    ["DSA PRIVATE KEY", ["-----BEGIN ", "A".repeat(140), "\n"].join("")],
+  ];
+  for (const [label, malformed] of cases) {
+    const diagnostic = redactStageBRefreshDiagnostic(["safe-before", malformed, validBlock(label), "safe-after"].join("\n"));
+    assert.match(diagnostic, /safe-before/);
+    assert.match(diagnostic, /\[REDACTED_PRIVATE_KEY\]/);
+    assert.match(diagnostic, /safe-after/);
+    assert.doesNotMatch(diagnostic, new RegExp(`payload-${label.replaceAll(" ", "\\s")}`));
+  }
+  const safe = "safe-before\n-----BEGIN malformed\nsafe-after";
+  assert.equal(redactStageBRefreshDiagnostic(safe), safe);
+});
+
 test("refresh diagnostic assignment parsing handles quoted, escaped, unquoted, and adversarial values", () => {
   const backslashes = "\\".repeat(20000);
   const input = [
@@ -181,13 +201,34 @@ test("failed plan command writes a private bounded diagnostic without raw stderr
 
 test("show command failure writes a private diagnostic and preserves the show exit code", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-diagnostic-"));
-  assert.throws(() => runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: { ...validDeps(), showPlanJson: () => ({ status: 1, stdout: "", stderr: "Error: provider diagnostic" }) } }), /MALFORMED_RESULT/);
+  assert.throws(() => runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: { ...validDeps(), showPlanJson: () => ({ status: 1, stdout: "show stdout", stderr: "Error: provider diagnostic" }) } }), /MALFORMED_RESULT/);
   const report = JSON.parse(fs.readFileSync(path.join(directory, "refresh-only.json"), "utf8"));
   const diagnostic = JSON.parse(fs.readFileSync(report.diagnosticArtifactPath, "utf8"));
   assert.equal(report.acquisitionStatus, "SHOW_COMMAND_FAILED");
   assert.equal(diagnostic.showExitCode, 1);
+  assert.match(diagnostic.stdoutExcerptRedacted, /show stdout/);
   assert.match(diagnostic.stderrExcerptRedacted, /provider diagnostic/);
   assert.deepEqual(fs.readdirSync(directory).filter((name) => name.startsWith(".stage-b-refresh-")), []);
+});
+
+test("abnormal show termination preserves show stderr, signal, and error instead of plan diagnostics", () => {
+  for (const shown of [
+    { status: null, stdout: "show output", stderr: "show killed", signal: "SIGTERM" },
+    { status: null, stdout: "", stderr: "", error: { message: "spawn failure" } },
+    undefined,
+  ]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-show-abnormal-"));
+    assert.throws(() => runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: { ...validDeps(), showPlanJson: () => shown } }), /MALFORMED_RESULT/);
+    const report = JSON.parse(fs.readFileSync(path.join(directory, "refresh-only.json"), "utf8"));
+    const diagnostic = JSON.parse(fs.readFileSync(report.diagnosticArtifactPath, "utf8"));
+    assert.equal(report.acquisitionStatus, "SHOW_COMMAND_FAILED");
+    assert.equal(diagnostic.showExitCode, null);
+    assert.doesNotMatch(JSON.stringify(diagnostic), /No changes/);
+    if (shown?.signal) assert.match(diagnostic.stderrExcerptRedacted, /show killed|SIGTERM/);
+    if (shown?.error) assert.match(diagnostic.stderrExcerptRedacted, /spawn failure/);
+    if (!shown) assert.match(diagnostic.stderrExcerptRedacted, /no command result/);
+    assert.deepEqual(fs.readdirSync(directory).filter((name) => name.startsWith(".stage-b-refresh-")), []);
+  }
 });
 test("missing, empty, and wrong plan paths fail before classification", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-acquisition-")); const missing = acquireStageBRefreshPlan({ planPath: path.join(directory, "missing.tfplan"), planResult: { status: 2 }, showPlanJson: () => ({ status: 0, stdout: "{}", stderr: "" }) }); assert.equal(missing.acquisitionStatus, "PLAN_FILE_MISSING"); const emptyPath = path.join(directory, "empty.tfplan"); fs.writeFileSync(emptyPath, "", { mode: 0o600 }); const empty = acquireStageBRefreshPlan({ planPath: emptyPath, planResult: { status: 2 }, showPlanJson: () => ({ status: 0, stdout: "{}", stderr: "" }) }); assert.equal(empty.acquisitionStatus, "PLAN_FILE_EMPTY"); });
 test("valid plan shape narrowly normalizes omitted zero-change collections", () => { const plan = noChangePlan(); delete plan.resource_changes; delete plan.output_changes; assert.equal(classifyStageBRefreshResult({ plan, terraformExitCode: 0, bindingReport: bindingReport(), state, outputsSource }).status, "NO_CHANGES"); assert.equal(classifyStageBRefreshResult({ plan, terraformExitCode: 2, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"); });

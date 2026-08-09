@@ -44,10 +44,21 @@ function isPrivateKeyLabel(label) {
     && prefix[0] !== " " && prefix.at(-1) !== " " && !prefix.includes("  ") && [...prefix].every(isSafePemLabelCharacter);
 }
 
+function findBoundedPemMarkerSuffix(text, from) {
+  const lastStart = Math.min(text.length - PEM_MARKER_SUFFIX.length, from + MAX_PEM_LABEL_CHARS);
+  for (let position = from; position <= lastStart; position += 1) {
+    if (text.startsWith(PEM_MARKER_SUFFIX, position)) return position;
+  }
+  return -1;
+}
+
 function findPrivateKeyMarker(text, from) {
   const position = text.indexOf(PEM_BEGIN_PREFIX, from);
   if (position === -1) return null;
-  const markerEnd = text.indexOf(PEM_MARKER_SUFFIX, position + PEM_BEGIN_PREFIX.length);
+  const labelStart = position + PEM_BEGIN_PREFIX.length;
+  const nextBegin = text.indexOf(PEM_BEGIN_PREFIX, labelStart);
+  const markerEnd = findBoundedPemMarkerSuffix(text, labelStart);
+  if (nextBegin !== -1 && (markerEnd === -1 || nextBegin <= markerEnd)) return { nextSearchFrom: nextBegin };
   if (markerEnd === -1) return null;
   const label = text.slice(position + PEM_BEGIN_PREFIX.length, markerEnd);
   if (!isPrivateKeyLabel(label)) return { nextSearchFrom: markerEnd + PEM_MARKER_SUFFIX.length };
@@ -166,6 +177,25 @@ function safeDiagnostic(diagnostic = {}) {
   return { severity: redact(diagnostic.severity), summary: redact(diagnostic.summary), detail: redact(diagnostic.detail), address: diagnostic.address, range: diagnostic.range };
 }
 
+function showDiagnosticCapture({ shown, planCommandExitCode, error } = {}) {
+  const result = shown && typeof shown === "object" ? shown : null;
+  const stdout = result?.stdout ?? "";
+  const text = (value) => Buffer.isBuffer(value) ? value.toString("utf8") : typeof value === "string" ? value : "";
+  const stderrParts = [
+    text(result?.stderr),
+    text(result?.error?.message),
+    result?.signal ? `Terraform show terminated by ${result.signal}.` : null,
+    text(error?.message),
+  ].filter(Boolean);
+  if (!result && stderrParts.length === 0) stderrParts.push("Terraform show returned no command result.");
+  return {
+    stdout,
+    stderr: stderrParts.join("\n"),
+    planCommandExitCode,
+    showCommandExitCode: Number.isInteger(result?.status) ? result.status : null,
+  };
+}
+
 export function acquireStageBRefreshPlan({ planPath, planResult, showPlanJson, showOptions, repositoryRoot = root } = {}) {
   const planCommandDiagnostic = { stdout: planResult?.stdout || "", stderr: planResult?.stderr || "", planCommandExitCode: planResult?.status ?? null, showCommandExitCode: null };
   if (![0, 2].includes(planResult?.status)) return acquisitionFailure("PLAN_COMMAND_FAILED", "Terraform refresh-only plan command failed.", { planCommandExitCode: planResult?.status ?? null, diagnosticCapture: planCommandDiagnostic });
@@ -176,8 +206,9 @@ export function acquireStageBRefreshPlan({ planPath, planResult, showPlanJson, s
   if (planBytes.length === 0) return acquisitionFailure("PLAN_FILE_EMPTY", "Terraform refresh-only temporary plan is empty.", { planCommandExitCode: planResult.status, diagnosticCapture: planCommandDiagnostic });
   const privatePlan = ensureStageBPrivateFile({ filePath: planPath, repositoryRoot, normalize: true, label: "Stage B refresh-only temporary plan" });
   let shown;
-  try { shown = showPlanJson(planPath, showOptions); } catch (error) { return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json failed.", { planCommandExitCode: planResult.status, showCommandExitCode: null, showError: error.message, refreshPlanSha256: privatePlan.sha256, diagnosticCapture: { ...planCommandDiagnostic, stderr: error.message } }); }
-  if (!shown || typeof shown.status !== "number") return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json did not return a command result.", { planCommandExitCode: planResult.status, refreshPlanSha256: privatePlan.sha256, diagnosticCapture: planCommandDiagnostic });
+  try { shown = showPlanJson(planPath, showOptions); } catch (error) { return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json failed.", { planCommandExitCode: planResult.status, showCommandExitCode: null, showError: error.message, refreshPlanSha256: privatePlan.sha256, diagnosticCapture: showDiagnosticCapture({ shown: null, planCommandExitCode: planResult.status, error }) }); }
+  const showCapture = showDiagnosticCapture({ shown, planCommandExitCode: planResult.status });
+  if (!shown || typeof shown.status !== "number") return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json did not return a command result.", { planCommandExitCode: planResult.status, refreshPlanSha256: privatePlan.sha256, diagnosticCapture: showCapture });
   const stdout = Buffer.isBuffer(shown.stdout) ? shown.stdout : Buffer.from(shown.stdout || "");
   const stderr = Buffer.isBuffer(shown.stderr) ? shown.stderr : Buffer.from(shown.stderr || "");
   const showDiagnostic = { stdout, stderr, planCommandExitCode: planResult.status, showCommandExitCode: shown.status };
