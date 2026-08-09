@@ -67,8 +67,14 @@ locals {
       definition = jsondecode(entry.definition)
     }
   }
-  candidate_definitions_for_resources = var.stage_b_recovery_only ? {} : local.candidate_definitions
-  executor_definitions_for_resources  = var.stage_b_recovery_only ? {} : local.executor_definitions
+  candidate_definitions_for_resources = {
+    for kind, definition in local.candidate_definitions : kind => definition
+    if !var.stage_b_recovery_only
+  }
+  executor_definitions_for_resources = {
+    for mode, definition in local.executor_definitions : mode => definition
+    if !var.stage_b_recovery_only
+  }
   execution_secret_arns = {
     for kind, definition in merge(local.candidate_definitions, { executor = local.executor_definitions["full-rls-verification"] }) :
     kind => distinct([

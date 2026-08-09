@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { assertStageBPlan, assertStageBPlanCapture, assertStageBBrokerCaptureUpdateContract, classifyStageBBrokerActionShape, assertStageBTaskDefinitionStateMigrationPreconditions } from "../plan-production-green-stage-b.mjs";
 import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
@@ -490,4 +493,102 @@ test("zero-current checkpoint does not fail broker no-op refresh validation", ()
   assert.doesNotMatch(main, /resource "aws_(?:iam_policy|lambda_function)" "(?:broker)"[\s\S]*?precondition/);
   assert.match(planValidator, /!exactActions\(change\.change\?\.actions \|\| \[\], \["no-op"\]\)/);
   assert.match(planValidator, /assertStageBBrokerTaskDefinitionMapping\(plan, terraformConfiguration\)/);
+});
+
+test("Terraform 1.15.7 type-checks recovery ECS collections without configuring current resources", () => {
+  const terraform = process.env.TERRAFORM_BINARY || "terraform";
+  const moduleDir = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-recovery-type-"));
+  const dataDir = path.join(moduleDir, "terraform-data");
+  const candidateFiles = {
+    backend: "green-backend-candidate.json",
+    worker: "green-worker-candidate.json",
+    canary: "green-application-canary.json",
+    read_only_canary: "green-read-only-rls-canary.json",
+  };
+  const executorModes = {
+    "full-rls-capability-preflight": "",
+    "full-rls-admin-bootstrap": "MSCQR_PRODUCTION_GREEN_CREATE_AND_BOOTSTRAP_DATABASE",
+    "full-rls-role-provision": "MSCQR_PRODUCTION_GREEN_PROVISION_RUNTIME_ROLES",
+    "full-rls-role-verify": "",
+    "full-rls-admin-ownership": "MSCQR_PRODUCTION_GREEN_INSTALL_OWNERSHIP_GRANTS",
+    "full-rls-runtime-policy": "MSCQR_PRODUCTION_GREEN_INSTALL_RUNTIME_POLICIES",
+    "full-rls-verification": "",
+    "full-rls-rollback": "MSCQR_PRODUCTION_GREEN_ROLLBACK_EXACT_PACKAGE",
+  };
+  const taskDefinitionsDir = path.resolve("infra/aws/terraform/production-green-stage-b/task-definitions");
+  const replacements = {
+    "{{BACKEND_IMAGE}}": "backend-image",
+    "{{WORKER_IMAGE}}": "worker-image",
+    "{{CANARY_IMAGE}}": "canary-image",
+    "{{READ_ONLY_CANARY_IMAGE}}": "read-only-canary-image",
+    "{{READ_ONLY_CANARY_DATABASE_SECRET_ARN}}": "read-only-secret",
+    "{{RELEASE_SHA}}": "a".repeat(40),
+    "{{SOURCE_CONTRACT_SHA256}}": "b".repeat(64),
+    "{{MIGRATION_SET_DIGEST}}": "c".repeat(64),
+    "{{PACKAGE_CHECKSUM_SHA256}}": "d".repeat(64),
+    "{{EXECUTOR_IMAGE}}": "executor-image",
+    "{{RECEIPT_BUCKET}}": "receipt-bucket",
+    "{{EXECUTOR_LOG_GROUP}}": "/ecs/executor",
+    "{{BACKEND_LOG_GROUP}}": "/ecs/backend",
+    "{{WORKER_LOG_GROUP}}": "/ecs/worker",
+    "{{CANARY_LOG_GROUP}}": "/ecs/canary",
+    "{{READ_ONLY_CANARY_LOG_GROUP}}": "/ecs/read-only-canary",
+  };
+  const render = (fileName, extra = {}) => {
+    let rendered = fs.readFileSync(path.join(taskDefinitionsDir, fileName), "utf8");
+    for (const [placeholder, value] of Object.entries({ ...replacements, ...extra })) rendered = rendered.split(placeholder).join(value);
+    assert.doesNotMatch(rendered, /\{\{[^}]+\}\}/);
+    return rendered;
+  };
+  const hclString = (value) => JSON.stringify(value);
+  const candidateDefinitions = Object.entries(candidateFiles).map(([kind, fileName]) => `    ${kind} = jsondecode(${hclString(render(fileName))})`).join("\n");
+  const executorDefinitions = Object.entries(executorModes).map(([mode, confirmation]) => `    ${JSON.stringify(mode)} = jsondecode(${hclString(render("green-activation-executor.json", { "{{MODE}}": mode, "{{CONFIRMATION}}": confirmation }))})`).join("\n");
+  fs.writeFileSync(path.join(moduleDir, "main.tf"), `terraform { required_version = ">= 1.15.7" }
+
+variable "stage_b_recovery_only" { type = bool }
+
+locals {
+  candidate_definitions = {
+${candidateDefinitions}
+  }
+  executor_definitions = {
+${executorDefinitions}
+  }
+  candidate_definitions_for_resources = {
+    for kind, definition in local.candidate_definitions : kind => definition
+    if !var.stage_b_recovery_only
+  }
+  executor_definitions_for_resources = {
+    for mode, definition in local.executor_definitions : mode => definition
+    if !var.stage_b_recovery_only
+  }
+  retained_candidate_definitions = { for kind, definition in local.candidate_definitions : "e689d4d-\${kind}" => definition }
+  retained_executor_definitions = { for mode, definition in local.executor_definitions : "e689d4d-\${mode}" => definition }
+}
+
+output "candidate_count" { value = length(local.candidate_definitions_for_resources) }
+output "executor_count" { value = length(local.executor_definitions_for_resources) }
+output "retained_count" { value = length(local.retained_candidate_definitions) + length(local.retained_executor_definitions) }
+output "candidate_keys" { value = keys(local.candidate_definitions_for_resources) }
+output "executor_keys" { value = keys(local.executor_definitions_for_resources) }
+`);
+  const run = (args, options = {}) => execFileSync(terraform, [`-chdir=${moduleDir}`, ...args], { encoding: "utf8", env: { ...process.env, TF_DATA_DIR: dataDir }, ...options });
+  const consoleValue = (recovery, expression) => run(["console", "-no-color", `-var=stage_b_recovery_only=${recovery}`], { input: `${expression}\n` }).trim();
+  try {
+    run(["init", "-backend=false", "-input=false", "-no-color"]);
+    run(["validate", "-no-color"]);
+    assert.equal(consoleValue(true, "length(local.candidate_definitions_for_resources)"), "0");
+    assert.equal(consoleValue(true, "length(local.executor_definitions_for_resources)"), "0");
+    assert.equal(consoleValue(true, "length(local.retained_candidate_definitions) + length(local.retained_executor_definitions)"), "12");
+    assert.equal(consoleValue(false, "length(local.candidate_definitions_for_resources)"), "4");
+    assert.equal(consoleValue(false, "length(local.executor_definitions_for_resources)"), "8");
+    for (const key of Object.keys(candidateFiles)) assert.match(consoleValue(false, "keys(local.candidate_definitions_for_resources)"), new RegExp(key));
+    for (const key of Object.keys(executorModes)) assert.match(consoleValue(false, "keys(local.executor_definitions_for_resources)"), new RegExp(key));
+  } finally {
+    fs.rmSync(moduleDir, { recursive: true, force: true });
+  }
+  assert.match(terraformConfiguration, /candidate_definitions_for_resources\s*=\s*\{[\s\S]*if !var\.stage_b_recovery_only/);
+  assert.match(terraformConfiguration, /executor_definitions_for_resources\s*=\s*\{[\s\S]*if !var\.stage_b_recovery_only/);
+  assert.doesNotMatch(terraformConfiguration, /candidate_definitions_for_resources\s*=\s*var\.stage_b_recovery_only\s*\?/);
+  assert.doesNotMatch(terraformConfiguration, /executor_definitions_for_resources\s*=\s*var\.stage_b_recovery_only\s*\?/);
 });
