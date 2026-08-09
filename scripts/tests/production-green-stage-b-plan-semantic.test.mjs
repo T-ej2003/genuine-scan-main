@@ -5,6 +5,7 @@ import {
   assertStageBPlanSemanticCompleteness,
   assertStageBTypedRepresentationManifestComplete,
   censusStageBPlanSemantics,
+  initialRepresentationOnlyPaths,
   STAGE_B_PLAN_SEMANTIC_PROFILES,
   STAGE_B_SUPPORTED_PLAN_PROFILES,
 } from "../aws/stage-b-plan-semantic-contract.mjs";
@@ -21,6 +22,7 @@ import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
 const addresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
+const BROKER_INITIAL_ADDRESSES = new Set(["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]);
 const image = (n) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr@sha256:${String(n).repeat(64)}`;
 const ref = (references) => ({ references });
 const envNames = [
@@ -150,7 +152,7 @@ function baselinePlan() {
     after: {
       function_name: "mscqr-production-rls-approval-broker", role: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
       handler: "index.handler", runtime: "nodejs24.x", filename: "/private/tmp/broker.zip", source_code_hash: "baseline-source-code-hash",
-      memory_size: 128, package_type: "Zip", timeout: 30, publish: true, region: "eu-west-2",
+      memory_size: 128, package_type: "Zip", reserved_concurrent_executions: -1, skip_destroy: false, timeout: 30, publish: true, region: "eu-west-2",
       environment: [{}], tags, tags_all: { ...tags },
     },
     after_unknown: { architectures: [true], arn: true, code_sha256: true, environment: [{ variables: true }], id: true, invoke_arn: true, last_modified: true, qualified_arn: true, qualified_invoke_arn: true, response_streaming_invoke_arn: true, signing_job_arn: true, signing_profile_version_arn: true, source_code_size: true, version: true },
@@ -159,7 +161,7 @@ function baselinePlan() {
   const alias = value.resource_changes.find((change) => change.address === "aws_lambda_alias.reviewed");
   alias.change = {
     actions: ["create"], before: null,
-    after: { description: null, name: "reviewed", function_name: "mscqr-production-rls-approval-broker", region: "eu-west-2", routing_config: [] },
+    after: { description: null, name: "reviewed", function_name: "mscqr-production-rls-approval-broker", region: "eu-west-2", routing_config: [], timeouts: null },
     after_unknown: { arn: true, function_version: true, id: true, invoke_arn: true, routing_config: [] }, before_sensitive: {}, after_sensitive: {},
   };
   for (const [index, change] of value.resource_changes.filter((item) => addresses.includes(item.address)).entries()) {
@@ -295,7 +297,7 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
   assert.deepEqual(census.counts, {
     nonNoopResources: 15,
     resourceActions: 15,
-    changedPaths: 383,
+    changedPaths: 386,
     afterUnknownPaths: 93,
     replacePaths: 0,
     configurationReferences: 117,
@@ -501,6 +503,7 @@ test("typed Terraform envelope admits exact nulls, false markers, and resolved d
   rejectBaseline((value) => { value.resource_changes.find((item) => item.address === "aws_iam_policy.broker").change.after.name_prefix = "unexpected"; });
   rejectBaseline((value) => { value.resource_changes.find((item) => item.address === "aws_iam_policy.broker").change.after.unreviewed = null; });
   rejectBaseline((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed").change.after.routing_config = [{ additional_version_weights: { other: 1 } }]; });
+  rejectBaseline((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed").change.after.timeouts = { create: "1m" }; });
 
   const contradictoryPolicy = structuredClone(retry);
   contradictoryPolicy.resource_changes.find((item) => item.address === "aws_iam_policy.broker").change.after_unknown.policy = true;
@@ -562,6 +565,8 @@ test("initial broker Lambda uses exact default and optional-computed provider sh
     (change) => { change.after.memory_size = 256; },
     (change) => { delete change.after.package_type; },
     (change) => { change.after.package_type = "Image"; },
+    (change) => { change.after.reserved_concurrent_executions = 1; },
+    (change) => { change.after.skip_destroy = true; },
     (change) => { delete change.after.code_sha256; delete change.after_unknown.code_sha256; },
     (change) => { change.after.code_sha256 = "provider-output"; delete change.after_unknown.code_sha256; },
     (change) => { delete change.after.source_code_hash; change.after_unknown.source_code_hash = true; },
@@ -572,6 +577,25 @@ test("initial broker Lambda uses exact default and optional-computed provider sh
     const value = baselinePlan();
     mutate(lambdaChange(value));
     assert.throws(() => assertStageBPlanSemanticCompleteness(value), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_/);
+  }
+});
+
+test("initial representation-only changed paths derive from the typed manifest", () => {
+  assert.deepEqual([...initialRepresentationOnlyPaths("aws_lambda_function")].sort(), [
+    "capacity_provider_config", "code_signing_config_arn", "dead_letter_config", "description", "durable_config",
+    "ephemeral_storage", "file_system_config", "image_config", "image_uri", "kms_key_arn", "layers", "logging_config", "memory_size",
+    "package_type", "publish_to", "region", "replace_security_groups_on_destroy", "replacement_security_group_ids",
+    "reserved_concurrent_executions", "s3_bucket", "s3_key", "s3_object_version", "skip_destroy", "snap_start",
+    "source_kms_key_arn", "tags_all", "tenancy_config", "timeouts", "tracing_config", "use_resource_timeout_for_propagation", "vpc_config",
+  ].sort());
+  assert.deepEqual([...initialRepresentationOnlyPaths("aws_lambda_alias")].sort(), ["description", "region", "routing_config", "timeouts"].sort());
+  assert.deepEqual([...initialRepresentationOnlyPaths("aws_iam_policy")].sort(), ["delay_after_policy_creation_in_ms", "description", "name_prefix", "tags_all"].sort());
+  const census = assertStageBPlanSemanticCompleteness(baselinePlan());
+  for (const resource of census.resources.filter(({ address }) => BROKER_INITIAL_ADDRESSES.has(address))) {
+    for (const { path, classification } of resource.changedPaths) {
+      const field = /^([^.[\]]+)/.exec(path)?.[1];
+      if (initialRepresentationOnlyPaths(resource.type).has(field)) assert.equal(classification, "REVIEWED_PROVIDER_NORMALIZATION");
+    }
   }
 });
 

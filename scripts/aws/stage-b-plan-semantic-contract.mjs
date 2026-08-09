@@ -77,11 +77,11 @@ const BROKER_PROFILES = new Map([
   ["aws_lambda_alias.reviewed", { type: "aws_lambda_alias", profiles: [{ actions: ["create"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_ALIAS_INITIAL_CREATE }, { actions: ["update"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.REVIEWED_RECOVERY_ALIAS_UPDATE }] }],
 ]);
 const BROKER_ADDRESSES = new Set(BROKER_PROFILES.keys());
-const BROKER_INITIAL_TAG_PATHS = new Set(["tags.Component", "tags.Environment", "tags.ManagedBy", "tags_all.Component", "tags_all.Environment", "tags_all.ManagedBy"]);
-const BROKER_POLICY_INITIAL_CHANGED_PATHS = new Set(["description", "name", "name_prefix", "path", "arn", "id", "policy", ...BROKER_INITIAL_TAG_PATHS]);
+const BROKER_INITIAL_TAG_PATHS = new Set(["tags.Component", "tags.Environment", "tags.ManagedBy"]);
+const BROKER_POLICY_INITIAL_CHANGED_PATHS = new Set(["name", "path", "arn", "id", "policy", ...BROKER_INITIAL_TAG_PATHS]);
 const BROKER_FUNCTION_INITIAL_CHANGED_PATHS = new Set([
-  "function_name", "role", "handler", "runtime", "filename", "source_code_hash", "timeout", "publish", "description",
-  "memory_size", "package_type", "region", "environment[0].variables", ...BROKER_INITIAL_TAG_PATHS,
+  "function_name", "role", "handler", "runtime", "filename", "source_code_hash", "timeout", "publish",
+  "environment[0].variables", ...BROKER_INITIAL_TAG_PATHS,
 ]);
 export const STAGE_B_LAMBDA_INITIAL_CREATE_REPRESENTATION = Object.freeze({
   memory_size: Object.freeze({ category: "PROVIDER_DEFAULTED_CONCRETE", expected: 128 }),
@@ -95,7 +95,7 @@ export const STAGE_B_LAMBDA_INITIAL_CREATE_REPRESENTATION = Object.freeze({
   environment: Object.freeze({ category: "CONFIGURATION_DEPENDENCY_COMPUTED", expected: "unresolved-or-resolved" }),
 });
 const BROKER_ENVIRONMENT_PLACEHOLDER_PATH = "environment[0]";
-const BROKER_ALIAS_INITIAL_CHANGED_PATHS = new Set(["description", "name", "function_name", "function_version", "region", "routing_config"]);
+const BROKER_ALIAS_INITIAL_CHANGED_PATHS = new Set(["name", "function_name", "function_version"]);
 const ECS_METADATA_PATHS = new Set(["arn", "arn_without_revision", "enable_fault_injection", "id", "revision"]);
 const ECS_UNKNOWN_PATHS = new Set([...ECS_METADATA_PATHS, "volume[0].configure_at_launch"]);
 const ECS_SENSITIVE_PATHS = new Set(["requires_compatibilities[0]"]);
@@ -260,6 +260,16 @@ export const STAGE_B_TYPED_REPRESENTATION_MANIFEST = Object.freeze({
     volume: "PROVIDER_NORMALIZED_CONCRETE",
   }),
 });
+
+const INITIAL_REPRESENTATION_ONLY_CATEGORIES = new Set([
+  "PROVIDER_DEFAULTED_CONCRETE", "PROVIDER_NORMALIZED_CONCRETE", "KNOWN_UNSET_NULL", "KNOWN_EMPTY_LIST", "KNOWN_EMPTY_OBJECT", "KNOWN_FALSE_MARKER",
+]);
+
+export function initialRepresentationOnlyPaths(resourceType) {
+  return new Set(Object.entries(STAGE_B_TYPED_REPRESENTATION_MANIFEST[resourceType] || {})
+    .filter(([, category]) => INITIAL_REPRESENTATION_ONLY_CATEGORIES.has(category))
+    .map(([path]) => path));
+}
 
 export function assertStageBTypedRepresentationManifestComplete() {
   const missing = [];
@@ -457,11 +467,41 @@ function assertInitialTypedDefaults(change) {
     if (after.description !== null || after.name_prefix !== null) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.unset_fields`);
     if (!after.tags_all || !exactJson(after.tags_all, after.tags)) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.tags_all`);
   }
+  if (change.address === "aws_lambda_function.broker") {
+    if (after.reserved_concurrent_executions !== -1 || after.skip_destroy !== false) {
+      throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.defaulted_fields`);
+    }
+  }
   if (change.address === "aws_lambda_alias.reviewed") {
-    if (after.description !== null || after.region !== STAGE_B.region || !Array.isArray(after.routing_config) || after.routing_config.length !== 0) {
+    if (after.description !== null || after.timeouts !== null || after.region !== STAGE_B.region || !Array.isArray(after.routing_config) || after.routing_config.length !== 0) {
       throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.typed_defaults`);
     }
   }
+}
+
+function assertInitialRepresentationPath(change, path) {
+  if (!isBrokerInitialCreate(change)) return false;
+  const field = /^([^.[\]]+)/.exec(path)?.[1];
+  if (!field || !initialRepresentationOnlyPaths(change.type).has(field)) return false;
+  const value = change.change?.after?.[field];
+  const category = STAGE_B_TYPED_REPRESENTATION_MANIFEST[change.type]?.[field];
+  if (category === "KNOWN_UNSET_NULL") {
+    if (value !== null) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+  } else if (category === "KNOWN_EMPTY_LIST") {
+    if (!Array.isArray(value) || value.length !== 0) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+  } else if (category === "KNOWN_EMPTY_OBJECT") {
+    if (!isObject(value) || Array.isArray(value) || Object.keys(value).length !== 0) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+  } else if (category === "PROVIDER_DEFAULTED_CONCRETE") {
+    const expected = { memory_size: 128, package_type: "Zip", reserved_concurrent_executions: -1, skip_destroy: false }[field];
+    if (value !== expected) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+  } else if (category === "PROVIDER_NORMALIZED_CONCRETE") {
+    if (field === "region" && value !== STAGE_B.region) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+    if (field === "tags_all" && !exactJson(value, change.change?.after?.tags)) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+    if (!(["region", "tags_all"].includes(field))) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+  } else {
+    throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+  }
+  return true;
 }
 
 function assertBrokerPublishProviderMetadataRepresentation(change) {
@@ -640,19 +680,13 @@ function assertEcsSemanticDomain(change) {
 function classifyChangedPath(change, path) {
   if (ECS_ADDRESSES.has(change.address)) return classifyEcsChangedPath(change, path);
   if (change.address === "aws_iam_policy.broker" && isBrokerInitialCreate(change)) {
-    if (["description", "name_prefix"].includes(path)) {
-      if (change.change.after?.[path] !== null) throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
-      return "REVIEWED_PROVIDER_NORMALIZATION";
-    }
+    if (assertInitialRepresentationPath(change, path)) return "REVIEWED_PROVIDER_NORMALIZATION";
     if (BROKER_POLICY_INITIAL_CHANGED_PATHS.has(path)) return "REVIEWED_CONCRETE_CHANGE";
     throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
   }
   if (change.address === "aws_iam_policy.broker" && BROKER_POLICY_CHANGED_PATHS.has(path)) return "REVIEWED_CONCRETE_CHANGE";
   if (change.address === "aws_lambda_function.broker" && isBrokerInitialCreate(change)) {
-    if (path === "description") {
-      if (change.change.after?.description !== null) throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
-      return "REVIEWED_PROVIDER_NORMALIZATION";
-    }
+    if (assertInitialRepresentationPath(change, path)) return "REVIEWED_PROVIDER_NORMALIZATION";
     if (path === BROKER_ENVIRONMENT_PLACEHOLDER_PATH) {
       assertInitialBrokerEnvironment(change);
       return "REVIEWED_COMPUTED_CHANGE";
@@ -667,11 +701,8 @@ function classifyChangedPath(change, path) {
       ? "DIAGNOSTIC_ONLY" : "REVIEWED_CONCRETE_CHANGE";
   }
   if (change.address === "aws_lambda_alias.reviewed" && isBrokerInitialCreate(change)) {
+    if (assertInitialRepresentationPath(change, path)) return "REVIEWED_PROVIDER_NORMALIZATION";
     if (BROKER_ALIAS_INITIAL_CHANGED_PATHS.has(path)) {
-      if (path === "description") {
-        if (change.change.after?.description !== null) throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
-        return "REVIEWED_PROVIDER_NORMALIZATION";
-      }
       if (path === "function_version" && change.change.after?.function_version === undefined && change.change.after_unknown?.function_version !== true) throw new Error(`UNCLASSIFIED_COMPUTED_CHANGE: ${change.address}.${path}`);
       return path === "function_version" ? "REVIEWED_COMPUTED_CHANGE" : "REVIEWED_CONCRETE_CHANGE";
     }
