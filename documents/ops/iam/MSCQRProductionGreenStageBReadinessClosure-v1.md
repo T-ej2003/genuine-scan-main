@@ -92,10 +92,11 @@ The baseline profile also requires an atomic broker policy/function/alias create
 the rollover profile requires the corresponding exact all-update shape. Partial or mixed
 broker action shapes fail closed, while the no-change/append-only retry profile permits
 only the canonical broker no-op shape.
-The computed alias exception remains field-specific: only
-`aws_lambda_alias.reviewed.function_version` may be unknown, and only with the exact
-structured reference to `aws_lambda_function.broker.version` plus the same-plan published
-broker update. Unknown values elsewhere are not accepted.
+The semantic census still records a computed alias reference diagnostically, but recovery
+authorization does not accept an unknown alias target: Terraform cannot prove that a new
+published broker version equals the attested desired version. Recovery therefore requires
+a concrete `aws_lambda_alias.reviewed.function_version` equal to the attested configured
+version; unknown values elsewhere are not accepted.
 
 PLAN-SEM-01 also requires provider-fidelity proof for every baseline-created resource.
 The independent Stage B snapshot in
@@ -125,7 +126,9 @@ mandatory unknowns in both cases.
   assertion, not a generalized allowance.
 - Image/Lambda rotation: the current source-controlled resource matrix permits only
   the exact resource-level create/update/no-op actions and the independently validated
-  immutable image/package deltas.
+  immutable image/package deltas. A broker publish update may change
+  `source_code_hash` with the exact `var.broker_package_path` reference and the existing
+  package-bytes/source-hash artifact proof; this does not permit other Lambda fields.
 - ECS rotation: the exact twelve root-managed `aws_ecs_task_definition` addresses
   (four candidate and eight executor families) may use `create,delete` or
   `delete,create` only when all of these are true:
@@ -160,14 +163,12 @@ recovery verifier rechecks raw bytes, hashes, signature, source, lineage, serial
 refresh SHA, resource identity, versions, and freshness at each security-sensitive
 consumer.
 
-For the recovery plan delta, the reviewed alias target may be concrete only when it
-equals the attested configured version, or computed when Terraform marks only
-`aws_lambda_alias.reviewed.function_version` unknown. The computed form is accepted
-only when structured Terraform configuration metadata binds that expression exactly to
-`aws_lambda_function.broker.version`, the same plan contains the exact publishing
-broker update, and no conflicting concrete target or other unknown alias field exists.
-Post-apply verification must read the actual broker configuration and reviewed alias
-and prove that the alias resolves to the published broker version.
+For the recovery plan delta, the reviewed alias target must be concrete and equal the
+attested configured version. A computed `aws_lambda_function.broker.version` reference
+is insufficient because the plan cannot prove whether the publish produces the attested
+version or a later one. Post-apply verification must still read the actual broker
+configuration and reviewed alias and prove that the alias resolves to the published
+broker version.
 
 ## Historical failure coverage
 

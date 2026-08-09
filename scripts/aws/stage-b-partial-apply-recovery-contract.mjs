@@ -154,14 +154,6 @@ export function assertVerifiedStageBRecovery({ refreshReport, refreshReportBytes
   return { refreshReport: parsedRefresh, classification: parsedClassification, attestation: parsedAttestation, signature: parsedSignature, attestationSha256, signatureSha256, classificationSha256, refreshReportSha256, ...verified, derivedClassification: derived };
 }
 
-function rootConfigurationResource(plan, address, type) {
-  const resources = plan?.configuration?.root_module?.resources;
-  if (!Array.isArray(resources)) throw new Error("Recovery plan Terraform configuration metadata is missing.");
-  const matches = resources.filter((resource) => resource?.address === address);
-  if (matches.length !== 1 || matches[0]?.mode !== "managed" || matches[0]?.type !== type) throw new Error(`Recovery plan configuration identity is not the exact root-managed ${address}.`);
-  return matches[0];
-}
-
 function assertAliasUnknownShape(change, computed) {
   const unknown = change.change?.after_unknown;
   if (unknown === undefined) {
@@ -178,22 +170,18 @@ function assertAliasUnknownShape(change, computed) {
   if (!computed && unknown.function_version === true) throw new Error("Recovery plan alias target is both concrete and unknown.");
 }
 
-function assertComputedAliasTarget(plan, alias) {
-  const after = alias.change?.after || {};
-  if (after.function_version !== undefined && after.function_version !== null) throw new Error("Recovery plan computed alias target contains a conflicting concrete function version.");
-  assertAliasUnknownShape(alias, true);
-  const configuration = rootConfigurationResource(plan, STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS, "aws_lambda_alias");
-  const references = configuration.expressions?.function_version?.references;
-  const expectedReferences = ["aws_lambda_function.broker", "aws_lambda_function.broker.version"];
-  if (!Array.isArray(references) || !exact([...references].sort(), [...expectedReferences].sort())) throw new Error("Recovery plan alias function_version is not bound exactly to aws_lambda_function.broker.version.");
-  const brokerChanges = (plan.resource_changes || []).filter((change) => change?.address === "aws_lambda_function.broker");
-  if (brokerChanges.length !== 1) throw new Error("Recovery plan computed alias target requires exactly one broker function update.");
-  const broker = brokerChanges[0];
-  if (broker.mode !== "managed" || broker.module) throw new Error("Recovery plan broker update is not root-managed.");
+function assertConcreteRecoveryBrokerVersion(plan, current) {
+  const brokers = (plan.resource_changes || []).filter((change) => change?.address === "aws_lambda_function.broker");
+  if (brokers.length > 1) throw new Error("Recovery plan contains duplicate broker function updates.");
+  if (brokers.length === 0 || exact(brokers[0].change?.actions, ["no-op"])) return;
+  const broker = brokers[0];
+  if (broker.mode !== "managed" || broker.module || broker.type !== "aws_lambda_function" || !exact(broker.change?.actions, ["update"])) {
+    throw new Error("Recovery plan broker publication is not the exact root-managed update.");
+  }
   assertStageBBrokerFunctionUpdate(broker);
-  if (broker.change?.after_unknown?.version !== true) throw new Error("Recovery plan broker update does not prove a computed published version.");
-  const brokerConfiguration = rootConfigurationResource(plan, "aws_lambda_function.broker", "aws_lambda_function");
-  if (brokerConfiguration.expressions?.publish?.constant_value !== true) throw new Error("Recovery plan broker publish behavior is not enabled by the exact Terraform configuration.");
+  if (broker.change?.after?.version !== current.configuredDesiredVersion || broker.change?.after_unknown?.version === true) {
+    throw new Error("Recovery plan broker publication does not prove the exact attested desired version.");
+  }
 }
 
 export function assertRecoveryPlanDelta(plan, attestation) {
@@ -207,8 +195,9 @@ export function assertRecoveryPlanDelta(plan, attestation) {
   if (hasConcreteTarget) {
     assertAliasUnknownShape(alias, false);
     if (afterVersion !== current.configuredDesiredVersion) throw new Error("Recovery plan must contain the exact attested alias live-to-configured update.");
+    assertConcreteRecoveryBrokerVersion(plan, current);
   } else {
-    assertComputedAliasTarget(plan, alias);
+    throw new Error("Recovery plan computed alias target cannot prove the exact attested desired version.");
   }
   return { address: alias.address, action: "update", beforeVersion: current.liveVersion, afterVersion: current.configuredDesiredVersion };
 }

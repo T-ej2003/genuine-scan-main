@@ -119,8 +119,8 @@ function configuration() {
 
 function brokerChanges() {
   const policy = { address: "aws_iam_policy.broker", mode: "managed", type: "aws_iam_policy", change: { actions: ["update"], before: { policy: "old" }, after: {}, after_unknown: { policy: true }, before_sensitive: {}, after_sensitive: {} } };
-  const before = { architectures: ["x86_64"], environment: [{ variables: Object.fromEntries(envNames.map((name) => [name, `old-${name}`])) }], filename: "old.zip", last_modified: "old", qualified_arn: "old", qualified_invoke_arn: "old", version: 2 };
-  const after = { architectures: ["x86_64"], environment: [{}], filename: "new.zip" };
+  const before = { architectures: ["x86_64"], environment: [{ variables: Object.fromEntries(envNames.map((name) => [name, `old-${name}`])) }], filename: "old.zip", source_code_hash: "old-source-code-hash", last_modified: "old", qualified_arn: "old", qualified_invoke_arn: "old", version: 2 };
+  const after = { architectures: ["x86_64"], environment: [{}], filename: "new.zip", source_code_hash: "new-source-code-hash" };
   const lambda = { address: "aws_lambda_function.broker", mode: "managed", type: "aws_lambda_function", change: { actions: ["update"], before, after, after_unknown: { architectures: [false], environment: [{ variables: true }], last_modified: true, qualified_arn: true, qualified_invoke_arn: true, version: true }, before_sensitive: { architectures: [false] }, after_sensitive: { architectures: [false] } } };
   const alias = { address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "2", routing_config: [] }, after: { routing_config: [] }, after_unknown: { function_version: true, routing_config: [] }, before_sensitive: { routing_config: [] }, after_sensitive: { routing_config: [] } } };
   return [policy, lambda, alias];
@@ -252,7 +252,7 @@ test("real-plan-shaped semantic census has zero unclassified semantics", () => {
   assert.deepEqual(census.counts, {
     nonNoopResources: 15,
     resourceActions: 15,
-    changedPaths: 114,
+    changedPaths: 115,
     afterUnknownPaths: 77,
     replacePaths: 12,
     configurationReferences: 117,
@@ -601,6 +601,17 @@ test("computed alias requires same-plan published broker and exact configuration
   mutate((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.actions = ["no-op"]; }, /UNCLASSIFIED_(?:COMPUTED_CHANGE|RESOURCE_ACTION)/);
   mutate((value) => { value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_function.broker").expressions.publish.constant_value = false; }, /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
   mutateRecovery((value) => { const alias = value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed"); alias.change.after.function_version = "wrong"; delete alias.change.after_unknown.function_version; });
+});
+
+test("broker publish updates admit only the source-bound package digest change", () => {
+  const census = assertStageBPlanSemanticCompleteness(plan());
+  const broker = census.resources.find((item) => item.address === "aws_lambda_function.broker");
+  assert.deepEqual(broker.changedPaths.find(({ path }) => path === "source_code_hash"), {
+    path: "source_code_hash", classification: "CONFIGURATION_BOUND_PACKAGE_DIGEST",
+  });
+  const invalid = structuredClone(plan());
+  invalid.configuration.root_module.resources.find((item) => item.address === "aws_lambda_function.broker").expressions.source_code_hash = ref(["var.other_package_path"]);
+  assert.throws(() => assertStageBPlanSemanticCompleteness(invalid), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
 });
 
 test("semantic census feeds the normal offline action classifier without widening recovery", () => {

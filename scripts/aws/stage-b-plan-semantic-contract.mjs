@@ -17,6 +17,7 @@ export const STAGE_B_PLAN_SEMANTIC_CLASSES = Object.freeze([
   "REVIEWED_COMPUTED_CHANGE",
   "REVIEWED_PROVIDER_NORMALIZATION",
   "REVIEWED_REPLACEMENT_TRIGGER",
+  "CONFIGURATION_BOUND_PACKAGE_DIGEST",
   "DIAGNOSTIC_ONLY",
 ]);
 
@@ -77,6 +78,7 @@ const BROKER_POLICY_UNKNOWN_PATHS = new Set(["policy"]);
 const BROKER_FUNCTION_CHANGED_PATHS = new Set([
   "environment[0].variables",
   "filename",
+  "source_code_hash",
   "last_modified",
   "qualified_arn",
   "qualified_invoke_arn",
@@ -439,6 +441,7 @@ function classifyChangedPath(change, path) {
     throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
   }
   if (change.address === "aws_lambda_function.broker" && BROKER_FUNCTION_CHANGED_PATHS.has(path)) {
+    if (path === "source_code_hash") return "CONFIGURATION_BOUND_PACKAGE_DIGEST";
     return ["last_modified", "qualified_arn", "qualified_invoke_arn", "version"].includes(path)
       ? "DIAGNOSTIC_ONLY" : "REVIEWED_CONCRETE_CHANGE";
   }
