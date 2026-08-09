@@ -273,7 +273,7 @@ test("the release wrapper has no ECR read or mutation path", () => {
 });
 
 test("exact production-shaped plan variables and all twelve task definitions bind to signed evidence", () => {
-  const bindings = assertStageBPlanImageEvidenceBinding({ plan: imagePlan(), imageEvidence: reportFixture() });
+  const bindings = assertStageBPlanImageEvidenceBinding({ plan: imagePlan(), imageEvidence: reportFixture(), planProfile: "BASELINE" });
   assert.deepEqual(bindings, {
     backend: { repository: "mscqr-backend", digest: `sha256:${"1".repeat(64)}`, imageReference: planReferences.backend },
     worker: { repository: "mscqr-worker", digest: `sha256:${"2".repeat(64)}`, imageReference: planReferences.worker },
@@ -286,29 +286,47 @@ test("exact production-shaped plan variables and all twelve task definitions bin
 test("every plan variable must equal its signed repository and digest", () => {
   for (const variable of ["backend_image", "worker_image", "executor_image", "canary_image", "read_only_canary_image"]) {
     const plan = imagePlan({ variables: { [variable]: { value: `${planReferences.backend}:wrong` } } });
-    assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan, imageEvidence: reportFixture() }), new RegExp(`Terraform image variable ${variable}`));
+    assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan, imageEvidence: reportFixture(), planProfile: "BASELINE" }), new RegExp(`Terraform image variable ${variable}`));
   }
   for (const value of [
     "mscqr-backend:latest",
     `000000000000.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"1".repeat(64)}`,
     `368992683803.dkr.ecr.us-east-1.amazonaws.com/mscqr-backend@sha256:${"1".repeat(64)}`,
   ]) {
-    assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: imagePlan({ variables: { backend_image: { value } } }), imageEvidence: reportFixture() }), /Terraform image variable backend_image/);
+    assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: imagePlan({ variables: { backend_image: { value } } }), imageEvidence: reportFixture(), planProfile: "BASELINE" }), /Terraform image variable backend_image/);
   }
 });
 
 test("missing or duplicate signed image records fail closed", () => {
   const missing = reportFixture(); missing.images = missing.images.filter((image) => image.service !== "worker");
-  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: imagePlan(), imageEvidence: missing }), /exactly four image records/);
+  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: imagePlan(), imageEvidence: missing, planProfile: "BASELINE" }), /exactly four image records/);
   const duplicate = reportFixture(); duplicate.images.push({ ...duplicate.images[0] });
-  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: imagePlan(), imageEvidence: duplicate }), /exactly four image records/);
+  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: imagePlan(), imageEvidence: duplicate, planProfile: "BASELINE" }), /exactly four image records/);
 });
 
 test("planned current task-definition images must match, while retained history may remain old", () => {
   const changed = imagePlan();
   changed.resource_changes.find((change) => change.address.includes('executor["full-rls-verification"]')).change.after.container_definitions = JSON.stringify([{ image: planReferences.canary }]);
-  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: changed, imageEvidence: reportFixture() }), /task-definition image does not match/);
+  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: changed, imageEvidence: reportFixture(), planProfile: "BASELINE" }), /task-definition image does not match/);
   const retained = imagePlan();
   retained.resource_changes.push({ address: 'aws_ecs_task_definition.executor_retained["old-full-rls-verification"]', type: "aws_ecs_task_definition", change: { actions: ["no-op"], after: { family: "mscqr-production-full-rls-green-full-rls-verification", container_definitions: JSON.stringify([{ image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"9".repeat(64)}` }]) } } });
-  assert.doesNotThrow(() => assertStageBPlanImageEvidenceBinding({ plan: retained, imageEvidence: reportFixture() }));
+  assert.doesNotThrow(() => assertStageBPlanImageEvidenceBinding({ plan: retained, imageEvidence: reportFixture(), planProfile: "BASELINE" }));
+});
+
+test("recovery alias-only image binding requires zero current task definitions while retaining image evidence", () => {
+  const recoveryPlan = imagePlan({ resource_changes: [] });
+  assert.doesNotThrow(() => assertStageBPlanImageEvidenceBinding({ plan: recoveryPlan, imageEvidence: reportFixture(), planProfile: "RECOVERY_ALIAS_ONLY" }));
+  const current = imagePlan({ resource_changes: [imagePlan().resource_changes[0]] });
+  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: current, imageEvidence: reportFixture(), planProfile: "RECOVERY_ALIAS_ONLY" }), /forbids current task-definition addresses/);
+  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: recoveryPlan, imageEvidence: reportFixture(), planProfile: "UNKNOWN_PROFILE" }), /unsupported/);
+  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: recoveryPlan, imageEvidence: reportFixture() }), /unsupported/);
+});
+
+test("normal image binding rejects zero or incomplete current task-definition sets", () => {
+  for (const plan of [
+    imagePlan({ resource_changes: [] }),
+    imagePlan({ resource_changes: imagePlan().resource_changes.slice(0, -1) }),
+  ]) {
+    assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan, imageEvidence: reportFixture(), planProfile: "BASELINE" }), /exactly the twelve current task-definition addresses/);
+  }
 });

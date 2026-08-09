@@ -624,7 +624,7 @@ export function assertStageBPlan(plan, options = {}) {
   if (strictResourceContract) assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity });
   const resourceClassification = classifyStageBPlan(plan, { strict: strictResourceContract, terraformConfiguration, allowBrokerPolicyCreate: captureMode });
   const planSemanticCensus = requireSemanticCompleteness ? assertStageBPlanSemanticCompleteness(plan) : undefined;
-  const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence }) : undefined;
+  const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile: recoveryOnly ? "RECOVERY_ALIAS_ONLY" : resourceClassification.planProfile }) : undefined;
   if (recoveryOnly) {
     if (plan.variables?.stage_b_recovery_only?.value !== true) throw new Error("Recovery-only validation requires the explicit recovery-only plan variable.");
     if (!captureMode && requireReferenceAudit) assertRecoveryOnlyReferenceAuditBinding(plan, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now);

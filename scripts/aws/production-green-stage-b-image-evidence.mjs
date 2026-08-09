@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { APPROVED_PREFLIGHT_GENERATOR_ARNS } from "./validate-production-green-stage-b-permissions.mjs";
+import { STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBImagePublicationIdentity, publicationIdentitySha256, readStageBImagePublicationIdentity } from "./stage-b-image-publication-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
@@ -59,8 +60,9 @@ const taskDefinitionsFromPlan = (value, address) => {
   return definitions;
 };
 
-export function assertStageBPlanImageEvidenceBinding({ plan, imageEvidence } = {}) {
+export function assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile } = {}) {
   if (!plan || !imageEvidence) throw new Error("Stage B signed image evidence and Terraform plan are required for image binding.");
+  if (!STAGE_B_PLAN_PROFILES.includes(planProfile)) throw new Error(`Stage B image binding plan profile is unsupported: ${planProfile}`);
   const reportImages = new Map();
   if (!Array.isArray(imageEvidence.images) || imageEvidence.images.length !== Object.keys(SERVICES).length) throw new Error("Stage B signed image evidence must contain exactly four image records.");
   for (const image of imageEvidence.images) {
@@ -80,8 +82,12 @@ export function assertStageBPlanImageEvidenceBinding({ plan, imageEvidence } = {
   }
 
   const currentChanges = (plan.resource_changes || []).filter((change) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address));
-  const currentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
-  if (currentChanges.length !== currentAddresses.length || new Set(currentChanges.map((change) => change.address)).size !== currentAddresses.length) throw new Error("Stage B plan image binding requires exactly the twelve current task-definition addresses.");
+  if (planProfile === "RECOVERY_ALIAS_ONLY") {
+    if (currentChanges.length !== 0) throw new Error("RECOVERY_ALIAS_ONLY image binding forbids current task-definition addresses.");
+  } else {
+    const currentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
+    if (currentChanges.length !== currentAddresses.length || new Set(currentChanges.map((change) => change.address)).size !== currentAddresses.length) throw new Error("Stage B plan image binding requires exactly the twelve current task-definition addresses.");
+  }
   for (const change of currentChanges) {
     if (change.type !== "aws_ecs_task_definition") throw new Error(`Stage B current task-definition resource type is invalid: ${change.address}`);
     const actions = change.change?.actions || [];
