@@ -19,6 +19,11 @@ export const STAGE_B_REFRESH_ALLOWED_STATUSES = Object.freeze(["NO_CHANGES", "RE
 export const STAGE_B_TERRAFORM_PLAN_FORMAT_VERSION = "1.2";
 export const STAGE_B_TERRAFORM_MIN_VERSION = "1.6.0";
 export const STAGE_B_TERRAFORM_MAX_VERSION_EXCLUSIVE = "2.0.0";
+export const STAGE_B_SHARED_BINDING_FIELDS = Object.freeze([
+  "toolingSha", "toolingTreeSha256", "imageReleaseSha", "imageEvidenceCanonicalSha256",
+  "stageAInputSha256", "stageAStateBackupSha256", "stageAStateObject", "stageAStateLineage", "stageAStateSerial",
+  "stateLineage", "stateSerial", "stateBackupSha256", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "images",
+]);
 export const STAGE_B_REFRESH_ACQUISITION_FAILURES = Object.freeze([
   "PLAN_COMMAND_FAILED",
   "PLAN_FILE_MISSING",
@@ -298,4 +303,22 @@ export function assertStageBRefreshEvidence({ refreshReportPath, refreshReportSh
   for (const [key, value] of Object.entries(expected)) if (value !== undefined && report[key] !== value) throw new Error(`Stage B refresh evidence ${key} binding differs from the selected deployment.`);
   if (bindingReportSha256 && report.bindingReportSha256 !== bindingReportSha256) throw new Error("Stage B refresh evidence binding-report SHA256 differs from the selected report.");
   return report;
+}
+
+export function assertStageBRecoveryProvenance({ refreshReport, refreshReportSha256, observationBindingReport, observationBindingReportSha256, recoveryBindingReport, recoveryClassificationSha256, recoveryAttestationSha256 } = {}) {
+  requireObject(refreshReport, "Stage B refresh report");
+  requireObject(observationBindingReport, "Stage B observation binding report");
+  requireObject(recoveryBindingReport, "Stage B recovery binding report");
+  if (observationBindingReport.recoveryOnly !== false) throw new Error("Stage B refresh evidence requires the original non-recovery observation binding.");
+  if (recoveryBindingReport.recoveryOnly !== true) throw new Error("Stage B recovery planning requires the recovery binding report.");
+  if (!/^[a-f0-9]{64}$/.test(observationBindingReportSha256 || "") || refreshReport.bindingReportSha256 !== observationBindingReportSha256) throw new Error("Stage B refresh evidence is not bound to the selected observation binding report.");
+  if (refreshReport.tfvarsSha256 !== observationBindingReport.tfvarsSha256) throw new Error("Stage B refresh evidence is not bound to the selected observation tfvars.");
+  if (observationBindingReport.tfvarsSha256 === recoveryBindingReport.tfvarsSha256) throw new Error("Stage B recovery planning requires distinct observation and recovery tfvars bindings.");
+  if (recoveryBindingReport.recoveryRefreshReportSha256 !== refreshReportSha256) throw new Error("Stage B recovery binding is bound to a different refresh report.");
+  if (recoveryClassificationSha256 !== undefined && recoveryBindingReport.recoveryClassificationSha256 !== recoveryClassificationSha256) throw new Error("Stage B recovery binding is bound to a different recovery classification.");
+  if (recoveryAttestationSha256 !== undefined && recoveryBindingReport.recoveryAttestationSha256 !== recoveryAttestationSha256) throw new Error("Stage B recovery binding is bound to a different recovery attestation.");
+  for (const field of STAGE_B_SHARED_BINDING_FIELDS) {
+    if (!Object.hasOwn(observationBindingReport, field) || !Object.hasOwn(recoveryBindingReport, field) || !exactJson(observationBindingReport[field], recoveryBindingReport[field])) throw new Error(`Stage B observation and recovery binding ${field} differs.`);
+  }
+  return true;
 }
