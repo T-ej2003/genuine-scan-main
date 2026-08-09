@@ -8,6 +8,23 @@ const current = (overrides = {}) => ({ protectedSourceSha: "523817e71755616ed004
 const historical = (overrides = {}) => ({ protectedSourceSha: "0".repeat(40), terraformLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", preApplySerial: 76, failedMutation: { terraformAddress: "aws_lambda_alias.reviewed", awsService: "lambda", operation: "UpdateAlias", result: "FAILED", failureClass: "AUTHORIZATION", awsErrorClass: "AccessDeniedException", attemptedTargetVersion: "3" }, inputs: ["savedPlan", "planJson", "logicalPlan", "planApproved", "planBoundPermission", "applyStdout", "applyStderr"].map((name) => ({ name, path: `/private/tmp/${name}`, sha256: digest, trustClassification: name.startsWith("apply") ? "RAW_FORENSIC" : "STRUCTURED_VERIFIED", required: true })), ...overrides });
 const assertion = { historicalFailedTarget: "3", stateTarget: "3", liveTarget: "2", onlyFunctionVersionChanged: true, noAdditionalManagedDrift: true, authorizesPlan: false, authorizesApply: false, failureClass: "AUTHORIZATION", operation: "lambda:UpdateAlias" };
 const report = () => createRecoveryAttestation({ generatedAt: new Date().toISOString(), producerCallerArn: "arn:aws:iam::368992683803:root", historicalObservedEvidence: historical(), currentObservedEvidence: current(), reviewedRecoveryAssertion: assertion });
+const computedPlan = (overrides = {}) => {
+  const alias = {
+    address: "aws_lambda_alias.reviewed", mode: "managed", module: null, type: "aws_lambda_alias",
+    change: { actions: ["update"], before: { function_version: "2" }, after: {}, after_unknown: { function_version: true, routing_config: [] }, ...overrides.aliasChange },
+  };
+  const broker = {
+    address: "aws_lambda_function.broker", mode: "managed", module: null, type: "aws_lambda_function",
+    change: { actions: ["update"], before: { function_name: "mscqr-production-rls-approval-broker", filename: "old.zip", version: "3" }, after: { function_name: "mscqr-production-rls-approval-broker", filename: "new.zip" }, after_unknown: { version: true }, ...overrides.brokerChange },
+  };
+  return {
+    resource_changes: overrides.resource_changes || [alias, broker],
+    configuration: { root_module: { resources: overrides.configurationResources || [
+      { address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", expressions: { function_version: { references: ["aws_lambda_function.broker.version", "aws_lambda_function.broker"] } } },
+      { address: "aws_lambda_function.broker", mode: "managed", type: "aws_lambda_function", expressions: { publish: { constant_value: true } } },
+    ] } },
+  };
+};
 
 const recoveryBundle = () => {
   const refreshReport = { status: "RESOURCE_DRIFT", resourceChanges: { nonNoOp: 1, changes: [{ address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", actions: ["update"] }] } };
@@ -69,4 +86,51 @@ test("central recovery verification binds every raw byte hash before trusting fi
   assert.throws(() => assertVerifiedStageBRecovery({ ...bundle, expectedSourceSha: "f".repeat(40), expectedLineage: current().terraformLineage, expectedSerial: current().terraformSerial, verifySignature: verify }), /binding|identity|source/i);
 });
 
-test("recovery plan requires exact alias 2 to 3 update", () => { const value = report(); assert.deepEqual(assertRecoveryPlanDelta({ resource_changes: [{ address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "2" }, after: { function_version: "3" } } }] }, value), { address: "aws_lambda_alias.reviewed", action: "update", beforeVersion: "2", afterVersion: "3" }); assert.throws(() => assertRecoveryPlanDelta({ resource_changes: [] }, value), /exact attested/); assert.throws(() => assertRecoveryPlanDelta({ resource_changes: [{ address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "1" }, after: { function_version: "3" } } }] }, value), /exact attested/); });
+test("recovery plan rejects a computed alias target without exact version proof", () => {
+  const value = report();
+  assert.throws(() => assertRecoveryPlanDelta(computedPlan(), value), /exact attested desired version/);
+  assert.throws(() => assertRecoveryPlanDelta(computedPlan({ brokerChange: { before: { version: "4" } } }), value), /exact attested desired version/);
+  const concrete = computedPlan({ aliasChange: { after: { function_version: "3" }, after_unknown: { routing_config: [] } }, brokerChange: { after: { function_name: "mscqr-production-rls-approval-broker", filename: "new.zip", version: "3" }, after_unknown: {} } });
+  assert.deepEqual(assertRecoveryPlanDelta(concrete, value), { address: "aws_lambda_alias.reviewed", action: "update", beforeVersion: "2", afterVersion: "3" });
+  assert.throws(() => assertRecoveryPlanDelta(computedPlan({ aliasChange: { after: { function_version: "3" }, after_unknown: { routing_config: [] } } }), value), /exact attested desired version/);
+  assert.throws(() => assertRecoveryPlanDelta(computedPlan({ aliasChange: { after: { function_version: "3" }, after_unknown: { routing_config: [] } }, brokerChange: { after: { function_name: "mscqr-production-rls-approval-broker", filename: "new.zip", version: "4" }, after_unknown: {} } }), value), /exact attested desired version/);
+  const existingVersion = computedPlan({
+    aliasChange: { after: { function_version: "3" }, after_unknown: { routing_config: [] } },
+    brokerChange: { actions: ["no-op"], after: { function_name: "mscqr-production-rls-approval-broker", filename: "old.zip", version: "3" }, after_unknown: {} },
+  });
+  assert.deepEqual(assertRecoveryPlanDelta(existingVersion, value), { address: "aws_lambda_alias.reviewed", action: "update", beforeVersion: "2", afterVersion: "3" });
+});
+
+test("computed alias target rejects missing, wrong, duplicate, or indirect configuration references", () => {
+  const value = report();
+  const cases = [
+    { configurationResources: [{ address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", expressions: { function_version: {} } }, { address: "aws_lambda_function.broker", mode: "managed", type: "aws_lambda_function", expressions: { publish: { constant_value: true } } }] },
+    { configurationResources: [{ address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", expressions: { function_version: { references: ["aws_lambda_function.other", "aws_lambda_function.other.version"] } } }, { address: "aws_lambda_function.broker", mode: "managed", type: "aws_lambda_function", expressions: { publish: { constant_value: true } } }] },
+    { configurationResources: [{ address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", expressions: { function_version: { references: ["var.broker_version"] } } }, { address: "aws_lambda_function.broker", mode: "managed", type: "aws_lambda_function", expressions: { publish: { constant_value: true } } }] },
+    { configurationResources: [{ address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", expressions: { function_version: { references: ["aws_lambda_function.broker", "aws_lambda_function.broker.version", "local.target"] } } }, { address: "aws_lambda_function.broker", mode: "managed", type: "aws_lambda_function", expressions: { publish: { constant_value: true } } }] },
+  ];
+  for (const overrides of cases) assert.throws(() => assertRecoveryPlanDelta(computedPlan(overrides), value), /exact attested desired version/);
+});
+
+test("computed alias target rejects an absent, non-update, non-root, or non-publishing broker", () => {
+  const value = report();
+  for (const brokerChange of [null, { actions: ["no-op"] }, { actions: ["create"] }, { actions: ["delete", "create"] }, { actions: ["update"], after: { function_name: "mscqr-production-rls-approval-broker", filename: "new.zip", description: "unexpected" }, after_unknown: { version: true } }, { actions: ["update"], after: { function_name: "mscqr-production-rls-approval-broker", filename: "new.zip" }, after_unknown: {} }]) {
+    const plan = computedPlan({ resource_changes: brokerChange === null ? [computedPlan().resource_changes[0]] : [computedPlan().resource_changes[0], { ...computedPlan().resource_changes[1], change: { ...computedPlan().resource_changes[1].change, ...brokerChange } }] });
+    assert.throws(() => assertRecoveryPlanDelta(plan, value), /exact attested desired version/);
+  }
+  const nonRoot = computedPlan(); nonRoot.resource_changes[1].module = "module.broker";
+  assert.throws(() => assertRecoveryPlanDelta(nonRoot, value), /exact attested desired version/);
+  const unpublished = computedPlan({ configurationResources: [{ address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", expressions: { function_version: { references: ["aws_lambda_function.broker.version", "aws_lambda_function.broker"] } } }, { address: "aws_lambda_function.broker", mode: "managed", type: "aws_lambda_function", expressions: { publish: { constant_value: false } } }] });
+  assert.throws(() => assertRecoveryPlanDelta(unpublished, value), /publish|exact attested desired version/);
+});
+
+test("computed alias target rejects conflicting concrete values, wrong target, wrong action, and other unknown fields", () => {
+  const value = report();
+  for (const aliasChange of [
+    { after: { function_version: "3" }, after_unknown: { function_version: true, routing_config: [] } },
+    { after: { function_version: "4" }, after_unknown: { routing_config: [] } },
+    { actions: ["create"] },
+    { after: {}, after_unknown: { function_version: true, description: true } },
+  ]) assert.throws(() => assertRecoveryPlanDelta(computedPlan({ aliasChange }), value), /exact|unknown/);
+  assert.throws(() => assertRecoveryPlanDelta(computedPlan(), null), /Current recovery evidence/);
+});

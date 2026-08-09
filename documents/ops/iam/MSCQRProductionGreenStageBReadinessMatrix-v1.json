@@ -327,6 +327,69 @@
       "remediation": null
     },
     {
+      "id": "PLAN-SEM-01",
+      "phase": "PLAN_CLASSIFICATION",
+      "requirement": "Every non-noop production-plan action, changed path, after_unknown path, replace_path, and trust-relevant Terraform configuration reference is explicitly classified by the Stage B semantic contract.",
+      "sourceOfTruth": "scripts/aws/stage-b-plan-semantic-contract.mjs",
+      "producer": "assertStageBPlanSemanticCompleteness",
+      "consumer": "plan capture, approval, permission, closure, validator, verify-only, and apply precheck",
+      "inputs": ["Terraform show JSON", "structured Terraform configuration metadata", "source-controlled semantic matrix"],
+      "outputs": ["deterministic plan semantic census", "zero-unclassified counters", "zero provider-fidelity counters", "provider nested-block shape fidelity", "complete typed representation manifest", "reviewed broker publish code metadata"],
+      "providerSchemaSnapshot": {
+        "source": "registry.terraform.io/hashicorp/aws",
+        "version": "6.56.0",
+        "contract": "scripts/aws/stage-b-provider-semantic-snapshot.mjs",
+        "schemaCommand": "terraform providers schema -json",
+        "schemaJsonSha256": "0d4948a8af7ecbba0655f9b5b4f4f339eb70c4c9c98117a9079c68ecd4620fb1",
+        "providerBinarySha256": "9a5d52a253efb9c223e2f709749ed8b6db0d6e8b5710e6eabfed8de7b2a159fd"
+      },
+      "fidelityCounters": ["unrepresentedSupportedProfiles", "unfaithfulSupportedProfileFixtures", "unfaithfulProviderComputedFields", "missingTypedRepresentationClassifications"],
+      "dependencyComputedPaths": ["aws_iam_policy.broker.policy", "aws_lambda_function.broker.environment[0].variables"],
+      "identity": "exact non-noop root-managed resource, address, action, path, and reference",
+      "freshness": "same authoritative plan and protected source bindings",
+      "hashBinding": "plan JSON, canonical plan, and saved-plan downstream bindings",
+      "signatureBinding": "downstream approval, permission, and recovery signatures",
+      "expectedResourceActions": "BASELINE_INITIAL_CREATE: exact twelve ECS creates plus exact broker policy/function/alias creates; ROLLOVER_RECOVERY: exact twelve ECS rollovers plus exact broker policy/function/alias updates; NO_CHANGE_OR_APPEND_ONLY_RETRY: current task-definition create/no-op mix with broker no-op",
+      "supportedProfiles": [
+        {
+          "profile": "BASELINE_INITIAL_CREATE",
+          "ecsActions": [["create"]],
+          "brokerPolicyActions": [["create"]],
+          "brokerFunctionActions": [["create"]],
+          "brokerAliasActions": [["create"]],
+          "recoveryRequired": false,
+          "fixture": "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json",
+          "zeroUnclassified": true
+        },
+        {
+          "profile": "ROLLOVER_RECOVERY",
+          "ecsActions": [["create", "delete"], ["delete", "create"]],
+          "brokerPolicyActions": [["update"]],
+          "brokerFunctionActions": [["update"]],
+          "brokerAliasActions": [["update"]],
+          "recoveryRequired": true,
+          "fixture": "scripts/tests/production-green-stage-b-plan-semantic.test.mjs",
+          "zeroUnclassified": true
+        },
+        {
+          "profile": "NO_CHANGE_OR_APPEND_ONLY_RETRY",
+          "ecsActions": [["create"], ["no-op"]],
+          "brokerPolicyActions": [["no-op"]],
+          "brokerFunctionActions": [["no-op"]],
+          "brokerAliasActions": [["no-op"]],
+          "recoveryRequired": false,
+          "fixture": "scripts/tests/production-green-stage-b-plan-semantic.test.mjs",
+          "zeroUnclassified": true
+        }
+      ],
+      "failClosedBehavior": "PLAN_UNEXPECTED with the exact unclassified path",
+      "testCoverage": "baseline production-shaped initial-create census including the full broker profile, recovery-shaped rollover census, no-op/append-only retry census, and one-semantic-element mutation matrix",
+      "ciCoverage": "quality-gate.yml -> stage-b:deployment-closure:pull-request -> npm run test:production-green-stage-b-control-plane",
+      "implementationStatus": "SATISFIED",
+      "gap": null,
+      "remediation": null
+    },
+    {
       "id": "PERM-01",
       "phase": "PERMISSION",
       "requirement": "Permission manifest allows ECS RegisterTaskDefinition for exact rotations while retaining the explicit no-Deregister boundary.",

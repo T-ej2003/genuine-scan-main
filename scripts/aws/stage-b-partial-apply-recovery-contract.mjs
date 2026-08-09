@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { canonicalJson, STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { assertStageBBrokerFunctionUpdate } from "./stage-b-deployment-contract.mjs";
 import { assertStageBPrivateFile, assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 
@@ -153,12 +154,51 @@ export function assertVerifiedStageBRecovery({ refreshReport, refreshReportBytes
   return { refreshReport: parsedRefresh, classification: parsedClassification, attestation: parsedAttestation, signature: parsedSignature, attestationSha256, signatureSha256, classificationSha256, refreshReportSha256, ...verified, derivedClassification: derived };
 }
 
+function assertAliasUnknownShape(change, computed) {
+  const unknown = change.change?.after_unknown;
+  if (unknown === undefined) {
+    if (computed) throw new Error("Recovery plan computed alias target is missing after_unknown.function_version.");
+    return;
+  }
+  if (!unknown || typeof unknown !== "object" || Array.isArray(unknown)) throw new Error("Recovery plan alias unknown-value metadata is malformed.");
+  for (const [field, value] of Object.entries(unknown)) {
+    if (field === "function_version" && value === true) continue;
+    if (field === "routing_config" && exact(value, [])) continue;
+    throw new Error(`Recovery plan alias contains an unreviewed unknown field: ${field}.`);
+  }
+  if (computed && unknown.function_version !== true) throw new Error("Recovery plan computed alias target is not explicitly unknown.");
+  if (!computed && unknown.function_version === true) throw new Error("Recovery plan alias target is both concrete and unknown.");
+}
+
+function assertConcreteRecoveryBrokerVersion(plan, current) {
+  const brokers = (plan.resource_changes || []).filter((change) => change?.address === "aws_lambda_function.broker");
+  if (brokers.length > 1) throw new Error("Recovery plan contains duplicate broker function updates.");
+  if (brokers.length === 0 || exact(brokers[0].change?.actions, ["no-op"])) return;
+  const broker = brokers[0];
+  if (broker.mode !== "managed" || broker.module || broker.type !== "aws_lambda_function" || !exact(broker.change?.actions, ["update"])) {
+    throw new Error("Recovery plan broker publication is not the exact root-managed update.");
+  }
+  assertStageBBrokerFunctionUpdate(broker);
+  if (broker.change?.after?.version !== current.configuredDesiredVersion || broker.change?.after_unknown?.version === true) {
+    throw new Error("Recovery plan broker publication does not prove the exact attested desired version.");
+  }
+}
+
 export function assertRecoveryPlanDelta(plan, attestation) {
   const current = assertCurrentEvidence(attestation?.currentObservedEvidence);
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
-  const alias = changes.find((change) => change?.address === current.terraformAddress);
-  if (!alias || !exact(alias.change?.actions, ["update"]) || String(alias.change?.before?.function_version || "") !== current.liveVersion || String(alias.change?.after?.function_version || "") !== current.configuredDesiredVersion) throw new Error("Recovery plan must contain the exact attested alias live-to-configured update.");
-  if (changes.some((change) => change?.address === current.terraformAddress && (change.type !== current.resourceType || change.mode === "data" || change.module))) throw new Error("Recovery plan alias identity is not root-managed.");
+  const aliases = changes.filter((change) => change?.address === current.terraformAddress);
+  const alias = aliases[0];
+  if (aliases.length !== 1 || !alias || !exact(alias.change?.actions, ["update"]) || alias.mode !== "managed" || alias.module || alias.type !== current.resourceType || alias.change?.before?.function_version !== current.liveVersion) throw new Error("Recovery plan must contain the exact attested alias live-to-configured update.");
+  const afterVersion = alias.change?.after?.function_version;
+  const hasConcreteTarget = afterVersion !== undefined && afterVersion !== null;
+  if (hasConcreteTarget) {
+    assertAliasUnknownShape(alias, false);
+    if (afterVersion !== current.configuredDesiredVersion) throw new Error("Recovery plan must contain the exact attested alias live-to-configured update.");
+    assertConcreteRecoveryBrokerVersion(plan, current);
+  } else {
+    throw new Error("Recovery plan computed alias target cannot prove the exact attested desired version.");
+  }
   return { address: alias.address, action: "update", beforeVersion: current.liveVersion, afterVersion: current.configuredDesiredVersion };
 }
 

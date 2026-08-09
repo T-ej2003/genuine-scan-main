@@ -49,4 +49,19 @@ test("readiness matrix is complete and uses only the source-controlled status vo
     assert.ok(matrix.statusVocabulary.includes(row.implementationStatus), `${row.id} has unsupported status`);
     assert.ok(typeof row.requirement === "string" && row.requirement.length > 0);
   }
+  const semantic = matrix.rows.find((row) => row.id === "PLAN-SEM-01");
+  assert.equal(semantic?.implementationStatus, "SATISFIED");
+  assert.match(semantic?.ciCoverage || "", /test:production-green-stage-b-control-plane/);
+  assert.match(semantic?.expectedResourceActions || "", /exact twelve ECS creates/);
+  assert.match(semantic?.testCoverage || "", /baseline production-shaped initial-create/);
+  assert.deepEqual(semantic?.supportedProfiles?.map((profile) => profile.profile), [
+    "BASELINE_INITIAL_CREATE", "ROLLOVER_RECOVERY", "NO_CHANGE_OR_APPEND_ONLY_RETRY",
+  ]);
+  assert.ok(semantic.supportedProfiles.every((profile) => profile.zeroUnclassified === true));
+  assert.deepEqual(semantic.supportedProfiles[0].brokerPolicyActions, [["create"]]);
+  assert.deepEqual(semantic.supportedProfiles[0].brokerFunctionActions, [["create"]]);
+  assert.deepEqual(semantic.supportedProfiles[0].brokerAliasActions, [["create"]]);
+  assert.deepEqual(semantic.fidelityCounters, ["unrepresentedSupportedProfiles", "unfaithfulSupportedProfileFixtures", "unfaithfulProviderComputedFields", "missingTypedRepresentationClassifications"]);
+  assert.equal(semantic.providerSchemaSnapshot?.source, "registry.terraform.io/hashicorp/aws");
+  assert.equal(semantic.providerSchemaSnapshot?.version, "6.56.0");
 });

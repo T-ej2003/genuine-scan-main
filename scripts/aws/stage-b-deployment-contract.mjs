@@ -142,6 +142,11 @@ function normalizedPolicyShape(document) {
   return canonicalJson(actual.sort((left, right) => left.Sid.localeCompare(right.Sid)));
 }
 
+export function assertStageBBrokerPolicyDocument(document) {
+  normalizedPolicyShape(document);
+  return true;
+}
+
 function assertTerraformPolicySource(terraformConfiguration, strict) {
   if (!strict) return;
   if (typeof terraformConfiguration !== "string") throw new Error("Broker managed-policy source contract is missing.");
@@ -253,6 +258,40 @@ function assertStageBResourceIdentity(change, kind, key, strict) {
     assertKnown(after.qualifier, STAGE_B.brokerAliasQualifier, "Stage B Lambda permission qualifier", strict);
     assertKnown(after.principal, `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-release-deployer`, "Stage B Lambda permission principal", strict);
   }
+}
+
+const STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA = Object.freeze({
+  code_sha256: "unknown",
+  source_code_size: "unknown",
+  last_modified: "unknown",
+  qualified_arn: "unknown",
+  qualified_invoke_arn: "unknown",
+  version: "unknown",
+});
+export const STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS = Object.freeze(Object.keys(STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA));
+export const STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS = Object.freeze(
+  Object.entries(STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA)
+    .filter(([, representation]) => representation === "unknown")
+    .map(([field]) => field),
+);
+const brokerFunctionAllowedChangedFields = new Set([
+  "environment", "filename", "source_code_hash", ...STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
+]);
+
+export function assertStageBBrokerFunctionUpdate(change) {
+  if (change?.address !== "aws_lambda_function.broker" || change?.type !== "aws_lambda_function" || !exactActions(change.change?.actions, ["update"])) {
+    throw new Error("Stage B broker function must be the exact root-managed update.");
+  }
+  const before = change.change?.before || {};
+  const after = change.change?.after || {};
+  for (const value of [before.function_name, after.function_name]) if (value !== undefined && value !== STAGE_B.brokerFunctionArn.split(":function:")[1]) {
+    throw new Error("Stage B broker function identity is outside the exact contract.");
+  }
+  const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+  const unsupported = changed.find((key) => !brokerFunctionAllowedChangedFields.has(key));
+  if (unsupported) throw new Error(`Stage B broker function update contains an unsupported mutable field: ${unsupported}.`);
+  return true;
 }
 
 export function assertStageBPlanResourceChange(change, { strict = true, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false, plan } = {}) {

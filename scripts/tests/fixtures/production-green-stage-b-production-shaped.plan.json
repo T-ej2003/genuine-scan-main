@@ -274,11 +274,13 @@
           "cpu": "1024",
           "memory": "2048",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"backend\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -294,11 +296,13 @@
           "cpu": "512",
           "memory": "1024",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"worker\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -314,11 +318,13 @@
           "cpu": "1024",
           "memory": "2048",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"application-canary\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -334,11 +340,13 @@
           "cpu": "256",
           "memory": "512",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"read-only-canary\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -354,11 +362,13 @@
           "cpu": "1024",
           "memory": "2048",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -374,11 +384,13 @@
           "cpu": "1024",
           "memory": "2048",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -394,11 +406,13 @@
           "cpu": "1024",
           "memory": "2048",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -414,11 +428,13 @@
           "cpu": "1024",
           "memory": "2048",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -434,11 +450,13 @@
           "cpu": "1024",
           "memory": "2048",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -454,11 +472,13 @@
           "cpu": "1024",
           "memory": "2048",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -474,11 +494,13 @@
           "cpu": "1024",
           "memory": "2048",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {
@@ -494,11 +516,13 @@
           "cpu": "1024",
           "memory": "2048",
           "requires_compatibilities": ["FARGATE"],
+          "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
           "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
           "container_definitions": "[{\"name\":\"executor\",\"privileged\":false}]"
-        }
+        },
+        "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}
       }
     },
     {

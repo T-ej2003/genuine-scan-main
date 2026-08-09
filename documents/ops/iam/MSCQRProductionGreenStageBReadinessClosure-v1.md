@@ -76,6 +76,82 @@ refreshes or extends evidence.
 Authorization is derived from exact root-managed Terraform address, type, action, and
 field delta. Aggregate counts are diagnostics only.
 
+Before any plan evidence can enter the approval chain, `assertStageBPlanSemanticCompleteness`
+walks every non-no-op resource recursively. It records changed leaves, every true
+`after_unknown` and sensitive marker, replacement paths, and structured configuration
+references. Each item must be one of the explicit semantic classes in
+`scripts/aws/stage-b-plan-semantic-contract.mjs`; any unclassified path fails closed with
+its address and path. This is PLAN-SEM-01 and is required for `ONE_SHOT_DEPLOYMENT_READY`.
+The contract covers both supported twelve-address ECS profiles: `ECS_INITIAL_CREATE`
+(`actions=["create"]`) for a baseline deployment and `ECS_REVIEWED_ROLLOVER`
+(`actions=["create","delete"]` or `["delete","create"]`) for an approved immutable
+task-definition rotation. The baseline and recovery-shaped fixtures must each produce
+zero unclassified resource actions, changed paths, unknown paths, replacement paths, and
+configuration references.
+The baseline profile also requires an atomic broker policy/function/alias create shape;
+the rollover profile requires the corresponding exact all-update shape. Partial or mixed
+broker action shapes fail closed, while the no-change/append-only retry profile permits
+only the canonical broker no-op shape.
+The semantic census still records a computed alias reference diagnostically, but recovery
+authorization does not accept an unknown alias target: Terraform cannot prove that a new
+published broker version equals the attested desired version. Recovery therefore requires
+a concrete `aws_lambda_alias.reviewed.function_version` equal to the attested configured
+version; unknown values elsewhere are not accepted.
+
+PLAN-SEM-01 also requires provider-fidelity proof for every baseline-created resource.
+The independent Stage B security snapshot in
+`scripts/aws/stage-b-provider-semantic-snapshot.mjs` is derived from the locked
+`hashicorp/aws` 6.56.0 `terraform providers schema -json` output. Provider-computed
+identifiers and metadata are recognized only at explicitly recorded paths; they never
+authorize IAM content. Baseline fixtures must preserve Terraform's exact
+`after_unknown` and structural-placeholder representation. The provider-fidelity
+counters `unrepresentedSupportedProfiles`, `unfaithfulSupportedProfileFixtures`, and
+`unfaithfulProviderComputedFields` must all be zero.
+Typed shape recognition uses the separate complete four-resource universe in
+`scripts/aws/stage-b-provider-resource-shape-universe.mjs`, with extracted evidence
+captured in `scripts/tests/fixtures/stage-b-provider-6.56.0-resource-shape.json`.
+That universe is exhaustive for provider field/block names and nesting metadata, while
+the security snapshot and validators remain the authorization boundary. A schema-known
+field therefore passes representation only when its exact reviewed null/default/empty
+shape is present; a non-null or non-empty value still requires an independent security
+rule. The completeness test fails closed on missing or extra provider attributes/blocks.
+Provider nested-block shape is part of the same fidelity gate: the locked AWS 6.56.0
+`runtime_platform` block is a one-element list, so baseline ECS paths are explicitly
+indexed as `runtime_platform[0].operating_system_family` and
+`runtime_platform[0].cpu_architecture`; object-shaped or unindexed substitutes fail closed.
+The broker policy and Lambda environment are configuration-dependent values rather than
+provider-owned outputs: a fresh create may carry their exact unknown shape, while a
+partial-initial-apply retry may carry concrete values only after exact policy, variable,
+task-definition ARN, and structured-reference validation. Provider-owned identifiers remain
+mandatory unknowns in both cases.
+
+For the baseline broker Lambda create, the source-controlled representation contract also
+requires the provider's reviewed defaults `memory_size=128` and `package_type="Zip"`, the
+configured region and `tags_all` value, a concrete `source_code_hash`, and the exact
+optional-computed unknown `code_sha256`. These are separate categories: defaults and the
+package digest are not interchangeable with provider diagnostics, and no unlisted optional
+or optional-computed field is admitted.
+
+The semantic engine evaluates a typed Terraform representation envelope before security
+authorization. The envelope admits only the recorded categories in
+`STAGE_B_TYPED_REPRESENTATION_MANIFEST`: configured concrete values, dependency-computed
+unknown/resolved values, provider-computed unknowns, provider defaults/normalization, typed
+nulls, false markers, and exact empty structures. A false `after_unknown` marker is known
+and is never counted as an unknown path; a true leaf is the only unknown authorization
+input. Nulls and empty blocks are representation-valid only at their exact reviewed paths
+and grant no authority to a non-null or non-empty value. The counters
+`unmodeledTypedAfterFields`, `unmodeledAfterUnknownMarkers`, and `unmodeledEmptyStructures`
+are required to remain zero alongside the PLAN-SEM-01 counters, so provider or Terraform
+typed-shape drift identifies the exact resource/path and fails closed.
+
+The manifest is exhaustive over the locked provider shape universe for the four Stage B
+resource types. Every top-level attribute or block has exactly one reviewed representation
+disposition, including `NOT_EMITTED_IN_SUPPORTED_PROFILE`; an omitted disposition is a
+completeness failure, while a field marked not emitted is still rejected if it appears in a
+plan. Provider shape recognition does not authorize meaningful values. Broker publish
+metadata is limited to `code_sha256`, `source_code_size`, `last_modified`, `qualified_arn`,
+`qualified_invoke_arn`, and `version`; `source_code_hash` remains the package-identity input.
+
 ### Normal profiles
 
 - Clean/no-change: each allowlisted resource has its exact `[]`/`["no-op"]` equivalent;
@@ -85,7 +161,9 @@ field delta. Aggregate counts are diagnostics only.
   assertion, not a generalized allowance.
 - Image/Lambda rotation: the current source-controlled resource matrix permits only
   the exact resource-level create/update/no-op actions and the independently validated
-  immutable image/package deltas.
+  immutable image/package deltas. A broker publish update may change
+  `source_code_hash` with the exact `var.broker_package_path` reference and the existing
+  package-bytes/source-hash artifact proof; this does not permit other Lambda fields.
 - ECS rotation: the exact twelve root-managed `aws_ecs_task_definition` addresses
   (four candidate and eight executor families) may use `create,delete` or
   `delete,create` only when all of these are true:
@@ -119,6 +197,13 @@ replacements, another Lambda resource, or an unknown address. The original refre
 recovery verifier rechecks raw bytes, hashes, signature, source, lineage, serial,
 refresh SHA, resource identity, versions, and freshness at each security-sensitive
 consumer.
+
+For the recovery plan delta, the reviewed alias target must be concrete and equal the
+attested configured version. A computed `aws_lambda_function.broker.version` reference
+is insufficient because the plan cannot prove whether the publish produces the attested
+version or a later one. Post-apply verification must still read the actual broker
+configuration and reviewed alias and prove that the alias resolves to the published
+broker version.
 
 ## Historical failure coverage
 
