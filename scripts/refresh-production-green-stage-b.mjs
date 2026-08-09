@@ -19,24 +19,106 @@ const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex"
 export const STAGE_B_REFRESH_DIAGNOSTIC_SCHEMA_VERSION = 1;
 export const STAGE_B_REFRESH_DIAGNOSTIC_MAX_EXCERPT_CHARS = 4096;
 
-const SENSITIVE_ASSIGNMENT = /((?:["']?)(?:password|passwd|secret|token|access[_-]?key|private[_-]?key|session[_-]?token|aws_access_key_id|aws_secret_access_key|aws_session_token)(?:["']?\s*(?:=|:)\s*))((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*')|[^\s,;}]+)/gi;
-const PRIVATE_KEY = /-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]*PRIVATE KEY-----/gi;
 const AUTHORIZATION_VALUE = /((?:proxy-)?authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+/gi;
 const SECRET_ARN = /arn:aws:(?:secretsmanager|ssm):[^\s,;"']+/gi;
+const SENSITIVE_KEYS = new Set([
+  "password", "passwd", "secret", "token", "access_key", "access-key", "private_key", "private-key",
+  "session_token", "session-token", "aws_access_key_id", "aws_secret_access_key", "aws_session_token",
+]);
+const PRIVATE_KEY_LABELS = Object.freeze(["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "OPENSSH PRIVATE KEY"]);
+const privateKeyMarker = (boundary, label) => `-----${boundary} ${label}-----`;
+const PRIVATE_KEY_MARKERS = Object.freeze(PRIVATE_KEY_LABELS.map((label) => [privateKeyMarker("BEGIN", label), privateKeyMarker("END", label)]));
 
 const toBytes = (value) => Buffer.isBuffer(value) ? value : Buffer.from(String(value ?? ""));
-const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+function findPrivateKeyMarker(text, from, markerIndex) {
+  const [begin] = PRIVATE_KEY_MARKERS[markerIndex];
+  const position = text.indexOf(begin, from);
+  return position === -1 ? null : { position, markerIndex };
+}
+
+function redactPrivateKeyBlocks(text) {
+  let output = "";
+  let cursor = 0;
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const next = PRIVATE_KEY_MARKERS.map((_, markerIndex) => findPrivateKeyMarker(text, searchFrom, markerIndex))
+      .filter(Boolean)
+      .sort((left, right) => left.position - right.position)[0];
+    if (!next) break;
+    const [begin, end] = PRIVATE_KEY_MARKERS[next.markerIndex];
+    const contentStart = next.position + begin.length;
+    const endPosition = text.indexOf(end, contentStart);
+    const blockEnd = endPosition === -1 ? text.length : endPosition + end.length;
+    output += text.slice(cursor, next.position) + "[REDACTED_PRIVATE_KEY]";
+    cursor = blockEnd;
+    searchFrom = blockEnd;
+  }
+  return output + text.slice(cursor);
+}
+
+const isTokenCharacter = (value) => /[A-Za-z0-9_-]/.test(value);
+const isUnquotedValueDelimiter = (value) => /[\s,;}]/.test(value);
+
+function parseSensitiveAssignment(text, start) {
+  const initial = text[start];
+  const quotedKey = initial === "'" || initial === '"';
+  let keyEnd = start;
+  let key;
+  if (quotedKey) {
+    keyEnd += 1;
+    const closingQuote = text.indexOf(initial, keyEnd);
+    if (closingQuote === -1) return null;
+    key = text.slice(keyEnd, closingQuote);
+    keyEnd = closingQuote + 1;
+  } else {
+    if (start > 0 && isTokenCharacter(text[start - 1])) return null;
+    while (keyEnd < text.length && isTokenCharacter(text[keyEnd])) keyEnd += 1;
+    key = text.slice(start, keyEnd);
+  }
+  if (!SENSITIVE_KEYS.has(key.toLowerCase())) return null;
+  let valueStart = keyEnd;
+  while (/\s/.test(text[valueStart] || "")) valueStart += 1;
+  if (text[valueStart] !== "=" && text[valueStart] !== ":") return null;
+  valueStart += 1;
+  while (/\s/.test(text[valueStart] || "")) valueStart += 1;
+  let end = valueStart;
+  const quote = text[valueStart];
+  if (quote === "'" || quote === '"') {
+    end += 1;
+    while (end < text.length) {
+      if (text[end] === "\\") { end += 2; continue; }
+      if (text[end] === quote) { end += 1; break; }
+      end += 1;
+    }
+  } else {
+    while (end < text.length && !isUnquotedValueDelimiter(text[end])) end += 1;
+  }
+  return { start, valueStart, end };
+}
+
+function redactSensitiveAssignments(text) {
+  let output = "";
+  let cursor = 0;
+  let index = 0;
+  while (index < text.length) {
+    const parsed = parseSensitiveAssignment(text, index);
+    if (!parsed) { index += 1; continue; }
+    output += text.slice(cursor, parsed.valueStart) + "[REDACTED]";
+    cursor = parsed.end;
+    index = parsed.end;
+  }
+  return output + text.slice(cursor);
+}
 
 export function redactStageBRefreshDiagnostic(value, { maxChars = STAGE_B_REFRESH_DIAGNOSTIC_MAX_EXCERPT_CHARS, sensitiveValues = [] } = {}) {
   if (!Number.isInteger(maxChars) || maxChars < 1) throw new Error("Stage B refresh diagnostic excerpt limit is malformed.");
   let text = toBytes(value).toString("utf8").replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   const exactValues = [...new Set(sensitiveValues.filter((candidate) => typeof candidate === "string" && candidate.length > 0))].sort((left, right) => right.length - left.length);
-  for (const candidate of exactValues) text = text.replace(new RegExp(escapeRegExp(candidate), "g"), "[REDACTED]");
-  const redacted = text
-    .replace(PRIVATE_KEY, "[REDACTED_PRIVATE_KEY]")
+  for (const candidate of exactValues) text = text.split(candidate).join("[REDACTED]");
+  const redacted = redactSensitiveAssignments(redactPrivateKeyBlocks(text))
     .replace(SECRET_ARN, "[REDACTED_SECRET_REFERENCE]")
-    .replace(AUTHORIZATION_VALUE, "$1[REDACTED]")
-    .replace(SENSITIVE_ASSIGNMENT, "$1[REDACTED]");
+    .replace(AUTHORIZATION_VALUE, "$1[REDACTED]");
   return redacted.slice(0, maxChars) + (redacted.length > maxChars ? "\n[TRUNCATED]" : "");
 }
 
@@ -117,8 +199,8 @@ export function parseCli(argv = process.argv.slice(2)) {
   };
 }
 
-function assertPrivateNewOutput(outputPath) {
-  assertStageBArtifactPath({ artifactPath: outputPath, repositoryRoot: root, label: "Stage B refresh-only output", allowExisting: false });
+function assertPrivateNewOutput(outputPath, label = "Stage B refresh-only output") {
+  assertStageBArtifactPath({ artifactPath: outputPath, repositoryRoot: root, label, allowExisting: false });
   ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root, create: true });
 }
 
@@ -139,6 +221,8 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
   const backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: resolvedDataDir, backendMetadataPath: artifacts.backendMetadataPath, repositoryRoot: root });
   const { backendMetadataPath: expectedMetadataPath } = backendMetadata;
   assertPrivateNewOutput(artifacts.outputPath);
+  const diagnosticPath = path.join(path.dirname(artifacts.outputPath), "terraform-plan-diagnostic.json");
+  assertPrivateNewOutput(diagnosticPath, "Stage B refresh diagnostic");
   const validateTfvarsBinding = deps.validateTfvarsBinding || assertStageBTfvarsBinding;
   const bindingReport = validateTfvarsBinding({
     tfvarsPath: artifacts.tfvarsPath,
@@ -161,25 +245,26 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
   const runTerraform = deps.runTerraform || ((args, options) => spawnSync("terraform", args, { ...options, encoding: "utf8" }));
   const showPlanJson = deps.showPlanJson || ((planPath, options) => runStageBTerraformJson({ terraform: "terraform", args: [`-chdir=${terraformRoot}`, "show", "-json", planPath], cwd: options.cwd, env: options.env }));
   const refreshDirectory = fs.mkdtempSync(path.join(path.dirname(artifacts.outputPath), ".stage-b-refresh-"));
-  fs.chmodSync(refreshDirectory, 0o700);
-  const refreshPlanPath = path.join(refreshDirectory, "refresh-only.tfplan");
-  const argsForTerraform = [`-chdir=${terraformRoot}`, "plan", "-refresh-only", `-var-file=${artifacts.tfvarsPath}`, `-out=${refreshPlanPath}`, "-input=false", "-lock=true", "-no-color", "-detailed-exitcode"];
-  const result = runTerraform(argsForTerraform, { cwd: root, env: terraformEnv });
-  const acquisition = acquireStageBRefreshPlan({ planPath: refreshPlanPath, planResult: result, showPlanJson, showOptions: { cwd: root, env: terraformEnv }, repositoryRoot: root });
-  const diagnosticArtifact = acquisition.diagnosticCapture
-    ? writeDiagnostic(path.join(path.dirname(artifacts.outputPath), "terraform-plan-diagnostic.json"), createStageBRefreshDiagnostic({
-      failureClass: acquisition.acquisitionStatus,
-      failureReason: acquisition.acquisitionReason,
-      planCommandExitCode: acquisition.diagnosticCapture.planCommandExitCode,
-      showCommandExitCode: acquisition.diagnosticCapture.showCommandExitCode,
-      stdout: acquisition.diagnosticCapture.stdout,
-      stderr: acquisition.diagnosticCapture.stderr,
-    }))
-    : null;
-  const classification = acquisition.acquisitionStatus === "valid"
-    ? classifyStageBRefreshResult({ plan: acquisition.plan, terraformExitCode: result.status, terraformOutput: result.stdout || "", bindingReport, state, outputsSource: fs.readFileSync(path.join(root, terraformRoot, "outputs.tf"), "utf8") })
-    : { status: "MALFORMED_RESULT", reason: acquisition.acquisitionReason, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
-  const refreshReport = {
+  try {
+    fs.chmodSync(refreshDirectory, 0o700);
+    const refreshPlanPath = path.join(refreshDirectory, "refresh-only.tfplan");
+    const argsForTerraform = [`-chdir=${terraformRoot}`, "plan", "-refresh-only", `-var-file=${artifacts.tfvarsPath}`, `-out=${refreshPlanPath}`, "-input=false", "-lock=true", "-no-color", "-detailed-exitcode"];
+    const result = runTerraform(argsForTerraform, { cwd: root, env: terraformEnv });
+    const acquisition = acquireStageBRefreshPlan({ planPath: refreshPlanPath, planResult: result, showPlanJson, showOptions: { cwd: root, env: terraformEnv }, repositoryRoot: root });
+    const diagnosticArtifact = acquisition.diagnosticCapture
+      ? writeDiagnostic(diagnosticPath, createStageBRefreshDiagnostic({
+        failureClass: acquisition.acquisitionStatus,
+        failureReason: acquisition.acquisitionReason,
+        planCommandExitCode: acquisition.diagnosticCapture.planCommandExitCode,
+        showCommandExitCode: acquisition.diagnosticCapture.showCommandExitCode,
+        stdout: acquisition.diagnosticCapture.stdout,
+        stderr: acquisition.diagnosticCapture.stderr,
+      }))
+      : null;
+    const classification = acquisition.acquisitionStatus === "valid"
+      ? classifyStageBRefreshResult({ plan: acquisition.plan, terraformExitCode: result.status, terraformOutput: result.stdout || "", bindingReport, state, outputsSource: fs.readFileSync(path.join(root, terraformRoot, "outputs.tf"), "utf8") })
+      : { status: "MALFORMED_RESULT", reason: acquisition.acquisitionReason, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
+    const refreshReport = {
     schemaVersion: 1,
     status: classification.status,
     reason: classification.reason,
@@ -239,11 +324,13 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
     checks: classification.checks || [],
     resourceChanges: classification.resourceChanges,
     outputChanges: classification.outputChanges,
-  };
-  writeOutput(artifacts.outputPath, refreshReport);
-  fs.rmSync(refreshDirectory, { recursive: true, force: true });
-  if (!STAGE_B_REFRESH_ALLOWED_STATUSES.includes(classification.status)) throw new Error(`Stage B refresh-only ${classification.status}: ${classification.reason}`);
-  return { ...refreshReport, outputPath: artifacts.outputPath, terraformArgs: argsForTerraform };
+    };
+    writeOutput(artifacts.outputPath, refreshReport);
+    if (!STAGE_B_REFRESH_ALLOWED_STATUSES.includes(classification.status)) throw new Error(`Stage B refresh-only ${classification.status}: ${classification.reason}`);
+    return { ...refreshReport, outputPath: artifacts.outputPath, terraformArgs: argsForTerraform };
+  } finally {
+    fs.rmSync(refreshDirectory, { recursive: true, force: true });
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

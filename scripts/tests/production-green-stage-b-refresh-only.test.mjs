@@ -84,6 +84,51 @@ test("refresh diagnostic redaction removes credential material but preserves a b
   assert.doesNotMatch(diagnostic, /arn:aws:(?:secretsmanager|ssm):/);
 });
 
+test("refresh diagnostic redacts complete and truncated PEM blocks without consuming surrounding text", () => {
+  const label = ["PRIVATE", "KEY"].join(" ");
+  const begin = ["-----BEGIN ", label, "-----"].join("");
+  const end = ["-----END ", label, "-----"].join("");
+  const complete = redactStageBRefreshDiagnostic(["before", begin, "payload", end, "after"].join("\n"));
+  const truncated = redactStageBRefreshDiagnostic(["before", begin, "payload", "EOF"].join("\n"));
+  assert.match(complete, /before/);
+  assert.match(complete, /\[REDACTED_PRIVATE_KEY\]/);
+  assert.match(complete, /after/);
+  assert.match(truncated, /before/);
+  assert.match(truncated, /\[REDACTED_PRIVATE_KEY\]/);
+  assert.doesNotMatch(truncated, /payload|EOF/);
+  assert.equal(redactStageBRefreshDiagnostic(begin), "[REDACTED_PRIVATE_KEY]");
+  assert.equal(redactStageBRefreshDiagnostic("x".repeat(100), { maxChars: 16 }).length <= 29, true);
+});
+
+test("refresh diagnostic assignment parsing handles quoted, escaped, unquoted, and adversarial values", () => {
+  const backslashes = "\\".repeat(20000);
+  const input = [
+    "summary: useful",
+    "token=plain-at-eof",
+    "secret='quoted value'",
+    `token="escaped${backslashes}value"`,
+    `secret='${backslashes}`,
+    "repeated-token-like text without assignments ".repeat(1000),
+  ].join("\n");
+  const redacted = redactStageBRefreshDiagnostic(input, { maxChars: 1024 });
+  assert.match(redacted, /summary: useful/);
+  assert.doesNotMatch(redacted, /plain-at-eof|quoted value|escaped|value/);
+  assert.equal(redacted.length <= 1036, true);
+});
+
+test("diagnostic destination collisions fail before Terraform and preserve the existing artifact", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-collision-"));
+  const diagnosticPath = path.join(directory, "terraform-plan-diagnostic.json");
+  const existing = "existing forensic artifact\n";
+  fs.writeFileSync(diagnosticPath, existing, { mode: 0o600 });
+  let calls = 0;
+  assert.throws(() => runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: { ...validDeps(), runTerraform: () => { calls += 1; return { status: 1, stdout: "", stderr: "unexpected" }; } } }), /new absolute private output path|already exists|collision/i);
+  assert.equal(calls, 0);
+  assert.equal(fs.readFileSync(diagnosticPath, "utf8"), existing);
+  assert.equal(fs.existsSync(path.join(directory, "refresh-only.json")), false);
+  assert.deepEqual(fs.readdirSync(directory).filter((name) => name.startsWith(".stage-b-refresh-")), []);
+});
+
 test("failed plan command writes a private bounded diagnostic without raw stderr or retry", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-diagnostic-"));
   const stderr = "Error: Invalid index\npassword=fixture-password\nAWS_SESSION_TOKEN=fixture-session-token";
@@ -104,6 +149,7 @@ test("failed plan command writes a private bounded diagnostic without raw stderr
   assert.match(diagnostic.stderrExcerptRedacted, /Invalid index/);
   assert.doesNotMatch(JSON.stringify(diagnostic), /fixture-password|fixture-session-token/);
   assert.equal(Object.hasOwn(diagnostic, "stderr"), false);
+  assert.deepEqual(fs.readdirSync(directory).filter((name) => name.startsWith(".stage-b-refresh-")), []);
 });
 
 test("show command failure writes a private diagnostic and preserves the show exit code", () => {
@@ -114,6 +160,7 @@ test("show command failure writes a private diagnostic and preserves the show ex
   assert.equal(report.acquisitionStatus, "SHOW_COMMAND_FAILED");
   assert.equal(diagnostic.showExitCode, 1);
   assert.match(diagnostic.stderrExcerptRedacted, /provider diagnostic/);
+  assert.deepEqual(fs.readdirSync(directory).filter((name) => name.startsWith(".stage-b-refresh-")), []);
 });
 test("missing, empty, and wrong plan paths fail before classification", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-acquisition-")); const missing = acquireStageBRefreshPlan({ planPath: path.join(directory, "missing.tfplan"), planResult: { status: 2 }, showPlanJson: () => ({ status: 0, stdout: "{}", stderr: "" }) }); assert.equal(missing.acquisitionStatus, "PLAN_FILE_MISSING"); const emptyPath = path.join(directory, "empty.tfplan"); fs.writeFileSync(emptyPath, "", { mode: 0o600 }); const empty = acquireStageBRefreshPlan({ planPath: emptyPath, planResult: { status: 2 }, showPlanJson: () => ({ status: 0, stdout: "{}", stderr: "" }) }); assert.equal(empty.acquisitionStatus, "PLAN_FILE_EMPTY"); });
 test("valid plan shape narrowly normalizes omitted zero-change collections", () => { const plan = noChangePlan(); delete plan.resource_changes; delete plan.output_changes; assert.equal(classifyStageBRefreshResult({ plan, terraformExitCode: 0, bindingReport: bindingReport(), state, outputsSource }).status, "NO_CHANGES"); assert.equal(classifyStageBRefreshResult({ plan, terraformExitCode: 2, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"); });
