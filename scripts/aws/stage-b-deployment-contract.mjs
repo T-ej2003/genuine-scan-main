@@ -260,9 +260,20 @@ function assertStageBResourceIdentity(change, kind, key, strict) {
   }
 }
 
-export const STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS = Object.freeze([
-  "code_sha256", "source_code_size", "last_modified", "qualified_arn", "qualified_invoke_arn", "version",
-]);
+const STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA = Object.freeze({
+  code_sha256: "unknown",
+  source_code_size: "unknown",
+  last_modified: "unknown",
+  qualified_arn: "unknown",
+  qualified_invoke_arn: "unknown",
+  version: "unknown",
+});
+export const STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS = Object.freeze(Object.keys(STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA));
+export const STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS = Object.freeze(
+  Object.entries(STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA)
+    .filter(([, representation]) => representation === "unknown")
+    .map(([field]) => field),
+);
 const brokerFunctionAllowedChangedFields = new Set([
   "environment", "filename", "source_code_hash", ...STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
 ]);

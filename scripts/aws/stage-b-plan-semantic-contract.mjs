@@ -13,6 +13,7 @@ import {
 import {
   assertStageBBrokerPolicyDocument,
   STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
+  STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS,
 } from "./stage-b-deployment-contract.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 
@@ -109,10 +110,7 @@ const BROKER_FUNCTION_CHANGED_PATHS = new Set([
 const BROKER_FUNCTION_UNKNOWN_PATHS = new Set([
   "architectures[0]",
   "environment[0].variables",
-  "last_modified",
-  "qualified_arn",
-  "qualified_invoke_arn",
-  "version",
+  ...STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS,
 ]);
 const BROKER_FUNCTION_SENSITIVE_PATHS = new Set(["architectures[0]"]);
 const ALIAS_CHANGED_PATHS = new Set(["function_version"]);
@@ -466,6 +464,17 @@ function assertInitialTypedDefaults(change) {
   }
 }
 
+function assertBrokerPublishProviderMetadataRepresentation(change) {
+  if (change.address !== "aws_lambda_function.broker" || !exactJson(change.change?.actions, ["update"])) return;
+  const after = change.change?.after || {};
+  const unknown = change.change?.after_unknown || {};
+  for (const field of STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS) {
+    if (after[field] !== undefined || unknown[field] !== true) {
+      throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
+    }
+  }
+}
+
 const BROKER_ENVIRONMENT_VARIABLES = Object.freeze([
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
@@ -692,6 +701,7 @@ function classifyUnknownPath(change, path) {
     return ["architectures[0]", "environment[0].variables", "version"].includes(path) ? "REVIEWED_COMPUTED_CHANGE" : "DIAGNOSTIC_ONLY";
   }
   if (change.address === "aws_lambda_function.broker" && BROKER_FUNCTION_UNKNOWN_PATHS.has(path)) {
+    if (["code_sha256", "source_code_size"].includes(path)) return "PROVIDER_COMPUTED_CODE_METADATA";
     return ["environment[0].variables", "version"].includes(path) ? "REVIEWED_COMPUTED_CHANGE" : "DIAGNOSTIC_ONLY";
   }
   if (change.address === "aws_lambda_alias.reviewed" && isBrokerInitialCreate(change) && BROKER_ALIAS_INITIAL_PROVIDER_UNKNOWN_PATHS.has(path)) {
@@ -777,6 +787,7 @@ export function censusStageBPlanSemantics(plan) {
     seenAddresses.add(change.address);
     const classification = classifyResource(change);
     assertTypedRepresentationEnvelope(change);
+    assertBrokerPublishProviderMetadataRepresentation(change);
     if (ECS_ADDRESSES.has(change.address)) assertEcsSemanticDomain(change);
     assertInitialBrokerEnvironment(change);
     if (isBrokerInitialCreate(change) || isEcsInitialCreate(change)) assertInitialProviderComputedShape(change);

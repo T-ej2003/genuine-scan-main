@@ -16,7 +16,7 @@ import {
   STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT,
 } from "../aws/stage-b-provider-semantic-snapshot.mjs";
 import { assertRecoveryPlanDelta } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
-import { assertStageBBrokerFunctionUpdate, classifyStageBPlan, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS } from "../aws/stage-b-deployment-contract.mjs";
+import { assertStageBBrokerFunctionUpdate, classifyStageBPlan, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
@@ -126,9 +126,9 @@ function configuration() {
 
 function brokerChanges() {
   const policy = { address: "aws_iam_policy.broker", mode: "managed", type: "aws_iam_policy", change: { actions: ["update"], before: { policy: "old" }, after: {}, after_unknown: { policy: true }, before_sensitive: {}, after_sensitive: {} } };
-  const before = { architectures: ["x86_64"], environment: [{ variables: Object.fromEntries(envNames.map((name) => [name, `old-${name}`])) }], filename: "old.zip", source_code_hash: "old-source-code-hash", last_modified: "old", qualified_arn: "old", qualified_invoke_arn: "old", version: 2 };
+  const before = { architectures: ["x86_64"], environment: [{ variables: Object.fromEntries(envNames.map((name) => [name, `old-${name}`])) }], filename: "old.zip", source_code_hash: "old-source-code-hash", code_sha256: "old-code-sha", source_code_size: 100, last_modified: "old", qualified_arn: "old", qualified_invoke_arn: "old", version: 2 };
   const after = { architectures: ["x86_64"], environment: [{}], filename: "new.zip", source_code_hash: "new-source-code-hash" };
-  const lambda = { address: "aws_lambda_function.broker", mode: "managed", type: "aws_lambda_function", change: { actions: ["update"], before, after, after_unknown: { architectures: [false], environment: [{ variables: true }], last_modified: true, qualified_arn: true, qualified_invoke_arn: true, version: true }, before_sensitive: { architectures: [false] }, after_sensitive: { architectures: [false] } } };
+  const lambda = { address: "aws_lambda_function.broker", mode: "managed", type: "aws_lambda_function", change: { actions: ["update"], before, after, after_unknown: { architectures: [false], code_sha256: true, environment: [{ variables: true }], last_modified: true, qualified_arn: true, qualified_invoke_arn: true, source_code_size: true, version: true }, before_sensitive: { architectures: [false] }, after_sensitive: { architectures: [false] } } };
   const alias = { address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "2", routing_config: [] }, after: { routing_config: [] }, after_unknown: { function_version: true, routing_config: [] }, before_sensitive: { routing_config: [] }, after_sensitive: { routing_config: [] } } };
   return [policy, lambda, alias];
 }
@@ -270,8 +270,8 @@ test("real-plan-shaped semantic census has zero unclassified semantics", () => {
   assert.deepEqual(census.counts, {
     nonNoopResources: 15,
     resourceActions: 15,
-    changedPaths: 115,
-    afterUnknownPaths: 77,
+    changedPaths: 117,
+    afterUnknownPaths: 79,
     replacePaths: 12,
     configurationReferences: 117,
     unclassifiedResourceActions: 0,
@@ -677,7 +677,7 @@ test("future unknown and reference drift fails closed", () => {
   mutate((value) => { value.resource_changes.find((item) => item.address === "aws_iam_policy.broker").change.after_unknown.name = true; }, /UNCLASSIFIED_AFTER_UNKNOWN/);
   mutate((value) => { value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed").expressions.function_version.references = ["var.lambda_version"]; }, /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
   mutate((value) => { value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed").expressions.function_version.references.push("aws_lambda_function.other.version"); }, /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
-  mutate((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.after_unknown.version = false; }, /UNCLASSIFIED_COMPUTED_CHANGE/);
+  mutate((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.after_unknown.version = false; }, /UNCLASSIFIED_COMPUTED_CHANGE|UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
   mutate((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed").change.after.function_version = "3"; }, /UNCLASSIFIED_COMPUTED_CHANGE/);
   mutate((value) => { value.resource_changes = value.resource_changes.filter((item) => item.address !== "aws_lambda_function.broker"); }, /UNCLASSIFIED_(?:COMPUTED_CHANGE|RESOURCE_ACTION)/);
 });
@@ -712,11 +712,8 @@ test("broker publish updates admit source-bound package digest and exact provide
 
   const metadata = structuredClone(plan());
   const change = metadata.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change;
-  change.before.code_sha256 = "old-code-sha";
-  change.after.code_sha256 = "new-code-sha";
-  change.before.source_code_size = 100;
-  change.after.source_code_size = 200;
   assert.deepEqual(STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, ["code_sha256", "source_code_size", "last_modified", "qualified_arn", "qualified_invoke_arn", "version"]);
+  assert.deepEqual(STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS);
   assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(metadata));
   assert.doesNotThrow(() => assertStageBBrokerFunctionUpdate(metadata.resource_changes.find((item) => item.address === "aws_lambda_function.broker")));
   const metadataCensus = assertStageBPlanSemanticCompleteness(metadata);
@@ -726,6 +723,17 @@ test("broker publish updates admit source-bound package digest and exact provide
   unauthorized.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.after.invoke_arn = "changed";
   assert.throws(() => assertStageBPlanSemanticCompleteness(unauthorized), /UNCLASSIFIED_CHANGED_PATH/);
   assert.throws(() => assertStageBBrokerFunctionUpdate(unauthorized.resource_changes.find((item) => item.address === "aws_lambda_function.broker")), /unsupported mutable field/);
+
+  const concreteMetadata = structuredClone(metadata);
+  const concreteChange = concreteMetadata.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change;
+  concreteChange.after.code_sha256 = "future-code-sha";
+  delete concreteChange.after_unknown.code_sha256;
+  assert.throws(() => assertStageBPlanSemanticCompleteness(concreteMetadata), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
+  const concreteSize = structuredClone(metadata);
+  const concreteSizeChange = concreteSize.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change;
+  concreteSizeChange.after.source_code_size = 200;
+  delete concreteSizeChange.after_unknown.source_code_size;
+  assert.throws(() => assertStageBPlanSemanticCompleteness(concreteSize), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
 });
 
 test("semantic census feeds the normal offline action classifier without widening recovery", () => {
