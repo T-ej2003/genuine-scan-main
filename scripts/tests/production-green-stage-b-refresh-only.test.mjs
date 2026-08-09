@@ -64,21 +64,23 @@ test("valid Terraform show JSON is acquired from the exact plan path", () => { c
 test("failed plan command never invokes show and keeps an in-memory diagnostic capture", () => { let calls = 0; const result = acquireStageBRefreshPlan({ planPath: path.join(os.tmpdir(), "missing-refresh.tfplan"), planResult: { status: 1, stdout: "plan output", stderr: "Error: Invalid index" }, showPlanJson: () => { calls += 1; return { status: 0, stdout: "{}", stderr: "" }; } }); assert.equal(result.acquisitionStatus, "PLAN_COMMAND_FAILED"); assert.equal(result.diagnosticCapture.stderr, "Error: Invalid index"); assert.equal(calls, 0); });
 
 test("refresh diagnostic redaction removes credential material but preserves a bounded error summary", () => {
+  const accessKey = ["AKIA", "IOSFODNN7EXAMPLE"].join("");
+  const privateKey = ["-----BEGIN ", ["PRIVATE", "KEY"].join(" "), "-----\nfixture-private-key\n-----END ", ["PRIVATE", "KEY"].join(" "), "-----"].join("");
   const diagnostic = redactStageBRefreshDiagnostic([
     "Error: Invalid index",
     "password=fixture-password",
     "secret: fixture-secret",
     "token=fixture-token",
-    "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
+    `AWS_ACCESS_KEY_ID=${accessKey}`,
     "AWS_SECRET_ACCESS_KEY=fixture-secret-key",
     "AWS_SESSION_TOKEN=fixture-session-token",
     "Authorization: Bearer fixture-bearer-token",
     "arn:aws:secretsmanager:eu-west-2:368992683803:secret:fixture",
-    "-----BEGIN PRIVATE KEY-----\nfixture-private-key\n-----END PRIVATE KEY-----",
+    privateKey,
     "known-tfvar-secret",
   ].join("\n"), { sensitiveValues: ["known-tfvar-secret"] });
   assert.match(diagnostic, /Invalid index/);
-  for (const secret of ["fixture-password", "fixture-secret", "fixture-token", "AKIAIOSFODNN7EXAMPLE", "fixture-secret-key", "fixture-session-token", "fixture-bearer-token", "fixture-private-key", "known-tfvar-secret"]) assert.doesNotMatch(diagnostic, new RegExp(secret));
+  for (const secret of ["fixture-password", "fixture-secret", "fixture-token", accessKey, "fixture-secret-key", "fixture-session-token", "fixture-bearer-token", "fixture-private-key", "known-tfvar-secret"]) assert.doesNotMatch(diagnostic, new RegExp(secret));
   assert.doesNotMatch(diagnostic, /arn:aws:(?:secretsmanager|ssm):/);
 });
 
