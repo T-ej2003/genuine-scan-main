@@ -120,7 +120,12 @@ function configuration() {
       } },
       { address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", expressions: {
         function_name: ref(["aws_lambda_function.broker.function_name", "aws_lambda_function.broker"]),
-        function_version: ref(["aws_lambda_function.broker.version", "aws_lambda_function.broker"]),
+        function_version: ref([
+          "aws_lambda_function.broker",
+          "aws_lambda_function.broker.version",
+          "var.stage_b_recovery_alias_target_version",
+          "var.stage_b_recovery_only",
+        ]),
       } },
     ] },
   };
@@ -608,6 +613,38 @@ test("recovery alias reference classification is profile-bound and fail-closed",
   assert.throws(() => assertStageBPlanSemanticCompleteness(recoveryWithNormalReference), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
 });
 
+test("normal alias conditional references match the real Terraform traversal universe", () => {
+  const expected = [
+    "aws_lambda_function.broker",
+    "aws_lambda_function.broker.version",
+    "var.stage_b_recovery_alias_target_version",
+    "var.stage_b_recovery_only",
+  ];
+  const source = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  assert.match(source, /function_version\s*=\s*var\.stage_b_recovery_only\s*\?\s*var\.stage_b_recovery_alias_target_version\s*:\s*aws_lambda_function\.broker\.version/);
+  const value = plan();
+  const alias = value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed");
+  assert.deepEqual([...alias.expressions.function_version.references].sort(), [...expected].sort());
+  const census = assertStageBPlanSemanticCompleteness(value);
+  assert.deepEqual(census.resources.find((item) => item.address === "aws_lambda_alias.reviewed").configurationReferences.find((item) => item.field === "function_version"), {
+    field: "function_version",
+    references: [...expected].sort(),
+    classification: "REVIEWED_COMPUTED_CHANGE",
+  });
+  for (const missing of expected) {
+    const incomplete = plan();
+    incomplete.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed")
+      .expressions.function_version = ref(expected.filter((reference) => reference !== missing));
+    assert.throws(() => assertStageBPlanSemanticCompleteness(incomplete), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+  }
+  for (const extra of ["aws_lambda_function.unreviewed.version", "var.unreviewed"]) {
+    const widened = plan();
+    widened.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed")
+      .expressions.function_version = ref([...expected, extra]);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(widened), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+  }
+});
+
 test("baseline broker profiles reject non-root, unknown, and partial semantic shapes", () => {
   const mutateBaseline = (mutator, expected = /UNCLASSIFIED/) => {
     const value = baselinePlan();
@@ -765,7 +802,7 @@ test("semantic census exposes recursive changed, unknown, sensitive and referenc
   const alias = census.resources.find((item) => item.address === "aws_lambda_alias.reviewed");
   assert.deepEqual(alias.changedPaths, [{ path: "function_version", classification: "REVIEWED_COMPUTED_CHANGE" }]);
   assert.deepEqual(alias.afterUnknownPaths, [{ path: "function_version", classification: "REVIEWED_COMPUTED_CHANGE" }]);
-  assert.deepEqual(alias.configurationReferences[1], { field: "function_version", references: ["aws_lambda_function.broker", "aws_lambda_function.broker.version"].sort(), classification: "REVIEWED_COMPUTED_CHANGE" });
+  assert.deepEqual(alias.configurationReferences[1], { field: "function_version", references: ["aws_lambda_function.broker", "aws_lambda_function.broker.version", "var.stage_b_recovery_alias_target_version", "var.stage_b_recovery_only"].sort(), classification: "REVIEWED_COMPUTED_CHANGE" });
   assert.equal(census.resources.find((item) => item.address.includes('candidate["backend"]')).changedPaths.some((item) => item.path === "volume[0].configure_at_launch"), true);
 });
 

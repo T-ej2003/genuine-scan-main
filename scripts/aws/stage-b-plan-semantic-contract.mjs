@@ -205,7 +205,12 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
   },
   "aws_lambda_alias.reviewed": {
     function_name: ["aws_lambda_function.broker.function_name", "aws_lambda_function.broker"],
-    function_version: ["aws_lambda_function.broker.version", "aws_lambda_function.broker"],
+    function_version: [
+      "aws_lambda_function.broker",
+      "aws_lambda_function.broker.version",
+      "var.stage_b_recovery_alias_target_version",
+      "var.stage_b_recovery_only",
+    ],
   },
 });
 
