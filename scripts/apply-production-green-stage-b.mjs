@@ -28,7 +28,7 @@ import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenc
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBDeploymentCapabilityGraph } from "./aws/generate-production-green-stage-b-capability-graph.mjs";
-import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
+import { assertStageBRecoveryProvenance, assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBPrivateFile } from "./aws/stage-b-artifact-contract.mjs";
 import { assertStageBPlanApprovedBinding } from "./aws/stage-b-plan-approval-contract.mjs";
 import { assertRecoveryOnlyPlan, assertVerifiedStageBRecovery } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
@@ -85,6 +85,8 @@ export function parseCli(argv) {
     tfvarsBindingReportSha256: requireOption(argv, "--tfvars-binding-report-sha256"),
     refreshReportPath: requireOption(argv, "--refresh-report"),
     refreshReportSha256: requireOption(argv, "--refresh-report-sha256"),
+    refreshBindingReportPath: readOption(argv, "--refresh-binding-report"),
+    refreshBindingReportSha256: readOption(argv, "--refresh-binding-report-sha256"),
     recoveryAttestationPath: readOption(argv, "--recovery-attestation-path"),
     recoveryAttestationSha256: readOption(argv, "--recovery-attestation-sha256"),
     recoverySignaturePath: readOption(argv, "--recovery-signature-path"),
@@ -122,7 +124,7 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   return true;
 }
 
-export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJsonPath, planApprovalReportPath, planApprovalReportSha256, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, permissionReportSignatureSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, toolingTreeSha256, imageReleaseSha, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256, recoveryAttestationPath, recoveryAttestationSha256, recoverySignaturePath, recoverySignatureSha256, recoveryClassificationPath, recoveryClassificationSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
+export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJsonPath, planApprovalReportPath, planApprovalReportSha256, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, permissionReportSignatureSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, toolingTreeSha256, imageReleaseSha, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256, refreshBindingReportPath, refreshBindingReportSha256, recoveryAttestationPath, recoveryAttestationSha256, recoverySignaturePath, recoverySignatureSha256, recoveryClassificationPath, recoveryClassificationSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
   assertStageBDeploymentCapabilityGraph();
   assertStageBTerraformBackendPolicy(readJson("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json"));
   if (!tfvarsPath || !tfvarsBindingReportPath || !tfvarsBindingReportSha256 || !refreshReportPath || !refreshReportSha256 || !toolingTreeSha256) throw new Error("Canonical Stage B tfvars, binding report, refresh report, binding-report SHA256, refresh-report SHA256, and tooling-tree SHA256 are required.");
@@ -135,6 +137,8 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   if (!fs.existsSync(imageEvidenceSignaturePath)) throw new Error("Authenticated image evidence signature is missing.");
   for (const [filePath, label] of [[planPath, "Stage B saved plan"], [planJsonPath, "Stage B plan JSON"], [canonicalPlanJsonPath, "Stage B canonical plan JSON"], [planApprovalReportPath, "Stage B plan approval report"], [auditPath, "Stage B reference audit"], [permissionReportPath, "Stage B permission report"], [permissionReportSignaturePath, "Stage B permission-report signature"], [imageEvidencePath, "Stage B image evidence"], [imageEvidenceSignaturePath, "Stage B image-evidence signature"]]) assertStageBPrivateFile({ filePath, repositoryRoot: root, label });
   const planBytes = fs.readFileSync(planJsonPath); const canonicalPlanJsonBytes = fs.readFileSync(canonicalPlanJsonPath); const approvalReportBytes = fs.readFileSync(planApprovalReportPath); const approvalReport = JSON.parse(approvalReportBytes); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReportBytes = fs.readFileSync(permissionReportPath); const permissionReport = JSON.parse(permissionReportBytes); const permissionReportSignatureBytes = fs.readFileSync(permissionReportSignaturePath); const signatureArtifact = JSON.parse(permissionReportSignatureBytes); const imageEvidenceBytes = fs.readFileSync(imageEvidencePath); const imageEvidence = JSON.parse(imageEvidenceBytes); const imageEvidenceSignatureArtifact = JSON.parse(fs.readFileSync(imageEvidenceSignaturePath, "utf8"));
+  const recoveryPlan = approvalReport.planProfile === "RECOVERY_ALIAS_ONLY";
+  if (recoveryPlan && (!refreshBindingReportPath || !refreshBindingReportSha256)) throw new Error("Recovery apply requires the original observation binding report and SHA256.");
   const recoveryInputs = [recoveryAttestationPath, recoveryAttestationSha256, recoverySignaturePath, recoverySignatureSha256, recoveryClassificationPath, recoveryClassificationSha256];
   const hasRecoveryInputs = recoveryInputs.some((value) => value !== undefined);
   let trustedRecovery = null;
@@ -145,9 +149,20 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
     trustedRecovery = assertVerifiedStageBRecovery({ refreshReport: JSON.parse(refreshBytes), refreshReportBytes: refreshBytes, refreshReportSha256, classification: JSON.parse(classificationBytes), classificationBytes, classificationSha256: recoveryClassificationSha256, attestation: JSON.parse(attestationBytes), attestationBytes, attestationSha256: recoveryAttestationSha256, signature: JSON.parse(signatureBytes), signatureBytes, signatureSha256: recoverySignatureSha256, expectedSourceSha: toolingSha, expectedLineage: bindingReport.stateLineage, expectedSerial: bindingReport.stateSerial, now: new Date(now) });
     if (approvalReport.recoveryAttestationSha256 !== trustedRecovery.attestationSha256 || JSON.parse(auditBytes).recoveryAttestationSha256 !== trustedRecovery.attestationSha256) throw new Error("Recovery apply upstream bindings do not match the verified attestation.");
   } else if (hasRecoveryInputs) throw new Error("Recovery artifacts are not valid without a recovery PLAN_APPROVED report.");
-  assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256: tfvarsBindingReportSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: imageEvidenceSha256, expectedStateSha256: bindingReport.stateBackupSha256, allowReviewedResourceDrift: trustedRecovery !== null });
+  let refreshBindingReport = bindingReport;
+  let selectedRefreshBindingSha256 = tfvarsBindingReportSha256;
+  if (recoveryPlan) {
+    assertStageBPrivateFile({ filePath: refreshBindingReportPath, repositoryRoot: root, label: "Stage B observation binding report" });
+    const observationBytes = fs.readFileSync(refreshBindingReportPath);
+    if (sha256(observationBytes) !== refreshBindingReportSha256) throw new Error("Stage B observation binding report SHA256 does not match the approved digest.");
+    refreshBindingReport = JSON.parse(observationBytes);
+    const refreshReport = JSON.parse(fs.readFileSync(refreshReportPath));
+    assertStageBRecoveryProvenance({ refreshReport, refreshReportSha256, observationBindingReport: refreshBindingReport, observationBindingReportSha256: refreshBindingReportSha256, recoveryBindingReport: bindingReport, recoveryClassificationSha256, recoveryAttestationSha256 });
+    selectedRefreshBindingSha256 = refreshBindingReportSha256;
+  }
+  assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport: refreshBindingReport, bindingReportSha256: selectedRefreshBindingSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: refreshBindingReport.toolingTreeSha256, expectedTfvarsSha256: refreshBindingReport.tfvarsSha256, expectedImageEvidenceSha256: refreshBindingReport.imageEvidenceCanonicalSha256 || imageEvidenceSha256, expectedStateSha256: refreshBindingReport.stateBackupSha256, allowReviewedResourceDrift: trustedRecovery !== null });
   if (!/^[a-f0-9]{64}$/.test(savedPlanSha256) || sha256(savedPlanBytes) !== savedPlanSha256) throw new Error("Saved Terraform plan SHA256 does not match the approved digest.");
-  assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedRefreshReportSha256: refreshReportSha256, expectedRecoveryAttestationSha256: trustedRecovery?.attestationSha256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial, now: new Date(now) });
+  assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedRefreshReportSha256: refreshReportSha256, expectedRefreshBindingReportSha256: recoveryPlan ? refreshBindingReportSha256 : undefined, expectedRecoveryAttestationSha256: trustedRecovery?.attestationSha256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial, now: new Date(now) });
   if (!/^[a-f0-9]{64}$/.test(canonicalPlanJsonSha256)) throw new Error("Canonical plan JSON SHA256 is missing or malformed.");
   if (sha256(planBytes) !== planSha256) throw new Error("Plan JSON SHA256 does not match the approved digest.");
   if (sha256(auditBytes) !== auditSha256) throw new Error("Reference audit SHA256 does not match the approved digest.");

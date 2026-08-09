@@ -216,7 +216,7 @@ test("RECOVERY_ALIAS_ONLY survives recovery classification, capture, approval, p
   const canonicalBytes = Buffer.from(`${canonicalJson(recoveryPlan)}\n`);
   const recoveryHashes = stageBPlanHashes({ savedPlanBytes: saved, planJsonBytes: planBytes, canonicalPlanJsonBytes: canonicalBytes });
   const recoveryCapture = createStageBPlanCaptureReport({
-    toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), refreshReportSha256: "d".repeat(64), recoveryAttestationSha256: "c".repeat(64), hashes: recoveryHashes,
+    toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), refreshReportSha256: "d".repeat(64), refreshBindingReportSha256: "e".repeat(64), recoveryAttestationSha256: "c".repeat(64), hashes: recoveryHashes,
     capturedAt: "2026-08-09T00:00:00.000Z", stageBLineage: recoveryEvidence.currentObservedEvidence.terraformLineage, stageBSerial: 76,
     terraformVersion: recoveryPlan.terraform_version, terraformFormatVersion: recoveryPlan.format_version, planProfile: "RECOVERY_ALIAS_ONLY",
     classification: { noOp: 3, create: 0, update: 1, destroy: 0, replacement: 0, unclassified: 0 },
@@ -228,7 +228,7 @@ test("RECOVERY_ALIAS_ONLY survives recovery classification, capture, approval, p
   const recoveryApproval = createStageBPlanApprovalReport({
     captureReportSha256: hash(recoveryCaptureBytes), referenceAuditPath: path.join(directory, "recovery-audit.json"), referenceAuditSha256: hash(recoveryAuditBytes),
     referenceAuditCallerArn: recoveryAudit.callerArn, referenceAuditAt: recoveryAudit.auditedAt, toolingSha: recoveryCapture.toolingSha, toolingTreeSha256: recoveryCapture.toolingTreeSha256,
-    refreshReportSha256: recoveryCapture.refreshReportSha256, recoveryAttestationSha256: recoveryCapture.recoveryAttestationSha256, stageBLineage: recoveryCapture.stageBLineage,
+    refreshReportSha256: recoveryCapture.refreshReportSha256, refreshBindingReportSha256: recoveryCapture.refreshBindingReportSha256, recoveryAttestationSha256: recoveryCapture.recoveryAttestationSha256, stageBLineage: recoveryCapture.stageBLineage,
     stageBSerial: recoveryCapture.stageBSerial, hashes: recoveryHashes, logicalCanonicalPlanJsonSha256: recoveryHashes.logicalCanonicalPlanJsonSha256, approvedAt: "2026-08-09T00:02:00.000Z",
     planProfile: recoveryCapture.planProfile, classification: recoveryCapture.classification, brokerOperation: recoveryCapture.brokerOperation, brokerUpdatePresent: recoveryCapture.brokerUpdatePresent,
     brokerActions: recoveryCapture.brokerActions, brokerResourceAddresses: recoveryCapture.brokerResourceAddresses,
