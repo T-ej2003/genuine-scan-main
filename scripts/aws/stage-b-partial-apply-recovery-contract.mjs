@@ -202,6 +202,16 @@ export function assertRecoveryPlanDelta(plan, attestation) {
   return { address: alias.address, action: "update", beforeVersion: current.liveVersion, afterVersion: current.configuredDesiredVersion };
 }
 
+export function assertRecoveryOnlyPlan(plan, attestation) {
+  const delta = assertRecoveryPlanDelta(plan, attestation);
+  const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
+  const mutations = changes.filter((change) => !exact(change.change?.actions, ["no-op"]));
+  if (mutations.length !== 1 || mutations[0]?.address !== STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS || !exact(mutations[0].change?.actions, ["update"])) {
+    throw new Error("Recovery-only plan may contain exactly one non-no-op mutation: the attested reviewed-alias update.");
+  }
+  return { profile: "RECOVERY_ALIAS_ONLY", ...delta, nonNoOpMutations: 1 };
+}
+
 export function publishRecoveryAttestation({ reportPath, signaturePath, report, signature, repositoryRoot = path.resolve(process.cwd()) } = {}) {
   assertStageBArtifactPath({ artifactPath: reportPath, repositoryRoot, label: "Recovery attestation", allowExisting: false }); assertStageBArtifactPath({ artifactPath: signaturePath, repositoryRoot, label: "Recovery attestation signature", allowExisting: false });
   if (path.dirname(reportPath) !== path.dirname(signaturePath) || path.resolve(reportPath) === path.resolve(signaturePath)) throw new Error("Recovery outputs must be distinct files in one directory.");

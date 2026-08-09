@@ -1753,6 +1753,35 @@ test("malformed AWS responses fail closed", () => {
   assert.throws(() => generate(fixture), /task listing is malformed/);
 });
 
+test("recovery-only reference audit binds one concrete alias update and all release resources to no-op", () => {
+  const fixture = makeFixture({ appendOnly: true });
+  fixture.plan.variables.stage_b_recovery_only = { value: true };
+  fixture.plan.variables.stage_b_recovery_alias_target_version = { value: "3" };
+  for (const change of fixture.plan.resource_changes) {
+    if (change.type === "aws_ecs_task_definition" && !change.address.includes("_retained[")) change.change.actions = ["no-op"];
+  }
+  fixture.plan.resource_changes.push({ address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "2" }, after: { function_version: "3" }, after_unknown: {} } });
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  const audit = generate(fixture, { recoveryAttestationSha256: "b".repeat(64) });
+  assert.equal(audit.recoveryOnly, true);
+  assert.equal(audit.recoveryAlias.liveVersion, "2");
+  assert.equal(audit.recoveryAlias.targetVersion, "3");
+  assert.equal(audit.recoveryNoOpResources.length, fixture.plan.resource_changes.length - 1);
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: terraformConfigurationSource,
+    trustedCallerArn: callerArn,
+    recoveryOnly: true,
+    now,
+  }));
+});
+
 test("generated audit is accepted by the existing Stage B plan validator", () => {
   const fixture = makeAtomicBrokerFixture();
   const audit = generate(fixture);

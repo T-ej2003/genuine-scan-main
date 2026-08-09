@@ -10,13 +10,13 @@ import {
   verifyImageEvidenceSignature,
   STAGE_B_PLAN_IMAGE_BINDINGS,
 } from "./production-green-stage-b-image-evidence.mjs";
-import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs";
+import { STAGE_B, STAGE_B_MODES, canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { assertStageBBrokerPackageManifest } from "./package-production-green-stage-b-broker.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageAStateIdentity, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
+import { assertCanonicalTerraformSerialNumber, assertVerifiedStageBRecovery } from "./stage-b-partial-apply-recovery-contract.mjs";
 
 export const STAGE_B_TFVARS_SCHEMA_VERSION = 1;
 export const STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION = 2;
@@ -214,7 +214,7 @@ export function deriveRetainedDefinitions(state) {
     const familyRevision = `${definition.family}:${revision}`;
     if (familyRevisions.has(familyRevision)) throw new Error(`Retained task-definition family/revision is duplicated: ${familyRevision}.`);
     familyRevisions.add(familyRevision);
-    candidates[instance.index_key] = { kind: match[2], definition: JSON.stringify(definition) };
+    candidates[instance.index_key] = { kind: match[2], revision, arn: instance.attributes.arn, definition: JSON.stringify(definition) };
   }
   const executors = {};
   for (const instance of resourceInstances(state, "aws_ecs_task_definition", "executor_retained")) {
@@ -226,7 +226,7 @@ export function deriveRetainedDefinitions(state) {
     const familyRevision = `${definition.family}:${revision}`;
     if (familyRevisions.has(familyRevision)) throw new Error(`Retained task-definition family/revision is duplicated: ${familyRevision}.`);
     familyRevisions.add(familyRevision);
-    executors[instance.index_key] = { mode, definition: JSON.stringify(definition) };
+    executors[instance.index_key] = { mode, revision, arn: instance.attributes.arn, definition: JSON.stringify(definition) };
   }
   if (!Object.keys(candidates).length || !Object.keys(executors).length) throw new Error("Terraform state retained task-definition evidence is incomplete.");
   const candidateGenerations = new Map();
@@ -242,6 +242,77 @@ export function deriveRetainedDefinitions(state) {
   if (attachment.length !== 1 || attachment[0].attributes?.policy_arn !== STAGE_B_BROKER_POLICY.arn || attachment[0].attributes?.role !== STAGE_B_BROKER_POLICY.roleName) throw new Error("Terraform state broker policy attachment evidence is missing or wrong.");
   if (resourceInstances(state, "aws_iam_role_policy", "broker").length) throw new Error("Terraform state contains the legacy broker inline policy address.");
   return { retainedCandidateTaskDefinitions: Object.fromEntries(sortedEntries(candidates)), retainedExecutorTaskDefinitions: Object.fromEntries(sortedEntries(executors)), serial: state.serial, counts: { candidate: Object.keys(candidates).length, executor: Object.keys(executors).length } };
+}
+
+function singleStateResource(state, type, name, label) {
+  const matches = (state.resources || [])
+    .filter((resource) => resource.type === type && resource.name === name && resource.mode === "managed" && (!Object.hasOwn(resource, "module") || resource.module === null))
+    .flatMap((resource) => resource.instances || []);
+  if (matches.length !== 1) throw new Error(`${label} must contain exactly one root-managed state instance.`);
+  return matches[0].attributes || {};
+}
+
+export function deriveRecoveryOnlyBindings(state) {
+  const lambda = singleStateResource(state, "aws_lambda_function", "broker", "Recovery broker function state");
+  const policy = singleStateResource(state, "aws_iam_policy", "broker", "Recovery broker policy state");
+  if (!path.isAbsolute(lambda.filename || "")) throw new Error("Recovery broker package path must come from the absolute current Lambda state filename.");
+  if (!/^[A-Za-z0-9+/]+=*$/.test(lambda.source_code_hash || "")) throw new Error("Recovery broker source_code_hash is missing or malformed.");
+  const environment = lambda.environment?.[0]?.variables;
+  if (!environment || typeof environment !== "object" || Array.isArray(environment) || Object.keys(environment).some((key) => typeof environment[key] !== "string")) throw new Error("Recovery broker environment must be the exact string-valued state map.");
+  const expectedEnvironmentKeys = ["BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN", "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON", "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON"];
+  if (JSON.stringify(Object.keys(environment).sort()) !== JSON.stringify(expectedEnvironmentKeys.sort())) throw new Error("Recovery broker environment keys are not the exact Stage B state map.");
+  let taskDefinitionArns;
+  let approvalExpected;
+  try {
+    taskDefinitionArns = JSON.parse(environment.BROKER_TASK_DEFINITIONS_JSON);
+    approvalExpected = JSON.parse(environment.BROKER_APPROVAL_EXPECTED_JSON);
+  } catch {
+    throw new Error("Recovery broker state environment contains malformed JSON bindings.");
+  }
+  if (!taskDefinitionArns || typeof taskDefinitionArns !== "object" || Array.isArray(taskDefinitionArns)
+    || JSON.stringify(Object.keys(taskDefinitionArns).sort()) !== JSON.stringify([...STAGE_B_MODES].sort())
+    || Object.values(taskDefinitionArns).some((arn) => !/^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/.test(arn))) {
+    throw new Error("Recovery broker state task-definition mapping is incomplete or malformed.");
+  }
+  if (!approvalExpected || typeof approvalExpected !== "object" || !digestPattern.test(approvalExpected.packageChecksumSha256 || "")) throw new Error("Recovery broker state package identity is missing.");
+  if (policy.policy === undefined || typeof policy.policy !== "string") throw new Error("Recovery broker policy state is missing its exact document.");
+  return { packagePath: path.resolve(lambda.filename), sourceCodeHashBase64: lambda.source_code_hash, environment, taskDefinitionArns, approvalExpected, policyDocument: policy.policy };
+}
+
+function assertRecoveryOnlyEvidence({ recovery, state, toolingSha } = {}) {
+  if (!recovery || typeof recovery !== "object") throw new Error("Recovery-only mode requires the complete signed recovery evidence bundle.");
+  const files = ["refreshReportPath", "attestationPath", "signaturePath", "classificationPath"];
+  for (const name of files) assertAbsoluteFile(recovery[name], `Recovery ${name}`);
+  const bytes = Object.fromEntries(files.map((name) => [name, fs.readFileSync(recovery[name])]));
+  const hashes = {
+    refreshReportSha256: recovery.refreshReportSha256,
+    attestationSha256: recovery.attestationSha256,
+    signatureSha256: recovery.signatureSha256,
+    classificationSha256: recovery.classificationSha256,
+  };
+  for (const [name, value] of Object.entries(hashes)) if (!digestPattern.test(value || "") || sha256(bytes[name.replace("Sha256", "Path")]) !== value) throw new Error(`Recovery ${name} does not match its immutable evidence bytes.`);
+  const refreshReport = JSON.parse(bytes.refreshReportPath); const attestation = JSON.parse(bytes.attestationPath); const signature = JSON.parse(bytes.signaturePath); const classification = JSON.parse(bytes.classificationPath);
+  const verified = assertVerifiedStageBRecovery({ refreshReport, refreshReportBytes: bytes.refreshReportPath, refreshReportSha256: hashes.refreshReportSha256, classification, classificationBytes: bytes.classificationPath, classificationSha256: hashes.classificationSha256, attestation, attestationBytes: bytes.attestationPath, attestationSha256: hashes.attestationSha256, signature, signatureBytes: bytes.signaturePath, signatureSha256: hashes.signatureSha256, expectedSourceSha: toolingSha, expectedLineage: state.lineage, expectedSerial: state.serial, verifySignature: recovery.verifySignature });
+  return { ...verified, report: attestation, classification, hashes };
+}
+
+function deriveRecoveryExecutionSecretArns(retained, taskDefinitionArns) {
+  const result = {};
+  for (const kind of ["backend", "worker", "canary", "read_only_canary"]) {
+    const entries = Object.values(retained.retainedCandidateTaskDefinitions).filter((entry) => entry.kind === kind);
+    const exactCanary = kind === "canary" ? entries.filter((entry) => entry.arn === taskDefinitionArns["full-rls-application-canary"]) : [];
+    const selected = (exactCanary.length ? exactCanary : entries).sort((left, right) => Number(right.revision) - Number(left.revision)).slice(0, 1);
+    const secrets = selected.flatMap((entry) => JSON.parse(entry.definition).containerDefinitions?.[0]?.secrets || []).map((secret) => String(secret.valueFrom).match(/^arn:aws:secretsmanager:[^:]+:[^:]+:secret:[^:]+/)?.[0]).filter(Boolean);
+    if (!secrets.length) throw new Error(`Recovery retained history has no execution secrets for ${kind}.`);
+    result[kind] = [...new Set(secrets)].sort();
+  }
+  const executorEntries = Object.values(retained.retainedExecutorTaskDefinitions).filter((entry) => entry.mode === "full-rls-verification");
+  const exactExecutor = executorEntries.filter((entry) => entry.arn === taskDefinitionArns["full-rls-verification"]);
+  const selectedExecutor = (exactExecutor.length ? exactExecutor : executorEntries).sort((left, right) => Number(right.revision) - Number(left.revision)).slice(0, 1);
+  const executorSecrets = selectedExecutor.flatMap((entry) => JSON.parse(entry.definition).containerDefinitions?.[0]?.secrets || []).map((secret) => String(secret.valueFrom).match(/^arn:aws:secretsmanager:[^:]+:[^:]+:secret:[^:]+/)?.[0]).filter(Boolean);
+  if (!executorSecrets.length) throw new Error("Recovery retained history has no executor execution secrets.");
+  result.executor = [...new Set(executorSecrets)].sort();
+  return result;
 }
 
 export function deriveContractDigests({ file = checksumsPath } = {}) {
@@ -299,6 +370,11 @@ export function renderTfvars(values) {
     `approval_kms_key_arn = ${quote(values.approval_kms_key_arn)}`,
     `receipt_bucket_arn = ${quote(values.receipt_bucket_arn)}`,
     `broker_package_path = ${quote(values.broker_package_path)}`,
+    `stage_b_recovery_only = ${values.stage_b_recovery_only === true}`,
+    `stage_b_recovery_alias_target_version = ${values.stage_b_recovery_alias_target_version === null ? "null" : quote(values.stage_b_recovery_alias_target_version)}`,
+    `stage_b_recovery_broker_environment = ${renderMap(values.stage_b_recovery_broker_environment || {}, quote)}`,
+    `stage_b_recovery_task_definition_arns = ${renderMap(values.stage_b_recovery_task_definition_arns || {}, quote)}`,
+    `stage_b_recovery_execution_secret_arns = ${renderMap(values.stage_b_recovery_execution_secret_arns || {}, (items) => `[${items.map(quote).join(", ")}]`)}`,
     `tooling_sha = ${quote(values.tooling_sha)}`,
     `image_release_sha = ${quote(values.image_release_sha)}`,
     `canonical_image_evidence_sha256 = ${quote(values.canonical_image_evidence_sha256)}`,
@@ -333,7 +409,7 @@ function assertBrokerPackageBinding(tfvarsBytes, report) {
   const bytes = fs.readFileSync(tfvarsBrokerPath);
   if (sha256(bytes) !== report.brokerPackageRawSha256) throw new Error("Stage B broker package raw SHA256 does not match the canonical binding report.");
   if (base64Sha256(bytes) !== report.brokerPackageBase64Sha256) throw new Error("Stage B broker package base64 SHA256 does not match the canonical binding report.");
-  const manifest = assertStageBBrokerPackageManifest({ brokerPackagePath: tfvarsBrokerPath, manifestPath: report.brokerPackageManifestPath, repositoryRoot: root, expectedToolingSha: report.toolingSha, expectedToolingTreeSha256: report.toolingTreeSha256 });
+  const manifest = assertStageBBrokerPackageManifest({ brokerPackagePath: tfvarsBrokerPath, manifestPath: report.brokerPackageManifestPath, repositoryRoot: root, ...(report.recoveryOnly ? {} : { expectedToolingSha: report.toolingSha, expectedToolingTreeSha256: report.toolingTreeSha256 }) });
   if (manifest.sha256 !== report.brokerPackageManifestSha256 || manifest.manifest.rawSha256 !== report.brokerPackageRawSha256) throw new Error("Stage B broker package manifest binding does not match the canonical report.");
 }
 
@@ -373,6 +449,8 @@ export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindi
   if (bindingReportSha256 && sha256(reportBytes) !== bindingReportSha256) throw new Error("Stage B tfvars binding-report SHA256 does not match the approved digest.");
   if (report?.schemaVersion !== STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION || report.tfvarsSchemaVersion !== STAGE_B_TFVARS_SCHEMA_VERSION || report.generator !== STAGE_B_TFVARS_GENERATOR) throw new Error("Stage B tfvars binding report is not produced by the canonical generator.");
   if (report.tfvarsSha256 !== sha256(tfvarsBytes)) throw new Error("Stage B tfvars was modified after canonical generation.");
+  if (report.recoveryOnly !== undefined && typeof report.recoveryOnly !== "boolean") throw new Error("Stage B tfvars binding recovery-only flag is malformed.");
+  if (report.recoveryOnly === undefined) report.recoveryOnly = false;
   assertBrokerPackageBinding(tfvarsBytes, report);
   assertStageAPrerequisiteBinding(report);
   for (const [key, expected] of [["toolingSha", expectedToolingSha], ["toolingTreeSha256", expectedToolingTreeSha256], ["imageReleaseSha", expectedImageReleaseSha], ["imageEvidenceCanonicalSha256", expectedImageEvidenceSha256]]) if (expected !== undefined && report[key] !== expected) throw new Error(`Stage B tfvars binding report ${key} does not match the current deployment identity.`);
@@ -382,6 +460,10 @@ export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindi
   if (JSON.stringify(Object.keys(report.images || {}).sort()) !== JSON.stringify([...expectedImages].sort())) throw new Error("Stage B tfvars binding report does not contain exactly the five image bindings.");
   for (const image of Object.values(report.images)) {
     if (image.matchesEvidence !== true || image.digestLength !== 71 || !imageReferencePattern(image.imageReference) || !tfvarsBytes.toString("utf8").includes(`${image.terraformVariable} = ${quote(image.imageReference)}`)) throw new Error("Stage B tfvars image binding is missing, modified, or not equal to signed evidence.");
+  }
+  if (report.recoveryOnly === true) {
+    if (!digestPattern.test(report.recoveryAttestationSha256 || "") || !digestPattern.test(report.recoveryClassificationSha256 || "") || !digestPattern.test(report.recoveryRefreshReportSha256 || "") || report.recoveryStateLineage !== report.stateLineage || report.recoveryStateSerial !== report.stateSerial || report.recoveryDesiredVersion === null || !/^[1-9][0-9]*$/.test(String(report.recoveryDesiredVersion))) throw new Error("Recovery-only tfvars binding report is incomplete or state-unbound.");
+    if (!tfvarsBytes.toString("utf8").includes("stage_b_recovery_only = true") || !tfvarsBytes.toString("utf8").includes(`stage_b_recovery_alias_target_version = ${quote(report.recoveryDesiredVersion)}`)) throw new Error("Recovery-only tfvars does not carry the exact attested target binding.");
   }
   return report;
 }
@@ -394,7 +476,7 @@ function validateTfvarsValues(values) {
   for (const field of ["backend_image", "worker_image", "executor_image", "canary_image", "read_only_canary_image"]) if (!imageUriPattern.test(values[field] || "")) throw new Error(`${field} is not an immutable Stage B image reference.`);
 }
 
-export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, outputPath, bindingReportPath, allowOverwrite = false } = {}) {
+export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, outputPath, bindingReportPath, allowOverwrite = false, recoveryOnly = false, recovery } = {}) {
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !digestPattern.test(toolingTreeSha256 || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "")) throw new Error("Tooling, tooling-tree, or image-release identity is malformed.");
   if (environment !== STAGE_B_EXPECTED_ENVIRONMENT) throw new Error("Stage B tfvars require the production environment.");
   assertAbsoluteFile(imageEvidence, "Image evidence"); assertAbsoluteFile(imageEvidenceSignature, "Image-evidence signature"); assertAbsoluteFile(stateBackup, "State backup"); assertAbsoluteFile(stageAInput, "Stage-A prerequisite input"); assertAbsoluteFile(stageAStateBackup, "Stage-A state backup"); assertAbsoluteFile(brokerPackagePath, "Broker package");
@@ -407,12 +489,16 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   const evidenceSha256 = imageEvidenceSha256(report);
   const images = extractImages(report, imageReleaseSha);
   const state = readJson(stateBackup); const retained = deriveRetainedDefinitions(state);
+  const recoveryEvidence = recoveryOnly ? assertRecoveryOnlyEvidence({ recovery, state, toolingSha }) : null;
+  const recoveryBindings = recoveryOnly ? deriveRecoveryOnlyBindings(state) : null;
+  if (recoveryOnly && path.resolve(brokerPackagePath) !== recoveryBindings.packagePath) throw new Error("Recovery-only broker package path must match the current Lambda state filename exactly.");
+  if (recoveryOnly && base64Sha256(fs.readFileSync(brokerPackagePath)) !== recoveryBindings.sourceCodeHashBase64) throw new Error("Recovery-only broker package bytes do not match the current Lambda source_code_hash.");
   const stageAStateBytes = fs.readFileSync(stageAStateBackup);
   const stageAState = JSON.parse(stageAStateBytes);
   const stageAPrerequisiteInput = validateStageBStageAInput(readJson(stageAInput), { toolingSha, toolingTreeSha256 });
   const stageAStateSha256 = assertStageAInputMatchesStateBackup(stageAPrerequisiteInput, stageAStateBytes, stageAState);
   const contract = deriveContractDigests({ file: checksumsFile }); const brokerBytes = fs.readFileSync(brokerPackagePath);
-  const brokerManifest = assertStageBBrokerPackageManifest({ brokerPackagePath, repositoryRoot: root, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256 });
+  const brokerManifest = assertStageBBrokerPackageManifest({ brokerPackagePath, repositoryRoot: root, ...(recoveryOnly ? {} : { expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256 }) });
   const values = {
     account_id: STAGE_B.account, aws_region: STAGE_B.region, deployment_environment: environment, vpc_id: stageAPrerequisiteInput.vpcId, private_subnet_ids: [...stageAPrerequisiteInput.privateSubnetIds].sort(), ecs_cluster_arn: stageAPrerequisiteInput.ecsClusterArn,
     stage_a_database_security_group_id: stageAPrerequisiteInput.stageADatabaseSecurityGroupId, stage_a_executor_security_group_id: stageAPrerequisiteInput.stageAExecutorSecurityGroupId, stage_a_executor_task_role_arn: stageAPrerequisiteInput.stageAExecutorTaskRoleArn, stage_a_broker_role_arn: stageAPrerequisiteInput.stageABrokerRoleArn,
@@ -421,6 +507,11 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
     broker_package_path: path.resolve(brokerPackagePath), tooling_sha: toolingSha, image_release_sha: imageReleaseSha, canonical_image_evidence_sha256: evidenceSha256, source_contract_sha256: contract.sourceContractSha256, migration_set_digest: contract.migrationSetDigest, package_checksum_sha256: contract.packageChecksumSha256,
     backend_image: images.backend_image.value, worker_image: images.worker_image.value, executor_image: images.executor_image.value, canary_image: images.canary_image.value, read_only_canary_image: images.read_only_canary_image.value, stage_a_read_only_canary_database_secret_arn: stageAPrerequisiteInput.stageAReadOnlyCanaryDatabaseSecretArn,
     retained_candidate_task_definitions: retained.retainedCandidateTaskDefinitions, retained_executor_task_definitions: retained.retainedExecutorTaskDefinitions,
+    stage_b_recovery_only: recoveryOnly,
+    stage_b_recovery_alias_target_version: recoveryOnly ? recoveryEvidence.report.currentObservedEvidence.configuredDesiredVersion : null,
+    stage_b_recovery_broker_environment: recoveryOnly ? recoveryBindings.environment : {},
+    stage_b_recovery_task_definition_arns: recoveryOnly ? recoveryBindings.taskDefinitionArns : {},
+    stage_b_recovery_execution_secret_arns: recoveryOnly ? deriveRecoveryExecutionSecretArns(retained, recoveryBindings.taskDefinitionArns) : {},
   };
   validateTfvarsValues(values);
   const tfvars = renderTfvars(values); const tfvarsBytes = Buffer.from(tfvars); const tfvarsSha256 = sha256(tfvarsBytes); const stateBytes = fs.readFileSync(stateBackup);
@@ -431,11 +522,24 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
     tfvarsFileName: path.basename(outputPath),
     tfvarsExtension: STAGE_B_TFVARS_EXTENSION,
     generator: STAGE_B_TFVARS_GENERATOR,
+    recoveryOnly,
     toolingSha, toolingTreeSha256, imageReleaseSha, imageEvidenceCanonicalSha256: evidenceSha256,
     imageEvidenceSource: path.basename(imageEvidence), imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputPath: path.resolve(stageAInput), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stageAStateBackupPath: path.resolve(stageAStateBackup), stageAStateBackupSha256: stageAStateSha256, stageAStateObject: stageAPrerequisiteInput.stageAStateObject, stageAStateLineage: stageAState.lineage, stageAStateSerial: stageAState.serial, stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
     brokerPackagePath: path.resolve(brokerPackagePath), brokerPackageManifestPath: brokerManifest.path, brokerPackageManifestSha256: brokerManifest.sha256, brokerPackageManifestFormat: brokerManifest.manifest.format, brokerPackageRawSha256: sha256(brokerBytes), brokerPackageBase64Sha256: base64Sha256(brokerBytes), sourceContractSha256: contract.sourceContractSha256, migrationSetDigest: contract.migrationSetDigest, packageChecksumSha256: contract.packageChecksumSha256,
     images: Object.fromEntries(Object.entries(images).map(([variable, image]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: image.service, repository: image.repository, tag: image.tag, imageReference: image.value, digestLength: image.digest.length, digest: image.digest, matchesEvidence: report.images.find((record) => record.service === image.service)?.digest === image.digest }])),
     retainedDefinitions: { candidate: retained.counts.candidate, executor: retained.counts.executor },
+    recoveryOnly,
+    ...(recoveryOnly ? {
+      recoveryAttestationSha256: recoveryEvidence.hashes.attestationSha256,
+      recoveryClassificationSha256: recoveryEvidence.hashes.classificationSha256,
+      recoveryRefreshReportSha256: recoveryEvidence.hashes.refreshReportSha256,
+      recoveryLiveVersion: recoveryEvidence.report.currentObservedEvidence.liveVersion,
+      recoveryDesiredVersion: recoveryEvidence.report.currentObservedEvidence.configuredDesiredVersion,
+      recoveryStateLineage: state.lineage,
+      recoveryStateSerial: state.serial,
+      recoveryBrokerPackageStatePath: recoveryBindings.packagePath,
+      recoveryBrokerStateSourceCodeHashBase64: recoveryBindings.sourceCodeHashBase64,
+    } : {}),
     tfvarsSha256,
   };
   if (Object.values(bindingReport.images).some((image) => image.digestLength !== 71 || image.matchesEvidence !== true)) throw new Error("Stage B image binding report contains an unequal or malformed digest.");
@@ -446,10 +550,18 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
 function requiredOption(argv, option) { const index = argv.indexOf(option); const value = index === -1 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${option} is required.`); return value; }
 
 export function parseCli(argv = process.argv.slice(2)) {
-  return {
+  const recoveryOnly = argv.includes("--recovery-only");
+  const result = {
     imageEvidence: requiredOption(argv, "--image-evidence"), imageEvidenceSignature: requiredOption(argv, "--image-evidence-signature"), stateBackup: requiredOption(argv, "--state-backup"), stageAInput: requiredOption(argv, "--stage-a-input"), stageAStateBackup: requiredOption(argv, "--stage-a-state-backup"), brokerPackagePath: requiredOption(argv, "--broker-package"),
-    toolingSha: requiredOption(argv, "--tooling-sha"), toolingTreeSha256: requiredOption(argv, "--tooling-tree-sha256"), imageReleaseSha: requiredOption(argv, "--image-release-sha"), workflowRunId: requiredOption(argv, "--workflow-run-id"), canonicalArtifactSha256: requiredOption(argv, "--canonical-artifact-sha256"), environment: requiredOption(argv, "--environment"), outputPath: requiredOption(argv, "--output"), bindingReportPath: requiredOption(argv, "--binding-report"), allowOverwrite: argv.includes("--allow-overwrite"),
+    toolingSha: requiredOption(argv, "--tooling-sha"), toolingTreeSha256: requiredOption(argv, "--tooling-tree-sha256"), imageReleaseSha: requiredOption(argv, "--image-release-sha"), workflowRunId: requiredOption(argv, "--workflow-run-id"), canonicalArtifactSha256: requiredOption(argv, "--canonical-artifact-sha256"), environment: requiredOption(argv, "--environment"), outputPath: requiredOption(argv, "--output"), bindingReportPath: requiredOption(argv, "--binding-report"), allowOverwrite: argv.includes("--allow-overwrite"), recoveryOnly,
   };
+  if (recoveryOnly) result.recovery = {
+    refreshReportPath: requiredOption(argv, "--refresh-report"), refreshReportSha256: requiredOption(argv, "--refresh-report-sha256"),
+    attestationPath: requiredOption(argv, "--recovery-attestation"), attestationSha256: requiredOption(argv, "--recovery-attestation-sha256"),
+    signaturePath: requiredOption(argv, "--recovery-signature"), signatureSha256: requiredOption(argv, "--recovery-signature-sha256"),
+    classificationPath: requiredOption(argv, "--recovery-classification"), classificationSha256: requiredOption(argv, "--recovery-classification-sha256"),
+  };
+  return result;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

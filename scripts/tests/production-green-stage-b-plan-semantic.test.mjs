@@ -531,12 +531,22 @@ test("typed Terraform envelope admits exact nulls, false markers, and resolved d
 
 test("supported profile matrix is explicit and includes baseline broker creation", () => {
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES.map(({ profile }) => profile), [
-    "BASELINE_INITIAL_CREATE", "ROLLOVER_RECOVERY", "NO_CHANGE_OR_APPEND_ONLY_RETRY",
+    "BASELINE_INITIAL_CREATE", "ROLLOVER_RECOVERY", "RECOVERY_ALIAS_ONLY", "NO_CHANGE_OR_APPEND_ONLY_RETRY",
   ]);
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerPolicyActions, [["create"]]);
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerFunctionActions, [["create"]]);
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerAliasActions, [["create"]]);
-  assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[2].brokerPolicyActions, [["create"], ["no-op"]]);
+  assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[3].brokerPolicyActions, [["create"], ["no-op"]]);
+});
+
+test("recovery-only semantic profile contains only the exact concrete alias target", () => {
+  const value = plan();
+  value.variables = { stage_b_recovery_only: { value: true } };
+  value.resource_changes = [value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed")];
+  const alias = value.resource_changes[0];
+  alias.change.after.function_version = "3";
+  delete alias.change.after_unknown.function_version;
+  assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(value));
 });
 
 test("baseline broker profiles reject non-root, unknown, and partial semantic shapes", () => {

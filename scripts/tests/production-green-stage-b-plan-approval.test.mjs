@@ -5,9 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
-import { assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes } from "../aws/stage-b-plan-approval-contract.mjs";
+import { assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes, STAGE_B_BROKER_OPERATIONS, STAGE_B_PLAN_PROFILES } from "../aws/stage-b-plan-approval-contract.mjs";
 import { finalizeCapturedStageBPlanApproval, readStageBApprovalPlanArtifacts } from "../plan-production-green-stage-b.mjs";
 import { writeStageBPrivateFileAtomic } from "../aws/stage-b-artifact-contract.mjs";
+import { assertRecoveryOnlyPlan } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
+import { assertPermissionReportPlanBinding } from "../aws/validate-production-green-stage-b-permissions.mjs";
 
 const fixture = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-plan-approval-"));
@@ -179,4 +181,75 @@ test("approval rejects every changed plan artifact and stale capture binding", (
 test("approval is deterministic for unchanged captured artifacts", () => {
   const second = createStageBPlanApprovalReport({ captureReportSha256: hash(captureBytes), referenceAuditPath: approval.referenceAuditPath, referenceAuditSha256: hash(auditBytes), referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, stageBLineage: capture.stageBLineage, stageBSerial: capture.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: approval.approvedAt, classification: capture.classification, brokerOperation: capture.brokerOperation, brokerUpdatePresent: capture.brokerUpdatePresent, brokerActions: capture.brokerActions, brokerResourceAddresses: capture.brokerResourceAddresses });
   assert.deepEqual(second, approval);
+});
+
+test("plan profile and broker operation registries match the emitted Stage B universe", () => {
+  assert.deepEqual(STAGE_B_PLAN_PROFILES, ["BASELINE", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY"]);
+  assert.deepEqual(STAGE_B_BROKER_OPERATIONS, ["none", "initial-create", "update", "recovery-alias-only"]);
+  assert.throws(() => createStageBPlanCaptureReport({ ...capture, planProfile: "UNREVIEWED" }), /unsupported/);
+  assert.throws(() => createStageBPlanApprovalReport({ ...approval, planProfile: "UNREVIEWED" }), /unsupported/);
+});
+
+test("RECOVERY_ALIAS_ONLY survives recovery classification, capture, approval, permission, and apply binding", () => {
+  const recoveryPlan = {
+    terraform_version: "1.15.7",
+    format_version: "1.2",
+    variables: { stage_b_recovery_only: { value: true } },
+    resource_changes: [
+      { address: "aws_iam_policy.broker", type: "aws_iam_policy", change: { actions: ["no-op"], before: {}, after: {}, after_unknown: {} } },
+      { address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: ["no-op"], before: {}, after: {}, after_unknown: {} } },
+      { address: "aws_ecs_task_definition.candidate[\"backend\"]", type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: {}, after: {}, after_unknown: {} } },
+      { address: "aws_lambda_alias.reviewed", mode: "managed", module: null, type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "2" }, after: { function_version: "3" }, after_unknown: { routing_config: [] } } },
+    ],
+  };
+  const recoveryEvidence = {
+    currentObservedEvidence: {
+      protectedSourceSha: "a".repeat(40), terraformLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", refreshReportSha256: "d".repeat(64), terraformSerial: 76,
+      terraformAddress: "aws_lambda_alias.reviewed", resourceMode: "managed", resourceModule: null, resourceType: "aws_lambda_alias", resourceName: "reviewed",
+      functionName: "mscqr-production-rls-approval-broker", aliasName: "reviewed", stateVersion: "3", configuredDesiredVersion: "3", liveVersion: "2",
+      changedAttributes: ["function_version"], routingConfigurationChanged: false, descriptionChanged: false, functionIdentityChanged: false, aliasIdentityChanged: false, additionalManagedResourceDrift: false,
+    },
+  };
+  assert.deepEqual(assertRecoveryOnlyPlan(recoveryPlan, recoveryEvidence).profile, "RECOVERY_ALIAS_ONLY");
+  const saved = Buffer.from("recovery-saved-plan\n");
+  const planBytes = Buffer.from(`${JSON.stringify(recoveryPlan)}\n`);
+  const canonicalBytes = Buffer.from(`${canonicalJson(recoveryPlan)}\n`);
+  const recoveryHashes = stageBPlanHashes({ savedPlanBytes: saved, planJsonBytes: planBytes, canonicalPlanJsonBytes: canonicalBytes });
+  const recoveryCapture = createStageBPlanCaptureReport({
+    toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), refreshReportSha256: "d".repeat(64), recoveryAttestationSha256: "c".repeat(64), hashes: recoveryHashes,
+    capturedAt: "2026-08-09T00:00:00.000Z", stageBLineage: recoveryEvidence.currentObservedEvidence.terraformLineage, stageBSerial: 76,
+    terraformVersion: recoveryPlan.terraform_version, terraformFormatVersion: recoveryPlan.format_version, planProfile: "RECOVERY_ALIAS_ONLY",
+    classification: { noOp: 3, create: 0, update: 1, destroy: 0, replacement: 0, unclassified: 0 },
+    brokerEvidence: { brokerOperation: "recovery-alias-only", brokerUpdatePresent: false, brokerActions: ["no-op"], brokerResourceAddresses: ["aws_lambda_alias.reviewed"], brokerReferenceValidationPending: false },
+  });
+  const recoveryCaptureBytes = Buffer.from(`${JSON.stringify(recoveryCapture, null, 2)}\n`);
+  const recoveryAudit = { planJsonSha256: recoveryHashes.planJsonSha256, recoveryAttestationSha256: recoveryCapture.recoveryAttestationSha256, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/recovery", auditedAt: "2026-08-09T00:01:00.000Z" };
+  const recoveryAuditBytes = Buffer.from(`${JSON.stringify(recoveryAudit)}\n`);
+  const recoveryApproval = createStageBPlanApprovalReport({
+    captureReportSha256: hash(recoveryCaptureBytes), referenceAuditPath: path.join(directory, "recovery-audit.json"), referenceAuditSha256: hash(recoveryAuditBytes),
+    referenceAuditCallerArn: recoveryAudit.callerArn, referenceAuditAt: recoveryAudit.auditedAt, toolingSha: recoveryCapture.toolingSha, toolingTreeSha256: recoveryCapture.toolingTreeSha256,
+    refreshReportSha256: recoveryCapture.refreshReportSha256, recoveryAttestationSha256: recoveryCapture.recoveryAttestationSha256, stageBLineage: recoveryCapture.stageBLineage,
+    stageBSerial: recoveryCapture.stageBSerial, hashes: recoveryHashes, logicalCanonicalPlanJsonSha256: recoveryHashes.logicalCanonicalPlanJsonSha256, approvedAt: "2026-08-09T00:02:00.000Z",
+    planProfile: recoveryCapture.planProfile, classification: recoveryCapture.classification, brokerOperation: recoveryCapture.brokerOperation, brokerUpdatePresent: recoveryCapture.brokerUpdatePresent,
+    brokerActions: recoveryCapture.brokerActions, brokerResourceAddresses: recoveryCapture.brokerResourceAddresses,
+  });
+  const recoveryApprovalBytes = Buffer.from(`${JSON.stringify(recoveryApproval, null, 2)}\n`);
+  assert.doesNotThrow(() => assertStageBPlanCaptureReport(recoveryCapture, { captureReportBytes: recoveryCaptureBytes, hashes: recoveryHashes, recoveryAttestationSha256: recoveryCapture.recoveryAttestationSha256, stageBLineage: recoveryCapture.stageBLineage, stageBSerial: recoveryCapture.stageBSerial }));
+  assert.doesNotThrow(() => assertStageBPlanApprovalReport(recoveryApproval, { approvalReportBytes: recoveryApprovalBytes, captureReport: recoveryCapture, captureReportBytes: recoveryCaptureBytes, referenceAudit: recoveryAudit, referenceAuditBytes: recoveryAuditBytes, hashes: recoveryHashes, logicalCanonicalPlanJsonSha256: recoveryHashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: hash(recoveryAuditBytes), trustedCallerArn: recoveryAudit.callerArn, stageBLineage: recoveryCapture.stageBLineage, stageBSerial: recoveryCapture.stageBSerial }));
+  assert.doesNotThrow(() => assertStageBPlanApprovedBinding(recoveryApproval, { approvalReportBytes: recoveryApprovalBytes, approvalReportSha256: hash(recoveryApprovalBytes), savedPlanBytes: saved, planJsonBytes: planBytes, canonicalPlanJsonBytes: canonicalBytes, referenceAudit: recoveryAudit, referenceAuditBytes: recoveryAuditBytes, expectedRecoveryAttestationSha256: recoveryCapture.recoveryAttestationSha256, expectedStageBLineage: recoveryCapture.stageBLineage, expectedStageBSerial: recoveryCapture.stageBSerial, now: new Date("2026-08-09T00:02:00.000Z") }));
+  const manifest = { recoveryOnly: true, reviewed: ["aws_lambda_alias.reviewed"] };
+  const permission = { planSha256: recoveryHashes.planJsonSha256, savedPlanSha256: recoveryHashes.savedPlanSha256, canonicalPlanJsonSha256: recoveryHashes.logicalCanonicalPlanJsonSha256, manifestSha256: hash(Buffer.from(canonicalJson(manifest))), planApprovalReportSha256: hash(recoveryApprovalBytes) };
+  assert.doesNotThrow(() => assertPermissionReportPlanBinding(permission, { planJsonBytes: planBytes, savedPlanBytes: saved, manifest, planApprovalReportSha256: hash(recoveryApprovalBytes) }));
+  assert.equal(recoveryCapture.planProfile, "RECOVERY_ALIAS_ONLY");
+  assert.equal(recoveryApproval.planProfile, "RECOVERY_ALIAS_ONLY");
+  assert.equal(permission.planApprovalReportSha256, hash(recoveryApprovalBytes));
+
+  const rejectCapture = (mutate) => { const candidate = structuredClone(recoveryCapture); mutate(candidate); const bytes = Buffer.from(`${JSON.stringify(candidate, null, 2)}\n`); assert.throws(() => assertStageBPlanCaptureReport(candidate, { captureReportBytes: bytes, hashes: recoveryHashes, recoveryAttestationSha256: recoveryCapture.recoveryAttestationSha256, stageBLineage: recoveryCapture.stageBLineage, stageBSerial: recoveryCapture.stageBSerial })); };
+  rejectCapture((candidate) => { delete candidate.planProfile; });
+  rejectCapture((candidate) => { candidate.brokerUpdatePresent = true; });
+  rejectCapture((candidate) => { candidate.brokerResourceAddresses = ["aws_lambda_function.broker"]; });
+  rejectCapture((candidate) => { candidate.brokerOperation = "unknown"; });
+  rejectCapture((candidate) => { delete candidate.recoveryAttestationSha256; delete candidate.recoveryPlan; });
+  const mismatchedApproval = { ...recoveryApproval, planProfile: "BASELINE" };
+  assert.throws(() => assertStageBPlanApprovalReport(mismatchedApproval, { approvalReportBytes: Buffer.from(`${JSON.stringify(mismatchedApproval, null, 2)}\n`), captureReport: recoveryCapture, captureReportBytes: recoveryCaptureBytes, referenceAudit: recoveryAudit, referenceAuditBytes: recoveryAuditBytes, hashes: recoveryHashes, logicalCanonicalPlanJsonSha256: recoveryHashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: hash(recoveryAuditBytes), trustedCallerArn: recoveryAudit.callerArn, stageBLineage: recoveryCapture.stageBLineage, stageBSerial: recoveryCapture.stageBSerial }));
 });

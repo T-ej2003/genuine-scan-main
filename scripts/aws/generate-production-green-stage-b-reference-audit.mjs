@@ -374,6 +374,49 @@ function referenceNamesByFamily(items, families, arnKey, nameKey) {
   return references;
 }
 
+function generateRecoveryOnlyReferenceAudit({ plan, planBytes, planJsonSha256, reader, callerArn, auditedAt, now, recoveryAttestationSha256 }) {
+  if (plan?.variables?.stage_b_recovery_only?.value !== true) throw new Error("Recovery-only reference audit requires the explicit recovery-only plan variable.");
+  const changes = requireArray(plan.resource_changes, "Terraform plan resource_changes");
+  const alias = changes.find((change) => change?.address === "aws_lambda_alias.reviewed");
+  if (!alias || JSON.stringify(alias.change?.actions || []) !== JSON.stringify(["update"])) throw new Error("Recovery-only reference audit requires the reviewed-alias update.");
+  const mutations = changes.filter((change) => JSON.stringify(change.change?.actions || []) !== JSON.stringify(["no-op"]));
+  if (mutations.length !== 1 || mutations[0] !== alias) throw new Error("Recovery-only reference audit found a non-alias mutation.");
+  const aliasVersion = String(alias.change?.before?.function_version || "");
+  const targetVersion = String(alias.change?.after?.function_version || "");
+  if (!/^[1-9][0-9]*$/.test(aliasVersion) || !/^[1-9][0-9]*$/.test(targetVersion) || alias.change?.after_unknown?.function_version === true) throw new Error("Recovery-only alias target must be a concrete published version.");
+  const config = reader.getFunctionConfiguration(STAGE_B.brokerAliasArn);
+  const liveAlias = reader.getAlias(STAGE_B.brokerFunctionArn, STAGE_B.brokerAliasQualifier);
+  const brokerIdentity = assertStageBBrokerConfigurationIdentity({ configuration: config, alias: liveAlias });
+  if (brokerIdentity.aliasFunctionVersion !== aliasVersion) throw new Error("Recovery-only reference audit live alias version does not match the plan.");
+  assertStageBReferenceAuditFreshness(auditedAt, now);
+  if (recoveryAttestationSha256 !== undefined && !/^[a-f0-9]{64}$/.test(recoveryAttestationSha256)) throw new Error("Recovery attestation SHA256 is malformed.");
+  const planSha = ensurePlanHash(planBytes, planJsonSha256);
+  const deploymentIdentity = assertStageBDeploymentIdentity({ plan });
+  const observedCallerArn = callerArn || reader.getCallerIdentity()?.Arn;
+  if (!assumedReleaseRolePattern.test(observedCallerArn || "")) throw new Error("Recovery-only reference audit caller is not the production release-deployer.");
+  const noOpResources = changes.filter((change) => change !== alias).map((change) => ({ address: change.address, type: change.type, actions: change.change?.actions || [] }));
+  return {
+    schemaVersion: STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
+    toolingSha: deploymentIdentity.toolingSha,
+    imageReleaseSha: deploymentIdentity.imageReleaseSha,
+    canonicalImageEvidenceSha256: deploymentIdentity.canonicalImageEvidenceSha256,
+    auditedAt,
+    callerArn: observedCallerArn,
+    clusterArn: STAGE_B.clusterArn,
+    recoveryOnly: true,
+    recoveryAttestationSha256,
+    recoveryAlias: { address: alias.address, liveVersion: aliasVersion, targetVersion, aliasArn: liveAlias.AliasArn, aliasName: liveAlias.Name },
+    broker: { ...brokerIdentity, functionArn: STAGE_B.brokerFunctionArn, configurationFunctionArn: brokerIdentity.configurationFunctionArn, configurationVersion: brokerIdentity.configurationVersion, resolvedVersionArn: brokerIdentity.resolvedVersionArn },
+    recoveryNoOpResources: noOpResources,
+    services: [], runningTasks: [], pendingTasks: [], transitionalTasks: [], taskDefinitions: [],
+    oldTaskDefinitions: [], retainedTaskDefinitions: [], newestRetainedTaskDefinitions: [], createOnlyTaskDefinitions: [], noOpTaskDefinitions: noOpResources,
+    currentTaskDefinitions: { currentCreates: 0, currentNoOps: noOpResources.filter((entry) => entry.type === "aws_ecs_task_definition").length, total: 0 },
+    plannedAtomicBrokerRollovers: [], plannedAtomicPackageChecksumTransition: null,
+    allOldRevisionsUnreferenced: true, noServiceDeploymentObserved: true, noTaskExecutionObserved: true,
+    planJsonSha256: planSha,
+  };
+}
+
 function assertStageBLiveReferences(items, allowedByFamily, createOnlyFamilies, arnKey, nameKey) {
   for (const item of items) {
     const family = observedFamily(item[arnKey], `${nameKey} task definition`);
@@ -413,6 +456,7 @@ export function generateReferenceAudit({
   const deploymentIdentity = assertStageBDeploymentIdentity({ plan });
   const planSha = ensurePlanHash(planBytes, planJsonSha256);
   if (recoveryAttestationSha256 !== undefined && !/^[a-f0-9]{64}$/.test(recoveryAttestationSha256)) throw new Error("Recovery attestation SHA256 is malformed.");
+  if (plan?.variables?.stage_b_recovery_only?.value === true) return generateRecoveryOnlyReferenceAudit({ plan, planBytes, planJsonSha256, reader, callerArn, auditedAt, now, recoveryAttestationSha256 });
   const {
     rolloverByAddress,
     createOnlyByAddress,

@@ -67,6 +67,8 @@ locals {
       definition = jsondecode(entry.definition)
     }
   }
+  candidate_definitions_for_resources = var.stage_b_recovery_only ? {} : local.candidate_definitions
+  executor_definitions_for_resources  = var.stage_b_recovery_only ? {} : local.executor_definitions
   execution_secret_arns = {
     for kind, definition in merge(local.candidate_definitions, { executor = local.executor_definitions["full-rls-verification"] }) :
     kind => distinct([
@@ -74,6 +76,7 @@ locals {
       regex("^arn:aws:secretsmanager:[^:]+:[^:]+:secret:[^:]+", secret.valueFrom)
     ])
   }
+  active_execution_secret_arns = var.stage_b_recovery_only ? var.stage_b_recovery_execution_secret_arns : local.execution_secret_arns
   execution_log_group_arns = merge(
     { for kind, log_group in aws_cloudwatch_log_group.stage_b : kind => log_group.arn },
     { executor = var.stage_a_executor_log_group_arn }
@@ -121,6 +124,7 @@ locals {
       "full-rls-application-canary" => arn if kind == "canary"
     },
   )
+  active_broker_task_definition_arns = var.stage_b_recovery_only ? var.stage_b_recovery_task_definition_arns : local.broker_task_definition_arns
   current_task_definition_mappings_complete = (
     length(local.current_task_definition_arns) == length(local.expected_current_task_definition_families) &&
     alltrue([
@@ -142,7 +146,7 @@ locals {
         Sid      = "RunOnlyApprovedExecutorAndCanaryRevisions"
         Effect   = "Allow"
         Action   = ["ecs:RunTask"]
-        Resource = values(local.broker_task_definition_arns)
+        Resource = values(local.active_broker_task_definition_arns)
       },
       {
         Sid      = "PassOnlyApprovedTaskRoles"
@@ -253,7 +257,7 @@ resource "aws_iam_role_policy" "execution" {
         Sid      = "ReadOnlyExactInjectedSecrets"
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
-        Resource = local.execution_secret_arns[each.key]
+        Resource = local.active_execution_secret_arns[each.key]
       }
     ]
   })
@@ -368,7 +372,7 @@ resource "aws_ecs_task_definition" "executor_retained" {
 }
 
 resource "aws_ecs_task_definition" "candidate" {
-  for_each                 = local.candidate_definitions
+  for_each                 = local.candidate_definitions_for_resources
   skip_destroy             = true
   family                   = each.value.family
   network_mode             = each.value.networkMode
@@ -394,7 +398,7 @@ resource "aws_ecs_task_definition" "candidate" {
 }
 
 resource "aws_ecs_task_definition" "executor" {
-  for_each                 = local.executor_definitions
+  for_each                 = local.executor_definitions_for_resources
   skip_destroy             = true
   family                   = each.value.family
   network_mode             = each.value.networkMode
@@ -465,14 +469,14 @@ resource "aws_lambda_function" "broker" {
   publish          = true
 
   environment {
-    variables = {
+    variables = var.stage_b_recovery_only ? var.stage_b_recovery_broker_environment : {
       BROKER_REPLAY_TABLE               = aws_dynamodb_table.replay.name
       BROKER_RECEIPT_BUCKET             = trimprefix(var.receipt_bucket_arn, "arn:aws:s3:::")
       BROKER_CLUSTER_ARN                = var.ecs_cluster_arn
       BROKER_APPROVAL_SECRET_ARN        = var.approval_secret_arn
       BROKER_EXECUTOR_SECURITY_GROUP_ID = var.stage_a_executor_security_group_id
       BROKER_PRIVATE_SUBNETS_JSON       = jsonencode(var.private_subnet_ids)
-      BROKER_TASK_DEFINITIONS_JSON      = jsonencode(local.broker_task_definition_arns)
+      BROKER_TASK_DEFINITIONS_JSON      = jsonencode(local.active_broker_task_definition_arns)
       BROKER_TASK_TEMPLATE_HASHES_JSON  = jsonencode(local.broker_template_hashes)
       BROKER_APPROVAL_EXPECTED_JSON     = jsonencode(local.broker_approval_expected)
       BROKER_IMAGES_JSON                = jsonencode(local.broker_images)
@@ -484,7 +488,7 @@ resource "aws_lambda_function" "broker" {
 resource "aws_lambda_alias" "reviewed" {
   name             = "reviewed"
   function_name    = aws_lambda_function.broker.function_name
-  function_version = aws_lambda_function.broker.version
+  function_version = var.stage_b_recovery_only ? var.stage_b_recovery_alias_target_version : aws_lambda_function.broker.version
 }
 
 resource "aws_lambda_permission" "release_deployer" {

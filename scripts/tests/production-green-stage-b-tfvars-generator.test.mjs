@@ -8,8 +8,8 @@ import test from "node:test";
 import { signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
-import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, deriveContractDigests, deriveRetainedDefinitions, generateStageBTfvars, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
-import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, deriveContractDigests, deriveRecoveryOnlyBindings, deriveRetainedDefinitions, generateStageBTfvars, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
+import { STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 
@@ -164,6 +164,32 @@ test("partial-apply state accepts current candidate and executor addresses", () 
   assert.equal(result.serial, 78);
   assert.equal(result.counts.candidate, 3);
   assert.equal(result.counts.executor, 8);
+});
+
+test("recovery-only bindings are derived from exact broker state identity", () => {
+  const f = files();
+  const state = stateFixture();
+  const taskDefinitionArns = Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${mode}:4`]));
+  const environment = Object.fromEntries([
+    ["BROKER_APPROVAL_EXPECTED_JSON", JSON.stringify({ packageChecksumSha256: "d".repeat(64) })],
+    ["BROKER_APPROVAL_SECRET_ARN", STAGE_B.approvalSecretArn],
+    ["BROKER_CLUSTER_ARN", STAGE_B.clusterArn],
+    ["BROKER_EXECUTOR_SECURITY_GROUP_ID", STAGE_B.executorSecurityGroupId],
+    ["BROKER_IMAGES_JSON", "{}"],
+    ["BROKER_PRIVATE_SUBNETS_JSON", JSON.stringify(STAGE_B.privateSubnetIds)],
+    ["BROKER_RECEIPT_BUCKET", STAGE_B.receiptBucket],
+    ["BROKER_REPLAY_TABLE", "replay"],
+    ["BROKER_TASK_DEFINITIONS_JSON", JSON.stringify(taskDefinitionArns)],
+    ["BROKER_TASK_TEMPLATE_HASHES_JSON", "{}"],
+  ]);
+  const policyResource = state.resources.find((resource) => resource.type === "aws_iam_policy" && resource.name === "broker");
+  policyResource.mode = "managed";
+  policyResource.instances[0].attributes.policy = "{}";
+  state.resources.push({ mode: "managed", type: "aws_lambda_function", name: "broker", instances: [{ attributes: { filename: f.packagePath, source_code_hash: crypto.createHash("sha256").update(fs.readFileSync(f.packagePath)).digest("base64"), environment: [{ variables: environment }] } }] });
+  const bindings = deriveRecoveryOnlyBindings(state);
+  assert.equal(bindings.packagePath, path.resolve(f.packagePath));
+  assert.deepEqual(bindings.taskDefinitionArns, taskDefinitionArns);
+  assert.deepEqual(bindings.environment, environment);
 });
 
 test("current task-definition family and address mismatches fail closed", () => {

@@ -31,7 +31,7 @@ import { assertStageBDeploymentCapabilityGraph } from "./aws/generate-production
 import { assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBPrivateFile } from "./aws/stage-b-artifact-contract.mjs";
 import { assertStageBPlanApprovedBinding } from "./aws/stage-b-plan-approval-contract.mjs";
-import { assertVerifiedStageBRecovery } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
+import { assertRecoveryOnlyPlan, assertVerifiedStageBRecovery } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
 import { captureStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -156,6 +156,11 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   if (!/^[a-f0-9]{64}$/.test(imageEvidenceSha256) || canonicalImageEvidenceSha256(imageEvidence) !== imageEvidenceSha256) throw new Error("Image evidence canonical SHA256 does not match the approved digest.");
   try { assertStageBReleaseCallerArn(callerArn); } catch { throw new Error("Current caller is not the production release-deployer STS assumed-role."); }
   const plan = JSON.parse(planBytes); const audit = JSON.parse(auditBytes);
+  if (bindingReport.recoveryOnly !== (approvalReport.planProfile === "RECOVERY_ALIAS_ONLY")) throw new Error("Stage B recovery-only tfvars and approved plan profile disagree.");
+  if (bindingReport.recoveryOnly) {
+    if (!trustedRecovery) throw new Error("Recovery-only apply requires verified recovery evidence.");
+    assertRecoveryOnlyPlan(plan, trustedRecovery.attestation);
+  }
   const deploymentIdentity = assertStageBDeploymentIdentity({ plan, expectedToolingSha: toolingSha, expectedImageReleaseSha: imageReleaseSha, imageEvidence });
   const boundToolingSha = toolingSha || deploymentIdentity.toolingSha;
   const boundImageReleaseSha = imageReleaseSha || deploymentIdentity.imageReleaseSha;
@@ -200,6 +205,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
     trustedCallerArn: callerArn,
     terraformConfiguration: fs.readFileSync(path.join(root, terraformRoot, "main.tf"), "utf8"),
     strictResourceContract: true,
+    recoveryOnly: bindingReport.recoveryOnly === true,
     protectedMainCheckout,
     now: new Date(now),
   });

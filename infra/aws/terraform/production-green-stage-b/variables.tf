@@ -18,6 +18,31 @@ variable "approval_secret_arn" { type = string }
 variable "approval_kms_key_arn" { type = string }
 variable "receipt_bucket_arn" { type = string }
 variable "broker_package_path" { type = string }
+variable "stage_b_recovery_only" {
+  type    = bool
+  default = false
+}
+variable "stage_b_recovery_alias_target_version" {
+  type     = string
+  nullable = true
+  default  = null
+  validation {
+    condition     = var.stage_b_recovery_alias_target_version == null || can(regex("^[1-9][0-9]*$", var.stage_b_recovery_alias_target_version))
+    error_message = "Stage B recovery alias targets must be positive published Lambda version strings; $LATEST is forbidden."
+  }
+}
+variable "stage_b_recovery_broker_environment" {
+  type    = map(string)
+  default = {}
+}
+variable "stage_b_recovery_task_definition_arns" {
+  type    = map(string)
+  default = {}
+}
+variable "stage_b_recovery_execution_secret_arns" {
+  type    = map(list(string))
+  default = {}
+}
 variable "tooling_sha" { type = string }
 variable "image_release_sha" { type = string }
 variable "canonical_image_evidence_sha256" { type = string }
@@ -71,6 +96,31 @@ check "production_only" {
   assert {
     condition     = var.account_id == "368992683803" && var.aws_region == "eu-west-2" && var.deployment_environment == "production"
     error_message = "Stage B requires the production deployment environment in eu-west-2 account 368992683803."
+  }
+}
+
+check "recovery_mode_bindings" {
+  assert {
+    condition = var.stage_b_recovery_only ? (
+      var.stage_b_recovery_alias_target_version != null &&
+      toset(keys(var.stage_b_recovery_broker_environment)) == toset([
+        "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
+        "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
+        "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON"
+      ]) &&
+      toset(keys(var.stage_b_recovery_task_definition_arns)) == toset([
+        "full-rls-admin-bootstrap", "full-rls-admin-ownership", "full-rls-application-canary",
+        "full-rls-capability-preflight", "full-rls-role-provision", "full-rls-role-verify",
+        "full-rls-rollback", "full-rls-runtime-policy", "full-rls-verification"
+      ]) &&
+      toset(keys(var.stage_b_recovery_execution_secret_arns)) == toset(["backend", "worker", "executor", "canary", "read_only_canary"])
+      ) : (
+      var.stage_b_recovery_alias_target_version == null &&
+      length(var.stage_b_recovery_broker_environment) == 0 &&
+      length(var.stage_b_recovery_task_definition_arns) == 0 &&
+      length(var.stage_b_recovery_execution_secret_arns) == 0
+    )
+    error_message = "Stage B recovery-only mode must be completely state-bound; normal releases must not carry recovery overrides."
   }
 }
 

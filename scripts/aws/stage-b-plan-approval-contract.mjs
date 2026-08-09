@@ -11,7 +11,30 @@ export const STAGE_B_PLAN_APPROVED = "PLAN_APPROVED";
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const STAGE_B_CAPTURE_BROKER_ADDRESSES = ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"];
-const STAGE_B_BROKER_OPERATIONS = new Set(["none", "initial-create", "update"]);
+export const STAGE_B_PLAN_PROFILES = Object.freeze(["BASELINE", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY"]);
+export const STAGE_B_BROKER_OPERATIONS = Object.freeze(["none", "initial-create", "update", "recovery-alias-only"]);
+
+function assertPlanProfile(profile, label = "Stage B plan evidence") {
+  if (!STAGE_B_PLAN_PROFILES.includes(profile)) throw new Error(`${label} profile is unsupported: ${profile}`);
+  return profile;
+}
+
+function expectedBrokerEvidence(operation) {
+  if (operation === "none") return { updatePresent: false, actions: [], addresses: [], pending: false };
+  if (operation === "initial-create") return { updatePresent: false, actions: ["create"], addresses: STAGE_B_CAPTURE_BROKER_ADDRESSES, pending: false };
+  if (operation === "update") return { updatePresent: true, actions: ["update"], addresses: STAGE_B_CAPTURE_BROKER_ADDRESSES, pending: true };
+  if (operation === "recovery-alias-only") return { updatePresent: false, actions: ["no-op"], addresses: ["aws_lambda_alias.reviewed"], pending: false };
+  throw new Error(`Stage B broker operation is unsupported: ${operation}`);
+}
+
+function assertBrokerEvidence(report, { approved = false } = {}) {
+  if (!STAGE_B_BROKER_OPERATIONS.includes(report?.brokerOperation)) throw new Error("Stage B broker operation is unsupported.");
+  const expected = expectedBrokerEvidence(report.brokerOperation);
+  if (report.brokerUpdatePresent !== expected.updatePresent || report.brokerReferenceValidationPending !== (approved ? false : expected.pending)
+    || JSON.stringify(report.brokerActions) !== JSON.stringify(expected.actions)
+    || JSON.stringify(report.brokerResourceAddresses) !== JSON.stringify(expected.addresses)) throw new Error("Stage B broker evidence is malformed.");
+  return true;
+}
 
 export function stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes }) {
   if (![savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes].every(Buffer.isBuffer)) throw new Error("Stage B plan artifact bytes are required.");
@@ -44,14 +67,23 @@ function assertTaskDefinitionRotations(rotations) {
 
 function assertClassification(report) {
   const classification = report?.classification;
-  const profile = report?.planProfile || "BASELINE";
+  const profileValue = report?.planProfile === undefined
+    ? (report?.recoveryPlan === true || report?.recoveryAttestationSha256 ? undefined : "BASELINE")
+    : report.planProfile;
+  const profile = assertPlanProfile(profileValue);
   const validCounts = classification && ["noOp", "create", "update", "destroy", "replacement", "unclassified"].every((key) => Number.isSafeInteger(classification[key]) && classification[key] >= 0);
   if (!validCounts) throw new Error("Stage B plan evidence classification counters are malformed.");
   if (profile === "ECS_TASK_DEFINITION_ROTATION") {
     assertTaskDefinitionRotations(report.taskDefinitionRotations);
     if (classification.replacement !== report.taskDefinitionRotations.length || classification.destroy !== 0 || classification.unclassified !== 0) throw new Error("Stage B task-definition rotation classification is not exact and non-destructive.");
-  } else if (profile !== "BASELINE") {
-    throw new Error(`Stage B plan evidence profile is unsupported: ${profile}`);
+  } else if (profile === "RECOVERY_ALIAS_ONLY") {
+    if (!/^[a-f0-9]{64}$/.test(report.recoveryAttestationSha256 || "") || report.recoveryPlan !== true
+      || report.brokerOperation !== "recovery-alias-only" || classification.update !== 1
+      || classification.destroy !== 0 || classification.replacement !== 0 || classification.unclassified !== 0) {
+      throw new Error("Stage B recovery-alias-only classification is not exact and non-destructive.");
+    }
+    assertBrokerEvidence(report);
+    return;
   }
   if (report?.recoveryAttestationSha256 !== undefined) {
     if (!/^[a-f0-9]{64}$/.test(report.recoveryAttestationSha256) || report.recoveryPlan !== true || classification.destroy !== 0 || classification.unclassified !== 0) throw new Error("Stage B recovery plan evidence classification is not exact and non-destructive.");
@@ -79,7 +111,8 @@ export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, r
     toolingTreeSha256,
     refreshReportSha256,
     ...(recoveryAttestationSha256 ? { recoveryAttestationSha256, recoveryPlan: true } : {}),
-    ...(planProfile === "ECS_TASK_DEFINITION_ROTATION" ? { planProfile, taskDefinitionRotations } : {}),
+    planProfile: assertPlanProfile(planProfile),
+    ...(planProfile === "ECS_TASK_DEFINITION_ROTATION" ? { taskDefinitionRotations } : {}),
     ...hashes,
     classification,
     terraformVersion,
@@ -101,19 +134,11 @@ export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, r
 
 export function assertStageBPlanCaptureReport(report, { captureReportBytes, hashes, toolingSha, toolingTreeSha256, refreshReportSha256, recoveryAttestationSha256, stageBLineage, stageBSerial } = {}) {
   assertCanonicalTerraformSerialNumber(report?.stageBSerial, "Stage B plan capture serial");
-  if (report?.schemaVersion !== STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION || report.state !== STAGE_B_PLAN_CAPTURED || report.approvedForApply !== false || report.referenceAuditRequired !== true || !STAGE_B_BROKER_OPERATIONS.has(report.brokerOperation) || typeof report.brokerReferenceValidationPending !== "boolean" || typeof report.brokerUpdatePresent !== "boolean" || !Array.isArray(report.brokerActions) || !Array.isArray(report.brokerResourceAddresses)) {
+  if (report?.schemaVersion !== STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION || report.state !== STAGE_B_PLAN_CAPTURED || report.approvedForApply !== false || report.referenceAuditRequired !== true || typeof report.planProfile !== "string" || typeof report.brokerReferenceValidationPending !== "boolean" || typeof report.brokerUpdatePresent !== "boolean" || !Array.isArray(report.brokerActions) || !Array.isArray(report.brokerResourceAddresses)) {
     throw new Error("Stage B plan capture report is missing the PLAN_CAPTURED contract.");
   }
-  const expectedBrokerEvidence = report.brokerOperation === "initial-create"
-    ? { updatePresent: false, actions: ["create"], pending: false }
-    : report.brokerOperation === "update"
-      ? { updatePresent: true, actions: ["update"], pending: true }
-      : { updatePresent: false, actions: [], pending: false };
-  if (report.brokerUpdatePresent !== expectedBrokerEvidence.updatePresent || report.brokerReferenceValidationPending !== expectedBrokerEvidence.pending || JSON.stringify(report.brokerActions) !== JSON.stringify(expectedBrokerEvidence.actions)
-    || (report.brokerOperation !== "none" && JSON.stringify(report.brokerResourceAddresses) !== JSON.stringify(STAGE_B_CAPTURE_BROKER_ADDRESSES))
-    || (report.brokerOperation === "none" && report.brokerResourceAddresses.length !== 0)) {
-    throw new Error("Stage B plan capture broker evidence is malformed.");
-  }
+  assertPlanProfile(report.planProfile, "Stage B plan capture");
+  assertBrokerEvidence(report);
   if (!Buffer.isBuffer(captureReportBytes) || sha256(captureReportBytes) !== sha256(Buffer.from(JSON.stringify(report, null, 2) + "\n"))) throw new Error("Stage B plan capture report bytes are not self-consistent.");
   assertPlanHashes(report, hashes);
   if ((recoveryAttestationSha256 || report.recoveryAttestationSha256) && report.recoveryAttestationSha256 !== recoveryAttestationSha256) throw new Error("Stage B plan capture recovery-attestation binding differs from the selected recovery evidence.");
@@ -136,7 +161,8 @@ export function createStageBPlanApprovalReport({ captureReportSha256, referenceA
     toolingTreeSha256,
     refreshReportSha256,
     ...(recoveryAttestationSha256 ? { recoveryAttestationSha256, recoveryPlan: true } : {}),
-    ...(planProfile === "ECS_TASK_DEFINITION_ROTATION" ? { planProfile, taskDefinitionRotations } : {}),
+    planProfile: assertPlanProfile(planProfile),
+    ...(planProfile === "ECS_TASK_DEFINITION_ROTATION" ? { taskDefinitionRotations } : {}),
     stageBLineage,
     stageBSerial,
     referenceAuditPath,
@@ -164,7 +190,9 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
   if (!Buffer.isBuffer(captureReportBytes)) throw new Error("Stage B plan approval report capture binding is missing.");
   assertStageBPlanCaptureReport(captureReport, { captureReportBytes, hashes, stageBLineage, stageBSerial, recoveryAttestationSha256: report.recoveryAttestationSha256 });
   if (report.brokerOperation !== captureReport.brokerOperation || report.brokerUpdatePresent !== captureReport.brokerUpdatePresent || JSON.stringify(report.brokerActions) !== JSON.stringify(captureReport.brokerActions) || JSON.stringify(report.brokerResourceAddresses) !== JSON.stringify(captureReport.brokerResourceAddresses)) throw new Error("Stage B plan approval broker evidence is not bound to the captured plan.");
-  if ((report.planProfile || "BASELINE") !== (captureReport.planProfile || "BASELINE") || JSON.stringify(report.taskDefinitionRotations || []) !== JSON.stringify(captureReport.taskDefinitionRotations || [])) throw new Error("Stage B plan approval task-definition rotation profile is not bound to the captured plan.");
+  assertBrokerEvidence(report, { approved: true });
+  assertPlanProfile(report.planProfile, "Stage B plan approval");
+  if (report.planProfile !== captureReport.planProfile || JSON.stringify(report.taskDefinitionRotations || []) !== JSON.stringify(captureReport.taskDefinitionRotations || [])) throw new Error("Stage B plan approval profile is not bound to the captured plan.");
   if (report.captureReportSha256 !== sha256(captureReportBytes)) throw new Error("Stage B plan approval report is bound to a different capture report.");
   if (report.recoveryAttestationSha256 !== captureReport.recoveryAttestationSha256) throw new Error("Stage B approval recovery-attestation binding is not inherited from the capture report.");
   assertPlanHashes(report, hashes);
@@ -195,6 +223,8 @@ export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, a
     if (expected !== undefined && report[name] !== expected) throw new Error(`Stage B plan approval report ${name} does not match the current deployment binding.`);
   }
   if (expectedRecoveryAttestationSha256 !== undefined && report.recoveryAttestationSha256 !== expectedRecoveryAttestationSha256) throw new Error("Stage B approval recovery-attestation binding differs from the current recovery evidence.");
+  assertPlanProfile(report.planProfile, "Stage B plan approval");
+  assertBrokerEvidence(report, { approved: true });
   assertStageBReferenceAuditFreshness(report.referenceAuditAt, now);
   if (referenceAuditBytes && (sha256(referenceAuditBytes) !== report.referenceAuditSha256 || referenceAudit?.planJsonSha256 !== hashes.planJsonSha256 || referenceAudit?.recoveryAttestationSha256 !== report.recoveryAttestationSha256)) throw new Error("Stage B plan approval report reference-audit binding is invalid.");
   assertClassification(report);
