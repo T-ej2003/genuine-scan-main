@@ -18,12 +18,19 @@ const terraformRoot = "infra/aws/terraform/production-green-stage-b";
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 export const STAGE_B_REFRESH_DIAGNOSTIC_SCHEMA_VERSION = 1;
 export const STAGE_B_REFRESH_DIAGNOSTIC_MAX_EXCERPT_CHARS = 4096;
+const STAGE_B_REFRESH_DIAGNOSTIC_COMMAND_PHASES = new Set(["refresh-only-plan", "refresh-only-show"]);
+const STAGE_B_REFRESH_RUNTIME_SENSITIVE_ENV_KEYS = Object.freeze([
+  "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN",
+]);
 
-const AUTHORIZATION_VALUE = /((?:proxy-)?authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+/gi;
 const SECRET_ARN = /arn:aws:(?:secretsmanager|ssm):[^\s,;"']+/gi;
 const SENSITIVE_KEYS = new Set([
   "password", "passwd", "secret", "token", "access_key", "access-key", "private_key", "private-key",
   "session_token", "session-token", "aws_access_key_id", "aws_secret_access_key", "aws_session_token",
+]);
+const SENSITIVE_KEY_SUFFIXES = Object.freeze([
+  "aws_access_key_id", "aws_secret_access_key", "aws_session_token", "access_key", "access-key",
+  "private_key", "private-key", "session_token", "session-token", "password", "passwd", "secret", "token",
 ]);
 const PEM_BEGIN_PREFIX = "-----BEGIN ";
 const PEM_MARKER_SUFFIX = "-----";
@@ -105,7 +112,7 @@ function parseSensitiveAssignment(text, start) {
     while (keyEnd < text.length && isTokenCharacter(text[keyEnd])) keyEnd += 1;
     key = text.slice(start, keyEnd);
   }
-  if (!SENSITIVE_KEYS.has(key.toLowerCase())) return null;
+  if (!isSensitiveAssignmentKey(key)) return null;
   let valueStart = keyEnd;
   while (/\s/.test(text[valueStart] || "")) valueStart += 1;
   if (text[valueStart] !== "=" && text[valueStart] !== ":") return null;
@@ -126,6 +133,12 @@ function parseSensitiveAssignment(text, start) {
   return { start, valueStart, end };
 }
 
+function isSensitiveAssignmentKey(key) {
+  const normalized = key.toLowerCase();
+  if (SENSITIVE_KEYS.has(normalized)) return true;
+  return SENSITIVE_KEY_SUFFIXES.some((suffix) => normalized.endsWith(`_${suffix}`) || normalized.endsWith(`-${suffix}`));
+}
+
 function redactSensitiveAssignments(text) {
   let output = "";
   let cursor = 0;
@@ -140,22 +153,90 @@ function redactSensitiveAssignments(text) {
   return output + text.slice(cursor);
 }
 
+function findAuthorizationValue(text, from) {
+  const lower = text.toLowerCase();
+  const names = ["proxy-authorization", "authorization"];
+  let position = -1;
+  let name;
+  for (const candidate of names) {
+    const candidatePosition = lower.indexOf(candidate, from);
+    if (candidatePosition !== -1 && (position === -1 || candidatePosition < position)) {
+      position = candidatePosition;
+      name = candidate;
+    }
+  }
+  if (position === -1) return null;
+  const nameEnd = position + name.length;
+  const preceding = text[position - 1];
+  const quotedKey = preceding === "'" || preceding === '"';
+  if ((!quotedKey && position > 0 && isTokenCharacter(preceding)) || (quotedKey && text[nameEnd] !== preceding) || (!quotedKey && isTokenCharacter(text[nameEnd] || ""))) {
+    return { nextSearchFrom: position + 1 };
+  }
+  let valueStart = quotedKey ? nameEnd + 1 : nameEnd;
+  while (/\s/.test(text[valueStart] || "")) valueStart += 1;
+  if (text[valueStart] !== ":") return { nextSearchFrom: position + 1 };
+  valueStart += 1;
+  while (/\s/.test(text[valueStart] || "")) valueStart += 1;
+  const quote = text[valueStart] === "'" || text[valueStart] === '"' ? text[valueStart] : null;
+  const schemeStart = quote ? valueStart + 1 : valueStart;
+  const scheme = lower.slice(schemeStart, schemeStart + 6);
+  const schemeLength = scheme.startsWith("bearer") ? 6 : scheme.startsWith("basic") ? 5 : 0;
+  if (!schemeLength || !/\s/.test(text[schemeStart + schemeLength] || "")) return { nextSearchFrom: position + 1 };
+  let credentialStart = schemeStart + schemeLength;
+  while (/\s/.test(text[credentialStart] || "")) credentialStart += 1;
+  if (credentialStart >= text.length || (quote && text[credentialStart] === quote)) return { nextSearchFrom: position + 1 };
+  let credentialEnd = credentialStart;
+  if (quote) {
+    while (credentialEnd < text.length) {
+      if (text[credentialEnd] === "\\") { credentialEnd += 2; continue; }
+      if (text[credentialEnd] === quote) break;
+      credentialEnd += 1;
+    }
+  } else {
+    while (credentialEnd < text.length && !isUnquotedValueDelimiter(text[credentialEnd])) credentialEnd += 1;
+  }
+  return credentialEnd > credentialStart ? { start: credentialStart, end: credentialEnd } : { nextSearchFrom: position + 1 };
+}
+
+function redactAuthorizationValues(text) {
+  let output = "";
+  let cursor = 0;
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const match = findAuthorizationValue(text, searchFrom);
+    if (!match) break;
+    if (match.start === undefined) {
+      searchFrom = match.nextSearchFrom;
+      continue;
+    }
+    output += text.slice(cursor, match.start) + "[REDACTED]";
+    cursor = match.end;
+    searchFrom = match.end;
+  }
+  return output + text.slice(cursor);
+}
+
 export function redactStageBRefreshDiagnostic(value, { maxChars = STAGE_B_REFRESH_DIAGNOSTIC_MAX_EXCERPT_CHARS, sensitiveValues = [] } = {}) {
   if (!Number.isInteger(maxChars) || maxChars < 1) throw new Error("Stage B refresh diagnostic excerpt limit is malformed.");
   let text = toBytes(value).toString("utf8").replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   const exactValues = [...new Set(sensitiveValues.filter((candidate) => typeof candidate === "string" && candidate.length > 0))].sort((left, right) => right.length - left.length);
   for (const candidate of exactValues) text = text.split(candidate).join("[REDACTED]");
-  const redacted = redactSensitiveAssignments(redactPrivateKeyBlocks(text))
+  const redacted = redactAuthorizationValues(redactSensitiveAssignments(redactPrivateKeyBlocks(text)))
     .replace(SECRET_ARN, "[REDACTED_SECRET_REFERENCE]")
-    .replace(AUTHORIZATION_VALUE, "$1[REDACTED]");
+    ;
   return redacted.slice(0, maxChars) + (redacted.length > maxChars ? "\n[TRUNCATED]" : "");
 }
 
-export function createStageBRefreshDiagnostic({ failureClass, failureReason, planCommandExitCode = null, showCommandExitCode = null, stdout = "", stderr = "", capturedAt = new Date().toISOString(), sensitiveValues = [] } = {}) {
-  const stdoutBytes = toBytes(stdout); const stderrBytes = toBytes(stderr);
+export function stageBRefreshRuntimeSensitiveValues(env = process.env) {
+  return [...new Set(STAGE_B_REFRESH_RUNTIME_SENSITIVE_ENV_KEYS.map((key) => env?.[key]).filter((value) => typeof value === "string" && value.length > 0))];
+}
+
+export function createStageBRefreshDiagnostic({ commandPhase, failureClass, failureReason, planCommandExitCode = null, showCommandExitCode = null, stdout = "", stderr = "", stdoutRaw = stdout, stderrRaw = stderr, terminationSignal = null, commandErrorMessage = "", capturedAt = new Date().toISOString(), sensitiveValues = [] } = {}) {
+  if (!STAGE_B_REFRESH_DIAGNOSTIC_COMMAND_PHASES.has(commandPhase)) throw new Error("Stage B refresh diagnostic command phase is unsupported.");
+  const stdoutBytes = toBytes(stdoutRaw); const stderrBytes = toBytes(stderrRaw);
   return {
     schemaVersion: STAGE_B_REFRESH_DIAGNOSTIC_SCHEMA_VERSION,
-    commandPhase: "refresh-only-plan",
+    commandPhase,
     failureClass: String(failureClass || "MALFORMED_RESULT"),
     failureReason: redactStageBRefreshDiagnostic(failureReason || "", { maxChars: 512, sensitiveValues }),
     exitCode: Number.isInteger(planCommandExitCode) ? planCommandExitCode : null,
@@ -164,6 +245,8 @@ export function createStageBRefreshDiagnostic({ failureClass, failureReason, pla
     stderrSha256: sha256(stderrBytes),
     stdoutExcerptRedacted: redactStageBRefreshDiagnostic(stdoutBytes, { sensitiveValues }),
     stderrExcerptRedacted: redactStageBRefreshDiagnostic(stderrBytes, { sensitiveValues }),
+    terminationSignal: terminationSignal ? redactStageBRefreshDiagnostic(terminationSignal, { maxChars: 128, sensitiveValues }) : null,
+    commandErrorExcerptRedacted: commandErrorMessage ? redactStageBRefreshDiagnostic(commandErrorMessage, { maxChars: 512, sensitiveValues }) : null,
     capturedAt,
   };
 }
@@ -177,28 +260,29 @@ function safeDiagnostic(diagnostic = {}) {
   return { severity: redact(diagnostic.severity), summary: redact(diagnostic.summary), detail: redact(diagnostic.detail), address: diagnostic.address, range: diagnostic.range };
 }
 
-function showDiagnosticCapture({ shown, planCommandExitCode, error } = {}) {
-  const result = shown && typeof shown === "object" ? shown : null;
+function commandDiagnosticCapture({ result: commandResult, commandName, commandPhase, exitCodeTarget, planCommandExitCode = null, showCommandExitCode = null, error } = {}) {
+  const result = commandResult && typeof commandResult === "object" ? commandResult : null;
   const stdout = result?.stdout ?? "";
   const text = (value) => Buffer.isBuffer(value) ? value.toString("utf8") : typeof value === "string" ? value : "";
-  const stderrParts = [
-    text(result?.stderr),
-    text(result?.error?.message),
-    result?.signal ? `Terraform show terminated by ${result.signal}.` : null,
-    text(error?.message),
-  ].filter(Boolean);
-  if (!result && stderrParts.length === 0) stderrParts.push("Terraform show returned no command result.");
+  const signal = result?.signal || error?.signal;
+  const errorMessage = text(result?.error?.message) || text(error?.message);
+  const status = Number.isInteger(result?.status) ? result.status : null;
   return {
-    stdout,
-    stderr: stderrParts.join("\n"),
-    planCommandExitCode,
-    showCommandExitCode: Number.isInteger(result?.status) ? result.status : null,
+    stdout: text(stdout),
+    stderr: text(result?.stderr),
+    stdoutRaw: text(stdout),
+    stderrRaw: text(result?.stderr),
+    commandPhase,
+    terminationSignal: signal || null,
+    commandErrorMessage: errorMessage || (!result ? `${commandName} returned no command result.` : ""),
+    planCommandExitCode: exitCodeTarget === "plan" ? status : planCommandExitCode,
+    showCommandExitCode: exitCodeTarget === "show" ? status : showCommandExitCode,
   };
 }
 
 export function acquireStageBRefreshPlan({ planPath, planResult, showPlanJson, showOptions, repositoryRoot = root } = {}) {
-  const planCommandDiagnostic = { stdout: planResult?.stdout || "", stderr: planResult?.stderr || "", planCommandExitCode: planResult?.status ?? null, showCommandExitCode: null };
-  if (![0, 2].includes(planResult?.status)) return acquisitionFailure("PLAN_COMMAND_FAILED", "Terraform refresh-only plan command failed.", { planCommandExitCode: planResult?.status ?? null, diagnosticCapture: planCommandDiagnostic });
+  const planCommandDiagnostic = commandDiagnosticCapture({ result: planResult, commandName: "Terraform plan", commandPhase: "refresh-only-plan", exitCodeTarget: "plan" });
+  if (![0, 2].includes(planResult?.status)) return acquisitionFailure("PLAN_COMMAND_FAILED", "Terraform refresh-only plan command failed.", { planCommandExitCode: planCommandDiagnostic.planCommandExitCode, showCommandExitCode: planCommandDiagnostic.showCommandExitCode, diagnosticCapture: planCommandDiagnostic });
   const planStat = fs.lstatSync(planPath, { throwIfNoEntry: false });
   if (!planStat) return acquisitionFailure("PLAN_FILE_MISSING", "Terraform refresh-only did not produce its temporary plan.", { planCommandExitCode: planResult.status, diagnosticCapture: planCommandDiagnostic });
   if (!planStat.isFile() || planStat.isSymbolicLink()) return acquisitionFailure("MALFORMED_RESULT", "Terraform refresh-only temporary plan is not a regular non-symlink file.", { planCommandExitCode: planResult.status, diagnosticCapture: planCommandDiagnostic });
@@ -206,12 +290,12 @@ export function acquireStageBRefreshPlan({ planPath, planResult, showPlanJson, s
   if (planBytes.length === 0) return acquisitionFailure("PLAN_FILE_EMPTY", "Terraform refresh-only temporary plan is empty.", { planCommandExitCode: planResult.status, diagnosticCapture: planCommandDiagnostic });
   const privatePlan = ensureStageBPrivateFile({ filePath: planPath, repositoryRoot, normalize: true, label: "Stage B refresh-only temporary plan" });
   let shown;
-  try { shown = showPlanJson(planPath, showOptions); } catch (error) { return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json failed.", { planCommandExitCode: planResult.status, showCommandExitCode: null, showError: error.message, refreshPlanSha256: privatePlan.sha256, diagnosticCapture: showDiagnosticCapture({ shown: null, planCommandExitCode: planResult.status, error }) }); }
-  const showCapture = showDiagnosticCapture({ shown, planCommandExitCode: planResult.status });
-  if (!shown || typeof shown.status !== "number") return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json did not return a command result.", { planCommandExitCode: planResult.status, refreshPlanSha256: privatePlan.sha256, diagnosticCapture: showCapture });
+  try { shown = showPlanJson(planPath, showOptions); } catch (error) { return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json failed.", { planCommandExitCode: planResult.status, showCommandExitCode: null, showError: error.message, refreshPlanSha256: privatePlan.sha256, diagnosticCapture: commandDiagnosticCapture({ result: null, commandName: "Terraform show", commandPhase: "refresh-only-show", exitCodeTarget: "show", planCommandExitCode: planResult.status, showCommandExitCode: null, error }) }); }
+  const showCapture = commandDiagnosticCapture({ result: shown, commandName: "Terraform show", commandPhase: "refresh-only-show", exitCodeTarget: "show", planCommandExitCode: planResult.status, showCommandExitCode: null });
+  if (!shown || typeof shown.status !== "number") return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json did not return a command result.", { planCommandExitCode: planResult.status, showCommandExitCode: showCapture.showCommandExitCode, refreshPlanSha256: privatePlan.sha256, diagnosticCapture: showCapture });
   const stdout = Buffer.isBuffer(shown.stdout) ? shown.stdout : Buffer.from(shown.stdout || "");
   const stderr = Buffer.isBuffer(shown.stderr) ? shown.stderr : Buffer.from(shown.stderr || "");
-  const showDiagnostic = { stdout, stderr, planCommandExitCode: planResult.status, showCommandExitCode: shown.status };
+  const showDiagnostic = { ...showCapture, stdoutRaw: stdout, stderrRaw: stderr };
   const hashes = { planCommandExitCode: planResult.status, showCommandExitCode: shown.status, refreshPlanSha256: privatePlan.sha256, refreshPlanJsonSha256: sha256(stdout), showStdoutSha256: sha256(stdout), showStderrSha256: sha256(stderr) };
   if (shown.status !== 0) return acquisitionFailure("SHOW_COMMAND_FAILED", "Terraform show -json failed.", { ...hashes, diagnosticCapture: showDiagnostic });
   if (stdout.length === 0) return acquisitionFailure("SHOW_OUTPUT_EMPTY", "Terraform show -json returned empty stdout.", { ...hashes, diagnosticCapture: showDiagnostic });
@@ -290,6 +374,7 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
     : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
   assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity: { toolingSha: artifacts.toolingSha } });
   const terraformEnv = { ...env, TF_DATA_DIR: resolvedDataDir };
+  const runtimeSensitiveValues = stageBRefreshRuntimeSensitiveValues(terraformEnv);
   const showWorkspace = deps.showWorkspace || ((options) => execFileSync("terraform", [`-chdir=${terraformRoot}`, "workspace", "show"], { ...options, encoding: "utf8" }).trim());
   const observedWorkspace = String(showWorkspace({ cwd: root, env: terraformEnv })).trim();
   assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE, observedWorkspace });
@@ -304,12 +389,16 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
     const acquisition = acquireStageBRefreshPlan({ planPath: refreshPlanPath, planResult: result, showPlanJson, showOptions: { cwd: root, env: terraformEnv }, repositoryRoot: root });
     const diagnosticArtifact = acquisition.diagnosticCapture
       ? writeDiagnostic(diagnosticPath, createStageBRefreshDiagnostic({
+        commandPhase: acquisition.diagnosticCapture.commandPhase,
         failureClass: acquisition.acquisitionStatus,
         failureReason: acquisition.acquisitionReason,
         planCommandExitCode: acquisition.diagnosticCapture.planCommandExitCode,
         showCommandExitCode: acquisition.diagnosticCapture.showCommandExitCode,
-        stdout: acquisition.diagnosticCapture.stdout,
-        stderr: acquisition.diagnosticCapture.stderr,
+        stdoutRaw: acquisition.diagnosticCapture.stdoutRaw,
+        stderrRaw: acquisition.diagnosticCapture.stderrRaw,
+        terminationSignal: acquisition.diagnosticCapture.terminationSignal,
+        commandErrorMessage: acquisition.diagnosticCapture.commandErrorMessage,
+        sensitiveValues: runtimeSensitiveValues,
       }))
       : null;
     const classification = acquisition.acquisitionStatus === "valid"
