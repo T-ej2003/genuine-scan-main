@@ -139,6 +139,26 @@ function plan() {
   return { configuration: configuration(), resource_changes: [...addresses.map((address, index) => taskChange(address, index + 1)), ...brokerChanges()] };
 }
 
+function recoveryPlan() {
+  const value = structuredClone(plan());
+  value.variables = {
+    stage_b_recovery_only: { value: true },
+    stage_b_recovery_alias_target_version: { value: "3" },
+  };
+  value.resource_changes = [value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed")];
+  const alias = value.resource_changes[0];
+  alias.change.after.function_version = "3";
+  delete alias.change.after_unknown.function_version;
+  value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed")
+    .expressions.function_version = ref([
+      "aws_lambda_function.broker",
+      "aws_lambda_function.broker.version",
+      "var.stage_b_recovery_alias_target_version",
+      "var.stage_b_recovery_only",
+    ]);
+  return value;
+}
+
 function productionForensicPlan() {
   const value = structuredClone(plan());
   const change = value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change;
@@ -540,13 +560,52 @@ test("supported profile matrix is explicit and includes baseline broker creation
 });
 
 test("recovery-only semantic profile contains only the exact concrete alias target", () => {
-  const value = plan();
-  value.variables = { stage_b_recovery_only: { value: true } };
-  value.resource_changes = [value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed")];
-  const alias = value.resource_changes[0];
-  alias.change.after.function_version = "3";
-  delete alias.change.after_unknown.function_version;
-  assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(value));
+  const census = assertStageBPlanSemanticCompleteness(recoveryPlan());
+  assert.equal(census.counts.unclassifiedConfigurationReferences, 0);
+  assert.deepEqual(census.resources[0].configurationReferences, [{
+    field: "function_name",
+    references: ["aws_lambda_function.broker", "aws_lambda_function.broker.function_name"].sort(),
+    classification: "STABLE_REQUIRED",
+  }, {
+    field: "function_version",
+    references: [
+      "aws_lambda_function.broker",
+      "aws_lambda_function.broker.version",
+      "var.stage_b_recovery_alias_target_version",
+      "var.stage_b_recovery_only",
+    ],
+    classification: "REVIEWED_CONCRETE_CHANGE",
+  }]);
+});
+
+test("recovery alias reference classification is profile-bound and fail-closed", () => {
+  const normalWithRecoveryReference = plan();
+  normalWithRecoveryReference.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed")
+    .expressions.function_version = ref(["var.stage_b_recovery_alias_target_version"]);
+  assert.throws(() => assertStageBPlanSemanticCompleteness(normalWithRecoveryReference), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+
+  for (const references of [
+    ["var.other_version"],
+    ["aws_lambda_function.other.version"],
+    ["var.stage_b_recovery_alias_target_version", "aws_lambda_function.broker.version"],
+    [
+      "aws_lambda_function.broker",
+      "aws_lambda_function.broker.version",
+      "var.stage_b_recovery_alias_target_version",
+      "var.stage_b_recovery_only",
+      "var.unreviewed",
+    ],
+  ]) {
+    const invalid = recoveryPlan();
+    invalid.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed")
+      .expressions.function_version = ref(references);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(invalid), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+  }
+
+  const recoveryWithNormalReference = recoveryPlan();
+  recoveryWithNormalReference.configuration.root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed")
+    .expressions.function_version = ref(["aws_lambda_function.broker.version"]);
+  assert.throws(() => assertStageBPlanSemanticCompleteness(recoveryWithNormalReference), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
 });
 
 test("baseline broker profiles reject non-root, unknown, and partial semantic shapes", () => {
