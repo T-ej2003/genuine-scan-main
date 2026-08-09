@@ -334,7 +334,7 @@
       "producer": "assertStageBPlanSemanticCompleteness",
       "consumer": "plan capture, approval, permission, closure, validator, verify-only, and apply precheck",
       "inputs": ["Terraform show JSON", "structured Terraform configuration metadata", "source-controlled semantic matrix"],
-      "outputs": ["deterministic plan semantic census", "zero-unclassified counters", "zero provider-fidelity counters", "provider nested-block shape fidelity"],
+      "outputs": ["deterministic plan semantic census", "zero-unclassified counters", "zero provider-fidelity counters", "provider nested-block shape fidelity", "complete typed representation manifest", "reviewed broker publish code metadata"],
       "providerSchemaSnapshot": {
         "source": "registry.terraform.io/hashicorp/aws",
         "version": "6.56.0",
@@ -343,7 +343,7 @@
         "schemaJsonSha256": "0d4948a8af7ecbba0655f9b5b4f4f339eb70c4c9c98117a9079c68ecd4620fb1",
         "providerBinarySha256": "9a5d52a253efb9c223e2f709749ed8b6db0d6e8b5710e6eabfed8de7b2a159fd"
       },
-      "fidelityCounters": ["unrepresentedSupportedProfiles", "unfaithfulSupportedProfileFixtures", "unfaithfulProviderComputedFields"],
+      "fidelityCounters": ["unrepresentedSupportedProfiles", "unfaithfulSupportedProfileFixtures", "unfaithfulProviderComputedFields", "missingTypedRepresentationClassifications"],
       "dependencyComputedPaths": ["aws_iam_policy.broker.policy", "aws_lambda_function.broker.environment[0].variables"],
       "identity": "exact non-noop root-managed resource, address, action, path, and reference",
       "freshness": "same authoritative plan and protected source bindings",

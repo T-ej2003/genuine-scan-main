@@ -144,6 +144,14 @@ and grant no authority to a non-null or non-empty value. The counters
 are required to remain zero alongside the PLAN-SEM-01 counters, so provider or Terraform
 typed-shape drift identifies the exact resource/path and fails closed.
 
+The manifest is exhaustive over the locked provider shape universe for the four Stage B
+resource types. Every top-level attribute or block has exactly one reviewed representation
+disposition, including `NOT_EMITTED_IN_SUPPORTED_PROFILE`; an omitted disposition is a
+completeness failure, while a field marked not emitted is still rejected if it appears in a
+plan. Provider shape recognition does not authorize meaningful values. Broker publish
+metadata is limited to `code_sha256`, `source_code_size`, `last_modified`, `qualified_arn`,
+`qualified_invoke_arn`, and `version`; `source_code_hash` remains the package-identity input.
+
 ### Normal profiles
 
 - Clean/no-change: each allowlisted resource has its exact `[]`/`["no-op"]` equivalent;

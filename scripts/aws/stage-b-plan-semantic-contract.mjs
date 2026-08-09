@@ -10,7 +10,10 @@ import {
   STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE,
   STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT,
 } from "./stage-b-provider-semantic-snapshot.mjs";
-import { assertStageBBrokerPolicyDocument } from "./stage-b-deployment-contract.mjs";
+import {
+  assertStageBBrokerPolicyDocument,
+  STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
+} from "./stage-b-deployment-contract.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 
 export const STAGE_B_PLAN_SEMANTIC_CLASSES = Object.freeze([
@@ -20,6 +23,7 @@ export const STAGE_B_PLAN_SEMANTIC_CLASSES = Object.freeze([
   "REVIEWED_PROVIDER_NORMALIZATION",
   "REVIEWED_REPLACEMENT_TRIGGER",
   "CONFIGURATION_BOUND_PACKAGE_DIGEST",
+  "PROVIDER_COMPUTED_CODE_METADATA",
   "DIAGNOSTIC_ONLY",
 ]);
 
@@ -63,6 +67,7 @@ export const STAGE_B_TYPED_REPRESENTATION_CATEGORIES = Object.freeze([
   "CONFIGURATION_DEPENDENCY_COMPUTED",
   "PROVIDER_COMPUTED_UNKNOWN", "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", "PROVIDER_DEFAULTED_CONCRETE",
   "PROVIDER_NORMALIZED_CONCRETE", "KNOWN_UNSET_NULL", "KNOWN_FALSE_MARKER", "KNOWN_EMPTY_LIST", "KNOWN_EMPTY_OBJECT",
+  "NOT_EMITTED_IN_SUPPORTED_PROFILE",
 ]);
 const DIFF_ATOMIC_PATHS = new Set(["environment[0].variables"]);
 const BROKER_PROFILES = new Map([
@@ -99,10 +104,7 @@ const BROKER_FUNCTION_CHANGED_PATHS = new Set([
   "environment[0].variables",
   "filename",
   "source_code_hash",
-  "last_modified",
-  "qualified_arn",
-  "qualified_invoke_arn",
-  "version",
+  ...STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
 ]);
 const BROKER_FUNCTION_UNKNOWN_PATHS = new Set([
   "architectures[0]",
@@ -122,24 +124,28 @@ const providerTopLevelPaths = (resourceType) => new Set([
   ...STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE.resources[resourceType].attributes.map((entry) => entry.attributePath),
   ...STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE.resources[resourceType].blocks.map((entry) => entry.blockPath.split(".")[0].replace(/\[\]$/, "")),
 ]);
+const providerShapeTopLevelNames = (resourceType) => [
+  ...STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE.resources[resourceType].attributes.map((entry) => entry.attributePath),
+  ...STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE.resources[resourceType].blocks.map((entry) => entry.blockPath.split(".")[0].replace(/\[\]$/, "")),
+].sort();
 const TYPED_NULL_PATHS = Object.freeze({
-  aws_iam_policy: new Set(["description", "name_prefix"]),
-  aws_lambda_function: new Set(["description"]),
-  aws_lambda_alias: new Set(["description"]),
+  aws_iam_policy: new Set(["description", "name_prefix", "delay_after_policy_creation_in_ms"]),
+  aws_lambda_function: new Set(["description", "publish_to", "replace_security_groups_on_destroy", "replacement_security_group_ids", "s3_bucket", "s3_key", "s3_object_version", "timeouts", "use_resource_timeout_for_propagation"]),
+  aws_lambda_alias: new Set(["description", "timeouts"]),
   aws_ecs_task_definition: new Set(["ipc_mode", "pid_mode"]),
 });
 const TYPED_EMPTY_PATHS = Object.freeze({
   aws_iam_policy: new Set(["tags", "tags_all"]),
-  aws_lambda_function: new Set(["tags", "tags_all"]),
+  aws_lambda_function: new Set(["capacity_provider_config", "dead_letter_config", "durable_config", "file_system_config", "image_config", "layers", "snap_start", "tags", "tags_all", "tenancy_config", "vpc_config"]),
   aws_lambda_alias: new Set(["routing_config"]),
   aws_ecs_task_definition: new Set(["ephemeral_storage", "placement_constraints", "proxy_configuration", "tags", "tags_all"]),
 });
 const TYPED_MARKER_PATHS = Object.freeze({
   aws_iam_policy: new Set(["arn", "attachment_count", "id", "policy", "policy_id", "tags", "tags_all"]),
   aws_lambda_function: new Set([
-    "architectures[0]", "arn", "code_sha256", "environment[0].variables", "id", "invoke_arn", "last_modified",
-    "qualified_arn", "qualified_invoke_arn", "response_streaming_invoke_arn", "signing_job_arn",
-    "signing_profile_version_arn", "source_code_size", "version", "tags", "tags_all",
+    "architectures[0]", "arn", "capacity_provider_config", "code_sha256", "dead_letter_config", "durable_config", "environment[0].variables", "ephemeral_storage", "file_system_config", "id", "image_config", "invoke_arn", "last_modified", "layers",
+    "logging_config", "qualified_arn", "qualified_invoke_arn", "response_streaming_invoke_arn", "signing_job_arn",
+    "signing_profile_version_arn", "snap_start", "source_code_size", "tags", "tags_all", "tenancy_config", "tracing_config", "version", "vpc_config",
   ]),
   aws_lambda_alias: new Set(["arn", "function_version", "id", "invoke_arn", "routing_config"]),
   aws_ecs_task_definition: new Set([
@@ -237,23 +243,15 @@ function truePaths(value, base = "") {
 
 export const STAGE_B_TYPED_REPRESENTATION_MANIFEST = Object.freeze({
   aws_iam_policy: Object.freeze({
-    description: "KNOWN_UNSET_NULL", name: "CONFIGURED_CONCRETE", name_prefix: "KNOWN_UNSET_NULL", path: "CONFIGURED_CONCRETE", policy: "CONFIGURATION_DEPENDENCY_COMPUTED",
-    arn: "PROVIDER_COMPUTED_UNKNOWN", attachment_count: "PROVIDER_COMPUTED_UNKNOWN", id: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN",
+    arn: "PROVIDER_COMPUTED_UNKNOWN", attachment_count: "PROVIDER_COMPUTED_UNKNOWN", delay_after_policy_creation_in_ms: "KNOWN_UNSET_NULL", description: "KNOWN_UNSET_NULL", id: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", name: "CONFIGURED_CONCRETE", name_prefix: "KNOWN_UNSET_NULL", path: "CONFIGURED_CONCRETE", policy: "CONFIGURATION_DEPENDENCY_COMPUTED",
     policy_id: "PROVIDER_COMPUTED_UNKNOWN", tags: "CONFIGURED_CONCRETE", tags_all: "PROVIDER_NORMALIZED_CONCRETE",
   }),
   aws_lambda_function: Object.freeze({
-    function_name: "CONFIGURED_CONCRETE", role: "CONFIGURED_CONCRETE", handler: "CONFIGURED_CONCRETE", runtime: "CONFIGURED_CONCRETE", filename: "CONFIGURED_CONCRETE", description: "KNOWN_UNSET_NULL", timeout: "CONFIGURED_CONCRETE", publish: "CONFIGURED_CONCRETE",
-    memory_size: "PROVIDER_DEFAULTED_CONCRETE", package_type: "PROVIDER_DEFAULTED_CONCRETE", region: "PROVIDER_NORMALIZED_CONCRETE",
-    source_code_hash: "CONFIGURED_CONCRETE", environment: "CONFIGURATION_DEPENDENCY_COMPUTED", "environment[0].variables": "CONFIGURATION_DEPENDENCY_COMPUTED",
-    architectures: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", code_sha256: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", id: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN",
-    arn: "PROVIDER_COMPUTED_UNKNOWN", invoke_arn: "PROVIDER_COMPUTED_UNKNOWN", last_modified: "PROVIDER_COMPUTED_UNKNOWN",
-    qualified_arn: "PROVIDER_COMPUTED_UNKNOWN", qualified_invoke_arn: "PROVIDER_COMPUTED_UNKNOWN", response_streaming_invoke_arn: "PROVIDER_COMPUTED_UNKNOWN",
-    signing_job_arn: "PROVIDER_COMPUTED_UNKNOWN", signing_profile_version_arn: "PROVIDER_COMPUTED_UNKNOWN", source_code_size: "PROVIDER_COMPUTED_UNKNOWN", version: "PROVIDER_COMPUTED_UNKNOWN",
-    tags: "CONFIGURED_CONCRETE", tags_all: "PROVIDER_NORMALIZED_CONCRETE",
+    architectures: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", arn: "PROVIDER_COMPUTED_UNKNOWN", capacity_provider_config: "KNOWN_EMPTY_LIST", code_sha256: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", code_signing_config_arn: "PROVIDER_NORMALIZED_CONCRETE", dead_letter_config: "KNOWN_EMPTY_LIST", description: "KNOWN_UNSET_NULL", durable_config: "KNOWN_EMPTY_LIST", environment: "CONFIGURATION_DEPENDENCY_COMPUTED", ephemeral_storage: "PROVIDER_NORMALIZED_CONCRETE", file_system_config: "KNOWN_EMPTY_LIST", filename: "CONFIGURED_CONCRETE", function_name: "CONFIGURED_CONCRETE", handler: "CONFIGURED_CONCRETE", id: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", image_config: "KNOWN_EMPTY_LIST", image_uri: "PROVIDER_NORMALIZED_CONCRETE", invoke_arn: "PROVIDER_COMPUTED_UNKNOWN", kms_key_arn: "PROVIDER_NORMALIZED_CONCRETE", last_modified: "PROVIDER_COMPUTED_UNKNOWN", layers: "KNOWN_EMPTY_LIST", logging_config: "PROVIDER_NORMALIZED_CONCRETE", memory_size: "PROVIDER_DEFAULTED_CONCRETE", package_type: "PROVIDER_DEFAULTED_CONCRETE", publish: "CONFIGURED_CONCRETE", publish_to: "KNOWN_UNSET_NULL", qualified_arn: "PROVIDER_COMPUTED_UNKNOWN", qualified_invoke_arn: "PROVIDER_COMPUTED_UNKNOWN", region: "PROVIDER_NORMALIZED_CONCRETE", replace_security_groups_on_destroy: "KNOWN_UNSET_NULL", replacement_security_group_ids: "KNOWN_UNSET_NULL", reserved_concurrent_executions: "PROVIDER_DEFAULTED_CONCRETE", response_streaming_invoke_arn: "PROVIDER_COMPUTED_UNKNOWN", role: "CONFIGURED_CONCRETE", runtime: "CONFIGURED_CONCRETE", s3_bucket: "KNOWN_UNSET_NULL", s3_key: "KNOWN_UNSET_NULL", s3_object_version: "KNOWN_UNSET_NULL", signing_job_arn: "PROVIDER_COMPUTED_UNKNOWN", signing_profile_version_arn: "PROVIDER_COMPUTED_UNKNOWN", skip_destroy: "PROVIDER_DEFAULTED_CONCRETE", snap_start: "KNOWN_EMPTY_LIST", source_code_hash: "CONFIGURED_CONCRETE", source_code_size: "PROVIDER_COMPUTED_UNKNOWN", source_kms_key_arn: "PROVIDER_NORMALIZED_CONCRETE", tags: "CONFIGURED_CONCRETE", tags_all: "PROVIDER_NORMALIZED_CONCRETE", tenancy_config: "KNOWN_EMPTY_LIST", timeout: "CONFIGURED_CONCRETE", timeouts: "KNOWN_UNSET_NULL", tracing_config: "PROVIDER_NORMALIZED_CONCRETE", use_resource_timeout_for_propagation: "KNOWN_UNSET_NULL", vpc_config: "KNOWN_EMPTY_LIST", version: "PROVIDER_COMPUTED_UNKNOWN",
+    "environment[0].variables": "CONFIGURATION_DEPENDENCY_COMPUTED",
   }),
   aws_lambda_alias: Object.freeze({
-    description: "KNOWN_UNSET_NULL", name: "CONFIGURED_CONCRETE", function_name: "CONFIGURED_CONCRETE", region: "PROVIDER_NORMALIZED_CONCRETE", routing_config: "KNOWN_EMPTY_LIST", function_version: "CONFIGURATION_DEPENDENCY_COMPUTED",
-    arn: "PROVIDER_COMPUTED_UNKNOWN", id: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", invoke_arn: "PROVIDER_COMPUTED_UNKNOWN",
+    arn: "PROVIDER_COMPUTED_UNKNOWN", description: "KNOWN_UNSET_NULL", function_name: "CONFIGURED_CONCRETE", function_version: "CONFIGURATION_DEPENDENCY_COMPUTED", id: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", invoke_arn: "PROVIDER_COMPUTED_UNKNOWN", name: "CONFIGURED_CONCRETE", region: "PROVIDER_NORMALIZED_CONCRETE", routing_config: "KNOWN_EMPTY_LIST", timeouts: "KNOWN_UNSET_NULL",
   }),
   aws_ecs_task_definition: Object.freeze({
     family: "CONFIGURED_CONCRETE", container_definitions: "CONFIGURED_CONCRETE", cpu: "CONFIGURED_CONCRETE", memory: "CONFIGURED_CONCRETE", network_mode: "CONFIGURED_CONCRETE", requires_compatibilities: "CONFIGURED_CONCRETE", execution_role_arn: "CONFIGURED_CONCRETE", task_role_arn: "CONFIGURED_CONCRETE", region: "PROVIDER_NORMALIZED_CONCRETE", skip_destroy: "CONFIGURED_CONCRETE", track_latest: "PROVIDER_DEFAULTED_CONCRETE", tags: "CONFIGURED_CONCRETE",
@@ -264,6 +262,19 @@ export const STAGE_B_TYPED_REPRESENTATION_MANIFEST = Object.freeze({
     volume: "PROVIDER_NORMALIZED_CONCRETE",
   }),
 });
+
+export function assertStageBTypedRepresentationManifestComplete() {
+  const missing = [];
+  for (const resourceType of Object.keys(STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE.resources)) {
+    const expected = providerShapeTopLevelNames(resourceType);
+    const manifest = STAGE_B_TYPED_REPRESENTATION_MANIFEST[resourceType] || {};
+    for (const field of expected) {
+      if (!STAGE_B_TYPED_REPRESENTATION_CATEGORIES.includes(manifest[field])) missing.push(`${resourceType}.${field}`);
+    }
+  }
+  if (missing.length) throw new Error(`MISSING_TYPED_REPRESENTATION_CLASSIFICATIONS: ${missing.join(",")}`);
+  return { missingTypedRepresentationClassifications: 0 };
+}
 
 function typedMarkerPaths(value, base = "") {
   if (value === true || value === false) return [{ path: base, value }];
@@ -315,6 +326,7 @@ function assertTypedRepresentationEnvelope(change) {
     if (!allowed.has(field)) throw new Error(`UNCLASSIFIED_CHANGED_PATH (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}`);
     const category = STAGE_B_TYPED_REPRESENTATION_MANIFEST[type]?.[field];
     if (!STAGE_B_TYPED_REPRESENTATION_CATEGORIES.includes(category)) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}`);
+    if (category === "NOT_EMITTED_IN_SUPPORTED_PROFILE") throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}.${field}`);
     assertTypedNestedShape(change, field, after[field], unknown?.[field]);
   }
   for (const marker of typedMarkerPaths(unknown)) {
@@ -641,6 +653,7 @@ function classifyChangedPath(change, path) {
   }
   if (change.address === "aws_lambda_function.broker" && BROKER_FUNCTION_CHANGED_PATHS.has(path)) {
     if (path === "source_code_hash") return "CONFIGURATION_BOUND_PACKAGE_DIGEST";
+    if (["code_sha256", "source_code_size"].includes(path)) return "PROVIDER_COMPUTED_CODE_METADATA";
     return ["last_modified", "qualified_arn", "qualified_invoke_arn", "version"].includes(path)
       ? "DIAGNOSTIC_ONLY" : "REVIEWED_CONCRETE_CHANGE";
   }
@@ -751,6 +764,7 @@ function assertComputedAliasBinding(plan) {
 
 export function censusStageBPlanSemantics(plan) {
   if (!plan || !Array.isArray(plan.resource_changes)) throw new Error("Stage B semantic census requires Terraform plan resource_changes.");
+  const manifest = assertStageBTypedRepresentationManifestComplete();
   assertStageBProviderResourceShapeUniverse();
   assertStageBProviderSemanticSnapshot();
   assertBrokerActionProfile(plan);
@@ -806,6 +820,7 @@ export function censusStageBPlanSemantics(plan) {
     unmodeledTypedAfterFields: 0,
     unmodeledAfterUnknownMarkers: 0,
     unmodeledEmptyStructures: 0,
+    ...manifest,
   };
   return { schemaVersion: 1, resources, counts };
 }

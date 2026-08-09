@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import {
   assertStageBPlanSemanticCompleteness,
+  assertStageBTypedRepresentationManifestComplete,
   censusStageBPlanSemantics,
   STAGE_B_PLAN_SEMANTIC_PROFILES,
   STAGE_B_SUPPORTED_PLAN_PROFILES,
@@ -15,7 +16,7 @@ import {
   STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT,
 } from "../aws/stage-b-provider-semantic-snapshot.mjs";
 import { assertRecoveryPlanDelta } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
-import { classifyStageBPlan } from "../aws/stage-b-deployment-contract.mjs";
+import { assertStageBBrokerFunctionUpdate, classifyStageBPlan, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
@@ -282,6 +283,7 @@ test("real-plan-shaped semantic census has zero unclassified semantics", () => {
     unmodeledTypedAfterFields: 0,
     unmodeledAfterUnknownMarkers: 0,
     unmodeledEmptyStructures: 0,
+    missingTypedRepresentationClassifications: 0,
   });
   assert.equal(new Set(census.resources.map((item) => item.classification)).size, 4);
   assert.equal(census.resources.filter((item) => item.classification === "ECS_REVIEWED_ROLLOVER").length, 12);
@@ -306,6 +308,7 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
     unmodeledTypedAfterFields: 0,
     unmodeledAfterUnknownMarkers: 0,
     unmodeledEmptyStructures: 0,
+    missingTypedRepresentationClassifications: 0,
   });
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_INITIAL_CREATE).length, 12);
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_REVIEWED_ROLLOVER).length, 0);
@@ -585,6 +588,10 @@ test("locked provider semantic snapshot is independently validated", () => {
   assert.throws(() => assertStageBProviderSemanticSnapshot(wrongNesting), /PROVIDER_SCHEMA_NESTING_CHANGED/);
 });
 
+test("typed representation manifest exhaustively disposes every provider top-level shape", () => {
+  assert.deepEqual(assertStageBTypedRepresentationManifestComplete(), { missingTypedRepresentationClassifications: 0 });
+});
+
 test("complete provider resource shape universe matches extracted AWS 6.56.0 evidence", () => {
   const evidence = JSON.parse(fs.readFileSync("scripts/tests/fixtures/stage-b-provider-6.56.0-resource-shape.json", "utf8"));
   assert.doesNotThrow(() => assertStageBProviderResourceShapeUniverse());
@@ -693,7 +700,7 @@ test("computed alias requires same-plan published broker and exact configuration
   mutateRecovery((value) => { const alias = value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed"); alias.change.after.function_version = "wrong"; delete alias.change.after_unknown.function_version; });
 });
 
-test("broker publish updates admit only the source-bound package digest change", () => {
+test("broker publish updates admit source-bound package digest and exact provider code metadata", () => {
   const census = assertStageBPlanSemanticCompleteness(plan());
   const broker = census.resources.find((item) => item.address === "aws_lambda_function.broker");
   assert.deepEqual(broker.changedPaths.find(({ path }) => path === "source_code_hash"), {
@@ -702,6 +709,23 @@ test("broker publish updates admit only the source-bound package digest change",
   const invalid = structuredClone(plan());
   invalid.configuration.root_module.resources.find((item) => item.address === "aws_lambda_function.broker").expressions.source_code_hash = ref(["var.other_package_path"]);
   assert.throws(() => assertStageBPlanSemanticCompleteness(invalid), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+
+  const metadata = structuredClone(plan());
+  const change = metadata.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change;
+  change.before.code_sha256 = "old-code-sha";
+  change.after.code_sha256 = "new-code-sha";
+  change.before.source_code_size = 100;
+  change.after.source_code_size = 200;
+  assert.deepEqual(STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, ["code_sha256", "source_code_size", "last_modified", "qualified_arn", "qualified_invoke_arn", "version"]);
+  assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(metadata));
+  assert.doesNotThrow(() => assertStageBBrokerFunctionUpdate(metadata.resource_changes.find((item) => item.address === "aws_lambda_function.broker")));
+  const metadataCensus = assertStageBPlanSemanticCompleteness(metadata);
+  assert.equal(metadataCensus.resources.find((item) => item.address === "aws_lambda_function.broker").changedPaths.filter(({ path }) => STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS.includes(path)).every(({ classification }) => classification === "PROVIDER_COMPUTED_CODE_METADATA" || classification === "DIAGNOSTIC_ONLY"), true);
+
+  const unauthorized = structuredClone(metadata);
+  unauthorized.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.after.invoke_arn = "changed";
+  assert.throws(() => assertStageBPlanSemanticCompleteness(unauthorized), /UNCLASSIFIED_CHANGED_PATH/);
+  assert.throws(() => assertStageBBrokerFunctionUpdate(unauthorized.resource_changes.find((item) => item.address === "aws_lambda_function.broker")), /unsupported mutable field/);
 });
 
 test("semantic census feeds the normal offline action classifier without widening recovery", () => {

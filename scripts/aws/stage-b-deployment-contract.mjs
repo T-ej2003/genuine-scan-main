@@ -260,7 +260,12 @@ function assertStageBResourceIdentity(change, kind, key, strict) {
   }
 }
 
-const brokerFunctionAllowedChangedFields = new Set(["environment", "filename", "source_code_hash", "last_modified", "qualified_arn", "qualified_invoke_arn", "version"]);
+export const STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS = Object.freeze([
+  "code_sha256", "source_code_size", "last_modified", "qualified_arn", "qualified_invoke_arn", "version",
+]);
+const brokerFunctionAllowedChangedFields = new Set([
+  "environment", "filename", "source_code_hash", ...STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
+]);
 
 export function assertStageBBrokerFunctionUpdate(change) {
   if (change?.address !== "aws_lambda_function.broker" || change?.type !== "aws_lambda_function" || !exactActions(change.change?.actions, ["update"])) {
