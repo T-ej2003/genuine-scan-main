@@ -5,7 +5,9 @@ import {
   STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS,
 } from "./stage-b-reference-audit-contract.mjs";
 import {
+  assertStageBProviderResourceShapeUniverse,
   assertStageBProviderSemanticSnapshot,
+  STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE,
   STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT,
 } from "./stage-b-provider-semantic-snapshot.mjs";
 import { assertStageBBrokerPolicyDocument } from "./stage-b-deployment-contract.mjs";
@@ -72,7 +74,7 @@ const BROKER_ADDRESSES = new Set(BROKER_PROFILES.keys());
 const BROKER_INITIAL_TAG_PATHS = new Set(["tags.Component", "tags.Environment", "tags.ManagedBy", "tags_all.Component", "tags_all.Environment", "tags_all.ManagedBy"]);
 const BROKER_POLICY_INITIAL_CHANGED_PATHS = new Set(["description", "name", "name_prefix", "path", "arn", "id", "policy", ...BROKER_INITIAL_TAG_PATHS]);
 const BROKER_FUNCTION_INITIAL_CHANGED_PATHS = new Set([
-  "function_name", "role", "handler", "runtime", "filename", "source_code_hash", "timeout", "publish",
+  "function_name", "role", "handler", "runtime", "filename", "source_code_hash", "timeout", "publish", "description",
   "memory_size", "package_type", "region", "environment[0].variables", ...BROKER_INITIAL_TAG_PATHS,
 ]);
 export const STAGE_B_LAMBDA_INITIAL_CREATE_REPRESENTATION = Object.freeze({
@@ -117,12 +119,12 @@ const ALIAS_SENSITIVE_PATHS = new Set();
 
 const providerAttributes = (resourceType) => new Map(STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT.resources[resourceType].attributes.map((entry) => [entry.attributePath, entry]));
 const providerTopLevelPaths = (resourceType) => new Set([
-  ...STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT.resources[resourceType].attributes.map((entry) => entry.attributePath),
-  ...STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT.resources[resourceType].blocks.map((entry) => entry.blockPath.split(".")[0].replace(/\[\]$/, "")),
+  ...STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE.resources[resourceType].attributes.map((entry) => entry.attributePath),
+  ...STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE.resources[resourceType].blocks.map((entry) => entry.blockPath.split(".")[0].replace(/\[\]$/, "")),
 ]);
 const TYPED_NULL_PATHS = Object.freeze({
   aws_iam_policy: new Set(["description", "name_prefix"]),
-  aws_lambda_function: new Set(),
+  aws_lambda_function: new Set(["description"]),
   aws_lambda_alias: new Set(["description"]),
   aws_ecs_task_definition: new Set(["ipc_mode", "pid_mode"]),
 });
@@ -240,7 +242,7 @@ export const STAGE_B_TYPED_REPRESENTATION_MANIFEST = Object.freeze({
     policy_id: "PROVIDER_COMPUTED_UNKNOWN", tags: "CONFIGURED_CONCRETE", tags_all: "PROVIDER_NORMALIZED_CONCRETE",
   }),
   aws_lambda_function: Object.freeze({
-    function_name: "CONFIGURED_CONCRETE", role: "CONFIGURED_CONCRETE", handler: "CONFIGURED_CONCRETE", runtime: "CONFIGURED_CONCRETE", filename: "CONFIGURED_CONCRETE", timeout: "CONFIGURED_CONCRETE", publish: "CONFIGURED_CONCRETE",
+    function_name: "CONFIGURED_CONCRETE", role: "CONFIGURED_CONCRETE", handler: "CONFIGURED_CONCRETE", runtime: "CONFIGURED_CONCRETE", filename: "CONFIGURED_CONCRETE", description: "KNOWN_UNSET_NULL", timeout: "CONFIGURED_CONCRETE", publish: "CONFIGURED_CONCRETE",
     memory_size: "PROVIDER_DEFAULTED_CONCRETE", package_type: "PROVIDER_DEFAULTED_CONCRETE", region: "PROVIDER_NORMALIZED_CONCRETE",
     source_code_hash: "CONFIGURED_CONCRETE", environment: "CONFIGURATION_DEPENDENCY_COMPUTED", "environment[0].variables": "CONFIGURATION_DEPENDENCY_COMPUTED",
     architectures: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", code_sha256: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN", id: "PROVIDER_OPTIONAL_COMPUTED_UNKNOWN",
@@ -617,11 +619,19 @@ function assertEcsSemanticDomain(change) {
 function classifyChangedPath(change, path) {
   if (ECS_ADDRESSES.has(change.address)) return classifyEcsChangedPath(change, path);
   if (change.address === "aws_iam_policy.broker" && isBrokerInitialCreate(change)) {
+    if (["description", "name_prefix"].includes(path)) {
+      if (change.change.after?.[path] !== null) throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
+      return "REVIEWED_PROVIDER_NORMALIZATION";
+    }
     if (BROKER_POLICY_INITIAL_CHANGED_PATHS.has(path)) return "REVIEWED_CONCRETE_CHANGE";
     throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
   }
   if (change.address === "aws_iam_policy.broker" && BROKER_POLICY_CHANGED_PATHS.has(path)) return "REVIEWED_CONCRETE_CHANGE";
   if (change.address === "aws_lambda_function.broker" && isBrokerInitialCreate(change)) {
+    if (path === "description") {
+      if (change.change.after?.description !== null) throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
+      return "REVIEWED_PROVIDER_NORMALIZATION";
+    }
     if (path === BROKER_ENVIRONMENT_PLACEHOLDER_PATH) {
       assertInitialBrokerEnvironment(change);
       return "REVIEWED_COMPUTED_CHANGE";
@@ -636,6 +646,10 @@ function classifyChangedPath(change, path) {
   }
   if (change.address === "aws_lambda_alias.reviewed" && isBrokerInitialCreate(change)) {
     if (BROKER_ALIAS_INITIAL_CHANGED_PATHS.has(path)) {
+      if (path === "description") {
+        if (change.change.after?.description !== null) throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
+        return "REVIEWED_PROVIDER_NORMALIZATION";
+      }
       if (path === "function_version" && change.change.after?.function_version === undefined && change.change.after_unknown?.function_version !== true) throw new Error(`UNCLASSIFIED_COMPUTED_CHANGE: ${change.address}.${path}`);
       return path === "function_version" ? "REVIEWED_COMPUTED_CHANGE" : "REVIEWED_CONCRETE_CHANGE";
     }
@@ -737,6 +751,7 @@ function assertComputedAliasBinding(plan) {
 
 export function censusStageBPlanSemantics(plan) {
   if (!plan || !Array.isArray(plan.resource_changes)) throw new Error("Stage B semantic census requires Terraform plan resource_changes.");
+  assertStageBProviderResourceShapeUniverse();
   assertStageBProviderSemanticSnapshot();
   assertBrokerActionProfile(plan);
   const resources = [];

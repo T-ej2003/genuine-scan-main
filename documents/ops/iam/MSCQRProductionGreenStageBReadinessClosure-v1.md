@@ -99,7 +99,7 @@ a concrete `aws_lambda_alias.reviewed.function_version` equal to the attested co
 version; unknown values elsewhere are not accepted.
 
 PLAN-SEM-01 also requires provider-fidelity proof for every baseline-created resource.
-The independent Stage B snapshot in
+The independent Stage B security snapshot in
 `scripts/aws/stage-b-provider-semantic-snapshot.mjs` is derived from the locked
 `hashicorp/aws` 6.56.0 `terraform providers schema -json` output. Provider-computed
 identifiers and metadata are recognized only at explicitly recorded paths; they never
@@ -107,6 +107,14 @@ authorize IAM content. Baseline fixtures must preserve Terraform's exact
 `after_unknown` and structural-placeholder representation. The provider-fidelity
 counters `unrepresentedSupportedProfiles`, `unfaithfulSupportedProfileFixtures`, and
 `unfaithfulProviderComputedFields` must all be zero.
+Typed shape recognition uses the separate complete four-resource universe in
+`scripts/aws/stage-b-provider-resource-shape-universe.mjs`, with extracted evidence
+captured in `scripts/tests/fixtures/stage-b-provider-6.56.0-resource-shape.json`.
+That universe is exhaustive for provider field/block names and nesting metadata, while
+the security snapshot and validators remain the authorization boundary. A schema-known
+field therefore passes representation only when its exact reviewed null/default/empty
+shape is present; a non-null or non-empty value still requires an independent security
+rule. The completeness test fails closed on missing or extra provider attributes/blocks.
 Provider nested-block shape is part of the same fidelity gate: the locked AWS 6.56.0
 `runtime_platform` block is a one-element list, so baseline ECS paths are explicitly
 indexed as `runtime_platform[0].operating_system_family` and

@@ -7,7 +7,13 @@ import {
   STAGE_B_PLAN_SEMANTIC_PROFILES,
   STAGE_B_SUPPORTED_PLAN_PROFILES,
 } from "../aws/stage-b-plan-semantic-contract.mjs";
-import { assertStageBProviderSemanticSnapshot, STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT } from "../aws/stage-b-provider-semantic-snapshot.mjs";
+import {
+  assertStageBProviderResourceShapeUniverse,
+  assertStageBProviderSemanticSnapshot,
+  STAGE_B_PROVIDER_RESOURCE_SCHEMA_COMPLETE,
+  STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE,
+  STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT,
+} from "../aws/stage-b-provider-semantic-snapshot.mjs";
 import { assertRecoveryPlanDelta } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
 import { classifyStageBPlan } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
@@ -577,6 +583,26 @@ test("locked provider semantic snapshot is independently validated", () => {
   const wrongNesting = structuredClone(STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT);
   wrongNesting.resources.aws_ecs_task_definition.blocks.find((entry) => entry.blockPath === "runtime_platform").nestingMode = "single";
   assert.throws(() => assertStageBProviderSemanticSnapshot(wrongNesting), /PROVIDER_SCHEMA_NESTING_CHANGED/);
+});
+
+test("complete provider resource shape universe matches extracted AWS 6.56.0 evidence", () => {
+  const evidence = JSON.parse(fs.readFileSync("scripts/tests/fixtures/stage-b-provider-6.56.0-resource-shape.json", "utf8"));
+  assert.doesNotThrow(() => assertStageBProviderResourceShapeUniverse());
+  assert.deepEqual(STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE, evidence);
+  for (const type of ["aws_iam_policy", "aws_lambda_function", "aws_lambda_alias", "aws_ecs_task_definition"]) {
+    assert.equal(STAGE_B_PROVIDER_RESOURCE_SCHEMA_COMPLETE[type], true);
+    assert.ok(STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE.resources[type].attributes.length > 0);
+    assert.ok(STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE.resources[type].blocks.every((block) => typeof block.nestingMode === "string"));
+  }
+});
+
+test("provider-known Lambda unset fields are representation-valid but meaningful values fail", () => {
+  const value = baselinePlan();
+  const lambda = value.resource_changes.find((change) => change.address === "aws_lambda_function.broker");
+  lambda.change.after.description = null;
+  assert.doesNotThrow(() => assertStageBPlanSemanticCompleteness(value));
+  lambda.change.after.description = "unexpected";
+  assert.throws(() => assertStageBPlanSemanticCompleteness(value), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_CHANGED_PATH/);
 });
 
 test("supported nested blocks retain their provider JSON shapes", () => {

@@ -1,3 +1,5 @@
+import { STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE } from "./stage-b-provider-resource-shape-universe.mjs";
+
 const PROVIDER_SOURCE = "registry.terraform.io/hashicorp/aws";
 const PROVIDER_VERSION = "6.56.0";
 
@@ -92,6 +94,43 @@ export const STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT = Object.freeze({
 export const STAGE_B_PROVIDER_RESOURCE_TYPES = Object.freeze([
   "aws_iam_policy", "aws_lambda_function", "aws_lambda_alias", "aws_ecs_task_definition",
 ]);
+
+export { STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE };
+export const STAGE_B_PROVIDER_RESOURCE_SCHEMA_COMPLETE = Object.freeze(Object.fromEntries(
+  STAGE_B_PROVIDER_RESOURCE_TYPES.map((resourceType) => [resourceType, true]),
+));
+
+export function assertStageBProviderResourceShapeUniverse(universe = STAGE_B_PROVIDER_RESOURCE_SHAPE_UNIVERSE) {
+  if (universe.providerSource !== PROVIDER_SOURCE || universe.providerVersion !== PROVIDER_VERSION) {
+    throw new Error("PROVIDER_RESOURCE_SHAPE_UNIVERSE_VERSION_MISMATCH");
+  }
+  for (const type of STAGE_B_PROVIDER_RESOURCE_TYPES) {
+    const schema = universe.resources?.[type];
+    if (!schema || schema.resourceType !== type || !Array.isArray(schema.attributes) || !Array.isArray(schema.blocks)) {
+      throw new Error(`MISSING_PROVIDER_RESOURCE_SHAPE_SCHEMA: ${type}`);
+    }
+    const allBlocks = (blocks) => blocks.flatMap((entry) => [entry, ...allBlocks(entry.blocks || [])]);
+    const completeBlocks = allBlocks(schema.blocks);
+    const attributePaths = schema.attributes.map((entry) => entry.attributePath);
+    const blockPaths = completeBlocks.map((entry) => entry.blockPath);
+    if (new Set(attributePaths).size !== attributePaths.length || new Set(blockPaths).size !== blockPaths.length) {
+      throw new Error(`DUPLICATE_PROVIDER_RESOURCE_SHAPE_PATH: ${type}`);
+    }
+    for (const entry of [...schema.attributes, ...completeBlocks.flatMap((blockEntry) => blockEntry.attributes)]) {
+      if (typeof entry.attributePath !== "string" || typeof entry.required !== "boolean" || typeof entry.optional !== "boolean"
+        || typeof entry.computed !== "boolean" || typeof entry.sensitive !== "boolean") {
+        throw new Error(`INVALID_PROVIDER_RESOURCE_SHAPE_ENTRY: ${type}`);
+      }
+    }
+    for (const entry of completeBlocks) {
+      if (typeof entry.blockPath !== "string" || !["list", "set", "map", "single"].includes(entry.nestingMode)
+        || (entry.minItems !== null && !Number.isInteger(entry.minItems)) || (entry.maxItems !== null && !Number.isInteger(entry.maxItems))) {
+        throw new Error(`INVALID_PROVIDER_RESOURCE_SHAPE_BLOCK: ${type}`);
+      }
+    }
+  }
+  return universe;
+}
 
 const EXPECTED_ATTRIBUTE_FLAGS = Object.freeze({
   aws_iam_policy: Object.freeze({
