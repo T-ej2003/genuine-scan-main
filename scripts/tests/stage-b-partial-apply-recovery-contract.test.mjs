@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
-import { assertCanonicalTerraformSerialNumber, parseCanonicalTerraformSerialCliText, assertRecoveryPlanDelta, assertRecoveryAttestation, assertVerifiedStageBRecovery, classifyRecoveryResidue, createRecoveryAttestation, signRecoveryAttestation, verifyRecoveryAttestation } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
+import { assertCanonicalTerraformSerialNumber, parseCanonicalTerraformSerialCliText, assertRecoveryOnlyPlan, assertRecoveryPlanDelta, assertRecoveryAttestation, assertVerifiedStageBRecovery, classifyRecoveryResidue, createRecoveryAttestation, signRecoveryAttestation, verifyRecoveryAttestation } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
 const digest = "a".repeat(64);
@@ -111,6 +111,21 @@ test("recovery plan rejects a computed alias target without exact version proof"
     brokerChange: { actions: ["no-op"], after: { function_name: "mscqr-production-rls-approval-broker", filename: "old.zip", version: "3" }, after_unknown: {} },
   });
   assert.deepEqual(assertRecoveryPlanDelta(existingVersion, value), { address: "aws_lambda_alias.reviewed", action: "update", beforeVersion: "2", afterVersion: "3" });
+});
+
+test("recovery-only profile permits only the concrete attested alias update", () => {
+  const value = report();
+  const plan = computedPlan({
+    aliasChange: { after: { function_version: "3" }, after_unknown: { routing_config: [] } },
+    brokerChange: { actions: ["no-op"], after: { function_name: "mscqr-production-rls-approval-broker", filename: "old.zip", version: "3" }, after_unknown: {} },
+  });
+  assert.deepEqual(assertRecoveryOnlyPlan(plan, value), { profile: "RECOVERY_ALIAS_ONLY", address: "aws_lambda_alias.reviewed", action: "update", beforeVersion: "2", afterVersion: "3", nonNoOpMutations: 1 });
+  const withBrokerNoOp = computedPlan({
+    aliasChange: { after: { function_version: "3" }, after_unknown: { routing_config: [] } },
+    brokerChange: { actions: ["no-op"], after: { function_name: "mscqr-production-rls-approval-broker", filename: "old.zip", version: "3" }, after_unknown: {} },
+  });
+  withBrokerNoOp.resource_changes.push({ address: "aws_ecs_task_definition.candidate[\"backend\"]", type: "aws_ecs_task_definition", change: { actions: ["create"], before: {}, after: {} } });
+  assert.throws(() => assertRecoveryOnlyPlan(withBrokerNoOp, value), /exactly one non-no-op/);
 });
 
 test("computed alias target rejects missing, wrong, duplicate, or indirect configuration references", () => {

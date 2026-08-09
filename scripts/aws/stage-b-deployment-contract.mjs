@@ -168,7 +168,7 @@ function assertTerraformPolicySource(terraformConfiguration, strict) {
     if (!statement.includes('Effect   = "Allow"') || JSON.stringify(actionValues) !== JSON.stringify([...actions].sort())) throw new Error(`Broker managed-policy source statement is not canonical: ${sid}`);
   }
   const sourceResourceExpressions = {
-    RunOnlyApprovedExecutorAndCanaryRevisions: "Resource = values(local.broker_task_definition_arns)",
+    RunOnlyApprovedExecutorAndCanaryRevisions: "Resource = values(local.active_broker_task_definition_arns)",
     PassOnlyApprovedTaskRoles: "Resource = [var.stage_a_executor_task_role_arn, aws_iam_role.execution[\"executor\"].arn, aws_iam_role.task[\"canary\"].arn, aws_iam_role.execution[\"canary\"].arn]",
     ClaimOnlyStageBReplayRows: "Resource = aws_dynamodb_table.replay.arn",
     ReadOnlyStageAApproval: "Resource = var.approval_secret_arn",

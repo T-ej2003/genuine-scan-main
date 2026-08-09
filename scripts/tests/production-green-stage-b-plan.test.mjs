@@ -428,7 +428,7 @@ test("broker Terraform runtime variables exactly cover runtimeConfig and publish
   const supplied = [...environment.matchAll(/^\s+(BROKER_[A-Z0-9_]+)\s*=/gm)].map((match) => match[1]).sort();
   assert.deepEqual(supplied, required);
   assert.match(main, /publish\s*=\s*true/);
-  assert.match(main, /function_version\s*=\s*aws_lambda_function\.broker\.version/);
+  assert.match(main, /function_version\s*=\s*var\.stage_b_recovery_only\s*\?[\s\S]*aws_lambda_function\.broker\.version/);
   assert.doesNotMatch(main, /function_version\s*=\s*"\$LATEST"/);
   assert.match(main, /qualifier\s*=\s*aws_lambda_alias\.reviewed\.name/);
   const hashes = main.match(/broker_template_hashes\s*=\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
@@ -450,10 +450,12 @@ test("broker and executor IAM match their exact AWS SDK writes and launch bounda
   assert.match(main, /current_candidate_task_definition_arns\s*=\s*\{[\s\S]*try\(aws_ecs_task_definition\.candidate\[kind\]\.arn, null\)/);
   assert.match(main, /current_executor_task_definition_arns\s*=\s*\{[\s\S]*for mode, task in aws_ecs_task_definition\.executor : mode => task\.arn/);
   assert.match(main, /broker_task_definition_arns\s*=\s*merge\([\s\S]*local\.current_executor_task_definition_arns[\s\S]*kind == "canary"/);
+  assert.match(main, /active_broker_task_definition_arns\s*=\s*var\.stage_b_recovery_only\s*\?\s*var\.stage_b_recovery_task_definition_arns\s*:\s*local\.broker_task_definition_arns/);
+  assert.match(main, /BROKER_TASK_DEFINITIONS_JSON\s*=\s*jsonencode\(local\.active_broker_task_definition_arns\)/);
   assert.match(main, /current_task_definition_mappings_complete\s*=\s*\([\s\S]*expected_current_task_definition_families/);
   assert.match(main, /broker_task_definition_mappings_complete\s*=\s*\([\s\S]*broker_expected_task_definition_families/);
   const runTaskPolicy = main.match(/Sid\s*=\s*"RunOnlyApprovedExecutorAndCanaryRevisions"[\s\S]*?\n      }/)?.[0] || "";
-  assert.match(runTaskPolicy, /values\(local\.broker_task_definition_arns\)/);
+  assert.match(runTaskPolicy, /values\(local\.active_broker_task_definition_arns\)/);
   assert.doesNotMatch(runTaskPolicy, /candidate\["(?:backend|worker)"\]/);
   const brokerPolicy = main.match(/resource "aws_iam_policy" "broker" \{[\s\S]*?\n}/)?.[0] || "";
   const brokerFunction = main.match(/resource "aws_lambda_function" "broker" \{[\s\S]*?\n}/)?.[0] || "";

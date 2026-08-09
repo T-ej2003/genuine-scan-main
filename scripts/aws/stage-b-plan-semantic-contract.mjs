@@ -43,6 +43,7 @@ export const STAGE_B_PLAN_SEMANTIC_PROFILES = Object.freeze({
 export const STAGE_B_SUPPORTED_PLAN_PROFILES = Object.freeze([
   Object.freeze({ profile: "BASELINE_INITIAL_CREATE", ecsActions: [["create"]], brokerPolicyActions: [["create"]], brokerFunctionActions: [["create"]], brokerAliasActions: [["create"]], recoveryRequired: false, fixture: "production-green-stage-b-production-shaped.plan.json" }),
   Object.freeze({ profile: "ROLLOVER_RECOVERY", ecsActions: [["create", "delete"], ["delete", "create"]], brokerPolicyActions: [["update"]], brokerFunctionActions: [["update"]], brokerAliasActions: [["update"]], recoveryRequired: true, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
+  Object.freeze({ profile: "RECOVERY_ALIAS_ONLY", ecsActions: [], brokerPolicyActions: [["no-op"]], brokerFunctionActions: [["no-op"]], brokerAliasActions: [["update"]], recoveryRequired: true, fixture: "stage-b-partial-apply-recovery-contract.test.mjs" }),
   Object.freeze({ profile: "NO_CHANGE_OR_APPEND_ONLY_RETRY", ecsActions: [["create"], ["no-op"]], brokerPolicyActions: [["create"], ["no-op"]], brokerFunctionActions: [["create"], ["no-op"]], brokerAliasActions: [["create"], ["no-op"]], recoveryRequired: false, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
 ]);
 
@@ -762,6 +763,10 @@ function assertBrokerActionProfile(plan) {
   const active = plan.resource_changes.filter((change) => BROKER_ADDRESSES.has(change?.address)
     && !exactJson(change.change?.actions, ["no-op"]));
   if (active.length === 0) return;
+  if (plan.variables?.stage_b_recovery_only?.value === true) {
+    if (active.length !== 1 || active[0].address !== "aws_lambda_alias.reviewed" || !exactJson(active[0].change?.actions, ["update"])) throw new Error("UNCLASSIFIED_RESOURCE_ACTION: recovery-only mode permits only the reviewed alias update.");
+    return;
+  }
   if (active.length !== BROKER_ADDRESSES.size || !active.every((change) => exactJson(change.change?.actions, active[0].change.actions))) {
     throw new Error("UNCLASSIFIED_RESOURCE_ACTION: broker initial/update profile is not atomic.");
   }

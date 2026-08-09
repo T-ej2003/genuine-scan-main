@@ -684,6 +684,23 @@ all three exact ResourceTag contexts required by the final-write policy.
 
 ## Final partial-retry PassRole correction and preflight
 
+## Attested alias-only recovery lifecycle
+
+When a reviewed partial apply proves an alias residue such as live version `2` and
+attested desired version `3`, recovery is a separate Terraform lifecycle. The
+canonical tfvars producer derives `stage_b_recovery_alias_target_version` from the
+verified signed attestation; operators cannot select the version. Recovery-only
+configuration binds broker package/environment and task-definition inputs to the
+current verified state, removes current ECS resources from configuration after the
+retained-history reconciliation, and permits exactly one non-no-op: the concrete
+reviewed-alias update from the attested live version to the attested desired version.
+
+The recovery plan must contain no ECS, broker-function, or broker-policy mutation.
+`assertRecoveryOnlyPlan` and the recovery-only reference audit enforce this before
+approval and again before apply. After the alias update is verified, the recovery
+lifecycle ends; the next normal release starts a fresh evidence chain and resumes
+the normal `aws_lambda_function.broker.version` alias expression.
+
 The later partial apply proved that ECS task-definition registration needs
 `iam:PassRole` for both the configured execution role and task role. The final
 write companion therefore grants `iam:PassRole` only for:
@@ -779,3 +796,18 @@ exact ECS task-role PassRole tuples are therefore never also listed as forbidden
 forbidden examples use unrelated roles or a different `iam:PassedToService`
 context. This keeps the twelve required mappings simulatable without weakening
 the unrelated-role, wrong-service, wildcard, and wrong-account denials.
+
+## Alias-only recovery evidence closure
+
+The recovery-only lifecycle is represented by the exact `RECOVERY_ALIAS_ONLY` plan
+profile and `recovery-alias-only` broker operation. Capture, approval, permission,
+closure, and apply binding preserve both values; recovery evidence cannot fall back
+to the baseline profile. Its broker evidence is limited to the reviewed alias with
+`brokerUpdatePresent=false`, `brokerActions=["no-op"]`, and no pending broker
+reference validation.
+
+Recovery Terraform derives `BROKER_TASK_DEFINITIONS_JSON` and the broker IAM
+`ecs:RunTask` resources from the same `active_broker_task_definition_arns` mapping.
+In recovery-only mode that mapping is the verified state-derived recovery input; in
+normal mode it is the planned broker mapping. This keeps the broker environment and
+policy on one exact task-definition identity set.
