@@ -12,6 +12,7 @@ import {
 } from "./stage-b-provider-semantic-snapshot.mjs";
 import {
   assertStageBBrokerPolicyDocument,
+  assertStageBBrokerPublishProviderMetadataRepresentation,
   STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
   STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS,
 } from "./stage-b-deployment-contract.mjs";
@@ -505,14 +506,7 @@ function assertInitialRepresentationPath(change, path) {
 }
 
 function assertBrokerPublishProviderMetadataRepresentation(change) {
-  if (change.address !== "aws_lambda_function.broker" || !exactJson(change.change?.actions, ["update"])) return;
-  const after = change.change?.after || {};
-  const unknown = change.change?.after_unknown || {};
-  for (const field of STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS) {
-    if (after[field] !== undefined || unknown[field] !== true) {
-      throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.${field}`);
-    }
-  }
+  assertStageBBrokerPublishProviderMetadataRepresentation(change);
 }
 
 const BROKER_ENVIRONMENT_VARIABLES = Object.freeze([

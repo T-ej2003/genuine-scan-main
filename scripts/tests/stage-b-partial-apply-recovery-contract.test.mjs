@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 import { assertCanonicalTerraformSerialNumber, parseCanonicalTerraformSerialCliText, assertRecoveryPlanDelta, assertRecoveryAttestation, assertVerifiedStageBRecovery, classifyRecoveryResidue, createRecoveryAttestation, signRecoveryAttestation, verifyRecoveryAttestation } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
+import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
 const digest = "a".repeat(64);
 const current = (overrides = {}) => ({ protectedSourceSha: "523817e71755616ed004a5dea03ea4e10672723b", terraformLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", terraformSerial: 78, refreshReportSha256: digest, terraformAddress: "aws_lambda_alias.reviewed", resourceMode: "managed", resourceModule: null, resourceType: "aws_lambda_alias", resourceName: "reviewed", functionName: "mscqr-production-rls-approval-broker", aliasName: "reviewed", stateVersion: "3", configuredDesiredVersion: "3", liveVersion: "2", changedAttributes: ["function_version"], routingConfigurationChanged: false, descriptionChanged: false, functionIdentityChanged: false, aliasIdentityChanged: false, additionalManagedResourceDrift: false, ...overrides });
@@ -9,13 +10,24 @@ const historical = (overrides = {}) => ({ protectedSourceSha: "0".repeat(40), te
 const assertion = { historicalFailedTarget: "3", stateTarget: "3", liveTarget: "2", onlyFunctionVersionChanged: true, noAdditionalManagedDrift: true, authorizesPlan: false, authorizesApply: false, failureClass: "AUTHORIZATION", operation: "lambda:UpdateAlias" };
 const report = () => createRecoveryAttestation({ generatedAt: new Date().toISOString(), producerCallerArn: "arn:aws:iam::368992683803:root", historicalObservedEvidence: historical(), currentObservedEvidence: current(), reviewedRecoveryAssertion: assertion });
 const computedPlan = (overrides = {}) => {
+  const qualifiedArn = `${STAGE_B.brokerFunctionArn}:3`;
+  const qualifiedInvokeArn = `arn:aws:apigateway:eu-west-2:lambda:path/2015-03-31/functions/${qualifiedArn}/invocations`;
   const alias = {
     address: "aws_lambda_alias.reviewed", mode: "managed", module: null, type: "aws_lambda_alias",
     change: { actions: ["update"], before: { function_version: "2" }, after: {}, after_unknown: { function_version: true, routing_config: [] }, ...overrides.aliasChange },
   };
   const broker = {
     address: "aws_lambda_function.broker", mode: "managed", module: null, type: "aws_lambda_function",
-    change: { actions: ["update"], before: { function_name: "mscqr-production-rls-approval-broker", filename: "old.zip", version: "3" }, after: { function_name: "mscqr-production-rls-approval-broker", filename: "new.zip" }, after_unknown: { version: true }, ...overrides.brokerChange },
+    change: {
+      actions: ["update"],
+      before: { function_name: "mscqr-production-rls-approval-broker", filename: "old.zip", code_sha256: "old-code-sha", source_code_size: 100, last_modified: "old", qualified_arn: qualifiedArn, qualified_invoke_arn: qualifiedInvokeArn, version: "3" },
+      after: { function_name: "mscqr-production-rls-approval-broker", filename: "new.zip" },
+      after_unknown: { code_sha256: true, source_code_size: true, last_modified: true, qualified_arn: true, qualified_invoke_arn: true, version: true },
+      ...overrides.brokerChange,
+      before: { function_name: "mscqr-production-rls-approval-broker", filename: "old.zip", code_sha256: "old-code-sha", source_code_size: 100, last_modified: "old", qualified_arn: qualifiedArn, qualified_invoke_arn: qualifiedInvokeArn, version: "3", ...(overrides.brokerChange?.before || {}) },
+      after: { function_name: "mscqr-production-rls-approval-broker", filename: "new.zip", ...(overrides.brokerChange?.after || {}) },
+      after_unknown: { code_sha256: true, source_code_size: true, last_modified: true, qualified_arn: true, qualified_invoke_arn: true, ...(overrides.brokerChange?.after_unknown || {}) },
+    },
   };
   return {
     resource_changes: overrides.resource_changes || [alias, broker],
