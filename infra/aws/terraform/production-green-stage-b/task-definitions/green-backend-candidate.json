@@ -31,6 +31,7 @@
       { "name": "SCAN_FINGERPRINT_SECRET", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/scan-fingerprint-secret-3wsoIV" },
       { "name": "TOKEN_HASH_SECRET_CURRENT", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/token-hash-secret-current-1j79IN" }
     ],
+    "portMappings": [{ "containerPort": 4000, "hostPort": 4000, "protocol": "tcp", "name": "backend-4000-tcp", "appProtocol": "http" }],
     "logConfiguration": { "logDriver": "awslogs", "options": { "awslogs-region": "eu-west-2", "awslogs-group": "{{BACKEND_LOG_GROUP}}", "awslogs-stream-prefix": "stage-b" } }
   }]
 }

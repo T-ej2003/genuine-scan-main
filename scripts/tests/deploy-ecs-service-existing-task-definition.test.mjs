@@ -16,10 +16,12 @@ const targetArn = `arn:aws:ecs:${region}:${account}:task-definition/mscqr-produc
 const targetFamily = "mscqr-production-rls-green-backend-candidate";
 const sourceSha = "5e12983f1fe733473cacb6b213c0c02ef9f38098";
 const digest = "sha256:32cf5587dff017354e637c147a3d985f286933129af83091d48edf35bee4e656";
+const serviceLoadBalancers = [{ targetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/example", containerName: "backend", containerPort: 4000 }];
+const validBackendPortMappings = [{ containerPort: 4000, hostPort: 4000, protocol: "tcp", name: "backend-4000-tcp", appProtocol: "http" }];
 
 const serviceResponse = (taskDefinition, deployments = [
   { status: "PRIMARY", taskDefinition, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },
-]) => ({ failures: [], services: [{ status: "ACTIVE", taskDefinition, desiredCount: 2, deployments }] });
+]) => ({ failures: [], services: [{ status: "ACTIVE", taskDefinition, desiredCount: 2, loadBalancers: serviceLoadBalancers, deployments }] });
 
 function writeFixture(data, options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ecs-existing-target-"));
@@ -37,8 +39,9 @@ function writeFixture(data, options = {}) {
       status: options.status || "ACTIVE",
       family: options.family || targetFamily,
       containerDefinitions: [{
-        name: containerName,
+        name: options.targetContainerName || containerName,
         image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${options.targetDigest || digest}`,
+        portMappings: options.targetPortMappings === undefined ? validBackendPortMappings : options.targetPortMappings,
         environment: !includeSourceMetadata
           ? []
           : [{ name: "RELEASE_GIT_SHA", value: options.releaseGitSha || sourceSha }],
@@ -50,7 +53,7 @@ function writeFixture(data, options = {}) {
     taskDefinition: {
       taskDefinitionArn: fromArn,
       family: "mscqr-backend",
-      containerDefinitions: [{ name: containerName, image: "old-image" }],
+      containerDefinitions: [{ name: containerName, image: "old-image", portMappings: options.normalPortMappings === undefined ? validBackendPortMappings : options.normalPortMappings }],
       runtimePlatform: { cpuArchitecture: "X86_64" },
     },
   };
@@ -219,6 +222,29 @@ test("existing production-shaped target switches once without registering", () =
   assert.equal((result.calls.match(/ecs register-task-definition/g) || []).length, 0);
   assert.match(result.stdout, new RegExp(targetArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assertTempClean(result);
+});
+test("existing mode enforces the independent service load-balancer port contract", () => {
+  const missing = runExisting({ targetPortMappings: [] });
+  assertFailure(missing, /backend:4000/);
+  assert.equal((missing.calls.match(/ecs update-service/g) || []).length, 0);
+
+  const wrongPort = runExisting({ targetPortMappings: [{ containerPort: 4001, hostPort: 4001, protocol: "tcp" }] });
+  assertFailure(wrongPort, /backend:4000/);
+  assert.equal((wrongPort.calls.match(/ecs update-service/g) || []).length, 0);
+
+  const wrongName = runExisting({ targetContainerName: "not-backend" });
+  assertFailure(wrongName, /exactly one backend container/);
+  assert.equal((wrongName.calls.match(/ecs update-service/g) || []).length, 0);
+
+  const candidate6Shape = runExisting({ targetPortMappings: [] });
+  assertFailure(candidate6Shape, /backend:4000/);
+  assert.equal((candidate6Shape.calls.match(/ecs update-service/g) || []).length, 0);
+
+  const corrected = runExisting({ targetPortMappings: validBackendPortMappings });
+  assert.equal(corrected.status, 0, corrected.stderr);
+  assert.equal((corrected.calls.match(/ecs update-service/g) || []).length, 1);
+  assert.equal((corrected.calls.match(/ecs register-task-definition/g) || []).length, 0);
+  assertTempClean(corrected);
 });
 
 test("existing mode rejects an unrevisioned target", () => assertFailure(runExisting({ targetArgument: `arn:aws:ecs:${region}:${account}:task-definition/${targetFamily}` }), /full ARN.*revision/));
@@ -463,6 +489,31 @@ test("normal mode still registers a new revision before updating the service", (
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal((fs.readFileSync(fixture.calls, "utf8").match(/ecs register-task-definition/g) || []).length, 1);
+  assertTempClean({ fixture });
+});
+
+test("normal mode rejects an incompatible payload before registration", () => {
+  const fixture = writeFixture({}, { normalPortMappings: [] });
+  const result = spawnSync("bash", [script], {
+    cwd: path.resolve("."),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+      AWS_REGION: region,
+      CLUSTER_NAME: cluster,
+      SERVICE_NAME: service,
+      TASK_DEFINITION: "mscqr-backend",
+      CONTAINER_NAME: containerName,
+      IMAGE_URI: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`,
+      FAKE_DATA: fixture.dir,
+      FAKE_SCENARIO: "",
+      TMPDIR: fixture.tempDir,
+    },
+  });
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /backend:4000/);
+  assert.equal((fs.readFileSync(fixture.calls, "utf8").match(/ecs register-task-definition/g) || []).length, 0);
   assertTempClean({ fixture });
 });
 
