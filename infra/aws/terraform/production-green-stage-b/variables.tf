@@ -26,6 +26,10 @@ variable "production_rotation_enabled" {
   type    = bool
   default = false
 }
+variable "production_rotation_cleanup_enabled" {
+  type    = bool
+  default = false
+}
 variable "production_rotation_secret_value_from" {
   type = object({
     jwt_current         = string
@@ -131,14 +135,14 @@ check "production_only" {
 
 check "production_rotation_contract" {
   assert {
-    condition = !var.production_rotation_enabled || (
+    condition = (!var.production_rotation_cleanup_enabled || var.production_rotation_enabled) && (!var.production_rotation_enabled || (
       alltrue([
         for value in values(var.production_rotation_secret_value_from) : can(regex("^arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:.+:[A-Za-z0-9_-]+::$", value))
       ]) &&
       var.production_rotation_secret_value_from.jwt_current != var.production_rotation_secret_value_from.jwt_previous &&
       var.production_rotation_secret_value_from.qr_public_current != var.production_rotation_secret_value_from.qr_public_previous &&
       var.production_rotation_secret_value_from.qr_current_version != var.production_rotation_secret_value_from.qr_previous_version
-    )
+    ))
     error_message = "Production rotation current and previous secret references/version references must be distinct."
   }
 }

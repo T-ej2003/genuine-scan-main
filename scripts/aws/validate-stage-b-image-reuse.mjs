@@ -48,7 +48,7 @@ export function classifyStageBImageReusePath(file) {
   if (CI.test(file)) return { file, category: "ciOnly", imageAffecting: false };
   if (DOCUMENTATION.test(file)) return { file, category: "documentationOnly", imageAffecting: false };
   if (TEST.test(file)) return { file, category: "testOnly", imageAffecting: false };
-  if (/^scripts\//.test(file) || /^documents\/ops\//.test(file) || /^documents\/security\/rls-program\//.test(file) || /^package\.json$/.test(file)) {
+  if (/^scripts\//.test(file) || /^documents\/ops\//.test(file) || /^documents\/security\/rls-program\//.test(file) || /^package\.json$/.test(file) || file === ".security/rotation-evidence.schema.json") {
     return { file, category: "toolingOnly", imageAffecting: false };
   }
   return { file, category: "unknown", imageAffecting: true };

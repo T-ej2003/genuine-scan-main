@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertIdentity, cleanup, prepare, verify } from "../scripts/security/rotate-production-signing-material.mjs";
+import { assertIdentity, cleanup, prepare, validateRuntimeProof, verify } from "../scripts/security/rotate-production-signing-material.mjs";
 
 const baseConfig = {
   region: "eu-west-2",
@@ -214,4 +214,24 @@ test("wrong release identity fails closed before secret operations", () => {
     () => assertIdentity({ expectedRoleArn: "arn:aws:iam::368992683803:role/approved-rotation-role" }, () => "arn:aws:sts::368992683803:assumed-role/unapproved-role/session"),
     /not the configured release role/
   );
+});
+
+test("runtime proof accepts only the expected deployment SHA for overlap and cleanup", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-runtime-proof-sha-"));
+  try {
+    const config = { rotationId: "rotation-proof" };
+    const common = { rotationId: config.rotationId, runtimeInvocationRef: "https://example.test/proof", observedAt: "2026-08-10T00:00:00.000Z", serviceHealthy: true };
+    const overlap = { ...common, phase: "overlap", deploymentSha: "a".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true };
+    const cleanupProof = { ...common, phase: "cleanup", deploymentSha: "b".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeRejected: true, qrUnknownKeyRejected: true };
+    const overlapFile = writeProof(directory, "overlap.json", overlap);
+    const cleanupFile = writeProof(directory, "cleanup.json", cleanupProof);
+    const clock = () => Date.parse("2026-08-10T00:01:00.000Z");
+    assert.doesNotThrow(() => validateRuntimeProof({ file: overlapFile, config, phase: "overlap", expectedDeploymentSha: overlap.deploymentSha, clock }));
+    assert.throws(() => validateRuntimeProof({ file: overlapFile, config, phase: "overlap", expectedDeploymentSha: "c".repeat(40), clock }), /deployment SHA is invalid/);
+    assert.doesNotThrow(() => validateRuntimeProof({ file: cleanupFile, config, phase: "cleanup", expectedDeploymentSha: cleanupProof.deploymentSha, clock }));
+    assert.throws(() => validateRuntimeProof({ file: cleanupFile, config, phase: "cleanup", expectedDeploymentSha: "d".repeat(40), clock }), /deployment SHA is invalid/);
+    assert.throws(() => validateRuntimeProof({ file: overlapFile, config, phase: "cleanup", expectedDeploymentSha: overlap.deploymentSha, clock }), /does not match this rotation/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

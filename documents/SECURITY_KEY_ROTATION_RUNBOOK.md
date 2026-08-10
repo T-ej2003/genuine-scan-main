@@ -52,7 +52,7 @@ npm --prefix backend run security:rotate-production-signing-material -- \
 
 npm --prefix backend run security:rotate-production-signing-material -- \
   --config /secure/operator/rotation.json --state-file /secure/operator/rotation-state.json \
-  --fixture-file /secure/operator/previous-qr-fixture.json --verification-out /secure/operator/verification.json \
+  --fixture-file /secure/operator/previous-qr-fixture.json --runtime-verification-file /secure/operator/overlap-runtime.json \
   --verify
 ```
 
@@ -140,7 +140,9 @@ pending slots with one immutable `retirementTimestamp`, then stops at
 `cleanup-deploy-required`. Deploy/restart tasks after those writes, run the
 deployment-side verifier with `ROTATION_RUNTIME_PHASE=cleanup`, and resume
 `--cleanup` with that proof. A cleanup deployment observed before retirement is
-rejected.
+rejected. The Stage B task definition must be rendered with
+`production_rotation_cleanup_enabled=true`; that mode omits the retired JWT
+previous, QR previous public, and QR previous key-version bindings entirely.
 
 Mark cleanup in `.security/rotation-evidence.json`:
 

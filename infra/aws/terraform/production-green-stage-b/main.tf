@@ -43,8 +43,23 @@ locals {
     canary           = replace(replace(replace(replace(replace(file("${path.module}/task-definitions/green-application-canary.json"), "{{CANARY_IMAGE}}", var.canary_image), "{{RELEASE_SHA}}", var.image_release_sha), "{{SOURCE_CONTRACT_SHA256}}", var.source_contract_sha256), "{{MIGRATION_SET_DIGEST}}", var.migration_set_digest), "{{CANARY_LOG_GROUP}}", local.logs.canary)
     read_only_canary = replace(replace(replace(file("${path.module}/task-definitions/green-read-only-rls-canary.json"), "{{READ_ONLY_CANARY_IMAGE}}", var.read_only_canary_image), "{{READ_ONLY_CANARY_DATABASE_SECRET_ARN}}", var.stage_a_read_only_canary_database_secret_arn), "{{READ_ONLY_CANARY_LOG_GROUP}}", local.logs.read_only_canary)
   }
+  backend_definition = jsondecode(local.rendered_candidates.backend)
+  backend_definition_for_mode = var.production_rotation_cleanup_enabled ? merge(
+    local.backend_definition,
+    {
+      containerDefinitions = [merge(
+        local.backend_definition.containerDefinitions[0],
+        {
+          secrets = [
+            for secret in local.backend_definition.containerDefinitions[0].secrets :
+            secret if !contains(["JWT_SECRET_PREVIOUS", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"], secret.name)
+          ]
+        }
+      )]
+    }
+  ) : local.backend_definition
   candidate_definitions = {
-    for kind, rendered in local.rendered_candidates : kind => jsondecode(rendered)
+    for kind, rendered in local.rendered_candidates : kind => kind == "backend" ? local.backend_definition_for_mode : jsondecode(rendered)
   }
   executor_template = replace(replace(replace(replace(replace(replace(file("${path.module}/task-definitions/green-activation-executor.json"), "{{EXECUTOR_IMAGE}}", var.executor_image), "{{RELEASE_SHA}}", var.image_release_sha), "{{SOURCE_CONTRACT_SHA256}}", var.source_contract_sha256), "{{MIGRATION_SET_DIGEST}}", var.migration_set_digest), "{{PACKAGE_CHECKSUM_SHA256}}", var.package_checksum_sha256), "{{RECEIPT_BUCKET}}", trimprefix(var.receipt_bucket_arn, "arn:aws:s3:::"))
   executor_definitions = {

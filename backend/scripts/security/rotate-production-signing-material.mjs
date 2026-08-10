@@ -165,10 +165,10 @@ const makePreviousQrFixture = (privatePem, publicPem, oldVersion, file) => {
   chmodSync(file, 0o600);
 };
 
-const validateRuntimeProof = (file, config, phase, clock) => {
+const validateRuntimeProof = ({ file, config, phase, expectedDeploymentSha, clock }) => {
   const proof = JSON.parse(readFileSync(path.resolve(required(file, `--${phase}-runtime-file`)), "utf8"));
   if (proof.rotationId !== config.rotationId || proof.phase !== phase) throw new Error(`${phase} runtime proof does not match this rotation`);
-  if (!fullSha(proof.deploymentSha) || proof.deploymentSha !== (phase === "overlap" ? config.overlapDeploymentSha : proof.deploymentSha)) throw new Error(`${phase} runtime proof deployment SHA is invalid`);
+  if (!fullSha(expectedDeploymentSha) || proof.deploymentSha !== expectedDeploymentSha) throw new Error(`${phase} runtime proof deployment SHA is invalid`);
   if (!reference(proof.runtimeInvocationRef)) throw new Error(`${phase} runtime proof reference is invalid`);
   const observedAt = isoDate(proof.observedAt);
   if (observedAt === null || observedAt > clock()) throw new Error(`${phase} runtime proof timestamp is invalid`);
@@ -297,7 +297,7 @@ const verify = async (context) => {
   const state = readState(stateFile);
   assertState(state, config);
   if (!["overlap-deploy-required", "overlap-ready"].includes(state.phase)) throw new Error("rotation must require an overlap deployment before verification");
-  const proof = validateRuntimeProof(file, config, "overlap", clockOf(context));
+  const proof = validateRuntimeProof({ file, config, phase: "overlap", expectedDeploymentSha: config.overlapDeploymentSha, clock: clockOf(context) });
   const overlapReadyAt = proof.observedAt;
   const cleanupEligibleAt = new Date(isoDate(overlapReadyAt) + config.minimumGraceSeconds * 1000).toISOString();
   state.phase = "overlap-ready";
@@ -410,7 +410,7 @@ const cleanup = async (context) => {
       return;
     }
     const runtimeFile = required(values.get("cleanup-runtime-file"), "--cleanup-runtime-file");
-    const proof = validateRuntimeProof(runtimeFile, { ...config, overlapDeploymentSha: cleanupDeploymentSha }, "cleanup", clock);
+    const proof = validateRuntimeProof({ file: runtimeFile, config, phase: "cleanup", expectedDeploymentSha: cleanupDeploymentSha, clock });
     if (isoDate(proof.observedAt) <= isoDate(state.retirementTimestamp)) throw new Error("cleanup deployment must occur after retirement writes");
     state.cleanupRuntime = proof;
     state.phase = "cleanup-runtime-verified";

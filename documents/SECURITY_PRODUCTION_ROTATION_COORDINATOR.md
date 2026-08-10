@@ -76,8 +76,10 @@ force/skip-grace bypass.
 Cleanup is two-step and retry-safe: retire `JWT_SECRET_PREVIOUS`,
 `QR_SIGN_PUBLIC_KEY_PREVIOUS`, `JWT pending`, `QR private pending`, and
 `QR public pending` with one persisted timestamp; then deploy/restart the
-service and pass the post-deployment runtime proof. Only that proof can produce
-cleanup evidence.
+service and pass the post-deployment runtime proof. The Stage B cleanup task
+definition sets `production_rotation_cleanup_enabled=true`, which removes the
+retired JWT and QR previous bindings entirely while retaining every current
+binding. Only that proof can produce cleanup evidence.
 
 State, fixture, verification, and evidence paths must be outside the repository
 or explicitly reviewed non-secret evidence locations. They contain identifiers,
