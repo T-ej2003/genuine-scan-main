@@ -214,6 +214,13 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
   },
 });
 
+export function getStageBConfigurationReferenceRules() {
+  return Object.fromEntries(Object.entries(CONFIGURATION_REFERENCE_RULES).map(([address, fields]) => [
+    address,
+    Object.fromEntries(Object.entries(fields).map(([field, references]) => [field, [...references]])),
+  ]));
+}
+
 const exactJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const isObject = (value) => value !== null && typeof value === "object";
 const pathFor = (base, key) => typeof key === "number" ? `${base}[${key}]` : (base ? `${base}.${key}` : key);

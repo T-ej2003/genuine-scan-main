@@ -26,10 +26,14 @@ export const STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS = STAGE_B_DEPLOYMENT_EVIDENCE_TT
 export const STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS = STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS;
 export const STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL = STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL;
 export const STAGE_B_BROKER_TERRAFORM_ADDRESS = "aws_lambda_function.broker";
-export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.broker_task_definition_arns";
+export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.active_broker_task_definition_arns";
+export const STAGE_B_ACTIVE_BROKER_TASK_DEFINITION_LOCAL_EXPRESSION = "var.stage_b_recovery_only ? var.stage_b_recovery_task_definition_arns : local.broker_task_definition_arns";
 export const STAGE_B_BROKER_APPROVAL_REFERENCE = "local.broker_approval_expected";
 export const STAGE_B_BROKER_APPROVAL_INPUT = "var.package_checksum_sha256";
 export const STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION = "aws_ecs_task_definition.executor";
+export const STAGE_B_CANDIDATE_FOR_EACH_REFERENCES = Object.freeze([
+  "local.candidate_definitions_for_resources",
+]);
 export const STAGE_B_EXECUTOR_FOR_EACH_REFERENCES = Object.freeze([
   "local.executor_definitions_for_resources",
 ]);
@@ -292,10 +296,22 @@ function expectedExecutorAddresses() {
     .filter((address) => address.startsWith(`${STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION}[`));
 }
 
+export function assertStageBActiveBrokerTaskDefinitionLocal(terraformConfiguration) {
+  if (typeof terraformConfiguration !== "string" || terraformConfiguration.length === 0) {
+    throw new Error("Active broker task-definition local source is missing.");
+  }
+  const assignments = [...terraformConfiguration.matchAll(/^\s*active_broker_task_definition_arns\s*=\s*(.+?)\s*$/gm)];
+  if (assignments.length !== 1 || assignments[0][1].replace(/\s+/g, " ").trim() !== STAGE_B_ACTIVE_BROKER_TASK_DEFINITION_LOCAL_EXPRESSION) {
+    throw new Error("Active broker task-definition local source is missing or malformed.");
+  }
+  return true;
+}
+
 export function assertStageBBrokerTaskDefinitionMapping(plan, terraformConfiguration) {
   if (typeof terraformConfiguration !== "string" || terraformConfiguration.length === 0) {
     throw new Error("Broker atomic rollover Terraform configuration is missing.");
   }
+  assertStageBActiveBrokerTaskDefinitionLocal(terraformConfiguration);
   const normalizedConfiguration = terraformConfiguration.replace(/\s+/g, " ");
   const currentCandidateMappingExpression = /current_candidate_task_definition_arns\s*=\s*\{\s*for kind in keys\(local\.candidate_definitions\)\s*:\s*kind\s*=>\s*try\(aws_ecs_task_definition\.candidate\[kind\]\.arn, null\)\s*if try\(aws_ecs_task_definition\.candidate\[kind\]\.arn, null\) != null\s*\}/;
   const brokerMappingExpression = /broker_task_definition_arns\s*=\s*merge\s*\(\s*local\.current_executor_task_definition_arns\s*,\s*\{\s*for kind, arn in local\.current_candidate_task_definition_arns\s*:\s*"full-rls-application-canary"\s*=>\s*arn if kind == "canary"\s*\}\s*,?\s*\)/;
@@ -381,7 +397,7 @@ export function assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, broker
     return references;
   });
   if (!variableReferences.includes(STAGE_B_BROKER_TASK_DEFINITION_REFERENCE)) {
-    throw new Error("Broker atomic rollover Terraform reference to local.broker_task_definition_arns is missing.");
+    throw new Error(`Broker atomic rollover Terraform reference to ${STAGE_B_BROKER_TASK_DEFINITION_REFERENCE} is missing.`);
   }
   assertStageBBrokerTaskDefinitionMapping(plan, terraformConfiguration);
   const relevant = Array.isArray(plan?.relevant_attributes) ? plan.relevant_attributes : [];
@@ -405,12 +421,13 @@ export function assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, broker
   const candidateFamilyReferences = configuredCandidate?.expressions?.family?.references;
   const hasForEachCandidate = configuredCandidate?.type === "aws_ecs_task_definition"
     && Array.isArray(candidateForEachReferences)
-    && candidateForEachReferences.length === 1
-    && candidateForEachReferences[0] === "local.candidate_definitions"
-    && Array.isArray(candidateFamilyReferences)
-    && candidateFamilyReferences.includes("each.value.family");
+    && candidateForEachReferences.length === STAGE_B_CANDIDATE_FOR_EACH_REFERENCES.length
+    && candidateForEachReferences.every((reference, index) => reference === STAGE_B_CANDIDATE_FOR_EACH_REFERENCES[index]);
+  if (!hasForEachCandidate) {
+    throw new Error("Broker atomic rollover candidate for_each metadata is missing or malformed.");
+  }
   if (relevant.some((item) => item?.resource === "aws_ecs_task_definition.candidate")) {
-    if (!hasForEachCandidate) {
+    if (!Array.isArray(candidateFamilyReferences) || !candidateFamilyReferences.includes("each.value.family")) {
       throw new Error(`Broker atomic rollover Terraform collection dependency to ${taskDefinitionAddress}.arn is missing.`);
     }
   }
