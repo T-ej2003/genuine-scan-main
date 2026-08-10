@@ -29,7 +29,7 @@ const IMAGE_INPUTS = [
 ];
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/workflows\//;
-const TERRAFORM = /^infra\/aws\/terraform\/production-green-stage-b\//;
+const TERRAFORM = /^infra\/aws\/terraform\/production-green-stage-(?:a|b)\//;
 const TEST = /(?:^|\/)(?:tests?|fixtures)(?:\/|\.)|\.test\.[^.]+$/;
 
 const canonicalJson = (value) => {

@@ -5,6 +5,7 @@ import {
   assertProductionImageReuseResult,
   imageImpactReportFor,
   imageReuseCompatibility,
+  classifyStageBImageReusePath,
   parseStageBClosureMode,
   STAGE_B_IMAGE_REUSE_RULES_VERSION,
 } from "../aws/validate-stage-b-image-reuse.mjs";
@@ -39,6 +40,26 @@ test("package-lock image impact is merge-ready but requires fresh protected-main
   assert.equal(report.imageReuseCompatible, false);
   assert.equal(report.newImagesRequired, true);
   assert.equal(report.deploymentAuthorized, false);
+});
+
+test("Stage A Terraform changes are classified as infrastructure-only without image rebuild", () => {
+  const file = "infra/aws/terraform/production-green-stage-a/main.tf";
+  assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "terraformOnly", imageAffecting: false });
+  const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: [file] });
+  assert.deepEqual(report.imageAffectingFiles, []);
+  assert.equal(report.imageReuseCompatible, true);
+  assert.equal(report.newImagesRequired, false);
+});
+
+test("Terraform classification stays bounded and runtime image behavior remains fail-closed", () => {
+  const stageB = "infra/aws/terraform/production-green-stage-b/main.tf";
+  assert.equal(classifyStageBImageReusePath(stageB).category, "terraformOnly");
+  assert.equal(classifyStageBImageReusePath("infra/aws/terraform/unrelated/main.tf").category, "unknown");
+
+  const backend = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["backend/src/app.ts"] });
+  assert.deepEqual(backend.imageAffectingFiles, ["backend/src/app.ts"]);
+  assert.equal(backend.newImagesRequired, true);
+  assert.throws(() => imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["frontend/src/App.tsx"] }), /unclassified/);
 });
 
 test("false compatibility and unknown classification fail closed", () => {
