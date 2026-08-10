@@ -6,6 +6,7 @@ import {
   assertStageBTypedRepresentationManifestComplete,
   censusStageBPlanSemantics,
   initialRepresentationOnlyPaths,
+  getStageBConfigurationReferenceRules,
   STAGE_B_PLAN_SEMANTIC_PROFILES,
   STAGE_B_SUPPORTED_PLAN_PROFILES,
 } from "../aws/stage-b-plan-semantic-contract.mjs";
@@ -18,68 +19,37 @@ import {
 } from "../aws/stage-b-provider-semantic-snapshot.mjs";
 import { assertRecoveryPlanDelta } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
 import { assertStageBBrokerFunctionUpdate, classifyStageBPlan, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS } from "../aws/stage-b-deployment-contract.mjs";
-import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
+import {
+  STAGE_B_CANDIDATE_FOR_EACH_REFERENCES,
+  STAGE_B_EXECUTOR_FOR_EACH_REFERENCES,
+  STAGE_B_TASK_DEFINITION_FAMILIES,
+} from "../aws/stage-b-reference-audit-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
 const addresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
 const BROKER_INITIAL_ADDRESSES = new Set(["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]);
 const image = (n) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr@sha256:${String(n).repeat(64)}`;
 const ref = (references) => ({ references });
-const BROKER_ENVIRONMENT_REFERENCES = [
-  "aws_dynamodb_table.replay", "aws_dynamodb_table.replay.name", "local.active_broker_task_definition_arns",
-  "local.broker_approval_expected", "local.broker_images", "local.broker_template_hashes",
-  "var.approval_secret_arn", "var.ecs_cluster_arn", "var.private_subnet_ids", "var.receipt_bucket_arn",
-  "var.stage_a_executor_security_group_id", "var.stage_b_recovery_broker_environment", "var.stage_b_recovery_only",
-];
 const envNames = [
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
   "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
 ];
-const SCOPED_REFERENCE_CENSUS_EXPECTED = {
-  "aws_ecs_task_definition.candidate": {
-    for_each_expression: ["local.candidate_definitions_for_resources"],
-    container_definitions: ["each.value.containerDefinitions", "each.value"],
-    cpu: ["each.value.cpu", "each.value"],
-    execution_role_arn: ["aws_iam_role.execution", "each.key"],
-    family: ["each.value.family", "each.value"],
-    memory: ["each.value.memory", "each.value"],
-    network_mode: ["each.value.networkMode", "each.value"],
-    requires_compatibilities: ["each.value.requiresCompatibilities", "each.value"],
-    tags: ["local.tags"],
-    task_role_arn: ["aws_iam_role.task", "each.key"],
-  },
-  "aws_ecs_task_definition.executor": {
-    for_each_expression: ["local.executor_definitions_for_resources"],
-    container_definitions: ["each.value.containerDefinitions", "each.value"],
-    cpu: ["each.value.cpu", "each.value"],
-    execution_role_arn: ["aws_iam_role.execution[\"executor\"].arn", "aws_iam_role.execution[\"executor\"]", "aws_iam_role.execution"],
-    family: ["each.value.family", "each.value"],
-    memory: ["each.value.memory", "each.value"],
-    network_mode: ["each.value.networkMode", "each.value"],
-    requires_compatibilities: ["each.value.requiresCompatibilities", "each.value"],
-    tags: ["local.tags"],
-    task_role_arn: ["var.stage_a_executor_task_role_arn"],
-  },
-  "aws_iam_policy.broker": {
-    policy: ["local.broker_runtime_policy"],
-    tags: ["local.tags"],
-  },
-  "aws_lambda_function.broker": {
-    "environment[0].variables": BROKER_ENVIRONMENT_REFERENCES,
-    filename: ["var.broker_package_path"],
-    role: ["var.stage_a_broker_role_arn"],
-    source_code_hash: ["var.broker_package_path"],
-    tags: ["local.tags"],
-  },
-  "aws_lambda_alias.reviewed": {
-    function_name: ["aws_lambda_function.broker.function_name", "aws_lambda_function.broker"],
-    function_version: [
-      "aws_lambda_function.broker", "aws_lambda_function.broker.version",
-      "var.stage_b_recovery_alias_target_version", "var.stage_b_recovery_only",
-    ],
-  },
-};
+const SCOPED_REFERENCE_CENSUS_FIELDS = [
+  ["aws_ecs_task_definition.candidate", "for_each_expression"],
+  ...["container_definitions", "cpu", "execution_role_arn", "family", "memory", "network_mode", "requires_compatibilities", "tags", "task_role_arn"]
+    .map((field) => ["aws_ecs_task_definition.candidate", field]),
+  ["aws_ecs_task_definition.executor", "for_each_expression"],
+  ...["container_definitions", "cpu", "execution_role_arn", "family", "memory", "network_mode", "requires_compatibilities", "tags", "task_role_arn"]
+    .map((field) => ["aws_ecs_task_definition.executor", field]),
+  ["aws_iam_policy.broker", "policy"],
+  ["aws_iam_policy.broker", "tags"],
+  ["aws_lambda_function.broker", "environment[0].variables"],
+  ...["filename", "role", "source_code_hash", "tags"]
+    .map((field) => ["aws_lambda_function.broker", field]),
+  ["aws_lambda_alias.reviewed", "function_name"],
+  ["aws_lambda_alias.reviewed", "function_version"],
+];
 
 function taskChange(address, index) {
   const family = STAGE_B_TASK_DEFINITION_FAMILIES[address];
@@ -167,7 +137,12 @@ function configuration() {
       executor,
       { address: "aws_iam_policy.broker", type: "aws_iam_policy", expressions: { policy: ref(["local.broker_runtime_policy"]), tags: ref(["local.tags"]) } },
       { address: "aws_lambda_function.broker", type: "aws_lambda_function", expressions: {
-        environment: [{ variables: ref([...BROKER_ENVIRONMENT_REFERENCES]) }],
+        environment: [{ variables: ref([
+          "aws_dynamodb_table.replay", "aws_dynamodb_table.replay.name", "local.active_broker_task_definition_arns",
+          "local.broker_approval_expected", "local.broker_images", "local.broker_template_hashes",
+          "var.approval_secret_arn", "var.ecs_cluster_arn", "var.private_subnet_ids", "var.receipt_bucket_arn",
+          "var.stage_a_executor_security_group_id", "var.stage_b_recovery_broker_environment", "var.stage_b_recovery_only",
+        ]) }],
         filename: ref(["var.broker_package_path"]), role: ref(["var.stage_a_broker_role_arn"]), publish: { constant_value: true }, source_code_hash: ref(["var.broker_package_path"]), tags: ref(["local.tags"]),
       } },
       { address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", expressions: {
@@ -183,25 +158,134 @@ function configuration() {
   };
 }
 
-function scopedReferenceCensus() {
-  const resources = configuration().root_module.resources;
-  return Object.entries(SCOPED_REFERENCE_CENSUS_EXPECTED).flatMap(([resourceAddress, fields]) => {
+function balancedBlock(text, openIndex) {
+  const pairs = { "{": "}", "[": "]", "(": ")" };
+  const stack = [];
+  let quote = false;
+  let escaped = false;
+  for (let index = openIndex; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quote = false;
+      continue;
+    }
+    if (char === '"') {
+      quote = true;
+      continue;
+    }
+    if (pairs[char]) stack.push(pairs[char]);
+    else if (char === stack.at(-1)) {
+      stack.pop();
+      if (stack.length === 0) return text.slice(openIndex + 1, index);
+    }
+  }
+  throw new Error("Terraform source fixture has an unbalanced expression.");
+}
+
+function namedBlock(text, type, name) {
+  const start = text.indexOf(`resource "${type}" "${name}"`);
+  if (start < 0) throw new Error(`Terraform source resource is missing: ${type}.${name}`);
+  const open = text.indexOf("{", start);
+  return balancedBlock(text, open);
+}
+
+function nestedBlock(text, name) {
+  const start = text.search(new RegExp(`(?:^|\\n)\\s*${name}\\s*\\{`));
+  if (start < 0) throw new Error(`Terraform source block is missing: ${name}`);
+  const open = text.indexOf("{", start);
+  return balancedBlock(text, open);
+}
+
+function assignmentExpression(text, name) {
+  const match = new RegExp(`(?:^|\\n)\\s*${name}\\s*=\\s*`).exec(text);
+  if (!match) throw new Error(`Terraform source assignment is missing: ${name}`);
+  const start = match.index + match[0].length;
+  let quote = false;
+  let escaped = false;
+  const stack = [];
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quote = false;
+      continue;
+    }
+    if (char === '"') quote = true;
+    else if ("{[(".includes(char)) stack.push(char);
+    else if ("}])".includes(char)) stack.pop();
+    else if (char === "\n" && stack.length === 0) return text.slice(start, index).trim();
+  }
+  return text.slice(start).trim();
+}
+
+function terraformReferences(expression) {
+  const tokens = expression.match(/(?:aws_[A-Za-z0-9_]+\.[A-Za-z0-9_]+|local\.[A-Za-z0-9_]+|var\.[A-Za-z0-9_]+|each\.[A-Za-z0-9_]+)(?:\[(?:[A-Za-z0-9_]+\.[A-Za-z0-9_]+|"[^"]+")\])?(?:\.[A-Za-z0-9_]+)*/g) || [];
+  const references = new Set();
+  for (const token of tokens) {
+    const dynamicIndex = token.match(/^(.+?)\[([A-Za-z0-9_]+\.[A-Za-z0-9_]+)\](\..+)?$/);
+    if (dynamicIndex) {
+      references.add(dynamicIndex[1]);
+      references.add(dynamicIndex[2]);
+      continue;
+    }
+    references.add(token);
+    const parts = token.split(".");
+    if (parts[0].startsWith("aws_") && parts.length > 2) references.add(parts.slice(0, 2).join("."));
+    if (parts[0] === "each" && parts.length > 2) references.add(parts.slice(0, 2).join("."));
+    const fixedIndex = token.match(/^(.+\[[^\]]+\])\..+$/);
+    if (fixedIndex) {
+      references.add(fixedIndex[1]);
+      references.add(fixedIndex[1].slice(0, fixedIndex[1].indexOf("[")));
+    }
+  }
+  return [...references].sort();
+}
+
+function terraformSourceExpression(source, resourceAddress, expressionPath) {
+  const match = resourceAddress.match(/^aws_([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)/);
+  if (!match) throw new Error(`Scoped Terraform address is malformed: ${resourceAddress}`);
+  const block = namedBlock(source, `aws_${match[1]}`, match[2]);
+  if (expressionPath === "for_each_expression") return assignmentExpression(block, "for_each");
+  if (expressionPath === "environment[0].variables") return assignmentExpression(nestedBlock(block, "environment"), "variables");
+  return assignmentExpression(block, expressionPath);
+}
+
+function validatorReferences(resourceAddress, expressionPath, rules = getStageBConfigurationReferenceRules()) {
+  if (expressionPath === "for_each_expression") {
+    return resourceAddress.endsWith("candidate") ? STAGE_B_CANDIDATE_FOR_EACH_REFERENCES : STAGE_B_EXECUTOR_FOR_EACH_REFERENCES;
+  }
+  return rules[resourceAddress]?.[expressionPath];
+}
+
+function fixtureReferences(resource, expressionPath) {
+  if (expressionPath === "for_each_expression") return resource?.for_each_expression?.references;
+  if (expressionPath === "environment[0].variables") return resource?.expressions?.environment?.[0]?.variables?.references;
+  return resource?.expressions?.[expressionPath]?.references;
+}
+
+function scopedReferenceCensus({ source = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8"), fixture = configuration(), rules = getStageBConfigurationReferenceRules() } = {}) {
+  const resources = fixture.root_module.resources;
+  return SCOPED_REFERENCE_CENSUS_FIELDS.map(([resourceAddress, expressionPath]) => {
     const resource = resources.find((item) => item.address === resourceAddress);
-    return Object.entries(fields).map(([expressionPath, terraformReferences]) => {
-      const fixtureReferences = expressionPath === "for_each_expression"
-        ? resource?.for_each_expression?.references
-        : expressionPath === "environment[0].variables"
-          ? resource?.expressions?.environment?.[0]?.variables?.references
-        : resource?.expressions?.[expressionPath]?.references;
-      return {
-        resourceAddress,
-        expressionPath,
-        terraformReferences: [...terraformReferences].sort(),
-        validatorExpectedReferences: [...terraformReferences].sort(),
-        fixtureReferences: [...(fixtureReferences || [])].sort(),
-      };
-    });
+    return {
+      resourceAddress,
+      expressionPath,
+      terraformReferences: terraformReferences(terraformSourceExpression(source, resourceAddress, expressionPath)),
+      validatorExpectedReferences: [...(validatorReferences(resourceAddress, expressionPath, rules) || [])].sort(),
+      fixtureReferences: [...(fixtureReferences(resource, expressionPath) || [])].sort(),
+    };
   });
+}
+
+function assertScopedReferenceCensus(census) {
+  assert.equal(census.length, 29);
+  for (const entry of census) {
+    assert.deepEqual(entry.terraformReferences, entry.validatorExpectedReferences, `${entry.resourceAddress}.${entry.expressionPath} Terraform source drift or validator drift`);
+    assert.deepEqual(entry.terraformReferences, entry.fixtureReferences, `${entry.resourceAddress}.${entry.expressionPath} fixture drift`);
+  }
 }
 
 function brokerChanges() {
@@ -229,11 +313,11 @@ test("broker environment conditional references match the source and exact seman
   assert.doesNotMatch(source, /BROKER_TASK_DEFINITIONS_JSON\s*=\s*jsonencode\(local\.broker_task_definition_arns\)/);
 
   const fixture = configuration().root_module.resources.find((item) => item.address === "aws_lambda_function.broker");
-  assert.deepEqual(fixture.expressions.environment[0].variables.references, BROKER_ENVIRONMENT_REFERENCES);
+  const brokerEnvironmentReferences = fixture.expressions.environment[0].variables.references;
   const census = assertStageBPlanSemanticCompleteness(plan());
   assert.deepEqual(census.resources.find((item) => item.address === "aws_lambda_function.broker").configurationReferences.find((item) => item.field === "environment[0].variables"), {
     field: "environment[0].variables",
-    references: [...BROKER_ENVIRONMENT_REFERENCES].sort(),
+    references: [...brokerEnvironmentReferences].sort(),
     classification: "STABLE_REQUIRED",
   });
   const alias = configuration().root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed");
@@ -243,7 +327,10 @@ test("broker environment conditional references match the source and exact seman
 });
 
 test("broker environment references require exact conditional completeness", () => {
-  for (const missing of BROKER_ENVIRONMENT_REFERENCES) {
+  const requiredReferences = configuration().root_module.resources
+    .find((item) => item.address === "aws_lambda_function.broker")
+    .expressions.environment[0].variables.references;
+  for (const missing of requiredReferences) {
     const value = plan();
     const references = value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_function.broker").expressions.environment[0].variables.references;
     references.splice(references.indexOf(missing), 1);
@@ -257,26 +344,9 @@ test("broker environment references require exact conditional completeness", () 
 });
 
 test("all broker configuration reference fields remain exact", () => {
-  const expected = {
-    "aws_iam_policy.broker": {
-      policy: ["local.broker_runtime_policy"],
-      tags: ["local.tags"],
-    },
-    "aws_lambda_function.broker": {
-      "environment[0].variables": BROKER_ENVIRONMENT_REFERENCES,
-      filename: ["var.broker_package_path"],
-      role: ["var.stage_a_broker_role_arn"],
-      source_code_hash: ["var.broker_package_path"],
-      tags: ["local.tags"],
-    },
-    "aws_lambda_alias.reviewed": {
-      function_name: ["aws_lambda_function.broker.function_name", "aws_lambda_function.broker"],
-      function_version: [
-        "aws_lambda_function.broker", "aws_lambda_function.broker.version",
-        "var.stage_b_recovery_alias_target_version", "var.stage_b_recovery_only",
-      ],
-    },
-  };
+  const allRules = getStageBConfigurationReferenceRules();
+  const expected = Object.fromEntries(["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]
+    .map((address) => [address, allRules[address]]));
   const census = assertStageBPlanSemanticCompleteness(plan());
   for (const [address, fields] of Object.entries(expected)) {
     const actual = Object.fromEntries(census.resources.find((item) => item.address === address).configurationReferences.map(({ field, references }) => [field, references]));
@@ -284,20 +354,27 @@ test("all broker configuration reference fields remain exact", () => {
   }
 });
 
-test("bounded scoped Terraform reference census stays source, contract, and fixture convergent", () => {
-  const source = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
-  assert.match(source, /resource "aws_ecs_task_definition" "candidate"[\s\S]*?for_each\s*=\s*local\.candidate_definitions_for_resources/);
-  assert.match(source, /resource "aws_ecs_task_definition" "executor"[\s\S]*?for_each\s*=\s*local\.executor_definitions_for_resources/);
-  assert.match(source, /BROKER_TASK_DEFINITIONS_JSON\s*=\s*jsonencode\(local\.active_broker_task_definition_arns\)/);
-  assert.match(source, /policy\s*=\s*jsonencode\(local\.broker_runtime_policy\)/);
-  assert.match(source, /function_version\s*=\s*var\.stage_b_recovery_only\s*\?\s*var\.stage_b_recovery_alias_target_version\s*:\s*aws_lambda_function\.broker\.version/);
+test("bounded scoped Terraform reference census stays independently source, contract, and fixture convergent", () => {
+  assertScopedReferenceCensus(scopedReferenceCensus());
+});
 
-  const census = scopedReferenceCensus();
-  assert.equal(census.length, 29);
-  for (const entry of census) {
-    assert.deepEqual(entry.terraformReferences, entry.validatorExpectedReferences, `${entry.resourceAddress}.${entry.expressionPath} validator drift`);
-    assert.deepEqual(entry.terraformReferences, entry.fixtureReferences, `${entry.resourceAddress}.${entry.expressionPath} fixture drift`);
-  }
+test("bounded census detects drift in each independent source", () => {
+  const source = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  const fixture = configuration();
+  const fixtureReferences = fixture.root_module.resources.find((item) => item.address === "aws_ecs_task_definition.candidate")
+    .expressions.container_definitions.references;
+  fixtureReferences.pop();
+  assert.throws(() => assertScopedReferenceCensus(scopedReferenceCensus({ fixture })), /fixture drift/);
+
+  const rules = getStageBConfigurationReferenceRules();
+  rules["aws_ecs_task_definition.candidate"].container_definitions.pop();
+  assert.throws(() => assertScopedReferenceCensus(scopedReferenceCensus({ rules })), /validator drift/);
+
+  const mutatedSource = source.replace(
+    /container_definitions\s*=\s*jsonencode\(each\.value\.containerDefinitions\)/,
+    "container_definitions = jsonencode(local.unreviewed)",
+  );
+  assert.throws(() => assertScopedReferenceCensus(scopedReferenceCensus({ source: mutatedSource })), /Terraform source drift/);
 });
 
 function recoveryPlan() {
