@@ -3744,7 +3744,7 @@
     "strict-backend-metadata",
     "tf-workspace-default",
     "no-workspace-select-or-migration",
-    "73-classified-58-no-op-12-create-3-update-0-destroy",
+    "structural-normal-resource-universe-append-only-retained-history",
     "no-service-database-alb-dns-traffic-or-secret-value-change"
   ]
 }

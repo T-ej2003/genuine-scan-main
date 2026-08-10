@@ -9,7 +9,7 @@ import { generateStageBTerraformBackendConfig } from "../aws/generate-production
 import { ensureStageBTerraformBackendMetadataPrivate } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { STAGE_B_EXPECTED_CHECK_ADDRESSES, STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 import { runRefreshOnly } from "../refresh-production-green-stage-b.mjs";
-import { STAGE_B_PRIVATE_FILE_MODE, STAGE_B_PRIVATE_DIRECTORY_MODE, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "../aws/stage-b-artifact-contract.mjs";
+import { STAGE_B_ARTIFACT_CONTRACTS, STAGE_B_PRIVATE_FILE_MODE, STAGE_B_PRIVATE_DIRECTORY_MODE, canonicalStageBArtifactContracts, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "../aws/stage-b-artifact-contract.mjs";
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-artifact-contract-"));
@@ -26,6 +26,18 @@ const binding = (stateHash, tfvarsHash) => ({
 });
 
 test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+test("reference-audit contract registers every production consumer", () => {
+  const referenceAudit = STAGE_B_ARTIFACT_CONTRACTS.find(({ id }) => id === "reference-audit");
+  assert.deepEqual(referenceAudit?.consumers, [
+    "scripts/aws/validate-production-green-stage-b-permissions.mjs",
+    "scripts/aws/validate-stage-b-deployment-closure.mjs",
+    "scripts/apply-production-green-stage-b.mjs",
+  ]);
+  const generated = canonicalStageBArtifactContracts().artifacts.find(({ id }) => id === "reference-audit");
+  assert.deepEqual(generated?.consumers, referenceAudit.consumers);
+  assert.equal(new Set(referenceAudit.consumers).size, referenceAudit.consumers.length);
+});
 
 test("real release-read and backend producers normalize generated permissions", () => {
   const directory = path.join(root, "release"); fs.mkdirSync(directory, { recursive: true, mode: 0o755 }); fs.chmodSync(directory, 0o755);

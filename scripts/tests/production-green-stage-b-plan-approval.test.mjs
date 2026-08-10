@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
-import { assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes, STAGE_B_BROKER_OPERATIONS, STAGE_B_PLAN_PROFILES } from "../aws/stage-b-plan-approval-contract.mjs";
+import { assertStageBNormalPlanCompleteness, assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes, STAGE_B_BROKER_OPERATIONS, STAGE_B_PLAN_PROFILES, STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS } from "../aws/stage-b-plan-approval-contract.mjs";
+import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { finalizeCapturedStageBPlanApproval, readStageBApprovalPlanArtifacts } from "../plan-production-green-stage-b.mjs";
 import { writeStageBPrivateFileAtomic } from "../aws/stage-b-artifact-contract.mjs";
 import { assertRecoveryOnlyPlan } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
@@ -14,13 +15,23 @@ import { assertPermissionReportPlanBinding } from "../aws/validate-production-gr
 const fixture = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-plan-approval-"));
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+const fixtureClassification = (() => {
+  const counts = {};
+  for (const change of fixture.resource_changes) counts[change.change.actions.join(",")] = (counts[change.change.actions.join(",")] || 0) + 1;
+  return { noOp: counts["no-op"] || 0, create: counts.create || 0, update: counts.update || 0, destroy: counts.destroy || 0, replacement: 0, unclassified: 0 };
+})();
+const fixtureRetainedTaskDefinitions = fixture.resource_changes.filter((change) => change.address.includes("_retained[")).map((change, index) => {
+  const key = change.address.match(/\["[a-f0-9]+-([^"]+)"\]$/)[1];
+  const family = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).find(([address]) => address.match(/\["([^"]+)"\]$/)[1] === key)?.[1];
+  return { terraformAddress: change.address, family, classification: "retained-no-op", oldTaskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${index + 1}` };
+});
 const savedPlanBytes = Buffer.from("captured-binary-plan\n");
 const planJsonBytes = Buffer.from(`${JSON.stringify(fixture)}\n`);
 const canonicalPlanJsonBytes = Buffer.from(`${canonicalJson(fixture)}\n`);
 const hashes = stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes });
-const capture = createStageBPlanCaptureReport({ toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), refreshReportSha256: "d".repeat(64), hashes, capturedAt: "2026-08-05T14:00:00.000Z", stageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stageBSerial: 76, terraformVersion: fixture.terraform_version, terraformFormatVersion: fixture.format_version, classification: { noOp: 58, create: 12, update: 3, destroy: 0, replacement: 0, unclassified: 0 }, brokerEvidence: { brokerOperation: "update", brokerUpdatePresent: true, brokerActions: ["update"], brokerResourceAddresses: ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"], brokerReferenceValidationPending: true } });
+const capture = createStageBPlanCaptureReport({ toolingSha: "b".repeat(40), toolingTreeSha256: "c".repeat(64), refreshReportSha256: "d".repeat(64), hashes, capturedAt: "2026-08-05T14:00:00.000Z", stageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stageBSerial: 76, terraformVersion: fixture.terraform_version, terraformFormatVersion: fixture.format_version, classification: fixtureClassification, brokerEvidence: { brokerOperation: "update", brokerUpdatePresent: true, brokerActions: ["update"], brokerResourceAddresses: ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"], brokerReferenceValidationPending: true } });
 const captureBytes = Buffer.from(`${JSON.stringify(capture, null, 2)}\n`);
-const audit = { schemaVersion: 1, planJsonSha256: hashes.planJsonSha256, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", auditedAt: "2026-08-05T14:01:00.000Z" };
+const audit = { schemaVersion: 1, planJsonSha256: hashes.planJsonSha256, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", auditedAt: "2026-08-05T14:01:00.000Z", retainedTaskDefinitions: fixtureRetainedTaskDefinitions };
 const auditBytes = Buffer.from(`${JSON.stringify(audit)}\n`);
 const approval = createStageBPlanApprovalReport({ captureReportSha256: hash(captureBytes), referenceAuditPath: path.join(directory, "audit.json"), referenceAuditSha256: hash(auditBytes), referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, stageBLineage: capture.stageBLineage, stageBSerial: capture.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: "2026-08-05T14:02:00.000Z", classification: capture.classification, brokerOperation: capture.brokerOperation, brokerUpdatePresent: capture.brokerUpdatePresent, brokerActions: capture.brokerActions, brokerResourceAddresses: capture.brokerResourceAddresses });
 const approvalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
@@ -166,7 +177,7 @@ test("capture proves the one-plan structural boundary but is not deployable", ()
 test("approval binds exact captured artifacts and audit without another plan", () => {
   assert.equal(approval.brokerOperation, "update");
   assert.doesNotThrow(() => assertStageBPlanApprovalReport(approval, { approvalReportBytes: approvalBytes, captureReport: capture, captureReportBytes: captureBytes, referenceAudit: audit, referenceAuditBytes: auditBytes, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: hash(auditBytes), trustedCallerArn: audit.callerArn, stageBLineage: capture.stageBLineage, stageBSerial: capture.stageBSerial }));
-  assert.doesNotThrow(() => assertStageBPlanApprovedBinding(approval, { approvalReportBytes: approvalBytes, approvalReportSha256: hash(approvalBytes), savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes, now: new Date("2026-08-05T14:02:00.000Z") }));
+  assert.doesNotThrow(() => assertStageBPlanApprovedBinding(approval, { approvalReportBytes: approvalBytes, approvalReportSha256: hash(approvalBytes), savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes, referenceAudit: audit, referenceAuditBytes: auditBytes, now: new Date("2026-08-05T14:02:00.000Z") }));
 });
 
 test("approval rejects every changed plan artifact and stale capture binding", () => {
@@ -188,6 +199,57 @@ test("plan profile and broker operation registries match the emitted Stage B uni
   assert.deepEqual(STAGE_B_BROKER_OPERATIONS, ["none", "initial-create", "update", "recovery-alias-only"]);
   assert.throws(() => createStageBPlanCaptureReport({ ...capture, planProfile: "UNREVIEWED" }), /unsupported/);
   assert.throws(() => createStageBPlanApprovalReport({ ...approval, planProfile: "UNREVIEWED" }), /unsupported/);
+});
+
+test("normal approval uses canonical address completeness instead of a fixed no-op count", () => {
+  const current = assertStageBNormalPlanCompleteness(fixture, { referenceAudit: audit, strict: false });
+  assert.equal(current.classification.actionCounts["no-op"], 70);
+
+  const retainedKeys = Object.keys(STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS).sort();
+  assert.deepEqual(retainedKeys, [...new Set(fixtureRetainedTaskDefinitions.map((entry) => entry.terraformAddress.match(/_retained\["[a-f0-9]+-([^\"]+)"\]$/)[1]))].sort());
+  assert.equal(retainedKeys.length, Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length);
+  assert.deepEqual([...new Set(retainedKeys.map((key) => STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS[key].kind))].sort(), ["candidate", "executor"]);
+  assert.doesNotThrow(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: audit, strict: false }));
+
+  const wrongKind = structuredClone(audit);
+  wrongKind.retainedTaskDefinitions.find((entry) => entry.terraformAddress.endsWith('-backend"]')).terraformAddress = wrongKind.retainedTaskDefinitions.find((entry) => entry.terraformAddress.endsWith('-backend"]')).terraformAddress.replace("candidate_retained", "executor_retained");
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: wrongKind, strict: false }), /collection kind/);
+  const wrongExecutorKind = structuredClone(audit);
+  const executorEntry = wrongExecutorKind.retainedTaskDefinitions.find((entry) => entry.terraformAddress.includes("executor_retained"));
+  executorEntry.terraformAddress = executorEntry.terraformAddress.replace("executor_retained", "candidate_retained");
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: wrongExecutorKind, strict: false }), /collection kind/);
+  const wrongFamily = structuredClone(audit);
+  wrongFamily.retainedTaskDefinitions[0].family = STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]'];
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: wrongFamily, strict: false }), /family/);
+  const unknownKey = structuredClone(audit);
+  unknownKey.retainedTaskDefinitions[0].terraformAddress = 'aws_ecs_task_definition.executor_retained["e689d4d-unreviewed"]';
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: unknownKey, strict: false }), /malformed|contract|collection kind/);
+  const malformedCollection = structuredClone(audit);
+  malformedCollection.retainedTaskDefinitions[0].terraformAddress = malformedCollection.retainedTaskDefinitions[0].terraformAddress.replace("candidate_retained", "candidate_history");
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: malformedCollection, strict: false }), /malformed/);
+
+  const futurePlan = structuredClone(fixture);
+  const futureAddress = 'aws_ecs_task_definition.executor_retained["f00ba4d-full-rls-verification"]';
+  futurePlan.resource_changes.splice(futurePlan.resource_changes.findIndex((change) => change.address === "aws_dynamodb_table.replay"), 0, { address: futureAddress, type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: {}, after: {} } });
+  const futureAudit = structuredClone(audit);
+  futureAudit.retainedTaskDefinitions.push({ terraformAddress: futureAddress, family: "mscqr-production-full-rls-green-full-rls-verification", classification: "retained-no-op", oldTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-verification:99" });
+  assert.equal(assertStageBNormalPlanCompleteness(futurePlan, { referenceAudit: futureAudit, strict: false }).classification.actionCounts["no-op"], 71);
+
+  const rejects = (mutate, pattern) => {
+    const candidate = structuredClone(fixture);
+    mutate(candidate);
+    assert.throws(() => assertStageBNormalPlanCompleteness(candidate, { referenceAudit: audit, strict: false }), pattern);
+  };
+  rejects((candidate) => { candidate.resource_changes.find((change) => change.address === 'aws_ecs_task_definition.candidate_retained["e689d4d-backend"]').address = "aws_s3_bucket.unreviewed"; }, /canonical resource universe|omits/);
+  rejects((candidate) => { candidate.resource_changes.find((change) => change.address === 'aws_ecs_task_definition.candidate_retained["e689d4d-backend"]').change.actions = ["update"]; }, /retained task-definition is not an exact no-op/);
+  rejects((candidate) => { candidate.resource_changes = candidate.resource_changes.filter((change) => change.address !== 'aws_ecs_task_definition.candidate_retained["e689d4d-backend"]'); }, /resource universe|omits/);
+  rejects((candidate) => { candidate.resource_changes.find((change) => change.address === "aws_dynamodb_table.replay").change.actions = ["update"]; }, /unsupported|mutation census/);
+  const duplicateAudit = structuredClone(audit);
+  duplicateAudit.retainedTaskDefinitions.find((entry) => entry.terraformAddress === 'aws_ecs_task_definition.candidate_retained["760df83-backend"]').oldTaskDefinitionArn = duplicateAudit.retainedTaskDefinitions.find((entry) => entry.terraformAddress === 'aws_ecs_task_definition.candidate_retained["60b782b-backend"]').oldTaskDefinitionArn;
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: duplicateAudit, strict: false }), /family\/revision/);
+  const unknownFamilyAudit = structuredClone(audit);
+  unknownFamilyAudit.retainedTaskDefinitions[0].terraformAddress = 'aws_ecs_task_definition.executor_retained["e689d4d-unreviewed"]';
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: unknownFamilyAudit, strict: false }), /malformed|contract/);
 });
 
 test("RECOVERY_ALIAS_ONLY survives recovery classification, capture, approval, permission, and apply binding", () => {

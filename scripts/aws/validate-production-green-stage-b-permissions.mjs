@@ -147,6 +147,7 @@ export function parseCli(argv) {
     savedPlanPath: requireOption(argv, "--saved-plan"),
     planApprovalReportPath: requireOption(argv, "--plan-approval-report"),
     planApprovalReportSha256: requireOption(argv, "--plan-approval-report-sha256"),
+    referenceAuditPath: readOption(argv, "--reference-audit"),
     expectedAccount: requireOption(argv, "--expected-account"),
     expectedRegion: requireOption(argv, "--expected-region"),
     generatedAt: readOption(argv, "--generated-at") || new Date().toISOString(),
@@ -866,6 +867,8 @@ export function runPermissionPreflight({
   planApprovalReport,
   planApprovalReportBytes,
   planApprovalReportSha256,
+  referenceAudit,
+  referenceAuditBytes,
   expectedAccount = ACCOUNT,
   expectedRegion = REGION,
   generatedAt = new Date().toISOString(),
@@ -886,7 +889,7 @@ export function runPermissionPreflight({
   if (planBound && (!Buffer.isBuffer(savedPlanBytes) || savedPlanBytes.length === 0)) throw new Error("Saved binary plan bytes are required for permission preflight.");
   if (planBound && (!planApprovalReport || !Buffer.isBuffer(planApprovalReportBytes) || !/^[a-f0-9]{64}$/.test(planApprovalReportSha256 || ""))) throw new Error("PLAN_APPROVED evidence is required before permission preflight.");
   if (planBound && !Buffer.isBuffer(canonicalPlanJsonBytes)) throw new Error("Canonical plan JSON bytes are required for permission preflight.");
-  if (planBound) assertStageBPlanApprovedBinding(planApprovalReport, { approvalReportBytes: planApprovalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, now: new Date(now) });
+  if (planBound) assertStageBPlanApprovedBinding(planApprovalReport, { approvalReportBytes: planApprovalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, referenceAudit, referenceAuditBytes, now: new Date(now) });
   const permissionProfileBinding = resolveStageBPermissionProfile({ plan, approvedPlanProfile: planApprovalReport?.planProfile, phase });
   if (!reportGeneratorCallerArn || !APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(reportGeneratorCallerArn)) throw new Error("Permission preflight generator is not an approved audit/admin principal.");
   if (simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission preflight simulated role ARN is not the production release role.");
@@ -966,6 +969,7 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   assertStageBPrivateFile({ filePath: options.canonicalPlanJsonPath, repositoryRoot: stageBRoot, label: "Stage B canonical plan JSON" });
   assertStageBPrivateFile({ filePath: options.savedPlanPath, repositoryRoot: stageBRoot, label: "Stage B saved plan" });
   assertStageBPrivateFile({ filePath: options.planApprovalReportPath, repositoryRoot: stageBRoot, label: "Stage B plan approval report" });
+  if (options.referenceAuditPath) assertStageBPrivateFile({ filePath: options.referenceAuditPath, repositoryRoot: stageBRoot, label: "Stage B reference audit" });
   const outputPath = assertStageBArtifactPath({ artifactPath: options.outputPath, repositoryRoot: stageBRoot, label: "Stage B permission report", allowExisting: false });
   const signatureOutputPath = assertStageBArtifactPath({ artifactPath: options.signatureOutputPath, repositoryRoot: stageBRoot, label: "Stage B permission-report signature", allowExisting: false });
   if (path.dirname(outputPath) !== path.dirname(signatureOutputPath)) throw new Error("Stage B permission report and signature must use one private directory.");
@@ -977,9 +981,14 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   const savedPlanBytes = fs.readFileSync(path.resolve(options.savedPlanPath));
   const planApprovalReportBytes = fs.readFileSync(path.resolve(options.planApprovalReportPath));
   const planApprovalReport = JSON.parse(planApprovalReportBytes);
+  if (planApprovalReport.planProfile === "BASELINE" && !options.referenceAuditPath) {
+    throw new Error("--reference-audit is required for BASELINE plan-bound permission preflight.");
+  }
   const plan = JSON.parse(planBytes);
+  const referenceAuditBytes = options.referenceAuditPath ? fs.readFileSync(path.resolve(options.referenceAuditPath)) : undefined;
+  const referenceAudit = referenceAuditBytes ? JSON.parse(referenceAuditBytes) : undefined;
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
-  const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, canonicalPlanJsonBytes, savedPlanBytes, planApprovalReport, planApprovalReportBytes, policyEvidence: collectPolicyEvidence() });
+  const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, canonicalPlanJsonBytes, savedPlanBytes, planApprovalReport, planApprovalReportBytes, referenceAudit, referenceAuditBytes, policyEvidence: collectPolicyEvidence() });
   assertStageBPermissionEvidenceKind(report, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, "plan-bound");
   process.stdout.write(`${JSON.stringify({ status: report.status, outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
   if (report.status !== "valid") {

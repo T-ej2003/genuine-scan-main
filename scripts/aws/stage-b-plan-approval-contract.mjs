@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
+import { classifyStageBPlan, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
 import { assertStageBReferenceAuditFreshness, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
@@ -65,6 +66,86 @@ function assertTaskDefinitionRotations(rotations) {
   if (seen.size !== expectedAddresses.length || expectedAddresses.some((address) => !seen.has(address))) throw new Error("Stage B task-definition rotation metadata must cover the exact twelve-address collection.");
 }
 
+const retainedTaskDefinitionAddress = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([a-f0-9]{7,40})-([^"]+)"\]$/;
+const retainedTaskDefinitionDescriptorEntries = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([address, family]) => {
+  const match = /^aws_ecs_task_definition\.(candidate|executor)\["([^"]+)"\]$/.exec(address);
+  if (!match) throw new Error(`Stage B current task-definition address is malformed: ${address}`);
+  return [match[2], Object.freeze({ kind: match[1], family })];
+});
+if (new Set(retainedTaskDefinitionDescriptorEntries.map(([key]) => key)).size !== retainedTaskDefinitionDescriptorEntries.length) throw new Error("Stage B retained task-definition keys are ambiguous across candidate and executor collections.");
+export const STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS = Object.freeze(Object.fromEntries(retainedTaskDefinitionDescriptorEntries));
+const currentTaskDefinitionAddresses = Object.freeze(Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES));
+
+function retainedEntryAddress(entry) {
+  return entry?.terraformAddress || entry?.address;
+}
+
+function assertRetainedTaskDefinitionEntry(entry, { requireMetadata, seenFamilyRevisions } = {}) {
+  const address = retainedEntryAddress(entry);
+  const match = retainedTaskDefinitionAddress.exec(address || "");
+  if (!match) throw new Error(`Stage B retained task-definition address is malformed: ${address || "<missing>"}`);
+  const descriptor = STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS[match[3]];
+  if (!descriptor || descriptor.kind !== match[1]) throw new Error(`Stage B retained task-definition collection kind is outside the exact contract: ${address}`);
+  if (entry.family !== undefined && entry.family !== descriptor.family) throw new Error(`Stage B retained task-definition family is outside the exact contract: ${address}`);
+  if (entry.classification !== undefined && entry.classification !== "retained-no-op") throw new Error(`Stage B retained task-definition classification is not retained-no-op: ${address}`);
+  if (requireMetadata) {
+    const arnMatch = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):([1-9][0-9]*)$/.exec(entry.oldTaskDefinitionArn || entry.oldArn || "");
+    if (!arnMatch || arnMatch[1] !== descriptor.family) throw new Error(`Stage B retained task-definition ARN is invalid: ${address}`);
+    const familyRevision = `${descriptor.family}:${arnMatch[2]}`;
+    if (seenFamilyRevisions.has(familyRevision)) throw new Error(`Stage B retained task-definition family/revision is duplicated: ${familyRevision}`);
+    seenFamilyRevisions.add(familyRevision);
+  }
+  return address;
+}
+
+export function assertStageBNormalPlanCompleteness(plan, { referenceAudit, expectedRetainedAddresses, strict = true } = {}) {
+  const changes = plan?.resource_changes;
+  if (!Array.isArray(changes)) throw new Error("Stage B normal plan resource_changes are missing.");
+  const addresses = changes.map((change) => change?.address);
+  const seenAddresses = new Set();
+  for (const address of addresses) {
+    if (!address || seenAddresses.has(address)) throw new Error(`Stage B normal plan contains a duplicate or malformed address: ${address || "<missing>"}`);
+    seenAddresses.add(address);
+  }
+
+  let retainedEntries;
+  if (referenceAudit !== undefined) {
+    if (!Array.isArray(referenceAudit?.retainedTaskDefinitions)) throw new Error("Stage B normal plan retained-history audit is missing.");
+    const seenFamilyRevisions = new Set();
+    retainedEntries = referenceAudit.retainedTaskDefinitions.map((entry) => {
+      const address = assertRetainedTaskDefinitionEntry(entry, { requireMetadata: true, seenFamilyRevisions });
+      if (entry.classification !== "retained-no-op") throw new Error(`Stage B retained-history audit entry is not a retained no-op: ${address}`);
+      return address;
+    });
+  } else if (Array.isArray(expectedRetainedAddresses)) {
+    retainedEntries = expectedRetainedAddresses.map((address) => assertRetainedTaskDefinitionEntry({ address }, { requireMetadata: false, seenFamilyRevisions: new Set() }));
+  } else {
+    throw new Error("Stage B normal plan requires an independently bound retained-history address set.");
+  }
+  const retainedAddresses = new Set(retainedEntries);
+  if (retainedAddresses.size !== retainedEntries.length) throw new Error("Stage B retained-history address set contains duplicates.");
+
+  const expectedAddresses = new Set([
+    ...STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES,
+    ...currentTaskDefinitionAddresses,
+    ...retainedAddresses,
+  ]);
+  if (expectedAddresses.size !== addresses.length) throw new Error(`Stage B normal plan resource universe size differs from the canonical address set: expected ${expectedAddresses.size}, got ${addresses.length}.`);
+  for (const address of addresses) if (!expectedAddresses.has(address)) throw new Error(`Stage B normal plan contains an address outside the canonical resource universe: ${address}`);
+  for (const address of expectedAddresses) if (!seenAddresses.has(address)) throw new Error(`Stage B normal plan omits a canonical managed resource: ${address}`);
+  for (const change of changes.filter((item) => retainedAddresses.has(item?.address))) {
+    if (JSON.stringify(change?.change?.actions) !== JSON.stringify(["no-op"])) throw new Error(`Stage B retained task-definition is not an exact no-op: ${change.address}`);
+  }
+
+  const classified = classifyStageBPlan(plan, { strict });
+  const noOp = classified.actionCounts["no-op"] || 0;
+  if (classified.actionCounts.create !== 12 || classified.actionCounts.update !== 3 || noOp !== expectedAddresses.size - 15
+    || (classified.actionCounts.destroy || 0) !== 0 || (classified.actionCounts.replacement || 0) !== 0 || classified.unclassifiedResources.length !== 0) {
+    throw new Error("Stage B normal plan mutation census is outside the exact structural contract.");
+  }
+  return { expectedAddresses: [...expectedAddresses].sort(), retainedAddresses: [...retainedAddresses].sort(), classification: classified };
+}
+
 function assertClassification(report) {
   const classification = report?.classification;
   const profileValue = report?.planProfile === undefined
@@ -90,9 +171,9 @@ function assertClassification(report) {
     return;
   }
   if (profile === "ECS_TASK_DEFINITION_ROTATION") return;
-  if (profile !== "BASELINE" || classification.noOp !== 58 || classification.create !== 12 || classification.update !== 3
+  if (profile !== "BASELINE" || classification.create !== 12 || classification.update !== 3
     || classification.destroy !== 0 || classification.replacement !== 0 || classification.unclassified !== 0) {
-    throw new Error("Stage B plan evidence classification is not the reviewed 58/12/3/0/0 contract.");
+    throw new Error("Stage B plan evidence classification is not the reviewed normal 12-create/3-update/0-destroy/0-replacement contract.");
   }
 }
 
@@ -100,6 +181,21 @@ function assertPlanHashes(report, hashes) {
   for (const [name, value] of Object.entries(hashes)) {
     if (report?.[name] !== value) throw new Error(`Stage B plan evidence ${name} does not match the selected artifact.`);
   }
+}
+
+function assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required }) {
+  if (!referenceAudit && !referenceAuditBytes) {
+    if (required) throw new Error("BASELINE plan approval requires the bound reference audit.");
+    return false;
+  }
+  if (!referenceAudit || !Buffer.isBuffer(referenceAuditBytes)) throw new Error("Stage B reference audit object and bytes must be supplied together.");
+  let parsedAudit;
+  try { parsedAudit = JSON.parse(referenceAuditBytes); } catch { throw new Error("Stage B reference audit bytes are malformed."); }
+  if (canonicalJson(parsedAudit) !== canonicalJson(referenceAudit)) throw new Error("Stage B reference audit object does not match its bound bytes.");
+  if (sha256(referenceAuditBytes) !== report.referenceAuditSha256) throw new Error("Stage B plan approval report reference-audit SHA256 mismatch.");
+  if (parsedAudit.planJsonSha256 !== hashes.planJsonSha256) throw new Error("Stage B reference audit is bound to a different plan JSON.");
+  if (parsedAudit.recoveryAttestationSha256 !== report.recoveryAttestationSha256) throw new Error("Stage B reference audit recovery-attestation binding differs from the approval report.");
+  return parsedAudit;
 }
 
 export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, refreshReportSha256, refreshBindingReportSha256, recoveryAttestationSha256, hashes, capturedAt, stageBLineage, stageBSerial, terraformVersion, terraformFormatVersion, planExitCode = 0, showExitCode = 0, classification, planProfile = "BASELINE", taskDefinitionRotations = [], brokerEvidence = {} }) {
@@ -186,7 +282,7 @@ export function createStageBPlanApprovalReport({ captureReportSha256, referenceA
   };
 }
 
-export function assertStageBPlanApprovalReport(report, { approvalReportBytes, captureReport, captureReportBytes, referenceAudit, referenceAuditBytes, hashes, logicalCanonicalPlanJsonSha256, referenceAuditSha256, trustedCallerArn, stageBLineage, stageBSerial } = {}) {
+export function assertStageBPlanApprovalReport(report, { approvalReportBytes, captureReport, captureReportBytes, referenceAudit, referenceAuditBytes, plan, hashes, logicalCanonicalPlanJsonSha256, referenceAuditSha256, trustedCallerArn, stageBLineage, stageBSerial } = {}) {
   assertCanonicalTerraformSerialNumber(report?.stageBSerial, "Stage B plan approval serial");
   if (report?.schemaVersion !== STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION || report.state !== STAGE_B_PLAN_APPROVED || report.approvedForApply !== true || report.brokerReferenceValidationPending !== false || report.brokerReferenceValidationPassed !== true) throw new Error("Stage B plan approval report is required; PLAN_CAPTURED is not deployable.");
   if (!Buffer.isBuffer(approvalReportBytes) || sha256(approvalReportBytes) !== sha256(Buffer.from(JSON.stringify(report, null, 2) + "\n"))) throw new Error("Stage B plan approval report bytes are not self-consistent.");
@@ -204,11 +300,12 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
     if (report[name] !== value) throw new Error(`Stage B plan approval report ${name} is not bound to the captured release.`);
   }
   if (report.logicalCanonicalPlanJsonSha256 !== logicalCanonicalPlanJsonSha256) throw new Error("Stage B logical canonical plan hash is not bound to the approved plan.");
-  if (!Buffer.isBuffer(referenceAuditBytes) || sha256(referenceAuditBytes) !== referenceAuditSha256 || report.referenceAuditSha256 !== referenceAuditSha256) throw new Error("Stage B plan approval report reference-audit binding is invalid.");
-  if (referenceAudit?.planJsonSha256 !== hashes.planJsonSha256) throw new Error("Stage B reference audit is bound to a different plan JSON.");
+  assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required: true });
+  if (referenceAuditSha256 !== undefined && report.referenceAuditSha256 !== referenceAuditSha256) throw new Error("Stage B plan approval report reference-audit binding is invalid.");
   if (captureReport.recoveryAttestationSha256 !== referenceAudit?.recoveryAttestationSha256) throw new Error("Stage B reference audit does not inherit the recovery-attestation binding.");
   if (trustedCallerArn !== undefined && referenceAudit?.callerArn !== trustedCallerArn) throw new Error("Stage B reference audit caller does not match the trusted release caller.");
   if (report.referenceAuditCallerArn !== referenceAudit?.callerArn || report.referenceAuditAt !== referenceAudit?.auditedAt) throw new Error("Stage B plan approval report reference-audit identity is incomplete.");
+  if (report.planProfile === "BASELINE" && plan && referenceAudit) assertStageBNormalPlanCompleteness(plan, { referenceAudit, strict: false });
   assertClassification(report);
   return true;
 }
@@ -231,7 +328,8 @@ export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, a
   if (report.planProfile === "RECOVERY_ALIAS_ONLY" && expectedRefreshBindingReportSha256 !== undefined && report.refreshBindingReportSha256 !== expectedRefreshBindingReportSha256) throw new Error("Stage B recovery approval observation-binding SHA256 differs from the selected observation binding.");
   assertBrokerEvidence(report, { approved: true });
   assertStageBReferenceAuditFreshness(report.referenceAuditAt, now);
-  if (referenceAuditBytes && (sha256(referenceAuditBytes) !== report.referenceAuditSha256 || referenceAudit?.planJsonSha256 !== hashes.planJsonSha256 || referenceAudit?.recoveryAttestationSha256 !== report.recoveryAttestationSha256)) throw new Error("Stage B plan approval report reference-audit binding is invalid.");
+  const boundReferenceAudit = assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required: report.planProfile === "BASELINE" });
+  if (report.planProfile === "BASELINE") assertStageBNormalPlanCompleteness(JSON.parse(planJsonBytes.toString("utf8")), { referenceAudit: boundReferenceAudit, strict: false });
   assertClassification(report);
   return true;
 }

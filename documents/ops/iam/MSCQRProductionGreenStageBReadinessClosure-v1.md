@@ -156,9 +156,10 @@ metadata is limited to `code_sha256`, `source_code_size`, `last_modified`, `qual
 
 - Clean/no-change: each allowlisted resource has its exact `[]`/`["no-op"]` equivalent;
   no resource outside the matrix is accepted.
-- Baseline initial release: the existing reviewed classification remains `58` no-op,
-  `12` create, `3` update, `0` destroy, `0` unclassified. These counts are a regression
-  assertion, not a generalized allowance.
+- Baseline initial release: the existing reviewed classification remains `12` create,
+  `3` update, `0` destroy, `0` unclassified; no-ops must be the exact canonical managed
+  address universe minus those approved mutations, including structurally validated
+  append-only retained ECS history. Retained generations may increase that no-op set.
 - Image/Lambda rotation: the current source-controlled resource matrix permits only
   the exact resource-level create/update/no-op actions and the independently validated
   immutable image/package deltas. A broker publish update may change

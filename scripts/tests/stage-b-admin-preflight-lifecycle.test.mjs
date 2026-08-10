@@ -231,3 +231,15 @@ test("credential-session documentation is explicit without inventing a root life
   assert.match(runbook, /root administrator `aws login --profile default` session is externally controlled/);
   assert.match(runbook, /ExpiredToken/);
 });
+
+test("plan-bound permission runbook documents every mandatory artifact input", () => {
+  const runbook = fs.readFileSync(new URL("../../documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md", import.meta.url), "utf8");
+  const start = runbook.indexOf("npm run stage-b:plan-bound-permission-preflight");
+  const end = runbook.indexOf("```", start + 1);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const command = runbook.slice(start, end);
+  for (const option of ["--plan-json", "--canonical-plan-json", "--saved-plan", "--plan-approval-report", "--plan-approval-report-sha256", "--reference-audit", "--manifest", "--output", "--signature-output", "--lifecycle-directory"]) {
+    assert.match(command, new RegExp(`${option}\\s+<[^>]+>`));
+  }
+});

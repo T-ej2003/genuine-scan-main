@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { classifyStageBPlan } from "../aws/stage-b-deployment-contract.mjs";
+import { assertStageBNormalPlanCompleteness } from "../aws/stage-b-plan-approval-contract.mjs";
 
 const fixturePath = "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json";
 const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
@@ -57,8 +58,11 @@ test("pull-request closure rejects recovery inputs without production approval",
 });
 
 test("production-shaped Stage B plan is fully classified with zero destroys", () => {
-  const result = classifyStageBPlan(fixture, { strict: false });
-  assert.deepEqual(result.actionCounts, { "no-op": 58, create: 12, update: 3 });
+  const retained = fixture.resource_changes.filter((change) => change.address.includes("_retained[")).map((change) => change.address);
+  const result = assertStageBNormalPlanCompleteness(fixture, { expectedRetainedAddresses: retained, strict: false }).classification;
+  assert.equal(result.actionCounts["no-op"], 70);
+  assert.equal(result.actionCounts.create, 12);
+  assert.equal(result.actionCounts.update, 3);
   assert.deepEqual(result.unclassifiedResources, []);
 });
 

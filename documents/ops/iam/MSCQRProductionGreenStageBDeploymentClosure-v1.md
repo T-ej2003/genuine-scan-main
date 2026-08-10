@@ -5,11 +5,11 @@ The machine-readable resource matrix is [MSCQRProductionGreenStageBDeploymentClo
 
 ## Supported production plan
 
-The sanitized current production shape is 73 resources:
+The sanitized current production shape is validated by structural address-set completeness:
 
 | Action | Count | Boundary |
 | --- | ---: | --- |
-| no-op | 58 | retained history, imported roles/policies, exact broker attachment, and persistent resources |
+| no-op | derived | every remaining canonical managed address; retained ECS history is append-only |
 | create | 12 | the four candidate definitions and eight executor definitions |
 | update | 3 | broker Lambda, reviewed alias, and exact managed broker policy |
 | delete/replacement | 0 | always rejected |

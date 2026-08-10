@@ -509,6 +509,7 @@
       "kind": "file",
       "producer": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs:runCli",
       "consumers": [
+        "scripts/aws/validate-production-green-stage-b-permissions.mjs",
         "scripts/aws/validate-stage-b-deployment-closure.mjs",
         "scripts/apply-production-green-stage-b.mjs"
       ],
