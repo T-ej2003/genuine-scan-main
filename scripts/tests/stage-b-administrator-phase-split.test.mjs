@@ -47,8 +47,8 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   });
   assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredAllowedCount, 89);
-  assert.equal(report.forbiddenDeniedCount, 21);
+  assert.equal(report.requiredAllowedCount, 90);
+  assert.equal(report.forbiddenDeniedCount, 23);
   assert.equal(Object.hasOwn(report, "planSha256"), false);
   assert.equal(Object.hasOwn(report, "savedPlanSha256"), false);
   assert.equal(Object.hasOwn(report, "planApprovalReportSha256"), false);

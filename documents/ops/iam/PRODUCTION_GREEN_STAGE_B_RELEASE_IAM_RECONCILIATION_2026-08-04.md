@@ -21,9 +21,19 @@ Terraform plan, closure, and apply bindings. No wildcard Lambda resource is
 required.
 
 The canonical FinalApplyWrite SHA-256 changes from
-`0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b`
+`04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`
 to
-`04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`.
+`53dcc2062c2792c8d379b6d285d02467b1bdfe088fe482a1dfee534b82c4491c`.
+
+The existing-task-definition traffic switch is intentionally owned by the same
+release-deployer identity used by the canonical wrapper. FinalApplyWrite grants
+only `ecs:UpdateService` on
+`arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2`,
+with `aws:RequestedRegion=eu-west-2` and the exact production cluster condition.
+It does not grant service creation/deletion, task-definition deregistration, or
+wildcard service updates. The source change requires administrator publication
+of the new managed-policy version after merge; no live IAM change is performed
+by this document.
 
 Primary references:
 
@@ -101,8 +111,16 @@ therefore records the exact decision and order-independent missing-context set:
 | `invoke-broker` | `implicitDeny` | FULL-14 |
 | `pass-to-lambda` | `implicitDeny` | PASSROLE-13 |
 | `pass-unrelated-role` | `implicitDeny` | PASSROLE-13 |
-| `update-ecs-service` | `implicitDeny` | FULL-14 |
+| `activate-exact-ecs-service` | `allowed` | SWITCH-REQUIRED |
+| `update-ecs-service` | `implicitDeny` | SWITCH-12 |
 
+`SWITCH-12` is the sorted set `aws:RequestTag/Component`,
+`aws:RequestTag/Environment`, `aws:RequestTag/ManagedBy`,
+`aws:ResourceTag/Component`, `aws:ResourceTag/Environment`,
+`aws:ResourceTag/ManagedBy`, `aws:TagKeys`, `ecs:compute-compatibility`,
+`ecs:privileged`, `ecs:task-cpu`, `ecs:task-memory`, and
+`iam:PassedToService`; the switch supplies the reviewed region and cluster
+values. `SWITCH-REQUIRED` supplies both exact switch context values.
 `FULL-14` is the sorted set `aws:RequestTag/Component`,
 `aws:RequestTag/Environment`, `aws:RequestTag/ManagedBy`,
 `aws:RequestedRegion`, `aws:ResourceTag/Component`,
@@ -163,9 +181,9 @@ The allowed inline-policy set is empty.
 The candidate source policy union was evaluated with AWS IAM custom-policy
 simulation against the production-shaped plan:
 
-- required evaluations: 89/89 allowed
+- required evaluations: 90/90 allowed
 - required failures: 0
-- forbidden evaluations: 21/21 denied
+- forbidden evaluations: 23/23 denied
 - forbidden allowed: 0
 - unresolved missing context: 0
 - supplementary provider reads: 55/55 allowed

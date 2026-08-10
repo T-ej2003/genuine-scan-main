@@ -58,20 +58,29 @@ test("broker alias update is authorized on the exact broker function resource", 
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: STAGE_B.brokerAliasArn, context }), false);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: `${functionArn}:other`, context }), false);
   assert.equal(finalWrite.Statement.some((statement) => list(statement.Action).some((action) => ["lambda:CreateAlias", "lambda:DeleteAlias"].includes(action))), false);
-  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee");
+  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "53dcc2062c2792c8d379b6d285d02467b1bdfe088fe482a1dfee534b82c4491c");
 });
 
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 89);
-  assert.equal(evaluations.forbidden.length, 21);
+  assert.equal(evaluations.required.length, 90);
+  assert.equal(evaluations.forbidden.length, 23);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
   const registrations = evaluations.required.filter(({ action }) => action === "ecs:RegisterTaskDefinition");
   assert.equal(registrations.length, 12);
   assert.equal(registrations.filter(allows).length, 12);
+  const switchEvaluation = evaluations.required.find(({ manifestId }) => manifestId === "activate-exact-ecs-service");
+  assert.equal(switchEvaluation.action, "ecs:UpdateService");
+  assert.equal(switchEvaluation.resource, "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2");
+  assert.equal(allows(switchEvaluation), true);
+  for (const manifestId of ["update-ecs-service", "delete-ecs-service", "create-ecs-service", "deregister-task-definition"]) {
+    const forbidden = evaluations.forbidden.find(({ manifestId: id }) => id === manifestId);
+    assert.equal(forbidden.decision ?? "implicitDeny", "implicitDeny");
+    assert.equal(allows(forbidden), false, manifestId);
+  }
   assert.deepEqual(registrations.flatMap(({ context }) => context).filter(({ key }) => key.startsWith("ecs:")).map(({ key }) => key).filter((key, index, keys) => keys.indexOf(key) === index).sort(), ["ecs:cluster", "ecs:compute-compatibility", "ecs:privileged", "ecs:task-cpu", "ecs:task-memory"]);
 });
 

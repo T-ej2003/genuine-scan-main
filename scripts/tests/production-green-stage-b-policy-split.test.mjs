@@ -86,6 +86,8 @@ const arn = (family) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${fa
 const logArn = (name) => `arn:aws:logs:eu-west-2:368992683803:log-group:${name}:*`;
 const exactLogArn = (name) => `arn:aws:logs:eu-west-2:368992683803:log-group:${name}`;
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
+const backendServiceArn = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2";
+const unrelatedServiceArn = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-unrelated-service";
 const mutationActions = new Set([
   "ecs:TagResource",
   "ecs:RegisterTaskDefinition",
@@ -130,13 +132,13 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   }));
 });
 
-test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and seven final-write statements", () => {
+test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and eight final-write statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
-  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), finalWriteSids);
+  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set([...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids]).size, 27);
+  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids]).size, 28);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
   for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "ReadExactStageBBrokerManagedPolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
@@ -263,10 +265,24 @@ test("final-write PassRole is limited to both canary roles and ECS tasks", () =>
 test("unrelated ECS and CloudWatch Logs mutations remain denied", () => {
   const actions = [...policies.v4.Statement, ...policies.audit.Statement].flatMap(actionsOf);
   for (const forbidden of [
-    "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:DeleteService",
+    "ecs:RunTask", "ecs:StopTask", "ecs:DeleteService",
     "logs:DeleteLogGroup", "logs:PutResourcePolicy", "logs:DeleteResourcePolicy", "logs:AssociateKmsKey",
     "logs:DisassociateKmsKey", "logs:CreateExportTask", "logs:StartQuery", "logs:StopQuery",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
+});
+
+test("UpdateService is limited to the exact production backend service and cluster", () => {
+  const statement = statementOf(policies.finalWrite, "UpdateExactStageBBackendService");
+  assert.deepEqual(statement, {
+    Sid: "UpdateExactStageBBackendService",
+    Effect: "Allow",
+    Action: "ecs:UpdateService",
+    Resource: backendServiceArn,
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2", "ecs:cluster": clusterArn } },
+  });
+  assert.notEqual(statement.Resource, unrelatedServiceArn);
+  assert.equal(policies.finalWrite.Statement.some((candidate) => actionsOf(candidate).includes("ecs:UpdateService") && candidate.Resource === "*"), false);
+  for (const action of ["ecs:DeleteService", "ecs:CreateService", "ecs:DeregisterTaskDefinition"]) assert.equal(statementsForAction(policies.finalWrite, action).length, 0, action);
 });
 
 test("cluster, broker, and exact twelve-family restrictions remain unchanged", () => {
@@ -389,7 +405,7 @@ test("Terraform role refresh reads are complete and narrowly scoped", () => {
 test("the source-controlled policies carry only the reviewed read, recovery, retry, and signature-verification actions", () => {
   const actions = [...policies.v4.Statement, ...policies.audit.Statement, ...policies.finalWrite.Statement].flatMap(actionsOf);
   for (const forbidden of [
-    "ecs:RunTask", "ecs:StopTask", "ecs:UpdateService", "ecs:DeleteService", "lambda:InvokeFunction",
+    "ecs:RunTask", "ecs:StopTask", "ecs:DeleteService", "lambda:InvokeFunction",
     "iam:CreateRole", "iam:UpdateAssumeRolePolicy",
     "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "sts:AssumeRole",
     "secretsmanager:GetSecretValue", "kms:Decrypt", "rds:Connect", "route53:ChangeResourceRecordSets",
@@ -402,6 +418,7 @@ test("the source-controlled policies carry only the reviewed read, recovery, ret
   assert.equal(actions.includes("lambda:GetFunctionConfiguration"), true);
   assert.equal(actions.includes("lambda:GetAlias"), true);
   assert.equal(actions.includes("ecs:RegisterTaskDefinition"), true);
+  assert.equal(actions.includes("ecs:UpdateService"), true);
   assert.equal(actions.includes("lambda:UpdateFunctionConfiguration"), true);
   assert.equal(actions.includes("lambda:UpdateFunctionCode"), true);
   assert.equal(actions.includes("lambda:PublishVersion"), true);
