@@ -38,7 +38,7 @@ export const STAGE_B_REFRESH_ACQUISITION_FAILURES = Object.freeze([
 const VARIABLES_SOURCE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b/variables.tf");
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const checkAddressesFromSource = (source) => [...source.matchAll(/check\s+"([^"]+)"\s*\{/g)].map(([, name]) => `check.${name}`).sort();
-const REVIEWED_VARIABLE_VALIDATION_NAMES = Object.freeze(["retained_candidate_task_definitions", "retained_executor_task_definitions", "stage_b_recovery_alias_target_version"]);
+const REVIEWED_VARIABLE_VALIDATION_NAMES = Object.freeze(["production_rotation_secret_value_from", "retained_candidate_task_definitions", "retained_executor_task_definitions", "stage_b_recovery_alias_target_version"]);
 const variableValidationNamesFromSource = (source) => [...source.matchAll(/variable\s+"([^"]+)"\s*\{/g)]
   .filter((match) => {
     const nextVariable = source.indexOf("\nvariable ", match.index + match[0].length);
