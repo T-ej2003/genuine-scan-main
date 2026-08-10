@@ -36,8 +36,8 @@
       "method": "dual-slot",
       "currentVersionId": "qr-version-fixture-2",
       "previousVersionId": "qr-version-fixture-1",
-      "currentKeyVersion": "qr-current-fixture-2",
-      "previousKeyVersion": "qr-previous-fixture-1",
+      "currentKeyVersion": "key-v2",
+      "previousKeyVersion": "key-v1",
       "verificationRef": "https://example.invalid/rotation-fixture/qr"
     }
   ]
