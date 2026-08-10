@@ -167,16 +167,15 @@ UPDATE_SETTLEMENT_ATTEMPTS=6
 UPDATE_SETTLEMENT_INTERVAL_SECONDS=2
 
 settle_update_outcome() {
-  local attempt classification last_classification
+  local attempt classification
+  local saw_previous=false
   settlement_result="UNKNOWN"
-  last_classification="READ_FAILURE"
   for ((attempt = 1; attempt <= UPDATE_SETTLEMENT_ATTEMPTS; attempt++)); do
     if ! aws ecs describe-services \
       --region "$AWS_REGION" \
       --cluster "$CLUSTER_NAME" \
       --services "$SERVICE_NAME" \
       >"$EXISTING_POST_SERVICE_FILE"; then
-      last_classification="READ_FAILURE"
       if ((attempt < UPDATE_SETTLEMENT_ATTEMPTS)); then
         if ! sleep "$UPDATE_SETTLEMENT_INTERVAL_SECONDS"; then settlement_result="UNKNOWN"; return 0; fi
       fi
@@ -205,13 +204,11 @@ if (service.taskDefinition === targetArn || deployments.some(({ taskDefinition }
 }
 NODE
 )"; then
-      last_classification="MALFORMED_READ"
       if ((attempt < UPDATE_SETTLEMENT_ATTEMPTS)); then
         if ! sleep "$UPDATE_SETTLEMENT_INTERVAL_SECONDS"; then settlement_result="UNKNOWN"; return 0; fi
       fi
       continue
     fi
-    last_classification="$classification"
     case "$classification" in
       TARGET)
         settlement_result="TARGET"
@@ -221,26 +218,23 @@ NODE
         settlement_result="FOREIGN"
         return 0
         ;;
-      PREVIOUS_STABLE)
-        if ((attempt == UPDATE_SETTLEMENT_ATTEMPTS)); then
-          settlement_result="NO_TARGET_OBSERVED"
-          return 0
-        fi
-        ;;
-      PREVIOUS_PENDING)
+      PREVIOUS_STABLE|PREVIOUS_PENDING)
+        saw_previous=true
         ;;
       *)
         settlement_result="UNKNOWN"
         return 0
         ;;
     esac
-    if ! sleep "$UPDATE_SETTLEMENT_INTERVAL_SECONDS"; then
-      settlement_result="UNKNOWN"
-      return 0
+    if ((attempt < UPDATE_SETTLEMENT_ATTEMPTS)); then
+      if ! sleep "$UPDATE_SETTLEMENT_INTERVAL_SECONDS"; then
+        settlement_result="UNKNOWN"
+        return 0
+      fi
     fi
   done
-  if [[ "$last_classification" == "PREVIOUS_STABLE" ]]; then
-    settlement_result="NO_TARGET_OBSERVED"
+  if [[ "$saw_previous" == "true" ]]; then
+    settlement_result="AMBIGUOUS"
   else
     settlement_result="UNKNOWN"
   fi
@@ -453,19 +447,19 @@ NODE
           echo "AMBIGUOUS_UPDATE_OUTCOME: UpdateService failed after the target became active; restoring the exact previous task definition." >&2
           exit 1
           ;;
-        NO_TARGET_OBSERVED)
-          update_state="UPDATE_FAILED_NO_TARGET_OBSERVED"
-          echo "UpdateService failed; the complete settlement window ended with the previous task definition stable and no target deployment observed." >&2
-          exit 1
-          ;;
         FOREIGN)
           update_state="UPDATE_OUTCOME_AMBIGUOUS"
           echo "AMBIGUOUS_UPDATE_OUTCOME: service task definition or deployment is neither the expected previous nor target ARN: concurrent state requires operator intervention." >&2
           exit 1
           ;;
-        *)
+        UNKNOWN)
           update_state="UPDATE_OUTCOME_AMBIGUOUS"
           echo "UNKNOWN_SERVICE_STATE: UpdateService failed and the bounded settlement window could not establish a safe service state." >&2
+          exit 1
+          ;;
+        *)
+          update_state="UPDATE_OUTCOME_AMBIGUOUS"
+          echo "AMBIGUOUS_UPDATE_OUTCOME: UpdateService returned nonzero after being attempted; bounded previous-state observations cannot prove rejection, so operator intervention is required." >&2
           exit 1
           ;;
       esac

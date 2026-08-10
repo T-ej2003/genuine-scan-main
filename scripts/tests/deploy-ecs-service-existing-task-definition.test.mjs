@@ -114,6 +114,14 @@ elif [[ "$1 $2" == "ecs describe-services" ]]; then
     if ((count == 1)); then exit 51; fi
     if ((count >= 3)); then printf '%s' "${targetArn}" > "$FAKE_DATA/state"; fi
   fi
+  if [[ "$FAKE_SCENARIO" == "late-target-after-window" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then
+    count=0
+    [[ -f "$FAKE_DATA/settlement-count" ]] && count="$(cat "$FAKE_DATA/settlement-count")"
+    count=$((count + 1))
+    printf '%s' "$count" > "$FAKE_DATA/settlement-count"
+    if ((count == 6)); then touch "$FAKE_DATA/late-target-ready"; fi
+    if ((count >= 7)); then printf '%s' "${targetArn}" > "$FAKE_DATA/state"; fi
+  fi
   if [[ "$FAKE_SCENARIO" == "delayed-accepted" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then
     count=0
     [[ -f "$FAKE_DATA/settlement-count" ]] && count="$(cat "$FAKE_DATA/settlement-count")"
@@ -135,6 +143,7 @@ elif [[ "$1 $2" == "ecs update-service" ]]; then
   if [[ "$FAKE_SCENARIO" == "reconcile-failure" && "$task_definition" == "${targetArn}" ]]; then printf '%s' "$task_definition" > "$FAKE_DATA/state"; exit 31; fi
   if [[ "$FAKE_SCENARIO" == "delayed-accepted" && "$task_definition" == "${targetArn}" ]]; then exit 31; fi
   if [[ "$FAKE_SCENARIO" == "transient-then-target" && "$task_definition" == "${targetArn}" ]]; then exit 31; fi
+  if [[ "$FAKE_SCENARIO" == "late-target-after-window" && "$task_definition" == "${targetArn}" ]]; then exit 31; fi
   if [[ "$FAKE_SCENARIO" == "malformed-then-target" && "$task_definition" == "${targetArn}" ]]; then exit 31; fi
   if [[ "$FAKE_SCENARIO" == "target-deployment" && "$task_definition" == "${targetArn}" ]]; then touch "$FAKE_DATA/update-attempted"; exit 31; fi
   if [[ "$task_definition" == "${fromArn}" ]]; then touch "$FAKE_DATA/rollback-attempted"; fi
@@ -283,10 +292,19 @@ test("already-active target is a verified no-op", () => {
   assert.equal((result.calls.match(/ecs register-task-definition/g) || []).length, 0);
   assertTempClean(result);
 });
-test("all previous settlement proves no target was observed without rollback", () => {
+test("all previous settlement remains ambiguous without rollback", () => {
   const result = runExisting({ scenario: "update-failure" });
-  assertFailure(result, /complete settlement window/);
+  assertFailure(result, /AMBIGUOUS_UPDATE_OUTCOME/);
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assertTempClean(result);
+});
+test("previous reads through the old window do not prove a later target was rejected", () => {
+  const result = runExisting({ scenario: "late-target-after-window" });
+  assertFailure(result, /AMBIGUOUS_UPDATE_OUTCOME/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assert.equal(fs.existsSync(path.join(result.fixture.dir, "late-target-ready")), true);
+  assert.equal(fs.readFileSync(result.fixture.state, "utf8"), fromArn);
+  assert.doesNotMatch(result.stderr, /NO_TARGET_OBSERVED|UPDATE_FAILED_NO_TARGET_OBSERVED/);
   assertTempClean(result);
 });
 test("transient reconciliation failure is retried before delayed target detection and rollback", () => {
