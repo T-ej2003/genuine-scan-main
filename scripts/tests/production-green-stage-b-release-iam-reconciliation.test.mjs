@@ -60,7 +60,7 @@ test("broker alias update is authorized on the exact broker function resource", 
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: STAGE_B.brokerAliasArn, context }), false);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: `${functionArn}:other`, context }), false);
   assert.equal(finalWrite.Statement.some((statement) => list(statement.Action).some((action) => ["lambda:CreateAlias", "lambda:DeleteAlias"].includes(action))), false);
-  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "4378bd51ef746f43d3fc99d2604e7344d0802ba4b278119288fd4e0971415624");
+  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "93f786460d003e541bd92c5b7c3b4f2bcc8cc2688ff7b455ca6d33379c6f0e18");
 });
 
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
@@ -78,11 +78,14 @@ test("production-shaped required and forbidden resources reconcile to the source
   assert.equal(switchEvaluation.action, "ecs:UpdateService");
   assert.equal(switchEvaluation.resource, "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2");
   assert.equal(allows(switchEvaluation), true);
-  assert.deepEqual(switchEvaluation.context.find(({ key }) => key === "ecs:task-definition").values, ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1"]);
+  assert.deepEqual(switchEvaluation.context.find(({ key }) => key === "ecs:task-definition").values, ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:6"]);
   const rollbackEvaluation = evaluations.required.find(({ manifestId }) => manifestId === "rollback-exact-ecs-service");
   assert.equal(allows(rollbackEvaluation), true);
   const replaceContext = (evaluation, key, values) => ({ ...evaluation, context: evaluation.context.map((entry) => entry.key === key ? { ...entry, values } : entry) });
   assert.equal(allows(replaceContext(switchEvaluation, "ecs:task-definition", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:2"])), false);
+  for (const revision of [1, 5, 7]) {
+    assert.equal(allows(replaceContext(switchEvaluation, "ecs:task-definition", [`arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:${revision}`])), false);
+  }
   assert.equal(allows(replaceContext(switchEvaluation, "ecs:cluster", ["arn:aws:ecs:eu-west-2:368992683803:cluster/other"])), false);
   assert.equal(allows(replaceContext(switchEvaluation, "aws:RequestedRegion", ["us-east-1"])), false);
   assert.equal(allows({ ...switchEvaluation, resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-unrelated-service" }), false);
