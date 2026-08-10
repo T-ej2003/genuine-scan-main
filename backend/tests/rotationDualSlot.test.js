@@ -1,8 +1,10 @@
 const assert = require("node:assert/strict");
 const { generateKeyPairSync } = require("node:crypto");
+const jwt = require("jsonwebtoken");
 
 const { getJwtSecret, verifyJwtWithCurrentOrPrevious } = require("../dist/utils/security.js");
 const { signQrPayload, verifyQrToken } = require("../dist/services/qrTokenService.js");
+const { verifyProductionRotationCleanupRuntime, verifyProductionRotationRuntime } = require("../dist/security/productionRotationRuntime.js");
 
 const keys = () => generateKeyPairSync("ed25519", {
   privateKeyEncoding: { format: "pem", type: "pkcs8" },
@@ -51,6 +53,31 @@ try {
   assert.throws(() => signQrPayload(payload("old-v1")), /active key version/);
   assert.throws(() => verifyQrToken(`${oldToken.slice(0, -1)}x`), /could not be verified/);
   assert.throws(() => verifyQrToken(signQrPayload(payload("unknown"))), /active key version/);
+
+  const overlapRuntime = verifyProductionRotationRuntime({ previousQrToken: oldToken });
+  assert.deepEqual(overlapRuntime, {
+    jwtCurrentRuntimeVerify: true,
+    jwtPreviousRuntimeVerify: true,
+    jwtInvalidRuntimeRejected: true,
+    qrCurrentRuntimeVerify: true,
+    qrPreviousRuntimeVerify: true,
+    qrTamperMatchingKeyTest: true,
+    qrUnknownKeyRejected: true,
+    serviceHealthy: true,
+  });
+  delete process.env.JWT_SECRET_PREVIOUS;
+  assert.throws(() => verifyProductionRotationRuntime({ previousQrToken: oldToken }), /JWT_SECRET_PREVIOUS/);
+  process.env.JWT_SECRET_PREVIOUS = "jwt-previous";
+
+  const previousJwtToken = jwt.sign({ rotationId: "cleanup-runtime" }, "jwt-previous", { algorithm: "HS256" });
+  delete process.env.JWT_SECRET_PREVIOUS;
+  delete process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS;
+  delete process.env.QR_SIGN_PREVIOUS_KEY_VERSION;
+  const cleanupRuntime = verifyProductionRotationCleanupRuntime({ previousJwtToken, previousQrToken: oldToken });
+  assert.equal(cleanupRuntime.jwtPreviousRuntimeRejected, true);
+  assert.equal(cleanupRuntime.qrPreviousRuntimeRejected, true);
+  assert.equal(cleanupRuntime.jwtCurrentRuntimeVerify, true);
+  assert.equal(cleanupRuntime.qrCurrentRuntimeVerify, true);
 } finally {
   for (const key of Object.keys(process.env)) {
     if (!(key in restore)) delete process.env[key];

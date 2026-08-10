@@ -57,11 +57,12 @@ npm --prefix backend run security:rotate-production-signing-material -- \
 ```
 
 The config maps distinct Secrets Manager resources for JWT current/previous/pending, QR current/private,
-QR previous/public, and pending material. `config.qr.previousKeyVersion` must equal the currently deployed
-legacy QR `kid` when the old public-key record has no metadata. The coordinator writes only non-secret state
-and synthetic verification evidence to operator-controlled mode-600 files. `--cleanup` additionally requires
-`--confirm-cleanup`, a full cleanup deployment SHA, and a real verification reference after the documented
-grace window; it is never run by CI or implicitly by `--prepare`.
+QR previous/public, and pending material. It also requires a reviewed `minimumGraceSeconds`. The coordinator
+writes only non-secret state and redacted runtime proof to operator-controlled mode-600 files. The deployed-task
+verifier uses the compiled application JWT and QR verification functions; it is not a public endpoint.
+`--cleanup` first retires all previous/pending slots and stops at `cleanup-deploy-required`. Only after the
+approved cleanup deployment restarts tasks may the operator resume with a cleanup runtime proof. It is never
+run by CI or implicitly by `--prepare`.
 
 ## Standard Two-Deploy Rotation
 
@@ -131,20 +132,15 @@ Wait at least:
 
 For this repo, the practical minimum is the full refresh-token window if you want zero forced re-auth on refresh rotation. If that is too long for the incident, rotate immediately and accept forced reauthentication.
 
-### 5. Cleanup Deploy
+### 5. Retire, Then Cleanup Deploy
 
-After the cutover window:
-
-```bash
-unset JWT_SECRET_PREVIOUS
-unset QR_SIGN_HMAC_SECRET_PREVIOUS
-unset PRINTER_SSE_SIGN_SECRET_PREVIOUS
-unset TOKEN_HASH_SECRET_PREVIOUS
-unset INCIDENT_HASH_SALT_PREVIOUS
-unset IP_HASH_SALT_PREVIOUS
-```
-
-Redeploy again. At that point only the new `CURRENT` secrets remain.
+After the persisted `cleanupEligibleAt` deadline, run coordinator `--cleanup`.
+It retires `JWT_SECRET_PREVIOUS`, `QR_SIGN_PUBLIC_KEY_PREVIOUS`, and all three
+pending slots with one immutable `retirementTimestamp`, then stops at
+`cleanup-deploy-required`. Deploy/restart tasks after those writes, run the
+deployment-side verifier with `ROTATION_RUNTIME_PHASE=cleanup`, and resume
+`--cleanup` with that proof. A cleanup deployment observed before retirement is
+rejected.
 
 Mark cleanup in `.security/rotation-evidence.json`:
 
@@ -152,6 +148,8 @@ Mark cleanup in `.security/rotation-evidence.json`:
 - `cleanupCompletedAt=<timestamp>`
 - `cleanupVerifiedBy=<operator>`
 - `linkedDeployShas` includes both deploy SHAs
+- previous JWT/QR rejected after cleanup while current JWT/QR remain valid
+- all previous and pending slots carry explicit retired metadata
 
 ## Secret-Specific Notes
 

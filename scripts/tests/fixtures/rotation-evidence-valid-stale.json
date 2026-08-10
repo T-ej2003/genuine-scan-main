@@ -12,6 +12,27 @@
   "cleanupCompletedAt": "2026-04-13T20:00:00.000Z",
   "cleanupVerifiedBy": "security-fixture@example.com",
   "cleanupEvidenceRef": "https://example.invalid/rotation-fixture/cleanup",
+  "overlapReadyAt": "2026-04-12T20:00:00.000Z",
+  "verifiedAt": "2026-04-12T20:10:00.000Z",
+  "cleanupEligibleAt": "2026-04-13T19:00:00.000Z",
+  "retirementTimestamp": "2026-04-13T19:05:00.000Z",
+  "cleanupDeploymentSha": "cccccccccccccccccccccccccccccccccccccccc",
+  "cleanupDeploymentObservedAt": "2026-04-13T19:10:00.000Z",
+  "proofs": {
+    "previousJwtSlotRetired": true,
+    "previousQrPublicSlotRetired": true,
+    "jwtPendingRetired": true,
+    "qrPrivatePendingRetired": true,
+    "qrPublicPendingRetired": true,
+    "cleanupDeploymentAfterRetirement": true,
+    "cleanupRuntimeVerified": true,
+    "jwtPreviousRuntimeRejected": true,
+    "qrPreviousRuntimeRejected": true,
+    "jwtCurrentRuntimeVerify": true,
+    "qrCurrentRuntimeVerify": true,
+    "qrUnknownKeyRejected": true,
+    "serviceHealthy": true
+  },
   "linkedDeployShas": [
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

@@ -9,6 +9,8 @@ const variables = read("infra/aws/terraform/production-green-stage-b/variables.t
 const qr = read("backend/src/services/qrTokenService.ts");
 const jwt = read("backend/src/utils/secretConfig.ts");
 const coordinator = read("backend/scripts/security/rotate-production-signing-material.mjs");
+const runtimeVerifier = read("backend/src/security/productionRotationRuntime.ts");
+const runtimeCommand = read("backend/scripts/security/verify-production-rotation-runtime.mjs");
 
 test("rotation task template is dual-slot and Ed25519-only", () => {
   for (const placeholder of [
@@ -48,5 +50,19 @@ test("coordinator exposes explicit resumable phases and no implicit cleanup", ()
   assert.match(coordinator, /--confirm-cleanup is required for cleanup/);
   assert.match(coordinator, /config\.qr\.previousKeyVersion/);
   assert.match(coordinator, /deploymentRequired: true/);
+  for (const phase of ["prepared", "overlap-deploy-required", "overlap-ready", "verified", "grace-wait", "retirement-started", "retirement-complete", "cleanup-deploy-required", "cleanup-runtime-verified", "cleaned"]) assert.match(coordinator, new RegExp(phase));
+  assert.match(coordinator, /minimumGraceSeconds/);
+  assert.match(coordinator, /retirementTimestamp/);
+  assert.match(coordinator, /cleanup deployment must occur after retirement writes/);
+  assert.match(coordinator, /qrPublicPending/);
   assert.doesNotMatch(coordinator, /console\.log\([^\n]*SecretString/);
+});
+
+test("runtime verification is deployment-side and uses the application verification stack", () => {
+  assert.match(runtimeVerifier, /verifyJwtWithCurrentOrPrevious/);
+  assert.match(runtimeVerifier, /verifyQrToken/);
+  assert.match(runtimeVerifier, /verifyProductionRotationCleanupRuntime/);
+  assert.match(runtimeCommand, /ROTATION_RUNTIME_PHASE/);
+  assert.match(runtimeCommand, /ROTATION_DEPLOYMENT_SHA/);
+  assert.doesNotMatch(runtimeCommand, /console\.log\([^\n]*Token/);
 });

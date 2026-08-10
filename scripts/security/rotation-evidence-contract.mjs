@@ -46,10 +46,28 @@ export const validateRotationEvidenceContract = (evidence, { now = Date.now(), r
   const cleanupComplete = evidence?.cleanupWindowComplete === true;
   if (requireCleanup && !cleanupComplete) failures.push("rotation evidence cleanupWindowComplete must be true for production freshness");
   if (cleanupComplete) {
+    const timeline = ["overlapReadyAt", "verifiedAt", "cleanupEligibleAt", "retirementTimestamp", "cleanupDeploymentObservedAt", "cleanupCompletedAt"]
+      .map((key) => [key, new Date(text(evidence?.[key])).getTime()]);
+    for (const [key, value] of timeline) {
+      if (!isIsoDate(evidence?.[key])) failures.push(`rotation evidence ${key} must be a valid ISO date-time`);
+      else if (value > now) failures.push(`rotation evidence ${key} must not be in the future`);
+    }
+    for (let index = 1; index < timeline.length; index += 1) {
+      if (Number.isFinite(timeline[index - 1][1]) && Number.isFinite(timeline[index][1]) && timeline[index][1] < timeline[index - 1][1]) {
+        failures.push(`rotation evidence timeline is not monotonic at ${timeline[index][0]}`);
+      }
+    }
+    if (!SHA.test(text(evidence?.cleanupDeploymentSha))) failures.push("rotation evidence cleanupDeploymentSha must be a full SHA-1");
     if (!isIsoDate(evidence?.cleanupCompletedAt)) failures.push("rotation evidence cleanupCompletedAt must be valid when cleanup is complete");
     else if (new Date(evidence.cleanupCompletedAt).getTime() > now) failures.push("rotation evidence cleanupCompletedAt must not be in the future");
     if (!text(evidence?.cleanupVerifiedBy)) failures.push("rotation evidence cleanupVerifiedBy must be set when cleanup is complete");
     if (!hasRealReference(evidence?.cleanupEvidenceRef)) failures.push("rotation evidence cleanupEvidenceRef must be machine-verifiable");
+    const proofNames = [
+      "previousJwtSlotRetired", "previousQrPublicSlotRetired", "jwtPendingRetired", "qrPrivatePendingRetired", "qrPublicPendingRetired",
+      "cleanupDeploymentAfterRetirement", "cleanupRuntimeVerified", "jwtPreviousRuntimeRejected", "qrPreviousRuntimeRejected",
+      "jwtCurrentRuntimeVerify", "qrCurrentRuntimeVerify", "qrUnknownKeyRejected", "serviceHealthy",
+    ];
+    for (const name of proofNames) if (evidence?.proofs?.[name] !== true) failures.push(`rotation evidence cleanup proof ${name} must be true`);
   }
 
   const families = Array.isArray(evidence?.families) ? evidence.families : [];

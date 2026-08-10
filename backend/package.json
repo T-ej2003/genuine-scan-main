@@ -7,6 +7,7 @@
     "dev": "prisma generate && tsx watch src/index.ts",
     "auth:mfa:break-glass": "tsx scripts/break-glass-mfa-reset.ts",
     "security:rotate-production-signing-material": "node scripts/security/rotate-production-signing-material.mjs",
+    "security:verify-production-rotation-runtime": "node scripts/security/verify-production-rotation-runtime.mjs",
     "test:production-rotation": "npm run build && node tests/rotationDualSlot.test.js",
     "test:production-rotation-coordinator": "node --test tests/rotationCoordinator.test.mjs",
     "auth:resend-setup-link": "node scripts/resend-password-setup-link.js",

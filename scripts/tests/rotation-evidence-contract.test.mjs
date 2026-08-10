@@ -21,6 +21,17 @@ const fresh = {
   cleanupCompletedAt: "2026-08-10T12:00:00.000Z",
   cleanupVerifiedBy: "ops@example.com",
   cleanupEvidenceRef: "https://github.com/example/run/1",
+  overlapReadyAt: "2026-08-10T00:00:00.000Z",
+  verifiedAt: "2026-08-10T00:10:00.000Z",
+  cleanupEligibleAt: "2026-08-10T11:00:00.000Z",
+  retirementTimestamp: "2026-08-10T11:05:00.000Z",
+  cleanupDeploymentSha: "c".repeat(40),
+  cleanupDeploymentObservedAt: "2026-08-10T11:10:00.000Z",
+  proofs: {
+    previousJwtSlotRetired: true, previousQrPublicSlotRetired: true, jwtPendingRetired: true, qrPrivatePendingRetired: true, qrPublicPendingRetired: true,
+    cleanupDeploymentAfterRetirement: true, cleanupRuntimeVerified: true, jwtPreviousRuntimeRejected: true, qrPreviousRuntimeRejected: true,
+    jwtCurrentRuntimeVerify: true, qrCurrentRuntimeVerify: true, qrUnknownKeyRejected: true, serviceHealthy: true,
+  },
   linkedDeployShas: [sha, "b".repeat(40)],
   verificationRefs: ["https://github.com/example/run/1"],
   families: [
@@ -40,6 +51,11 @@ test("valid stale evidence passes contract validation but fails freshness", () =
     ...fresh,
     recordedAt: "2026-04-11T20:00:00.000Z",
     cleanupCompletedAt: "2026-04-12T20:00:00.000Z",
+    overlapReadyAt: "2026-04-11T20:00:00.000Z",
+    verifiedAt: "2026-04-11T20:10:00.000Z",
+    cleanupEligibleAt: "2026-04-12T19:00:00.000Z",
+    retirementTimestamp: "2026-04-12T19:05:00.000Z",
+    cleanupDeploymentObservedAt: "2026-04-12T19:10:00.000Z",
     families: fresh.families.map((family) => ({ ...family, rotatedAt: "2026-04-11T20:00:00.000Z" })),
   };
   const now = Date.parse("2026-08-10T20:00:00.000Z");

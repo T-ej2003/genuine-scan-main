@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertIdentity, prepare, verify, cleanup } from "../scripts/security/rotate-production-signing-material.mjs";
+import { assertIdentity, cleanup, prepare, verify } from "../scripts/security/rotate-production-signing-material.mjs";
 
-const config = {
+const baseConfig = {
   region: "eu-west-2",
   rotationId: "rotation-test-2026",
   sourceSha: "a".repeat(40),
@@ -13,6 +14,7 @@ const config = {
   approvedBy: "security@example.com",
   approverRole: "Security Lead",
   reason: "test rotation",
+  minimumGraceSeconds: 10,
   overlapDeploymentSha: "b".repeat(40),
   verificationRef: "https://example.test/verify",
   jwt: { currentSecretId: "jwt-current", previousSecretId: "jwt-previous", pendingSecretId: "jwt-pending" },
@@ -27,70 +29,182 @@ const config = {
 };
 
 const material = (value, metadata = {}) => JSON.stringify({ ...metadata, value });
-const fakeSecrets = (initial) => {
+const makeKeys = () => generateKeyPairSync("ed25519", {
+  privateKeyEncoding: { format: "pem", type: "pkcs8" },
+  publicKeyEncoding: { format: "pem", type: "spki" },
+});
+
+const fakeSecrets = (initial, { failAfterPut = 0 } = {}) => {
   const values = new Map(Object.entries(initial));
-  let version = 0;
+  const requests = new Map();
+  const versions = new Map();
+  let puts = 0;
   return {
     values,
+    requests,
+    get putCount() { return puts; },
     async send(command) {
       const input = command.input;
       if (command.constructor.name === "GetSecretValueCommand") {
-        return { SecretString: values.get(input.SecretId) || "", VersionId: `version-${input.SecretId}` };
+        return { SecretString: values.get(input.SecretId) || "", VersionId: versions.get(input.SecretId) || `version-${input.SecretId}-initial` };
       }
       if (command.constructor.name === "PutSecretValueCommand") {
+        const prior = requests.get(input.ClientRequestToken);
+        if (prior && prior !== input.SecretString) throw new Error("conflicting deterministic ClientRequestToken payload");
+        requests.set(input.ClientRequestToken, input.SecretString);
+        puts += 1;
+        const versionId = versions.get(input.SecretId) || `version-${input.SecretId}-${puts}`;
+        versions.set(input.SecretId, versionId);
         values.set(input.SecretId, input.SecretString);
-        version += 1;
-        return { VersionId: `version-${input.SecretId}-${version}` };
+        if (failAfterPut && puts === failAfterPut) throw new Error("simulated process crash after durable AWS write");
+        return { VersionId: versionId };
       }
       throw new Error(`unexpected command ${command.constructor.name}`);
     },
   };
 };
 
-test("prepare, verify, and cleanup are resumable and cleanup is idempotent", async () => {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-test-"));
-  const stateFile = path.join(directory, "state.json");
-  const fixtureFile = path.join(directory, "previous-qr.json");
-  const verificationFile = path.join(directory, "verification.json");
-  const evidenceFile = path.join(directory, "evidence.json");
-  const oldJwt = "old-jwt-material";
-  const keys = await import("node:crypto").then(({ generateKeyPairSync }) => generateKeyPairSync("ed25519", {
-    privateKeyEncoding: { format: "pem", type: "pkcs8" },
-    publicKeyEncoding: { format: "pem", type: "spki" },
-  }));
-  const sm = fakeSecrets({
-    [config.jwt.currentSecretId]: material(oldJwt),
-    [config.qr.privateCurrentSecretId]: material(keys.privateKey, { keyVersion: "legacy-v1" }),
-    [config.qr.publicCurrentSecretId]: material(keys.publicKey, { keyVersion: "legacy-v1" }),
-  });
-  const values = new Map([
-    ["state-file", stateFile],
-    ["fixture-file", fixtureFile],
+const contextFor = (directory, config, sm, clock = () => Date.parse("2026-08-10T00:00:00.000Z"), extras = {}) => ({
+  config,
+  sm,
+  clock,
+  identity: "arn:aws:sts::368992683803:assumed-role/release/test",
+  values: new Map([
+    ["state-file", path.join(directory, "state.json")],
+    ["fixture-file", path.join(directory, "previous-qr.json")],
     ["confirm-cleanup", true],
-  ]);
-  const context = { config, sm, values, identity: "arn:aws:sts::368992683803:assumed-role/release/test" };
-  const output = [];
-  const originalLog = console.log;
-  console.log = (line) => output.push(String(line));
+  ]),
+  ...extras,
+});
+
+const initialSecrets = () => {
+  const keys = makeKeys();
+  return {
+    keys,
+    initial: {
+      [baseConfig.jwt.currentSecretId]: material("old-jwt-material"),
+      [baseConfig.qr.privateCurrentSecretId]: material(keys.privateKey, { keyVersion: "legacy-v1" }),
+      [baseConfig.qr.publicCurrentSecretId]: material(keys.publicKey, { keyVersion: "legacy-v1" }),
+    },
+  };
+};
+
+const runtimeProof = (config, phase, observedAt, deploymentSha) => phase === "overlap"
+  ? {
+      rotationId: config.rotationId, phase, deploymentSha, runtimeInvocationRef: "https://example.test/runtime-overlap",
+      observedAt, jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true,
+      qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true, serviceHealthy: true,
+    }
+  : {
+      rotationId: config.rotationId, phase, deploymentSha, runtimeInvocationRef: "https://example.test/runtime-cleanup",
+      observedAt, jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeRejected: true, qrCurrentRuntimeVerify: true,
+      qrPreviousRuntimeRejected: true, qrUnknownKeyRejected: true, serviceHealthy: true,
+    };
+
+const writeProof = (directory, name, proof) => {
+  const file = path.join(directory, name);
+  writeFileSync(file, `${JSON.stringify(proof)}\n`, { mode: 0o600 });
+  return file;
+};
+
+test("prepare resumes after JWT pending write crash", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-jwt-crash-"));
   try {
-    await prepare(context);
-    const firstState = readFileSync(stateFile, "utf8");
-    const interrupted = JSON.parse(firstState);
-    interrupted.phase = "pending-ready";
-    writeFileSync(stateFile, `${JSON.stringify(interrupted, null, 2)}\n`);
-    await prepare(context);
-    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).phase, "overlap-ready");
-    const resumedState = readFileSync(stateFile, "utf8");
-    await prepare(context);
-    assert.equal(readFileSync(stateFile, "utf8"), resumedState);
-    await verify({ ...context, values: new Map([...values, ["verification-out", verificationFile]]) });
-    await cleanup({ ...context, values: new Map([...values, ["verification-file", verificationFile], ["cleanup-deployment-sha", "c".repeat(40)], ["cleanup-evidence-ref", "https://example.test/cleanup"], ["evidence-out", evidenceFile]]) });
-    const cleaned = readFileSync(stateFile, "utf8");
-    await cleanup({ ...context, values: new Map([...values, ["verification-file", verificationFile], ["cleanup-deployment-sha", "c".repeat(40)], ["cleanup-evidence-ref", "https://example.test/cleanup"], ["evidence-out", evidenceFile]]) });
-    assert.equal(readFileSync(stateFile, "utf8"), cleaned);
-    assert.equal(output.some((line) => line.includes(oldJwt)), false);
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial, { failAfterPut: 1 });
+    const first = contextFor(directory, baseConfig, sm);
+    await assert.rejects(prepare(first), /simulated process crash/);
+    const pendingJwt = sm.values.get(baseConfig.jwt.pendingSecretId);
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values));
+    const resumed = contextFor(directory, baseConfig, resumedSm);
+    await prepare(resumed);
+    assert.equal(JSON.parse(resumedSm.values.get(baseConfig.jwt.pendingSecretId)).value, JSON.parse(pendingJwt).value);
   } finally {
-    console.log = originalLog;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("prepare resumes after QR private pending write crash and derives its public pair", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-qr-crash-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial, { failAfterPut: 2 });
+    await assert.rejects(prepare(contextFor(directory, baseConfig, sm)), /simulated process crash/);
+    const privatePending = JSON.parse(sm.values.get(baseConfig.qr.privatePendingSecretId)).value;
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values));
+    await prepare(contextFor(directory, baseConfig, resumedSm));
+    assert.equal(JSON.parse(resumedSm.values.get(baseConfig.qr.privatePendingSecretId)).value, privatePending);
+    assert.ok(JSON.parse(resumedSm.values.get(baseConfig.qr.publicPendingSecretId)).value);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("prepare recovers when local state write fails after all secret writes and reuses versions and payloads", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-state-crash-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    let stateWrites = 0;
+    const first = contextFor(directory, baseConfig, sm, undefined, { persistState: (file, state) => {
+      stateWrites += 1;
+      if (stateWrites === 2) throw new Error("simulated state write failure");
+      writeFileSync(file, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    } });
+    await assert.rejects(prepare(first), /simulated state write failure/);
+    const requestCount = sm.requests.size;
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values));
+    const resumed = contextFor(directory, baseConfig, resumedSm);
+    await prepare(resumed);
+    assert.equal(resumedSm.putCount, 0);
+    assert.ok(requestCount >= 8);
+    assert.equal(JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8")).phase, "overlap-deploy-required");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("full rotation enforces grace, retires every slot, deploys after retirement, and allows the next rotation", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-full-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    let currentTime = Date.parse("2026-08-10T00:00:00.000Z");
+    const context = contextFor(directory, baseConfig, sm, () => currentTime);
+    await prepare(context);
+    const overlapFile = writeProof(directory, "overlap.json", runtimeProof(baseConfig, "overlap", new Date(currentTime).toISOString(), baseConfig.overlapDeploymentSha));
+    await verify({ ...context, values: new Map([...context.values, ["runtime-verification-file", overlapFile]]) });
+    await assert.rejects(cleanup({ ...context, values: new Map([...context.values, ["cleanup-deployment-sha", "c".repeat(40)], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) }), /cleanup grace window has not expired/);
+    currentTime += 9_000;
+    await assert.rejects(cleanup({ ...context, values: new Map([...context.values, ["cleanup-deployment-sha", "c".repeat(40)], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) }), /cleanup grace window has not expired/);
+    currentTime += 1_000;
+    const cleanupSha = "c".repeat(40);
+    const firstCleanup = { ...context, values: new Map([...context.values, ["cleanup-deployment-sha", cleanupSha], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) };
+    await cleanup(firstCleanup);
+    const retirementTimestamp = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8")).retirementTimestamp;
+    const cleanupFile = writeProof(directory, "cleanup.json", runtimeProof(baseConfig, "cleanup", new Date(Date.parse(retirementTimestamp) + 1_000).toISOString(), cleanupSha));
+    currentTime = Date.parse(retirementTimestamp) + 2_000;
+    await cleanup({ ...firstCleanup, values: new Map([...firstCleanup.values, ["cleanup-runtime-file", cleanupFile]]) });
+    const state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
+    assert.equal(state.phase, "cleaned");
+    for (const id of [baseConfig.jwt.previousSecretId, baseConfig.jwt.pendingSecretId, baseConfig.qr.privatePendingSecretId, baseConfig.qr.publicPendingSecretId, baseConfig.qr.publicPreviousSecretId]) {
+      const record = JSON.parse(sm.values.get(id));
+      assert.equal(record.value, "");
+      assert.match(record.slot, /-retired$/);
+      assert.equal(record.retiredAt, retirementTimestamp);
+    }
+
+    const nextConfig = structuredClone(baseConfig);
+    nextConfig.rotationId = "rotation-test-next";
+    nextConfig.sourceSha = "d".repeat(40);
+    nextConfig.qr.previousKeyVersion = state.qr.newKeyVersion;
+    const nextDirectory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-next-"));
+    try {
+      await prepare(contextFor(nextDirectory, nextConfig, sm, () => currentTime));
+    } finally {
+      rmSync(nextDirectory, { recursive: true, force: true });
+    }
+  } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });
