@@ -37,6 +37,7 @@ openssl rand -base64 48
 
 - Writers always use the `*_CURRENT` secret.
 - Verification accepts both `*_CURRENT` and `*_PREVIOUS` during the cutover window.
+- During overlap, cookies sealed before rotation open with the previous-derived AES-GCM key while all new cookies seal with the current key only.
 - JWTs include a `kid` derived from the active signing secret.
 - Versioned hashes are stored with a prefix, so historic hashes remain comparable during the cutover.
 - After the cutover window, `*_PREVIOUS` is removed in a second deploy.
@@ -54,6 +55,11 @@ npm --prefix backend run security:rotate-production-signing-material -- \
   --config /secure/operator/rotation.json --state-file /secure/operator/rotation-state.json \
   --fixture-file /secure/operator/previous-qr-fixture.json --runtime-verification-file /secure/operator/overlap-runtime.json \
   --verify
+
+# Run inside the deployed overlap task; /api/health must report the expected release SHA.
+npm --prefix backend run security:verify-production-rotation-runtime -- \
+  --fixture-file /secure/operator/previous-qr-fixture.json --output /secure/operator/overlap-runtime.json \
+  --health-url https://www.mscqr.com/api/health --expected-release-sha <full-source-sha>
 ```
 
 The config maps distinct Secrets Manager resources for JWT current/previous/pending, QR current/private,
@@ -63,6 +69,10 @@ verifier uses the compiled application JWT and QR verification functions; it is 
 `--cleanup` first retires all previous/pending slots and stops at `cleanup-deploy-required`. Only after the
 approved cleanup deployment restarts tasks may the operator resume with a cleanup runtime proof. It is never
 run by CI or implicitly by `--prepare`.
+
+After cleanup deployment, the previous JWT cookie key and previous QR/JWT bindings are absent: old cookies
+must fail to open, current cookies must continue to work, and the cleanup runtime proof must include a real
+healthy `/api/health` observation for the expected release SHA.
 
 ## Standard Two-Deploy Rotation
 

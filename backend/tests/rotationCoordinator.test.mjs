@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import jwt from "jsonwebtoken";
 import { assertIdentity, cleanup, prepare, validateRuntimeProof, verify } from "../scripts/security/rotate-production-signing-material.mjs";
 
 const baseConfig = {
@@ -29,6 +30,7 @@ const baseConfig = {
 };
 
 const material = (value, metadata = {}) => JSON.stringify({ ...metadata, value });
+const fingerprint = (value) => createHash("sha256").update(value).digest("hex").slice(0, 16);
 const makeKeys = () => generateKeyPairSync("ed25519", {
   privateKeyEncoding: { format: "pem", type: "pkcs8" },
   publicKeyEncoding: { format: "pem", type: "spki" },
@@ -37,11 +39,13 @@ const makeKeys = () => generateKeyPairSync("ed25519", {
 const fakeSecrets = (initial, { failAfterPut = 0 } = {}) => {
   const values = new Map(Object.entries(initial));
   const requests = new Map();
+  const putCalls = [];
   const versions = new Map();
   let puts = 0;
   return {
     values,
     requests,
+    putCalls,
     get putCount() { return puts; },
     async send(command) {
       const input = command.input;
@@ -52,6 +56,7 @@ const fakeSecrets = (initial, { failAfterPut = 0 } = {}) => {
         const prior = requests.get(input.ClientRequestToken);
         if (prior && prior !== input.SecretString) throw new Error("conflicting deterministic ClientRequestToken payload");
         requests.set(input.ClientRequestToken, input.SecretString);
+        putCalls.push({ secretId: input.SecretId, payload: input.SecretString });
         puts += 1;
         const versionId = versions.get(input.SecretId) || `version-${input.SecretId}-${puts}`;
         versions.set(input.SecretId, versionId);
@@ -93,12 +98,14 @@ const runtimeProof = (config, phase, observedAt, deploymentSha) => phase === "ov
   ? {
       rotationId: config.rotationId, phase, deploymentSha, runtimeInvocationRef: "https://example.test/runtime-overlap",
       observedAt, jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true,
-      qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true, serviceHealthy: true,
+      qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true,
+      serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: config.sourceSha, expectedReleaseGitSha: config.sourceSha, healthObservedAt: observedAt,
     }
   : {
       rotationId: config.rotationId, phase, deploymentSha, runtimeInvocationRef: "https://example.test/runtime-cleanup",
       observedAt, jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeRejected: true, qrCurrentRuntimeVerify: true,
-      qrPreviousRuntimeRejected: true, qrUnknownKeyRejected: true, serviceHealthy: true,
+      qrPreviousRuntimeRejected: true, qrUnknownKeyRejected: true,
+      serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: config.sourceSha, expectedReleaseGitSha: config.sourceSha, healthObservedAt: observedAt,
     };
 
 const writeProof = (directory, name, proof) => {
@@ -119,6 +126,90 @@ test("prepare resumes after JWT pending write crash", async () => {
     const resumed = contextFor(directory, baseConfig, resumedSm);
     await prepare(resumed);
     assert.equal(JSON.parse(resumedSm.values.get(baseConfig.jwt.pendingSecretId)).value, JSON.parse(pendingJwt).value);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("prepare rejects an active previous JWT before any secret write", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-active-previous-"));
+  try {
+    const { initial } = initialSecrets();
+    initial[baseConfig.jwt.previousSecretId] = material("historical-active-jwt", {
+      rotationId: "prior-rotation", family: "jwt_secrets", slot: "previous", materialFingerprint: "not-relevant",
+    });
+    const sm = fakeSecrets(initial);
+    await assert.rejects(prepare(contextFor(directory, baseConfig, sm)), /JWT_PREVIOUS_SLOT_NOT_RETIRED/);
+    assert.equal(sm.putCount, 0);
+    assert.equal(sm.putCalls.length, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("promotion writes pre-rotation current to previous and pending to current", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-lineage-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    await prepare(contextFor(directory, baseConfig, sm));
+    const current = JSON.parse(sm.values.get(baseConfig.jwt.currentSecretId));
+    const previous = JSON.parse(sm.values.get(baseConfig.jwt.previousSecretId));
+    const pending = JSON.parse(sm.values.get(baseConfig.jwt.pendingSecretId));
+    assert.equal(previous.value, "old-jwt-material");
+    assert.equal(current.value, pending.value);
+    assert.notEqual(current.value, previous.value);
+    const state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
+    assert.equal(state.jwt.oldFingerprint, fingerprint("old-jwt-material"));
+    const fixture = JSON.parse(readFileSync(path.join(directory, "previous-qr.json"), "utf8"));
+    assert.doesNotThrow(() => jwt.verify(fixture.jwtToken, "old-jwt-material", { algorithms: ["HS256"] }));
+    assert.throws(() => jwt.verify(fixture.jwtToken, "historical-wrong-secret", { algorithms: ["HS256"] }));
+    const jwtWrites = sm.putCalls.filter(({ secretId }) => [baseConfig.jwt.previousSecretId, baseConfig.jwt.currentSecretId].includes(secretId));
+    assert.equal(JSON.parse(jwtWrites.at(-2).payload).value, "old-jwt-material");
+    assert.equal(JSON.parse(jwtWrites.at(-1).payload).value, pending.value);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("canonical retired previous JWT is reusable but never becomes the old secret", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-retired-previous-"));
+  try {
+    const { initial } = initialSecrets();
+    initial[baseConfig.jwt.previousSecretId] = material("", {
+      rotationId: "prior-rotation", family: "jwt_secrets", slot: "previous-retired", retiredAt: "2026-08-09T00:00:00.000Z",
+    });
+    const sm = fakeSecrets(initial);
+    await prepare(contextFor(directory, baseConfig, sm));
+    assert.equal(JSON.parse(sm.values.get(baseConfig.jwt.previousSecretId)).value, "old-jwt-material");
+    const fixture = JSON.parse(readFileSync(path.join(directory, "previous-qr.json"), "utf8"));
+    assert.doesNotThrow(() => jwt.verify(fixture.jwtToken, "old-jwt-material", { algorithms: ["HS256"] }));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("prepared state resumes with the original current lineage without regenerating pending material", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-prepared-resume-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    let persistCount = 0;
+    const first = contextFor(directory, baseConfig, sm, undefined, {
+      persistState: (file, state) => {
+        writeFileSync(file, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+        persistCount += 1;
+        if (persistCount === 1) throw new Error("simulated process death before promotion");
+      },
+    });
+    await assert.rejects(prepare(first), /simulated process death before promotion/);
+    const pendingBefore = sm.values.get(baseConfig.jwt.pendingSecretId);
+    assert.equal(JSON.parse(sm.values.get(baseConfig.jwt.currentSecretId)).value, "old-jwt-material");
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values));
+    await prepare(contextFor(directory, baseConfig, resumedSm));
+    assert.equal(resumedSm.values.get(baseConfig.jwt.pendingSecretId), pendingBefore);
+    assert.equal(JSON.parse(resumedSm.values.get(baseConfig.jwt.previousSecretId)).value, "old-jwt-material");
+    assert.notEqual(JSON.parse(resumedSm.values.get(baseConfig.jwt.currentSecretId)).value, "old-jwt-material");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -219,8 +310,8 @@ test("wrong release identity fails closed before secret operations", () => {
 test("runtime proof accepts only the expected deployment SHA for overlap and cleanup", () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-runtime-proof-sha-"));
   try {
-    const config = { rotationId: "rotation-proof" };
-    const common = { rotationId: config.rotationId, runtimeInvocationRef: "https://example.test/proof", observedAt: "2026-08-10T00:00:00.000Z", serviceHealthy: true };
+    const config = { rotationId: "rotation-proof", sourceSha: "a".repeat(40) };
+    const common = { rotationId: config.rotationId, runtimeInvocationRef: "https://example.test/proof", observedAt: "2026-08-10T00:00:00.000Z", serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: "a".repeat(40), expectedReleaseGitSha: "a".repeat(40), healthObservedAt: "2026-08-10T00:00:00.000Z" };
     const overlap = { ...common, phase: "overlap", deploymentSha: "a".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true };
     const cleanupProof = { ...common, phase: "cleanup", deploymentSha: "b".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeRejected: true, qrUnknownKeyRejected: true };
     const overlapFile = writeProof(directory, "overlap.json", overlap);

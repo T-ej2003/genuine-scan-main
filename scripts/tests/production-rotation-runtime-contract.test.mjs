@@ -77,6 +77,8 @@ test("runtime verification is deployment-side and uses the application verificat
   assert.match(runtimeVerifier, /verifyProductionRotationCleanupRuntime/);
   assert.match(runtimeCommand, /ROTATION_RUNTIME_PHASE/);
   assert.match(runtimeCommand, /ROTATION_DEPLOYMENT_SHA/);
+  assert.match(runtimeCommand, /--health-url/);
+  assert.match(runtimeCommand, /--expected-release-sha/);
   assert.doesNotMatch(runtimeCommand, /console\.log\([^\n]*Token/);
 });
 

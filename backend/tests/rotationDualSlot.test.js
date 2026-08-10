@@ -54,7 +54,9 @@ try {
   assert.throws(() => verifyQrToken(`${oldToken.slice(0, -1)}x`), /could not be verified/);
   assert.throws(() => verifyQrToken(signQrPayload(payload("unknown"))), /active key version/);
 
-  const overlapRuntime = verifyProductionRotationRuntime({ previousQrToken: oldToken });
+  const preparedPreviousJwtToken = jwt.sign({ rotationId: "prepared-old-current" }, "jwt-previous", { algorithm: "HS256" });
+  const healthEvidence = { serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: "a".repeat(40), expectedReleaseGitSha: "a".repeat(40), healthObservedAt: new Date().toISOString() };
+  const overlapRuntime = verifyProductionRotationRuntime({ previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence });
   assert.deepEqual(overlapRuntime, {
     jwtCurrentRuntimeVerify: true,
     jwtPreviousRuntimeVerify: true,
@@ -64,20 +66,33 @@ try {
     qrTamperMatchingKeyTest: true,
     qrUnknownKeyRejected: true,
     serviceHealthy: true,
+    healthHttpStatus: 200,
+    healthReleaseGitSha: "a".repeat(40),
+    expectedReleaseGitSha: "a".repeat(40),
+    healthObservedAt: healthEvidence.healthObservedAt,
   });
   delete process.env.JWT_SECRET_PREVIOUS;
-  assert.throws(() => verifyProductionRotationRuntime({ previousQrToken: oldToken }), /JWT_SECRET_PREVIOUS/);
+  assert.throws(() => verifyProductionRotationRuntime({ previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence }), /JWT_SECRET_PREVIOUS/);
+  process.env.JWT_SECRET_PREVIOUS = "jwt-previous";
+
+  process.env.JWT_SECRET_PREVIOUS = "wrong-previous";
+  assert.throws(() => verifyProductionRotationRuntime({ previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence }), /invalid signature|Invalid token|previous/i);
   process.env.JWT_SECRET_PREVIOUS = "jwt-previous";
 
   const previousJwtToken = jwt.sign({ rotationId: "cleanup-runtime" }, "jwt-previous", { algorithm: "HS256" });
   delete process.env.JWT_SECRET_PREVIOUS;
   delete process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS;
   delete process.env.QR_SIGN_PREVIOUS_KEY_VERSION;
-  const cleanupRuntime = verifyProductionRotationCleanupRuntime({ previousJwtToken, previousQrToken: oldToken });
+  const cleanupRuntime = verifyProductionRotationCleanupRuntime({ previousJwtToken, previousQrToken: oldToken, healthEvidence });
   assert.equal(cleanupRuntime.jwtPreviousRuntimeRejected, true);
   assert.equal(cleanupRuntime.qrPreviousRuntimeRejected, true);
   assert.equal(cleanupRuntime.jwtCurrentRuntimeVerify, true);
   assert.equal(cleanupRuntime.qrCurrentRuntimeVerify, true);
+
+  assert.throws(() => verifyProductionRotationRuntime({ previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence: { ...healthEvidence, serviceHealthy: false } }), /health/i);
+  assert.throws(() => verifyProductionRotationRuntime({ previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence: { ...healthEvidence, healthHttpStatus: 500 } }), /health/i);
+  assert.throws(() => verifyProductionRotationRuntime({ previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence: { ...healthEvidence, healthReleaseGitSha: "b".repeat(40) } }), /health/i);
+  assert.throws(() => verifyProductionRotationRuntime({ previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence: { ...healthEvidence, healthObservedAt: new Date(Date.now() - 301_000).toISOString() } }), /health/i);
 } finally {
   for (const key of Object.keys(process.env)) {
     if (!(key in restore)) delete process.env[key];

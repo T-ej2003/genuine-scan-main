@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "crypto";
 
-import { getJwtSecret } from "../../utils/security";
+import { getJwtSecretSet } from "../../utils/secretConfig";
 
 type CookieTokenPurpose =
   | "auth.access"
@@ -11,8 +11,8 @@ type CookieTokenPurpose =
 const COOKIE_TOKEN_VERSION = "v1";
 const COOKIE_TOKEN_IV_BYTES = 12;
 
-const deriveCookieTokenKey = (purpose: CookieTokenPurpose) =>
-  createHmac("sha256", getJwtSecret())
+const deriveCookieTokenKey = (secret: string, purpose: CookieTokenPurpose) =>
+  createHmac("sha256", secret)
     .update(`mscqr-cookie-token:${purpose}:${COOKIE_TOKEN_VERSION}`)
     .digest()
     .subarray(0, 32);
@@ -40,7 +40,7 @@ export const sealCookieToken = (rawValue: string, purpose: CookieTokenPurpose) =
   }
 
   const iv = randomBytes(COOKIE_TOKEN_IV_BYTES);
-  const cipher = createCipheriv("aes-256-gcm", deriveCookieTokenKey(purpose), iv);
+  const cipher = createCipheriv("aes-256-gcm", deriveCookieTokenKey(getJwtSecretSet().current.value, purpose), iv);
   const ciphertext = Buffer.concat([cipher.update(normalized, "utf8"), cipher.final()]);
   const authTag = cipher.getAuthTag();
 
@@ -58,10 +58,18 @@ export const openCookieToken = (sealedValue: string, purpose: CookieTokenPurpose
 
   try {
     const parsed = parseProtectedToken(normalized);
-    const decipher = createDecipheriv("aes-256-gcm", deriveCookieTokenKey(purpose), parsed.iv);
-    decipher.setAuthTag(parsed.authTag);
-    const plaintext = Buffer.concat([decipher.update(parsed.ciphertext), decipher.final()]).toString("utf8").trim();
-    return plaintext || null;
+    const secrets = getJwtSecretSet();
+    for (const secret of [secrets.current.value, secrets.previous?.value].filter((value): value is string => Boolean(value))) {
+      try {
+        const decipher = createDecipheriv("aes-256-gcm", deriveCookieTokenKey(secret, purpose), parsed.iv);
+        decipher.setAuthTag(parsed.authTag);
+        const plaintext = Buffer.concat([decipher.update(parsed.ciphertext), decipher.final()]).toString("utf8").trim();
+        if (plaintext) return plaintext;
+      } catch {
+        // Try the one configured compatibility key, then fail closed.
+      }
+    }
+    return null;
   } catch {
     return null;
   }

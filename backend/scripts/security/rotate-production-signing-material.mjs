@@ -150,6 +150,12 @@ const assertPendingOwnership = (name, material, rotationId) => {
   if (!String(material.metadata.slot || "").startsWith("pending")) throw new Error(`${name} pending slot metadata is invalid`);
 };
 
+const assertJwtPreviousSlotAvailable = (material) => {
+  if (material.value || (!isRetired(material) && Object.keys(material.metadata || {}).length)) {
+    throw new Error("JWT_PREVIOUS_SLOT_NOT_RETIRED");
+  }
+};
+
 const keyPair = () => generateKeyPairSync("ed25519", {
   privateKeyEncoding: { format: "pem", type: "pkcs8" },
   publicKeyEncoding: { format: "pem", type: "spki" },
@@ -172,6 +178,9 @@ const validateRuntimeProof = ({ file, config, phase, expectedDeploymentSha, cloc
   if (!reference(proof.runtimeInvocationRef)) throw new Error(`${phase} runtime proof reference is invalid`);
   const observedAt = isoDate(proof.observedAt);
   if (observedAt === null || observedAt > clock()) throw new Error(`${phase} runtime proof timestamp is invalid`);
+  if (proof.serviceHealthy !== true || proof.healthHttpStatus !== 200 || proof.expectedReleaseGitSha !== config.sourceSha || proof.healthReleaseGitSha !== config.sourceSha) throw new Error(`${phase} runtime proof health is invalid`);
+  const healthObservedAt = isoDate(proof.healthObservedAt);
+  if (healthObservedAt === null || healthObservedAt > observedAt || observedAt - healthObservedAt > 300_000) throw new Error(`${phase} runtime proof health timestamp is invalid`);
   const requiredChecks = phase === "overlap"
     ? ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "serviceHealthy"]
     : ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeRejected", "qrUnknownKeyRejected", "serviceHealthy"];
@@ -208,6 +217,21 @@ const assertStateSlots = (state, current) => {
   if (current.qrPublicPrevious.material.value && fingerprint(current.qrPublicPrevious.material.value) !== state.qr?.oldPublicFingerprint) throw new Error("previous QR public key does not match rotation state");
 };
 
+const assertPrepareLineage = (state, current) => {
+  const currentFingerprint = fingerprint(current.jwtCurrent.material.value);
+  const previousFingerprint = current.jwtPrevious.material.value ? fingerprint(current.jwtPrevious.material.value) : null;
+  if (state.phase === "prepared") {
+    const oldCurrent = currentFingerprint === state.jwt?.oldFingerprint;
+    const promotedCurrent = currentFingerprint === state.jwt?.newFingerprint;
+    if (!oldCurrent && !promotedCurrent) throw new Error("current JWT does not match prepared rotation lineage");
+    if (previousFingerprint && previousFingerprint !== state.jwt?.oldFingerprint) throw new Error("previous JWT does not match prepared rotation lineage");
+    if (promotedCurrent && previousFingerprint !== state.jwt?.oldFingerprint) throw new Error("prepared promotion is incomplete or foreign");
+    return;
+  }
+  if (currentFingerprint !== state.jwt?.newFingerprint) throw new Error("current JWT does not match rotation state");
+  if (previousFingerprint && previousFingerprint !== state.jwt?.oldFingerprint) throw new Error("previous JWT does not match rotation state");
+};
+
 const prepare = async (context) => {
   const { config, sm, values, identity } = context;
   const stateFile = statePath(values);
@@ -216,9 +240,11 @@ const prepare = async (context) => {
   if (state) assertState(state, config);
   let current = await slots(sm, config);
   for (const [name, record] of [["jwt", current.jwtPending], ["QR private", current.qrPrivatePending], ["QR public", current.qrPublicPending]]) assertPendingOwnership(name, record.material, config.rotationId);
+  if (state) assertPrepareLineage(state, current);
 
   if (!state) {
-    const oldJwt = current.jwtPrevious.material.value || current.jwtCurrent.material.value;
+    assertJwtPreviousSlotAvailable(current.jwtPrevious.material);
+    const oldJwt = current.jwtCurrent.material.value;
     const oldQrPublic = current.qrPublicPrevious.material.value || current.qrPublicCurrent.material.value;
     if (!oldJwt || !oldQrPublic || !current.qrPrivateCurrent.material.value) throw new Error("current rotation material is incomplete");
     const oldQrVersion = current.qrPublicPrevious.material.metadata.keyVersion || current.qrPublicCurrent.material.metadata.keyVersion || required(config.qr.previousKeyVersion, "config.qr.previousKeyVersion");
@@ -267,6 +293,7 @@ const prepare = async (context) => {
 
   assertState(state, config);
   current = await slots(sm, config);
+  if (state.phase === "prepared") assertPrepareLineage(state, current);
   const pendingJwt = current.jwtPending.material;
   const pendingPrivate = current.qrPrivatePending.material;
   const pendingPublic = current.qrPublicPending.material;
@@ -439,7 +466,8 @@ const status = async ({ config, sm, values, identity }) => {
   const state = readState(statePath(values));
   if (state) {
     assertState(state, config);
-    if (["overlap-ready", "verified", "grace-wait", "retirement-started", "retirement-complete", "cleanup-deploy-required", "cleanup-runtime-verified", "cleaned"].includes(state.phase)) assertStateSlots(state, current);
+    if (state.phase === "prepared") assertPrepareLineage(state, current);
+    if (["overlap-deploy-required", "overlap-ready", "verified", "grace-wait", "retirement-started", "retirement-complete", "cleanup-deploy-required", "cleanup-runtime-verified", "cleaned"].includes(state.phase)) assertStateSlots(state, current);
   }
   const records = Object.fromEntries(Object.entries(current).map(([name, record]) => [name, {
     id: record.id, versionId: record.raw.versionId, populated: Boolean(record.material.value),
