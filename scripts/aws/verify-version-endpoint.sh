@@ -5,8 +5,8 @@ usage() {
   cat <<'EOF'
 Usage: scripts/aws/verify-version-endpoint.sh <version-url> <expected-git-sha>
 
-Fetch a backend /version endpoint and fail unless the payload reports the
-expected git SHA.
+Fetch a backend release endpoint and fail unless the payload reports the
+expected full git SHA.
 EOF
 }
 
@@ -20,6 +20,11 @@ EXPECTED_GIT_SHA="${2:-}"
 
 if [[ -z "$VERSION_URL" || -z "$EXPECTED_GIT_SHA" ]]; then
   usage >&2
+  exit 1
+fi
+
+if [[ ! "$EXPECTED_GIT_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+  echo "EXPECTED_GIT_SHA must be a 40-character lowercase hexadecimal SHA." >&2
   exit 1
 fi
 
@@ -42,12 +47,30 @@ import fs from "node:fs";
 
 const [versionUrl, expectedGitSha, responsePath] = process.argv.slice(2);
 const payload = JSON.parse(fs.readFileSync(responsePath, "utf8"));
-const actualGitSha = String(payload?.gitSha || "").trim();
+const shaPattern = /^[a-f0-9]{40}$/;
+const hasTopLevelGitSha = payload !== null && typeof payload === "object" && Object.hasOwn(payload, "gitSha");
+const hasHealthGitSha = payload?.release !== null && typeof payload?.release === "object" && Object.hasOwn(payload.release, "gitSha");
+const topLevelGitSha = hasTopLevelGitSha ? payload.gitSha : undefined;
+const healthGitSha = hasHealthGitSha ? payload.release.gitSha : undefined;
 
-if (!actualGitSha) {
-  console.error(`Version endpoint ${versionUrl} did not return gitSha.`);
+for (const [location, value] of [["gitSha", topLevelGitSha], ["release.gitSha", healthGitSha]]) {
+  if (value !== undefined && (typeof value !== "string" || !shaPattern.test(value))) {
+    console.error(`Version endpoint ${versionUrl} returned malformed ${location}.`);
+    process.exit(1);
+  }
+}
+
+if (topLevelGitSha === undefined && healthGitSha === undefined) {
+  console.error(`Version endpoint ${versionUrl} did not return gitSha or release.gitSha.`);
   process.exit(1);
 }
+
+if (topLevelGitSha !== undefined && healthGitSha !== undefined && topLevelGitSha !== healthGitSha) {
+  console.error(`Version endpoint ${versionUrl} returned conflicting gitSha values.`);
+  process.exit(1);
+}
+
+const actualGitSha = topLevelGitSha ?? healthGitSha;
 
 if (actualGitSha !== expectedGitSha) {
   console.error(`Version endpoint ${versionUrl} returned gitSha=${actualGitSha}, expected ${expectedGitSha}.`);

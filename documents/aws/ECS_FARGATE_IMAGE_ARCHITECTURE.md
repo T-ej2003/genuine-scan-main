@@ -133,7 +133,7 @@ Workflow behavior:
 - verifies manifest platforms after publish
 - prints exact image URIs and manifest results in the workflow summary
 
-Use `Publish ECS Images` for publish-only runs. Use `Deploy ECS Release` when you want one audited flow that publishes, verifies, deploys, waits for ECS stability, and confirms `/version` is serving the expected `GIT_SHA`.
+Use `Publish ECS Images` for publish-only runs. Use `Deploy ECS Release` when you want one audited flow that publishes, verifies, deploys, waits for ECS stability, and confirms the backend release endpoint is serving the expected `GIT_SHA`.
 
 ## Deployment Environment Protections
 
@@ -236,7 +236,7 @@ export AWS_REGION=eu-west-2
 export CLUSTER_NAME=mscqr-prod-euw2-main
 export SERVICE_NAME=mscqr-backend-servi-euw2
 export CONTAINER_NAME=backend
-export VERSION_URL=https://www.mscqr.com/version
+export VERSION_URL=https://www.mscqr.com/api/health
 export EXPECTED_GIT_SHA=5e12983f1fe733473cacb6b213c0c02ef9f38098
 
 ./scripts/aws/deploy-ecs-service.sh \

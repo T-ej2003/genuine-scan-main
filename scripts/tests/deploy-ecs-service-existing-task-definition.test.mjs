@@ -108,7 +108,7 @@ fi
 set -euo pipefail
 echo "curl $*" >> "$FAKE_DATA/calls.log"
 if [[ "$FAKE_SCENARIO" == "version-endpoint-failure" ]]; then exit 41; fi
-if [[ "$FAKE_SCENARIO" == "wrong-version" ]]; then printf '%s\\n' '{"gitSha":"${"a".repeat(40)}"}'; else printf '%s\\n' '{"gitSha":"${sourceSha}"}'; fi
+if [[ "$FAKE_SCENARIO" == "malformed-health" ]]; then printf '%s\\n' '{"status":"ok","release":{"gitSha":"not-a-sha"}}'; elif [[ "$FAKE_SCENARIO" == "wrong-version" ]]; then printf '%s\\n' '{"status":"ok","release":{"gitSha":"${"a".repeat(40)}"}}'; else printf '%s\\n' '{"status":"ok","release":{"gitSha":"${sourceSha}"}}'; fi
 `;
   const fakeCurl = path.join(fakeBin, "curl");
   fs.writeFileSync(fakeCurl, curl, { mode: 0o755 });
@@ -192,14 +192,14 @@ test("existing mode requires source metadata to match when present", () => {
   assertFailure(runExisting({ releaseGitSha: "a".repeat(40), versionUrl: "https://example.test/version" }), /RELEASE_GIT_SHA/);
 });
 test("existing mode verifies the deployed version before disarming rollback", () => {
-  const success = runExisting({ versionUrl: "https://example.test/version" });
+  const success = runExisting({ versionUrl: "https://www.mscqr.com/api/health" });
   assert.equal(success.status, 0, success.stderr);
   assert.equal((success.calls.match(/curl /g) || []).length, 1);
   assert.equal((success.calls.match(/ecs update-service/g) || []).length, 1);
   assertTempClean(success);
 
-  for (const scenario of ["wrong-version", "version-endpoint-failure"]) {
-    const result = runExisting({ versionUrl: "https://example.test/version", scenario });
+  for (const scenario of ["wrong-version", "malformed-health", "version-endpoint-failure"]) {
+    const result = runExisting({ versionUrl: "https://www.mscqr.com/api/health", scenario });
     assertFailure(result);
     assert.equal((result.calls.match(/curl /g) || []).length, 1);
     assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
@@ -334,6 +334,7 @@ test("normal mode retains its existing version verification behavior", () => {
 
 test("the operator runbook exposes both explicit modes and existing-mode bindings", () => {
   const runbook = fs.readFileSync("documents/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md", "utf8");
+  const nginx = fs.readFileSync("nginx.https.conf", "utf8");
   const existingMode = runbook.split("### Switching to an already-registered task definition", 2)[1].split("The wrapper verifies", 1)[0];
   assert.match(runbook, /NEW_REVISION_MODE/);
   assert.match(runbook, /EXISTING_TASK_DEFINITION_MODE/);
@@ -343,7 +344,9 @@ test("the operator runbook exposes both explicit modes and existing-mode binding
   for (const variable of ["AWS_PROFILE", "AWS_REGION", "CLUSTER_NAME", "SERVICE_NAME", "CONTAINER_NAME", "VERSION_URL", "EXPECTED_GIT_SHA"]) {
     assert.match(existingMode, new RegExp(`export ${variable}=`));
   }
-  assert.match(existingMode, /export VERSION_URL=https:\/\/www\.mscqr\.com\/version/);
+  assert.match(existingMode, /export VERSION_URL=https:\/\/www\.mscqr\.com\/api\/health/);
+  assert.doesNotMatch(existingMode, /export VERSION_URL=https:\/\/www\.mscqr\.com\/(?:version|health)(?:\s|$)/);
+  assert.match(nginx, /location\s+~\s+\^\/api\/health\/\?\(\.\*\)\$\s*\{[\s\S]*rewrite\s+\^\/api\/health\/\?\(\.\*\)\$\s+\/health\/\$1\s+break;[\s\S]*proxy_pass\s+\$backend_upstream;/);
   assert.doesNotMatch(existingMode, /example\.com/);
   assert.match(existingMode, /never registers a\s+task-definition revision/i);
 });

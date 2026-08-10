@@ -65,7 +65,7 @@ on:
         type: string
         default: backend
       backend_version_url:
-        description: "Public backend /version URL for post-deploy SHA verification"
+        description: "Public backend release endpoint URL for post-deploy SHA verification"
         required: true
         type: string
       backend_ready_url:
