@@ -72,6 +72,16 @@ resource "aws_vpc_security_group_ingress_rule" "executor_endpoints_https" {
   description                  = "Production green executor to reviewed AWS interface endpoints"
 }
 
+resource "aws_vpc_security_group_ingress_rule" "runtime_endpoints_https" {
+  for_each                     = var.runtime_security_group_ids
+  security_group_id            = aws_security_group.executor_endpoints.id
+  referenced_security_group_id = each.value
+  from_port                    = 443
+  to_port                      = 443
+  ip_protocol                  = "tcp"
+  description                  = "Approved production runtime to reviewed AWS interface endpoints"
+}
+
 resource "aws_vpc_endpoint" "executor" {
   for_each            = local.executor_interface_endpoint_services
   vpc_id              = var.vpc_id

@@ -415,6 +415,7 @@ test("Stage A owns shared logs and reviewed executor networking while Stage B on
   for (const endpoint of ["ecr.api", "ecr.dkr", "logs", "secretsmanager", "kms"]) assert.match(stageA, new RegExp(`"${endpoint.replace(".", "\\.")}"`));
   assert.match(stageA, /resource "aws_vpc_endpoint" "executor"[\s\S]*vpc_endpoint_type\s*=\s*"Interface"[\s\S]*private_dns_enabled\s*=\s*true[\s\S]*subnet_ids\s*=\s*var\.private_subnet_ids[\s\S]*security_group_ids\s*=\s*\[aws_security_group\.executor_endpoints\.id\]/);
   assert.match(stageA, /resource "aws_vpc_security_group_ingress_rule" "executor_endpoints_https"[\s\S]*referenced_security_group_id\s*=\s*aws_security_group\.executor\.id[\s\S]*from_port\s*=\s*443[\s\S]*to_port\s*=\s*443/);
+  assert.match(stageA, /resource "aws_vpc_security_group_ingress_rule" "runtime_endpoints_https"[\s\S]*for_each\s*=\s*var\.runtime_security_group_ids[\s\S]*referenced_security_group_id\s*=\s*each\.value[\s\S]*from_port\s*=\s*443[\s\S]*to_port\s*=\s*443/);
   assert.match(stageA, /resource "aws_vpc_security_group_egress_rule" "executor_interface_endpoints"[\s\S]*referenced_security_group_id\s*=\s*aws_security_group\.executor_endpoints\.id/);
   assert.doesNotMatch(stageA.match(/resource "aws_security_group" "executor"[\s\S]*?\n}/)?.[0] || "", /0\.0\.0\.0\/0|::\/0|egress\s*\{/);
 });

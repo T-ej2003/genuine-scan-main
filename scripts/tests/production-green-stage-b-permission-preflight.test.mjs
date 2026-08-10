@@ -456,7 +456,7 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 91);
+  assert.equal(report.requiredEvaluations.length, 93);
   assert.equal(report.forbiddenEvaluations.length, 23);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
@@ -479,7 +479,7 @@ test("signed permission reports bind expected and actual missing context", () =>
 
 test("exact canary create derives Register, TagResource, and both PassRole evaluations", () => {
   const derived = deriveRequiredEvaluations(plan, manifest);
-  const passRoles = derived.required.filter((item) => item.action === "iam:PassRole");
+  const passRoles = derived.required.filter((item) => item.action === "iam:PassRole" && !item.manifestId.startsWith("rollback-exact"));
   assert.deepEqual(passRoles.map((item) => item.resource), [
     "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
     "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
@@ -793,7 +793,7 @@ test("the exact twelve task-definition creates expand to registration, tagging, 
   assert.equal(derived.coveredChanges.length, 13);
   assert.equal(derived.required.filter((item) => item.action === "ecs:RegisterTaskDefinition").length, 12);
   assert.equal(derived.required.filter((item) => item.action === "ecs:TagResource").length, 12);
-  assert.equal(derived.required.filter((item) => item.action === "iam:PassRole").length, 24);
+  assert.equal(derived.required.filter((item) => item.action === "iam:PassRole").length, 26);
 });
 
 test("task-definition registration context is complete and bound to each planned family", () => {
