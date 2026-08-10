@@ -217,6 +217,37 @@ export EXPECTED_GIT_SHA="$IMAGE_TAG"
 ./scripts/aws/verify-version-endpoint.sh "$VERSION_URL" "$EXPECTED_GIT_SHA"
 ```
 
+### Switching to an already-registered task definition
+
+The command above is the default `NEW_REVISION_MODE`: it clones the current task
+definition, registers a new revision, and deploys it. For an already-reviewed,
+ACTIVE task definition, use the explicit `EXISTING_TASK_DEFINITION_MODE` below.
+It requires the full target ARN including its revision, the exact current service
+ARN, the expected family, and the approved container digest. It never registers a
+task-definition revision. The target's `GIT_SHA`/`RELEASE_GIT_SHA` metadata is also
+checked when present, so keep `EXPECTED_GIT_SHA` bound to the approved source.
+
+```bash
+export AWS_PROFILE=mscqr-production-release-deployer
+export AWS_REGION=eu-west-2
+export CLUSTER_NAME=mscqr-prod-euw2-main
+export SERVICE_NAME=mscqr-backend-servi-euw2
+export CONTAINER_NAME=backend
+export EXPECTED_GIT_SHA=5e12983f1fe733473cacb6b213c0c02ef9f38098
+
+./scripts/aws/deploy-ecs-service.sh \
+  --existing-task-definition arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1 \
+  --expected-current-task-definition arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47 \
+  --expected-family mscqr-production-rls-green-backend-candidate \
+  --expected-image-digest sha256:0f8bf5cdbdfb5b67c00a1a6d5c27a7445b40fee7a1c15b525fab7f1846437e05
+```
+
+The wrapper verifies the release-deployer identity, target status/account/region,
+the service's exact current ARN, deployment stability, the target container digest,
+and every running task after the switch. If stabilization or post-switch verification
+fails, rollback uses the exact pre-switch ARN recorded by the wrapper; never derive a
+rollback target from a family or revision number.
+
 For automatic rollback support during backend canary:
 
 ```bash

@@ -32,6 +32,16 @@ Optional environment:
                     to production green Secrets Manager ARNs. Backend app/preauth
                     entries are all-or-nothing.
 
+Existing task-definition mode:
+  --existing-task-definition <FULL_ARN>
+  --expected-current-task-definition <FULL_ARN>
+  --expected-family <family>
+  --expected-image-digest <sha256:64-hex>
+
+This explicit mode switches only to an already-registered ACTIVE revision. It
+requires the release-deployer identity, performs no registration, and verifies
+the exact target task definition and running task image digest before success.
+
 Example:
   AWS_REGION=eu-west-2 \
   CLUSTER_NAME=mscqr-prod \
@@ -44,6 +54,54 @@ Example:
   ./scripts/aws/deploy-ecs-service.sh
 EOF
 }
+
+EXISTING_TASK_DEFINITION_ARN="${EXISTING_TASK_DEFINITION_ARN:-}"
+EXPECTED_CURRENT_TASK_DEFINITION_ARN="${EXPECTED_CURRENT_TASK_DEFINITION_ARN:-}"
+EXPECTED_FAMILY="${EXPECTED_FAMILY:-}"
+EXPECTED_IMAGE_DIGEST="${EXPECTED_IMAGE_DIGEST:-}"
+
+while (($# > 0)); do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --existing-task-definition)
+      [[ $# -ge 2 ]] || { echo "Missing value for --existing-task-definition." >&2; exit 1; }
+      EXISTING_TASK_DEFINITION_ARN="$2"
+      shift 2
+      ;;
+    --expected-current-task-definition)
+      [[ $# -ge 2 ]] || { echo "Missing value for --expected-current-task-definition." >&2; exit 1; }
+      EXPECTED_CURRENT_TASK_DEFINITION_ARN="$2"
+      shift 2
+      ;;
+    --expected-family)
+      [[ $# -ge 2 ]] || { echo "Missing value for --expected-family." >&2; exit 1; }
+      EXPECTED_FAMILY="$2"
+      shift 2
+      ;;
+    --expected-image-digest)
+      [[ $# -ge 2 ]] || { echo "Missing value for --expected-image-digest." >&2; exit 1; }
+      EXPECTED_IMAGE_DIGEST="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -n "$EXISTING_TASK_DEFINITION_ARN" && -n "${IMAGE_URI:-}" ]]; then
+  echo "IMAGE_URI must not be supplied in existing task-definition mode." >&2
+  exit 1
+fi
+
+if [[ -z "$EXISTING_TASK_DEFINITION_ARN" && ( -n "$EXPECTED_CURRENT_TASK_DEFINITION_ARN" || -n "$EXPECTED_FAMILY" || -n "$EXPECTED_IMAGE_DIGEST" ) ]]; then
+  echo "Existing task-definition expectations require --existing-task-definition." >&2
+  exit 1
+fi
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
@@ -74,16 +132,218 @@ DRY_RUN="${DRY_RUN:-false}"
 require_env AWS_REGION
 require_env CLUSTER_NAME
 require_env SERVICE_NAME
-require_env TASK_DEFINITION
 require_env CONTAINER_NAME
-require_env IMAGE_URI
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERSION_VERIFY_SCRIPT="$REPO_ROOT/scripts/aws/verify-version-endpoint.sh"
 
 RAW_FILE="$(mktemp)"
 PAYLOAD_FILE="$(mktemp)"
-trap 'rm -f "$RAW_FILE" "$PAYLOAD_FILE"' EXIT
+EXISTING_SERVICE_FILE="$(mktemp)"
+EXISTING_POST_SERVICE_FILE="$(mktemp)"
+EXISTING_TASKS_LIST_FILE="$(mktemp)"
+EXISTING_TASKS_FILE="$(mktemp)"
+EXISTING_CALLER_FILE="$(mktemp)"
+trap 'rm -f "$RAW_FILE" "$PAYLOAD_FILE" "$EXISTING_SERVICE_FILE" "$EXISTING_POST_SERVICE_FILE" "$EXISTING_TASKS_LIST_FILE" "$EXISTING_TASKS_FILE" "$EXISTING_CALLER_FILE"' EXIT
+
+if [[ -n "$EXISTING_TASK_DEFINITION_ARN" ]]; then
+  require_env CLUSTER_NAME
+  require_env SERVICE_NAME
+  require_env CONTAINER_NAME
+  require_env EXPECTED_CURRENT_TASK_DEFINITION_ARN
+  require_env EXPECTED_FAMILY
+  require_env EXPECTED_IMAGE_DIGEST
+
+  [[ "$WAIT_FOR_STABLE" == "true" ]] || {
+    echo "Existing task-definition mode requires WAIT_FOR_STABLE=true." >&2
+    exit 1
+  }
+  [[ "$DRY_RUN" == "false" ]] || {
+    echo "Existing task-definition mode does not support DRY_RUN; use the offline contract tests instead." >&2
+    exit 1
+  }
+
+  aws sts get-caller-identity \
+    --query Arn \
+    --output text \
+    --no-cli-pager \
+    >"$EXISTING_CALLER_FILE"
+
+  aws ecs describe-task-definition \
+    --region "$AWS_REGION" \
+    --task-definition "$EXISTING_TASK_DEFINITION_ARN" \
+    --include TAGS \
+    >"$RAW_FILE"
+
+  aws ecs describe-services \
+    --region "$AWS_REGION" \
+    --cluster "$CLUSTER_NAME" \
+    --services "$SERVICE_NAME" \
+    >"$EXISTING_SERVICE_FILE"
+
+  PREVIOUS_TASK_DEFINITION_ARN="$(
+    node --input-type=module - "$RAW_FILE" "$EXISTING_SERVICE_FILE" "$EXISTING_CALLER_FILE" "$AWS_REGION" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_CURRENT_TASK_DEFINITION_ARN" "$EXPECTED_FAMILY" "$EXPECTED_IMAGE_DIGEST" "$CONTAINER_NAME" "${EXPECTED_GIT_SHA:-}" <<'NODE'
+import fs from "node:fs";
+
+const [targetPath, servicePath, callerPath, region, targetArn, expectedCurrentArn, expectedFamily, expectedDigest, containerName, expectedGitSha] = process.argv.slice(2);
+const targetResponse = JSON.parse(fs.readFileSync(targetPath, "utf8"));
+const serviceResponse = JSON.parse(fs.readFileSync(servicePath, "utf8"));
+const callerArn = fs.readFileSync(callerPath, "utf8").trim();
+const accountId = "368992683803";
+const arnPattern = /^arn:aws:ecs:([a-z0-9-]+):([0-9]{12}):task-definition\/([A-Za-z0-9_-]+):([1-9][0-9]*)$/;
+const digestPattern = /^sha256:[a-f0-9]{64}$/;
+const fail = (message) => { throw new Error(message); };
+
+const targetMatch = arnPattern.exec(targetArn);
+const currentMatch = arnPattern.exec(expectedCurrentArn);
+if (!targetMatch) fail("Existing task-definition target must be a full ARN with an exact revision.");
+if (!currentMatch) fail("Expected current task definition must be a full ARN with an exact revision.");
+if (targetMatch[1] !== region || currentMatch[1] !== region) fail("Task-definition ARN region does not match AWS_REGION.");
+if (targetMatch[2] !== accountId || currentMatch[2] !== accountId) fail("Task-definition ARN account is outside the production contract.");
+if (!digestPattern.test(expectedDigest)) fail("Expected image digest must be sha256 followed by 64 lowercase hex characters.");
+if (!/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/.test(callerArn)) fail("Existing task-definition mode requires the production release-deployer identity.");
+
+const target = targetResponse.taskDefinition;
+if (!target || target.taskDefinitionArn !== targetArn) fail("Described task definition did not match the exact requested ARN.");
+if (target.status !== "ACTIVE") fail(`Target task definition status is ${target.status || "missing"}; expected ACTIVE.`);
+if (target.family !== expectedFamily || targetMatch[3] !== expectedFamily) fail("Target task-definition family does not match the expected family.");
+const containers = Array.isArray(target.containerDefinitions) ? target.containerDefinitions : [];
+const selected = containers.filter((container) => container?.name === containerName);
+if (selected.length !== 1) fail(`Target task definition must contain exactly one ${containerName} container.`);
+const imageMatch = /@(?<digest>sha256:[a-f0-9]{64})$/.exec(selected[0].image || "");
+if (!imageMatch || imageMatch.groups.digest !== expectedDigest) fail("Target container image digest does not match the approved digest.");
+const metadata = new Map((selected[0].environment || []).filter((entry) => entry?.name).map((entry) => [entry.name, entry.value]));
+const sourceMetadata = ["GIT_SHA", "RELEASE_GIT_SHA"].filter((name) => metadata.has(name));
+if (sourceMetadata.length > 0 && (!expectedGitSha || !/^[0-9a-f]{40}$/.test(expectedGitSha))) fail("Target source metadata is present but EXPECTED_GIT_SHA is missing or malformed.");
+for (const name of sourceMetadata) if (metadata.get(name) !== expectedGitSha) fail(`Target ${name} does not match EXPECTED_GIT_SHA.`);
+
+if (!Array.isArray(serviceResponse.failures) || serviceResponse.failures.length !== 0) fail("ECS service description returned failures.");
+const services = Array.isArray(serviceResponse.services) ? serviceResponse.services : [];
+if (services.length !== 1) fail("ECS service description did not return exactly one service.");
+const service = services[0];
+if (service.status !== "ACTIVE") fail(`ECS service status is ${service.status || "missing"}; expected ACTIVE.`);
+if (service.taskDefinition !== expectedCurrentArn) fail("ECS service is not bound to the expected current task definition.");
+if (!Number.isInteger(service.desiredCount) || service.desiredCount < 1) fail("ECS service desired count is invalid.");
+const deployments = Array.isArray(service.deployments) ? service.deployments : [];
+if (deployments.length !== 1 || deployments[0]?.status !== "PRIMARY" || deployments[0]?.taskDefinition !== expectedCurrentArn || deployments[0]?.pendingCount !== 0 || deployments[0]?.runningCount !== service.desiredCount || (deployments[0]?.rolloutState && deployments[0].rolloutState !== "COMPLETED")) fail("ECS service has a concurrent or unhealthy deployment.");
+
+process.stdout.write(expectedCurrentArn);
+NODE
+  )"
+
+  existing_switch_started=false
+  rollback_existing_on_failure() {
+    local exit_code=$?
+    trap - EXIT
+    if [[ "$existing_switch_started" == "true" && "$exit_code" -ne 0 ]]; then
+      echo "Existing task-definition switch failed; restoring ${PREVIOUS_TASK_DEFINITION_ARN}." >&2
+      WAIT_FOR_STABLE=true \
+        AWS_REGION="$AWS_REGION" \
+        CLUSTER_NAME="$CLUSTER_NAME" \
+        SERVICE_NAME="$SERVICE_NAME" \
+        PREVIOUS_TASK_DEFINITION_ARN="$PREVIOUS_TASK_DEFINITION_ARN" \
+        "$REPO_ROOT/scripts/aws/rollback-ecs-service.sh" || echo "Canonical rollback failed." >&2
+    fi
+    exit "$exit_code"
+  }
+  trap rollback_existing_on_failure EXIT
+
+  if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" ]]; then
+    aws ecs update-service \
+      --region "$AWS_REGION" \
+      --cluster "$CLUSTER_NAME" \
+      --service "$SERVICE_NAME" \
+      --task-definition "$EXISTING_TASK_DEFINITION_ARN" \
+      >/dev/null
+    existing_switch_started=true
+  else
+    echo "Target task definition is already active on ${SERVICE_NAME}; no service update required."
+  fi
+
+  aws ecs wait services-stable \
+    --region "$AWS_REGION" \
+    --cluster "$CLUSTER_NAME" \
+    --services "$SERVICE_NAME"
+
+  aws ecs describe-services \
+    --region "$AWS_REGION" \
+    --cluster "$CLUSTER_NAME" \
+    --services "$SERVICE_NAME" \
+    >"$EXISTING_POST_SERVICE_FILE"
+
+  node --input-type=module - "$EXISTING_POST_SERVICE_FILE" "$EXISTING_TASKS_LIST_FILE" "$EXISTING_TASK_DEFINITION_ARN" <<'NODE'
+import fs from "node:fs";
+const [servicePath, taskListPath, targetArn] = process.argv.slice(2);
+const response = JSON.parse(fs.readFileSync(servicePath, "utf8"));
+const fail = (message) => { throw new Error(message); };
+if (!Array.isArray(response.failures) || response.failures.length !== 0) fail("Post-switch ECS service description returned failures.");
+if (response.services?.length !== 1) fail("Post-switch ECS service description did not return exactly one service.");
+const service = response.services[0];
+if (service.status !== "ACTIVE" || service.taskDefinition !== targetArn) fail("Post-switch service is not bound to the exact target task definition.");
+const deployments = Array.isArray(service.deployments) ? service.deployments : [];
+if (deployments.length !== 1 || deployments[0]?.status !== "PRIMARY" || deployments[0]?.taskDefinition !== targetArn || deployments[0]?.pendingCount !== 0 || deployments[0]?.runningCount !== service.desiredCount || (deployments[0]?.rolloutState && deployments[0].rolloutState !== "COMPLETED")) fail("Post-switch ECS service is not stable on the exact target.");
+fs.writeFileSync(taskListPath, JSON.stringify({ targetArn, desiredCount: service.desiredCount }));
+NODE
+
+  aws ecs list-tasks \
+    --region "$AWS_REGION" \
+    --cluster "$CLUSTER_NAME" \
+    --service-name "$SERVICE_NAME" \
+    --desired-status RUNNING \
+    >"$EXISTING_TASKS_LIST_FILE.raw"
+
+  running_task_arns=()
+  while IFS= read -r task_arn; do
+    [[ -n "$task_arn" ]] && running_task_arns+=("$task_arn")
+  done < <(node --input-type=module - "$EXISTING_TASKS_LIST_FILE.raw" <<'NODE'
+import fs from "node:fs";
+const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!Array.isArray(response.failures) || response.failures.length !== 0) throw new Error("ECS list-tasks returned failures.");
+for (const arn of response.taskArns || []) process.stdout.write(`${arn}\n`);
+NODE
+  )
+  [[ "${#running_task_arns[@]}" -gt 0 ]] || { echo "No running ECS tasks were returned after the existing task-definition switch." >&2; exit 1; }
+
+  aws ecs describe-tasks \
+    --region "$AWS_REGION" \
+    --cluster "$CLUSTER_NAME" \
+    --tasks "${running_task_arns[@]}" \
+    >"$EXISTING_TASKS_FILE"
+
+  node --input-type=module - "$EXISTING_POST_SERVICE_FILE" "$EXISTING_TASKS_LIST_FILE" "$EXISTING_TASKS_FILE" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_IMAGE_DIGEST" "$CONTAINER_NAME" <<'NODE'
+import fs from "node:fs";
+const [servicePath, taskListPath, tasksPath, targetArn, expectedDigest, containerName] = process.argv.slice(2);
+const serviceResponse = JSON.parse(fs.readFileSync(servicePath, "utf8"));
+const taskSummary = JSON.parse(fs.readFileSync(taskListPath, "utf8"));
+const tasksResponse = JSON.parse(fs.readFileSync(tasksPath, "utf8"));
+const fail = (message) => { throw new Error(message); };
+const desiredCount = serviceResponse.services?.[0]?.desiredCount;
+if (taskSummary.targetArn !== targetArn || taskSummary.desiredCount !== desiredCount) fail("Post-switch task summary binding is inconsistent.");
+if (!Array.isArray(tasksResponse.failures) || tasksResponse.failures.length !== 0) fail("ECS describe-tasks returned failures.");
+if (!Array.isArray(tasksResponse.tasks) || tasksResponse.tasks.length !== desiredCount) fail("Running task count does not equal the desired count.");
+for (const task of tasksResponse.tasks) {
+  if (task.lastStatus !== "RUNNING" || task.taskDefinitionArn !== targetArn) fail("A running task is not using the exact target task definition.");
+  const containers = (task.containers || []).filter((container) => container?.name === containerName);
+  if (containers.length !== 1 || containers[0].imageDigest !== expectedDigest) fail("A running target container does not report the approved image digest.");
+}
+NODE
+
+  if [[ -n "${METADATA_FILE:-}" ]]; then
+    node --input-type=module - "$METADATA_FILE" "$CLUSTER_NAME" "$SERVICE_NAME" "$CONTAINER_NAME" "$PREVIOUS_TASK_DEFINITION_ARN" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_IMAGE_DIGEST" <<'NODE'
+import fs from "node:fs";
+const [outPath, clusterName, serviceName, containerName, previousTaskDefinitionArn, targetTaskDefinitionArn, expectedImageDigest] = process.argv.slice(2);
+fs.writeFileSync(outPath, JSON.stringify({ mode: "existing-task-definition", clusterName, serviceName, containerName, previousTaskDefinitionArn, targetTaskDefinitionArn, expectedImageDigest }, null, 2));
+NODE
+  fi
+
+  existing_switch_started=false
+  trap - EXIT
+  echo "Verified ${SERVICE_NAME} on ${CLUSTER_NAME} using existing task definition ${EXISTING_TASK_DEFINITION_ARN}"
+  exit 0
+fi
+
+require_env TASK_DEFINITION
+require_env IMAGE_URI
 
 aws ecs describe-task-definition \
   --region "$AWS_REGION" \
