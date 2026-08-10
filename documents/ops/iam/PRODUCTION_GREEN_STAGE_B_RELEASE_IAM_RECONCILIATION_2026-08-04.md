@@ -21,9 +21,20 @@ Terraform plan, closure, and apply bindings. No wildcard Lambda resource is
 required.
 
 The canonical FinalApplyWrite SHA-256 changes from
-`0038d24898d2a20f806949d3329b8c29fb329e4f7e9b2406fb96ff97c2d2fa9b`
+`04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`
 to
-`04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`.
+`4378bd51ef746f43d3fc99d2604e7344d0802ba4b278119288fd4e0971415624`.
+
+The existing-task-definition traffic switch is intentionally owned by the same
+release-deployer identity used by the canonical wrapper. FinalApplyWrite grants
+only `ecs:UpdateService` on
+`arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2`,
+with `aws:RequestedRegion=eu-west-2`, the exact production cluster condition,
+and `ecs:task-definition` constrained to the reviewed target and rollback ARNs.
+It does not grant service creation/deletion, task-definition deregistration, or
+wildcard service updates. The source change requires administrator publication
+of the new managed-policy version after merge; no live IAM change is performed
+by this document.
 
 Primary references:
 
@@ -81,34 +92,44 @@ therefore records the exact decision and order-independent missing-context set:
 
 | Evaluation | Decision | Expected set |
 |---|---|---|
-| `backend-bucket-delete` | `implicitDeny` | FULL-14 |
-| `backend-bucket-policy-write` | `implicitDeny` | FULL-14 |
-| `backend-encryption-write` | `implicitDeny` | FULL-14 |
+| `backend-bucket-delete` | `implicitDeny` | FULL-15 |
+| `backend-bucket-policy-write` | `implicitDeny` | FULL-15 |
+| `backend-encryption-write` | `implicitDeny` | FULL-15 |
 | `backend-legacy-lock-delete` | `explicitDeny` | EMPTY |
 | `backend-legacy-lock-read` | `explicitDeny` | EMPTY |
 | `backend-legacy-state-read` | `explicitDeny` | EMPTY |
 | `backend-legacy-state-write` | `explicitDeny` | EMPTY |
-| `backend-list-bucket-not-required` | `implicitDeny` | FULL-14 |
-| `backend-other-production-workspace-read` | `implicitDeny` | FULL-14 |
-| `backend-other-stage-b-key-read` | `implicitDeny` | FULL-14 |
+| `backend-list-bucket-not-required` | `implicitDeny` | FULL-15 |
+| `backend-other-production-workspace-read` | `implicitDeny` | FULL-15 |
+| `backend-other-stage-b-key-read` | `implicitDeny` | FULL-15 |
 | `backend-state-delete` | `explicitDeny` | EMPTY |
-| `backend-unrelated-bucket-read` | `implicitDeny` | FULL-14 |
-| `backend-versioning-write` | `implicitDeny` | FULL-14 |
-| `backend-wildcard-object-read` | `implicitDeny` | FULL-14 |
-| `create-iam-role` | `implicitDeny` | FULL-14 |
-| `deregister-task-definition` | `implicitDeny` | FULL-14 |
-| `execute-ecs-task` | `implicitDeny` | FULL-14 |
-| `invoke-broker` | `implicitDeny` | FULL-14 |
-| `pass-to-lambda` | `implicitDeny` | PASSROLE-13 |
-| `pass-unrelated-role` | `implicitDeny` | PASSROLE-13 |
-| `update-ecs-service` | `implicitDeny` | FULL-14 |
+| `backend-unrelated-bucket-read` | `implicitDeny` | FULL-15 |
+| `backend-versioning-write` | `implicitDeny` | FULL-15 |
+| `backend-wildcard-object-read` | `implicitDeny` | FULL-15 |
+| `create-iam-role` | `implicitDeny` | FULL-15 |
+| `deregister-task-definition` | `implicitDeny` | FULL-15 |
+| `execute-ecs-task` | `implicitDeny` | FULL-15 |
+| `invoke-broker` | `implicitDeny` | FULL-15 |
+| `pass-to-lambda` | `implicitDeny` | PASSROLE-14 |
+| `pass-unrelated-role` | `implicitDeny` | PASSROLE-14 |
+| `activate-exact-ecs-service` | `allowed` | SWITCH-REQUIRED |
+| `rollback-exact-ecs-service` | `allowed` | SWITCH-REQUIRED |
+| `update-ecs-service` | `implicitDeny` | SWITCH-13 |
 
-`FULL-14` is the sorted set `aws:RequestTag/Component`,
+`SWITCH-13` is the sorted set `aws:RequestTag/Component`,
+`aws:RequestTag/Environment`, `aws:RequestTag/ManagedBy`,
+`aws:ResourceTag/Component`, `aws:ResourceTag/Environment`,
+`aws:ResourceTag/ManagedBy`, `aws:TagKeys`, `ecs:compute-compatibility`,
+`ecs:privileged`, `ecs:task-cpu`, `ecs:task-definition`, `ecs:task-memory`, and
+`iam:PassedToService`; the switch supplies the reviewed region and cluster
+values. `SWITCH-REQUIRED` supplies the reviewed region, cluster, and exact
+target or rollback task-definition context.
+`FULL-15` is the sorted set `aws:RequestTag/Component`,
 `aws:RequestTag/Environment`, `aws:RequestTag/ManagedBy`,
 `aws:RequestedRegion`, `aws:ResourceTag/Component`,
 `aws:ResourceTag/Environment`, `aws:ResourceTag/ManagedBy`, `aws:TagKeys`,
 `ecs:cluster`, `ecs:compute-compatibility`, `ecs:privileged`, `ecs:task-cpu`,
-`ecs:task-memory`, and `iam:PassedToService`. `PASSROLE-13` omits
+`ecs:task-definition`, `ecs:task-memory`, and `iam:PassedToService`. `PASSROLE-14` omits
 `iam:PassedToService` because both PassRole controls supply it. `EMPTY` has no
 keys. Thus 16 implicit denials have non-empty sets and five explicit backend
 denials have empty sets.
@@ -163,9 +184,9 @@ The allowed inline-policy set is empty.
 The candidate source policy union was evaluated with AWS IAM custom-policy
 simulation against the production-shaped plan:
 
-- required evaluations: 89/89 allowed
+- required evaluations: 91/91 allowed
 - required failures: 0
-- forbidden evaluations: 21/21 denied
+- forbidden evaluations: 23/23 denied
 - forbidden allowed: 0
 - unresolved missing context: 0
 - supplementary provider reads: 55/55 allowed

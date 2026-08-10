@@ -547,6 +547,53 @@
       "mutation": false
     },
     {
+      "id": "manifest-activate-exact-ecs-service",
+      "phase": "wrapper-apply",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "activate-exact-ecs-service",
+      "action": "ecs:UpdateService",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        },
+        {
+          "key": "ecs:task-definition",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "UpdateExactStageBBackendService",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "4378bd51ef746f43d3fc99d2604e7344d0802ba4b278119288fd4e0971415624"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "manifest-apply-stage-b-backend-lock-delete",
       "phase": "wrapper-apply",
       "identity": "RELEASE_DEPLOYER",
@@ -1221,6 +1268,46 @@
       "mutation": false
     },
     {
+      "id": "manifest-create-ecs-service",
+      "phase": "refresh-only",
+      "identity": "ADMINISTRATOR",
+      "executor": "iam-simulator",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "create-ecs-service",
+      "action": "ecs:CreateService",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "manifest-create-iam-role",
       "phase": "refresh-only",
       "identity": "ADMINISTRATOR",
@@ -1277,6 +1364,46 @@
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
         "expectedPolicySha256": "47bfd01f207470fe1a6d28bcdeae1965b1c05e2aed69d8b94b4533fd59f656a5"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "manifest-delete-ecs-service",
+      "phase": "refresh-only",
+      "identity": "ADMINISTRATOR",
+      "executor": "iam-simulator",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "delete-ecs-service",
+      "action": "ecs:DeleteService",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
       },
       "required": true,
       "mutation": true
@@ -1442,7 +1569,7 @@
         "sid": "PruneExactStageBBrokerManagedPolicyVersions",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
+        "expectedPolicySha256": "4378bd51ef746f43d3fc99d2604e7344d0802ba4b278119288fd4e0971415624"
       },
       "required": true,
       "mutation": true
@@ -1496,7 +1623,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
+        "expectedPolicySha256": "4378bd51ef746f43d3fc99d2604e7344d0802ba4b278119288fd4e0971415624"
       },
       "required": true,
       "mutation": true
@@ -2089,6 +2216,53 @@
       "mutation": false
     },
     {
+      "id": "manifest-rollback-exact-ecs-service",
+      "phase": "wrapper-apply",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "rollback-exact-ecs-service",
+      "action": "ecs:UpdateService",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        },
+        {
+          "key": "ecs:task-definition",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "UpdateExactStageBBackendService",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "4378bd51ef746f43d3fc99d2604e7344d0802ba4b278119288fd4e0971415624"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "manifest-set-stage-b-log-retention",
       "phase": "wrapper-apply",
       "identity": "RELEASE_DEPLOYER",
@@ -2239,7 +2413,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
+        "expectedPolicySha256": "4378bd51ef746f43d3fc99d2604e7344d0802ba4b278119288fd4e0971415624"
       },
       "required": true,
       "mutation": true
@@ -2293,7 +2467,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
+        "expectedPolicySha256": "4378bd51ef746f43d3fc99d2604e7344d0802ba4b278119288fd4e0971415624"
       },
       "required": true,
       "mutation": true
@@ -2318,7 +2492,7 @@
         "sid": "UpdateExactStageBBrokerManagedPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
+        "expectedPolicySha256": "4378bd51ef746f43d3fc99d2604e7344d0802ba4b278119288fd4e0971415624"
       },
       "required": true,
       "mutation": true
@@ -2332,9 +2506,24 @@
       "sourceFunction": "update-ecs-service",
       "action": "ecs:UpdateService",
       "resources": [
-        "*"
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-unrelated-service"
       ],
-      "context": [],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        }
+      ],
       "classification": "FORBIDDEN",
       "probe": "administrator-simulation",
       "probeIds": [],
@@ -2397,7 +2586,7 @@
         "sid": "UpdateExactStageBBrokerReviewedAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee"
+        "expectedPolicySha256": "4378bd51ef746f43d3fc99d2604e7344d0802ba4b278119288fd4e0971415624"
       },
       "required": true,
       "mutation": true
