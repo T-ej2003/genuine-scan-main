@@ -10,6 +10,7 @@ const list = (value) => Array.isArray(value) ? value : [value];
 const matches = (pattern, value) => pattern === "*" || pattern === value || (pattern.endsWith("*") && value.startsWith(pattern.slice(0, -1)));
 const policies = RELEASE_POLICY_SOURCES.map(({ name, arn, sourcePath }) => ({ name, arn, sourcePath, document: read(sourcePath) }));
 const manifest = read("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
+const reconciliationDocument = fs.readFileSync("documents/ops/iam/PRODUCTION_GREEN_STAGE_B_RELEASE_IAM_RECONCILIATION_2026-08-04.md", "utf8");
 const contextMap = (evaluation) => new Map((evaluation.context || []).map(({ key, values }) => [key, values.map(String)]));
 const conditionsMatch = (condition = {}, evaluation) => {
   const context = contextMap(evaluation);
@@ -93,6 +94,18 @@ test("production-shaped required and forbidden resources reconcile to the source
     assert.equal(allows(forbidden), false, manifestId);
   }
   assert.deepEqual(registrations.flatMap(({ context }) => context).filter(({ key }) => key.startsWith("ecs:")).map(({ key }) => key).filter((key, index, keys) => keys.indexOf(key) === index).sort(), ["ecs:cluster", "ecs:compute-compatibility", "ecs:privileged", "ecs:task-cpu", "ecs:task-definition", "ecs:task-memory"]);
+});
+
+test("IAM reconciliation documentation matches generated policy evidence", () => {
+  const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
+  const requiredEvaluations = deriveRequiredEvaluations(plan, manifest).required.length;
+  const expectedPolicySha256 = sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256;
+  const documentedPolicySha256 = reconciliationDocument.match(/canonical FinalApplyWrite SHA-256 changes from[\s\S]*?to\s+`([a-f0-9]{64})`/)?.[1];
+  const documentedEvaluations = reconciliationDocument.match(/required evaluations: (\d+)\/(\d+) allowed/);
+  assert.equal(documentedPolicySha256, expectedPolicySha256);
+  assert.ok(documentedEvaluations);
+  assert.equal(Number(documentedEvaluations[1]), requiredEvaluations);
+  assert.equal(Number(documentedEvaluations[2]), requiredEvaluations);
 });
 
 test("IAM condition evaluation fails closed for missing context and unknown operators", () => {

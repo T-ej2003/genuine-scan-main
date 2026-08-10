@@ -61,6 +61,10 @@ function writeFixture(data, options = {}) {
     ]
     : undefined);
   const post = serviceResponse(targetArn);
+  const targetDeployment = serviceResponse(fromArn, [
+    { status: "PRIMARY", taskDefinition: fromArn, pendingCount: 1, runningCount: 2, rolloutState: "IN_PROGRESS" },
+    { status: "ACTIVE", taskDefinition: targetArn, pendingCount: 0, runningCount: 0 },
+  ]);
   const unrelatedTaskDefinition = `arn:aws:ecs:${region}:${account}:task-definition/unreviewed:9`;
   const unrelated = serviceResponse(unrelatedTaskDefinition);
   const tasks = {
@@ -73,7 +77,7 @@ function writeFixture(data, options = {}) {
     })),
   };
   const taskArns = options.taskArnsResponse || { taskArns: tasks.tasks.map((task) => task.taskArn) };
-  for (const [name, value] of Object.entries({ target, normal, pre, post, unrelated, tasks, taskArns })) {
+  for (const [name, value] of Object.entries({ target, normal, pre, post, targetDeployment, unrelated, tasks, taskArns })) {
     fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(value));
   }
   const aws = `#!/usr/bin/env bash
@@ -89,8 +93,15 @@ elif [[ "$1 $2" == "ecs describe-task-definition" ]]; then
   if [[ "$task_definition" == "${fromArn}" || "$task_definition" == "mscqr-backend" ]]; then cat "$FAKE_DATA/normal.json"; else cat "$FAKE_DATA/target.json"; fi
 elif [[ "$1 $2" == "ecs describe-services" ]]; then
   if [[ "$FAKE_SCENARIO" == "reconcile-failure" && -f "$FAKE_DATA/update-attempted" ]]; then exit 51; fi
+  if [[ "$FAKE_SCENARIO" == "delayed-accepted" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then
+    count=0
+    [[ -f "$FAKE_DATA/settlement-count" ]] && count="$(cat "$FAKE_DATA/settlement-count")"
+    count=$((count + 1))
+    printf '%s' "$count" > "$FAKE_DATA/settlement-count"
+    if ((count >= 2)); then printf '%s' "${targetArn}" > "$FAKE_DATA/state"; fi
+  fi
   current="$(cat "$FAKE_DATA/state")"
-  if [[ "$current" == "${targetArn}" ]]; then cat "$FAKE_DATA/post.json"; elif [[ "$current" == "${fromArn}" ]]; then cat "$FAKE_DATA/pre.json"; else cat "$FAKE_DATA/unrelated.json"; fi
+  if [[ "$FAKE_SCENARIO" == "target-deployment" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then cat "$FAKE_DATA/targetDeployment.json"; elif [[ "$current" == "${targetArn}" ]]; then cat "$FAKE_DATA/post.json"; elif [[ "$current" == "${fromArn}" ]]; then cat "$FAKE_DATA/pre.json"; else cat "$FAKE_DATA/unrelated.json"; fi
 elif [[ "$1 $2" == "ecs update-service" ]]; then
   task_definition=""
   for ((i=1; i<=$#; i++)); do
@@ -101,6 +112,9 @@ elif [[ "$1 $2" == "ecs update-service" ]]; then
   if [[ "$FAKE_SCENARIO" == "ambiguous-target" && "$task_definition" == "${targetArn}" ]]; then printf '%s' "$task_definition" > "$FAKE_DATA/state"; exit 31; fi
   if [[ "$FAKE_SCENARIO" == "ambiguous-unrelated" && "$task_definition" == "${targetArn}" ]]; then printf '%s' "${unrelatedTaskDefinition}" > "$FAKE_DATA/state"; exit 31; fi
   if [[ "$FAKE_SCENARIO" == "reconcile-failure" && "$task_definition" == "${targetArn}" ]]; then printf '%s' "$task_definition" > "$FAKE_DATA/state"; exit 31; fi
+  if [[ "$FAKE_SCENARIO" == "delayed-accepted" && "$task_definition" == "${targetArn}" ]]; then exit 31; fi
+  if [[ "$FAKE_SCENARIO" == "target-deployment" && "$task_definition" == "${targetArn}" ]]; then touch "$FAKE_DATA/update-attempted"; exit 31; fi
+  if [[ "$task_definition" == "${fromArn}" ]]; then touch "$FAKE_DATA/rollback-attempted"; fi
   if [[ "$FAKE_SCENARIO" == "rollback-failure" && "$task_definition" == "${fromArn}" ]]; then exit 31; fi
   printf '%s' "$task_definition" > "$FAKE_DATA/state"
 elif [[ "$1 $2" == "ecs wait" ]]; then
@@ -112,6 +126,8 @@ fi
 `;
   const fakeAws = path.join(fakeBin, "aws");
   fs.writeFileSync(fakeAws, aws, { mode: 0o755 });
+  const sleep = path.join(fakeBin, "sleep");
+  fs.writeFileSync(sleep, "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
   const curl = `#!/usr/bin/env bash
 set -euo pipefail
 echo "curl $*" >> "$FAKE_DATA/calls.log"
@@ -241,10 +257,31 @@ test("already-active target is a verified no-op", () => {
   assert.equal((result.calls.match(/ecs register-task-definition/g) || []).length, 0);
   assertTempClean(result);
 });
-test("update failure does not trigger an invented rollback", () => {
+test("all previous settlement proves no target was observed without rollback", () => {
   const result = runExisting({ scenario: "update-failure" });
-  assertFailure(result);
+  assertFailure(result, /complete settlement window/);
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assertTempClean(result);
+});
+test("delayed accepted UpdateService is detected after an initial previous read and rolled back", () => {
+  const result = runExisting({ scenario: "delayed-accepted" });
+  assertFailure(result, /AMBIGUOUS_UPDATE_OUTCOME/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
+  assert.equal(fs.readFileSync(result.fixture.state, "utf8"), fromArn);
+  const events = result.calls.trim().split("\n");
+  const descriptions = events.reduce((indexes, event, index) => event.startsWith("ecs describe-services") ? [...indexes, index] : indexes, []);
+  const updates = events.reduce((indexes, event, index) => event.startsWith("ecs update-service") ? [...indexes, index] : indexes, []);
+  assert.ok(descriptions.length >= 4);
+  assert.ok(descriptions[1] < descriptions[2]);
+  assert.ok(descriptions[2] < updates[1]);
+  assert.match(events[updates[1]], new RegExp(`--task-definition ${fromArn.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}`));
+  assertTempClean(result);
+});
+test("target deployment metadata is treated as accepted before the service primary flips", () => {
+  const result = runExisting({ scenario: "target-deployment" });
+  assertFailure(result, /AMBIGUOUS_UPDATE_OUTCOME/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
+  assert.equal(fs.readFileSync(result.fixture.state, "utf8"), fromArn);
   assertTempClean(result);
 });
 test("ambiguous accepted UpdateService response reconciles and rolls back the exact previous ARN", () => {

@@ -161,7 +161,77 @@ EXISTING_TASKS_FILE="$(mktemp)"
 EXISTING_CALLER_FILE="$(mktemp)"
 existing_mode_active=false
 existing_switch_started=false
+update_attempted=false
 update_state="NOT_ATTEMPTED"
+UPDATE_SETTLEMENT_ATTEMPTS=6
+UPDATE_SETTLEMENT_INTERVAL_SECONDS=2
+
+settle_update_outcome() {
+  local attempt classification
+  settlement_result="UNKNOWN"
+  for ((attempt = 1; attempt <= UPDATE_SETTLEMENT_ATTEMPTS; attempt++)); do
+    if ! aws ecs describe-services \
+      --region "$AWS_REGION" \
+      --cluster "$CLUSTER_NAME" \
+      --services "$SERVICE_NAME" \
+      >"$EXISTING_POST_SERVICE_FILE"; then
+      settlement_result="UNKNOWN"
+      return 0
+    fi
+    if ! classification="$(node --input-type=module - "$EXISTING_POST_SERVICE_FILE" "$PREVIOUS_TASK_DEFINITION_ARN" "$EXISTING_TASK_DEFINITION_ARN" <<'NODE'
+import fs from "node:fs";
+
+const [responsePath, previousArn, targetArn] = process.argv.slice(2);
+const response = JSON.parse(fs.readFileSync(responsePath, "utf8"));
+if (!Array.isArray(response.failures) || response.failures.length !== 0 || response.services?.length !== 1) throw new Error("ECS service settlement response is malformed.");
+const service = response.services[0];
+const deployments = service.deployments;
+if (typeof service.taskDefinition !== "string" || !Array.isArray(deployments) || deployments.length === 0 || deployments.some(({ taskDefinition }) => typeof taskDefinition !== "string")) throw new Error("ECS service settlement response is incomplete.");
+if (service.taskDefinition === targetArn || deployments.some(({ taskDefinition }) => taskDefinition === targetArn)) {
+  process.stdout.write("TARGET");
+} else if (service.taskDefinition !== previousArn || deployments.some(({ taskDefinition }) => taskDefinition !== previousArn)) {
+  process.stdout.write("FOREIGN");
+} else {
+  const deployment = deployments.length === 1 ? deployments[0] : null;
+  const stable = deployment?.status === "PRIMARY"
+    && deployment.pendingCount === 0
+    && deployment.runningCount === service.desiredCount
+    && (!deployment.rolloutState || deployment.rolloutState === "COMPLETED");
+  process.stdout.write(stable ? "PREVIOUS_STABLE" : "PREVIOUS_PENDING");
+}
+NODE
+)"; then
+      settlement_result="UNKNOWN"
+      return 0
+    fi
+    case "$classification" in
+      TARGET)
+        settlement_result="TARGET"
+        return 0
+        ;;
+      FOREIGN)
+        settlement_result="FOREIGN"
+        return 0
+        ;;
+      PREVIOUS_STABLE)
+        if ((attempt == UPDATE_SETTLEMENT_ATTEMPTS)); then
+          settlement_result="NO_TARGET_OBSERVED"
+          return 0
+        fi
+        ;;
+      PREVIOUS_PENDING)
+        ;;
+      *)
+        settlement_result="UNKNOWN"
+        return 0
+        ;;
+    esac
+    if ! sleep "$UPDATE_SETTLEMENT_INTERVAL_SECONDS"; then
+      settlement_result="UNKNOWN"
+      return 0
+    fi
+  done
+}
 
 verify_existing_service_restored() {
   local response_file="$EXISTING_POST_SERVICE_FILE"
@@ -189,7 +259,7 @@ cleanup_and_rollback_on_exit() {
   local exit_code=$?
   trap - EXIT
   set +e
-  if [[ "$existing_mode_active" == "true" && "$existing_switch_started" == "true" && "$exit_code" -ne 0 && ( "$update_state" == "UPDATE_CONFIRMED" || "$update_state" == "ROLLBACK_REQUIRED" ) ]]; then
+  if [[ "$existing_mode_active" == "true" && "$update_attempted" == "true" && "$exit_code" -ne 0 && ( "$update_state" == "UPDATE_CONFIRMED" || "$update_state" == "ROLLBACK_REQUIRED" ) ]]; then
     echo "Existing task-definition switch failed; restoring ${PREVIOUS_TASK_DEFINITION_ARN}." >&2
     WAIT_FOR_STABLE=true \
       AWS_REGION="$AWS_REGION" \
@@ -302,6 +372,7 @@ NODE
   )"
 
   if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" ]]; then
+    update_attempted=true
     update_state="UPDATE_ATTEMPTED"
     if aws ecs update-service \
       --region "$AWS_REGION" \
@@ -312,40 +383,30 @@ NODE
       update_state="UPDATE_CONFIRMED"
       existing_switch_started=true
     else
-      if ! aws ecs describe-services \
-        --region "$AWS_REGION" \
-        --cluster "$CLUSTER_NAME" \
-        --services "$SERVICE_NAME" \
-        >"$EXISTING_POST_SERVICE_FILE"; then
-        update_state="UPDATE_OUTCOME_AMBIGUOUS"
-        echo "UNKNOWN_SERVICE_STATE: UpdateService failed and service state could not be reconciled." >&2
-        exit 1
-      fi
-      if ! reconciled_task_definition="$(node --input-type=module - "$EXISTING_POST_SERVICE_FILE" <<'NODE'
-import fs from "node:fs";
-const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-if (!Array.isArray(response.failures) || response.failures.length !== 0 || response.services?.length !== 1 || typeof response.services[0]?.taskDefinition !== "string") throw new Error("ECS service reconciliation response is malformed.");
-process.stdout.write(response.services[0].taskDefinition);
-NODE
-      )"; then
-        update_state="UPDATE_OUTCOME_AMBIGUOUS"
-        echo "UNKNOWN_SERVICE_STATE: UpdateService failed and service state was malformed." >&2
-        exit 1
-      fi
-      if [[ "$reconciled_task_definition" == "$PREVIOUS_TASK_DEFINITION_ARN" ]]; then
-        update_state="NOT_ATTEMPTED"
-        echo "UpdateService failed; reconciliation proved the service remains on the previous task definition." >&2
-        exit 1
-      fi
-      if [[ "$reconciled_task_definition" == "$EXISTING_TASK_DEFINITION_ARN" ]]; then
-        update_state="ROLLBACK_REQUIRED"
-        existing_switch_started=true
-        echo "AMBIGUOUS_UPDATE_OUTCOME: UpdateService failed after the target became active; restoring the exact previous task definition." >&2
-        exit 1
-      fi
-      update_state="UPDATE_OUTCOME_AMBIGUOUS"
-      echo "AMBIGUOUS_UPDATE_OUTCOME: service task definition is neither the expected previous nor target ARN: ${reconciled_task_definition}" >&2
-      exit 1
+      settle_update_outcome
+      case "$settlement_result" in
+        TARGET)
+          update_state="ROLLBACK_REQUIRED"
+          existing_switch_started=true
+          echo "AMBIGUOUS_UPDATE_OUTCOME: UpdateService failed after the target became active; restoring the exact previous task definition." >&2
+          exit 1
+          ;;
+        NO_TARGET_OBSERVED)
+          update_state="UPDATE_FAILED_NO_TARGET_OBSERVED"
+          echo "UpdateService failed; the complete settlement window ended with the previous task definition stable and no target deployment observed." >&2
+          exit 1
+          ;;
+        FOREIGN)
+          update_state="UPDATE_OUTCOME_AMBIGUOUS"
+          echo "AMBIGUOUS_UPDATE_OUTCOME: service task definition or deployment is neither the expected previous nor target ARN: concurrent state requires operator intervention." >&2
+          exit 1
+          ;;
+        *)
+          update_state="UPDATE_OUTCOME_AMBIGUOUS"
+          echo "UNKNOWN_SERVICE_STATE: UpdateService failed and the bounded settlement window could not establish a safe service state." >&2
+          exit 1
+          ;;
+      esac
     fi
   else
     echo "Target task definition is already active on ${SERVICE_NAME}; no service update required."
