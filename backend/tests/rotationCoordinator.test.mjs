@@ -36,21 +36,23 @@ const makeKeys = () => generateKeyPairSync("ed25519", {
   publicKeyEncoding: { format: "pem", type: "spki" },
 });
 
-const fakeSecrets = (initial, { failAfterPut = 0 } = {}) => {
+const fakeSecrets = (initial, { failAfterPut = 0, versionIds = {} } = {}) => {
   const values = new Map(Object.entries(initial));
   const requests = new Map();
   const putCalls = [];
-  const versions = new Map();
+  const versions = new Map(Object.entries(versionIds));
   let puts = 0;
   return {
     values,
     requests,
     putCalls,
+    versionIds: versions,
     get putCount() { return puts; },
     async send(command) {
       const input = command.input;
       if (command.constructor.name === "GetSecretValueCommand") {
-        return { SecretString: values.get(input.SecretId) || "", VersionId: versions.get(input.SecretId) || `version-${input.SecretId}-initial` };
+        if (!versions.has(input.SecretId)) versions.set(input.SecretId, `version-${input.SecretId}-initial`);
+        return { SecretString: values.get(input.SecretId) || "", VersionId: versions.get(input.SecretId) };
       }
       if (command.constructor.name === "PutSecretValueCommand") {
         const prior = requests.get(input.ClientRequestToken);
@@ -94,6 +96,17 @@ const initialSecrets = () => {
   };
 };
 
+const seededRotationSecrets = () => {
+  const { initial } = initialSecrets();
+  const keys = makeKeys();
+  const newJwt = "new-jwt-material";
+  const newQrVersion = createHash("sha256").update(keys.publicKey).digest("hex").slice(0, 16);
+  initial[baseConfig.jwt.pendingSecretId] = material(newJwt, { rotationId: baseConfig.rotationId, family: "jwt_secrets", slot: "pending", materialFingerprint: fingerprint(newJwt) });
+  initial[baseConfig.qr.privatePendingSecretId] = material(keys.privateKey, { rotationId: baseConfig.rotationId, family: "qr_signing_keys", slot: "pending-private", keyVersion: newQrVersion, materialFingerprint: fingerprint(keys.privateKey) });
+  initial[baseConfig.qr.publicPendingSecretId] = material(keys.publicKey, { rotationId: baseConfig.rotationId, family: "qr_signing_keys", slot: "pending-public", keyVersion: newQrVersion, materialFingerprint: fingerprint(keys.publicKey) });
+  return initial;
+};
+
 const runtimeProof = (config, phase, observedAt, deploymentSha) => phase === "overlap"
   ? {
       rotationId: config.rotationId, phase, deploymentSha, runtimeInvocationRef: "https://example.test/runtime-overlap",
@@ -112,6 +125,41 @@ const writeProof = (directory, name, proof) => {
   const file = path.join(directory, name);
   writeFileSync(file, `${JSON.stringify(proof)}\n`, { mode: 0o600 });
   return file;
+};
+
+const valuesWith = (context, entries, remove = []) => {
+  const values = new Map(context.values);
+  for (const key of remove) values.delete(key);
+  for (const [key, value] of entries) values.set(key, value);
+  return values;
+};
+
+const setupCleanupDeployRequired = async (directory, sm, clockState) => {
+  const context = contextFor(directory, baseConfig, sm, () => clockState.now);
+  await prepare(context);
+  const overlapFile = writeProof(directory, "overlap.json", runtimeProof(baseConfig, "overlap", new Date(clockState.now).toISOString(), baseConfig.overlapDeploymentSha));
+  await verify({ ...context, values: valuesWith(context, [["runtime-verification-file", overlapFile]]) });
+  clockState.now += 10_000;
+  const cleanupSha = "c".repeat(40);
+  const cleanupContext = { ...context, values: valuesWith(context, [["cleanup-deployment-sha", cleanupSha], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) };
+  await cleanup(cleanupContext);
+  return { cleanupContext, cleanupSha, retirementTimestamp: JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8")).retirementTimestamp };
+};
+
+const interruptedCleanup = async (directory, sm, clockState) => {
+  const { cleanupContext, cleanupSha, retirementTimestamp } = await setupCleanupDeployRequired(directory, sm, clockState);
+  clockState.now = Date.parse(retirementTimestamp) + 2_000;
+  const cleanupFile = writeProof(directory, "cleanup.json", runtimeProof(baseConfig, "cleanup", new Date(Date.parse(retirementTimestamp) + 1_000).toISOString(), cleanupSha));
+  const crashContext = {
+    ...cleanupContext,
+    persistState: (file, state) => {
+      writeFileSync(file, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+      if (state.phase === "cleanup-runtime-verified") throw new Error("simulated process death before cleaned persist");
+    },
+    values: valuesWith(cleanupContext, [["cleanup-runtime-file", cleanupFile]])
+  };
+  await assert.rejects(cleanup(crashContext), /simulated process death before cleaned persist/);
+  return { cleanupContext, cleanupSha, cleanupFile, retirementTimestamp };
 };
 
 test("prepare resumes after JWT pending write crash", async () => {
@@ -296,6 +344,158 @@ test("full rotation enforces grace, retires every slot, deploys after retirement
     } finally {
       rmSync(nextDirectory, { recursive: true, force: true });
     }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("uninterrupted cleanup reaches cleaned and emits final evidence", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-normal-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clockState = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext, cleanupSha, retirementTimestamp } = await setupCleanupDeployRequired(directory, sm, clockState);
+    clockState.now = Date.parse(retirementTimestamp) + 2_000;
+    const cleanupFile = writeProof(directory, "cleanup.json", runtimeProof(baseConfig, "cleanup", new Date(Date.parse(retirementTimestamp) + 1_000).toISOString(), cleanupSha));
+    const evidenceFile = path.join(directory, "evidence.json");
+    await cleanup({ ...cleanupContext, values: valuesWith(cleanupContext, [["cleanup-runtime-file", cleanupFile], ["evidence-out", evidenceFile]]) });
+    assert.equal(JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8")).phase, "cleaned");
+    assert.equal(JSON.parse(readFileSync(evidenceFile, "utf8")).cleanupWindowComplete, true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cleanup resumes from cleanup-runtime-verified without secret or deployment mutations and preserves evidence", async () => {
+  const normalDirectory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-evidence-normal-"));
+  const resumedDirectory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-evidence-resumed-"));
+  try {
+    const fixture = { initial: seededRotationSecrets() };
+    const normalClock = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext: normalContext, cleanupSha: normalSha, retirementTimestamp: normalRetirement } = await setupCleanupDeployRequired(normalDirectory, fakeSecrets(fixture.initial), normalClock);
+    normalClock.now = Date.parse(normalRetirement) + 2_000;
+    const normalFile = writeProof(normalDirectory, "cleanup.json", runtimeProof(baseConfig, "cleanup", new Date(Date.parse(normalRetirement) + 1_000).toISOString(), normalSha));
+    const normalEvidenceFile = path.join(normalDirectory, "evidence.json");
+    await cleanup({ ...normalContext, values: valuesWith(normalContext, [["cleanup-runtime-file", normalFile], ["evidence-out", normalEvidenceFile]]) });
+
+    const resumedClock = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext, cleanupSha, cleanupFile } = await interruptedCleanup(resumedDirectory, fakeSecrets(fixture.initial), resumedClock);
+    const resumedSm = fakeSecrets(Object.fromEntries(cleanupContext.sm.values), { versionIds: Object.fromEntries(cleanupContext.sm.versionIds) });
+    const secretWritesBeforeResume = resumedSm.putCount;
+    const ecsMutationsBeforeResume = 0;
+    const resumedEvidenceFile = path.join(resumedDirectory, "evidence.json");
+    await cleanup({
+      ...cleanupContext,
+      sm: resumedSm,
+      values: valuesWith(cleanupContext, [["evidence-out", resumedEvidenceFile]], ["cleanup-evidence-ref", "cleanup-runtime-file"]),
+    });
+    assert.equal(JSON.parse(readFileSync(path.join(resumedDirectory, "state.json"), "utf8")).phase, "cleaned");
+    assert.equal(resumedSm.putCount - secretWritesBeforeResume, 0);
+    assert.equal(ecsMutationsBeforeResume, 0);
+    assert.deepEqual(JSON.parse(readFileSync(resumedEvidenceFile, "utf8")), JSON.parse(readFileSync(normalEvidenceFile, "utf8")));
+  } finally {
+    rmSync(normalDirectory, { recursive: true, force: true });
+    rmSync(resumedDirectory, { recursive: true, force: true });
+  }
+});
+
+test("cleanup-runtime-verified fails closed when cleanupRuntime is missing", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-missing-proof-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clockState = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext } = await interruptedCleanup(directory, sm, clockState);
+    const stateFile = path.join(directory, "state.json");
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    delete state.cleanupRuntime;
+    writeFileSync(stateFile, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
+    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /state.cleanupRuntime is required/);
+    assert.equal(resumedSm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cleanup-runtime-verified resumes a pre-fix crash state using only persisted proof plus required evidence reference", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-legacy-resume-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clockState = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext, cleanupSha } = await interruptedCleanup(directory, sm, clockState);
+    const stateFile = path.join(directory, "state.json");
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    delete state.cleanupCompletedAt;
+    delete state.cleanupEvidenceRef;
+    delete state.cleanupVerifiedBy;
+    writeFileSync(stateFile, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
+    await cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [["cleanup-deployment-sha", cleanupSha]]) });
+    const resumedState = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(resumedState.phase, "cleaned");
+    assert.equal(resumedState.cleanupCompletedAt, resumedState.cleanupRuntime.observedAt);
+    assert.equal(resumedSm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cleanup-runtime-verified fails closed when persisted cleanup deployment SHA is wrong", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-sha-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clockState = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext, cleanupSha } = await interruptedCleanup(directory, sm, clockState);
+    const stateFile = path.join(directory, "state.json");
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    state.cleanupRuntime.deploymentSha = "d".repeat(40);
+    writeFileSync(stateFile, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
+    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [["cleanup-deployment-sha", cleanupSha]], ["cleanup-evidence-ref"]) }), /deployment SHA is invalid/);
+    assert.equal(resumedSm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cleanup-runtime-verified fails closed when retirement state drifts", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-retirement-drift-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clockState = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext } = await interruptedCleanup(directory, sm, clockState);
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
+    resumedSm.values.set(baseConfig.jwt.pendingSecretId, material("drifted", { rotationId: baseConfig.rotationId, family: "jwt_secrets", slot: "pending", materialFingerprint: fingerprint("drifted") }));
+    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /does not match rotation state|was not retired/);
+    assert.equal(resumedSm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cleaned cleanup is idempotent and re-emits persisted evidence without new metadata", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-idempotent-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clockState = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext, cleanupSha, retirementTimestamp } = await setupCleanupDeployRequired(directory, sm, clockState);
+    clockState.now = Date.parse(retirementTimestamp) + 2_000;
+    const cleanupFile = writeProof(directory, "cleanup.json", runtimeProof(baseConfig, "cleanup", new Date(Date.parse(retirementTimestamp) + 1_000).toISOString(), cleanupSha));
+    const firstEvidence = path.join(directory, "first-evidence.json");
+    await cleanup({ ...cleanupContext, values: valuesWith(cleanupContext, [["cleanup-runtime-file", cleanupFile], ["evidence-out", firstEvidence]]) });
+    const stateBefore = readFileSync(path.join(directory, "state.json"), "utf8");
+    const writesBeforeRetry = sm.putCount;
+    const secondEvidence = path.join(directory, "second-evidence.json");
+    await cleanup({ ...cleanupContext, values: valuesWith(cleanupContext, [["cleanup-deployment-sha", cleanupSha], ["evidence-out", secondEvidence]], ["cleanup-evidence-ref", "cleanup-runtime-file"]) });
+    assert.equal(sm.putCount - writesBeforeRetry, 0);
+    assert.equal(readFileSync(path.join(directory, "state.json"), "utf8"), stateBefore);
+    assert.deepEqual(JSON.parse(readFileSync(secondEvidence, "utf8")), JSON.parse(readFileSync(firstEvidence, "utf8")));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

@@ -85,6 +85,13 @@ definition sets `production_rotation_cleanup_enabled=true`, which removes the
 retired JWT and QR previous bindings entirely while retaining every current
 binding. Only that proof can produce cleanup evidence.
 
+If the process stops after persisting `cleanup-runtime-verified`, the next
+`--cleanup` validates the persisted runtime proof and cleanup evidence identity,
+re-reads the secret slots, re-proves retirement, and persists `cleaned` without
+retiring or deploying again. Final evidence is rebuilt from that persisted
+verified state, so repeated cleanup is idempotent and does not create new
+timestamps or proof references.
+
 State, fixture, verification, and evidence paths must be outside the repository
 or explicitly reviewed non-secret evidence locations. They contain identifiers,
 version IDs, fingerprints, timestamps, and checks only—not secret values. The
