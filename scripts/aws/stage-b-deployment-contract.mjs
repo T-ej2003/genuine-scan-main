@@ -34,6 +34,21 @@ const executionRoleNames = Object.freeze({
 const executionPolicyKeys = new Set(Object.keys(executionRoleNames));
 const candidateStoragePolicyKeys = new Set(["backend", "worker", "canary"]);
 
+export const STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES = Object.freeze([
+  ...Object.keys(stageBLogNames).map((key) => `aws_cloudwatch_log_group.stage_b["${key}"]`),
+  ...Object.keys(executionRoleNames).map((key) => `aws_iam_role.execution["${key}"]`),
+  ...Object.keys(taskRoleNames).map((key) => `aws_iam_role.task["${key}"]`),
+  ...Object.keys(executionRoleNames).map((key) => `aws_iam_role_policy.execution["${key}"]`),
+  ...[...candidateStoragePolicyKeys].map((key) => `aws_iam_role_policy.candidate_object_storage["${key}"]`),
+  "aws_iam_role_policy.executor_runtime",
+  "aws_dynamodb_table.replay",
+  "aws_iam_policy.broker",
+  "aws_iam_role_policy_attachment.broker",
+  "aws_lambda_function.broker",
+  "aws_lambda_alias.reviewed",
+  "aws_lambda_permission.release_deployer",
+].sort());
+
 export const STAGE_B_BROKER_POLICY_STATEMENTS = Object.freeze([
   Object.freeze(["RunOnlyApprovedExecutorAndCanaryRevisions", Object.freeze(["ecs:RunTask"])]),
   Object.freeze(["PassOnlyApprovedTaskRoles", Object.freeze(["iam:PassRole"])]),

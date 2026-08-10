@@ -67,7 +67,7 @@
     "zero-current-refresh-checkpoint": "retained definitions and persistent broker resources refresh as no-op",
     "normal-subsequent-release": "current creates/no-ops, exact task-definition rotations, with broker mutation when mappings change",
     "ecs-task-definition-rotation": "exact twelve root-managed versioned task definitions may replace only through the reviewed container-definition rollover contract",
-    "current-production-shaped-plan": "58 no-ops, 12 creates, 3 updates, zero deletes/replacements"
+    "current-production-shaped-plan": "canonical managed address-set completeness with 12 creates, 3 updates, append-only retained no-ops, and zero deletes/replacements"
   },
   "actionLifecycle": {
     "create": ["initial-stage-b", "partial-apply-retry", "pre-canary-retained-rollover", "post-canary-rollover", "zero-current-refresh-checkpoint", "normal-subsequent-release"],

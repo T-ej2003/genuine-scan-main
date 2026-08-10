@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
+import { STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
 import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, assertPermissionEvaluationBindings, assertPermissionReportPlanBinding, assertReleasePolicyEvidence, validateManifest, verifyPermissionReportSignature, assertStageBPermissionEvidenceKind, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, resolveStageBPermissionProfile } from "./validate-production-green-stage-b-permissions.mjs";
@@ -16,7 +16,7 @@ import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mj
 import { assertStageBDeploymentCapabilityGraph } from "./generate-production-green-stage-b-capability-graph.mjs";
 import { assertStageBRecoveryProvenance, assertStageBRefreshEvidence } from "./stage-b-refresh-contract.mjs";
 import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
-import { assertStageBPlanApprovedBinding } from "./stage-b-plan-approval-contract.mjs";
+import { assertStageBNormalPlanCompleteness, assertStageBPlanApprovedBinding } from "./stage-b-plan-approval-contract.mjs";
 import { assertVerifiedStageBRecovery } from "./stage-b-partial-apply-recovery-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -181,10 +181,14 @@ for (const contractPattern of Object.keys(STAGE_B_RESOURCE_ACTION_MATRIX)) {
   assert(matrixBases.includes(base), `Shared classifier contract has no closure matrix entry: ${base}`);
 }
 
-const classified = classifyStageBPlan(fixture, { strict: false });
-assert.deepEqual(classified.actionCounts, { "no-op": 58, create: 12, update: 3 });
+const fixtureRetainedAddresses = fixture.resource_changes.filter((change) => change.address?.includes("_retained[")).map((change) => change.address);
+const structuralFixture = assertStageBNormalPlanCompleteness(fixture, { expectedRetainedAddresses: fixtureRetainedAddresses, strict: false });
+const classified = structuralFixture.classification;
+assert.equal(classified.actionCounts["no-op"], structuralFixture.expectedAddresses.length - 15);
+assert.equal(classified.actionCounts.create, 12);
+assert.equal(classified.actionCounts.update, 3);
 assert.deepEqual(classified.unclassifiedResources, []);
-assert.equal(fixture.resource_changes.length, 73);
+assert.equal(fixture.resource_changes.length, structuralFixture.expectedAddresses.length);
 for (const variable of matrix.deploymentIdentity.requiredPlanVariables) assert.match(fixture.variables?.[variable]?.value || "", variable === "canonical_image_evidence_sha256" ? /^[a-f0-9]{64}$/ : /^[a-f0-9]{40}$/);
 assert(!fixture.resource_changes.some((change) => (change.change?.actions || []).some((action) => ["delete", "create-delete", "replace"].includes(action))), "Closure fixture contains a destructive action.");
 assert.equal(matrix.resources.every((entry) => entry.layers.includes("plan-validator") && entry.layers.includes("apply-wrapper")), true);

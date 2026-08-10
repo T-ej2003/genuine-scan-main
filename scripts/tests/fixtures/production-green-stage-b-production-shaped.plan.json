@@ -6,7 +6,7 @@
     "expected": {
       "create": 12,
       "update": 3,
-      "no-op": 58,
+      "no-op": 70,
       "delete": 0,
       "replacement": 0
     }
@@ -887,6 +887,66 @@
         "before": {},
         "after": {}
       }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"e689d4d-backend\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"e689d4d-worker\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"e689d4d-canary\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "aws_ecs_task_definition.candidate_retained[\"e689d4d-read_only_canary\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"e689d4d-full-rls-admin-bootstrap\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"e689d4d-full-rls-admin-ownership\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"e689d4d-full-rls-capability-preflight\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"e689d4d-full-rls-role-provision\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"e689d4d-full-rls-role-verify\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"e689d4d-full-rls-rollback\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"e689d4d-full-rls-runtime-policy\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "aws_ecs_task_definition.executor_retained[\"e689d4d-full-rls-verification\"]",
+      "type": "aws_ecs_task_definition",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
     },
     {
       "address": "aws_dynamodb_table.replay",
