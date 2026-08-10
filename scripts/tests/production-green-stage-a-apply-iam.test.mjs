@@ -3,12 +3,16 @@ import fs from "node:fs";
 import test from "node:test";
 
 const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
+const refreshContract = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAProviderRefreshContract-v1.json", "utf8"));
 const statements = policy.Statement;
 const asArray = (value) => Array.isArray(value) ? value : [value];
 const matches = (pattern, value) => pattern === "*" || pattern === value || (pattern.endsWith("*") && value.startsWith(pattern.slice(0, -1)));
 
 const production = Object.freeze({
   region: "eu-west-2",
+  bucketArn: refreshContract.backend.bucketArn,
+  stateArn: refreshContract.backend.stateArn,
+  lockArn: refreshContract.backend.lockArn,
   endpointSecurityGroupArn: "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412",
   storageKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
   approvalKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",
@@ -17,16 +21,15 @@ const production = Object.freeze({
   checkerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
   executorLogArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green",
   brokerLogArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker",
-  secrets: [
-    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho",
-    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
-    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/canary/admin-email-gctAQZ",
-    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-rR3kri",
-  ],
+  executorRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
+  brokerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
 });
 
 const context = (region = production.region, overrides = {}) => ({
   "aws:RequestedRegion": region,
+  "aws:ResourceTag/Environment": "production",
+  "aws:ResourceTag/ManagedBy": "Terraform",
+  "aws:ResourceTag/Component": "full-rls-green-stage-a",
   ...overrides,
 });
 
@@ -52,13 +55,42 @@ const readCases = [
   ["iam:GetRole", production.checkerRoleArn],
   ["logs:ListTagsForResource", production.executorLogArn],
   ["logs:ListTagsForResource", production.brokerLogArn],
-  ...production.secrets.map((resource) => ["secretsmanager:DescribeSecret", resource]),
+  ["secretsmanager:DescribeSecret", "*"],
 ];
 
 test("Stage A provider refresh actions are exact and region-bound", () => {
   for (const [action, resource] of readCases) assert.equal(allows({ action, resource, values: context() }), true, `${action} ${resource}`);
   assert.equal(allows({ action: "ec2:DescribeVpcEndpoints", resource: "*", values: context("us-east-1") }), false);
-  assert.equal(allows({ action: "secretsmanager:DescribeSecret", resource: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:unrelated", values: context() }), false);
+  assert.equal(allows({ action: "secretsmanager:DescribeSecret", resource: "*", values: context(production.region, { "aws:ResourceTag/Component": "unrelated" }) }), false);
+});
+
+test("the independent Stage A resource graph has a reviewed refresh contract", () => {
+  const source = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
+  const discovered = new Set([...source.matchAll(/^resource "([^"]+)"/gm)].map(([, type]) => type));
+  const contracted = new Set(refreshContract.resourceTypes.map(({ type }) => type));
+  assert.deepEqual([...discovered].sort(), [...contracted].sort());
+  assert.deepEqual(refreshContract.unmappedResourceTypes, []);
+  for (const resourceType of refreshContract.resourceTypes) {
+    assert.ok(resourceType.addresses.length > 0, resourceType.type);
+    assert.ok(resourceType.readActions.length > 0, resourceType.type);
+    for (const read of resourceType.readActions) {
+      for (const resource of read.resources) {
+        assert.equal(allows({ action: read.action, resource, values: context(read.region ?? production.region) }), true, `${resourceType.type} ${read.action} ${resource}`);
+      }
+    }
+  }
+});
+
+test("the S3 backend contract covers exact state and lockfile lifecycle only", () => {
+  for (const operation of refreshContract.backend.operations) {
+    assert.equal(allows({ action: operation.action, resource: operation.resource, values: context() }), true, `${operation.action} ${operation.resource}`);
+  }
+  assert.equal(allows({ action: "s3:PutObject", resource: `${production.bucketArn}/mscqr/production/rls-green/stage-b/terraform.tfstate`, values: context() }), false);
+  assert.equal(allows({ action: "s3:PutObject", resource: `${production.bucketArn}/arbitrary/object`, values: context() }), false);
+  assert.equal(allows({ action: "s3:DeleteObject", resource: production.stateArn, values: context() }), false);
+  assert.equal(allows({ action: "s3:DeleteObject", resource: `${production.bucketArn}/arbitrary.tflock`, values: context() }), false);
+  assert.equal(allows({ action: "s3:GetObject", resource: "arn:aws:s3:::unrelated-bucket/state.tfstate", values: context() }), false);
+  assert.equal(statements.flatMap(({ Action }) => asArray(Action)).includes("s3:ListBucket"), false);
 });
 
 test("Stage A apply permits only the exact endpoint security-group ingress", () => {
@@ -71,10 +103,13 @@ test("Stage A policy has no unrelated mutation or secret/value authority", () =>
   const actions = statements.flatMap(({ Action }) => asArray(Action));
   for (const forbidden of [
     "ec2:RevokeSecurityGroupIngress", "ec2:ModifySecurityGroupRules", "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup",
-    "rds:ModifyDBInstance", "rds:DeleteDBInstance", "secretsmanager:GetSecretValue", "secretsmanager:GetResourcePolicy",
-    "secretsmanager:ListSecretVersionIds", "secretsmanager:PutSecretValue", "kms:ScheduleKeyDeletion", "iam:PassRole",
-    "ecs:UpdateService", "ecs:RegisterTaskDefinition",
+    "rds:ModifyDBInstance", "rds:ModifyDBCluster", "rds:DeleteDBInstance", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecret",
+    "secretsmanager:ListSecretVersionIds", "kms:PutKeyPolicy", "kms:ScheduleKeyDeletion", "iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:PassRole",
+    "logs:DeleteLogGroup", "ec2:RevokeSecurityGroupIngress", "ec2:ModifySecurityGroupRules", "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup", "ecs:UpdateService", "ecs:RegisterTaskDefinition",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
   assert.equal(actions.some((action) => /^(ec2|rds|secretsmanager|kms):\*$/.test(action)), false);
   assert.equal(statements.filter(({ Action }) => asArray(Action).includes("ec2:AuthorizeSecurityGroupIngress")).length, 1);
+  assert.equal(actions.includes("s3:DeleteObject"), true);
+  assert.equal(actions.includes("s3:PutObject"), true);
+  assert.equal(actions.includes("kms:*") || actions.includes("iam:*") || actions.includes("ec2:*") || actions.includes("rds:*") || actions.includes("secretsmanager:*") || actions.includes("logs:*") , false);
 });

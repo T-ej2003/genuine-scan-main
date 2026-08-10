@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "terraformRoot": "infra/aws/terraform/production-green-stage-a",
+  "provider": {
+    "source": "hashicorp/aws",
+    "version": "6.56.0",
+    "lockFile": "infra/aws/terraform/production-green-stage-a/.terraform.lock.hcl"
+  },
+  "backend": {
+    "bucketArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+    "stateArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate",
+    "lockArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock",
+    "locking": "s3-use_lockfile=true",
+    "dynamodb": false,
+    "listBucketRequired": false,
+    "operations": [
+      { "action": "s3:GetBucketLocation", "resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2", "mode": "read" },
+      { "action": "s3:GetObject", "resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate", "mode": "read" },
+      { "action": "s3:PutObject", "resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate", "mode": "write" },
+      { "action": "s3:GetObject", "resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock", "mode": "read" },
+      { "action": "s3:PutObject", "resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock", "mode": "write" },
+      { "action": "s3:DeleteObject", "resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock", "mode": "write" }
+    ]
+  },
+  "resourceTypes": [
+    {
+      "type": "aws_kms_key",
+      "addresses": ["aws_kms_key.storage", "aws_kms_key.approval"],
+      "readActions": [
+        { "action": "kms:DescribeKey", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5", "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" },
+        { "action": "kms:GetKeyPolicy", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5", "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" },
+        { "action": "kms:GetKeyRotationStatus", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" },
+        { "action": "kms:ListResourceTags", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5", "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" }
+      ]
+    },
+    {
+      "type": "aws_kms_alias",
+      "addresses": ["aws_kms_alias.storage", "aws_kms_alias.approval"],
+      "readActions": [
+        { "action": "kms:ListAliases", "resources": ["*"], "region": "eu-west-2", "sourceOfProof": "provider kms/alias.go findAliasByName" }
+      ]
+    },
+    {
+      "type": "aws_db_subnet_group",
+      "addresses": ["aws_db_subnet_group.green"],
+      "readActions": [
+        { "action": "rds:DescribeDBSubnetGroups", "resources": ["arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2"], "region": "eu-west-2", "sourceOfProof": "provider rds/subnet_group.go" }
+      ]
+    },
+    {
+      "type": "aws_db_parameter_group",
+      "addresses": ["aws_db_parameter_group.green"],
+      "readActions": [
+        { "action": "rds:DescribeDBParameterGroups", "resources": ["arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"], "region": "eu-west-2", "sourceOfProof": "provider rds/parameter_group.go" },
+        { "action": "rds:DescribeDBParameters", "resources": ["arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"], "region": "eu-west-2", "sourceOfProof": "provider rds/parameter_group.go" }
+      ]
+    },
+    {
+      "type": "aws_security_group",
+      "addresses": ["aws_security_group.executor", "aws_security_group.database", "aws_security_group.executor_endpoints"],
+      "readActions": [
+        { "action": "ec2:DescribeSecurityGroups", "resources": ["*"], "region": "eu-west-2", "sourceOfProof": "provider ec2/security_group.go" }
+      ]
+    },
+    {
+      "type": "aws_vpc_security_group_ingress_rule",
+      "addresses": ["aws_vpc_security_group_ingress_rule.executor_endpoints_https", "aws_vpc_security_group_ingress_rule.runtime_endpoints_https[*]", "aws_vpc_security_group_ingress_rule.executor_database", "aws_vpc_security_group_ingress_rule.runtime_database[*]"],
+      "readActions": [
+        { "action": "ec2:DescribeSecurityGroupRules", "resources": ["*"], "region": "eu-west-2", "sourceOfProof": "provider ec2/security_group_rule.go" }
+      ]
+    },
+    {
+      "type": "aws_vpc_security_group_egress_rule",
+      "addresses": ["aws_vpc_security_group_egress_rule.executor_database", "aws_vpc_security_group_egress_rule.executor_interface_endpoints", "aws_vpc_security_group_egress_rule.executor_s3", "aws_vpc_security_group_egress_rule.executor_dns_udp", "aws_vpc_security_group_egress_rule.executor_dns_tcp"],
+      "readActions": [
+        { "action": "ec2:DescribeSecurityGroupRules", "resources": ["*"], "region": "eu-west-2", "sourceOfProof": "provider ec2/security_group_rule.go" }
+      ]
+    },
+    {
+      "type": "aws_vpc_endpoint",
+      "addresses": ["aws_vpc_endpoint.executor[*]"],
+      "readActions": [
+        { "action": "ec2:DescribeVpcEndpoints", "resources": ["*"], "region": "eu-west-2", "sourceOfProof": "provider ec2/vpc_endpoint.go" },
+        { "action": "ec2:DescribeNetworkInterfaces", "resources": ["*"], "region": "eu-west-2", "sourceOfProof": "provider ec2/vpc_endpoint.go findSubnetConfigurationsByNetworkInterfaceIDs" },
+        { "action": "ec2:DescribePrefixLists", "resources": ["*"], "region": "eu-west-2", "sourceOfProof": "provider ec2/vpc_endpoint.go findPrefixListByName" }
+      ]
+    },
+    {
+      "type": "aws_db_instance",
+      "addresses": ["aws_db_instance.green"],
+      "readActions": [
+        { "action": "rds:DescribeDBInstances", "resources": ["*"], "region": "eu-west-2", "sourceOfProof": "provider rds/instance.go" }
+      ]
+    },
+    {
+      "type": "aws_iam_role",
+      "addresses": ["aws_iam_role.checker", "aws_iam_role.executor", "aws_iam_role.broker"],
+      "readActions": [
+        { "action": "iam:GetRole", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"], "sourceOfProof": "provider iam/role.go" },
+        { "action": "iam:ListAttachedRolePolicies", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"], "sourceOfProof": "provider iam/role.go" },
+        { "action": "iam:ListRolePolicies", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"], "sourceOfProof": "provider iam/role.go" }
+      ]
+    },
+    {
+      "type": "aws_iam_role_policy",
+      "addresses": ["aws_iam_role_policy.checker"],
+      "readActions": [
+        { "action": "iam:GetRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"], "sourceOfProof": "provider iam/role_policy.go" }
+      ]
+    },
+    {
+      "type": "aws_cloudwatch_log_group",
+      "addresses": ["aws_cloudwatch_log_group.executor", "aws_cloudwatch_log_group.broker"],
+      "readActions": [
+        { "action": "logs:DescribeLogGroups", "resources": ["*"], "region": "eu-west-2", "sourceOfProof": "provider cloudwatch/log_group.go" },
+        { "action": "logs:ListTagsForResource", "resources": ["arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green", "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker"], "region": "eu-west-2", "sourceOfProof": "provider cloudwatch/log_group.go and Stage A plan diagnostic" }
+      ]
+    },
+    {
+      "type": "aws_secretsmanager_secret",
+      "addresses": ["aws_secretsmanager_secret.approval", "aws_secretsmanager_secret.runtime[*]", "aws_secretsmanager_secret.read_only_canary", "aws_secretsmanager_secret.canary[*]"],
+      "readActions": [
+        { "action": "secretsmanager:DescribeSecret", "resources": ["*"], "region": "eu-west-2", "conditions": { "aws:ResourceTag/Environment": "production", "aws:ResourceTag/ManagedBy": "Terraform", "aws:ResourceTag/Component": "full-rls-green-stage-a" }, "sourceOfProof": "provider secretsmanager/secret.go; AWS Secrets Manager service authorization" },
+        { "action": "secretsmanager:GetResourcePolicy", "resources": ["*"], "region": "eu-west-2", "conditions": { "aws:ResourceTag/Environment": "production", "aws:ResourceTag/ManagedBy": "Terraform", "aws:ResourceTag/Component": "full-rls-green-stage-a" }, "sourceOfProof": "provider secretsmanager/secret.go resourceSecretFlatten; AWS Secrets Manager service authorization" }
+      ]
+    }
+  ],
+  "unmappedResourceTypes": []
+}
