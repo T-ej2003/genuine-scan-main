@@ -11,6 +11,14 @@ This runbook covers the rotating backend secret families used by the app:
 
 Legacy single-slot variables still exist for compatibility, but production should use the dual-slot `CURRENT` / `PREVIOUS` model.
 
+Production Ed25519 QR rotation uses the same two-deploy overlap contract:
+
+- `QR_SIGN_PRIVATE_KEY_CURRENT` and `QR_SIGN_PUBLIC_KEY_CURRENT` are the only signing slots.
+- `QR_SIGN_ACTIVE_KEY_VERSION` is the current payload `kid`.
+- `QR_SIGN_PUBLIC_KEY_PREVIOUS` and `QR_SIGN_PREVIOUS_KEY_VERSION` are the only previous verification slot.
+- A previous private key is never deployed for verification.
+- Verification accepts exactly the current key or the one declared previous key; unknown `kid` values fail closed.
+
 ## Principles
 
 - Never commit secrets to git.
@@ -32,6 +40,28 @@ openssl rand -base64 48
 - JWTs include a `kid` derived from the active signing secret.
 - Versioned hashes are stored with a prefix, so historic hashes remain comparable during the cutover.
 - After the cutover window, `*_PREVIOUS` is removed in a second deploy.
+
+The canonical production coordinator is `backend/scripts/security/rotate-production-signing-material.mjs`.
+It requires an external, operator-owned JSON config containing only secret resource identifiers and the expected
+release role; it never prints secret values. Run one explicit mode at a time:
+
+```bash
+npm --prefix backend run security:rotate-production-signing-material -- \
+  --config /secure/operator/rotation.json --state-file /secure/operator/rotation-state.json \
+  --fixture-file /secure/operator/previous-qr-fixture.json --prepare
+
+npm --prefix backend run security:rotate-production-signing-material -- \
+  --config /secure/operator/rotation.json --state-file /secure/operator/rotation-state.json \
+  --fixture-file /secure/operator/previous-qr-fixture.json --verification-out /secure/operator/verification.json \
+  --verify
+```
+
+The config maps distinct Secrets Manager resources for JWT current/previous/pending, QR current/private,
+QR previous/public, and pending material. `config.qr.previousKeyVersion` must equal the currently deployed
+legacy QR `kid` when the old public-key record has no metadata. The coordinator writes only non-secret state
+and synthetic verification evidence to operator-controlled mode-600 files. `--cleanup` additionally requires
+`--confirm-cleanup`, a full cleanup deployment SHA, and a real verification reference after the documented
+grace window; it is never run by CI or implicitly by `--prepare`.
 
 ## Standard Two-Deploy Rotation
 

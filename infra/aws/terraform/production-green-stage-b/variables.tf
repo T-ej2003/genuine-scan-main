@@ -22,6 +22,36 @@ variable "stage_b_recovery_only" {
   type    = bool
   default = false
 }
+variable "production_rotation_enabled" {
+  type    = bool
+  default = false
+}
+variable "production_rotation_secret_value_from" {
+  type = object({
+    jwt_current         = string
+    jwt_previous        = string
+    qr_private_current  = string
+    qr_public_current   = string
+    qr_current_version  = string
+    qr_public_previous  = string
+    qr_previous_version = string
+  })
+  default = {
+    jwt_current         = ""
+    jwt_previous        = ""
+    qr_private_current  = ""
+    qr_public_current   = ""
+    qr_current_version  = ""
+    qr_public_previous  = ""
+    qr_previous_version = ""
+  }
+  validation {
+    condition = !var.production_rotation_enabled || alltrue([
+      for value in values(var.production_rotation_secret_value_from) : can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+:[A-Za-z0-9_-]+::$", value))
+    ])
+    error_message = "Production rotation task definitions require exact Secrets Manager JSON-key valueFrom references when enabled."
+  }
+}
 variable "stage_b_recovery_alias_target_version" {
   type     = string
   nullable = true
@@ -96,6 +126,20 @@ check "production_only" {
   assert {
     condition     = var.account_id == "368992683803" && var.aws_region == "eu-west-2" && var.deployment_environment == "production"
     error_message = "Stage B requires the production deployment environment in eu-west-2 account 368992683803."
+  }
+}
+
+check "production_rotation_contract" {
+  assert {
+    condition = !var.production_rotation_enabled || (
+      alltrue([
+        for value in values(var.production_rotation_secret_value_from) : can(regex("^arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:.+:[A-Za-z0-9_-]+::$", value))
+      ]) &&
+      var.production_rotation_secret_value_from.jwt_current != var.production_rotation_secret_value_from.jwt_previous &&
+      var.production_rotation_secret_value_from.qr_public_current != var.production_rotation_secret_value_from.qr_public_previous &&
+      var.production_rotation_secret_value_from.qr_current_version != var.production_rotation_secret_value_from.qr_previous_version
+    )
+    error_message = "Production rotation current and previous secret references/version references must be distinct."
   }
 }
 

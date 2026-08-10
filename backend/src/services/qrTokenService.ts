@@ -187,7 +187,7 @@ export const classifyQrSigningSecretFormat = (value: string | undefined | null):
 
 const keyFormatHint = (privateKeyFormat: QrSigningSecretFormat, publicKeyFormat: QrSigningSecretFormat) => {
   if (privateKeyFormat === "single_line_pem" || publicKeyFormat === "single_line_pem") {
-    return "QR_SIGN_PRIVATE_KEY appears to be single-line PEM. Store as base64-wrapped PEM or escaped-newline PEM.";
+    return "QR_SIGN_PRIVATE_KEY_CURRENT appears to be single-line PEM. Store as base64-wrapped PEM or escaped-newline PEM.";
   }
   if (privateKeyFormat === "invalid" || publicKeyFormat === "invalid") {
     return "Store QR signing keys as base64-wrapped PEM, escaped-newline PEM, or valid multiline PEM.";
@@ -200,11 +200,17 @@ const normalizePem = (value: string) =>
     decodeBase64PemIfNeeded(unwrapQuotedSecret(value).replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n")).trim()
   ).trim();
 
-const hasEd25519KeyPair = () => Boolean(process.env.QR_SIGN_PRIVATE_KEY && process.env.QR_SIGN_PUBLIC_KEY);
 const normalizeProviderSetting = () => String(process.env.QR_SIGN_PROVIDER || "").trim().toLowerCase();
 const managedQrSignerRequested = () => ["managed", "kms", "kms-bridge", "hsm"].includes(normalizeProviderSetting());
 
-export const hasEd25519QrSigningKeys = () => hasEd25519KeyPair();
+const readCurrentPrivateKey = () => String(process.env.QR_SIGN_PRIVATE_KEY_CURRENT || process.env.QR_SIGN_PRIVATE_KEY || "").trim();
+const readCurrentPublicKey = () => String(process.env.QR_SIGN_PUBLIC_KEY_CURRENT || process.env.QR_SIGN_PUBLIC_KEY || "").trim();
+const readPreviousPublicKey = () => String(process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS || "").trim();
+const readCurrentKeyVersion = () => String(process.env.QR_SIGN_ACTIVE_KEY_VERSION || "").trim();
+const readPreviousKeyVersion = () => String(process.env.QR_SIGN_PREVIOUS_KEY_VERSION || "").trim();
+const isKeyVersion = (value: string) => /^[A-Za-z0-9._-]{1,64}$/.test(value);
+
+export const hasEd25519QrSigningKeys = () => Boolean(readCurrentPrivateKey() && readCurrentPublicKey());
 export const isManagedQrSignerRequested = () => managedQrSignerRequested();
 export const hasManagedQrSignerRefs = () => kmsBackedSigningConfigured();
 export const hasManagedQrSignerBridgeRegistered = () => Boolean(managedQrSignerBridge);
@@ -219,11 +225,10 @@ const kmsBackedSigningConfigured = () =>
   Boolean(String(process.env.QR_SIGN_KMS_KEY_REF || "").trim() || String(process.env.QR_SIGN_KMS_VERIFY_KEY_REF || "").trim());
 
 const getEd25519KeyVersion = () =>
-  String(process.env.QR_SIGN_ACTIVE_KEY_VERSION || "").trim() ||
-  createHash("sha256").update(normalizePem(String(process.env.QR_SIGN_PUBLIC_KEY || ""))).digest("hex").slice(0, 12);
+  readCurrentKeyVersion() || createHash("sha256").update(normalizePem(readCurrentPublicKey())).digest("hex").slice(0, 12);
 
 const getEd25519KeyRef = () =>
-  String(process.env.QR_SIGN_KMS_VERIFY_KEY_REF || process.env.QR_SIGN_KMS_KEY_REF || "").trim() || "env:QR_SIGN_PUBLIC_KEY";
+  String(process.env.QR_SIGN_KMS_VERIFY_KEY_REF || process.env.QR_SIGN_KMS_KEY_REF || "").trim() || "env:QR_SIGN_PUBLIC_KEY_CURRENT";
 
 const createQrSigningError = (
   code: "QR_SIGNING_CONFIGURATION_INVALID" | "QR_SIGNING_KEY_TYPE_UNSUPPORTED",
@@ -263,7 +268,7 @@ const stableStringify = (obj: any): string => {
 };
 
 const getSignMode = (): { mode: SignMode; key: string } => {
-  if (hasEd25519KeyPair()) return { mode: "ed25519", key: "ed25519" };
+  if (hasEd25519QrSigningKeys()) return { mode: "ed25519", key: "ed25519" };
 
   try {
     const hmac = getQrSigningHmacSecretSet().current.value;
@@ -272,7 +277,7 @@ const getSignMode = (): { mode: SignMode; key: string } => {
     // handled by final error below
   }
 
-  throw new Error("Missing QR signing keys. Set QR_SIGN_PRIVATE_KEY + QR_SIGN_PUBLIC_KEY (preferred) or QR_SIGN_HMAC_SECRET.");
+  throw new Error("Missing QR signing keys. Set QR_SIGN_PRIVATE_KEY_CURRENT + QR_SIGN_PUBLIC_KEY_CURRENT (preferred) or QR_SIGN_HMAC_SECRET.");
 };
 
 const getEd25519Keys = () => {
@@ -290,9 +295,9 @@ let ed25519KeyCache:
   | null = null;
 
 const loadEd25519Keys = (options?: QrSigningOptions) => {
-  const priv = process.env.QR_SIGN_PRIVATE_KEY;
-  const pub = process.env.QR_SIGN_PUBLIC_KEY;
-  if (!priv || !pub) throw new Error("Missing QR_SIGN_PRIVATE_KEY / QR_SIGN_PUBLIC_KEY");
+  const priv = readCurrentPrivateKey();
+  const pub = readCurrentPublicKey();
+  if (!priv || !pub) throw new Error("Missing QR_SIGN_PRIVATE_KEY_CURRENT / QR_SIGN_PUBLIC_KEY_CURRENT");
   if (ed25519KeyCache?.privateKeyRaw === priv && ed25519KeyCache.publicKeyRaw === pub) {
     emitSafeCryptoMetadata(options, ed25519KeyCache.metadata);
     return {
@@ -305,8 +310,8 @@ const loadEd25519Keys = (options?: QrSigningOptions) => {
     operation: "key_import",
     mode: "ed25519",
     provider: "env",
-    keySourceLabel: "env:QR_SIGN_PRIVATE_KEY/QR_SIGN_PUBLIC_KEY",
-    keyVersion: String(process.env.QR_SIGN_ACTIVE_KEY_VERSION || "").trim() || null,
+    keySourceLabel: "env:QR_SIGN_PRIVATE_KEY_CURRENT/QR_SIGN_PUBLIC_KEY_CURRENT",
+    keyVersion: getEd25519KeyVersion(),
     privateKeyFormat: classifyQrSigningSecretFormat(priv),
     publicKeyFormat: classifyQrSigningSecretFormat(pub),
     privateKeyLength: String(priv || "").length,
@@ -322,7 +327,7 @@ const loadEd25519Keys = (options?: QrSigningOptions) => {
   } catch (error: any) {
     const wrapped = createQrSigningError(
       "QR_SIGNING_CONFIGURATION_INVALID",
-      "QR signing key configuration is invalid. Check that QR_SIGN_PRIVATE_KEY and QR_SIGN_PUBLIC_KEY contain Ed25519 PEM keys.",
+      "QR signing key configuration is invalid. Check that QR_SIGN_PRIVATE_KEY_CURRENT and QR_SIGN_PUBLIC_KEY_CURRENT contain Ed25519 PEM keys.",
       error,
       baseMetadata
     );
@@ -356,6 +361,37 @@ const loadEd25519Keys = (options?: QrSigningOptions) => {
   };
   emitSafeCryptoMetadata(options, metadata);
   return { privateKey, publicKey };
+};
+
+const loadEd25519VerificationKeys = () => {
+  if (String(process.env.QR_SIGN_PRIVATE_KEY_PREVIOUS || "").trim()) {
+    throw new Error("QR_SIGN_PRIVATE_KEY_PREVIOUS is forbidden; verification uses public keys only");
+  }
+  const currentVersion = getEd25519KeyVersion();
+  if (!isKeyVersion(currentVersion)) throw new Error("QR_SIGN_ACTIVE_KEY_VERSION is invalid");
+
+  const { publicKey: currentPublicKey } = loadEd25519Keys();
+  const keys = [{ version: currentVersion, publicKey: currentPublicKey }];
+  const previousRaw = readPreviousPublicKey();
+  const previousVersion = readPreviousKeyVersion();
+  if (!previousRaw) {
+    if (previousVersion) throw new Error("QR_SIGN_PREVIOUS_KEY_VERSION requires QR_SIGN_PUBLIC_KEY_PREVIOUS");
+    return keys;
+  }
+
+  if (!isKeyVersion(previousVersion) || previousVersion === currentVersion) {
+    throw new Error("QR previous public-key slot requires a distinct valid version");
+  }
+
+  const previousPublicKey = createPublicKey(normalizePem(previousRaw));
+  if (previousPublicKey.asymmetricKeyType !== "ed25519") {
+    throw new Error("QR_SIGN_PUBLIC_KEY_PREVIOUS must be an Ed25519 public key");
+  }
+  const currentDer = currentPublicKey.export({ format: "der", type: "spki" });
+  const previousDer = previousPublicKey.export({ format: "der", type: "spki" });
+  if (currentDer.equals(previousDer)) throw new Error("QR current and previous public keys must be different");
+  keys.push({ version: previousVersion, publicKey: previousPublicKey });
+  return keys;
 };
 
 const requireManagedQrSignerBridge = () => {
@@ -392,7 +428,7 @@ export const getQrSigningProfile = (): QrSigningMetadata => {
       mode,
       keyVersion: getEd25519KeyVersion(),
       provider: "env",
-      keyRef: "env:QR_SIGN_PUBLIC_KEY",
+      keyRef: "env:QR_SIGN_PUBLIC_KEY_CURRENT",
     };
   }
 
@@ -417,6 +453,10 @@ export const getQrTokenExpiryDate = (issuedAt: Date = new Date()) =>
 export const signQrPayload = (payload: QrTokenPayload, options?: QrSigningOptions): string => {
   const managedBridge = requireManagedQrSignerBridge();
   const signingProfile = getQrSigningProfile();
+  const requestedKeyVersion = String(payload.kid || "").trim();
+  if (requestedKeyVersion && requestedKeyVersion !== signingProfile.keyVersion) {
+    throw new Error("QR signing must use the active key version");
+  }
   const sanitized: Record<string, any> = {};
   for (const [k, v] of Object.entries({
     ...payload,
@@ -446,7 +486,7 @@ export const signQrPayload = (payload: QrTokenPayload, options?: QrSigningOption
         operation: "sign",
         mode: "ed25519",
         provider: "env",
-        keySourceLabel: "env:QR_SIGN_PRIVATE_KEY",
+        keySourceLabel: "env:QR_SIGN_PRIVATE_KEY_CURRENT",
         keyVersion: signingProfile.keyVersion,
         privateKeyType: privateKey.asymmetricKeyType || null,
       });
@@ -459,7 +499,7 @@ export const signQrPayload = (payload: QrTokenPayload, options?: QrSigningOption
           operation: "sign",
           mode: "ed25519",
           provider: "env",
-          keySourceLabel: "env:QR_SIGN_PRIVATE_KEY",
+          keySourceLabel: "env:QR_SIGN_PRIVATE_KEY_CURRENT",
           keyVersion: signingProfile.keyVersion,
           privateKeyType: privateKey.asymmetricKeyType || null,
         }
@@ -490,14 +530,15 @@ export const validateQrSigningConfiguration = () => {
 
   const { mode } = getSignMode();
   if (mode === "ed25519") {
-    const { privateKey, publicKey } = loadEd25519Keys({
+    const { privateKey } = loadEd25519Keys({
       onCryptoMetadata: (metadata) => {
         console.info("qrSigning", { ...metadata, operation: "startup_validation" });
       },
     });
     const data = Buffer.from("mscqr-qr-signing-startup-validation", "utf8");
     const signature = cryptoSign(null, data, privateKey);
-    if (!cryptoVerify(null, data, publicKey, signature)) {
+    const currentPublicKey = loadEd25519VerificationKeys()[0].publicKey;
+    if (!cryptoVerify(null, data, currentPublicKey, signature)) {
       throw createQrSigningError(
         "QR_SIGNING_CONFIGURATION_INVALID",
         "QR signing startup validation failed.",
@@ -506,10 +547,10 @@ export const validateQrSigningConfiguration = () => {
           operation: "startup_validation",
           mode: "ed25519",
           provider: "env",
-          keySourceLabel: "env:QR_SIGN_PRIVATE_KEY/QR_SIGN_PUBLIC_KEY",
+          keySourceLabel: "env:QR_SIGN_PRIVATE_KEY_CURRENT/QR_SIGN_PUBLIC_KEY_CURRENT",
           keyVersion: getEd25519KeyVersion(),
           privateKeyType: privateKey.asymmetricKeyType || null,
-          publicKeyType: publicKey.asymmetricKeyType || null,
+          publicKeyType: currentPublicKey.asymmetricKeyType || null,
         }
       );
     }
@@ -561,13 +602,16 @@ export const verifyQrToken = (token: string): { payload: QrTokenPayload; signing
 
   const { mode } = getSignMode();
   if (mode === "ed25519") {
-    const { publicKey } = getEd25519Keys();
-    const ok = cryptoVerify(null, payloadHash, publicKey, decodeBase64UrlStrict(sigPart));
+    const payloadKeyVersion = String(payload.kid || "").trim();
+    const matchedKey = loadEd25519VerificationKeys().find((entry) => entry.version === payloadKeyVersion);
+    if (!matchedKey) throw new QrTokenVerificationError();
+    const ok = cryptoVerify(null, payloadHash, matchedKey.publicKey, decodeBase64UrlStrict(sigPart));
     if (!ok) throw new QrTokenVerificationError();
     return {
       payload,
       signing: {
         ...activeProfile,
+        keyVersion: matchedKey.version,
         payloadKeyVersion: String(payload.kid || "").trim() || null,
       },
     };

@@ -72,9 +72,15 @@ export const getCurrentAndPreviousSecrets = (params: {
     throw new Error(`Missing required env var: ${acceptedKeys}`);
   }
 
-  const previous = (params.previousKeys || [])
+  const configuredPrevious = (params.previousKeys || [])
     .map((key) => toSecretVersion(key, readSecret(key)))
-    .find((entry) => Boolean(entry && entry.id !== current.id)) || null;
+    .find(Boolean) || null;
+
+  if (configuredPrevious && configuredPrevious.id === current.id) {
+    throw new Error("Configured current and previous secret values must be different");
+  }
+
+  const previous = configuredPrevious;
 
   return {
     current,

@@ -15,7 +15,7 @@ import { startPrintConfirmationReconciler } from "./services/printConfirmationRe
 import { attachPrinterAgentSessionWebSocket } from "./services/printerAgentSessionSocket";
 import { releaseMetadata } from "./observability/release";
 import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
-import { hasConfiguredSecret } from "./utils/secretConfig";
+import { getJwtSecretSet, hasConfiguredSecret } from "./utils/secretConfig";
 import { getObjectStorageConfiguration } from "./services/objectStorageService";
 import { closeRedisConnections, isRedisConfigured } from "./services/redisService";
 import { markDistributedLeaseShutdown } from "./services/distributedLeaseService";
@@ -92,6 +92,7 @@ if (process.env.NODE_ENV === "production") {
   const placeholderEnv = [
     "DATABASE_URL",
     "JWT_SECRET",
+    "JWT_SECRET_CURRENT",
     "SMTP_PASS",
     "SUPER_ADMIN_EMAIL",
     "PUBLIC_SCAN_WEB_BASE_URL",
@@ -131,7 +132,7 @@ if (process.env.NODE_ENV === "production") {
     process.exit(1);
   }
 
-  const hasQrEd25519 = hasAnyConfiguredSecret("QR_SIGN_PRIVATE_KEY") && hasAnyConfiguredSecret("QR_SIGN_PUBLIC_KEY");
+  const hasQrEd25519 = hasEd25519QrSigningKeys();
   const hasQrHmac = hasAnyConfiguredSecret("QR_SIGN_HMAC_SECRET_CURRENT", "QR_SIGN_HMAC_SECRET");
   const enforceEd25519InProduction = parseBool(process.env.QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION, true);
 
@@ -151,7 +152,7 @@ if (process.env.NODE_ENV === "production") {
 
   const missingStrongSecurityEnv = [
     !qrSigningConfigured
-      ? "QR signing configuration (managed bridge with QR_SIGN_KMS_* refs, or QR_SIGN_PRIVATE_KEY + QR_SIGN_PUBLIC_KEY, or QR_SIGN_HMAC_SECRET_CURRENT/QR_SIGN_HMAC_SECRET)"
+      ? "QR signing configuration (managed bridge with QR_SIGN_KMS_* refs, or QR_SIGN_PRIVATE_KEY_CURRENT + QR_SIGN_PUBLIC_KEY_CURRENT, or QR_SIGN_HMAC_SECRET_CURRENT/QR_SIGN_HMAC_SECRET)"
       : "",
     !hasAnyConfiguredSecret("TOKEN_HASH_SECRET_CURRENT", "TOKEN_HASH_SECRET") ? "TOKEN_HASH_SECRET_CURRENT or TOKEN_HASH_SECRET" : "",
     !hasAnyConfiguredSecret("IP_HASH_SALT_CURRENT", "IP_HASH_SALT") ? "IP_HASH_SALT_CURRENT or IP_HASH_SALT" : "",
@@ -167,6 +168,13 @@ if (process.env.NODE_ENV === "production") {
     logger.error(
       `Refusing to start: production security hardening requires ${missingStrongSecurityEnv.join(", ")}`
     );
+    process.exit(1);
+  }
+
+  try {
+    getJwtSecretSet();
+  } catch (error) {
+    logger.error(`Refusing to start: JWT dual-slot configuration is invalid. ${String((error as Error)?.message || error)}`);
     process.exit(1);
   }
 
@@ -237,7 +245,7 @@ const legacyFallbackWarnings = [
   {
     primaryKeys: ["QR_SIGN_HMAC_SECRET_CURRENT", "QR_SIGN_HMAC_SECRET"],
     fallbackKeys: ["JWT_SECRET"],
-    enabled: !hasConfiguredSecret("QR_SIGN_PRIVATE_KEY"),
+    enabled: !hasEd25519QrSigningKeys(),
     message:
       "QR signing HMAC is falling back to JWT_SECRET. Configure QR_SIGN_HMAC_SECRET_CURRENT so it can be rotated independently.",
   },
