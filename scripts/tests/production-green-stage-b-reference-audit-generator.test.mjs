@@ -15,6 +15,7 @@ import {
 import {
   assertStageBAtomicBrokerPlan,
   assertStageBAtomicBrokerPackagePlan,
+  assertStageBActiveBrokerTaskDefinitionLocal,
   assertStageBBrokerTaskDefinitionMapping,
   assertTerraformDependencyCoversAddress,
   STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS,
@@ -22,6 +23,7 @@ import {
   STAGE_B_EXECUTOR_FOR_EACH_REFERENCES,
   STAGE_B_CANDIDATE_FOR_EACH_REFERENCES,
   STAGE_B_BROKER_TASK_DEFINITION_REFERENCE,
+  STAGE_B_ACTIVE_BROKER_TASK_DEFINITION_LOCAL_EXPRESSION,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "../aws/stage-b-reference-audit-contract.mjs";
 
@@ -381,6 +383,13 @@ function withBrokerMapping(mapping) {
   return terraformConfigurationSource.replace(
     /  broker_task_definition_arns = merge\([\s\S]*?\n  \)/,
     `  broker_task_definition_arns = ${mapping}`,
+  );
+}
+
+function withActiveBrokerMapping(expression) {
+  return terraformConfigurationSource.replace(
+    /^\s*active_broker_task_definition_arns\s*=\s*.+$/m,
+    `  active_broker_task_definition_arns = ${expression}`,
   );
 }
 
@@ -1653,6 +1662,48 @@ test("broker task-definition mapping reference matches Terraform source exactly"
   assert.doesNotThrow(() => assertStageBBrokerTaskDefinitionMapping(fixture.plan, fixture.options.terraformConfiguration));
 });
 
+test("active broker task-definition local is the exact reviewed conditional", () => {
+  assert.doesNotThrow(() => assertStageBActiveBrokerTaskDefinitionLocal(terraformConfigurationSource));
+  assert.equal(
+    STAGE_B_ACTIVE_BROKER_TASK_DEFINITION_LOCAL_EXPRESSION,
+    "var.stage_b_recovery_only ? var.stage_b_recovery_task_definition_arns : local.broker_task_definition_arns",
+  );
+  const fixture = makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap" });
+  assert.doesNotThrow(() => assertStageBBrokerTaskDefinitionMapping(fixture.plan, fixture.options.terraformConfiguration));
+});
+
+test("active broker task-definition local rejects alternate branches and overrides", () => {
+  const invalidExpressions = [
+    "merge(local.broker_task_definition_arns, { override = \"unexpected\" })",
+    "merge(local.broker_task_definition_arns, var.stage_b_recovery_task_definition_arns)",
+    "var.stage_b_recovery_task_definition_arns",
+    "local.broker_task_definition_arns",
+    "var.stage_b_recovery_task_definition_arns ? var.stage_b_recovery_only : local.broker_task_definition_arns",
+    "var.stage_b_recovery_only ? local.broker_task_definition_arns : var.stage_b_recovery_task_definition_arns",
+    "var.other_selector ? var.stage_b_recovery_task_definition_arns : local.broker_task_definition_arns",
+    "var.stage_b_recovery_only ? var.other_recovery_task_definition_arns : local.broker_task_definition_arns",
+    "var.stage_b_recovery_only ? var.stage_b_recovery_task_definition_arns : local.other_broker_task_definition_arns",
+  ];
+  for (const expression of invalidExpressions) {
+    const fixture = makeAtomicBrokerFixture({
+      mode: "full-rls-admin-bootstrap",
+      terraformConfiguration: withActiveBrokerMapping(expression),
+    });
+    assert.throws(
+      () => assertStageBBrokerTaskDefinitionMapping(fixture.plan, fixture.options.terraformConfiguration),
+      /Active broker task-definition local source is missing or malformed/,
+    );
+  }
+  const missing = makeAtomicBrokerFixture({
+    mode: "full-rls-admin-bootstrap",
+    terraformConfiguration: terraformConfigurationSource.replace(/^\s*active_broker_task_definition_arns\s*=.*\n/m, ""),
+  });
+  assert.throws(
+    () => assertStageBBrokerTaskDefinitionMapping(missing.plan, missing.options.terraformConfiguration),
+    /Active broker task-definition local source is missing or malformed/,
+  );
+});
+
 test("stale, arbitrary, and missing broker mapping references fail closed", () => {
   for (const references of [
     ["local.broker_task_definition_arns", "local.broker_approval_expected"],
@@ -1698,6 +1749,17 @@ test("candidate for_each fixture matches the Terraform source and exact audit co
   assert.deepEqual(candidate.for_each_expression.references, [...STAGE_B_CANDIDATE_FOR_EACH_REFERENCES]);
 });
 
+test("indexed candidate dependency passes the exact candidate for_each contract", () => {
+  const fixture = makeAtomicBrokerFixture({ mode: "full-rls-application-canary" });
+  assert.deepEqual(fixture.plan.relevant_attributes, [{ resource: canaryAddress, attribute: ["arn"] }]);
+  assert.doesNotThrow(() => assertStageBAtomicBrokerPlan(
+    fixture.plan,
+    canaryAddress,
+    "full-rls-application-canary",
+    fixture.options.terraformConfiguration,
+  ));
+});
+
 test("stale, arbitrary, missing, empty, and extra executor for_each references fail closed", () => {
   for (const references of [
     ["local.executor_definitions"],
@@ -1718,29 +1780,34 @@ test("stale, arbitrary, missing, empty, and extra executor for_each references f
   }
 });
 
-test("stale candidate for_each references fail closed", () => {
+test("candidate for_each references are required for collection and indexed dependencies", () => {
   for (const references of [
     ["local.candidate_definitions"],
     ["local.unreviewed"],
     [],
     ["local.candidate_definitions_for_resources", "local.unreviewed"],
   ]) {
-    const fixture = makeAtomicBrokerFixture({
-      mode: "full-rls-application-canary",
-      mutatePlan: (plan) => { plan.relevant_attributes = [{ resource: "aws_ecs_task_definition.candidate", attribute: [] }]; },
-    });
-    const candidate = fixture.plan.configuration.root_module.resources
-      .find((resource) => resource.address === "aws_ecs_task_definition.candidate");
-    candidate.for_each_expression.references = references;
-    assert.throws(
-      () => assertStageBAtomicBrokerPlan(
-        fixture.plan,
-        canaryAddress,
-        "full-rls-application-canary",
-        fixture.options.terraformConfiguration,
-      ),
-      /collection dependency to .* is missing/,
-    );
+    for (const relevantAttributes of [
+      [{ resource: "aws_ecs_task_definition.candidate", attribute: [] }],
+      [{ resource: canaryAddress, attribute: ["arn"] }],
+    ]) {
+      const fixture = makeAtomicBrokerFixture({
+        mode: "full-rls-application-canary",
+        mutatePlan: (plan) => { plan.relevant_attributes = relevantAttributes; },
+      });
+      const candidate = fixture.plan.configuration.root_module.resources
+        .find((resource) => resource.address === "aws_ecs_task_definition.candidate");
+      candidate.for_each_expression.references = references;
+      assert.throws(
+        () => assertStageBAtomicBrokerPlan(
+          fixture.plan,
+          canaryAddress,
+          "full-rls-application-canary",
+          fixture.options.terraformConfiguration,
+        ),
+        /candidate for_each metadata is missing or malformed/,
+      );
+    }
   }
 });
 
