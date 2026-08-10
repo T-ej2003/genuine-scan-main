@@ -162,8 +162,9 @@ test("promotion writes pre-rotation current to previous and pending to current",
     const state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
     assert.equal(state.jwt.oldFingerprint, fingerprint("old-jwt-material"));
     const fixture = JSON.parse(readFileSync(path.join(directory, "previous-qr.json"), "utf8"));
-    assert.doesNotThrow(() => jwt.verify(fixture.jwtToken, "old-jwt-material", { algorithms: ["HS256"] }));
-    assert.throws(() => jwt.verify(fixture.jwtToken, "historical-wrong-secret", { algorithms: ["HS256"] }));
+    assert.doesNotThrow(() => jwt.verify(fixture.jwtPreviousToken, "old-jwt-material", { algorithms: ["HS256"] }));
+    assert.doesNotThrow(() => jwt.verify(fixture.jwtCurrentToken, JSON.parse(sm.values.get(baseConfig.jwt.currentSecretId)).value, { algorithms: ["HS256"] }));
+    assert.throws(() => jwt.verify(fixture.jwtPreviousToken, "historical-wrong-secret", { algorithms: ["HS256"] }));
     const jwtWrites = sm.putCalls.filter(({ secretId }) => [baseConfig.jwt.previousSecretId, baseConfig.jwt.currentSecretId].includes(secretId));
     assert.equal(JSON.parse(jwtWrites.at(-2).payload).value, "old-jwt-material");
     assert.equal(JSON.parse(jwtWrites.at(-1).payload).value, pending.value);
@@ -183,7 +184,7 @@ test("canonical retired previous JWT is reusable but never becomes the old secre
     await prepare(contextFor(directory, baseConfig, sm));
     assert.equal(JSON.parse(sm.values.get(baseConfig.jwt.previousSecretId)).value, "old-jwt-material");
     const fixture = JSON.parse(readFileSync(path.join(directory, "previous-qr.json"), "utf8"));
-    assert.doesNotThrow(() => jwt.verify(fixture.jwtToken, "old-jwt-material", { algorithms: ["HS256"] }));
+    assert.doesNotThrow(() => jwt.verify(fixture.jwtPreviousToken, "old-jwt-material", { algorithms: ["HS256"] }));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

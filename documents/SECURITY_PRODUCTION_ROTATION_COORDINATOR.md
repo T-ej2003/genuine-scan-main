@@ -58,7 +58,8 @@ The coordinator does not deploy ECS. The existing approved deployment workflow
 must perform the overlap deployment and run the deployment-side verifier inside
 that task. The verifier uses the compiled application `verifyJwtWithCurrentOrPrevious`
 and `verifyQrToken` functions; it is not a public endpoint and does not print
-tokens. It must also probe the deployed `/api/health` with `--health-url` and
+tokens. The deployed image runs from `/app`, where the verifier is invoked with
+`npm run security:verify-production-rotation-runtime`. It must also probe the deployed `/api/health` with `--health-url` and
 bind `release.gitSha` to `--expected-release-sha`; timeout, non-ready, malformed,
 non-200, or mismatched-release responses fail closed. Pass its mode-600 JSON
 output to `--verify --runtime-verification-file`.

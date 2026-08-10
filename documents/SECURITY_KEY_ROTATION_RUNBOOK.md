@@ -56,10 +56,32 @@ npm --prefix backend run security:rotate-production-signing-material -- \
   --fixture-file /secure/operator/previous-qr-fixture.json --runtime-verification-file /secure/operator/overlap-runtime.json \
   --verify
 
-# Run inside the deployed overlap task; /api/health must report the expected release SHA.
-npm --prefix backend run security:verify-production-rotation-runtime -- \
-  --fixture-file /secure/operator/previous-qr-fixture.json --output /secure/operator/overlap-runtime.json \
-  --health-url https://www.mscqr.com/api/health --expected-release-sha <full-source-sha>
+# Run inside the deployed overlap task. The image workdir is /app; /api/health
+# must report the expected release SHA. Set the four deployment values from the
+# approved deployment record before invoking the command.
+cd /app
+ROTATION_RUNTIME_PHASE=overlap \
+ROTATION_ID=<rotation-id> \
+ROTATION_DEPLOYMENT_SHA=<full-overlap-deployment-sha> \
+ROTATION_RUNTIME_INVOCATION_REF=<machine-verifiable-runtime-ref> \
+npm run security:verify-production-rotation-runtime -- \
+  --fixture-file /secure/operator/previous-qr-fixture.json \
+  --output /secure/operator/overlap-runtime.json \
+  --health-url https://www.mscqr.com/api/health \
+  --expected-release-sha <full-source-sha>
+
+# After retirement and the cleanup deployment, run the same image-local command
+# with the cleanup phase and exact cleanup deployment identity.
+cd /app
+ROTATION_RUNTIME_PHASE=cleanup \
+ROTATION_ID=<rotation-id> \
+ROTATION_DEPLOYMENT_SHA=<full-cleanup-deployment-sha> \
+ROTATION_RUNTIME_INVOCATION_REF=<machine-verifiable-runtime-ref> \
+npm run security:verify-production-rotation-runtime -- \
+  --fixture-file /secure/operator/previous-qr-fixture.json \
+  --output /secure/operator/cleanup-runtime.json \
+  --health-url https://www.mscqr.com/api/health \
+  --expected-release-sha <full-source-sha>
 ```
 
 The config maps distinct Secrets Manager resources for JWT current/previous/pending, QR current/private,

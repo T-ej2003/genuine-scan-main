@@ -13,6 +13,8 @@ const runtimeVerifier = read("backend/src/security/productionRotationRuntime.ts"
 const runtimeCommand = read("backend/scripts/security/verify-production-rotation-runtime.mjs");
 const qualityGate = read(".github/workflows/quality-gate.yml");
 const runbook = read("documents/SECURITY_KEY_ROTATION_RUNBOOK.md");
+const dockerfile = read("backend/Dockerfile");
+const backendPackage = JSON.parse(read("backend/package.json"));
 
 test("rotation task template is dual-slot and Ed25519-only", () => {
   for (const placeholder of [
@@ -79,7 +81,25 @@ test("runtime verification is deployment-side and uses the application verificat
   assert.match(runtimeCommand, /ROTATION_DEPLOYMENT_SHA/);
   assert.match(runtimeCommand, /--health-url/);
   assert.match(runtimeCommand, /--expected-release-sha/);
+  assert.match(runtimeVerifier, /currentJwtToken/);
+  assert.match(runtimeVerifier, /previousJwtToken/);
+  assert.match(runtimeVerifier, /signUnknownKidFixture/);
+  assert.match(runtimeVerifier, /payload\.kid = "unknown-runtime-key"/);
+  assert.match(runtimeVerifier, /cryptoSign\(null/);
+  assert.doesNotMatch(runtimeVerifier, /const currentToken = jwt\.sign/);
+  assert.doesNotMatch(runtimeVerifier, /const previousToken = jwt\.sign/);
   assert.doesNotMatch(runtimeCommand, /console\.log\([^\n]*Token/);
+});
+
+test("deployed-task verifier command matches the image filesystem and parser contract", () => {
+  assert.match(dockerfile, /WORKDIR \/app/);
+  assert.equal(backendPackage.scripts["security:verify-production-rotation-runtime"], "node scripts/security/verify-production-rotation-runtime.mjs");
+  for (const value of ["ROTATION_RUNTIME_PHASE", "ROTATION_ID", "ROTATION_DEPLOYMENT_SHA", "ROTATION_RUNTIME_INVOCATION_REF", "--fixture-file", "--output", "--health-url", "--expected-release-sha"]) {
+    assert.match(runbook, new RegExp(value.replaceAll("-", "\\-")), `runbook is missing ${value}`);
+  }
+  assert.match(runbook, /cd \/app/);
+  assert.doesNotMatch(runbook, /npm --prefix backend run security:verify-production-rotation-runtime/);
+  assert.doesNotMatch(runtimeCommand, /--verification-out/);
 });
 
 test("Stage B image classification keeps the evidence schema non-image and unknown paths fail closed", async () => {

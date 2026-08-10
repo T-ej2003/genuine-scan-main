@@ -283,10 +283,16 @@ const prepare = async (context) => {
         qrPublicVersionId: current.qrPublicPending.raw.versionId,
       },
     });
-    const fixture = { payload: null, signature: null, token: null, jwtToken: jwt.sign({ rotationId: config.rotationId }, oldJwt, { algorithm: "HS256" }) };
+    const fixture = {
+      payload: null,
+      signature: null,
+      token: null,
+      jwtCurrentToken: jwt.sign({ rotationId: config.rotationId, slot: "current" }, newJwt, { algorithm: "HS256", noTimestamp: true }),
+      jwtPreviousToken: jwt.sign({ rotationId: config.rotationId, slot: "previous" }, oldJwt, { algorithm: "HS256", noTimestamp: true }),
+    };
     makePreviousQrFixture(current.qrPrivateCurrent.material.value, oldQrPublic, oldQrVersion, fixtureFile);
     const qrFixture = JSON.parse(readFileSync(fixtureFile, "utf8"));
-    writeFileSync(fixtureFile, JSON.stringify({ ...qrFixture, jwtToken: fixture.jwtToken }, null, 2), { mode: 0o600 });
+    writeFileSync(fixtureFile, JSON.stringify({ ...qrFixture, jwtCurrentToken: fixture.jwtCurrentToken, jwtPreviousToken: fixture.jwtPreviousToken }, null, 2), { mode: 0o600 });
     chmodSync(fixtureFile, 0o600);
     persist(context, state);
   }

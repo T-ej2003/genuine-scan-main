@@ -40,9 +40,10 @@ const healthEvidence = {
 };
 const fixture = JSON.parse(readFileSync(path.resolve(required(args.get("fixture-file"), "--fixture-file")), "utf8"));
 const phase = required(process.env.ROTATION_RUNTIME_PHASE, "ROTATION_RUNTIME_PHASE");
+if (phase !== "overlap" && phase !== "cleanup") throw new Error("ROTATION_RUNTIME_PHASE must be overlap or cleanup");
 const checks = phase === "overlap"
-  ? verifyProductionRotationRuntime({ previousJwtToken: required(fixture.jwtToken, "fixture.jwtToken"), previousQrToken: required(fixture.token, "fixture.token"), healthEvidence })
-  : verifyProductionRotationCleanupRuntime({ previousJwtToken: required(fixture.jwtToken, "fixture.jwtToken"), previousQrToken: required(fixture.token, "fixture.token"), healthEvidence });
+  ? verifyProductionRotationRuntime({ currentJwtToken: required(fixture.jwtCurrentToken, "fixture.jwtCurrentToken"), previousJwtToken: required(fixture.jwtPreviousToken, "fixture.jwtPreviousToken"), previousQrToken: required(fixture.token, "fixture.token"), healthEvidence })
+  : verifyProductionRotationCleanupRuntime({ currentJwtToken: required(fixture.jwtCurrentToken, "fixture.jwtCurrentToken"), previousJwtToken: required(fixture.jwtPreviousToken, "fixture.jwtPreviousToken"), previousQrToken: required(fixture.token, "fixture.token"), healthEvidence });
 const output = {
   rotationId: required(process.env.ROTATION_ID, "ROTATION_ID"),
   phase,

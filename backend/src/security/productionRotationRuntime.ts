@@ -1,9 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, createPrivateKey, sign as cryptoSign } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { signQrPayload, verifyQrToken } from "../services/qrTokenService";
 import { verifyJwtWithCurrentOrPrevious } from "../utils/security";
 
 type RuntimeInput = {
+  currentJwtToken: string;
   previousJwtToken: string;
   previousQrToken: string;
   healthEvidence: HealthEvidence;
@@ -30,6 +31,12 @@ const requiredInput = (value: string, name: string) => {
   return normalized;
 };
 
+const verifyJwtFixtureInSlot = (token: string, secret: string, slot: string) => {
+  const preparedToken = requiredInput(token, `${slot} JWT fixture`);
+  jwt.verify(preparedToken, secret, { algorithms: ["HS256"] });
+  return preparedToken;
+};
+
 const validateHealthEvidence = (health: HealthEvidence, now: () => number) => {
   if (health?.serviceHealthy !== true || health.healthHttpStatus !== 200) throw new Error("runtime health proof is unhealthy");
   if (!/^[a-f0-9]{40}$/.test(health.healthReleaseGitSha) || health.healthReleaseGitSha !== health.expectedReleaseGitSha) {
@@ -47,15 +54,34 @@ const tokenWithPayload = (token: string, mutate: (payload: Record<string, unknow
   return `${Buffer.from(JSON.stringify(mutate(payload))).toString("base64url")}.${signaturePart}`;
 };
 
-export const verifyProductionRotationRuntime = ({ previousJwtToken, previousQrToken, healthEvidence, now = Date.now }: RuntimeInput) => {
+const encodeBase64Url = (value: Buffer) => value.toString("base64url");
+const normalizePrivateKey = (value: string) => {
+  const normalized = value.replace(/\\n/g, "\n").trim();
+  if (normalized.includes("-----BEGIN")) return normalized;
+  const decoded = Buffer.from(normalized, "base64").toString("utf8");
+  if (!decoded.includes("-----BEGIN")) throw new Error("current QR private key is not a PEM key");
+  return decoded;
+};
+
+const signUnknownKidFixture = (currentQrToken: string) => {
+  const [payloadPart] = currentQrToken.split(".");
+  const payload = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8")) as Record<string, unknown>;
+  payload.kid = "unknown-runtime-key";
+  const payloadBytes = Buffer.from(JSON.stringify(payload), "utf8");
+  const privateKey = createPrivateKey(normalizePrivateKey(requiredEnv("QR_SIGN_PRIVATE_KEY_CURRENT")));
+  const signature = cryptoSign(null, createHash("sha256").update(payloadBytes).digest(), privateKey);
+  return `${encodeBase64Url(payloadBytes)}.${encodeBase64Url(signature)}`;
+};
+
+export const verifyProductionRotationRuntime = ({ currentJwtToken, previousJwtToken, previousQrToken, healthEvidence, now = Date.now }: RuntimeInput) => {
   const health = validateHealthEvidence(healthEvidence, now);
   const currentJwt = requiredEnv("JWT_SECRET_CURRENT");
-  requiredEnv("JWT_SECRET_PREVIOUS");
-  const preparedPreviousJwtToken = requiredInput(previousJwtToken, "previousJwtToken");
-  const currentToken = jwt.sign({ rotationId: "runtime-verification" }, currentJwt, { algorithm: "HS256" });
+  const previousJwt = requiredEnv("JWT_SECRET_PREVIOUS");
+  const preparedCurrentJwtToken = verifyJwtFixtureInSlot(currentJwtToken, currentJwt, "current");
+  const preparedPreviousJwtToken = verifyJwtFixtureInSlot(previousJwtToken, previousJwt, "previous");
   const invalidToken = jwt.sign({ rotationId: "runtime-verification" }, "runtime-invalid-secret", { algorithm: "HS256" });
 
-  verifyJwtWithCurrentOrPrevious(currentToken, (secret) => jwt.verify(currentToken, secret, { algorithms: ["HS256"] }));
+  verifyJwtWithCurrentOrPrevious(preparedCurrentJwtToken, (secret) => jwt.verify(preparedCurrentJwtToken, secret, { algorithms: ["HS256"] }));
   verifyJwtWithCurrentOrPrevious(preparedPreviousJwtToken, (secret) => jwt.verify(preparedPreviousJwtToken, secret, { algorithms: ["HS256"] }));
   let invalidRejected = false;
   try {
@@ -76,7 +102,7 @@ export const verifyProductionRotationRuntime = ({ previousJwtToken, previousQrTo
     tamperRejected = true;
   }
 
-  const unknownKey = tokenWithPayload(currentQrToken, (payload) => ({ ...payload, kid: "unknown-runtime-key" }));
+  const unknownKey = signUnknownKidFixture(currentQrToken);
   let unknownRejected = false;
   try {
     verifyQrToken(unknownKey);
@@ -96,11 +122,11 @@ export const verifyProductionRotationRuntime = ({ previousJwtToken, previousQrTo
   };
 };
 
-export const verifyProductionRotationCleanupRuntime = ({ previousJwtToken, previousQrToken, healthEvidence, now = Date.now }: RuntimeInput) => {
+export const verifyProductionRotationCleanupRuntime = ({ currentJwtToken, previousJwtToken, previousQrToken, healthEvidence, now = Date.now }: RuntimeInput) => {
   const health = validateHealthEvidence(healthEvidence, now);
   const currentJwt = requiredEnv("JWT_SECRET_CURRENT");
-  const currentToken = jwt.sign({ rotationId: "runtime-cleanup-verification" }, currentJwt, { algorithm: "HS256" });
-  verifyJwtWithCurrentOrPrevious(currentToken, (secret) => jwt.verify(currentToken, secret, { algorithms: ["HS256"] }));
+  const preparedCurrentJwtToken = verifyJwtFixtureInSlot(currentJwtToken, currentJwt, "current");
+  verifyJwtWithCurrentOrPrevious(preparedCurrentJwtToken, (secret) => jwt.verify(preparedCurrentJwtToken, secret, { algorithms: ["HS256"] }));
   let previousJwtRejected = false;
   try {
     verifyJwtWithCurrentOrPrevious(previousJwtToken, (secret) => jwt.verify(previousJwtToken, secret, { algorithms: ["HS256"] }));
@@ -116,7 +142,7 @@ export const verifyProductionRotationCleanupRuntime = ({ previousJwtToken, previ
   } catch {
     previousQrRejected = true;
   }
-  const unknownKey = tokenWithPayload(currentQrToken, (payload) => ({ ...payload, kid: "unknown-cleanup-key" }));
+  const unknownKey = signUnknownKidFixture(currentQrToken);
   let unknownRejected = false;
   try {
     verifyQrToken(unknownKey);
