@@ -63,15 +63,25 @@ const runPermissionPreflight = (input) => {
   if (!input.savedPlanBytes) return runPermissionPreflightRaw({ policyEvidence, ...input });
   if (input.planApprovalReport) return runPermissionPreflightRaw({ policyEvidence, ...input });
   const selectedPlan = JSON.parse(input.planBytes);
+  const planBound = input.planBound === true || selectedPlan.resource_changes.length >= 70;
   const savedPlanSha256 = crypto.createHash("sha256").update(input.savedPlanBytes).digest("hex");
   const planJsonSha256 = crypto.createHash("sha256").update(input.planBytes).digest("hex");
   const canonicalPlanJsonBytes = Buffer.from(`${canonicalizeJson(selectedPlan)}\n`);
   const hashes = { savedPlanSha256, planJsonSha256, canonicalPlanFileSha256: crypto.createHash("sha256").update(canonicalPlanJsonBytes).digest("hex"), logicalCanonicalPlanJsonSha256: crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(selectedPlan))).digest("hex") };
+  const referenceAudit = planBound ? (() => {
+    const retainedTaskDefinitions = selectedPlan.resource_changes.filter((change) => change.address?.includes("_retained[")).map((change, index) => {
+      const key = change.address.match(/\[\"[a-f0-9]+-([^\"]+)\"\]$/)?.[1];
+      const family = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).find(([address]) => address.match(/\[\"([^\"]+)\"\]$/)?.[1] === key)?.[1];
+      return { terraformAddress: change.address, family, classification: "retained-no-op", oldTaskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${index + 1}` };
+    });
+    const bytes = Buffer.from(`${JSON.stringify({ schemaVersion: 1, planJsonSha256, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", auditedAt: input.now || new Date().toISOString(), retainedTaskDefinitions })}\n`);
+    return { report: JSON.parse(bytes), bytes, sha256: crypto.createHash("sha256").update(bytes).digest("hex") };
+  })() : undefined;
   const capture = createStageBPlanCaptureReport({ toolingSha: input.plan.variables.tooling_sha.value, toolingTreeSha256: "e".repeat(64), refreshReportSha256: "r".repeat(64), hashes, capturedAt: input.now || new Date().toISOString(), stageBLineage: "lineage", stageBSerial: 76, terraformVersion: "1.15.7", terraformFormatVersion: "1.2", classification: { noOp: selectedPlan.resource_changes.filter((change) => JSON.stringify(change.change?.actions) === JSON.stringify(["no-op"])).length, create: 12, update: 3, destroy: 0, replacement: 0, unclassified: 0 } });
   const captureBytes = Buffer.from(`${JSON.stringify(capture, null, 2)}\n`);
-  const approval = createStageBPlanApprovalReport({ captureReportSha256: crypto.createHash("sha256").update(captureBytes).digest("hex"), referenceAuditPath: "/private/tmp/test-audit.json", referenceAuditSha256: "a".repeat(64), referenceAuditCallerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", referenceAuditAt: input.now || new Date().toISOString(), toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, stageBLineage: capture.stageBLineage, stageBSerial: capture.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: input.now || new Date().toISOString(), classification: capture.classification });
+  const approval = createStageBPlanApprovalReport({ captureReportSha256: crypto.createHash("sha256").update(captureBytes).digest("hex"), referenceAuditPath: "/private/tmp/test-audit.json", referenceAuditSha256: referenceAudit?.sha256 || "a".repeat(64), referenceAuditCallerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", referenceAuditAt: input.now || new Date().toISOString(), toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, stageBLineage: capture.stageBLineage, stageBSerial: capture.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: input.now || new Date().toISOString(), classification: capture.classification });
   let approvalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
-  return runPermissionPreflightRaw({ policyEvidence, ...input, canonicalPlanJsonBytes, planApprovalReport: approval, planApprovalReportBytes: approvalBytes, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex") });
+  return runPermissionPreflightRaw({ policyEvidence, ...input, phase: input.phase || (planBound ? "plan-bound" : "initial"), canonicalPlanJsonBytes, planApprovalReport: approval, planApprovalReportBytes: approvalBytes, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex"), referenceAudit: referenceAudit?.report, referenceAuditBytes: referenceAudit?.bytes });
 };
 
 function cliApprovalArgs(directory, selectedPlan = plan, selectedPlanBytes = planBytes, selectedSavedBytes = savedPlanBytes) {
@@ -82,13 +92,22 @@ function cliApprovalArgs(directory, selectedPlan = plan, selectedPlanBytes = pla
     canonicalPlanFileSha256: crypto.createHash("sha256").update(canonicalBytes).digest("hex"),
     logicalCanonicalPlanJsonSha256: crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(selectedPlan))).digest("hex"),
   };
+  const auditPath = path.join(directory, "approved.audit.json");
+  const retainedTaskDefinitions = selectedPlan.resource_changes.filter((change) => change.address?.includes("_retained[")).map((change, index) => {
+    const key = change.address.match(/\[\"[a-f0-9]+-([^\"]+)\"\]$/)?.[1];
+    const family = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).find(([address]) => address.match(/\[\"([^\"]+)\"\]$/)?.[1] === key)?.[1];
+    return { terraformAddress: change.address, family, classification: "retained-no-op", oldTaskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${index + 1}` };
+  });
+  const audit = selectedPlan.resource_changes.length >= 70 ? { schemaVersion: 1, planJsonSha256: hashes.planJsonSha256, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", auditedAt: now, retainedTaskDefinitions } : undefined;
+  if (audit) writePrivate(auditPath, `${JSON.stringify(audit)}\n`);
   const capture = createStageBPlanCaptureReport({ toolingSha: selectedPlan.variables.tooling_sha.value, toolingTreeSha256: "e".repeat(64), refreshReportSha256: "r".repeat(64), hashes, capturedAt: now, stageBLineage: "lineage", stageBSerial: 76, terraformVersion: "1.15.7", terraformFormatVersion: "1.2", classification: { noOp: selectedPlan.resource_changes.filter((change) => JSON.stringify(change.change?.actions) === JSON.stringify(["no-op"])).length, create: 12, update: 3, destroy: 0, replacement: 0, unclassified: 0 } });
   const captureBytes = Buffer.from(`${JSON.stringify(capture, null, 2)}\n`);
-  const approval = createStageBPlanApprovalReport({ captureReportSha256: crypto.createHash("sha256").update(captureBytes).digest("hex"), referenceAuditPath: "/private/tmp/test-audit.json", referenceAuditSha256: "a".repeat(64), referenceAuditCallerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", referenceAuditAt: now, toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, stageBLineage: capture.stageBLineage, stageBSerial: capture.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: now, classification: capture.classification });
+  const auditBytes = audit ? fs.readFileSync(auditPath) : undefined;
+  const approval = createStageBPlanApprovalReport({ captureReportSha256: crypto.createHash("sha256").update(captureBytes).digest("hex"), referenceAuditPath: auditPath, referenceAuditSha256: audit ? crypto.createHash("sha256").update(auditBytes).digest("hex") : "a".repeat(64), referenceAuditCallerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", referenceAuditAt: now, toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, stageBLineage: capture.stageBLineage, stageBSerial: 76, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: now, classification: capture.classification });
   const approvalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
   const canonicalPath = path.join(directory, "approved.canonical.json"); const approvalPath = path.join(directory, "approved.plan.approval.json");
   writePrivate(canonicalPath, canonicalBytes); writePrivate(approvalPath, approvalBytes);
-  return ["--canonical-plan-json", canonicalPath, "--plan-approval-report", approvalPath, "--plan-approval-report-sha256", crypto.createHash("sha256").update(approvalBytes).digest("hex")];
+  return ["--canonical-plan-json", canonicalPath, "--plan-approval-report", approvalPath, "--plan-approval-report-sha256", crypto.createHash("sha256").update(approvalBytes).digest("hex"), ...(audit ? ["--reference-audit", auditPath] : [])];
 }
 
 test("apply wrapper binds terraform show to the Stage B root and supplied discovery environment", () => {
@@ -161,6 +180,9 @@ const plan = {
 };
 const planBytes = Buffer.from(JSON.stringify(plan));
 const savedPlanBytes = Buffer.from("saved-binary-plan");
+const productionPlanBytes = fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
+const productionPlan = JSON.parse(productionPlanBytes);
+const fixture = productionPlan;
 const now = "2026-08-01T12:00:00.000Z";
 const clearCloudTrail = () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] });
 const writePrivate = (filePath, bytes) => fs.writeFileSync(filePath, bytes, { mode: 0o600 });
@@ -208,7 +230,7 @@ const reportBinding = (report) => ({
   now,
 });
 const validReport = () => runPermissionPreflight({
-  reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session",
+  reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: productionPlanBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session",
   simulate: allowRequiredDenyForbidden,
   cloudTrail: clearCloudTrail,
 });
@@ -425,7 +447,6 @@ test("every reviewed missing-context key has a canonical policy statement origin
 
 test("production-shaped plan requires and binds the exact account and region variables", () => {
   const bytes = fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
-  const productionPlan = JSON.parse(bytes);
   const run = (selectedPlan) => runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: selectedPlan, planBytes: Buffer.from(JSON.stringify(selectedPlan)), savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   for (const key of ["account_id", "aws_region"]) {
     const missing = structuredClone(productionPlan); delete missing.variables[key];
@@ -596,19 +617,19 @@ test("broker managed-policy simulation allows the exact update and rejects impli
 
 test("complete mocked preflight passes and binds the exact plan SHA", () => {
   const report = runPermissionPreflight({
-    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
+    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: productionPlanBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
     simulate: allowRequiredDenyForbidden,
     cloudTrail: clearCloudTrail,
   });
   assert.equal(report.status, "valid");
-  assert.equal(report.planSha256, crypto.createHash("sha256").update(planBytes).digest("hex"));
+  assert.equal(report.planSha256, crypto.createHash("sha256").update(productionPlanBytes).digest("hex"));
   assert.equal(report.deniedCount, 0);
   assertReport(report, { planSha256: report.planSha256, savedPlanSha256: report.savedPlanSha256, canonicalPlanJsonSha256: report.canonicalPlanJsonSha256, now });
 });
 
 test("missing required PassRole fails closed", () => {
   const report = runPermissionPreflight({
-    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
+    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: productionPlanBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
     simulate: ({ evaluation }) => !evaluation.forbidden && evaluation.action === "iam:PassRole" ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }),
     cloudTrail: clearCloudTrail,
   });
@@ -667,7 +688,7 @@ test("forbidden allowed evaluation fails closed", () => {
 
 test("wrong plan binding and stale reports are rejected", () => {
   const report = runPermissionPreflight({
-    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
+    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: productionPlanBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
     simulate: allowRequiredDenyForbidden,
     cloudTrail: clearCloudTrail,
   });
@@ -686,8 +707,8 @@ test("image provenance and permission evidence use independent freshness windows
 });
 
 test("permission preflight requires binary-plan bytes and the report carries both plan hashes", () => {
-  assert.throws(() => runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail }), /Saved binary plan bytes/);
-  const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
+  assert.throws(() => runPermissionPreflightRaw({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: productionPlanBytes, manifest, phase: "plan-bound", generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail }), /Saved binary plan bytes/);
+  const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: productionPlanBytes, savedPlanBytes, manifest, planBound: true, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.match(report.savedPlanSha256, /^[a-f0-9]{64}$/);
   assert.match(report.canonicalPlanJsonSha256, /^[a-f0-9]{64}$/);
   const missingSavedHash = { ...report, savedPlanSha256: undefined };
@@ -696,7 +717,7 @@ test("permission preflight requires binary-plan bytes and the report carries bot
 
 test("CloudTrail denial supplements simulation and blocks preflight", () => {
   const report = runPermissionPreflight({
-    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
+    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: productionPlanBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
     simulate: allowRequiredDenyForbidden,
     cloudTrail: () => ({ status: "unresolved-denial", eventsChecked: 1, unresolvedDenials: [{ eventName: "PassRole" }] }),
   });
@@ -1010,14 +1031,18 @@ test("CLI and programmatic preflight paths produce the same deterministic report
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-cli-equivalence-"));
   const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json"); const outputPath = path.join(directory, "report.json"); const signaturePath = path.join(directory, "report.signature.json");
   writePrivate(planPath, planBytes); writePrivate(savedPath, savedPlanBytes); writePrivate(manifestPath, JSON.stringify(manifest));
-  const direct = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, manifest, plan, planBytes, savedPlanBytes, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
-  runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test", ...cliApprovalArgs(directory)], {
+  const direct = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, manifest, plan: productionPlan, planBytes: productionPlanBytes, savedPlanBytes, planBound: true, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
+  writePrivate(planPath, productionPlanBytes);
+  runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", outputPath, "--signature-output", signaturePath, "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test", ...cliApprovalArgs(directory, productionPlan, productionPlanBytes)], {
     getCaller: () => generatorArn,
     collectPolicyEvidence: () => policyEvidence,
     runPreflight: (input) => runPermissionPreflight({ ...input, generatedAt: now, now, simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail }),
     signReport: (report) => reportSignature(report),
   });
-  assert.deepEqual(JSON.parse(fs.readFileSync(outputPath, "utf8")), direct);
+  const cliReport = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+  delete cliReport.planApprovalReportSha256;
+  delete direct.planApprovalReportSha256;
+  assert.deepEqual(cliReport, direct);
 });
 
 function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlanBytes, approvedBytes } = {}) {
@@ -1034,12 +1059,16 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   const effectivePlan = structuredClone(approvedPlan);
   effectivePlan.variables = {
     ...effectivePlan.variables,
+    tooling_sha: { value: "b".repeat(40) },
+    image_release_sha: { value: releaseSha },
     backend_image: { value: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"a".repeat(64)}` },
     worker_image: { value: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker@sha256:${"b".repeat(64)}` },
     executor_image: { value: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"c".repeat(64)}` },
     canary_image: { value: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"d".repeat(64)}` },
     read_only_canary_image: { value: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"d".repeat(64)}` },
   };
+  const effectiveAddresses = new Set(effectivePlan.resource_changes.map((change) => change.address));
+  for (const change of fixture.resource_changes) if (!effectiveAddresses.has(change.address)) effectivePlan.resource_changes.push(structuredClone(change));
   const planImageVariable = (address) => address.startsWith("aws_ecs_task_definition.executor[") ? "executor_image" : `${/\["([^"]+)"\]$/.exec(address)?.[1]}_image`;
   for (const [address, family] of Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES)) {
     const mapping = manifest.taskDefinitionMappings.find((candidate) => candidate.address === address);
@@ -1223,6 +1252,73 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   return { directory, planPath, planJsonPath, canonicalPlanJsonPath, planApprovalReportPath, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex"), auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), permissionReportSignatureSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionSignaturePath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256: crypto.createHash("sha256").update(fs.readFileSync(refreshReportPath)).digest("hex"), toolingTreeSha256: "e".repeat(64) };
 }
 
+const planBoundPermissionInput = (fixture) => {
+  const currentNow = new Date().toISOString();
+  const planBytes = fs.readFileSync(fixture.planJsonPath);
+  const approvalReportBytes = fs.readFileSync(fixture.planApprovalReportPath);
+  const referenceAuditBytes = fs.readFileSync(fixture.auditPath);
+  return {
+    reportGeneratorCallerArn: generatorArn,
+    simulatedRoleArn: roleArn,
+    manifest,
+    plan: JSON.parse(planBytes),
+    planBytes,
+    canonicalPlanJsonBytes: fs.readFileSync(fixture.canonicalPlanJsonPath),
+    savedPlanBytes: fs.readFileSync(fixture.planPath),
+    planApprovalReport: JSON.parse(approvalReportBytes),
+    planApprovalReportBytes: approvalReportBytes,
+    planApprovalReportSha256: fixture.planApprovalReportSha256,
+    referenceAudit: JSON.parse(referenceAuditBytes),
+    referenceAuditBytes,
+    generatedAt: currentNow,
+    now: currentNow,
+    policyPublishedAt: currentNow,
+    cloudTrailSessionName: "test",
+    simulate: allowRequiredDenyForbidden,
+    cloudTrail: clearCloudTrail,
+  };
+};
+
+const rebindPlanBoundPermissionInput = (input, plan, audit = input.referenceAudit, { bindAuditToPlan = true } = {}) => {
+  const planBytes = Buffer.from(JSON.stringify(plan));
+  const planJsonSha256 = crypto.createHash("sha256").update(planBytes).digest("hex");
+  const canonicalPlanJsonBytes = Buffer.from(`${canonicalizeJson(plan)}\n`);
+  const canonicalPlanFileSha256 = crypto.createHash("sha256").update(canonicalPlanJsonBytes).digest("hex");
+  const logicalCanonicalPlanJsonSha256 = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(plan))).digest("hex");
+  const boundAudit = { ...audit, ...(bindAuditToPlan ? { planJsonSha256 } : {}) };
+  const referenceAuditBytes = Buffer.from(JSON.stringify(boundAudit));
+  const approval = { ...input.planApprovalReport, planJsonSha256, canonicalPlanFileSha256, logicalCanonicalPlanJsonSha256, referenceAuditSha256: crypto.createHash("sha256").update(referenceAuditBytes).digest("hex") };
+  const planApprovalReportBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
+  return { ...input, plan, planBytes, canonicalPlanJsonBytes, planApprovalReport: approval, planApprovalReportBytes, planApprovalReportSha256: crypto.createHash("sha256").update(planApprovalReportBytes).digest("hex"), referenceAudit: boundAudit, referenceAuditBytes };
+};
+
+test("plan-bound BASELINE permission preflight requires an exact structural reference audit", () => {
+  const fixture = wrapperFixture();
+  const valid = planBoundPermissionInput(fixture);
+  assert.doesNotThrow(() => runPermissionPreflight(valid));
+  assert.throws(() => runPermissionPreflight({ ...valid, referenceAudit: undefined, referenceAuditBytes: undefined }), /requires the bound reference audit/);
+  assert.throws(() => runPermissionPreflight({ ...valid, referenceAudit: undefined }), /object and bytes/);
+  assert.throws(() => runPermissionPreflight({ ...valid, referenceAuditBytes: undefined }), /object and bytes/);
+  assert.throws(() => runPermissionPreflight({ ...valid, referenceAuditBytes: Buffer.from(`${JSON.stringify(valid.referenceAudit)}\n`) }), /reference-audit SHA256/);
+
+  const mismatchedAudit = { ...valid.referenceAudit, planJsonSha256: "0".repeat(64) };
+  assert.throws(() => runPermissionPreflight(rebindPlanBoundPermissionInput(valid, valid.plan, mismatchedAudit, { bindAuditToPlan: false })), /different plan JSON/);
+
+  const missingAddress = structuredClone(valid.plan);
+  missingAddress.resource_changes = missingAddress.resource_changes.filter((change) => change.address !== "aws_dynamodb_table.replay");
+  assert.throws(() => runPermissionPreflight(rebindPlanBoundPermissionInput(valid, missingAddress)), /canonical address set|mutation census/);
+
+  const arbitraryAddress = structuredClone(valid.plan);
+  arbitraryAddress.resource_changes.push({ address: "aws_s3_bucket.unreviewed", type: "aws_s3_bucket", change: { actions: ["no-op"] } });
+  assert.throws(() => runPermissionPreflight(rebindPlanBoundPermissionInput(valid, arbitraryAddress)), /canonical address set|mutation census/);
+
+  const retainedAddress = 'aws_ecs_task_definition.candidate_retained["abcdef1-backend"]';
+  const retainedPlan = structuredClone(valid.plan);
+  retainedPlan.resource_changes.push({ address: retainedAddress, type: "aws_ecs_task_definition", change: { actions: ["no-op"] } });
+  const retainedAudit = { ...valid.referenceAudit, retainedTaskDefinitions: [...valid.referenceAudit.retainedTaskDefinitions, { terraformAddress: retainedAddress, family: STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["backend"]'], classification: "retained-no-op", oldTaskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["backend"]']}:999999` }] };
+  assert.doesNotThrow(() => runPermissionPreflight(rebindPlanBoundPermissionInput(valid, retainedPlan, retainedAudit)));
+});
+
 const wrapperArgs = (fixture, verifyOnly = false) => [
   ...(verifyOnly ? ["--verify-only"] : []),
   "--closure-mode", "production",
@@ -1233,6 +1329,13 @@ const wrapperArgs = (fixture, verifyOnly = false) => [
   "--refresh-report", fixture.refreshReportPath, "--refresh-report-sha256", fixture.refreshReportSha256,
   "--plan-sha256", fixture.planHash, "--audit-sha256", fixture.auditHash, "--saved-plan-sha256", fixture.savedHash, "--canonical-plan-json-sha256", fixture.canonicalHash,
 ];
+const rebindApprovalAudit = (fixture, auditBytes) => {
+  const approval = JSON.parse(fs.readFileSync(fixture.planApprovalReportPath));
+  approval.referenceAuditSha256 = crypto.createHash("sha256").update(auditBytes).digest("hex");
+  const approvalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
+  writePrivate(fixture.planApprovalReportPath, approvalBytes);
+  fixture.planApprovalReportSha256 = crypto.createHash("sha256").update(approvalBytes).digest("hex");
+};
 
 const createValidStageBApplyFixture = (options = {}) => ({
   ...wrapperFixture(options),
@@ -1477,7 +1580,7 @@ test("verify-only and apply reject failed refresh checks before any plan or appl
 
 test("apply wrapper rejects an unqualified broker target before apply", () => {
   const fixture = wrapperFixture();
-  const audit = { audit: true, toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), canonicalImageEvidenceSha256: fixture.imageEvidenceSha256, broker: {
+  const audit = { ...JSON.parse(fs.readFileSync(fixture.auditPath)), broker: {
     aliasArn: STAGE_B.brokerFunctionArn,
     aliasName: "reviewed",
     aliasFunctionVersion: "2",
@@ -1487,6 +1590,7 @@ test("apply wrapper rejects an unqualified broker target before apply", () => {
   } };
   const auditBytes = Buffer.from(JSON.stringify(audit));
   writePrivate(fixture.auditPath, auditBytes);
+  rebindApprovalAudit(fixture, auditBytes);
   assert.throws(() => assertApplyArtifacts({
     ...fixture,
     planSha256: fixture.planHash,
@@ -1502,23 +1606,18 @@ test("apply wrapper rejects an unqualified broker target before apply", () => {
 });
 
 test("apply wrapper validates the canonical alias for any broker mutation regardless of ordering", () => {
-  const brokerChange = (address, type, actions) => ({
-    address,
-    type,
-    change: address === "aws_iam_policy.broker"
-      ? { actions, after: { name: "mscqr-production-rls-approval-broker-runtime" }, after_unknown: { policy: true } }
-      : { actions, after: {} },
-  });
-  const planWithBrokerChanges = (changes) => ({
-    ...plan,
+  const brokerAddresses = ["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"];
+  const brokerChanges = productionPlan.resource_changes.filter((change) => brokerAddresses.includes(change.address));
+  const planWithBrokerChanges = (order) => ({
+    ...productionPlan,
     resource_changes: [
-      ...plan.resource_changes.filter((change) => !["aws_lambda_function.broker", "aws_lambda_alias.reviewed", "aws_iam_policy.broker"].includes(change.address)),
-      ...changes,
+      ...productionPlan.resource_changes.filter((change) => !brokerAddresses.includes(change.address)),
+      ...order.map((address) => brokerChanges.find((change) => change.address === address)),
     ],
   });
   const run = (approvedPlan, aliasArn) => {
     const fixture = wrapperFixture({ approvedPlan });
-    const auditBytes = Buffer.from(JSON.stringify({ audit: true, toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), canonicalImageEvidenceSha256: fixture.imageEvidenceSha256, broker: {
+    const auditBytes = Buffer.from(JSON.stringify({ ...JSON.parse(fs.readFileSync(fixture.auditPath)), broker: {
       aliasArn,
       aliasName: "reviewed",
       aliasFunctionVersion: "2",
@@ -1527,6 +1626,7 @@ test("apply wrapper validates the canonical alias for any broker mutation regard
       resolvedVersionArn: `${STAGE_B.brokerFunctionArn}:2`,
     } }));
     writePrivate(fixture.auditPath, auditBytes);
+    rebindApprovalAudit(fixture, auditBytes);
     return () => assertApplyArtifacts({
       ...fixture,
       planSha256: fixture.planHash,
@@ -1540,35 +1640,13 @@ test("apply wrapper validates the canonical alias for any broker mutation regard
       verifyPermissionSignature: () => true,
     });
   };
-  const policyNoOpAliasUpdate = planWithBrokerChanges([
-    brokerChange("aws_iam_policy.broker", "aws_iam_policy", ["no-op"]),
-    brokerChange("aws_lambda_alias.reviewed", "aws_lambda_alias", ["update"]),
-  ]);
-  const policyUpdateAliasNoOp = planWithBrokerChanges([
-    brokerChange("aws_iam_policy.broker", "aws_iam_policy", ["update"]),
-    brokerChange("aws_lambda_alias.reviewed", "aws_lambda_alias", ["no-op"]),
-  ]);
-  const multipleResources = planWithBrokerChanges([
-    brokerChange("aws_lambda_alias.reviewed", "aws_lambda_alias", ["no-op"]),
-    brokerChange("aws_lambda_function.broker", "aws_lambda_function", ["update"]),
-    brokerChange("aws_iam_policy.broker", "aws_iam_policy", ["no-op"]),
-  ]);
-  const allNoOp = planWithBrokerChanges([
-    brokerChange("aws_iam_policy.broker", "aws_iam_policy", ["no-op"]),
-    brokerChange("aws_lambda_alias.reviewed", "aws_lambda_alias", ["no-op"]),
-  ]);
   const unqualified = STAGE_B.brokerFunctionArn;
-  for (const candidate of [policyNoOpAliasUpdate, policyUpdateAliasNoOp, multipleResources]) {
-    assert.throws(run(candidate, unqualified), (error) => error instanceof Error && error.message.includes("Difference: alias, qualifier"));
-  }
-  assert.doesNotThrow(run(allNoOp, unqualified));
-  const forward = run(policyNoOpAliasUpdate, unqualified);
-  const reverse = run(planWithBrokerChanges([
-    brokerChange("aws_lambda_alias.reviewed", "aws_lambda_alias", ["update"]),
-    brokerChange("aws_iam_policy.broker", "aws_iam_policy", ["no-op"]),
-  ]), unqualified);
-  assert.throws(forward, /Stage B broker alias ARN mismatch/);
-  assert.throws(reverse, /Stage B broker alias ARN mismatch/);
+  const orders = [
+    brokerAddresses,
+    [...brokerAddresses].reverse(),
+    [brokerAddresses[1], brokerAddresses[2], brokerAddresses[0]],
+  ];
+  for (const order of orders) assert.throws(run(planWithBrokerChanges(order), unqualified), /Difference: alias, qualifier/);
 });
 
 test("verification-only and real apply paths reject an invalid report signature before apply", () => {

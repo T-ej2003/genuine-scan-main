@@ -176,6 +176,21 @@ function assertPlanHashes(report, hashes) {
   }
 }
 
+function assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required }) {
+  if (!referenceAudit && !referenceAuditBytes) {
+    if (required) throw new Error("BASELINE plan approval requires the bound reference audit.");
+    return false;
+  }
+  if (!referenceAudit || !Buffer.isBuffer(referenceAuditBytes)) throw new Error("Stage B reference audit object and bytes must be supplied together.");
+  let parsedAudit;
+  try { parsedAudit = JSON.parse(referenceAuditBytes); } catch { throw new Error("Stage B reference audit bytes are malformed."); }
+  if (canonicalJson(parsedAudit) !== canonicalJson(referenceAudit)) throw new Error("Stage B reference audit object does not match its bound bytes.");
+  if (sha256(referenceAuditBytes) !== report.referenceAuditSha256) throw new Error("Stage B plan approval report reference-audit SHA256 mismatch.");
+  if (parsedAudit.planJsonSha256 !== hashes.planJsonSha256) throw new Error("Stage B reference audit is bound to a different plan JSON.");
+  if (parsedAudit.recoveryAttestationSha256 !== report.recoveryAttestationSha256) throw new Error("Stage B reference audit recovery-attestation binding differs from the approval report.");
+  return parsedAudit;
+}
+
 export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, refreshReportSha256, refreshBindingReportSha256, recoveryAttestationSha256, hashes, capturedAt, stageBLineage, stageBSerial, terraformVersion, terraformFormatVersion, planExitCode = 0, showExitCode = 0, classification, planProfile = "BASELINE", taskDefinitionRotations = [], brokerEvidence = {} }) {
   assertCanonicalTerraformSerialNumber(stageBSerial, "Stage B serial");
   return {
@@ -278,8 +293,8 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
     if (report[name] !== value) throw new Error(`Stage B plan approval report ${name} is not bound to the captured release.`);
   }
   if (report.logicalCanonicalPlanJsonSha256 !== logicalCanonicalPlanJsonSha256) throw new Error("Stage B logical canonical plan hash is not bound to the approved plan.");
-  if (!Buffer.isBuffer(referenceAuditBytes) || sha256(referenceAuditBytes) !== referenceAuditSha256 || report.referenceAuditSha256 !== referenceAuditSha256) throw new Error("Stage B plan approval report reference-audit binding is invalid.");
-  if (referenceAudit?.planJsonSha256 !== hashes.planJsonSha256) throw new Error("Stage B reference audit is bound to a different plan JSON.");
+  assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required: true });
+  if (referenceAuditSha256 !== undefined && report.referenceAuditSha256 !== referenceAuditSha256) throw new Error("Stage B plan approval report reference-audit binding is invalid.");
   if (captureReport.recoveryAttestationSha256 !== referenceAudit?.recoveryAttestationSha256) throw new Error("Stage B reference audit does not inherit the recovery-attestation binding.");
   if (trustedCallerArn !== undefined && referenceAudit?.callerArn !== trustedCallerArn) throw new Error("Stage B reference audit caller does not match the trusted release caller.");
   if (report.referenceAuditCallerArn !== referenceAudit?.callerArn || report.referenceAuditAt !== referenceAudit?.auditedAt) throw new Error("Stage B plan approval report reference-audit identity is incomplete.");
@@ -306,8 +321,8 @@ export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, a
   if (report.planProfile === "RECOVERY_ALIAS_ONLY" && expectedRefreshBindingReportSha256 !== undefined && report.refreshBindingReportSha256 !== expectedRefreshBindingReportSha256) throw new Error("Stage B recovery approval observation-binding SHA256 differs from the selected observation binding.");
   assertBrokerEvidence(report, { approved: true });
   assertStageBReferenceAuditFreshness(report.referenceAuditAt, now);
-  if (referenceAuditBytes && (sha256(referenceAuditBytes) !== report.referenceAuditSha256 || referenceAudit?.planJsonSha256 !== hashes.planJsonSha256 || referenceAudit?.recoveryAttestationSha256 !== report.recoveryAttestationSha256)) throw new Error("Stage B plan approval report reference-audit binding is invalid.");
-  if (report.planProfile === "BASELINE" && referenceAudit) assertStageBNormalPlanCompleteness(JSON.parse(planJsonBytes.toString("utf8")), { referenceAudit, strict: false });
+  const boundReferenceAudit = assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required: report.planProfile === "BASELINE" });
+  if (report.planProfile === "BASELINE") assertStageBNormalPlanCompleteness(JSON.parse(planJsonBytes.toString("utf8")), { referenceAudit: boundReferenceAudit, strict: false });
   assertClassification(report);
   return true;
 }
