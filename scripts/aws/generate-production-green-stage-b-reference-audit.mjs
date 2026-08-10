@@ -14,6 +14,7 @@ import {
   isStageBTaskDefinitionRotationActionsValue,
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
+  STAGE_B_BROKER_TASK_DEFINITION_REFERENCE,
 } from "./stage-b-reference-audit-contract.mjs";
 import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
 import { classifyStageBPlan } from "./stage-b-deployment-contract.mjs";
@@ -215,7 +216,7 @@ function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256, t
     mode,
     family: rollover.family,
     oldTaskDefinitionArn: rollover.oldArn,
-    brokerEnvironmentReference: "local.broker_task_definition_arns",
+    brokerEnvironmentReference: STAGE_B_BROKER_TASK_DEFINITION_REFERENCE,
     taskDefinitionArnReference: `${taskDefinitionAddress}.arn`,
     planJsonSha256: planSha256,
   };

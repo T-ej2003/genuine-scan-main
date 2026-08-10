@@ -15,6 +15,7 @@ import {
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
+  STAGE_B_BROKER_TASK_DEFINITION_REFERENCE,
 } from "./aws/stage-b-reference-audit-contract.mjs";
 import { assertStageBBrokerConfigurationIdentity, canonicalJson, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-stage-b-image-evidence.mjs";
@@ -161,7 +162,7 @@ function assertBoundRollover(plan, change, audit, auditBytes, auditSha256, planB
     if (JSON.stringify(brokerModes) !== JSON.stringify([atomic.mode])
       || atomic.brokerTerraformAddress !== "aws_lambda_function.broker"
       || atomic.taskDefinitionArnReference !== `${change.address}.arn`
-      || atomic.brokerEnvironmentReference !== "local.broker_task_definition_arns"
+      || atomic.brokerEnvironmentReference !== STAGE_B_BROKER_TASK_DEFINITION_REFERENCE
       || atomic.family !== expectedFamily
       || atomic.oldTaskDefinitionArn !== beforeArn
       || atomic.planJsonSha256 !== planSha256) {

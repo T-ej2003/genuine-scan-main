@@ -36,6 +36,50 @@ const envNames = [
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
   "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
 ];
+const SCOPED_REFERENCE_CENSUS_EXPECTED = {
+  "aws_ecs_task_definition.candidate": {
+    for_each_expression: ["local.candidate_definitions_for_resources"],
+    container_definitions: ["each.value.containerDefinitions", "each.value"],
+    cpu: ["each.value.cpu", "each.value"],
+    execution_role_arn: ["aws_iam_role.execution", "each.key"],
+    family: ["each.value.family", "each.value"],
+    memory: ["each.value.memory", "each.value"],
+    network_mode: ["each.value.networkMode", "each.value"],
+    requires_compatibilities: ["each.value.requiresCompatibilities", "each.value"],
+    tags: ["local.tags"],
+    task_role_arn: ["aws_iam_role.task", "each.key"],
+  },
+  "aws_ecs_task_definition.executor": {
+    for_each_expression: ["local.executor_definitions_for_resources"],
+    container_definitions: ["each.value.containerDefinitions", "each.value"],
+    cpu: ["each.value.cpu", "each.value"],
+    execution_role_arn: ["aws_iam_role.execution[\"executor\"].arn", "aws_iam_role.execution[\"executor\"]", "aws_iam_role.execution"],
+    family: ["each.value.family", "each.value"],
+    memory: ["each.value.memory", "each.value"],
+    network_mode: ["each.value.networkMode", "each.value"],
+    requires_compatibilities: ["each.value.requiresCompatibilities", "each.value"],
+    tags: ["local.tags"],
+    task_role_arn: ["var.stage_a_executor_task_role_arn"],
+  },
+  "aws_iam_policy.broker": {
+    policy: ["local.broker_runtime_policy"],
+    tags: ["local.tags"],
+  },
+  "aws_lambda_function.broker": {
+    "environment[0].variables": BROKER_ENVIRONMENT_REFERENCES,
+    filename: ["var.broker_package_path"],
+    role: ["var.stage_a_broker_role_arn"],
+    source_code_hash: ["var.broker_package_path"],
+    tags: ["local.tags"],
+  },
+  "aws_lambda_alias.reviewed": {
+    function_name: ["aws_lambda_function.broker.function_name", "aws_lambda_function.broker"],
+    function_version: [
+      "aws_lambda_function.broker", "aws_lambda_function.broker.version",
+      "var.stage_b_recovery_alias_target_version", "var.stage_b_recovery_only",
+    ],
+  },
+};
 
 function taskChange(address, index) {
   const family = STAGE_B_TASK_DEFINITION_FAMILIES[address];
@@ -99,6 +143,7 @@ function configuration() {
   const candidate = {
     address: "aws_ecs_task_definition.candidate",
     type: "aws_ecs_task_definition",
+    for_each_expression: ref(["local.candidate_definitions_for_resources"]),
     expressions: {
       container_definitions: ref(["each.value.containerDefinitions", "each.value"]),
       cpu: ref(["each.value.cpu", "each.value"]),
@@ -113,6 +158,7 @@ function configuration() {
   };
   const executor = structuredClone(candidate);
   executor.address = "aws_ecs_task_definition.executor";
+  executor.for_each_expression = ref(["local.executor_definitions_for_resources"]);
   executor.expressions.execution_role_arn = ref(["aws_iam_role.execution[\"executor\"].arn", "aws_iam_role.execution[\"executor\"]", "aws_iam_role.execution"]);
   executor.expressions.task_role_arn = ref(["var.stage_a_executor_task_role_arn"]);
   return {
@@ -135,6 +181,27 @@ function configuration() {
       } },
     ] },
   };
+}
+
+function scopedReferenceCensus() {
+  const resources = configuration().root_module.resources;
+  return Object.entries(SCOPED_REFERENCE_CENSUS_EXPECTED).flatMap(([resourceAddress, fields]) => {
+    const resource = resources.find((item) => item.address === resourceAddress);
+    return Object.entries(fields).map(([expressionPath, terraformReferences]) => {
+      const fixtureReferences = expressionPath === "for_each_expression"
+        ? resource?.for_each_expression?.references
+        : expressionPath === "environment[0].variables"
+          ? resource?.expressions?.environment?.[0]?.variables?.references
+        : resource?.expressions?.[expressionPath]?.references;
+      return {
+        resourceAddress,
+        expressionPath,
+        terraformReferences: [...terraformReferences].sort(),
+        validatorExpectedReferences: [...terraformReferences].sort(),
+        fixtureReferences: [...(fixtureReferences || [])].sort(),
+      };
+    });
+  });
 }
 
 function brokerChanges() {
@@ -214,6 +281,22 @@ test("all broker configuration reference fields remain exact", () => {
   for (const [address, fields] of Object.entries(expected)) {
     const actual = Object.fromEntries(census.resources.find((item) => item.address === address).configurationReferences.map(({ field, references }) => [field, references]));
     assert.deepEqual(actual, Object.fromEntries(Object.entries(fields).map(([field, references]) => [field, [...references].sort()])));
+  }
+});
+
+test("bounded scoped Terraform reference census stays source, contract, and fixture convergent", () => {
+  const source = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  assert.match(source, /resource "aws_ecs_task_definition" "candidate"[\s\S]*?for_each\s*=\s*local\.candidate_definitions_for_resources/);
+  assert.match(source, /resource "aws_ecs_task_definition" "executor"[\s\S]*?for_each\s*=\s*local\.executor_definitions_for_resources/);
+  assert.match(source, /BROKER_TASK_DEFINITIONS_JSON\s*=\s*jsonencode\(local\.active_broker_task_definition_arns\)/);
+  assert.match(source, /policy\s*=\s*jsonencode\(local\.broker_runtime_policy\)/);
+  assert.match(source, /function_version\s*=\s*var\.stage_b_recovery_only\s*\?\s*var\.stage_b_recovery_alias_target_version\s*:\s*aws_lambda_function\.broker\.version/);
+
+  const census = scopedReferenceCensus();
+  assert.equal(census.length, 29);
+  for (const entry of census) {
+    assert.deepEqual(entry.terraformReferences, entry.validatorExpectedReferences, `${entry.resourceAddress}.${entry.expressionPath} validator drift`);
+    assert.deepEqual(entry.terraformReferences, entry.fixtureReferences, `${entry.resourceAddress}.${entry.expressionPath} fixture drift`);
   }
 });
 

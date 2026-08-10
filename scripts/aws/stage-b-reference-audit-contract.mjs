@@ -26,10 +26,13 @@ export const STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS = STAGE_B_DEPLOYMENT_EVIDENCE_TT
 export const STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS = STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS;
 export const STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL = STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL;
 export const STAGE_B_BROKER_TERRAFORM_ADDRESS = "aws_lambda_function.broker";
-export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.broker_task_definition_arns";
+export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.active_broker_task_definition_arns";
 export const STAGE_B_BROKER_APPROVAL_REFERENCE = "local.broker_approval_expected";
 export const STAGE_B_BROKER_APPROVAL_INPUT = "var.package_checksum_sha256";
 export const STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION = "aws_ecs_task_definition.executor";
+export const STAGE_B_CANDIDATE_FOR_EACH_REFERENCES = Object.freeze([
+  "local.candidate_definitions_for_resources",
+]);
 export const STAGE_B_EXECUTOR_FOR_EACH_REFERENCES = Object.freeze([
   "local.executor_definitions_for_resources",
 ]);
@@ -381,7 +384,7 @@ export function assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, broker
     return references;
   });
   if (!variableReferences.includes(STAGE_B_BROKER_TASK_DEFINITION_REFERENCE)) {
-    throw new Error("Broker atomic rollover Terraform reference to local.broker_task_definition_arns is missing.");
+    throw new Error(`Broker atomic rollover Terraform reference to ${STAGE_B_BROKER_TASK_DEFINITION_REFERENCE} is missing.`);
   }
   assertStageBBrokerTaskDefinitionMapping(plan, terraformConfiguration);
   const relevant = Array.isArray(plan?.relevant_attributes) ? plan.relevant_attributes : [];
@@ -405,8 +408,8 @@ export function assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, broker
   const candidateFamilyReferences = configuredCandidate?.expressions?.family?.references;
   const hasForEachCandidate = configuredCandidate?.type === "aws_ecs_task_definition"
     && Array.isArray(candidateForEachReferences)
-    && candidateForEachReferences.length === 1
-    && candidateForEachReferences[0] === "local.candidate_definitions"
+    && candidateForEachReferences.length === STAGE_B_CANDIDATE_FOR_EACH_REFERENCES.length
+    && candidateForEachReferences.every((reference, index) => reference === STAGE_B_CANDIDATE_FOR_EACH_REFERENCES[index])
     && Array.isArray(candidateFamilyReferences)
     && candidateFamilyReferences.includes("each.value.family");
   if (relevant.some((item) => item?.resource === "aws_ecs_task_definition.candidate")) {
