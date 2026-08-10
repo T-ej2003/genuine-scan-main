@@ -52,6 +52,7 @@ const controlSids = [
 const finalWriteSids = [
   "RegisterExactStageBReadOnlyCanaryTaskDefinition",
   "PassExactStageBReadOnlyCanaryRolesToEcsTasks",
+  "PassExactLegacyBackendRolesForReviewedRollback",
   "UpdateExactStageBBrokerFunctionRelease",
   "UpdateExactStageBBrokerReviewedAlias",
   "UpdateExactStageBBrokerManagedPolicy",
@@ -134,13 +135,13 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   }));
 });
 
-test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and eight final-write statements", () => {
+test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and nine final-write statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids]).size, 28);
+  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids]).size, 29);
   for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
   for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "ReadExactStageBBrokerManagedPolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
@@ -258,10 +259,17 @@ test("final-write PassRole is limited to both canary roles and ECS tasks", () =>
     Resource: readOnlyCanaryRoles,
     Condition: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } },
   });
-  assert.equal(statementsForAction(policies.finalWrite, "iam:PassRole").length, 1);
+  const rollback = statementOf(policies.finalWrite, "PassExactLegacyBackendRolesForReviewedRollback");
+  assert.deepEqual(rollback.Resource, [
+    "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
+    "arn:aws:iam::368992683803:role/mscqr-ecs-task-role",
+  ]);
+  assert.equal(statementsForAction(policies.finalWrite, "iam:PassRole").length, 2);
   assert.equal(statement.Resource.includes("*"), false);
   assert.equal(statement.Resource.includes("mscqr-production-rls-green-backend-task"), false);
   assert.equal(statement.Condition.StringEquals["iam:PassedToService"], "ecs-tasks.amazonaws.com");
+  assert.equal(rollback.Condition.StringEquals["iam:PassedToService"], "ecs-tasks.amazonaws.com");
+  assert.equal(rollback.Resource.some((resource) => resource.includes("*")), false);
 });
 
 test("unrelated ECS and CloudWatch Logs mutations remain denied", () => {

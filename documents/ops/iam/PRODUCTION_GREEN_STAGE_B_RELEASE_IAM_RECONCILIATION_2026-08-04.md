@@ -23,7 +23,7 @@ required.
 The canonical FinalApplyWrite SHA-256 changes from
 `04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`
 to
-`2695724259fe808a68e594c62887879a63b8cc7746be70db4090349a45c8aece`.
+`2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09`.
 
 The existing-task-definition traffic switch is intentionally owned by the same
 release-deployer identity used by the canonical wrapper. FinalApplyWrite grants
@@ -31,6 +31,10 @@ only `ecs:UpdateService` on
 `arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2`,
 with `aws:RequestedRegion=eu-west-2`, the exact production cluster condition,
 and `ecs:task-definition` constrained to the reviewed target and rollback ARNs.
+The same policy grants `iam:PassRole` only for the two exact legacy backend roles
+needed by the reviewed rollback, with `iam:PassedToService=ecs-tasks.amazonaws.com`;
+the forward green backend roles remain covered by the separate task-definition
+registration policy. It does not grant wildcard PassRole authority.
 It does not grant service creation/deletion, task-definition deregistration, or
 wildcard service updates. The source change requires administrator publication
 of the new managed-policy version after merge; no live IAM change is performed
@@ -112,6 +116,8 @@ therefore records the exact decision and order-independent missing-context set:
 | `invoke-broker` | `implicitDeny` | FULL-15 |
 | `pass-to-lambda` | `implicitDeny` | PASSROLE-14 |
 | `pass-unrelated-role` | `implicitDeny` | PASSROLE-14 |
+| `rollback-exact-backend-execution-passrole` | `allowed` | SWITCH-REQUIRED |
+| `rollback-exact-backend-task-passrole` | `allowed` | SWITCH-REQUIRED |
 | `activate-exact-ecs-service` | `allowed` | SWITCH-REQUIRED |
 | `rollback-exact-ecs-service` | `allowed` | SWITCH-REQUIRED |
 | `update-ecs-service` | `implicitDeny` | SWITCH-13 |
@@ -184,7 +190,7 @@ The allowed inline-policy set is empty.
 The candidate source policy union was evaluated with AWS IAM custom-policy
 simulation against the production-shaped plan:
 
-- required evaluations: 91/91 allowed
+- required evaluations: 93/93 allowed
 - required failures: 0
 - forbidden evaluations: 23/23 denied
 - forbidden allowed: 0

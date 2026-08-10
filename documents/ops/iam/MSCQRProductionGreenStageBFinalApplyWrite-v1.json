@@ -55,6 +55,20 @@
       }
     },
     {
+      "Sid": "PassExactLegacyBackendRolesForReviewedRollback",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
+        "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "ecs-tasks.amazonaws.com"
+        }
+      }
+    },
+    {
       "Sid": "UpdateExactStageBBrokerFunctionRelease",
       "Effect": "Allow",
       "Action": [

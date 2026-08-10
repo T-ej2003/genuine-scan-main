@@ -60,14 +60,14 @@ test("broker alias update is authorized on the exact broker function resource", 
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: STAGE_B.brokerAliasArn, context }), false);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: `${functionArn}:other`, context }), false);
   assert.equal(finalWrite.Statement.some((statement) => list(statement.Action).some((action) => ["lambda:CreateAlias", "lambda:DeleteAlias"].includes(action))), false);
-  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "2695724259fe808a68e594c62887879a63b8cc7746be70db4090349a45c8aece");
+  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09");
 });
 
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 91);
+  assert.equal(evaluations.required.length, 93);
   assert.equal(evaluations.forbidden.length, 23);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
@@ -81,6 +81,16 @@ test("production-shaped required and forbidden resources reconcile to the source
   assert.deepEqual(switchEvaluation.context.find(({ key }) => key === "ecs:task-definition").values, ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7"]);
   const rollbackEvaluation = evaluations.required.find(({ manifestId }) => manifestId === "rollback-exact-ecs-service");
   assert.equal(allows(rollbackEvaluation), true);
+  for (const [manifestId, roleArn] of [
+    ["rollback-exact-backend-execution-passrole", "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"],
+    ["rollback-exact-backend-task-passrole", "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"],
+  ]) {
+    const passRole = evaluations.required.find(({ manifestId: id }) => id === manifestId);
+    assert.equal(passRole.action, "iam:PassRole");
+    assert.equal(passRole.resource, roleArn);
+    assert.equal(allows(passRole), true);
+    assert.equal(allows({ ...passRole, context: passRole.context.map((entry) => entry.key === "iam:PassedToService" ? { ...entry, values: ["lambda.amazonaws.com"] } : entry) }), false);
+  }
   const replaceContext = (evaluation, key, values) => ({ ...evaluation, context: evaluation.context.map((entry) => entry.key === key ? { ...entry, values } : entry) });
   assert.equal(allows(replaceContext(switchEvaluation, "ecs:task-definition", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:2"])), false);
   for (const revision of [1, 5, 6, 8]) {
