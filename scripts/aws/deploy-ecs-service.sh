@@ -142,11 +142,40 @@ PAYLOAD_FILE="$(mktemp)"
 EXISTING_SERVICE_FILE="$(mktemp)"
 EXISTING_POST_SERVICE_FILE="$(mktemp)"
 EXISTING_TASKS_LIST_FILE="$(mktemp)"
+EXISTING_TASKS_RAW_FILE="$(mktemp)"
 EXISTING_TASKS_FILE="$(mktemp)"
 EXISTING_CALLER_FILE="$(mktemp)"
-trap 'rm -f "$RAW_FILE" "$PAYLOAD_FILE" "$EXISTING_SERVICE_FILE" "$EXISTING_POST_SERVICE_FILE" "$EXISTING_TASKS_LIST_FILE" "$EXISTING_TASKS_FILE" "$EXISTING_CALLER_FILE"' EXIT
+existing_mode_active=false
+existing_switch_started=false
+
+cleanup_and_rollback_on_exit() {
+  local exit_code=$?
+  trap - EXIT
+  set +e
+  if [[ "$existing_mode_active" == "true" && "$existing_switch_started" == "true" && "$exit_code" -ne 0 ]]; then
+    echo "Existing task-definition switch failed; restoring ${PREVIOUS_TASK_DEFINITION_ARN}." >&2
+    WAIT_FOR_STABLE=true \
+      AWS_REGION="$AWS_REGION" \
+      CLUSTER_NAME="$CLUSTER_NAME" \
+      SERVICE_NAME="$SERVICE_NAME" \
+      PREVIOUS_TASK_DEFINITION_ARN="$PREVIOUS_TASK_DEFINITION_ARN" \
+      "$REPO_ROOT/scripts/aws/rollback-ecs-service.sh" || echo "Canonical rollback failed." >&2
+  fi
+  rm -f \
+    "$RAW_FILE" \
+    "$PAYLOAD_FILE" \
+    "$EXISTING_SERVICE_FILE" \
+    "$EXISTING_POST_SERVICE_FILE" \
+    "$EXISTING_TASKS_LIST_FILE" \
+    "$EXISTING_TASKS_RAW_FILE" \
+    "$EXISTING_TASKS_FILE" \
+    "$EXISTING_CALLER_FILE"
+  exit "$exit_code"
+}
+trap cleanup_and_rollback_on_exit EXIT
 
 if [[ -n "$EXISTING_TASK_DEFINITION_ARN" ]]; then
+  existing_mode_active=true
   require_env CLUSTER_NAME
   require_env SERVICE_NAME
   require_env CONTAINER_NAME
@@ -207,6 +236,8 @@ const target = targetResponse.taskDefinition;
 if (!target || target.taskDefinitionArn !== targetArn) fail("Described task definition did not match the exact requested ARN.");
 if (target.status !== "ACTIVE") fail(`Target task definition status is ${target.status || "missing"}; expected ACTIVE.`);
 if (target.family !== expectedFamily || targetMatch[3] !== expectedFamily) fail("Target task-definition family does not match the expected family.");
+const runtimePlatform = target.runtimePlatform || null;
+if (runtimePlatform?.cpuArchitecture && runtimePlatform.cpuArchitecture !== "X86_64") fail(`Target runtimePlatform.cpuArchitecture is ${runtimePlatform.cpuArchitecture}; expected X86_64.`);
 const containers = Array.isArray(target.containerDefinitions) ? target.containerDefinitions : [];
 const selected = containers.filter((container) => container?.name === containerName);
 if (selected.length !== 1) fail(`Target task definition must contain exactly one ${containerName} container.`);
@@ -230,23 +261,6 @@ if (deployments.length !== 1 || deployments[0]?.status !== "PRIMARY" || deployme
 process.stdout.write(expectedCurrentArn);
 NODE
   )"
-
-  existing_switch_started=false
-  rollback_existing_on_failure() {
-    local exit_code=$?
-    trap - EXIT
-    if [[ "$existing_switch_started" == "true" && "$exit_code" -ne 0 ]]; then
-      echo "Existing task-definition switch failed; restoring ${PREVIOUS_TASK_DEFINITION_ARN}." >&2
-      WAIT_FOR_STABLE=true \
-        AWS_REGION="$AWS_REGION" \
-        CLUSTER_NAME="$CLUSTER_NAME" \
-        SERVICE_NAME="$SERVICE_NAME" \
-        PREVIOUS_TASK_DEFINITION_ARN="$PREVIOUS_TASK_DEFINITION_ARN" \
-        "$REPO_ROOT/scripts/aws/rollback-ecs-service.sh" || echo "Canonical rollback failed." >&2
-    fi
-    exit "$exit_code"
-  }
-  trap rollback_existing_on_failure EXIT
 
   if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" ]]; then
     aws ecs update-service \
@@ -290,16 +304,23 @@ NODE
     --cluster "$CLUSTER_NAME" \
     --service-name "$SERVICE_NAME" \
     --desired-status RUNNING \
-    >"$EXISTING_TASKS_LIST_FILE.raw"
+    >"$EXISTING_TASKS_RAW_FILE"
 
   running_task_arns=()
   while IFS= read -r task_arn; do
     [[ -n "$task_arn" ]] && running_task_arns+=("$task_arn")
-  done < <(node --input-type=module - "$EXISTING_TASKS_LIST_FILE.raw" <<'NODE'
+  done < <(node --input-type=module - "$EXISTING_TASKS_RAW_FILE" <<'NODE'
 import fs from "node:fs";
 const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-if (!Array.isArray(response.failures) || response.failures.length !== 0) throw new Error("ECS list-tasks returned failures.");
-for (const arn of response.taskArns || []) process.stdout.write(`${arn}\n`);
+if (!response || typeof response !== "object" || Array.isArray(response)) throw new Error("ECS list-tasks response must be an object.");
+if (!Object.hasOwn(response, "taskArns") || !Array.isArray(response.taskArns)) throw new Error("ECS list-tasks response must contain an array taskArns field.");
+if (Object.hasOwn(response, "nextToken") && typeof response.nextToken !== "string") throw new Error("ECS list-tasks nextToken must be a string when present.");
+if (typeof response.nextToken === "string" && response.nextToken.length > 0) throw new Error("ECS list-tasks pagination is not supported; nextToken was returned.");
+const taskArnPattern = /^arn:aws:ecs:[a-z0-9-]+:[0-9]{12}:task\/[^/]+\/[^/]+$/;
+for (const arn of response.taskArns) {
+  if (typeof arn !== "string" || arn.length === 0 || !taskArnPattern.test(arn)) throw new Error("ECS list-tasks returned a malformed task ARN.");
+  process.stdout.write(`${arn}\n`);
+}
 NODE
   )
   [[ "${#running_task_arns[@]}" -gt 0 ]] || { echo "No running ECS tasks were returned after the existing task-definition switch." >&2; exit 1; }
@@ -337,7 +358,6 @@ NODE
   fi
 
   existing_switch_started=false
-  trap - EXIT
   echo "Verified ${SERVICE_NAME} on ${CLUSTER_NAME} using existing task definition ${EXISTING_TASK_DEFINITION_ARN}"
   exit 0
 fi

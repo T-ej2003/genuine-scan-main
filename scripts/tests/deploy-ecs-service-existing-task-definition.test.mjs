@@ -25,6 +25,8 @@ function writeFixture(data, options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ecs-existing-target-"));
   const fakeBin = path.join(dir, "bin");
   fs.mkdirSync(fakeBin);
+  const tempDir = path.join(dir, "tmp");
+  fs.mkdirSync(tempDir);
   const state = path.join(dir, "state");
   fs.writeFileSync(state, options.alreadyActive ? targetArn : fromArn);
   const target = {
@@ -37,6 +39,7 @@ function writeFixture(data, options = {}) {
         image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${options.targetDigest || digest}`,
         environment: [{ name: "RELEASE_GIT_SHA", value: options.releaseGitSha || sourceSha }],
       }],
+      runtimePlatform: options.runtimePlatform === undefined ? { cpuArchitecture: "X86_64" } : options.runtimePlatform,
     },
   };
   const normal = {
@@ -60,10 +63,10 @@ function writeFixture(data, options = {}) {
       lastStatus: "RUNNING",
       taskDefinitionArn: options.runningTaskDefinitionArn || targetArn,
       containers: [{ name: containerName, imageDigest: options.runningDigest || digest }],
-      taskArn: `arn:aws:ecs:${region}:${account}:task/${n}`,
+      taskArn: `arn:aws:ecs:${region}:${account}:task/${cluster}/${n}`,
     })),
   };
-  const taskArns = { failures: [], taskArns: tasks.tasks.map((task) => task.taskArn) };
+  const taskArns = options.taskArnsResponse || { taskArns: tasks.tasks.map((task) => task.taskArn) };
   for (const [name, value] of Object.entries({ target, normal, pre, post, tasks, taskArns })) {
     fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(value));
   }
@@ -86,10 +89,10 @@ elif [[ "$1 $2" == "ecs update-service" ]]; then
   for ((i=1; i<=$#; i++)); do
     if [[ "\${!i}" == "--task-definition" ]]; then j=$((i + 1)); task_definition="\${!j}"; fi
   done
-  if [[ "$FAKE_SCENARIO" == "update-failure" && "$task_definition" == "${targetArn}" ]]; then exit 31; fi
+  if [[ ("$FAKE_SCENARIO" == "update-failure" && "$task_definition" == "${targetArn}") || ("$FAKE_SCENARIO" == "rollback-failure" && "$task_definition" == "${fromArn}") ]]; then exit 31; fi
   printf '%s' "$task_definition" > "$FAKE_DATA/state"
 elif [[ "$1 $2" == "ecs wait" ]]; then
-  if [[ "$FAKE_SCENARIO" == "stable-failure" && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; exit 32; fi
+  if [[ ("$FAKE_SCENARIO" == "stable-failure" || "$FAKE_SCENARIO" == "rollback-failure") && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; exit 32; fi
 elif [[ "$1 $2" == "ecs list-tasks" ]]; then cat "$FAKE_DATA/taskArns.json"
 elif [[ "$1 $2" == "ecs describe-tasks" ]]; then cat "$FAKE_DATA/tasks.json"
 elif [[ "$1 $2" == "ecs register-task-definition" ]]; then printf '%s\\n' "${targetArn}"
@@ -97,7 +100,7 @@ fi
 `;
   const fakeAws = path.join(fakeBin, "aws");
   fs.writeFileSync(fakeAws, aws, { mode: 0o755 });
-  return { dir, fakeBin, state, calls: path.join(dir, "calls.log") };
+  return { dir, fakeBin, state, tempDir, calls: path.join(dir, "calls.log") };
 }
 
 function runExisting(options = {}, extraArgs = []) {
@@ -115,6 +118,7 @@ function runExisting(options = {}, extraArgs = []) {
       EXPECTED_GIT_SHA: options.expectedGitSha === undefined ? sourceSha : options.expectedGitSha,
       FAKE_DATA: fixture.dir,
       FAKE_SCENARIO: options.scenario || "",
+      TMPDIR: fixture.tempDir,
     },
   });
   const calls = fs.existsSync(fixture.calls) ? fs.readFileSync(fixture.calls, "utf8") : "";
@@ -124,6 +128,11 @@ function runExisting(options = {}, extraArgs = []) {
 function assertFailure(result, pattern) {
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
   if (pattern) assert.match(result.stderr, pattern);
+  assertTempClean(result);
+}
+
+function assertTempClean(result) {
+  assert.deepEqual(fs.readdirSync(result.fixture.tempDir), []);
 }
 
 test("existing production-shaped target switches once without registering", () => {
@@ -132,6 +141,7 @@ test("existing production-shaped target switches once without registering", () =
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
   assert.equal((result.calls.match(/ecs register-task-definition/g) || []).length, 0);
   assert.match(result.stdout, new RegExp(targetArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assertTempClean(result);
 });
 
 test("existing mode rejects an unrevisioned target", () => assertFailure(runExisting({ targetArgument: `arn:aws:ecs:${region}:${account}:task-definition/${targetFamily}` }), /full ARN.*revision/));
@@ -143,6 +153,18 @@ test("existing mode rejects inactive, wrong-family, and wrong-digest targets", (
   assertFailure(runExisting({ status: "INACTIVE" }), /ACTIVE/);
   assertFailure(runExisting({ family: "other-family" }), /family/);
   assertFailure(runExisting({ targetDigest: "sha256:" + "1".repeat(64) }), /digest/);
+});
+test("existing mode enforces the normal X86_64 runtime guard", () => {
+  const arm = runExisting({ runtimePlatform: { cpuArchitecture: "ARM64" } });
+  assertFailure(arm, /cpuArchitecture/);
+  assert.equal((arm.calls.match(/ecs update-service/g) || []).length, 0);
+  assert.equal((arm.calls.match(/ecs register-task-definition/g) || []).length, 0);
+  assertTempClean(arm);
+
+  const missing = runExisting({ runtimePlatform: null });
+  assert.equal(missing.status, 0, missing.stderr);
+  assert.equal((missing.calls.match(/ecs update-service/g) || []).length, 1);
+  assertTempClean(missing);
 });
 test("existing mode rejects a mismatched current service or concurrent deployment", () => {
   assertFailure(runExisting({ currentTaskDefinition: `arn:aws:ecs:${region}:${account}:task-definition/mscqr-backend:46` }), /expected current/);
@@ -160,11 +182,13 @@ test("already-active target is a verified no-op", () => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 0);
   assert.equal((result.calls.match(/ecs register-task-definition/g) || []).length, 0);
+  assertTempClean(result);
 });
 test("update failure does not trigger an invented rollback", () => {
   const result = runExisting({ scenario: "update-failure" });
   assertFailure(result);
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assertTempClean(result);
 });
 test("stabilization failure rolls back the exact previous ARN", () => {
   const result = runExisting({ scenario: "stable-failure" });
@@ -172,6 +196,32 @@ test("stabilization failure rolls back the exact previous ARN", () => {
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
   assert.match(result.calls, new RegExp(`--task-definition ${fromArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   assert.equal(fs.readFileSync(result.fixture.state, "utf8"), fromArn);
+  assertTempClean(result);
+});
+test("list-tasks validates the real response schema and rejects pagination", () => {
+  for (const [taskArnsResponse, pattern] of [
+    [{}, /taskArns/],
+    [{ taskArns: "not-an-array" }, /taskArns/],
+    [{ taskArns: ["not-an-arn"] }, /running ECS tasks/],
+    [{ taskArns: [`arn:aws:ecs:${region}:${account}:task/${cluster}/1`], nextToken: "next" }, /running ECS tasks/],
+  ]) {
+    const result = runExisting({ taskArnsResponse });
+    assertFailure(result, pattern);
+    assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
+    assertTempClean(result);
+  }
+
+  const empty = runExisting({ taskArnsResponse: { taskArns: [] } });
+  assertFailure(empty, /No running ECS tasks/);
+  assert.equal((empty.calls.match(/ecs update-service/g) || []).length, 2);
+  assertTempClean(empty);
+});
+test("rollback failure still cleans every temporary file", () => {
+  const result = runExisting({ scenario: "rollback-failure" });
+  assertFailure(result);
+  assert.match(result.stderr, /Canonical rollback failed/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
+  assertTempClean(result);
 });
 test("running task-definition and digest mismatches fail closed and roll back", () => {
   const taskMismatch = runExisting({ runningTaskDefinitionArn: fromArn });
@@ -198,10 +248,12 @@ test("normal mode still registers a new revision before updating the service", (
       IMAGE_URI: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`,
       FAKE_DATA: fixture.dir,
       FAKE_SCENARIO: "",
+      TMPDIR: fixture.tempDir,
     },
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal((fs.readFileSync(fixture.calls, "utf8").match(/ecs register-task-definition/g) || []).length, 1);
+  assertTempClean({ fixture });
 });
 
 test("the operator runbook exposes both explicit modes and existing-mode bindings", () => {
