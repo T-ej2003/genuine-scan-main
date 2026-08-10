@@ -116,6 +116,13 @@ require_env() {
   fi
 }
 
+require_version_verification_inputs() {
+  if [[ -n "${VERSION_URL:-}" || -n "${EXPECTED_GIT_SHA:-}" ]]; then
+    require_env VERSION_URL
+    require_env EXPECTED_GIT_SHA
+  fi
+}
+
 if ! command -v aws >/dev/null 2>&1; then
   echo "aws CLI is required." >&2
   exit 1
@@ -136,6 +143,13 @@ require_env CONTAINER_NAME
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERSION_VERIFY_SCRIPT="$REPO_ROOT/scripts/aws/verify-version-endpoint.sh"
+
+verify_deployed_version_if_requested() {
+  require_version_verification_inputs
+  if [[ -n "${VERSION_URL:-}" || -n "${EXPECTED_GIT_SHA:-}" ]]; then
+    "$VERSION_VERIFY_SCRIPT" "$VERSION_URL" "$EXPECTED_GIT_SHA"
+  fi
+}
 
 RAW_FILE="$(mktemp)"
 PAYLOAD_FILE="$(mktemp)"
@@ -191,6 +205,7 @@ if [[ -n "$EXISTING_TASK_DEFINITION_ARN" ]]; then
     echo "Existing task-definition mode does not support DRY_RUN; use the offline contract tests instead." >&2
     exit 1
   }
+  require_version_verification_inputs
 
   aws sts get-caller-identity \
     --query Arn \
@@ -356,6 +371,8 @@ const [outPath, clusterName, serviceName, containerName, previousTaskDefinitionA
 fs.writeFileSync(outPath, JSON.stringify({ mode: "existing-task-definition", clusterName, serviceName, containerName, previousTaskDefinitionArn, targetTaskDefinitionArn, expectedImageDigest }, null, 2));
 NODE
   fi
+
+  verify_deployed_version_if_requested
 
   existing_switch_started=false
   echo "Verified ${SERVICE_NAME} on ${CLUSTER_NAME} using existing task definition ${EXISTING_TASK_DEFINITION_ARN}"
@@ -542,8 +559,4 @@ echo "  Task definition: ${NEW_TASK_DEFINITION_ARN}"
 echo "  Container: ${CONTAINER_NAME}"
 echo "  Image: ${IMAGE_URI}"
 
-if [[ -n "${VERSION_URL:-}" || -n "${EXPECTED_GIT_SHA:-}" ]]; then
-  require_env VERSION_URL
-  require_env EXPECTED_GIT_SHA
-  "$VERSION_VERIFY_SCRIPT" "$VERSION_URL" "$EXPECTED_GIT_SHA"
-fi
+verify_deployed_version_if_requested

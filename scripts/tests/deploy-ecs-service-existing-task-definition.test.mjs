@@ -29,6 +29,8 @@ function writeFixture(data, options = {}) {
   fs.mkdirSync(tempDir);
   const state = path.join(dir, "state");
   fs.writeFileSync(state, options.alreadyActive ? targetArn : fromArn);
+  const includeSourceMetadata = options.includeSourceMetadata
+    ?? Boolean(options.versionUrl || options.expectedGitSha || options.releaseGitSha);
   const target = {
     taskDefinition: {
       taskDefinitionArn: options.targetResponseArn || targetArn,
@@ -37,7 +39,9 @@ function writeFixture(data, options = {}) {
       containerDefinitions: [{
         name: containerName,
         image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${options.targetDigest || digest}`,
-        environment: [{ name: "RELEASE_GIT_SHA", value: options.releaseGitSha || sourceSha }],
+        environment: !includeSourceMetadata
+          ? []
+          : [{ name: "RELEASE_GIT_SHA", value: options.releaseGitSha || sourceSha }],
       }],
       runtimePlatform: options.runtimePlatform === undefined ? { cpuArchitecture: "X86_64" } : options.runtimePlatform,
     },
@@ -100,11 +104,24 @@ fi
 `;
   const fakeAws = path.join(fakeBin, "aws");
   fs.writeFileSync(fakeAws, aws, { mode: 0o755 });
+  const curl = `#!/usr/bin/env bash
+set -euo pipefail
+echo "curl $*" >> "$FAKE_DATA/calls.log"
+if [[ "$FAKE_SCENARIO" == "version-endpoint-failure" ]]; then exit 41; fi
+if [[ "$FAKE_SCENARIO" == "wrong-version" ]]; then printf '%s\\n' '{"gitSha":"${"a".repeat(40)}"}'; else printf '%s\\n' '{"gitSha":"${sourceSha}"}'; fi
+`;
+  const fakeCurl = path.join(fakeBin, "curl");
+  fs.writeFileSync(fakeCurl, curl, { mode: 0o755 });
   return { dir, fakeBin, state, tempDir, calls: path.join(dir, "calls.log") };
 }
 
 function runExisting(options = {}, extraArgs = []) {
   const fixture = writeFixture({}, options);
+  const expectedGitSha = options.includeExpectedGitSha === false
+    ? undefined
+    : options.includeExpectedGitSha === true || options.versionUrl || options.expectedGitSha || options.releaseGitSha
+    ? options.expectedGitSha || sourceSha
+    : undefined;
   const result = spawnSync("bash", [script, "--existing-task-definition", options.targetArgument || targetArn, "--expected-current-task-definition", options.expectedCurrent || fromArn, "--expected-family", options.expectedFamily || targetFamily, "--expected-image-digest", options.expectedDigestArgument || digest, ...extraArgs], {
     cwd: path.resolve("."),
     encoding: "utf8",
@@ -115,7 +132,8 @@ function runExisting(options = {}, extraArgs = []) {
       CLUSTER_NAME: cluster,
       SERVICE_NAME: service,
       CONTAINER_NAME: containerName,
-      EXPECTED_GIT_SHA: options.expectedGitSha === undefined ? sourceSha : options.expectedGitSha,
+      ...(expectedGitSha ? { EXPECTED_GIT_SHA: expectedGitSha } : {}),
+      ...(options.versionUrl ? { VERSION_URL: options.versionUrl } : {}),
       FAKE_DATA: fixture.dir,
       FAKE_SCENARIO: options.scenario || "",
       TMPDIR: fixture.tempDir,
@@ -171,7 +189,38 @@ test("existing mode rejects a mismatched current service or concurrent deploymen
   assertFailure(runExisting({ concurrent: true }), /concurrent/);
 });
 test("existing mode requires source metadata to match when present", () => {
-  assertFailure(runExisting({ releaseGitSha: "a".repeat(40) }), /RELEASE_GIT_SHA/);
+  assertFailure(runExisting({ releaseGitSha: "a".repeat(40), versionUrl: "https://example.test/version" }), /RELEASE_GIT_SHA/);
+});
+test("existing mode verifies the deployed version before disarming rollback", () => {
+  const success = runExisting({ versionUrl: "https://example.test/version" });
+  assert.equal(success.status, 0, success.stderr);
+  assert.equal((success.calls.match(/curl /g) || []).length, 1);
+  assert.equal((success.calls.match(/ecs update-service/g) || []).length, 1);
+  assertTempClean(success);
+
+  for (const scenario of ["wrong-version", "version-endpoint-failure"]) {
+    const result = runExisting({ versionUrl: "https://example.test/version", scenario });
+    assertFailure(result);
+    assert.equal((result.calls.match(/curl /g) || []).length, 1);
+    assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
+    const events = result.calls.trim().split("\n");
+    assert.ok(events.findIndex((event) => event.startsWith("curl ")) < events.findIndex((event) => event.includes(`--task-definition ${fromArn}`)));
+    assertTempClean(result);
+  }
+});
+test("existing mode rejects incomplete version verification inputs before update", () => {
+  const urlOnly = runExisting({ versionUrl: "https://example.test/version", includeExpectedGitSha: false, includeSourceMetadata: false });
+  assertFailure(urlOnly, /EXPECTED_GIT_SHA/);
+  assert.equal((urlOnly.calls.match(/ecs update-service/g) || []).length, 0);
+
+  const shaOnly = runExisting({ includeExpectedGitSha: true, includeSourceMetadata: false });
+  assertFailure(shaOnly, /VERSION_URL/);
+  assert.equal((shaOnly.calls.match(/ecs update-service/g) || []).length, 0);
+
+  const neither = runExisting({ includeExpectedGitSha: false, includeSourceMetadata: false });
+  assert.equal(neither.status, 0, neither.stderr);
+  assert.equal((neither.calls.match(/curl /g) || []).length, 0);
+  assert.equal((neither.calls.match(/ecs update-service/g) || []).length, 1);
 });
 test("existing mode requires the release-deployer and exact described target", () => {
   assertFailure(runExisting({ callerArn: "arn:aws:iam::368992683803:root" }), /release-deployer/);
@@ -253,6 +302,33 @@ test("normal mode still registers a new revision before updating the service", (
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal((fs.readFileSync(fixture.calls, "utf8").match(/ecs register-task-definition/g) || []).length, 1);
+  assertTempClean({ fixture });
+});
+
+test("normal mode retains its existing version verification behavior", () => {
+  const fixture = writeFixture({});
+  const result = spawnSync("bash", [script], {
+    cwd: path.resolve("."),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+      AWS_REGION: region,
+      CLUSTER_NAME: cluster,
+      SERVICE_NAME: service,
+      TASK_DEFINITION: "mscqr-backend",
+      CONTAINER_NAME: containerName,
+      IMAGE_URI: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`,
+      VERSION_URL: "https://example.test/version",
+      EXPECTED_GIT_SHA: sourceSha,
+      FAKE_DATA: fixture.dir,
+      FAKE_SCENARIO: "",
+      TMPDIR: fixture.tempDir,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal((fs.readFileSync(fixture.calls, "utf8").match(/ecs register-task-definition/g) || []).length, 1);
+  assert.equal((fs.readFileSync(fixture.calls, "utf8").match(/curl /g) || []).length, 1);
   assertTempClean({ fixture });
 });
 
