@@ -193,10 +193,10 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
   },
   "aws_lambda_function.broker": {
     "environment[0].variables": [
-      "aws_dynamodb_table.replay.name", "aws_dynamodb_table.replay", "var.receipt_bucket_arn",
-      "var.ecs_cluster_arn", "var.approval_secret_arn", "var.stage_a_executor_security_group_id",
-      "var.private_subnet_ids", "local.broker_task_definition_arns", "local.broker_template_hashes",
-      "local.broker_approval_expected", "local.broker_images",
+      "aws_dynamodb_table.replay", "aws_dynamodb_table.replay.name", "local.active_broker_task_definition_arns",
+      "local.broker_approval_expected", "local.broker_images", "local.broker_template_hashes",
+      "var.approval_secret_arn", "var.ecs_cluster_arn", "var.private_subnet_ids", "var.receipt_bucket_arn",
+      "var.stage_a_executor_security_group_id", "var.stage_b_recovery_broker_environment", "var.stage_b_recovery_only",
     ],
     filename: ["var.broker_package_path"],
     role: ["var.stage_a_broker_role_arn"],
