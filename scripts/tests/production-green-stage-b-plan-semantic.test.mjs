@@ -25,6 +25,12 @@ const addresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
 const BROKER_INITIAL_ADDRESSES = new Set(["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]);
 const image = (n) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr@sha256:${String(n).repeat(64)}`;
 const ref = (references) => ({ references });
+const BROKER_ENVIRONMENT_REFERENCES = [
+  "aws_dynamodb_table.replay", "aws_dynamodb_table.replay.name", "local.active_broker_task_definition_arns",
+  "local.broker_approval_expected", "local.broker_images", "local.broker_template_hashes",
+  "var.approval_secret_arn", "var.ecs_cluster_arn", "var.private_subnet_ids", "var.receipt_bucket_arn",
+  "var.stage_a_executor_security_group_id", "var.stage_b_recovery_broker_environment", "var.stage_b_recovery_only",
+];
 const envNames = [
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
@@ -115,7 +121,7 @@ function configuration() {
       executor,
       { address: "aws_iam_policy.broker", type: "aws_iam_policy", expressions: { policy: ref(["local.broker_runtime_policy"]), tags: ref(["local.tags"]) } },
       { address: "aws_lambda_function.broker", type: "aws_lambda_function", expressions: {
-        environment: [{ variables: ref(["aws_dynamodb_table.replay.name", "aws_dynamodb_table.replay", "var.receipt_bucket_arn", "var.ecs_cluster_arn", "var.approval_secret_arn", "var.stage_a_executor_security_group_id", "var.private_subnet_ids", "local.broker_task_definition_arns", "local.broker_template_hashes", "local.broker_approval_expected", "local.broker_images"]) }],
+        environment: [{ variables: ref([...BROKER_ENVIRONMENT_REFERENCES]) }],
         filename: ref(["var.broker_package_path"]), role: ref(["var.stage_a_broker_role_arn"]), publish: { constant_value: true }, source_code_hash: ref(["var.broker_package_path"]), tags: ref(["local.tags"]),
       } },
       { address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", expressions: {
@@ -143,6 +149,73 @@ function brokerChanges() {
 function plan() {
   return { configuration: configuration(), resource_changes: [...addresses.map((address, index) => taskChange(address, index + 1)), ...brokerChanges()] };
 }
+
+test("broker environment conditional references match the source and exact semantic universe", () => {
+  const source = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  assert.match(source, /variables = var\.stage_b_recovery_only \? var\.stage_b_recovery_broker_environment : \{/);
+  for (const reference of [
+    "aws_dynamodb_table.replay.name", "var.receipt_bucket_arn", "var.ecs_cluster_arn", "var.approval_secret_arn",
+    "var.stage_a_executor_security_group_id", "var.private_subnet_ids", "local.active_broker_task_definition_arns",
+    "local.broker_template_hashes", "local.broker_approval_expected", "local.broker_images",
+    "var.stage_b_recovery_only", "var.stage_b_recovery_broker_environment",
+  ]) assert.match(source, new RegExp(reference.replaceAll(".", "\\.")));
+  assert.doesNotMatch(source, /BROKER_TASK_DEFINITIONS_JSON\s*=\s*jsonencode\(local\.broker_task_definition_arns\)/);
+
+  const fixture = configuration().root_module.resources.find((item) => item.address === "aws_lambda_function.broker");
+  assert.deepEqual(fixture.expressions.environment[0].variables.references, BROKER_ENVIRONMENT_REFERENCES);
+  const census = assertStageBPlanSemanticCompleteness(plan());
+  assert.deepEqual(census.resources.find((item) => item.address === "aws_lambda_function.broker").configurationReferences.find((item) => item.field === "environment[0].variables"), {
+    field: "environment[0].variables",
+    references: [...BROKER_ENVIRONMENT_REFERENCES].sort(),
+    classification: "STABLE_REQUIRED",
+  });
+  const alias = configuration().root_module.resources.find((item) => item.address === "aws_lambda_alias.reviewed");
+  assert.deepEqual(alias.expressions.function_version.references, [
+    "aws_lambda_function.broker", "aws_lambda_function.broker.version", "var.stage_b_recovery_alias_target_version", "var.stage_b_recovery_only",
+  ]);
+});
+
+test("broker environment references require exact conditional completeness", () => {
+  for (const missing of BROKER_ENVIRONMENT_REFERENCES) {
+    const value = plan();
+    const references = value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_function.broker").expressions.environment[0].variables.references;
+    references.splice(references.indexOf(missing), 1);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(value), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+  }
+  for (const extra of ["var.unreviewed", "local.unreviewed", "aws_lambda_function.unreviewed", "local.broker_task_definition_arns"]) {
+    const value = plan();
+    value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_function.broker").expressions.environment[0].variables.references.push(extra);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(value), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+  }
+});
+
+test("all broker configuration reference fields remain exact", () => {
+  const expected = {
+    "aws_iam_policy.broker": {
+      policy: ["local.broker_runtime_policy"],
+      tags: ["local.tags"],
+    },
+    "aws_lambda_function.broker": {
+      "environment[0].variables": BROKER_ENVIRONMENT_REFERENCES,
+      filename: ["var.broker_package_path"],
+      role: ["var.stage_a_broker_role_arn"],
+      source_code_hash: ["var.broker_package_path"],
+      tags: ["local.tags"],
+    },
+    "aws_lambda_alias.reviewed": {
+      function_name: ["aws_lambda_function.broker.function_name", "aws_lambda_function.broker"],
+      function_version: [
+        "aws_lambda_function.broker", "aws_lambda_function.broker.version",
+        "var.stage_b_recovery_alias_target_version", "var.stage_b_recovery_only",
+      ],
+    },
+  };
+  const census = assertStageBPlanSemanticCompleteness(plan());
+  for (const [address, fields] of Object.entries(expected)) {
+    const actual = Object.fromEntries(census.resources.find((item) => item.address === address).configurationReferences.map(({ field, references }) => [field, references]));
+    assert.deepEqual(actual, Object.fromEntries(Object.entries(fields).map(([field, references]) => [field, [...references].sort()])));
+  }
+});
 
 function recoveryPlan() {
   const value = structuredClone(plan());
