@@ -11,6 +11,7 @@ const paths = {
   v4: "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
   audit: "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
   finalWrite: "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+  manifest: "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
 };
 const read = (path) => fs.readFileSync(path, "utf8");
 const parse = (path) => JSON.parse(read(path));
@@ -109,7 +110,7 @@ test("all policy artifacts parse and historical v2/v3 remain byte-stable", () =>
 test("v4 and the companion policy fit the AWS managed-policy document limit", () => {
   assert.equal(awsCharacterCount(policies.v3), 6651);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
-  assert.equal(awsCharacterCount(policies.audit), 2312);
+  assert.equal(awsCharacterCount(policies.audit), 2251);
   assert.ok(awsCharacterCount(policies.finalWrite) < 6144);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.ok(awsCharacterCount(policies.audit) < 6144);
@@ -129,6 +130,7 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBBrokerManagedPolicy"));
   correctedV3.Statement.push(statementOf(policies.audit, "ReadStageBBrokerReviewedAlias"));
   correctedV3.Statement.push(statementOf(policies.audit, "ReadStageALivePrerequisites"));
+  correctedV3.Statement = correctedV3.Statement.map((statement) => statement.Sid === "DescribeStageBTasksReadOnly" ? statementOf(policies.audit, "DescribeStageBTasksReadOnly") : statement);
   assert.deepEqual(canonical(correctedV3), canonical({
     Version: policies.v3.Version,
     Statement: [...policies.v4.Statement, ...policies.audit.Statement],
@@ -142,7 +144,10 @@ test("the split has seven moved statements, two audit-only additions, eleven pro
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
   assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids]).size, 29);
-  for (const sid of movedSids) assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
+  for (const sid of movedSids) {
+    if (sid === "DescribeStageBTasksReadOnly") continue;
+    assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
+  }
   for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "ReadExactStageBBrokerManagedPolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
   }
@@ -323,6 +328,27 @@ test("cluster, broker, and exact twelve-family restrictions remain unchanged", (
   assert.equal(stageBTaskFamilies.length, 12);
 });
 
+test("runtime DescribeTasks authorization uses Resource * without mutation authority", () => {
+  const describeTasks = statementOf(policies.audit, "DescribeStageBTasksReadOnly");
+  assert.deepEqual(describeTasks, {
+    Sid: "DescribeStageBTasksReadOnly",
+    Effect: "Allow",
+    Action: "ecs:DescribeTasks",
+    Resource: "*",
+    Condition: {
+      StringEquals: {
+        "aws:RequestedRegion": "eu-west-2",
+        "ecs:cluster": clusterArn,
+      },
+    },
+  });
+  const manifestEntry = policies.manifest.required.find(({ id }) => id === "reference-audit-ecs-task-details");
+  assert.deepEqual(manifestEntry.resources, ["*"]);
+  for (const action of ["ecs:UpdateService", "ecs:StopTask", "ecs:RunTask", "ecs:RegisterTaskDefinition", "ecs:DeleteService"]) {
+    assert.equal(statementsForAction(policies.audit, action).some(({ Resource }) => Resource === "*"), false, action);
+  }
+});
+
 test("Terraform isolates broker runtime permissions in one dedicated managed policy", () => {
   const source = read("infra/aws/terraform/production-green-stage-b/main.tf");
   assert.equal(source.includes('resource "aws_iam_role_policy" "broker"'), false);
@@ -467,8 +493,8 @@ test("the runbook targets v4 and the companion policy for the separately authori
   assert.match(runbook, /actual AWS-managed-policy\s+version ID/i);
 });
 
-test("historical policy bytes remain unchanged while the active v4 correction is explicit", () => {
-  assert.equal(sha256(read(paths.audit)), "985f77d3fdc40d033d0e2859ecd811ebd506a089573326427bb2fee81b6bb4f2");
+test("historical policy bytes remain unchanged while the active runtime correction is explicit", () => {
+  assert.equal(sha256(read(paths.audit)), "f6b1c2726ee20ac80f37ce5452996a4f679eb64af1f0263b09f55700d79b1d71");
 });
 
 test("runbook is companion-first and verifies complete policy attachments before provider mutation", () => {

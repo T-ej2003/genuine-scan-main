@@ -1094,7 +1094,7 @@
         "sid": "ReadStageALivePrerequisites",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
       },
       "required": true,
       "mutation": false
@@ -1129,7 +1129,7 @@
         "sid": "ReadStageALivePrerequisites",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
       },
       "required": true,
       "mutation": false
@@ -1164,7 +1164,7 @@
         "sid": "ReadStageALivePrerequisites",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
       },
       "required": true,
       "mutation": false
@@ -1199,7 +1199,7 @@
         "sid": "ReadStageALivePrerequisites",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
       },
       "required": true,
       "mutation": false
@@ -1234,7 +1234,7 @@
         "sid": "ReadStageALivePrerequisites",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
       },
       "required": true,
       "mutation": false
@@ -1659,7 +1659,7 @@
         "sid": "ReadStageBBrokerConfiguration",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
       },
       "required": true,
       "mutation": false
@@ -1734,7 +1734,7 @@
         "sid": "DescribeStageBServicesReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
       },
       "required": true,
       "mutation": false
@@ -1776,7 +1776,7 @@
         "sid": "ListStageBServicesReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
       },
       "required": true,
       "mutation": false
@@ -1811,7 +1811,7 @@
         "sid": "DescribeStageBTaskDefinitionsReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
       },
       "required": true,
       "mutation": false
@@ -1825,7 +1825,7 @@
       "sourceFunction": "reference-audit-ecs-task-details",
       "action": "ecs:DescribeTasks",
       "resources": [
-        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"
+        "*"
       ],
       "context": [
         {
@@ -1851,7 +1851,7 @@
         "sid": "DescribeStageBTasksReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
       },
       "required": true,
       "mutation": false
@@ -1893,7 +1893,7 @@
         "sid": "ListStageBTasksReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f4106200bf96424d1250d9de2136d31870fe21adb306ae357955e114b740a55"
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
       },
       "required": true,
       "mutation": false

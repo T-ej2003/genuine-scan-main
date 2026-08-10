@@ -359,6 +359,49 @@ test("Stage A live-evidence policy source contains no mutation permission", () =
   }
 });
 
+test("runtime wrapper ECS reads simulate with the actual DescribeTasks Resource * shape", () => {
+  const runtimeIds = [
+    "reference-audit-ecs-services",
+    "reference-audit-ecs-tasks",
+    "reference-audit-ecs-service-details",
+    "reference-audit-ecs-task-details",
+    "reference-audit-ecs-task-definitions",
+  ];
+  const evaluations = deriveRequiredEvaluations(plan, manifest).required.filter(({ manifestId }) => runtimeIds.includes(manifestId));
+  assert.equal(evaluations.length, runtimeIds.length);
+  const byAction = new Map(evaluations.map((item) => [item.action, item]));
+  assert.equal(byAction.get("ecs:ListTasks").resource, "*");
+  assert.equal(byAction.get("ecs:DescribeTasks").resource, "*");
+  assert.equal(byAction.get("ecs:DescribeTaskDefinition").resource, "*");
+  assert.match(byAction.get("ecs:DescribeServices").resource, /service\/mscqr-prod-euw2-main\/\*/);
+  for (const item of evaluations) {
+    let invocation;
+    const result = simulatePrincipalPolicy({
+      roleArn,
+      evaluation: item,
+      run: (args) => {
+        invocation = args;
+        return JSON.stringify({ EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: "*" === item.resource ? "*" : item.resource, EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [] }] });
+      },
+    });
+    assert.equal(result.decision, "allowed");
+    assert.equal(invocation[invocation.indexOf("--resource-arns") + 1], item.resource);
+  }
+  const describeTasks = byAction.get("ecs:DescribeTasks");
+  assert.equal(describeTasks.context.find(({ key }) => key === "aws:RequestedRegion").values[0], "eu-west-2");
+  assert.equal(describeTasks.context.find(({ key }) => key === "ecs:cluster").values[0], STAGE_B.clusterArn);
+  const wrongRegion = { ...describeTasks, context: describeTasks.context.map((entry) => entry.key === "aws:RequestedRegion" ? { ...entry, values: ["us-east-1"] } : entry) };
+  const denied = simulatePrincipalPolicy({
+    roleArn,
+    evaluation: wrongRegion,
+    run: (args) => {
+      assert.equal(args[args.indexOf("--context-entries") + 1], "ContextKeyName=aws:RequestedRegion,ContextKeyValues=us-east-1,ContextKeyType=string");
+      return JSON.stringify({ EvaluationResults: [{ EvalActionName: wrongRegion.action, EvalResourceName: "*", EvalDecision: "implicitDeny", MatchedStatements: [], MissingContextValues: [] }] });
+    },
+  });
+  assert.equal(denied.decision, "implicitDeny");
+});
+
 const listBucketEvaluation = () => deriveRequiredEvaluations(plan, manifest).forbidden.find((item) => item.manifestId === "backend-list-bucket-not-required");
 const deniedListBucketSimulation = ({ evaluation }) => evaluation.manifestId === "backend-list-bucket-not-required"
   ? { decision: evaluation.expectedDecision, matchedStatements: 0, missingContextValues: evaluation.expectedMissingContextValues }

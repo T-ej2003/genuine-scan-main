@@ -228,7 +228,7 @@
       "id": "reference-audit-ecs-task-details",
       "phase": "reference-audit",
       "action": "ecs:DescribeTasks",
-      "resources": ["arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"],
+      "resources": ["*"],
       "context": [
         {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
         {"key": "ecs:cluster", "type": "string", "values": ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"]}
