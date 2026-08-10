@@ -334,10 +334,16 @@ test("normal mode retains its existing version verification behavior", () => {
 
 test("the operator runbook exposes both explicit modes and existing-mode bindings", () => {
   const runbook = fs.readFileSync("documents/aws/ECS_FARGATE_IMAGE_ARCHITECTURE.md", "utf8");
+  const existingMode = runbook.split("### Switching to an already-registered task definition", 2)[1].split("The wrapper verifies", 1)[0];
   assert.match(runbook, /NEW_REVISION_MODE/);
   assert.match(runbook, /EXISTING_TASK_DEFINITION_MODE/);
   for (const argument of ["--existing-task-definition", "--expected-current-task-definition", "--expected-family", "--expected-image-digest"]) {
-    assert.match(runbook, new RegExp(argument.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(existingMode, new RegExp(argument.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
-  assert.match(runbook, /never registers a\s+task-definition revision/i);
+  for (const variable of ["AWS_PROFILE", "AWS_REGION", "CLUSTER_NAME", "SERVICE_NAME", "CONTAINER_NAME", "VERSION_URL", "EXPECTED_GIT_SHA"]) {
+    assert.match(existingMode, new RegExp(`export ${variable}=`));
+  }
+  assert.match(existingMode, /export VERSION_URL=https:\/\/www\.mscqr\.com\/version/);
+  assert.doesNotMatch(existingMode, /example\.com/);
+  assert.match(existingMode, /never registers a\s+task-definition revision/i);
 });

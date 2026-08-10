@@ -226,6 +226,9 @@ It requires the full target ARN including its revision, the exact current servic
 ARN, the expected family, and the approved container digest. It never registers a
 task-definition revision. The target's `GIT_SHA`/`RELEASE_GIT_SHA` metadata is also
 checked when present, so keep `EXPECTED_GIT_SHA` bound to the approved source.
+`VERSION_URL` and `EXPECTED_GIT_SHA` are required together; the live application
+SHA is verified before rollback is disarmed, and a mismatch or failed check restores
+the exact previous task-definition ARN.
 
 ```bash
 export AWS_PROFILE=mscqr-production-release-deployer
@@ -233,6 +236,7 @@ export AWS_REGION=eu-west-2
 export CLUSTER_NAME=mscqr-prod-euw2-main
 export SERVICE_NAME=mscqr-backend-servi-euw2
 export CONTAINER_NAME=backend
+export VERSION_URL=https://www.mscqr.com/version
 export EXPECTED_GIT_SHA=5e12983f1fe733473cacb6b213c0c02ef9f38098
 
 ./scripts/aws/deploy-ecs-service.sh \
