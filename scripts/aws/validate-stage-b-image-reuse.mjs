@@ -31,7 +31,7 @@ const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/workflows\//;
 const TERRAFORM = /^infra\/aws\/terraform\/production-green-stage-(?:a|b)\//;
 const TEST = /(?:^|\/)(?:tests?|fixtures)(?:\/|\.)|\.test\.[^.]+$/;
-const TOOLING_ONLY = new Set([".gitleaks-baseline.json", ".security/rotation-evidence.schema.json"]);
+const TOOLING_ONLY = new Set([".gitleaks-baseline.json", ".gitleaksignore", ".security/rotation-evidence.schema.json"]);
 
 const canonicalJson = (value) => {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;

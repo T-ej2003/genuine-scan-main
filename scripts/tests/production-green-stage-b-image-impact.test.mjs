@@ -71,9 +71,9 @@ test("rotation evidence schema is canonical tooling-only input", () => {
 });
 
 test("the Gitleaks baseline is tooling-only while unknown paths remain fail-closed", () => {
-  const file = ".gitleaks-baseline.json";
-  assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "toolingOnly", imageAffecting: false });
-  const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: [file] });
+  const files = [".gitleaks-baseline.json", ".gitleaksignore"];
+  for (const file of files) assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "toolingOnly", imageAffecting: false });
+  const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: files });
   assert.deepEqual(report.imageAffectingFiles, []);
   assert.equal(report.imageReuseCompatible, true);
   assert.throws(() => imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["unknown/security-scan-output.bin"] }), /unclassified/);

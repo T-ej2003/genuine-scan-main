@@ -28,6 +28,8 @@ ff8617a52108982a2a8e2d02eeee23b1322494dc:databasefiles/key1.pem:private-key:1
 8ad088b6406107050d9470cfb038d931d8d2cd7f:documents/ops/evidence/aws-regional-cleanup-mumbai-20260603T195128Z/01-ec2-instances.json:generic-api-key:207
 8ad088b6406107050d9470cfb038d931d8d2cd7f:documents/ops/evidence/aws-regional-cleanup-mumbai-20260603T195128Z/01-ec2-instances.json:generic-api-key:373
 # Reviewed RF7 false positives from fixed test/operational identifiers, security prose, function names, and generated symbol inventory.
+# Historical-only false positive: the current QR key-version fixture was remediated in cc89585703e0810304f3de32eee8b1daaf9eb398.
+39963baaad3f85f90e905d3563e80ecb2fdaf854:scripts/tests/fixtures/rotation-evidence-valid-stale.json:generic-api-key:40
 scripts/rls/generate-clean-room-rls-sql.mjs:generic-api-key:2121
 documents/security/rls-program/public-read-contract.json:generic-api-key:287
 scripts/rls/lib/program-inventory.mjs:generic-api-key:2073
