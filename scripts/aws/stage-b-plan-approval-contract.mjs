@@ -67,7 +67,13 @@ function assertTaskDefinitionRotations(rotations) {
 }
 
 const retainedTaskDefinitionAddress = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([a-f0-9]{7,40})-([^"]+)"\]$/;
-const taskDefinitionFamilyByKey = new Map(Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([address, family]) => [address.match(/\["([^"]+)"\]$/)[1], family]));
+const retainedTaskDefinitionDescriptorEntries = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([address, family]) => {
+  const match = /^aws_ecs_task_definition\.(candidate|executor)\["([^"]+)"\]$/.exec(address);
+  if (!match) throw new Error(`Stage B current task-definition address is malformed: ${address}`);
+  return [match[2], Object.freeze({ kind: match[1], family })];
+});
+if (new Set(retainedTaskDefinitionDescriptorEntries.map(([key]) => key)).size !== retainedTaskDefinitionDescriptorEntries.length) throw new Error("Stage B retained task-definition keys are ambiguous across candidate and executor collections.");
+export const STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS = Object.freeze(Object.fromEntries(retainedTaskDefinitionDescriptorEntries));
 const currentTaskDefinitionAddresses = Object.freeze(Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES));
 
 function retainedEntryAddress(entry) {
@@ -78,13 +84,14 @@ function assertRetainedTaskDefinitionEntry(entry, { requireMetadata, seenFamilyR
   const address = retainedEntryAddress(entry);
   const match = retainedTaskDefinitionAddress.exec(address || "");
   if (!match) throw new Error(`Stage B retained task-definition address is malformed: ${address || "<missing>"}`);
-  const family = taskDefinitionFamilyByKey.get(match[3]);
-  if (!family || (entry.family !== undefined && entry.family !== family)) throw new Error(`Stage B retained task-definition family is outside the exact contract: ${address}`);
+  const descriptor = STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS[match[3]];
+  if (!descriptor || descriptor.kind !== match[1]) throw new Error(`Stage B retained task-definition collection kind is outside the exact contract: ${address}`);
+  if (entry.family !== undefined && entry.family !== descriptor.family) throw new Error(`Stage B retained task-definition family is outside the exact contract: ${address}`);
   if (entry.classification !== undefined && entry.classification !== "retained-no-op") throw new Error(`Stage B retained task-definition classification is not retained-no-op: ${address}`);
   if (requireMetadata) {
     const arnMatch = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):([1-9][0-9]*)$/.exec(entry.oldTaskDefinitionArn || entry.oldArn || "");
-    if (!arnMatch || arnMatch[1] !== family) throw new Error(`Stage B retained task-definition ARN is invalid: ${address}`);
-    const familyRevision = `${family}:${arnMatch[2]}`;
+    if (!arnMatch || arnMatch[1] !== descriptor.family) throw new Error(`Stage B retained task-definition ARN is invalid: ${address}`);
+    const familyRevision = `${descriptor.family}:${arnMatch[2]}`;
     if (seenFamilyRevisions.has(familyRevision)) throw new Error(`Stage B retained task-definition family/revision is duplicated: ${familyRevision}`);
     seenFamilyRevisions.add(familyRevision);
   }

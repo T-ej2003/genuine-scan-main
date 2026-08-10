@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
-import { assertStageBNormalPlanCompleteness, assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes, STAGE_B_BROKER_OPERATIONS, STAGE_B_PLAN_PROFILES } from "../aws/stage-b-plan-approval-contract.mjs";
+import { assertStageBNormalPlanCompleteness, assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes, STAGE_B_BROKER_OPERATIONS, STAGE_B_PLAN_PROFILES, STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS } from "../aws/stage-b-plan-approval-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { finalizeCapturedStageBPlanApproval, readStageBApprovalPlanArtifacts } from "../plan-production-green-stage-b.mjs";
 import { writeStageBPrivateFileAtomic } from "../aws/stage-b-artifact-contract.mjs";
@@ -204,6 +204,29 @@ test("plan profile and broker operation registries match the emitted Stage B uni
 test("normal approval uses canonical address completeness instead of a fixed no-op count", () => {
   const current = assertStageBNormalPlanCompleteness(fixture, { referenceAudit: audit, strict: false });
   assert.equal(current.classification.actionCounts["no-op"], 70);
+
+  const retainedKeys = Object.keys(STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS).sort();
+  assert.deepEqual(retainedKeys, [...new Set(fixtureRetainedTaskDefinitions.map((entry) => entry.terraformAddress.match(/_retained\["[a-f0-9]+-([^\"]+)"\]$/)[1]))].sort());
+  assert.equal(retainedKeys.length, Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length);
+  assert.deepEqual([...new Set(retainedKeys.map((key) => STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS[key].kind))].sort(), ["candidate", "executor"]);
+  assert.doesNotThrow(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: audit, strict: false }));
+
+  const wrongKind = structuredClone(audit);
+  wrongKind.retainedTaskDefinitions.find((entry) => entry.terraformAddress.endsWith('-backend"]')).terraformAddress = wrongKind.retainedTaskDefinitions.find((entry) => entry.terraformAddress.endsWith('-backend"]')).terraformAddress.replace("candidate_retained", "executor_retained");
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: wrongKind, strict: false }), /collection kind/);
+  const wrongExecutorKind = structuredClone(audit);
+  const executorEntry = wrongExecutorKind.retainedTaskDefinitions.find((entry) => entry.terraformAddress.includes("executor_retained"));
+  executorEntry.terraformAddress = executorEntry.terraformAddress.replace("executor_retained", "candidate_retained");
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: wrongExecutorKind, strict: false }), /collection kind/);
+  const wrongFamily = structuredClone(audit);
+  wrongFamily.retainedTaskDefinitions[0].family = STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]'];
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: wrongFamily, strict: false }), /family/);
+  const unknownKey = structuredClone(audit);
+  unknownKey.retainedTaskDefinitions[0].terraformAddress = 'aws_ecs_task_definition.executor_retained["e689d4d-unreviewed"]';
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: unknownKey, strict: false }), /malformed|contract|collection kind/);
+  const malformedCollection = structuredClone(audit);
+  malformedCollection.retainedTaskDefinitions[0].terraformAddress = malformedCollection.retainedTaskDefinitions[0].terraformAddress.replace("candidate_retained", "candidate_history");
+  assert.throws(() => assertStageBNormalPlanCompleteness(fixture, { referenceAudit: malformedCollection, strict: false }), /malformed/);
 
   const futurePlan = structuredClone(fixture);
   const futureAddress = 'aws_ecs_task_definition.executor_retained["f00ba4d-full-rls-verification"]';
