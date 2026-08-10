@@ -576,7 +576,7 @@
           "key": "ecs:task-definition",
           "type": "string",
           "values": [
-            "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:6"
+            "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7"
           ]
         }
       ],
@@ -588,7 +588,7 @@
         "sid": "UpdateExactStageBBackendService",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "93f786460d003e541bd92c5b7c3b4f2bcc8cc2688ff7b455ca6d33379c6f0e18"
+        "expectedPolicySha256": "2695724259fe808a68e594c62887879a63b8cc7746be70db4090349a45c8aece"
       },
       "required": true,
       "mutation": true
@@ -1569,7 +1569,7 @@
         "sid": "PruneExactStageBBrokerManagedPolicyVersions",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "93f786460d003e541bd92c5b7c3b4f2bcc8cc2688ff7b455ca6d33379c6f0e18"
+        "expectedPolicySha256": "2695724259fe808a68e594c62887879a63b8cc7746be70db4090349a45c8aece"
       },
       "required": true,
       "mutation": true
@@ -1623,7 +1623,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "93f786460d003e541bd92c5b7c3b4f2bcc8cc2688ff7b455ca6d33379c6f0e18"
+        "expectedPolicySha256": "2695724259fe808a68e594c62887879a63b8cc7746be70db4090349a45c8aece"
       },
       "required": true,
       "mutation": true
@@ -2257,7 +2257,7 @@
         "sid": "UpdateExactStageBBackendService",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "93f786460d003e541bd92c5b7c3b4f2bcc8cc2688ff7b455ca6d33379c6f0e18"
+        "expectedPolicySha256": "2695724259fe808a68e594c62887879a63b8cc7746be70db4090349a45c8aece"
       },
       "required": true,
       "mutation": true
@@ -2413,7 +2413,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "93f786460d003e541bd92c5b7c3b4f2bcc8cc2688ff7b455ca6d33379c6f0e18"
+        "expectedPolicySha256": "2695724259fe808a68e594c62887879a63b8cc7746be70db4090349a45c8aece"
       },
       "required": true,
       "mutation": true
@@ -2467,7 +2467,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "93f786460d003e541bd92c5b7c3b4f2bcc8cc2688ff7b455ca6d33379c6f0e18"
+        "expectedPolicySha256": "2695724259fe808a68e594c62887879a63b8cc7746be70db4090349a45c8aece"
       },
       "required": true,
       "mutation": true
@@ -2492,7 +2492,7 @@
         "sid": "UpdateExactStageBBrokerManagedPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "93f786460d003e541bd92c5b7c3b4f2bcc8cc2688ff7b455ca6d33379c6f0e18"
+        "expectedPolicySha256": "2695724259fe808a68e594c62887879a63b8cc7746be70db4090349a45c8aece"
       },
       "required": true,
       "mutation": true
@@ -2586,7 +2586,7 @@
         "sid": "UpdateExactStageBBrokerReviewedAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "93f786460d003e541bd92c5b7c3b4f2bcc8cc2688ff7b455ca6d33379c6f0e18"
+        "expectedPolicySha256": "2695724259fe808a68e594c62887879a63b8cc7746be70db4090349a45c8aece"
       },
       "required": true,
       "mutation": true
