@@ -167,16 +167,20 @@ UPDATE_SETTLEMENT_ATTEMPTS=6
 UPDATE_SETTLEMENT_INTERVAL_SECONDS=2
 
 settle_update_outcome() {
-  local attempt classification
+  local attempt classification last_classification
   settlement_result="UNKNOWN"
+  last_classification="READ_FAILURE"
   for ((attempt = 1; attempt <= UPDATE_SETTLEMENT_ATTEMPTS; attempt++)); do
     if ! aws ecs describe-services \
       --region "$AWS_REGION" \
       --cluster "$CLUSTER_NAME" \
       --services "$SERVICE_NAME" \
       >"$EXISTING_POST_SERVICE_FILE"; then
-      settlement_result="UNKNOWN"
-      return 0
+      last_classification="READ_FAILURE"
+      if ((attempt < UPDATE_SETTLEMENT_ATTEMPTS)); then
+        if ! sleep "$UPDATE_SETTLEMENT_INTERVAL_SECONDS"; then settlement_result="UNKNOWN"; return 0; fi
+      fi
+      continue
     fi
     if ! classification="$(node --input-type=module - "$EXISTING_POST_SERVICE_FILE" "$PREVIOUS_TASK_DEFINITION_ARN" "$EXISTING_TASK_DEFINITION_ARN" <<'NODE'
 import fs from "node:fs";
@@ -201,9 +205,13 @@ if (service.taskDefinition === targetArn || deployments.some(({ taskDefinition }
 }
 NODE
 )"; then
-      settlement_result="UNKNOWN"
-      return 0
+      last_classification="MALFORMED_READ"
+      if ((attempt < UPDATE_SETTLEMENT_ATTEMPTS)); then
+        if ! sleep "$UPDATE_SETTLEMENT_INTERVAL_SECONDS"; then settlement_result="UNKNOWN"; return 0; fi
+      fi
+      continue
     fi
+    last_classification="$classification"
     case "$classification" in
       TARGET)
         settlement_result="TARGET"
@@ -231,6 +239,11 @@ NODE
       return 0
     fi
   done
+  if [[ "$last_classification" == "PREVIOUS_STABLE" ]]; then
+    settlement_result="NO_TARGET_OBSERVED"
+  else
+    settlement_result="UNKNOWN"
+  fi
 }
 
 verify_existing_service_restored() {

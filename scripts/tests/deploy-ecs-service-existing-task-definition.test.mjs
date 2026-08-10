@@ -93,6 +93,22 @@ elif [[ "$1 $2" == "ecs describe-task-definition" ]]; then
   if [[ "$task_definition" == "${fromArn}" || "$task_definition" == "mscqr-backend" ]]; then cat "$FAKE_DATA/normal.json"; else cat "$FAKE_DATA/target.json"; fi
 elif [[ "$1 $2" == "ecs describe-services" ]]; then
   if [[ "$FAKE_SCENARIO" == "reconcile-failure" && -f "$FAKE_DATA/update-attempted" ]]; then exit 51; fi
+  if [[ "$FAKE_SCENARIO" == "malformed-then-target" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then
+    count=0
+    [[ -f "$FAKE_DATA/settlement-count" ]] && count="$(cat "$FAKE_DATA/settlement-count")"
+    count=$((count + 1))
+    printf '%s' "$count" > "$FAKE_DATA/settlement-count"
+    if ((count == 1)); then printf '%s' '{}' ; exit 0; fi
+    if ((count >= 2)); then printf '%s' "${targetArn}" > "$FAKE_DATA/state"; fi
+  fi
+  if [[ "$FAKE_SCENARIO" == "transient-then-target" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then
+    count=0
+    [[ -f "$FAKE_DATA/settlement-count" ]] && count="$(cat "$FAKE_DATA/settlement-count")"
+    count=$((count + 1))
+    printf '%s' "$count" > "$FAKE_DATA/settlement-count"
+    if ((count == 1)); then exit 51; fi
+    if ((count >= 3)); then printf '%s' "${targetArn}" > "$FAKE_DATA/state"; fi
+  fi
   if [[ "$FAKE_SCENARIO" == "delayed-accepted" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then
     count=0
     [[ -f "$FAKE_DATA/settlement-count" ]] && count="$(cat "$FAKE_DATA/settlement-count")"
@@ -113,6 +129,8 @@ elif [[ "$1 $2" == "ecs update-service" ]]; then
   if [[ "$FAKE_SCENARIO" == "ambiguous-unrelated" && "$task_definition" == "${targetArn}" ]]; then printf '%s' "${unrelatedTaskDefinition}" > "$FAKE_DATA/state"; exit 31; fi
   if [[ "$FAKE_SCENARIO" == "reconcile-failure" && "$task_definition" == "${targetArn}" ]]; then printf '%s' "$task_definition" > "$FAKE_DATA/state"; exit 31; fi
   if [[ "$FAKE_SCENARIO" == "delayed-accepted" && "$task_definition" == "${targetArn}" ]]; then exit 31; fi
+  if [[ "$FAKE_SCENARIO" == "transient-then-target" && "$task_definition" == "${targetArn}" ]]; then exit 31; fi
+  if [[ "$FAKE_SCENARIO" == "malformed-then-target" && "$task_definition" == "${targetArn}" ]]; then exit 31; fi
   if [[ "$FAKE_SCENARIO" == "target-deployment" && "$task_definition" == "${targetArn}" ]]; then touch "$FAKE_DATA/update-attempted"; exit 31; fi
   if [[ "$task_definition" == "${fromArn}" ]]; then touch "$FAKE_DATA/rollback-attempted"; fi
   if [[ "$FAKE_SCENARIO" == "rollback-failure" && "$task_definition" == "${fromArn}" ]]; then exit 31; fi
@@ -263,6 +281,15 @@ test("all previous settlement proves no target was observed without rollback", (
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
   assertTempClean(result);
 });
+test("transient reconciliation failure is retried before delayed target detection and rollback", () => {
+  const result = runExisting({ scenario: "transient-then-target" });
+  assertFailure(result, /AMBIGUOUS_UPDATE_OUTCOME/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
+  assert.equal((result.calls.match(/ecs describe-services/g) || []).length >= 5, true);
+  assert.equal(fs.readFileSync(result.fixture.state, "utf8"), fromArn);
+  assert.match(result.calls, new RegExp(`--task-definition ${fromArn.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}`));
+  assertTempClean(result);
+});
 test("delayed accepted UpdateService is detected after an initial previous read and rolled back", () => {
   const result = runExisting({ scenario: "delayed-accepted" });
   assertFailure(result, /AMBIGUOUS_UPDATE_OUTCOME/);
@@ -308,6 +335,14 @@ test("ambiguous UpdateService response with unreadable state fails closed", () =
   const result = runExisting({ scenario: "reconcile-failure" });
   assertFailure(result, /UNKNOWN_SERVICE_STATE/);
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assert.equal((result.calls.match(/ecs describe-services/g) || []).length, 7);
+  assertTempClean(result);
+});
+test("malformed reconciliation response is retried before target detection", () => {
+  const result = runExisting({ scenario: "malformed-then-target" });
+  assertFailure(result, /AMBIGUOUS_UPDATE_OUTCOME/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
+  assert.equal(fs.readFileSync(result.fixture.state, "utf8"), fromArn);
   assertTempClean(result);
 });
 test("stabilization failure rolls back the exact previous ARN", () => {
