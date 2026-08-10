@@ -40,7 +40,8 @@ Existing task-definition mode:
 
 This explicit mode switches only to an already-registered ACTIVE revision. It
 requires the release-deployer identity, performs no registration, and verifies
-the exact target task definition and running task image digest before success.
+the exact target task definition, service load-balancer port binding, and running
+task image digest before success.
 
 Example:
   AWS_REGION=eu-west-2 \
@@ -149,6 +150,34 @@ verify_deployed_version_if_requested() {
   if [[ -n "${VERSION_URL:-}" || -n "${EXPECTED_GIT_SHA:-}" ]]; then
     "$VERSION_VERIFY_SCRIPT" "$VERSION_URL" "$EXPECTED_GIT_SHA"
   fi
+}
+
+validate_service_load_balancer_compatibility() {
+  local service_path="$1"
+  local task_definition_path="$2"
+  node --input-type=module - "$service_path" "$task_definition_path" "$CONTAINER_NAME" <<'NODE'
+import fs from "node:fs";
+
+const [servicePath, taskDefinitionPath, expectedContainerName] = process.argv.slice(2);
+const serviceResponse = JSON.parse(fs.readFileSync(servicePath, "utf8"));
+const taskResponse = JSON.parse(fs.readFileSync(taskDefinitionPath, "utf8"));
+const fail = (message) => { throw new Error(`ECS service/task-definition compatibility failed: ${message}`); };
+if (!Array.isArray(serviceResponse.failures) || serviceResponse.failures.length !== 0 || serviceResponse.services?.length !== 1) fail("service response is malformed.");
+const service = serviceResponse.services[0];
+if (!Array.isArray(service.loadBalancers) || service.loadBalancers.length === 0) fail("service load-balancer contract is missing.");
+const definition = taskResponse.taskDefinition || taskResponse;
+const containers = Array.isArray(definition.containerDefinitions) ? definition.containerDefinitions : [];
+for (const loadBalancer of service.loadBalancers) {
+  if (typeof loadBalancer.containerName !== "string" || loadBalancer.containerName !== expectedContainerName || !Number.isInteger(loadBalancer.containerPort)) fail("service load-balancer binding is malformed or names a different container.");
+  const matches = containers.filter((container) => container?.name === loadBalancer.containerName);
+  if (matches.length !== 1) fail(`candidate must expose exactly one ${loadBalancer.containerName} container.`);
+  const mappings = Array.isArray(matches[0].portMappings) ? matches[0].portMappings : [];
+  const compatible = mappings.filter((mapping) => mapping?.containerPort === loadBalancer.containerPort);
+  if (compatible.length !== 1) fail(`${loadBalancer.containerName}:${loadBalancer.containerPort} is not exposed exactly once.`);
+  const mapping = compatible[0];
+  if (!Number.isInteger(mapping.hostPort) || mapping.hostPort !== mapping.containerPort || mapping.protocol !== "tcp" || (mapping.appProtocol !== undefined && mapping.appProtocol !== "http")) fail(`${loadBalancer.containerName}:${loadBalancer.containerPort} has an incompatible port mapping.`);
+}
+NODE
 }
 
 RAW_FILE="$(mktemp)"
@@ -374,6 +403,8 @@ if [[ -n "$EXISTING_TASK_DEFINITION_ARN" ]]; then
     --cluster "$CLUSTER_NAME" \
     --services "$SERVICE_NAME" \
     >"$EXISTING_SERVICE_FILE"
+
+  validate_service_load_balancer_compatibility "$EXISTING_SERVICE_FILE" "$RAW_FILE"
 
   PREVIOUS_TASK_DEFINITION_ARN="$(
     node --input-type=module - "$RAW_FILE" "$EXISTING_SERVICE_FILE" "$EXISTING_CALLER_FILE" "$AWS_REGION" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_CURRENT_TASK_DEFINITION_ARN" "$EXPECTED_FAMILY" "$EXPECTED_IMAGE_DIGEST" "$CONTAINER_NAME" "${EXPECTED_GIT_SHA:-}" <<'NODE'
@@ -684,6 +715,13 @@ for (const optionalField of [
 
 fs.writeFileSync(payloadPath, JSON.stringify(payload, null, 2));
 NODE
+
+aws ecs describe-services \
+  --region "$AWS_REGION" \
+  --cluster "$CLUSTER_NAME" \
+  --services "$SERVICE_NAME" \
+  >"$EXISTING_SERVICE_FILE"
+validate_service_load_balancer_compatibility "$EXISTING_SERVICE_FILE" "$PAYLOAD_FILE"
 
 PREVIOUS_TASK_DEFINITION_ARN="$(
   node --input-type=module -e 'import fs from "node:fs"; const raw = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(raw.taskDefinition.taskDefinitionArn || "");' "$RAW_FILE"
