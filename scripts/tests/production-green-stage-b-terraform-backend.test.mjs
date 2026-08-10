@@ -190,14 +190,28 @@ test("unrelated keys, buckets, and backend administration actions are denied", (
   assert.equal(policy.Statement.some((statement) => statement.Effect === "Allow" && statement.Action === "s3:ListBucket" && !statement.Condition), false);
 });
 
-test("the canonical Stage A managed contract is exact-state read-only", () => {
+test("the canonical Stage A managed contract is exact and recovery-scoped", () => {
   const serialized = JSON.stringify(stageA);
   assert.equal(serialized.includes("rls-green/stage-b"), false);
   assert.equal(stageA.Statement.some((statement) => statement.Sid.startsWith("StageB")), false);
-  assert.deepEqual(stageA.Statement, [{
+  assert.deepEqual(stageA.Statement[0], {
     Sid: "ReadExactStageAStateForHandoff",
     Effect: "Allow",
     Action: "s3:GetObject",
     Resource: "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate",
-  }]);
+  });
+  assert.deepEqual(stageA.Statement.map(({ Sid }) => Sid), [
+    "ReadExactStageAStateForHandoff",
+    "ReadExactStageAProviderEndpointMetadata",
+    "ReadExactStageAStorageKeys",
+    "ReadExactStageAGreenRdsGroups",
+    "ReadExactStageASecretMetadata",
+    "ReadExactStageACheckerRole",
+    "ReadExactStageALogTags",
+    "ApplyExactStageAEndpointSecurityGroupIngress",
+  ]);
+  const apply = stageA.Statement.at(-1);
+  assert.equal(apply.Action, "ec2:AuthorizeSecurityGroupIngress");
+  assert.equal(apply.Resource, "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412");
+  assert.deepEqual(apply.Condition, { StringEquals: { "aws:RequestedRegion": "eu-west-2" } });
 });

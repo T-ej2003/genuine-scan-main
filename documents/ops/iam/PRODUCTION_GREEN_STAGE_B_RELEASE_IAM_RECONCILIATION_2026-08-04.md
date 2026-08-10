@@ -175,7 +175,7 @@ The allowed inline-policy set is empty.
 
 | Live authority | Disposition | Reason |
 |---|---|---|
-| Same-named inline `MSCQRProductionGreenStageARelease` | Remove after managed replacement is attached and simulated | Legacy Stage A create/write authority conflicts with managed ownership. The managed source permits only exact Stage A state read for handoff generation. |
+| Same-named inline `MSCQRProductionGreenStageARelease` | Remove after managed replacement is attached and simulated | Legacy Stage A create/write authority conflicts with managed ownership. The managed source now permits only the exact Stage A state handoff, provider refresh metadata, and reviewed endpoint-security-group ingress recovery. |
 | `MSCQRProductionGreenStageAReadOnlyCanarySecretCreate` | Detach as legacy recovery | Stage A secret creation is not in the Stage B plan. |
 | `MSCQRProductionGreenStageBBrokerCodeSigningRead` | Retain canonical | Exact provider read required for broker refresh; source and live document already match. |
 | `MSCQRProductionGreenStageBBrokerLambdaTag` | Detach as legacy recovery | The current plan has no Lambda tag mutation. |

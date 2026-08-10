@@ -1262,7 +1262,7 @@
         "sid": "ReadExactStageAStateForHandoff",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "fa6ac7e5f206a03cc4c45f5f65ae33c1bd9111b0cda348b539949d46b91021ea"
+        "expectedPolicySha256": "0e8adac6f59151015036106697d6fdc18b175462e3db497b2077cdaf75133687"
       },
       "required": true,
       "mutation": false

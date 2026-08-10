@@ -6,6 +6,98 @@
       "Effect": "Allow",
       "Action": "s3:GetObject",
       "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+    },
+    {
+      "Sid": "ReadExactStageAProviderEndpointMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeSecurityGroupRules",
+        "ec2:DescribeVpcEndpoints"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactStageAStorageKeys",
+      "Effect": "Allow",
+      "Action": "kms:DescribeKey",
+      "Resource": [
+        "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactStageAGreenRdsGroups",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeDBParameterGroups",
+        "rds:DescribeDBSubnetGroups"
+      ],
+      "Resource": [
+        "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18",
+        "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactStageASecretMetadata",
+      "Effect": "Allow",
+      "Action": "secretsmanager:DescribeSecret",
+      "Resource": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/canary/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactStageACheckerRole",
+      "Effect": "Allow",
+      "Action": "iam:GetRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+    },
+    {
+      "Sid": "ReadExactStageALogTags",
+      "Effect": "Allow",
+      "Action": "logs:ListTagsForResource",
+      "Resource": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ApplyExactStageAEndpointSecurityGroupIngress",
+      "Effect": "Allow",
+      "Action": "ec2:AuthorizeSecurityGroupIngress",
+      "Resource": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
     }
   ]
 }
