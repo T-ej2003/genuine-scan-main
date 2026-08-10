@@ -268,19 +268,68 @@ if (!Array.isArray(response.failures) || response.failures.length !== 0 || !serv
 NODE
 }
 
+classify_rollback_ownership() {
+  rollback_ownership="UNKNOWN"
+  if ! aws ecs describe-services \
+    --region "$AWS_REGION" \
+    --cluster "$CLUSTER_NAME" \
+    --services "$SERVICE_NAME" \
+    >"$EXISTING_POST_SERVICE_FILE"; then
+    return 0
+  fi
+  if ! rollback_ownership="$(node --input-type=module - "$EXISTING_POST_SERVICE_FILE" "$PREVIOUS_TASK_DEFINITION_ARN" "$EXISTING_TASK_DEFINITION_ARN" <<'NODE'
+import fs from "node:fs";
+
+const [responsePath, previousArn, targetArn] = process.argv.slice(2);
+const response = JSON.parse(fs.readFileSync(responsePath, "utf8"));
+const fail = (message) => { throw new Error(message); };
+if (!Array.isArray(response.failures) || response.failures.length !== 0 || response.services?.length !== 1) fail("ECS rollback ownership response is malformed.");
+const service = response.services[0];
+const deployments = service.deployments;
+if (typeof service.taskDefinition !== "string" || !Array.isArray(deployments) || deployments.length === 0 || deployments.some(({ taskDefinition }) => typeof taskDefinition !== "string")) fail("ECS rollback ownership response is incomplete.");
+const taskDefinitions = [service.taskDefinition, ...deployments.map(({ taskDefinition }) => taskDefinition)];
+if (taskDefinitions.some((taskDefinition) => taskDefinition !== previousArn && taskDefinition !== targetArn)) {
+  process.stdout.write("FOREIGN");
+} else if (taskDefinitions.includes(targetArn)) {
+  process.stdout.write("TARGET_OWNED");
+} else if (service.taskDefinition === previousArn && taskDefinitions.every((taskDefinition) => taskDefinition === previousArn)) {
+  process.stdout.write("PREVIOUS_RESTORED");
+} else {
+  process.stdout.write("UNKNOWN");
+}
+NODE
+)"; then
+    rollback_ownership="UNKNOWN"
+  fi
+}
+
 cleanup_and_rollback_on_exit() {
   local exit_code=$?
   trap - EXIT
   set +e
   if [[ "$existing_mode_active" == "true" && "$update_attempted" == "true" && "$exit_code" -ne 0 && ( "$update_state" == "UPDATE_CONFIRMED" || "$update_state" == "ROLLBACK_REQUIRED" ) ]]; then
-    echo "Existing task-definition switch failed; restoring ${PREVIOUS_TASK_DEFINITION_ARN}." >&2
-    WAIT_FOR_STABLE=true \
-      AWS_REGION="$AWS_REGION" \
-      CLUSTER_NAME="$CLUSTER_NAME" \
-      SERVICE_NAME="$SERVICE_NAME" \
-      PREVIOUS_TASK_DEFINITION_ARN="$PREVIOUS_TASK_DEFINITION_ARN" \
-      "$REPO_ROOT/scripts/aws/rollback-ecs-service.sh" || echo "Canonical rollback failed." >&2
-    verify_existing_service_restored || echo "Rollback verification failed." >&2
+    classify_rollback_ownership
+    case "$rollback_ownership" in
+      TARGET_OWNED)
+        echo "Existing task-definition switch failed; restoring ${PREVIOUS_TASK_DEFINITION_ARN}." >&2
+        WAIT_FOR_STABLE=true \
+          AWS_REGION="$AWS_REGION" \
+          CLUSTER_NAME="$CLUSTER_NAME" \
+          SERVICE_NAME="$SERVICE_NAME" \
+          PREVIOUS_TASK_DEFINITION_ARN="$PREVIOUS_TASK_DEFINITION_ARN" \
+          "$REPO_ROOT/scripts/aws/rollback-ecs-service.sh" || echo "Canonical rollback failed." >&2
+        verify_existing_service_restored || echo "Rollback verification failed." >&2
+        ;;
+      PREVIOUS_RESTORED)
+        echo "Previous task definition is already restored; no rollback required." >&2
+        ;;
+      FOREIGN)
+        echo "CONCURRENT_SERVICE_STATE: refusing to overwrite a foreign ECS task definition." >&2
+        ;;
+      *)
+        echo "UNKNOWN_ROLLBACK_OWNERSHIP: refusing rollback because current ECS service ownership could not be established." >&2
+        ;;
+    esac
   fi
   rm -f \
     "$RAW_FILE" \

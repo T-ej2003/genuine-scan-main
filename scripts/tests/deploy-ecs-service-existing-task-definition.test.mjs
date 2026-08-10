@@ -67,6 +67,10 @@ function writeFixture(data, options = {}) {
   ]);
   const unrelatedTaskDefinition = `arn:aws:ecs:${region}:${account}:task-definition/unreviewed:9`;
   const unrelated = serviceResponse(unrelatedTaskDefinition);
+  const foreignDeployment = serviceResponse(targetArn, [
+    { status: "PRIMARY", taskDefinition: targetArn, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },
+    { status: "ACTIVE", taskDefinition: unrelatedTaskDefinition, pendingCount: 0, runningCount: 0 },
+  ]);
   const tasks = {
     failures: [],
     tasks: [1, 2].map((n) => ({
@@ -77,7 +81,7 @@ function writeFixture(data, options = {}) {
     })),
   };
   const taskArns = options.taskArnsResponse || { taskArns: tasks.tasks.map((task) => task.taskArn) };
-  for (const [name, value] of Object.entries({ target, normal, pre, post, targetDeployment, unrelated, tasks, taskArns })) {
+  for (const [name, value] of Object.entries({ target, normal, pre, post, targetDeployment, unrelated, foreignDeployment, tasks, taskArns })) {
     fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(value));
   }
   const aws = `#!/usr/bin/env bash
@@ -93,6 +97,7 @@ elif [[ "$1 $2" == "ecs describe-task-definition" ]]; then
   if [[ "$task_definition" == "${fromArn}" || "$task_definition" == "mscqr-backend" ]]; then cat "$FAKE_DATA/normal.json"; else cat "$FAKE_DATA/target.json"; fi
 elif [[ "$1 $2" == "ecs describe-services" ]]; then
   if [[ "$FAKE_SCENARIO" == "reconcile-failure" && -f "$FAKE_DATA/update-attempted" ]]; then exit 51; fi
+  if [[ "$FAKE_SCENARIO" == "ownership-read-failure" && -f "$FAKE_DATA/stable-failed" ]]; then exit 51; fi
   if [[ "$FAKE_SCENARIO" == "malformed-then-target" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then
     count=0
     [[ -f "$FAKE_DATA/settlement-count" ]] && count="$(cat "$FAKE_DATA/settlement-count")"
@@ -117,7 +122,7 @@ elif [[ "$1 $2" == "ecs describe-services" ]]; then
     if ((count >= 2)); then printf '%s' "${targetArn}" > "$FAKE_DATA/state"; fi
   fi
   current="$(cat "$FAKE_DATA/state")"
-  if [[ "$FAKE_SCENARIO" == "target-deployment" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then cat "$FAKE_DATA/targetDeployment.json"; elif [[ "$current" == "${targetArn}" ]]; then cat "$FAKE_DATA/post.json"; elif [[ "$current" == "${fromArn}" ]]; then cat "$FAKE_DATA/pre.json"; else cat "$FAKE_DATA/unrelated.json"; fi
+  if [[ "$FAKE_SCENARIO" == "target-deployment" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then cat "$FAKE_DATA/targetDeployment.json"; elif [[ "$FAKE_SCENARIO" == "foreign-deployment-after-update" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then cat "$FAKE_DATA/foreignDeployment.json"; elif [[ "$current" == "${targetArn}" ]]; then cat "$FAKE_DATA/post.json"; elif [[ "$current" == "${fromArn}" ]]; then cat "$FAKE_DATA/pre.json"; else cat "$FAKE_DATA/unrelated.json"; fi
 elif [[ "$1 $2" == "ecs update-service" ]]; then
   task_definition=""
   for ((i=1; i<=$#; i++)); do
@@ -137,6 +142,9 @@ elif [[ "$1 $2" == "ecs update-service" ]]; then
   printf '%s' "$task_definition" > "$FAKE_DATA/state"
 elif [[ "$1 $2" == "ecs wait" ]]; then
   if [[ ("$FAKE_SCENARIO" == "stable-failure" || "$FAKE_SCENARIO" == "rollback-failure") && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; exit 32; fi
+  if [[ "$FAKE_SCENARIO" == "foreign-after-update" && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; printf '%s' "${unrelatedTaskDefinition}" > "$FAKE_DATA/state"; exit 32; fi
+  if [[ "$FAKE_SCENARIO" == "previous-before-exit" && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; printf '%s' "${fromArn}" > "$FAKE_DATA/state"; exit 32; fi
+  if [[ "$FAKE_SCENARIO" == "ownership-read-failure" && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; exit 32; fi
 elif [[ "$1 $2" == "ecs list-tasks" ]]; then cat "$FAKE_DATA/taskArns.json"
 elif [[ "$1 $2" == "ecs describe-tasks" ]]; then cat "$FAKE_DATA/tasks.json"
 elif [[ "$1 $2" == "ecs register-task-definition" ]]; then printf '%s\\n' "${targetArn}"
@@ -320,7 +328,7 @@ test("ambiguous accepted UpdateService response reconciles and rolls back the ex
   const updates = events.reduce((indexes, event, index) => event.startsWith("ecs update-service") ? [...indexes, index] : indexes, []);
   const descriptions = events.reduce((indexes, event, index) => event.startsWith("ecs describe-services") ? [...indexes, index] : indexes, []);
   assert.equal(updates.length, 2);
-  assert.ok(updates[0] < descriptions[1] && descriptions[1] < updates[1] && updates[1] < descriptions[2]);
+  assert.ok(updates[0] < descriptions[1] && descriptions[1] < descriptions[2] && descriptions[2] < updates[1] && updates[1] < descriptions[3]);
   assert.match(events[updates[1]], new RegExp(`--task-definition ${fromArn.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}`));
   assertTempClean(result);
 });
@@ -351,6 +359,32 @@ test("stabilization failure rolls back the exact previous ARN", () => {
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
   assert.match(result.calls, new RegExp(`--task-definition ${fromArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   assert.equal(fs.readFileSync(result.fixture.state, "utf8"), fromArn);
+  assertTempClean(result);
+});
+test("foreign state appearing before rollback is preserved", () => {
+  const result = runExisting({ scenario: "foreign-after-update" });
+  assertFailure(result, /CONCURRENT_SERVICE_STATE/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assert.equal(fs.readFileSync(result.fixture.state, "utf8"), `arn:aws:ecs:${region}:${account}:task-definition/unreviewed:9`);
+  assertTempClean(result);
+});
+test("foreign deployment alongside the target prevents rollback", () => {
+  const result = runExisting({ scenario: "foreign-deployment-after-update" });
+  assertFailure(result, /CONCURRENT_SERVICE_STATE/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assertTempClean(result);
+});
+test("previous task definition already restored before rollback needs no mutation", () => {
+  const result = runExisting({ scenario: "previous-before-exit" });
+  assertFailure(result, /already restored/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assert.equal(fs.readFileSync(result.fixture.state, "utf8"), fromArn);
+  assertTempClean(result);
+});
+test("rollback ownership read failure fails closed without rollback", () => {
+  const result = runExisting({ scenario: "ownership-read-failure" });
+  assertFailure(result, /UNKNOWN_ROLLBACK_OWNERSHIP/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
   assertTempClean(result);
 });
 test("list-tasks validates the real response schema and rejects pagination", () => {
