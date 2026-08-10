@@ -46,6 +46,7 @@ npm run stage-b:plan-bound-permission-preflight -- \
   --saved-plan <saved-plan> \
   --plan-approval-report <approval-report> \
   --plan-approval-report-sha256 <approval-report-sha256> \
+  --reference-audit <reference-audit> \
   --manifest <permission-manifest> \
   --expected-account 368992683803 \
   --expected-region eu-west-2 \
@@ -56,9 +57,11 @@ npm run stage-b:plan-bound-permission-preflight -- \
   --lifecycle-directory <new-private-lifecycle-directory>
 ```
 
-This report uses `evidenceKind=PLAN_BOUND_PERMISSION` and `phase=plan-bound`; it always
-requires `PLAN_APPROVED` and binds the exact plan, refresh, audit, state, and identity
-artifacts. The two reports are not substitutable. The base launcher requires an explicit
+This report uses `evidenceKind=PLAN_BOUND_PERMISSION` and `phase=plan-bound`; BASELINE
+requires `--reference-audit`, and `PLAN_BOUND_PERMISSION` binds the exact reference-audit
+artifact used by approval and completeness validation. It always requires `PLAN_APPROVED`
+and binds the exact plan, refresh, audit, state, and identity artifacts. The two reports are
+not substitutable. The base launcher requires an explicit
 `--phase` and rejects ambiguous invocations.
 
 Permission evidence has four distinct hash domains. `canonicalPayloadSha256` is the

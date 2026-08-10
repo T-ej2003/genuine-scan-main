@@ -981,6 +981,9 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   const savedPlanBytes = fs.readFileSync(path.resolve(options.savedPlanPath));
   const planApprovalReportBytes = fs.readFileSync(path.resolve(options.planApprovalReportPath));
   const planApprovalReport = JSON.parse(planApprovalReportBytes);
+  if (planApprovalReport.planProfile === "BASELINE" && !options.referenceAuditPath) {
+    throw new Error("--reference-audit is required for BASELINE plan-bound permission preflight.");
+  }
   const plan = JSON.parse(planBytes);
   const referenceAuditBytes = options.referenceAuditPath ? fs.readFileSync(path.resolve(options.referenceAuditPath)) : undefined;
   const referenceAudit = referenceAuditBytes ? JSON.parse(referenceAuditBytes) : undefined;

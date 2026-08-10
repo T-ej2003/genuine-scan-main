@@ -98,7 +98,7 @@ function cliApprovalArgs(directory, selectedPlan = plan, selectedPlanBytes = pla
     const family = Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).find(([address]) => address.match(/\[\"([^\"]+)\"\]$/)?.[1] === key)?.[1];
     return { terraformAddress: change.address, family, classification: "retained-no-op", oldTaskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${index + 1}` };
   });
-  const audit = selectedPlan.resource_changes.length >= 70 ? { schemaVersion: 1, planJsonSha256: hashes.planJsonSha256, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", auditedAt: now, retainedTaskDefinitions } : undefined;
+  const audit = selectedPlan.variables?.stage_b_recovery_only?.value === true ? undefined : { schemaVersion: 1, planJsonSha256: hashes.planJsonSha256, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", auditedAt: now, retainedTaskDefinitions };
   if (audit) writePrivate(auditPath, `${JSON.stringify(audit)}\n`);
   const capture = createStageBPlanCaptureReport({ toolingSha: selectedPlan.variables.tooling_sha.value, toolingTreeSha256: "e".repeat(64), refreshReportSha256: "r".repeat(64), hashes, capturedAt: now, stageBLineage: "lineage", stageBSerial: 76, terraformVersion: "1.15.7", terraformFormatVersion: "1.2", classification: { noOp: selectedPlan.resource_changes.filter((change) => JSON.stringify(change.change?.actions) === JSON.stringify(["no-op"])).length, create: 12, update: 3, destroy: 0, replacement: 0, unclassified: 0 } });
   const captureBytes = Buffer.from(`${JSON.stringify(capture, null, 2)}\n`);
@@ -1002,6 +1002,34 @@ test("CLI passes its parsed manifest through the same preflight entrypoint", () 
   assert.deepEqual(received, manifest);
   assert.equal(JSON.parse(fs.readFileSync(outputPath, "utf8")).status, "valid");
   assert.equal(JSON.parse(fs.readFileSync(signaturePath, "utf8")).canonicalPayloadSha256, reportSignature(JSON.parse(fs.readFileSync(outputPath, "utf8"))).canonicalPayloadSha256);
+});
+
+test("BASELINE CLI preflight requires reference audit before simulation", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-cli-reference-audit-required-"));
+  const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json");
+  writePrivate(planPath, planBytes); writePrivate(savedPath, savedPlanBytes); writePrivate(manifestPath, JSON.stringify(manifest));
+  const approvalArgs = cliApprovalArgs(directory).filter((argument, index, args) => argument !== "--reference-audit" && args[index - 1] !== "--reference-audit");
+  let simulations = 0;
+  assert.throws(() => runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", path.join(directory, "report.json"), "--signature-output", path.join(directory, "signature.json"), "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test", ...approvalArgs], {
+    getCaller: () => generatorArn,
+    collectPolicyEvidence: () => policyEvidence,
+    runPreflight: () => { simulations += 1; throw new Error("simulation must not start"); },
+  }), /--reference-audit is required/);
+  assert.equal(simulations, 0);
+});
+
+test("BASELINE CLI preflight rejects a nonexistent reference audit before simulation", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-cli-reference-audit-missing-"));
+  const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json");
+  writePrivate(planPath, planBytes); writePrivate(savedPath, savedPlanBytes); writePrivate(manifestPath, JSON.stringify(manifest));
+  const cliArgs = cliApprovalArgs(directory); const auditIndex = cliArgs.indexOf("--reference-audit"); cliArgs[auditIndex + 1] = path.join(directory, "missing-audit.json");
+  let simulations = 0;
+  assert.throws(() => runCli(["--report-generator-caller-arn", generatorArn, "--simulated-role-arn", roleArn, "--plan-json", planPath, "--saved-plan", savedPath, "--manifest", manifestPath, "--output", path.join(directory, "report.json"), "--signature-output", path.join(directory, "signature.json"), "--expected-account", "368992683803", "--expected-region", "eu-west-2", "--policy-published-at", now, "--cloudtrail-session-name", "test", ...cliArgs], {
+    getCaller: () => generatorArn,
+    collectPolicyEvidence: () => policyEvidence,
+    runPreflight: () => { simulations += 1; throw new Error("simulation must not start"); },
+  }), /reference audit.*regular.*file/i);
+  assert.equal(simulations, 0);
 });
 
 test("invalid permission evidence is neither published nor signed", () => {
