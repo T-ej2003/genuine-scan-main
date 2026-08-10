@@ -88,6 +88,8 @@ const exactLogArn = (name) => `arn:aws:logs:eu-west-2:368992683803:log-group:${n
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
 const backendServiceArn = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2";
 const unrelatedServiceArn = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-unrelated-service";
+const approvedTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1";
+const rollbackTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47";
 const mutationActions = new Set([
   "ecs:TagResource",
   "ecs:RegisterTaskDefinition",
@@ -278,7 +280,10 @@ test("UpdateService is limited to the exact production backend service and clust
     Effect: "Allow",
     Action: "ecs:UpdateService",
     Resource: backendServiceArn,
-    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2", "ecs:cluster": clusterArn } },
+    Condition: {
+      StringEquals: { "aws:RequestedRegion": "eu-west-2", "ecs:cluster": clusterArn },
+      ArnEquals: { "ecs:task-definition": [approvedTaskDefinitionArn, rollbackTaskDefinitionArn] },
+    },
   });
   assert.notEqual(statement.Resource, unrelatedServiceArn);
   assert.equal(policies.finalWrite.Statement.some((candidate) => actionsOf(candidate).includes("ecs:UpdateService") && candidate.Resource === "*"), false);

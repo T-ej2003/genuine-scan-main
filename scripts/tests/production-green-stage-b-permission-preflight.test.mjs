@@ -240,8 +240,8 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.length, 12);
   assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 12);
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
-  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 14);
-  assert.equal(assertReviewedSimulationContextRegistry().length, 14);
+  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 15);
+  assert.equal(assertReviewedSimulationContextRegistry().length, 15);
   assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0 && !values.includes("*")));
 });
 
@@ -456,7 +456,7 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 90);
+  assert.equal(report.requiredEvaluations.length, 91);
   assert.equal(report.forbiddenEvaluations.length, 23);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
@@ -806,6 +806,7 @@ test("task-definition registration context is complete and bound to each planned
       { key: "ecs:compute-compatibility", type: "stringList", values: ["FARGATE"] },
       { key: "ecs:privileged", type: "string", values: ["false"] },
       { key: "ecs:task-cpu", type: "numeric", values: [registration.manifestId === "worker-register" ? "512" : registration.manifestId === "read-only-canary-register" ? "256" : "1024"] },
+      { key: "ecs:task-definition", type: "stringList", values: ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"] },
       { key: "ecs:task-memory", type: "numeric", values: [registration.manifestId === "worker-register" ? "1024" : registration.manifestId === "read-only-canary-register" ? "512" : "2048"] },
     ]);
   }

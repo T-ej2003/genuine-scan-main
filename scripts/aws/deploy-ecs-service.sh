@@ -161,12 +161,35 @@ EXISTING_TASKS_FILE="$(mktemp)"
 EXISTING_CALLER_FILE="$(mktemp)"
 existing_mode_active=false
 existing_switch_started=false
+update_state="NOT_ATTEMPTED"
+
+verify_existing_service_restored() {
+  local response_file="$EXISTING_POST_SERVICE_FILE"
+  if ! aws ecs describe-services \
+    --region "$AWS_REGION" \
+    --cluster "$CLUSTER_NAME" \
+    --services "$SERVICE_NAME" \
+    >"$response_file"; then
+    echo "UNKNOWN_SERVICE_STATE: rollback completed without a verifiable service description." >&2
+    return 1
+  fi
+  node --input-type=module - "$response_file" "$PREVIOUS_TASK_DEFINITION_ARN" <<'NODE'
+import fs from "node:fs";
+const [responsePath, previousArn] = process.argv.slice(2);
+const response = JSON.parse(fs.readFileSync(responsePath, "utf8"));
+const service = response.services?.length === 1 ? response.services[0] : null;
+const deployment = service?.deployments?.length === 1 ? service.deployments[0] : null;
+if (!Array.isArray(response.failures) || response.failures.length !== 0 || !service || service.status !== "ACTIVE" || service.taskDefinition !== previousArn || !deployment || deployment.status !== "PRIMARY" || deployment.taskDefinition !== previousArn || deployment.pendingCount !== 0 || deployment.runningCount !== service.desiredCount || (deployment.rolloutState && deployment.rolloutState !== "COMPLETED")) {
+  throw new Error("Rollback did not restore the exact previous stable task definition.");
+}
+NODE
+}
 
 cleanup_and_rollback_on_exit() {
   local exit_code=$?
   trap - EXIT
   set +e
-  if [[ "$existing_mode_active" == "true" && "$existing_switch_started" == "true" && "$exit_code" -ne 0 ]]; then
+  if [[ "$existing_mode_active" == "true" && "$existing_switch_started" == "true" && "$exit_code" -ne 0 && ( "$update_state" == "UPDATE_CONFIRMED" || "$update_state" == "ROLLBACK_REQUIRED" ) ]]; then
     echo "Existing task-definition switch failed; restoring ${PREVIOUS_TASK_DEFINITION_ARN}." >&2
     WAIT_FOR_STABLE=true \
       AWS_REGION="$AWS_REGION" \
@@ -174,6 +197,7 @@ cleanup_and_rollback_on_exit() {
       SERVICE_NAME="$SERVICE_NAME" \
       PREVIOUS_TASK_DEFINITION_ARN="$PREVIOUS_TASK_DEFINITION_ARN" \
       "$REPO_ROOT/scripts/aws/rollback-ecs-service.sh" || echo "Canonical rollback failed." >&2
+    verify_existing_service_restored || echo "Rollback verification failed." >&2
   fi
   rm -f \
     "$RAW_FILE" \
@@ -278,13 +302,51 @@ NODE
   )"
 
   if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" ]]; then
-    aws ecs update-service \
+    update_state="UPDATE_ATTEMPTED"
+    if aws ecs update-service \
       --region "$AWS_REGION" \
       --cluster "$CLUSTER_NAME" \
       --service "$SERVICE_NAME" \
       --task-definition "$EXISTING_TASK_DEFINITION_ARN" \
-      >/dev/null
-    existing_switch_started=true
+      >/dev/null; then
+      update_state="UPDATE_CONFIRMED"
+      existing_switch_started=true
+    else
+      if ! aws ecs describe-services \
+        --region "$AWS_REGION" \
+        --cluster "$CLUSTER_NAME" \
+        --services "$SERVICE_NAME" \
+        >"$EXISTING_POST_SERVICE_FILE"; then
+        update_state="UPDATE_OUTCOME_AMBIGUOUS"
+        echo "UNKNOWN_SERVICE_STATE: UpdateService failed and service state could not be reconciled." >&2
+        exit 1
+      fi
+      if ! reconciled_task_definition="$(node --input-type=module - "$EXISTING_POST_SERVICE_FILE" <<'NODE'
+import fs from "node:fs";
+const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!Array.isArray(response.failures) || response.failures.length !== 0 || response.services?.length !== 1 || typeof response.services[0]?.taskDefinition !== "string") throw new Error("ECS service reconciliation response is malformed.");
+process.stdout.write(response.services[0].taskDefinition);
+NODE
+      )"; then
+        update_state="UPDATE_OUTCOME_AMBIGUOUS"
+        echo "UNKNOWN_SERVICE_STATE: UpdateService failed and service state was malformed." >&2
+        exit 1
+      fi
+      if [[ "$reconciled_task_definition" == "$PREVIOUS_TASK_DEFINITION_ARN" ]]; then
+        update_state="NOT_ATTEMPTED"
+        echo "UpdateService failed; reconciliation proved the service remains on the previous task definition." >&2
+        exit 1
+      fi
+      if [[ "$reconciled_task_definition" == "$EXISTING_TASK_DEFINITION_ARN" ]]; then
+        update_state="ROLLBACK_REQUIRED"
+        existing_switch_started=true
+        echo "AMBIGUOUS_UPDATE_OUTCOME: UpdateService failed after the target became active; restoring the exact previous task definition." >&2
+        exit 1
+      fi
+      update_state="UPDATE_OUTCOME_AMBIGUOUS"
+      echo "AMBIGUOUS_UPDATE_OUTCOME: service task definition is neither the expected previous nor target ARN: ${reconciled_task_definition}" >&2
+      exit 1
+    fi
   else
     echo "Target task definition is already active on ${SERVICE_NAME}; no service update required."
   fi
@@ -374,6 +436,7 @@ NODE
 
   verify_deployed_version_if_requested
 
+  update_state="VERIFIED"
   existing_switch_started=false
   echo "Verified ${SERVICE_NAME} on ${CLUSTER_NAME} using existing task definition ${EXISTING_TASK_DEFINITION_ARN}"
   exit 0
