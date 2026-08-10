@@ -50,7 +50,14 @@ jobs:
         run: npm run report:lint:changed
 
       - name: Release-candidate validation contract
-        run: npm run verify:ci:release-candidate
+        run: |
+          # Pull requests validate merge safety. Pushes, tags, and manual runs
+          # retain the production-release freshness gate.
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            npm run verify:ci:release-candidate:source
+          else
+            npm run verify:ci:release-candidate
+          fi
 
   rc-staging-smoke:
     runs-on: ubuntu-latest

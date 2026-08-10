@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+export const ROTATION_EVIDENCE_MAX_AGE_DAYS = 120;
 const REQUIRED_FAMILIES = new Set(["jwt_secrets", "qr_signing_keys"]);
 const SHA = /^[a-f0-9]{40}$/;
 const VERSION_ID = /^[A-Za-z0-9+=/:._-]{7,256}$/;
@@ -16,7 +17,7 @@ const hasRealReference = (value) => {
   return Boolean(reference) && !reference.startsWith("deploy-log://") && !reference.includes("<") && !reference.includes(">");
 };
 
-export const validateRotationEvidence = (evidence, { now = Date.now(), maxAgeDays = 120, requireCleanup = false } = {}) => {
+export const validateRotationEvidenceContract = (evidence, { now = Date.now(), requireCleanup = false } = {}) => {
   const failures = [];
   const required = [
     "evidenceVersion", "rotationId", "recordedAt", "sourceSha", "approvedBy", "approverRole",
@@ -32,9 +33,7 @@ export const validateRotationEvidence = (evidence, { now = Date.now(), maxAgeDay
   const recordedAt = new Date(text(evidence?.recordedAt));
   if (!isIsoDate(evidence?.recordedAt)) failures.push("rotation evidence recordedAt must be a valid ISO date-time");
   else {
-    const ageMs = now - recordedAt.getTime();
-    if (ageMs < 0) failures.push("rotation evidence recordedAt must not be in the future");
-    if (ageMs > maxAgeDays * DAY_MS) failures.push(`rotation evidence is stale (${Math.floor(ageMs / DAY_MS)} days old; max ${maxAgeDays})`);
+    if (now - recordedAt.getTime() < 0) failures.push("rotation evidence recordedAt must not be in the future");
   }
 
   if (!Array.isArray(evidence?.linkedDeployShas) || evidence.linkedDeployShas.length < 2 || evidence.linkedDeployShas.some((sha) => !SHA.test(text(sha)))) {
@@ -45,7 +44,7 @@ export const validateRotationEvidence = (evidence, { now = Date.now(), maxAgeDay
   }
 
   const cleanupComplete = evidence?.cleanupWindowComplete === true;
-  if (requireCleanup && !cleanupComplete) failures.push("rotation evidence cleanupWindowComplete must be true when ROTATION_WINDOW_COMPLETE=true");
+  if (requireCleanup && !cleanupComplete) failures.push("rotation evidence cleanupWindowComplete must be true for production freshness");
   if (cleanupComplete) {
     if (!isIsoDate(evidence?.cleanupCompletedAt)) failures.push("rotation evidence cleanupCompletedAt must be valid when cleanup is complete");
     else if (new Date(evidence.cleanupCompletedAt).getTime() > now) failures.push("rotation evidence cleanupCompletedAt must not be in the future");
@@ -75,5 +74,18 @@ export const validateRotationEvidence = (evidence, { now = Date.now(), maxAgeDay
 
   return failures;
 };
+
+export const validateRotationEvidenceFreshness = (evidence, { now = Date.now(), maxAgeDays = ROTATION_EVIDENCE_MAX_AGE_DAYS, requireCleanup = true } = {}) => {
+  const failures = validateRotationEvidenceContract(evidence, { now, requireCleanup });
+  const recordedAt = new Date(text(evidence?.recordedAt));
+  if (isIsoDate(evidence?.recordedAt)) {
+    const ageMs = now - recordedAt.getTime();
+    if (ageMs > maxAgeDays * DAY_MS) failures.push(`rotation evidence is stale (${Math.floor(ageMs / DAY_MS)} days old; max ${maxAgeDays})`);
+  }
+  return failures;
+};
+
+// Backward-compatible strict API for existing callers and production gates.
+export const validateRotationEvidence = validateRotationEvidenceFreshness;
 
 export const readRotationEvidence = (path) => JSON.parse(readFileSync(path, "utf8"));

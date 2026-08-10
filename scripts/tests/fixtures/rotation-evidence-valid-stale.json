@@ -1,0 +1,44 @@
+{
+  "evidenceVersion": 2,
+  "rotationId": "fixture-rotation-2026",
+  "recordedAt": "2026-04-12T20:00:00.000Z",
+  "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "approvedBy": "security-fixture@example.com",
+  "approverRole": "Security Lead",
+  "reason": "Source contract validation fixture",
+  "ticket": "SEC-FIXTURE-2026",
+  "environment": "production",
+  "cleanupWindowComplete": true,
+  "cleanupCompletedAt": "2026-04-13T20:00:00.000Z",
+  "cleanupVerifiedBy": "security-fixture@example.com",
+  "cleanupEvidenceRef": "https://example.invalid/rotation-fixture/cleanup",
+  "linkedDeployShas": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  ],
+  "verificationRefs": [
+    "https://example.invalid/rotation-fixture/verification"
+  ],
+  "families": [
+    {
+      "name": "jwt_secrets",
+      "rotatedAt": "2026-04-12T20:00:00.000Z",
+      "operator": "security-fixture@example.com",
+      "method": "dual-slot",
+      "currentVersionId": "jwt-version-fixture-2",
+      "previousVersionId": "jwt-version-fixture-1",
+      "verificationRef": "https://example.invalid/rotation-fixture/jwt"
+    },
+    {
+      "name": "qr_signing_keys",
+      "rotatedAt": "2026-04-12T20:00:00.000Z",
+      "operator": "security-fixture@example.com",
+      "method": "dual-slot",
+      "currentVersionId": "qr-version-fixture-2",
+      "previousVersionId": "qr-version-fixture-1",
+      "currentKeyVersion": "qr-current-fixture-2",
+      "previousKeyVersion": "qr-previous-fixture-1",
+      "verificationRef": "https://example.invalid/rotation-fixture/qr"
+    }
+  ]
+}

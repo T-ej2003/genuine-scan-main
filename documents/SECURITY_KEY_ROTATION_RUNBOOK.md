@@ -229,15 +229,49 @@ Rollback is allowed only if the new deployment is broken and the previous secret
 
 ## CI policy checks
 
-- `npm run check:rotation-evidence`
+- `npm run check:rotation-evidence-contract` validates the committed rotation
+  evidence shape used by source/control-plane CI. It deliberately exercises a
+  non-production stale fixture and reports `ROTATION_EVIDENCE_FRESH=false`.
+- `npm run check:rotation-evidence-freshness` validates the real
+  `.security/rotation-evidence.json` and enforces the 120-day production
+  freshness limit plus cleanup proof.
+- `npm run check:rotation-evidence` remains the strict production alias for
+  `check:rotation-evidence-freshness`.
 - `npm run check:rotation-cleanup`
 
-When the rotation window is closed, run with:
+Source implementation PRs require the contract, runtime, coordinator, secret
+leakage, and security checks. They do not constitute a production rotation and
+must not be required to make stale operational evidence fresh.
+
+Production release, deployment, scheduled security, and release-candidate
+readiness gates require `check:rotation-evidence-freshness` and must remain red
+until a real governed rotation has completed. The gate contexts are explicit:
+
+| Consumer | Context | Contract | Freshness | Mutation-capable |
+| --- | --- | --- | --- | --- |
+| Source PR validation | pull request | required | reported, not required | no |
+| Stage B source closure | pull request | required | not required | no |
+| Production release/deployment | protected push/manual release | required | required | downstream only |
+| Scheduled DR/security validation | scheduled/manual operational run | required | required | no |
+| Release-candidate readiness | release push/manual release | required | required | downstream only |
+
+The pull-request workflows select their source-validation command from the
+workflow event. This is a semantic gate mode, not a PR, branch, or environment
+bypass. Pushes, scheduled checks, and manual production runs keep the strict
+freshness path.
+
+After a real rotation, run the strict checks without changing their threshold:
 
 ```bash
-ROTATION_WINDOW_COMPLETE=true npm run check:rotation-evidence
+ROTATION_WINDOW_COMPLETE=true npm run check:rotation-evidence-freshness
 ROTATION_WINDOW_COMPLETE=true npm run check:rotation-cleanup
 ```
+
+The recorded evidence file is not refreshed by source implementation PRs. The
+governed lifecycle remains: merge the reviewed mechanism, execute prepare and
+the overlap deployment, verify current and previous JWT/QR material, observe
+the grace window, execute cleanup, generate machine-verifiable evidence, then
+allow the strict freshness gate to pass.
 
 ## Operational Notes
 

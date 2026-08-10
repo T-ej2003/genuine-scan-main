@@ -43,8 +43,12 @@ jobs:
 
       - name: Validate DR guardrails
         run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            npm run verify:guardrails:source
+          else
+            npm run verify:guardrails
+          fi
           npm run check:documents
-          npm run verify:guardrails
           npm run check:aws-dr-safety
           /bin/sh -n scripts/deploy-standby.sh
           /bin/sh -n scripts/health-check-regions.sh
