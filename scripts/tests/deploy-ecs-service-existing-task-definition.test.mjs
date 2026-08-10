@@ -507,6 +507,17 @@ test("the operator runbook exposes both explicit modes and existing-mode binding
   }
   assert.match(existingMode, /export VERSION_URL=https:\/\/www\.mscqr\.com\/api\/health/);
   assert.doesNotMatch(existingMode, /export VERSION_URL=https:\/\/www\.mscqr\.com\/(?:version|health)(?:\s|$)/);
+  const documentedTarget = existingMode.match(/--existing-task-definition\s+([^\s\\]+)/)?.[1];
+  const documentedDigest = existingMode.match(/--expected-image-digest\s+([^\s\\]+)/)?.[1];
+  const documentedGitSha = existingMode.match(/export EXPECTED_GIT_SHA=([a-f0-9]{40})/)?.[1];
+  assert.equal(documentedTarget, "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:6");
+  assert.equal(documentedTarget.endsWith(":6"), true);
+  assert.equal(documentedDigest, "sha256:32cf5587dff017354e637c147a3d985f286933129af83091d48edf35bee4e656");
+  assert.equal(digest, "sha256:32cf5587dff017354e637c147a3d985f286933129af83091d48edf35bee4e656");
+  assert.equal(documentedDigest, digest);
+  assert.equal(documentedGitSha, "5e12983f1fe733473cacb6b213c0c02ef9f38098");
+  assert.equal(documentedGitSha, sourceSha);
+  assert.equal(documentedTarget.endsWith(":6") && documentedDigest === digest && documentedGitSha === sourceSha, true);
   assert.match(nginx, /location\s+~\s+\^\/api\/health\/\?\(\.\*\)\$\s*\{[\s\S]*rewrite\s+\^\/api\/health\/\?\(\.\*\)\$\s+\/health\/\$1\s+break;[\s\S]*proxy_pass\s+\$backend_upstream;/);
   assert.doesNotMatch(existingMode, /example\.com/);
   assert.match(existingMode, /never registers a\s+task-definition revision/i);
