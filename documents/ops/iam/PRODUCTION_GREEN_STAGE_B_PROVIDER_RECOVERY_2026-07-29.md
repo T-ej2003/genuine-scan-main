@@ -229,8 +229,10 @@ the complete service set and active task set before it can
 prove that no reference was omitted. AWS evaluates those List operations with
 `Resource: "*"`; the companion policy restricts them with the exact
 `aws:RequestedRegion=eu-west-2` and `ecs:cluster=arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main`
-conditions. `DescribeServices` and `DescribeTasks` use the exact production
-service/task ARN patterns plus the same conditions. AWS does not provide a
+conditions. `DescribeServices` uses the exact production service ARN pattern
+plus the same conditions. The runtime `DescribeTasks` API call is authorized
+against `Resource: "*"`; its isolated read-only statement retains the exact
+region and cluster conditions. AWS does not provide a
 resource-level scope for `ecs:DescribeTaskDefinition`, so that read uses the
 isolated `Resource: "*"` statement with only the exact region condition.
 `ListClusters` and `DescribeClusters` are not required: the exact production
@@ -395,7 +397,7 @@ simulate_audit_read iam:ListAttachedRolePolicies '*'
 simulate_audit_read ecs:ListServices '*'
 simulate_audit_read ecs:DescribeServices 'arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/*'
 simulate_audit_read ecs:ListTasks '*'
-simulate_audit_read ecs:DescribeTasks 'arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*'
+simulate_audit_read ecs:DescribeTasks '*'
 simulate_audit_read ecs:DescribeTaskDefinition '*'
 simulate_audit_read lambda:GetFunctionConfiguration 'arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker'
 simulate_audit_read lambda:GetFunctionConfiguration 'arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*'

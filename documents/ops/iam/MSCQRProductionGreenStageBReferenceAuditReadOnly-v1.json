@@ -64,7 +64,7 @@
       "Sid": "DescribeStageBTasksReadOnly",
       "Effect": "Allow",
       "Action": "ecs:DescribeTasks",
-      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*",
+      "Resource": "*",
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "eu-west-2",
