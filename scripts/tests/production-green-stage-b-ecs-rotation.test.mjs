@@ -7,7 +7,7 @@ import {
 } from "../aws/stage-b-deployment-contract.mjs";
 import { assertStageBPlan } from "../plan-production-green-stage-b.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
-import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
+import { STAGE_B_EXECUTOR_FOR_EACH_REFERENCES, STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import {
   createStageBPlanCaptureReport,
   assertStageBPlanCaptureReport,
@@ -129,7 +129,7 @@ function addBrokerMappingMetadata(plan) {
   plan.configuration = { root_module: { resources: [{
     address: "aws_ecs_task_definition.executor",
     type: "aws_ecs_task_definition",
-    for_each_expression: { references: ["local.executor_definitions"] },
+    for_each_expression: { references: [...STAGE_B_EXECUTOR_FOR_EACH_REFERENCES] },
     expressions: { family: { references: ["each.value.family"] } },
   }] } };
   plan.planned_values = { root_module: { resources: Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([address, family]) => ({

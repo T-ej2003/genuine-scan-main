@@ -19,6 +19,7 @@ import {
   assertTerraformDependencyCoversAddress,
   STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS,
   STAGE_B_REFERENCE_AUDIT_MAX_AGE_MS,
+  STAGE_B_EXECUTOR_FOR_EACH_REFERENCES,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "../aws/stage-b-reference-audit-contract.mjs";
 
@@ -248,7 +249,7 @@ function addBrokerAtomicPlanContract(plan, taskDefinitionAddress = canaryAddress
         {
           address: executorCollectionAddress,
           type: "aws_ecs_task_definition",
-          for_each_expression: { references: ["local.executor_definitions"] },
+          for_each_expression: { references: [...STAGE_B_EXECUTOR_FOR_EACH_REFERENCES] },
           expressions: { family: { references: ["each.value.family"] } },
         },
         {
@@ -1636,6 +1637,73 @@ test("structured dependency matching rejects unrelated or retained collections",
 test("complete broker mode mapping passes", () => {
   const fixture = makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap" });
   assert.doesNotThrow(() => assertStageBBrokerTaskDefinitionMapping(fixture.plan, fixture.options.terraformConfiguration));
+});
+
+test("executor for_each fixture matches the Terraform source and exact audit contract", () => {
+  assert.match(
+    terraformConfigurationSource,
+    /resource "aws_ecs_task_definition" "executor"[\s\S]*?for_each\s*=\s*local\.executor_definitions_for_resources/,
+  );
+  const fixture = makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap" });
+  const executor = fixture.plan.configuration.root_module.resources
+    .find((resource) => resource.address === executorCollectionAddress);
+  assert.deepEqual(executor.for_each_expression.references, ["local.executor_definitions_for_resources"]);
+  assert.deepEqual(executor.for_each_expression.references, STAGE_B_EXECUTOR_FOR_EACH_REFERENCES);
+});
+
+test("stale, arbitrary, missing, empty, and extra executor for_each references fail closed", () => {
+  for (const references of [
+    ["local.executor_definitions"],
+    ["local.unreviewed"],
+    undefined,
+    [],
+    ["local.executor_definitions_for_resources", "local.unreviewed"],
+  ]) {
+    const fixture = makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap" });
+    const executor = fixture.plan.configuration.root_module.resources
+      .find((resource) => resource.address === executorCollectionAddress);
+    if (references === undefined) delete executor.for_each_expression;
+    else executor.for_each_expression.references = references;
+    assert.throws(
+      () => assertStageBBrokerTaskDefinitionMapping(fixture.plan, fixture.options.terraformConfiguration),
+      /for_each metadata is missing or malformed/,
+    );
+  }
+});
+
+test("executor family reference remains exact and singular", () => {
+  for (const references of [[], ["each.value.other_family"], ["each.value.family", "each.value.family"]]) {
+    const fixture = makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap" });
+    const executor = fixture.plan.configuration.root_module.resources
+      .find((resource) => resource.address === executorCollectionAddress);
+    executor.expressions.family.references = references;
+    assert.throws(
+      () => assertStageBBrokerTaskDefinitionMapping(fixture.plan, fixture.options.terraformConfiguration),
+      /for_each metadata is missing or malformed/,
+    );
+  }
+});
+
+test("executor mapping still requires exactly the reviewed twelve current task-definition addresses", () => {
+  const missing = makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap" });
+  missing.plan.planned_values.root_module.resources = missing.plan.planned_values.root_module.resources
+    .filter((resource) => resource.address !== 'aws_ecs_task_definition.executor["full-rls-admin-bootstrap"]');
+  assert.throws(
+    () => assertStageBBrokerTaskDefinitionMapping(missing.plan, missing.options.terraformConfiguration),
+    /requires all twelve current task-definition mappings/,
+  );
+
+  const extra = makeAtomicBrokerFixture({ mode: "full-rls-admin-bootstrap" });
+  extra.plan.planned_values.root_module.resources.push({
+    address: 'aws_ecs_task_definition.executor["unreviewed"]',
+    type: "aws_ecs_task_definition",
+    index: "unreviewed",
+    values: { family: "unreviewed" },
+  });
+  assert.throws(
+    () => assertStageBBrokerTaskDefinitionMapping(extra.plan, extra.options.terraformConfiguration),
+    /executor mapping is incomplete or duplicated/,
+  );
 });
 
 test("broker mode mapping accepts supported plans without identity metadata", () => {

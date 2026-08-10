@@ -30,6 +30,9 @@ export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.broker_task_defin
 export const STAGE_B_BROKER_APPROVAL_REFERENCE = "local.broker_approval_expected";
 export const STAGE_B_BROKER_APPROVAL_INPUT = "var.package_checksum_sha256";
 export const STAGE_B_EXECUTOR_TASK_DEFINITION_COLLECTION = "aws_ecs_task_definition.executor";
+export const STAGE_B_EXECUTOR_FOR_EACH_REFERENCES = Object.freeze([
+  "local.executor_definitions_for_resources",
+]);
 const currentTaskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):([1-9][0-9]*)$/;
 
 export const STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS = Object.freeze([
@@ -307,8 +310,8 @@ export function assertStageBBrokerTaskDefinitionMapping(plan, terraformConfigura
   const familyReferences = configuredExecutor?.expressions?.family?.references;
   if (configuredExecutor?.type !== "aws_ecs_task_definition"
     || !Array.isArray(forEachReferences)
-    || forEachReferences.length !== 1
-    || forEachReferences[0] !== "local.executor_definitions"
+    || forEachReferences.length !== STAGE_B_EXECUTOR_FOR_EACH_REFERENCES.length
+    || forEachReferences.some((reference, index) => reference !== STAGE_B_EXECUTOR_FOR_EACH_REFERENCES[index])
     || !Array.isArray(familyReferences)
     || familyReferences.filter((reference) => reference === "each.value.family").length !== 1) {
     throw new Error("Broker atomic rollover executor for_each metadata is missing or malformed.");
