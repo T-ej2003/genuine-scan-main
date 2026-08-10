@@ -240,7 +240,7 @@ export VERSION_URL=https://www.mscqr.com/api/health
 export EXPECTED_GIT_SHA=5e12983f1fe733473cacb6b213c0c02ef9f38098
 
 ./scripts/aws/deploy-ecs-service.sh \
-  --existing-task-definition arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1 \
+  --existing-task-definition arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:6 \
   --expected-current-task-definition arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47 \
   --expected-family mscqr-production-rls-green-backend-candidate \
   --expected-image-digest sha256:0f8bf5cdbdfb5b67c00a1a6d5c27a7445b40fee7a1c15b525fab7f1846437e05

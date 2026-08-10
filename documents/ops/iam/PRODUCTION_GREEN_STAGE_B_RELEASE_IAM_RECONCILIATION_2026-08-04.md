@@ -23,7 +23,7 @@ required.
 The canonical FinalApplyWrite SHA-256 changes from
 `04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`
 to
-`4378bd51ef746f43d3fc99d2604e7344d0802ba4b278119288fd4e0971415624`.
+`93f786460d003e541bd92c5b7c3b4f2bcc8cc2688ff7b455ca6d33379c6f0e18`.
 
 The existing-task-definition traffic switch is intentionally owned by the same
 release-deployer identity used by the canonical wrapper. FinalApplyWrite grants

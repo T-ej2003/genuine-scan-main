@@ -12,10 +12,10 @@ const service = "mscqr-backend-servi-euw2";
 const cluster = "mscqr-prod-euw2-main";
 const containerName = "backend";
 const fromArn = `arn:aws:ecs:${region}:${account}:task-definition/mscqr-backend:47`;
-const targetArn = `arn:aws:ecs:${region}:${account}:task-definition/mscqr-production-rls-green-backend-candidate:1`;
+const targetArn = `arn:aws:ecs:${region}:${account}:task-definition/mscqr-production-rls-green-backend-candidate:6`;
 const targetFamily = "mscqr-production-rls-green-backend-candidate";
 const sourceSha = "5e12983f1fe733473cacb6b213c0c02ef9f38098";
-const digest = "sha256:0f8bf5cdbdfb5b67c00a1a6d5c27a7445b40fee7a1c15b525fab7f1846437e05";
+const digest = "sha256:32cf5587dff017354e637c147a3d985f286933129af83091d48edf35bee4e656";
 
 const serviceResponse = (taskDefinition, deployments = [
   { status: "PRIMARY", taskDefinition, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },

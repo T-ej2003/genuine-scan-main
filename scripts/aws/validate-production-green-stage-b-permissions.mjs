@@ -320,7 +320,7 @@ export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
   { key: "ecs:compute-compatibility", type: "stringList", values: Object.freeze(["FARGATE"]) },
   { key: "ecs:privileged", type: "string", values: Object.freeze(["false"]) },
   { key: "ecs:task-cpu", type: "numeric", values: Object.freeze(["512", "1024"]) },
-  { key: "ecs:task-definition", type: "stringList", values: Object.freeze(["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"]) },
+  { key: "ecs:task-definition", type: "stringList", values: Object.freeze(["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:6", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"]) },
   { key: "ecs:task-memory", type: "numeric", values: Object.freeze(["512", "1024", "2048"]) },
   { key: "iam:PassedToService", type: "string", values: Object.freeze(["ecs-tasks.amazonaws.com"]) },
 ]);
