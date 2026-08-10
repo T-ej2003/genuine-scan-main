@@ -806,7 +806,7 @@ test("task-definition registration context is complete and bound to each planned
       { key: "ecs:compute-compatibility", type: "stringList", values: ["FARGATE"] },
       { key: "ecs:privileged", type: "string", values: ["false"] },
       { key: "ecs:task-cpu", type: "numeric", values: [registration.manifestId === "worker-register" ? "512" : registration.manifestId === "read-only-canary-register" ? "256" : "1024"] },
-      { key: "ecs:task-definition", type: "stringList", values: ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:6", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"] },
+      { key: "ecs:task-definition", type: "stringList", values: ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"] },
       { key: "ecs:task-memory", type: "numeric", values: [registration.manifestId === "worker-register" ? "1024" : registration.manifestId === "read-only-canary-register" ? "512" : "2048"] },
     ]);
   }

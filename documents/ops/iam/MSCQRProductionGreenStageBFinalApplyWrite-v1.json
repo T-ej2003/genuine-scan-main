@@ -13,7 +13,7 @@
         },
         "ArnEquals": {
           "ecs:task-definition": [
-            "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:6",
+            "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7",
             "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"
           ]
         }
