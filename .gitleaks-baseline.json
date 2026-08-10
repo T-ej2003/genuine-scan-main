@@ -1,6 +1,27 @@
 [
  {
   "RuleID": "generic-api-key",
+  "Description": "Reviewed historical QR key-version fixture identifier; current fixture was remediated in cc89585703e0810304f3de32eee8b1daaf9eb398.",
+  "StartLine": 40,
+  "EndLine": 40,
+  "StartColumn": 9,
+  "EndColumn": 52,
+  "Match": "REDACTED",
+  "Secret": "REDACTED",
+  "File": "scripts/tests/fixtures/rotation-evidence-valid-stale.json",
+  "SymlinkFile": "",
+  "Commit": "39963baaad3f85f90e905d3563e80ecb2fdaf854",
+  "Link": "https://github.com/T-ej2003/genuine-scan-main/blob/39963baaad3f85f90e905d3563e80ecb2fdaf854/scripts/tests/fixtures/rotation-evidence-valid-stale.json#L40",
+  "Entropy": 0,
+  "Author": "T-ej2003",
+  "Email": "karatlapallyabhiramteja@gmail.com",
+  "Date": "2026-08-10T21:13:44Z",
+  "Message": "Separate rotation contract and freshness gates",
+  "Tags": [],
+  "Fingerprint": "39963baaad3f85f90e905d3563e80ecb2fdaf854:scripts/tests/fixtures/rotation-evidence-valid-stale.json:generic-api-key:40"
+ },
+ {
+  "RuleID": "generic-api-key",
   "Description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
   "StartLine": 30,
   "EndLine": 30,
