@@ -40,7 +40,17 @@ fi
 RESPONSE_FILE="$(mktemp)"
 trap 'rm -f "$RESPONSE_FILE"' EXIT
 
-curl --fail --silent --show-error --location "$VERSION_URL" >"$RESPONSE_FILE"
+readonly CONNECT_TIMEOUT_SECONDS=5
+readonly MAX_TIME_SECONDS=15
+
+curl \
+  --fail \
+  --silent \
+  --show-error \
+  --location \
+  --connect-timeout "$CONNECT_TIMEOUT_SECONDS" \
+  --max-time "$MAX_TIME_SECONDS" \
+  "$VERSION_URL" >"$RESPONSE_FILE"
 
 node --input-type=module - "$VERSION_URL" "$EXPECTED_GIT_SHA" "$RESPONSE_FILE" <<'NODE'
 import fs from "node:fs";

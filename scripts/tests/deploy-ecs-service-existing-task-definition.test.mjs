@@ -166,7 +166,7 @@ fi
   const curl = `#!/usr/bin/env bash
 set -euo pipefail
 echo "curl $*" >> "$FAKE_DATA/calls.log"
-if [[ "$FAKE_SCENARIO" == "version-endpoint-failure" ]]; then exit 41; fi
+if [[ "$FAKE_SCENARIO" == "version-endpoint-failure" || "$FAKE_SCENARIO" == "version-timeout" ]]; then exit $([[ "$FAKE_SCENARIO" == "version-timeout" ]] && echo 28 || echo 41); fi
 if [[ "$FAKE_SCENARIO" == "malformed-health" ]]; then printf '%s\\n' '{"status":"ok","release":{"gitSha":"not-a-sha"}}'; elif [[ "$FAKE_SCENARIO" == "wrong-version" ]]; then printf '%s\\n' '{"status":"ok","release":{"gitSha":"${"a".repeat(40)}"}}'; else printf '%s\\n' '{"status":"ok","release":{"gitSha":"${sourceSha}"}}'; fi
 `;
   const fakeCurl = path.join(fakeBin, "curl");
@@ -257,11 +257,14 @@ test("existing mode verifies the deployed version before disarming rollback", ()
   assert.equal((success.calls.match(/ecs update-service/g) || []).length, 1);
   assertTempClean(success);
 
-  for (const scenario of ["wrong-version", "malformed-health", "version-endpoint-failure"]) {
+  for (const scenario of ["wrong-version", "malformed-health", "version-endpoint-failure", "version-timeout"]) {
     const result = runExisting({ versionUrl: "https://www.mscqr.com/api/health", scenario });
     assertFailure(result);
     assert.equal((result.calls.match(/curl /g) || []).length, 1);
     assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
+    if (scenario === "version-timeout") {
+      assert.match(result.calls, /curl .*--connect-timeout 5 .*--max-time 15/);
+    }
     const events = result.calls.trim().split("\n");
     assert.ok(events.findIndex((event) => event.startsWith("curl ")) < events.findIndex((event) => event.includes(`--task-definition ${fromArn}`)));
     assertTempClean(result);
