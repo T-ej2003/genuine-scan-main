@@ -58,15 +58,22 @@ npm --prefix backend run security:rotate-production-signing-material -- \
   --fixture-file /secure/operator/previous-qr-fixture.json --runtime-verification-file /secure/operator/overlap-runtime.json \
   --verify
 
-# Deploy/restart the final overlap or cleanup task through the canonical wrapper.
-# Existing-task-definition mode performs the single reviewed UpdateService call;
-# ENABLE_EXECUTE_COMMAND=true both enables ECS Exec and verifies it after stability.
-ENABLE_EXECUTE_COMMAND=true \
-scripts/aws/deploy-ecs-service.sh \
-  --existing-task-definition <exact-task-definition-arn> \
-  --expected-current-task-definition <current-service-task-definition-arn> \
-  --expected-family <exact-task-definition-family> \
-  --expected-image-digest sha256:<64-hex>
+# Submit the governed overlap transition through Release Gate. It validates the
+# redacted coordinator state, source SHA, exact task definitions, and digest;
+# then invokes the existing-task-definition wrapper for the single reviewed
+# UpdateService call with ENABLE_EXECUTE_COMMAND=true. Do not run UpdateService manually.
+state_json="$(< /secure/operator/rotation-state.json)"
+state_sha256="$(printf '%s' "$state_json" | sha256sum | cut -d' ' -f1)"
+gh workflow run release-gate.yml --ref main \
+  -f git_ref=main -f target_sha=<protected-main-sha> \
+  -f release_mode=rotation-overlap \
+  -f rotation_id=<rotation-id> \
+  -f rotation_state_json="$state_json" \
+  -f rotation_state_sha256="$state_sha256" \
+  -f rotation_task_definition_arn=<exact-overlap-task-definition-arn> \
+  -f rotation_expected_current_task_definition_arn=<current-service-task-definition-arn> \
+  -f rotation_image_digest=sha256:<64-hex> \
+  -f rotation_deployment_sha=<exact-overlap-deployment-sha>
 
 # Run from the operator checkout. The helper selects the exact running backend
 # task, verifies its task definition/image/release identity, then uses ECS Exec
@@ -84,8 +91,23 @@ scripts/aws/verify-production-rotation-via-ecs-exec.sh \
   --health-url https://www.mscqr.com/api/health \
   --proof-output /secure/operator/overlap-runtime.json
 
-# After retirement and the cleanup deployment, invoke the same helper with
-# phase=cleanup and the exact post-retirement task identity.
+# After the grace deadline and retirement, submit the governed cleanup
+# transition. It requires phase=cleanup-deploy-required and the exact persisted
+# retirement/deployment identity before invoking the same wrapper.
+state_json="$(< /secure/operator/rotation-state.json)"
+state_sha256="$(printf '%s' "$state_json" | sha256sum | cut -d' ' -f1)"
+gh workflow run release-gate.yml --ref main \
+  -f git_ref=main -f target_sha=<protected-main-sha> \
+  -f release_mode=rotation-cleanup \
+  -f rotation_id=<rotation-id> \
+  -f rotation_state_json="$state_json" \
+  -f rotation_state_sha256="$state_sha256" \
+  -f rotation_task_definition_arn=<exact-cleanup-task-definition-arn> \
+  -f rotation_expected_current_task_definition_arn=<current-service-task-definition-arn> \
+  -f rotation_image_digest=sha256:<64-hex> \
+  -f rotation_deployment_sha=<exact-cleanup-deployment-sha>
+
+# Then invoke the deployment-side runtime proof inside the exact running task.
 ROTATION_RUNTIME_PHASE=cleanup \
 ROTATION_ID=<rotation-id> \
 ROTATION_DEPLOYMENT_SHA=<full-cleanup-deployment-sha> \
