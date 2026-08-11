@@ -32,7 +32,7 @@ function assertInventoryShape(inventory) {
       visit(nested);
     }
   };
-  visit(inventory);
+  Object.values(inventory).forEach(visit);
   assert.doesNotMatch(JSON.stringify(inventory), /postgresql:\/\/|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i);
 }
 
