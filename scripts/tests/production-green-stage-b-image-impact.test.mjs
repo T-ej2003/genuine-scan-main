@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   assertImageImpactReport,
   assertProductionImageReuseResult,
+  computeStageBToolingInputTreeSha256,
   imageImpactReportFor,
   imageReuseCompatibility,
   classifyStageBImageReusePath,
@@ -105,4 +106,20 @@ test("image-impact report generation is deterministic and exact", () => {
   const second = imageImpactReportFor(args);
   assert.deepEqual(first, second);
   assert.doesNotThrow(() => assertImageImpactReport({ report: first, ...args }));
+});
+
+test("tooling input digest excludes both compatibility evidence artifacts but detects real tooling changes", () => {
+  const evidenceJson = "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json";
+  const evidenceMarkdown = "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md";
+  const toolingInput = "scripts/plan-production-green-stage-b.mjs";
+  const files = [evidenceJson, evidenceMarkdown, toolingInput];
+  const digest = (contents) => computeStageBToolingInputTreeSha256({
+    files,
+    readFile: (file) => contents[file],
+  });
+  const baseline = digest({ [evidenceJson]: "json-a", [evidenceMarkdown]: "markdown-a", [toolingInput]: "tooling-a" });
+  assert.equal(digest({ [evidenceJson]: "json-b", [evidenceMarkdown]: "markdown-a", [toolingInput]: "tooling-a" }), baseline);
+  assert.equal(digest({ [evidenceJson]: "json-a", [evidenceMarkdown]: "markdown-b", [toolingInput]: "tooling-a" }), baseline);
+  assert.equal(digest({ [evidenceJson]: "json-b", [evidenceMarkdown]: "markdown-b", [toolingInput]: "tooling-a" }), baseline);
+  assert.notEqual(digest({ [evidenceJson]: "json-a", [evidenceMarkdown]: "markdown-a", [toolingInput]: "tooling-b" }), baseline);
 });

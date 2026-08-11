@@ -13,6 +13,7 @@ export const COMPATIBILITY_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProduction
 export const STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION = 1;
 export const IMAGE_IMPACT_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProductionGreenStageBImageImpact-v1.json";
 export const STAGE_B_CLOSURE_MODES = ["pull-request", "production"];
+const TOOLING_TREE_EVIDENCE_PATHS = new Set([COMPATIBILITY_REPORT_REPO_PATH, "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md", IMAGE_IMPACT_REPORT_REPO_PATH]);
 const SHA = /^[a-f0-9]{40}$/;
 
 const IMAGE_INPUTS = [
@@ -62,7 +63,7 @@ function normalizeClassifiedFiles(files) {
 }
 
 export function computeStageBToolingInputTreeSha256({ files, readFile, blobSha256 }) {
-  const entries = files.filter((file) => ![COMPATIBILITY_REPORT_REPO_PATH, IMAGE_IMPACT_REPORT_REPO_PATH].includes(file)).sort().map((file) => ({ file, sha256: blobSha256 ? blobSha256(file) : sha256(readFile(file)) }));
+  const entries = files.filter((file) => !TOOLING_TREE_EVIDENCE_PATHS.has(file)).sort().map((file) => ({ file, sha256: blobSha256 ? blobSha256(file) : sha256(readFile(file)) }));
   return sha256(Buffer.from(canonicalJson(entries)));
 }
 
