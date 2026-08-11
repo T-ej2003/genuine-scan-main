@@ -24,7 +24,16 @@ const runInventory = () => {
 function assertInventoryShape(inventory) {
   assert.deepEqual(Object.keys(inventory).sort(), [...ROTATION_INVENTORY_CATEGORIES].sort());
   assert.doesNotThrow(() => assertBoundedRotationInventory(inventory));
-  assert.doesNotMatch(JSON.stringify(inventory), /tokenHash|tokenNonce|password|secret|DATABASE_URL|payload/i);
+  const visit = (value) => {
+    if (Array.isArray(value)) return value.forEach(visit);
+    if (!value || typeof value !== "object") return;
+    for (const [key, nested] of Object.entries(value)) {
+      assert.doesNotMatch(key, /token|secret|password|credential|databaseurl/i);
+      visit(nested);
+    }
+  };
+  visit(inventory);
+  assert.doesNotMatch(JSON.stringify(inventory), /postgresql:\/\/|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i);
 }
 
 test("production-shaped rotation inventory executes against PostgreSQL for empty and representative data", { skip: skipOutsideCi }, () => {
