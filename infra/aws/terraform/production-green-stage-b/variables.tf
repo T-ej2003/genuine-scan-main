@@ -32,26 +32,26 @@ variable "production_rotation_cleanup_enabled" {
 }
 variable "production_rotation_secret_value_from" {
   type = object({
-    jwt_current         = string
-    jwt_previous        = string
-    qr_private_current  = string
-    qr_public_current   = string
-    qr_current_version  = string
-    qr_public_previous  = string
-    qr_previous_version = string
-    artifact_private_current    = string
-    artifact_public_current     = string
-    artifact_active_version     = string
-    artifact_public_keys_json   = string
+    jwt_current               = string
+    jwt_previous              = string
+    qr_private_current        = string
+    qr_public_current         = string
+    qr_current_version        = string
+    qr_public_previous        = string
+    qr_previous_version       = string
+    artifact_private_current  = string
+    artifact_public_current   = string
+    artifact_active_version   = string
+    artifact_public_keys_json = string
   })
   default = {
-    jwt_current         = ""
-    jwt_previous        = ""
-    qr_private_current  = ""
-    qr_public_current   = ""
-    qr_current_version  = ""
-    qr_public_previous  = ""
-    qr_previous_version = ""
+    jwt_current               = ""
+    jwt_previous              = ""
+    qr_private_current        = ""
+    qr_public_current         = ""
+    qr_current_version        = ""
+    qr_public_previous        = ""
+    qr_previous_version       = ""
     artifact_private_current  = ""
     artifact_public_current   = ""
     artifact_active_version   = ""
