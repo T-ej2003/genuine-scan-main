@@ -312,6 +312,10 @@ gate keep the strict freshness path. Before the first real rotation, the valid
 state is `ROTATION_CONTRACT_VALID=true`, `ROTATION_EVIDENCE_FRESH=false`, and
 `ROTATION_CLOSED=false`.
 
+The production `release-gate` repeats `npm run check:rotation-evidence-freshness`
+after upstream gate sanity and before the deploy job. A successful source-only
+push check can therefore never authorize production deployment by itself.
+
 After a real rotation, run the strict checks without changing their threshold:
 
 ```bash

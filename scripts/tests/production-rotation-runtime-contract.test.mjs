@@ -17,6 +17,7 @@ const immutableAudit = read("backend/src/services/immutableAuditExportService.ts
 const qualityGate = read(".github/workflows/quality-gate.yml");
 const deploymentAudit = read(".github/workflows/deployment-audit.yml");
 const releaseCandidateGate = read(".github/workflows/release-candidate-gate.yml");
+const releaseGate = read(".github/workflows/release-gate.yml");
 const runbook = read("documents/SECURITY_KEY_ROTATION_RUNBOOK.md");
 const dockerfile = read("backend/Dockerfile");
 const backendPackage = JSON.parse(read("backend/package.json"));
@@ -161,6 +162,19 @@ test("pre-rotation pushes use source validation while explicit production runs s
   assert.match(packageJson.scripts["verify:guardrails"], /check:rotation-evidence-freshness/);
   assert.match(packageJson.scripts["verify:guardrails:source"], /check:rotation-evidence-contract/);
   assert.doesNotMatch(packageJson.scripts["verify:guardrails:source"], /check:rotation-evidence-freshness/);
+});
+
+test("release gate independently enforces strict freshness before deployment", () => {
+  const strictStep = releaseGate.indexOf("- name: Strict production rotation freshness");
+  const deployJob = releaseGate.indexOf("  deploy-production-ecs:");
+  const upstreamSanity = releaseGate.indexOf("node scripts/github/check-required-workflow-gates.mjs");
+  assert.ok(strictStep > upstreamSanity, "strict freshness must follow upstream gate sanity");
+  assert.ok(strictStep < deployJob, "strict freshness must precede the deploy job");
+  assert.match(releaseGate.slice(strictStep, deployJob), /npm run check:rotation-evidence-freshness/);
+  assert.doesNotMatch(releaseGate.slice(strictStep, deployJob), /continue-on-error|if:/);
+  assert.match(releaseGate, /TARGET_EVENTS: push,workflow_dispatch/);
+  assert.match(releaseGate, /deploy-production-ecs:[\s\S]*needs: resolve-deploy-target/);
+  assert.match(JSON.parse(read("package.json")).scripts["check:rotation-evidence-freshness"], /check-rotation-evidence-freshness/);
 });
 
 test("runbook uses only the coordinator's supported runtime proof flags", () => {
