@@ -114,3 +114,13 @@ IAM evidence, identity handoff, Stage-A contract, artifact-signing contract,
 overlap task contract, bounded inventory, and `--prepare` state persistence all
 pass. It must be evaluated before `UpdateService`; it is distinct from
 `READY_FOR_ONBOARDING` and `ROTATION_CLOSED`.
+
+The release gate carries this checkpoint as a mode-600 redacted readiness
+evidence file plus its SHA-256 (`rotation_readiness_evidence_json` and
+`rotation_readiness_evidence_sha256`). Each required stage records an exact
+boolean `valid=true`, a non-secret evidence reference, and that evidence's
+SHA-256, bound to the protected source SHA, rotation ID, and persisted rotation
+state SHA-256. The gate validates it immediately before the transition step,
+and `deploy-ecs-service.sh` validates the same bytes again before any
+`UpdateService` call. Missing, stale, malformed, or mismatched evidence fails
+closed; the rollback helper remains a separate ownership-aware path.

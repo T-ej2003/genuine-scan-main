@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 usage() {
   cat <<'EOF'
 Usage: scripts/aws/deploy-ecs-service.sh
@@ -27,6 +29,15 @@ Optional environment:
   METADATA_FILE     Optional path to write deployment metadata JSON.
   VERSION_URL       Backend /version URL for post-deploy verification.
   EXPECTED_GIT_SHA  Full expected git SHA for VERSION_URL verification and runtime RELEASE_GIT_SHA.
+  OVERLAP_READINESS_EVIDENCE_FILE
+                    Mode-0600 redacted readiness evidence required before an existing-task-definition switch.
+  OVERLAP_READINESS_EVIDENCE_SHA256
+                    SHA-256 of OVERLAP_READINESS_EVIDENCE_FILE.
+  ROTATION_ID       Exact governed rotation ID bound to readiness evidence.
+  ROTATION_STATE_SHA256
+                    SHA-256 of the persisted redacted rotation state bound to readiness evidence.
+  DEPLOYMENT_SOURCE_SHA
+                    Exact protected-main source SHA bound to readiness evidence.
   ENV_UPDATES       Comma-separated container env names to set. Default:
                     GIT_SHA,RELEASE_GIT_SHA when EXPECTED_GIT_SHA is set.
   GIT_SHA           Value used when ENV_UPDATES includes GIT_SHA.
@@ -135,6 +146,22 @@ require_version_verification_inputs() {
     require_env VERSION_URL
     require_env EXPECTED_GIT_SHA
   fi
+}
+
+require_overlap_readiness() {
+  if [[ -z "$EXISTING_TASK_DEFINITION_ARN" ]]; then return; fi
+  require_env OVERLAP_READINESS_EVIDENCE_FILE
+  require_env OVERLAP_READINESS_EVIDENCE_SHA256
+  require_env ROTATION_ID
+  require_env ROTATION_STATE_SHA256
+  require_env DEPLOYMENT_SOURCE_SHA
+  node "$SCRIPT_DIR/production-overlap-readiness-contract.mjs" \
+    --mode rotation-overlap \
+    --evidence-file "$OVERLAP_READINESS_EVIDENCE_FILE" \
+    --evidence-sha256 "$OVERLAP_READINESS_EVIDENCE_SHA256" \
+    --source-sha "$DEPLOYMENT_SOURCE_SHA" \
+    --rotation-id "$ROTATION_ID" \
+    --rotation-state-sha256 "$ROTATION_STATE_SHA256" >/dev/null
 }
 
 if ! command -v aws >/dev/null 2>&1; then
@@ -404,6 +431,7 @@ if [[ -n "$EXISTING_TASK_DEFINITION_ARN" ]]; then
     exit 1
   }
   require_version_verification_inputs
+  require_overlap_readiness
 
   aws sts get-caller-identity \
     --query Arn \
@@ -502,6 +530,7 @@ NODE
       --service "$SERVICE_NAME" \
       --task-definition "$EXISTING_TASK_DEFINITION_ARN")
     if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then update_args+=(--enable-execute-command); fi
+    if [[ "${PROPAGATE_TAGS:-}" == "TASK_DEFINITION" ]]; then update_args+=(--propagate-tags "$PROPAGATE_TAGS"); fi
     if "${update_args[@]}" >/dev/null; then
       update_state="UPDATE_CONFIRMED"
       existing_switch_started=true

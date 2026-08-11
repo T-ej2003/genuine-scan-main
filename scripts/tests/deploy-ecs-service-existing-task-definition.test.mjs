@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -21,7 +22,7 @@ const validBackendPortMappings = [{ containerPort: 4000, hostPort: 4000, protoco
 
 const serviceResponse = (taskDefinition, deployments = [
   { status: "PRIMARY", taskDefinition, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },
-], enableExecuteCommand = false) => ({ failures: [], services: [{ status: "ACTIVE", taskDefinition, desiredCount: 2, loadBalancers: serviceLoadBalancers, deployments, enableExecuteCommand }] });
+], enableExecuteCommand = false, propagateTags) => ({ failures: [], services: [{ status: "ACTIVE", taskDefinition, desiredCount: 2, loadBalancers: serviceLoadBalancers, deployments, enableExecuteCommand, ...(propagateTags ? { propagateTags } : {}) }] });
 
 function writeFixture(data, options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ecs-existing-target-"));
@@ -31,6 +32,20 @@ function writeFixture(data, options = {}) {
   fs.mkdirSync(tempDir);
   const state = path.join(dir, "state");
   fs.writeFileSync(state, options.alreadyActive ? targetArn : fromArn);
+  const readiness = path.join(dir, "readiness.json");
+  const readinessEvidence = Object.fromEntries([
+    ["evidenceVersion", 1],
+    ["sourceSha", sourceSha],
+    ["rotationId", "rotation-test-1234"],
+    ["rotationStateSha256", "b".repeat(64)],
+    ["generatedAt", new Date().toISOString()],
+    ...["imageAuthorization", "iamPreflight", "rootDrop", "releaseIdentity", "verifierIdentity", "stageA", "artifactSigning", "overlapTaskDefinition", "inventory", "rotationPrepare"].map((stage) => [stage, { valid: true, evidenceRef: `test://${stage}`, evidenceSha256: "c".repeat(64) }]),
+    ["rotationPrepared", true],
+    ["ecsUpdateServiceCount", 0],
+  ]);
+  const readinessBytes = `${JSON.stringify(readinessEvidence)}\n`;
+  fs.writeFileSync(readiness, readinessBytes, { mode: 0o600 });
+  const readinessSha256 = createHash("sha256").update(readinessBytes).digest("hex");
   const includeSourceMetadata = options.includeSourceMetadata
     ?? Boolean(options.versionUrl || options.expectedGitSha || options.releaseGitSha);
   const target = {
@@ -62,8 +77,8 @@ function writeFixture(data, options = {}) {
       { status: "PRIMARY", taskDefinition: options.currentTaskDefinition || fromArn, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },
       { status: "ACTIVE", taskDefinition: fromArn, pendingCount: 1, runningCount: 1 },
     ]
-    : undefined, options.initialExecEnabled === true);
-  const post = serviceResponse(targetArn, undefined, options.postExecEnabled ?? options.enableExecuteCommand === true);
+    : undefined, options.initialExecEnabled === true, options.currentPropagateTags);
+  const post = serviceResponse(targetArn, undefined, options.postExecEnabled ?? options.enableExecuteCommand === true, options.postPropagateTags ?? options.currentPropagateTags ?? (options.propagateTags ? "TASK_DEFINITION" : undefined));
   const targetDeployment = serviceResponse(fromArn, [
     { status: "PRIMARY", taskDefinition: fromArn, pendingCount: 1, runningCount: 2, rolloutState: "IN_PROGRESS" },
     { status: "ACTIVE", taskDefinition: targetArn, pendingCount: 0, runningCount: 0 },
@@ -174,7 +189,7 @@ if [[ "$FAKE_SCENARIO" == "malformed-health" ]]; then printf '%s\\n' '{"status":
 `;
   const fakeCurl = path.join(fakeBin, "curl");
   fs.writeFileSync(fakeCurl, curl, { mode: 0o755 });
-  return { dir, fakeBin, state, tempDir, calls: path.join(dir, "calls.log") };
+  return { dir, fakeBin, state, tempDir, calls: path.join(dir, "calls.log"), readiness, readinessSha256 };
 }
 
 function runExisting(options = {}, extraArgs = []) {
@@ -195,8 +210,16 @@ function runExisting(options = {}, extraArgs = []) {
       SERVICE_NAME: service,
       CONTAINER_NAME: containerName,
       ...(expectedGitSha ? { EXPECTED_GIT_SHA: expectedGitSha } : {}),
+      DEPLOYMENT_SOURCE_SHA: sourceSha,
       ...(options.versionUrl ? { VERSION_URL: options.versionUrl } : {}),
       ...(options.enableExecuteCommand ? { ENABLE_EXECUTE_COMMAND: "true" } : {}),
+      ...(options.propagateTags ? { PROPAGATE_TAGS: options.propagateTags } : {}),
+      ...(options.omitReadiness ? {} : {
+        OVERLAP_READINESS_EVIDENCE_FILE: fixture.readiness,
+        OVERLAP_READINESS_EVIDENCE_SHA256: fixture.readinessSha256,
+        ROTATION_ID: "rotation-test-1234",
+        ROTATION_STATE_SHA256: "b".repeat(64),
+      }),
       FAKE_DATA: fixture.dir,
       FAKE_SCENARIO: options.scenario || "",
       TMPDIR: fixture.tempDir,
@@ -252,6 +275,29 @@ test("existing mode enables ECS Exec in the same canonical service update", () =
   assert.equal(result.status, 0, result.stderr);
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
   assert.match(result.calls, /--enable-execute-command/);
+  assertTempClean(result);
+});
+test("existing mode passes propagate-tags when the service does not already propagate task-definition tags", () => {
+  const result = runExisting({ propagateTags: "TASK_DEFINITION", currentPropagateTags: "" });
+  assert.equal(result.status, 0, result.stderr);
+  const update = result.calls.split("\n").find((line) => line.startsWith("ecs update-service"));
+  assert.match(update, /--propagate-tags TASK_DEFINITION/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assertTempClean(result);
+});
+test("existing mode does not update solely for propagation when TASK_DEFINITION is already active", () => {
+  const result = runExisting({ alreadyActive: true, expectedCurrent: targetArn, propagateTags: "TASK_DEFINITION", currentPropagateTags: "TASK_DEFINITION" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 0);
+  assertTempClean(result);
+});
+test("existing mode combines execute-command enablement and propagation in one UpdateService call", () => {
+  const result = runExisting({ enableExecuteCommand: true, propagateTags: "TASK_DEFINITION", currentPropagateTags: "" });
+  assert.equal(result.status, 0, result.stderr);
+  const updates = result.calls.split("\n").filter((line) => line.startsWith("ecs update-service"));
+  assert.equal(updates.length, 1);
+  assert.match(updates[0], /--enable-execute-command/);
+  assert.match(updates[0], /--propagate-tags TASK_DEFINITION/);
   assertTempClean(result);
 });
 
@@ -318,6 +364,11 @@ test("existing mode rejects incomplete version verification inputs before update
   assert.equal(neither.status, 0, neither.stderr);
   assert.equal((neither.calls.match(/curl /g) || []).length, 0);
   assert.equal((neither.calls.match(/ecs update-service/g) || []).length, 1);
+});
+test("existing mode rejects missing readiness evidence before any UpdateService call", () => {
+  const result = runExisting({ omitReadiness: true });
+  assertFailure(result, /OVERLAP_READINESS_EVIDENCE_FILE/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 0);
 });
 test("existing mode requires the release-deployer and exact described target", () => {
   assertFailure(runExisting({ callerArn: "arn:aws:iam::368992683803:root" }), /release-deployer/);
