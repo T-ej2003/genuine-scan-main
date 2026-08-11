@@ -5,15 +5,13 @@
       "Sid": "ExecuteOnlyProductionBackendTasks",
       "Effect": "Allow",
       "Action": "ecs:ExecuteCommand",
-      "Resource": [
-        "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
-        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"
-      ],
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*",
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "eu-west-2",
           "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
-          "ecs:container-name": "backend"
+          "ecs:container-name": "backend",
+          "aws:ResourceTag/MSCQRExecTarget": "production-backend"
         }
       }
     },

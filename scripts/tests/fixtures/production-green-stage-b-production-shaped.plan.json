@@ -288,7 +288,7 @@
           "runtime_platform": [{"operating_system_family":"LINUX","cpu_architecture":"X86_64"}],
           "execution_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
           "task_role_arn": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
-          "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform"},
+          "tags": {"Component":"full-rls-green-stage-b","Environment":"production","ManagedBy":"Terraform","MSCQRExecTarget":"production-backend"},
           "container_definitions": "[{\"name\":\"backend\",\"privileged\":false}]"
         },
         "after_unknown": {"arn":true,"arn_without_revision":true,"enable_fault_injection":true,"id":true,"revision":true}

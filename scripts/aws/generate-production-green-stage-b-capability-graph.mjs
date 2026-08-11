@@ -107,7 +107,10 @@ function operatorAuthority(entry, forbidden) {
   if (forbidden) return { sourceFile: null, sid: "implicit-deny", livePolicyArn: null, expectedVersion: null, expectedPolicySha256: null };
   const statement = operatorPolicy.Statement.find((candidate) => {
     const actions = asArray(candidate.Action); const resources = asArray(candidate.Resource);
-    return candidate.Effect === "Allow" && actions.includes(entry.action) && entry.resources.every((resource) => resources.some((allowed) => allowed === "*" || allowed === resource || (allowed.endsWith("*") && resource.startsWith(allowed.slice(0, -1)))));
+    const conditions = candidate.Condition?.StringEquals || {};
+    return candidate.Effect === "Allow" && actions.includes(entry.action)
+      && entry.resources.every((resource) => resources.some((allowed) => allowed === "*" || allowed === resource || (allowed.endsWith("*") && resource.startsWith(allowed.slice(0, -1)))))
+      && (entry.context || []).filter(({ type, values }) => type === "string" && values.length === 1).every(({ key, values }) => conditions[key] === values[0]);
   });
   if (!statement) throw new Error(`No reviewed ECS Exec operator policy authorizes ${entry.id}.`);
   return { sourceFile: ECS_EXEC_OPERATOR_POLICY_PATH, sid: statement.Sid, livePolicyArn: ECS_EXEC_OPERATOR_POLICY_ARN, expectedVersion: "administrator-provisioned", expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(operatorPolicy))) };

@@ -63,6 +63,14 @@ on:
         description: "Exact overlap or cleanup deployment SHA bound to coordinator state."
         required: false
         type: string
+      rotation_readiness_evidence_json:
+        description: "Redacted persisted READY_FOR_OVERLAP_DEPLOYMENT evidence JSON."
+        required: false
+        type: string
+      rotation_readiness_evidence_sha256:
+        description: "SHA-256 of the exact readiness evidence JSON bytes."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -149,6 +157,8 @@ jobs:
           ROTATION_EXPECTED_CURRENT_TASK_DEFINITION_ARN: ${{ inputs.rotation_expected_current_task_definition_arn }}
           ROTATION_IMAGE_DIGEST: ${{ inputs.rotation_image_digest }}
           ROTATION_DEPLOYMENT_SHA: ${{ inputs.rotation_deployment_sha }}
+          ROTATION_READINESS_EVIDENCE_JSON: ${{ inputs.rotation_readiness_evidence_json }}
+          ROTATION_READINESS_EVIDENCE_SHA256: ${{ inputs.rotation_readiness_evidence_sha256 }}
         run: |
           set -euo pipefail
           case "$RELEASE_MODE" in
@@ -156,7 +166,7 @@ jobs:
               npm run check:rotation-evidence-freshness
               ;;
             rotation-overlap|rotation-cleanup)
-              for name in ROTATION_ID ROTATION_STATE_JSON ROTATION_STATE_SHA256 ROTATION_TASK_DEFINITION_ARN ROTATION_EXPECTED_CURRENT_TASK_DEFINITION_ARN ROTATION_IMAGE_DIGEST ROTATION_DEPLOYMENT_SHA; do
+              for name in ROTATION_ID ROTATION_STATE_JSON ROTATION_STATE_SHA256 ROTATION_TASK_DEFINITION_ARN ROTATION_EXPECTED_CURRENT_TASK_DEFINITION_ARN ROTATION_IMAGE_DIGEST ROTATION_DEPLOYMENT_SHA ROTATION_READINESS_EVIDENCE_JSON ROTATION_READINESS_EVIDENCE_SHA256; do
                 if [ -z "${!name:-}" ]; then
                   echo "::error::${name} is required for ${RELEASE_MODE}."
                   exit 1
@@ -175,7 +185,18 @@ jobs:
                 --task-definition "$ROTATION_TASK_DEFINITION_ARN" \
                 --expected-current-task-definition "$ROTATION_EXPECTED_CURRENT_TASK_DEFINITION_ARN" \
                 --image-digest "$ROTATION_IMAGE_DIGEST"
+              readiness_file="$RUNNER_TEMP/rotation-readiness.json"
+              printf '%s' "$ROTATION_READINESS_EVIDENCE_JSON" > "$readiness_file"
+              chmod 600 "$readiness_file"
+              node scripts/aws/production-overlap-readiness-contract.mjs \
+                --mode rotation-overlap \
+                --evidence-file "$readiness_file" \
+                --evidence-sha256 "$ROTATION_READINESS_EVIDENCE_SHA256" \
+                --source-sha "$SOURCE_SHA" \
+                --rotation-id "$ROTATION_ID" \
+                --rotation-state-sha256 "$ROTATION_STATE_SHA256"
               rm -f "$state_file"
+              rm -f "$readiness_file"
               ;;
             *)
               echo "::error::Unsupported release_mode: $RELEASE_MODE"
@@ -584,6 +605,27 @@ jobs:
           set -euo pipefail
           ./scripts/aws/deploy-ecs-service.sh
 
+      - name: Authorize rotation transition readiness immediately before mutation
+        if: ${{ inputs.release_mode != 'normal' }}
+        env:
+          ROTATION_READINESS_EVIDENCE_JSON: ${{ inputs.rotation_readiness_evidence_json }}
+          ROTATION_READINESS_EVIDENCE_SHA256: ${{ inputs.rotation_readiness_evidence_sha256 }}
+          ROTATION_ID: ${{ inputs.rotation_id }}
+          ROTATION_STATE_SHA256: ${{ inputs.rotation_state_sha256 }}
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          READINESS_FILE: ${{ runner.temp }}/rotation-readiness.json
+        run: |
+          set -euo pipefail
+          printf '%s' "$ROTATION_READINESS_EVIDENCE_JSON" > "$READINESS_FILE"
+          chmod 600 "$READINESS_FILE"
+          node scripts/aws/production-overlap-readiness-contract.mjs \
+            --mode rotation-overlap \
+            --evidence-file "$READINESS_FILE" \
+            --evidence-sha256 "$ROTATION_READINESS_EVIDENCE_SHA256" \
+            --source-sha "$SOURCE_SHA" \
+            --rotation-id "$ROTATION_ID" \
+            --rotation-state-sha256 "$ROTATION_STATE_SHA256"
+
       - name: Deploy rotation transition backend ECS service
         if: ${{ inputs.release_mode != 'normal' }}
         env:
@@ -598,8 +640,14 @@ jobs:
           VERSION_URL: ${{ env.PUBLIC_BASE_URL }}/api/health
           EXPECTED_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           ENABLE_EXECUTE_COMMAND: "true"
+          PROPAGATE_TAGS: "TASK_DEFINITION"
           WAIT_FOR_STABLE: "true"
           METADATA_FILE: ${{ runner.temp }}/rotation-transition-backend.json
+          OVERLAP_READINESS_EVIDENCE_FILE: ${{ runner.temp }}/rotation-readiness.json
+          OVERLAP_READINESS_EVIDENCE_SHA256: ${{ inputs.rotation_readiness_evidence_sha256 }}
+          ROTATION_ID: ${{ inputs.rotation_id }}
+          ROTATION_STATE_SHA256: ${{ inputs.rotation_state_sha256 }}
+          DEPLOYMENT_SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
         run: |
           set -euo pipefail
           ./scripts/aws/deploy-ecs-service.sh \

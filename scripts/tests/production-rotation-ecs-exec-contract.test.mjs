@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorTrustDocument, buildEcsExecOperatorEvidence, collectLiveEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256, normalizeEcsExecOperatorTrustDocument, normalizeMfaRequired } from "../aws/production-ecs-exec-operator-contract.mjs";
+import { assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorTrustDocument, buildEcsExecOperatorEvidence, collectLiveEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256, normalizeEcsExecOperatorTrustDocument, normalizeMfaRequired } from "../aws/production-ecs-exec-operator-contract.mjs";
+import { RELEASE_POLICY_SOURCES } from "../aws/validate-production-green-stage-b-permissions.mjs";
 
 const helper = readFileSync("scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "utf8");
 const selection = readFileSync("scripts/aws/ecs-exec-target-selection.mjs", "utf8");
@@ -33,6 +34,9 @@ test("production ECS Exec policy is narrow and has no shell or mutation permissi
   assert(!actions.includes("ssm:StartSession"));
   assert.match(JSON.stringify(policy), /mscqr-prod-euw2-main/);
   assert.match(JSON.stringify(policy), /mscqr-backend-servi-euw2/);
+  const execute = policy.Statement.find((entry) => entry.Action === "ecs:ExecuteCommand");
+  assert.equal(execute.Resource, "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*");
+  assert.equal(execute.Condition.StringEquals["aws:ResourceTag/MSCQRExecTarget"], "production-backend");
 });
 
 test("ListTasks uses Resource * with exact cluster and region conditions", () => {
@@ -47,6 +51,38 @@ test("ListTasks uses Resource * with exact cluster and region conditions", () =>
   assert.equal(statement.Condition.StringEquals["ecs:cluster"], "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main");
   assert.equal(statement.Condition.StringEquals["aws:RequestedRegion"], "eu-west-2");
   assert.notEqual(required.resources[0], "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main");
+});
+
+test("ExecuteCommand evidence binds an immutable task identity marker", () => {
+  const required = ECS_EXEC_OPERATOR_REQUIRED.find(({ action }) => action === "ecs:ExecuteCommand");
+  assert.equal(required.resources[0], "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*");
+  assert.deepEqual(required.context.find(({ key }) => key === "aws:ResourceTag/MSCQRExecTarget"), { key: "aws:ResourceTag/MSCQRExecTarget", type: "string", values: ["production-backend"] });
+  for (const id of ["operator-unrelated-task", "operator-worker-task", "operator-rls-executor-task", "operator-rls-canary-task", "operator-wrong-container", "operator-missing-identity-marker"]) {
+    assert.ok(ECS_EXEC_OPERATOR_FORBIDDEN.some((entry) => entry.id === id), `missing negative ${id}`);
+  }
+});
+
+test("only backend task-definition registration may set the execution marker", () => {
+  const registration = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json", "utf8"));
+  const backend = registration.Statement.find(({ Sid }) => Sid === "RegisterExactStageBBackendTaskDefinition1024");
+  const nonBackend = registration.Statement.find(({ Sid }) => Sid === "RegisterExactStageBTaskDefinitions1024");
+  assert.equal(backend.Condition.StringEquals["aws:RequestTag/MSCQRExecTarget"], "production-backend");
+  assert(backend.Condition["ForAllValues:StringEquals"]["aws:TagKeys"].includes("MSCQRExecTarget"));
+  assert(!nonBackend.Resource.some((resource) => resource.includes("mscqr-production-rls-green-backend-candidate")));
+  assert.equal(nonBackend.Condition.StringEquals["aws:RequestTag/MSCQRExecTarget"], undefined);
+  assert(!nonBackend.Condition["ForAllValues:StringEquals"]["aws:TagKeys"].includes("MSCQRExecTarget"));
+});
+
+test("deployer and verifier cannot add the execution marker through TagResource", () => {
+  const verifierActions = policy.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
+  assert(!verifierActions.includes("ecs:TagResource"));
+  for (const { sourcePath } of RELEASE_POLICY_SOURCES) {
+    const source = JSON.parse(readFileSync(sourcePath, "utf8"));
+    for (const statement of source.Statement.filter(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("ecs:TagResource"))) {
+      assert.equal(statement.Condition?.StringEquals?.["aws:RequestTag/MSCQRExecTarget"], undefined);
+      assert(!statement.Condition?.["ForAllValues:StringEquals"]?.["aws:TagKeys"]?.includes("MSCQRExecTarget"), `${sourcePath}/${statement.Sid} can add the execution marker`);
+    }
+  }
 });
 
 test("verifier trust and policy evidence fail closed independently", () => {
@@ -137,4 +173,13 @@ test("canonical deployment enables and verifies ECS Exec in one service update",
   assert.match(deploy, /--enable-execute-command/);
   assert.match(deploy, /Post-switch service does not have ECS Exec enabled/);
   assert.match(runbook, /ENABLE_EXECUTE_COMMAND=true/);
+});
+
+test("governed rotation propagates the reviewed task identity tag", () => {
+  assert.match(deploy, /PROPAGATE_TAGS.*TASK_DEFINITION/);
+  assert.match(deploy, /--propagate-tags/);
+  assert.match(deploy, /CURRENT_PROPAGATE_TAGS.*TASK_DEFINITION/);
+  assert.match(deploy, /CURRENT_PROPAGATE_TAGS.*TASK_DEFINITION.*\|\|/s);
+  assert.match(readFileSync(".github/workflows/release-gate.yml", "utf8"), /PROPAGATE_TAGS: "TASK_DEFINITION"/);
+  assert.match(terraform, /MSCQRExecTarget/);
 });
