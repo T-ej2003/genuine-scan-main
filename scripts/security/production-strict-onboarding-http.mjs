@@ -2,12 +2,49 @@ import { runStrictOnboardingProbes } from "./production-strict-onboarding.mjs";
 
 const REQUIRED_PATHS = Object.freeze(["tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "artifactSigning", "publicQrVerification"]);
 const trim = (value) => String(value || "").replace(/\/+$/, "");
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials, runtimeReadback, ecsExecEvidence, rotationStateReadback } = {}) {
+function splitSetCookieHeader(value) {
+  return String(value || "").split(/,(?=\s*[^=;,\s]+=)/).map((part) => part.trim()).filter(Boolean);
+}
+
+export function parseSetCookieHeaders(values) {
+  const lines = (Array.isArray(values) ? values : splitSetCookieHeader(values)).flatMap((value) => splitSetCookieHeader(value));
+  return lines.map((line) => {
+    const [pair, ...attributes] = line.split(";");
+    const index = pair.indexOf("=");
+    if (index <= 0) return null;
+    return { name: pair.slice(0, index).trim(), value: pair.slice(index + 1).trim(), attributes: attributes.map((attribute) => attribute.trim().toLowerCase()) };
+  }).filter(Boolean);
+}
+
+export function createCookieAuthenticatedRequest({ baseUrl, fetchImpl = fetch } = {}) {
+  if (!/^https:\/\//.test(String(baseUrl || "")) || typeof fetchImpl !== "function") throw new Error("Cookie-authenticated request transport is invalid.");
+  const cookieJar = new Map();
+  const request = async (path, { method = "GET", body } = {}) => {
+    const normalizedMethod = String(method).toUpperCase();
+    const headers = { Accept: "application/json" };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (cookieJar.size) headers.Cookie = [...cookieJar].map(([name, value]) => `${name}=${value}`).join("; ");
+    if (UNSAFE_METHODS.has(normalizedMethod) && cookieJar.has("aq_csrf")) headers["x-csrf-token"] = cookieJar.get("aq_csrf");
+    const response = await fetchImpl(`${trim(baseUrl)}${path}`, { method: normalizedMethod, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const setCookieHeaders = typeof response.headers?.getSetCookie === "function" ? response.headers.getSetCookie() : response.headers?.get("set-cookie");
+    for (const { name, value, attributes } of parseSetCookieHeaders(setCookieHeaders)) {
+      if (attributes.includes("max-age=0")) cookieJar.delete(name);
+      else cookieJar.set(name, value);
+    }
+    let payload = null;
+    try { payload = await response.json(); } catch { payload = null; }
+    return { response, payload };
+  };
+  return { request, cookieJar };
+}
+
+export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials, runtimeReadback, ecsExecEvidence, rotationStateReadback, fetchImpl = fetch } = {}) {
   if (!/^https:\/\//.test(String(baseUrl || ""))) throw new Error("Strict onboarding base URL must use HTTPS.");
   if (!paths || REQUIRED_PATHS.some((name) => typeof paths[name] !== "string" || !paths[name])) throw new Error("Strict onboarding endpoint map is incomplete.");
   if (typeof runtimeReadback !== "function" || typeof ecsExecEvidence !== "function" || typeof rotationStateReadback !== "function") throw new Error("Strict onboarding runtime evidence adapters are required.");
-  const cookieJar = new Map();
+  const { request } = createCookieAuthenticatedRequest({ baseUrl, fetchImpl });
   let mfaCompleted = false;
   let runtimeProof;
   const proofCheck = async (name) => {
@@ -17,17 +54,6 @@ export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials,
       runtimeProof = evidence.proof;
     }
     return runtimeProof[name] === true;
-  };
-  const request = async (path, { method = "GET", body } = {}) => {
-    const headers = { Accept: "application/json" };
-    if (body !== undefined) headers["Content-Type"] = "application/json";
-    if (cookieJar.size) headers.Cookie = [...cookieJar].map(([name, value]) => `${name}=${value}`).join("; ");
-    const response = await fetch(`${trim(baseUrl)}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-    const setCookie = response.headers.get("set-cookie");
-    if (setCookie) { const [pair] = setCookie.split(";"); const index = pair.indexOf("="); if (index > 0) cookieJar.set(pair.slice(0, index), pair.slice(index + 1)); }
-    let payload = null;
-    try { payload = await response.json(); } catch { payload = null; }
-    return { response, payload };
   };
   const ok = async (path, options) => { const { response } = await request(path, options); return response.status >= 200 && response.status < 300; };
   return async ({ sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId }) => runStrictOnboardingProbes({

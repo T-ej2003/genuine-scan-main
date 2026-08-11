@@ -24,5 +24,11 @@ The bounded inventory command is repository-owned and runs inside the approved b
 operator supplies no `DATABASE_URL`; only aggregate counts, explicit not-applicable classifications,
 and hash-bound evidence leave the runtime boundary.
 
+Production AWS adapter service commands are invoked through the `aws` executable with the reviewed
+profile and `eu-west-2` region; Terraform and runtime commands remain distinct executables. Rotation
+deployment receives the SHA returned by the successful preparation step, not a stale command-line
+value. The onboarding HTTP client retains every authentication cookie and sends the server-issued
+`aq_csrf` value as `x-csrf-token` on mutating requests.
+
 `READY_FOR_ONBOARDING` is produced only after strict mandatory probes and independent evidence
 validation. Missing, unavailable, skipped, malformed, stale, or sensitive evidence fails closed.

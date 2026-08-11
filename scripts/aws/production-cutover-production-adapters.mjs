@@ -21,24 +21,29 @@ const SERVICE = "mscqr-backend-servi-euw2";
 const CLUSTER_ARN = `arn:aws:ecs:${REGION}:${ACCOUNT}:cluster/${CLUSTER}`;
 const CONTAINER = "backend";
 const jsonFile = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
+const AWS_SERVICE_COMMANDS = new Set(["ec2", "ecs", "ecr", "iam", "kms", "logs", "rds", "s3", "secretsmanager", "ssm", "sts"]);
 
-export function createProductionCommandRunner({ profile, region = REGION } = {}) {
+export function createProductionCommandRunner({ profile, region = REGION, exec = execFileSync } = {}) {
   const env = { ...process.env, AWS_REGION: region, AWS_DEFAULT_REGION: region, ...(profile ? { AWS_PROFILE: profile } : {}) };
   return (args) => {
-    const command = args[0] === "aws" && !args.includes("--region") ? [...args, "--region", region] : args;
-    return execFileSync(command[0], command.slice(1), { cwd: process.cwd(), env, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    if (!Array.isArray(args) || args.length === 0) throw new Error("Production command arguments are required.");
+    const command = args[0] === "aws" ? args.slice(1) : [...args];
+    const isAwsService = AWS_SERVICE_COMMANDS.has(command[0]);
+    const normalized = isAwsService && !command.includes("--region") ? [...command, "--region", region] : command;
+    const executable = isAwsService ? "aws" : normalized[0];
+    return exec(executable, normalized.slice(isAwsService ? 0 : 1), { cwd: process.cwd(), env, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   };
 }
 
-const parseJson = (run, args) => JSON.parse(run(["aws", ...args, "--region", REGION, "--output", "json", "--no-cli-pager"]));
+const parseJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 
-export function createProductionOverlapDeploymentAdapter({ run, runScript = execFileSync, profile, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), cluster = CLUSTER, service = SERVICE, expectedCurrentTaskDefinitionArn, readinessFile, readinessSha256, sourceSha, rotationId, rotationStateSha256, imageDigest, expectedFamily = "mscqr-production-rls-green-backend-candidate", versionUrl, expectedGitSha } = {}) {
+export function createProductionOverlapDeploymentAdapter({ run, runScript = execFileSync, profile, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), cluster = CLUSTER, service = SERVICE, expectedCurrentTaskDefinitionArn, readinessFile, readinessSha256, sourceSha, rotationId, imageDigest, expectedFamily = "mscqr-production-rls-green-backend-candidate", versionUrl, expectedGitSha } = {}) {
   if (typeof runScript !== "function" || !path.isAbsolute(deployScript)) throw new Error("Production overlap deployment runner is required.");
   return {
-    run: async ({ taskDefinitionArn, readinessSha256: suppliedReadinessSha256 }) => {
+    run: async ({ taskDefinitionArn, readinessSha256: suppliedReadinessSha256, rotationStateSha256: suppliedRotationStateSha256 }) => {
       if (!/^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:[1-9][0-9]*$/.test(taskDefinitionArn || "")) throw new Error("Overlap deployment ARN is outside the reviewed family.");
       const effectiveReadinessSha256 = suppliedReadinessSha256 || readinessSha256;
-      if (!readinessFile || !/^[a-f0-9]{64}$/.test(effectiveReadinessSha256 || "") || !/^[a-f0-9]{40}$/.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || !/^[a-f0-9]{64}$/.test(rotationStateSha256 || "")) throw new Error("Overlap deployment readiness binding is incomplete.");
+      if (!readinessFile || !/^[a-f0-9]{64}$/.test(effectiveReadinessSha256 || "") || !/^[a-f0-9]{40}$/.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || !/^[a-f0-9]{64}$/.test(suppliedRotationStateSha256 || "")) throw new Error("Overlap deployment readiness binding is incomplete.");
       const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "mscqr-overlap-deploy-"));
       const metadataFile = path.join(temporaryDirectory, "deployment.json");
       try {
@@ -60,7 +65,7 @@ export function createProductionOverlapDeploymentAdapter({ run, runScript = exec
           OVERLAP_READINESS_EVIDENCE_FILE: readinessFile,
           OVERLAP_READINESS_EVIDENCE_SHA256: effectiveReadinessSha256,
           ROTATION_ID: rotationId,
-          ROTATION_STATE_SHA256: rotationStateSha256,
+          ROTATION_STATE_SHA256: suppliedRotationStateSha256,
           DEPLOYMENT_SOURCE_SHA: sourceSha,
           MSCQR_GOVERNED_ORCHESTRATOR: "1",
           ...(versionUrl ? { VERSION_URL: versionUrl } : {}),
@@ -69,7 +74,7 @@ export function createProductionOverlapDeploymentAdapter({ run, runScript = exec
         runScript(deployScript, [], { cwd: process.cwd(), env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
         const metadata = JSON.parse(readFileSync(metadataFile, "utf8"));
         if (metadata.newTaskDefinitionArn !== taskDefinitionArn) throw new Error("Governed overlap deployment reported a different task-definition ARN.");
-        return { updateServiceCount: 1, propagateTags: "TASK_DEFINITION", taskDefinitionArn, mutationPayload: { cluster, service, taskDefinitionArn, enableExecuteCommand: true, propagateTags: "TASK_DEFINITION", expectedCurrentTaskDefinitionArn: expectedCurrentTaskDefinitionArn || null }, metadata };
+        return { updateServiceCount: 1, propagateTags: "TASK_DEFINITION", taskDefinitionArn, rotationStateSha256: suppliedRotationStateSha256, mutationPayload: { cluster, service, taskDefinitionArn, enableExecuteCommand: true, propagateTags: "TASK_DEFINITION", rotationStateSha256: suppliedRotationStateSha256, expectedCurrentTaskDefinitionArn: expectedCurrentTaskDefinitionArn || null }, metadata };
       } finally {
         rmSync(temporaryDirectory, { recursive: true, force: true });
       }
@@ -106,7 +111,7 @@ const runtimeProofCommand = ({ sourceSha, rotationId, deploymentSha, healthUrl, 
   ].join("; ");
 };
 
-export function createProductionCutoverAdapters({ config, sourceSha, rotationId, rotationStateSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier" } = {}) {
+export function createProductionCutoverAdapters({ config, sourceSha, rotationId, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier" } = {}) {
   if (!config || typeof config !== "object") throw new Error("Production cutover adapter configuration is required.");
   const releaseRun = createProductionCommandRunner({ profile: releaseProfile });
   const releaseSts = createAwsStsRunner({ profile: releaseProfile });
@@ -163,7 +168,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     readiness: config.readinessEvidenceFile ? {
       persist: async (evidence) => persistOverlapReadinessEvidence({ outputPath: config.readinessEvidenceFile, evidence }),
     } : undefined,
-    deployOverlap: createProductionOverlapDeploymentAdapter({ run: releaseRun, profile: releaseProfile, readinessFile: config.readinessEvidenceFile, sourceSha, rotationId, rotationStateSha256, imageDigest: config.backendImageDigest, expectedCurrentTaskDefinitionArn: config.expectedCurrentTaskDefinitionArn, versionUrl: config.rotationHealthUrl, expectedGitSha: sourceSha }),
+    deployOverlap: createProductionOverlapDeploymentAdapter({ run: releaseRun, profile: releaseProfile, readinessFile: config.readinessEvidenceFile, sourceSha, rotationId, imageDigest: config.backendImageDigest, expectedCurrentTaskDefinitionArn: config.expectedCurrentTaskDefinitionArn, versionUrl: config.rotationHealthUrl, expectedGitSha: sourceSha }),
     postDeploy: { run: async ({ taskDefinitionArn }) => {
       const service = await verifierEcs.describeService();
       if (service?.status !== "ACTIVE" || service?.runningCount !== service?.desiredCount || service?.pendingCount !== 0) throw new Error("ECS service is not stable after overlap deployment.");

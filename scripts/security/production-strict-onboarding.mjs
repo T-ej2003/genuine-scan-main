@@ -28,6 +28,18 @@ const asBoolean = (value, name) => {
   return true;
 };
 
+export function buildOnboardingEvidenceFingerprint(evidence) {
+  return {
+    sourceSha: evidence.sourceSha,
+    imageDigest: evidence.imageDigest,
+    taskDefinitionArn: evidence.taskDefinitionArn,
+    taskArn: evidence.taskArn,
+    rotationId: evidence.rotationId,
+    rotationPhase: evidence.rotationPhase,
+    checks: Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, evidence.checks[name]])),
+  };
+}
+
 /** The only strict onboarding producer. Missing probe functions are failures, never skips. */
 export async function runStrictOnboardingProbes({ probes, expected } = {}) {
   if (!probes || typeof probes !== "object") throw new Error("Strict onboarding probes are required.");
@@ -83,5 +95,6 @@ export async function runStrictOnboardingProbes({ probes, expected } = {}) {
     checks,
   };
   assertNoOnboardingEvidenceLeak(evidence);
-  return { ...evidence, valid: true, evidenceRef: `onboarding:${expected.taskArn}`, evidenceSha256: createHash("sha256").update(JSON.stringify(evidence)).digest("hex") };
+  const evidenceFingerprint = buildOnboardingEvidenceFingerprint(evidence);
+  return { ...evidence, valid: true, evidenceRef: `onboarding:${expected.taskArn}`, evidenceSha256: createHash("sha256").update(JSON.stringify(evidenceFingerprint)).digest("hex") };
 }

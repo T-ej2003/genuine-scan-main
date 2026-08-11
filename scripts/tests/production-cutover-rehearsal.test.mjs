@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { generateKeyPairSync } from "node:crypto";
-import { assertTransitionMatrix, buildTransitionMatrix, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
+import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
-import { runStrictOnboardingProbes, STRICT_ONBOARDING_CHECKS } from "../security/production-strict-onboarding.mjs";
+import { buildOnboardingEvidenceFingerprint, runStrictOnboardingProbes, STRICT_ONBOARDING_CHECKS } from "../security/production-strict-onboarding.mjs";
 import { ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -91,6 +91,19 @@ test("the real cutover orchestrator reaches synthetic onboarding with ordered mu
   assert.equal(result.transitionMatrix.every((edge) => edge.result === "PASS"), true);
 });
 
+test("rotation preparation hash is the only deployment authorization hash", async () => {
+  let deployedHash;
+  const input = fixtureInput({ deployOverlap: { run: async ({ taskDefinitionArn: arn, rotationStateSha256: hash }) => {
+    deployedHash = hash;
+    return { updateServiceCount: 1, propagateTags: "TASK_DEFINITION", taskDefinitionArn: arn, mutationPayload: { rotationStateSha256: hash } };
+  } } });
+  const result = await runProductionCutoverControlPlane(input);
+  assert.equal(deployedHash, rotationStateSha256);
+  let called = false;
+  await assert.rejects(() => runGovernedOverlapDeployment({ readiness: result.readiness, sourceSha, rotationId, rotationStateSha256: "f".repeat(64), taskDefinitionArn, deployOverlap: { run: async () => { called = true; } } }), /rotationStateSha256/i);
+  assert.equal(called, false);
+});
+
 test("invalid predecessor stops before the next mutation boundary", async () => {
   const input = fixtureInput({ imageAuthorization: { ...validEvidence("images:bad"), sourceSha: "f".repeat(40), imageReleaseSha: "e".repeat(40), workflowRunId: "31509287814", imageReuseCompatible: true, imageBuildInputsChanged: false, images: ["backend", "worker", "rls-executor", "rls-canary"].map((service) => ({ service, digest })), signatureVerified: true, attestationVerified: true, provenanceVerified: true } });
   await assert.rejects(() => runProductionCutoverControlPlane(input), /image evidence/i);
@@ -115,6 +128,14 @@ test("strict onboarding has no skip path", async () => {
   const probes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
   delete probes.rbac;
   await assert.rejects(() => runStrictOnboardingProbes({ probes, expected: { sourceSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId } }), /unavailable/);
+});
+
+test("onboarding evidence fingerprint contains only non-secret metadata", async () => {
+  const probes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
+  const evidence = await runStrictOnboardingProbes({ probes, expected: { sourceSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId } });
+  const fingerprint = buildOnboardingEvidenceFingerprint(evidence);
+  assert.deepEqual(Object.keys(fingerprint).sort(), ["checks", "imageDigest", "rotationId", "rotationPhase", "sourceSha", "taskArn", "taskDefinitionArn"].sort());
+  assert.doesNotMatch(JSON.stringify(fingerprint), /password|database_url|private.?key|secret|bearer|qr.?payload/i);
 });
 
 const failCases = [

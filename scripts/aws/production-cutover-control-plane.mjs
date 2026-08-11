@@ -94,7 +94,7 @@ export function assertTransitionMatrix(matrix) {
 export async function runGovernedOverlapDeployment({ readiness, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256, deployOverlap } = {}) {
   assertReadyForOverlapDeployment(readiness, { sourceSha, rotationId, rotationStateSha256 });
   if (!deployOverlap || typeof deployOverlap.run !== "function") throw new Error("Governed overlap deployment adapter is required.");
-  const deployment = await deployOverlap.run({ readiness, readinessSha256, taskDefinitionArn });
+  const deployment = await deployOverlap.run({ readiness, readinessSha256, rotationStateSha256, taskDefinitionArn });
   if (deployment?.updateServiceCount !== 1 || deployment.propagateTags !== "TASK_DEFINITION" || deployment.taskDefinitionArn !== taskDefinitionArn) throw new Error("Governed overlap deployment payload is invalid.");
   return deployment;
 }
