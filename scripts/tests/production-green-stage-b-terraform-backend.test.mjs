@@ -211,6 +211,7 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
     "ReadExactStageAProviderEndpointMetadata",
     "ReadExactStageAStorageKeys",
     "ReadExactStageAGreenRdsGroups",
+    "ReadExactStageAGreenRdsTags",
     "ReadExactStageAGreenRdsParameters",
     "ReadExactStageAGreenRdsInstance",
     "ReadExactStageAKmsAliases",
@@ -224,6 +225,18 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
   const stageAStatement = (sid) => stageA.Statement.find((statement) => statement.Sid === sid);
   assert.equal(stageAStatement("ReadExactStageABackendBucketLocation").Action, "s3:GetBucketLocation");
   assert.equal(stageAStatement("ReadExactStageABackendBucketLocation").Resource, "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2");
+  assert.equal(stageAStatement("ReadExactStageAGreenRdsGroups").Action, "rds:DescribeDBSubnetGroups");
+  assert.equal(stageAStatement("ReadExactStageAGreenRdsParameters").Action.includes("rds:ListTagsForResource"), false);
+  assert.deepEqual(stageAStatement("ReadExactStageAGreenRdsTags"), {
+    Sid: "ReadExactStageAGreenRdsTags",
+    Effect: "Allow",
+    Action: "rds:ListTagsForResource",
+    Resource: [
+      "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+      "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18",
+    ],
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
   assert.deepEqual(stageAStatement("WriteExactStageAState").Action, "s3:PutObject");
   assert.match(stageAStatement("WriteExactStageAState").Resource, /stage-a\/terraform\.tfstate$/);
   assert.deepEqual(stageAStatement("ReadExactStageALock").Action, "s3:GetObject");

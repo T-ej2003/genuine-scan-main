@@ -85,6 +85,20 @@
       }
     },
     {
+      "Sid": "ReadExactStageAGreenRdsTags",
+      "Effect": "Allow",
+      "Action": "rds:ListTagsForResource",
+      "Resource": [
+        "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+        "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
       "Sid": "ReadExactStageAGreenRdsParameters",
       "Effect": "Allow",
       "Action": [
