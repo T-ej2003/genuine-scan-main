@@ -63,6 +63,23 @@ test("valid stale evidence passes contract validation but fails freshness", () =
   assert.match(validateRotationEvidenceFreshness(stale, { now }).join("\n"), /stale/);
 });
 
+test("pre-rotation source validation accepts stale evidence without implying closure", () => {
+  const stale = { ...fresh, cleanupWindowComplete: false };
+  const failures = validateRotationEvidenceContract(stale, { now: Date.parse("2026-08-10T20:00:00.000Z") });
+  assert.deepEqual(failures, []);
+  assert.equal(stale.cleanupWindowComplete, false);
+  assert.match(validateRotationEvidenceFreshness(stale, { now: Date.parse("2026-08-10T20:00:00.000Z") }).join("\n"), /cleanupWindowComplete/);
+});
+
+test("strict freshness rejects missing final cleanup proof", () => {
+  const incomplete = { ...fresh, cleanupWindowComplete: true };
+  delete incomplete.cleanupCompletedAt;
+  delete incomplete.cleanupDeploymentSha;
+  delete incomplete.cleanupDeploymentObservedAt;
+  const failures = validateRotationEvidenceFreshness(incomplete, { now: Date.parse("2026-08-10T12:00:00.000Z") });
+  assert.match(failures.join("\n"), /cleanupCompletedAt|cleanupDeploymentSha|cleanupDeploymentObservedAt/);
+});
+
 test("stale and future evidence fail", () => {
   assert.match(validateRotationEvidence(fresh, { now: Date.parse("2026-12-09T00:00:00.000Z") }).join("\n"), /stale/);
   const future = { ...fresh, recordedAt: "2026-12-10T00:00:00.000Z" };

@@ -51,12 +51,12 @@ jobs:
 
       - name: Release-candidate validation contract
         run: |
-          # Pull requests validate merge safety. Pushes, tags, and manual runs
-          # retain the production-release freshness gate.
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            npm run verify:ci:release-candidate:source
-          else
+          # Pull requests and ordinary development/main pushes validate source
+          # contracts. Release refs and explicit runs retain freshness.
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [[ "$GITHUB_REF" == refs/heads/release-candidate/* ]] || [[ "$GITHUB_REF" == refs/tags/* ]]; then
             npm run verify:ci:release-candidate
+          else
+            npm run verify:ci:release-candidate:source
           fi
 
   rc-staging-smoke:

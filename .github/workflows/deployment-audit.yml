@@ -55,10 +55,12 @@ jobs:
           SECRET_ROTATION_EVIDENCE_REF: ${{ vars.RC_SECRET_ROTATION_EVIDENCE_REF }}
           INCIDENT_DRILL_EVIDENCE_REF: ${{ vars.RC_INCIDENT_DRILL_EVIDENCE_REF }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            npm run verify:release:source
-          else
+          # Main pushes are source validation until a governed production
+          # release explicitly invokes the strict gate.
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             npm run verify:release
+          else
+            npm run verify:release:source
           fi
 
   audit:
