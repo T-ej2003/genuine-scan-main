@@ -1,15 +1,15 @@
 {
   "schemaVersion": 2,
   "identityModel": "tooling-input-tree-sha256",
-  "imageReleaseSha": "65df3eb0b6e763095f960e66577b51f54608422e",
-  "comparisonBaseSha": "65df3eb0b6e763095f960e66577b51f54608422e",
+  "imageReleaseSha": "c45f2d788ce29c2067bfb4e8afff46f8b1c238ea",
+  "comparisonBaseSha": "c45f2d788ce29c2067bfb4e8afff46f8b1c238ea",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
-  "comparisonHeadSha256": "6c4c16592b3e26fa11c64a5d944e58017e399ad3312e91f162f82af1637f895b",
-  "toolingInputTreeSha256": "6c4c16592b3e26fa11c64a5d944e58017e399ad3312e91f162f82af1637f895b",
+  "comparisonHeadSha256": "8a121a50c6cfabef4dec5538d3e49fdcc12027d6af1a61f6acdf5320bcee85bf",
+  "toolingInputTreeSha256": "8a121a50c6cfabef4dec5538d3e49fdcc12027d6af1a61f6acdf5320bcee85bf",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
   "classificationRulesVersion": "stage-b-image-reuse-v2",
-  "generatedAt": "2026-08-11T14:44:40+01:00",
+  "generatedAt": "2026-08-11T23:05:47+01:00",
   "generatorVersion": "validate-stage-b-image-reuse@2",
   "classifiedChangedFiles": [
     {
@@ -23,7 +23,17 @@
       "imageAffecting": false
     },
     {
-      "file": "scripts/aws/production-ecs-exec-operator-contract.mjs",
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "package.json",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
       "category": "toolingOnly",
       "imageAffecting": false
     },
@@ -38,12 +48,12 @@
       "imageAffecting": false
     },
     {
-      "file": "scripts/tests/production-rotation-ecs-exec-contract.test.mjs",
+      "file": "scripts/tests/production-green-stage-b-image-reuse-cli.test.mjs",
       "category": "testOnly",
       "imageAffecting": false
     },
     {
-      "file": "scripts/tests/stage-b-administrator-phase-split.test.mjs",
+      "file": "scripts/tests/production-green-stage-b-permission-preflight.test.mjs",
       "category": "testOnly",
       "imageAffecting": false
     }

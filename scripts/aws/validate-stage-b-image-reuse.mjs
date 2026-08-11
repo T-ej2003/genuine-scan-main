@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
@@ -152,6 +153,50 @@ export function parseStageBClosureMode(argv) {
   return mode;
 }
 
+export function parseStageBImageReuseCliArgs(argv) {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: argv,
+      options: {
+        mode: { type: "string" },
+        "write-reviewed-report": { type: "boolean" },
+        "write-image-impact-report": { type: "boolean" },
+      },
+      allowPositionals: true,
+      strict: true,
+    });
+  } catch (error) {
+    throw new Error(`Invalid Stage B image-reuse arguments: ${error.message}`);
+  }
+
+  const mode = parsed.values.mode;
+  if (!mode) throw new Error("Stage B closure requires --mode pull-request or --mode production.");
+  assert(STAGE_B_CLOSURE_MODES.includes(mode), `Unsupported Stage B closure mode: ${mode}.`);
+  if (parsed.positionals.length > 2) throw new Error("Stage B image-reuse accepts at most image-release and tooling SHA positionals.");
+  for (const value of parsed.positionals) assert(SHA.test(value), `Stage B image-reuse SHA positional is invalid: ${value}.`);
+
+  const writeReviewedReport = parsed.values["write-reviewed-report"] === true;
+  const writeImageImpactReport = parsed.values["write-image-impact-report"] === true;
+  if (writeReviewedReport && mode !== "production") throw new Error("--write-reviewed-report requires --mode production.");
+  if (writeImageImpactReport && mode !== "pull-request") throw new Error("--write-image-impact-report requires --mode pull-request.");
+  return { mode, positionals: parsed.positionals, writeReviewedReport, writeImageImpactReport };
+}
+
+export function writeJsonAtomically(targetPath, value) {
+  const bytes = `${JSON.stringify(value, null, 2)}\n`;
+  JSON.parse(bytes);
+  const temporaryPath = `${targetPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  let published = false;
+  try {
+    fs.writeFileSync(temporaryPath, bytes, { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(temporaryPath, targetPath);
+    published = true;
+  } finally {
+    if (!published) try { fs.unlinkSync(temporaryPath); } catch {}
+  }
+}
+
 function git(args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 }
@@ -200,12 +245,15 @@ function imageImpactReportPath() {
   return process.env.STAGE_B_IMAGE_IMPACT_REPORT_PATH || path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH);
 }
 
+function compatibilityReportPath() {
+  return process.env.STAGE_B_COMPATIBILITY_REPORT_PATH || path.join(root, COMPATIBILITY_REPORT_REPO_PATH);
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const mode = parseStageBClosureMode(process.argv.slice(2));
-  const positional = process.argv.slice(2).filter((value, index, values) => value !== "--mode" && values[index - 1] !== "--mode" && value !== "--write-image-impact-report");
-  const reviewedReport = JSON.parse(fs.readFileSync(path.join(root, COMPATIBILITY_REPORT_REPO_PATH), "utf8"));
-  const imageReleaseSha = positional[0] || reviewedReport.imageReleaseSha;
-  const toolingSha = positional[1] || git(["rev-parse", "HEAD"]);
+  const { mode, positionals, writeReviewedReport, writeImageImpactReport } = parseStageBImageReuseCliArgs(process.argv.slice(2));
+  const reviewedReport = JSON.parse(fs.readFileSync(compatibilityReportPath(), "utf8"));
+  const imageReleaseSha = positionals[0] || reviewedReport.imageReleaseSha;
+  const toolingSha = positionals[1] || git(["rev-parse", "HEAD"]);
   const checkoutMode = process.env.STAGE_B_TOOLING_CHECKOUT_MODE || "review";
   if (mode === "production" && checkoutMode !== "production") throw new Error("Production image-reuse validation requires a protected-main checkout mode.");
   if (checkoutMode === "production") readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
@@ -215,11 +263,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (mode === "pull-request") {
     const impactReport = imageImpactReportFor({ imageReleaseSha, toolingSha, changedFiles: files, toolingInputTreeSha256: inputTreeSha256 });
     const reportPath = imageImpactReportPath();
-    if (process.argv.includes("--write-image-impact-report")) fs.writeFileSync(reportPath, `${JSON.stringify(impactReport, null, 2)}\n`);
+    if (writeImageImpactReport) writeJsonAtomically(reportPath, impactReport);
     else assertImageImpactReport({ report: JSON.parse(fs.readFileSync(reportPath, "utf8")), imageReleaseSha, toolingSha, toolingInputTreeSha256: inputTreeSha256, changedFiles: files });
     process.stdout.write(`${JSON.stringify({ ...impactReport, reportPath, summary: impactReport.newImagesRequired ? "Merge permitted; fresh protected-main images required before production deployment." : "Merge permitted; reviewed image reuse remains compatible." }, null, 2)}\n`);
-  } else if (process.argv.includes("--write-reviewed-report")) {
-    fs.writeFileSync(path.join(root, COMPATIBILITY_REPORT_REPO_PATH), `${JSON.stringify(reportFor({ imageReleaseSha, toolingSha, changedFiles: files, toolingInputTreeSha256: inputTreeSha256 }), null, 2)}\n`);
+  } else if (writeReviewedReport) {
+    writeJsonAtomically(compatibilityReportPath(), reportFor({ imageReleaseSha, toolingSha, changedFiles: files, toolingInputTreeSha256: inputTreeSha256 }));
   } else {
     const result = imageReuseCompatibility({ imageReleaseSha, toolingSha, changedFiles: files, currentHead: git(["rev-parse", "HEAD"]), toolingInputTreeSha256: inputTreeSha256, reviewedReport });
     assertProductionImageReuseResult(result);

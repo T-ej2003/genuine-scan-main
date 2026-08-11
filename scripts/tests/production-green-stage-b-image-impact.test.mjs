@@ -7,6 +7,7 @@ import {
   imageImpactReportFor,
   imageReuseCompatibility,
   classifyStageBImageReusePath,
+  parseStageBImageReuseCliArgs,
   parseStageBClosureMode,
   STAGE_B_IMAGE_REUSE_RULES_VERSION,
 } from "../aws/validate-stage-b-image-reuse.mjs";
@@ -98,6 +99,40 @@ test("closure mode is mandatory and explicit", () => {
   assert.equal(parseStageBClosureMode(["--mode", "production"]), "production");
   assert.throws(() => parseStageBClosureMode([]), /requires --mode/);
   assert.throws(() => parseStageBClosureMode(["--mode", "unknown"]), /Unsupported/);
+});
+
+test("image-reuse CLI keeps boolean options out of SHA positionals", () => {
+  const imageReleaseSha = "a".repeat(40);
+  const toolingSha = "b".repeat(40);
+  assert.deepEqual(parseStageBImageReuseCliArgs(["--mode", "production", "--write-reviewed-report"]), {
+    mode: "production",
+    positionals: [],
+    writeReviewedReport: true,
+    writeImageImpactReport: false,
+  });
+  assert.deepEqual(parseStageBImageReuseCliArgs(["--write-reviewed-report", "--mode", "production"]), {
+    mode: "production",
+    positionals: [],
+    writeReviewedReport: true,
+    writeImageImpactReport: false,
+  });
+  assert.deepEqual(parseStageBImageReuseCliArgs(["--mode", "production", imageReleaseSha, "--write-reviewed-report", toolingSha]), {
+    mode: "production",
+    positionals: [imageReleaseSha, toolingSha],
+    writeReviewedReport: true,
+    writeImageImpactReport: false,
+  });
+  assert.deepEqual(parseStageBImageReuseCliArgs(["--mode", "production"]), {
+    mode: "production",
+    positionals: [],
+    writeReviewedReport: false,
+    writeImageImpactReport: false,
+  });
+  assert.throws(() => parseStageBImageReuseCliArgs(["--mode", "production", "--write-reviewd-report"]), /Unknown option/);
+  assert.throws(() => parseStageBImageReuseCliArgs(["--mode", "production", "--totally-unknown"]), /Unknown option/);
+  assert.throws(() => parseStageBImageReuseCliArgs(["--mode", "production", imageReleaseSha, toolingSha, "garbage"]), /at most/);
+  assert.throws(() => parseStageBImageReuseCliArgs(["--mode", "production", "not-a-sha"]), /SHA positional is invalid/);
+  assert.throws(() => parseStageBImageReuseCliArgs(["--mode", "production", "g".repeat(40)]), /SHA positional is invalid/);
 });
 
 test("image-impact report generation is deterministic and exact", () => {
