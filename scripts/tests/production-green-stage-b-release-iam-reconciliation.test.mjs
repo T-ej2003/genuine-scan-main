@@ -67,8 +67,8 @@ test("production-shaped required and forbidden resources reconcile to the source
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 93);
-  assert.equal(evaluations.forbidden.length, 23);
+  assert.equal(evaluations.required.length, 94);
+  assert.equal(evaluations.forbidden.length, 26);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
   const registrations = evaluations.required.filter(({ action }) => action === "ecs:RegisterTaskDefinition");

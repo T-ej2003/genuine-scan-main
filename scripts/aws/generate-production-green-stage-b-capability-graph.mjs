@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { RELEASE_READ_PROBES } from "./production-green-stage-b-identity-capabilities.mjs";
 import { RELEASE_POLICY_SOURCES, canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS } from "./stage-b-evidence-freshness.mjs";
+import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -24,6 +25,7 @@ const awsCliSourceFiles = [
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const readJson = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
 const asArray = (value) => Array.isArray(value) ? value : [value];
+const operatorPolicy = readJson(ECS_EXEC_OPERATOR_POLICY_PATH);
 
 const PHASES = Object.freeze([
   ["protected-main-checkout", "scripts/aws/stage-b-release-gate.mjs"],
@@ -101,6 +103,16 @@ function authority(entry, forbidden, policies) {
   throw new Error(`No reviewed source policy authorizes ${entry.id}.`);
 }
 
+function operatorAuthority(entry, forbidden) {
+  if (forbidden) return { sourceFile: null, sid: "implicit-deny", livePolicyArn: null, expectedVersion: null, expectedPolicySha256: null };
+  const statement = operatorPolicy.Statement.find((candidate) => {
+    const actions = asArray(candidate.Action); const resources = asArray(candidate.Resource);
+    return candidate.Effect === "Allow" && actions.includes(entry.action) && entry.resources.every((resource) => resources.some((allowed) => allowed === "*" || allowed === resource || (allowed.endsWith("*") && resource.startsWith(allowed.slice(0, -1)))));
+  });
+  if (!statement) throw new Error(`No reviewed ECS Exec operator policy authorizes ${entry.id}.`);
+  return { sourceFile: ECS_EXEC_OPERATOR_POLICY_PATH, sid: statement.Sid, livePolicyArn: ECS_EXEC_OPERATOR_ROLE_ARN, expectedVersion: "administrator-provisioned", expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(operatorPolicy))) };
+}
+
 function terraformRuntimeActions() {
   const text = fs.readFileSync(path.join(root, terraformPath), "utf8");
   return [...text.matchAll(/Action\s*=\s*(?:\[([^\]]+)\]|"([^"]+)")/g)]
@@ -136,6 +148,11 @@ export function buildStageBDeploymentCapabilityGraph() {
     probe: forbidden ? "administrator-simulation" : probesByAction.has(entry.action) ? "direct" : entry.phase === "apply" ? "plan-derived-simulation" : "administrator-simulation",
     probeIds: probesByAction.get(entry.action) || [], policy: authority(entry, forbidden, policies), required: true, mutation: entry.phase === "apply" || forbidden,
   })));
+  const operatorCapabilities = [[ECS_EXEC_OPERATOR_REQUIRED, false], [ECS_EXEC_OPERATOR_FORBIDDEN, true]].flatMap(([entries, forbidden]) => entries.map((entry) => ({
+    id: `operator-${entry.id}`, phase: "runtime-verification", identity: "ECS_EXEC_VERIFIER_OPERATOR", executor: "ecs-exec-verifier",
+    sourceFile: ECS_EXEC_OPERATOR_POLICY_PATH, sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: forbidden ? "FORBIDDEN" : entry.action === "ecs:ExecuteCommand" ? "RUNTIME_VERIFICATION_MUTATION" : "RUNTIME_VERIFICATION_READ",
+    probe: "administrator-simulation", probeIds: [], policy: operatorAuthority(entry, forbidden), required: true, mutation: forbidden || entry.action === "ecs:ExecuteCommand",
+  })));
   const publisher = readJson(publisherPolicyPath).Statement.flatMap((statement) => asArray(statement.Action).map((action) => ({
     id: `publisher-${statement.Sid}-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "image-workflow-dispatch", identity: "GITHUB_IMAGE_PUBLISHER", executor: "github-actions",
     sourceFile: publisherPolicyPath, sourceFunction: statement.Sid, action, resources: asArray(statement.Resource), context: statement.Condition || {}, classification: statement.Effect === "Deny" ? "FORBIDDEN" : "GITHUB_IMAGE_MUTATION",
@@ -143,11 +160,11 @@ export function buildStageBDeploymentCapabilityGraph() {
   })));
   const fixed = FIXED.map(([id, phase, identity, action, actionClass, sourceFile]) => ({ id, phase, identity, executor: sourceFile.endsWith(".yml") ? "github-actions" : "aws-cli", sourceFile, sourceFunction: id, action, resources: ["reviewed-exact-resource"], context: { account: "368992683803", region: "eu-west-2" }, classification: actionClass, probe: actionClass === "RELEASE_DIRECT_READ" ? "direct" : actionClass === "ADMIN_SIMULATION" ? "administrator-simulation" : "structural", policy: { sourceFile: identity === "RELEASE_DEPLOYER" ? manifestPath : sourceFile, sid: "identity-boundary", livePolicyArn: identity === "RELEASE_DEPLOYER" ? "signed-administrator-evidence" : null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: ["ADMIN_SIGN", "GITHUB_IMAGE_MUTATION"].includes(actionClass) }));
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:Get)/.test(action) }));
-  const capabilities = [...fixed, ...publisher, ...manifestCapabilities, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ...publisher, ...manifestCapabilities, ...operatorCapabilities, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
-    identities: ["GITHUB_IMAGE_PUBLISHER", "ADMINISTRATOR", "BOOTSTRAP_OPERATOR", "RELEASE_DEPLOYER", "SERVICE_RUNTIME"], capabilities,
+    identities: ["GITHUB_IMAGE_PUBLISHER", "ADMINISTRATOR", "BOOTSTRAP_OPERATOR", "RELEASE_DEPLOYER", "ECS_EXEC_VERIFIER_OPERATOR", "SERVICE_RUNTIME"], capabilities,
     directProbes: RELEASE_READ_PROBES.map(({ id, action }) => ({ id, action })), sourceScan: discoverAwsCliActions(),
     artifactContracts: ["protected-checkout", "image-impact", "schema-v3-image-evidence", "stage-a-handoff", "tfvars-binding-report", "refresh-only", "saved-plan", "canonical-plan-json", "reference-audit", "plan-capability-manifest", "signed-permission-report"],
     stateContracts: ["stage-a-exact-object-lineage-minimum-serial-sha", "stage-b-direct-key-lineage-minimum-serial-sha", "stage-b-serial-stable-plan-to-apply"],
@@ -163,6 +180,8 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   if (new Set(graph.capabilities.map(({ id }) => id)).size !== graph.capabilities.length) throw new Error("Stage B capability IDs are not unique.");
   if (graph.capabilities.some(({ identity, action }) => !identity || !action)) throw new Error("Stage B capability identity is ambiguous.");
   if (graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy")) throw new Error("Release-deployer cannot own IAM simulation.");
+  if (graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "ecs:ExecuteCommand" && !graph.capabilities.some(({ id }) => id === "manifest-release-deployer-ecs-exec"))) throw new Error("Release-deployer ECS Exec boundary is not represented.");
+  if (!graph.capabilities.some(({ identity, action, resources }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand" && resources.includes(`arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*`))) throw new Error("Dedicated ECS Exec operator capability is absent.");
   const graphActions = new Set(graph.capabilities.map(({ action }) => action));
   for (const probe of RELEASE_READ_PROBES) if (!graphActions.has(probe.action)) throw new Error(`Release probe is absent from capability graph: ${probe.id}.`);
   assertStageBAwsCallCoverage(graph, graph.sourceScan);

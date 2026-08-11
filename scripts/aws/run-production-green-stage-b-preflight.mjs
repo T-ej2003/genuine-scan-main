@@ -21,6 +21,7 @@ import {
   canonicalizeJson,
   collectLiveReleasePolicyEvidence,
   runPermissionPreflight,
+  assertCutoverCriticalEvidence,
   assertStageBPermissionEvidenceKind,
   INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND,
   signPermissionReport,
@@ -118,6 +119,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     verify({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
     assertStageBPermissionEvidenceKind(adminReport, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
     if (adminReport.purpose !== "pre-plan-capability" || adminReport.status !== "valid" || adminReport.simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Administrator pre-plan capability report is invalid.");
+    assertCutoverCriticalEvidence(adminReport);
     if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
     assertReleasePolicyEvidence(adminReport.policyEvidence);
     const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)) });

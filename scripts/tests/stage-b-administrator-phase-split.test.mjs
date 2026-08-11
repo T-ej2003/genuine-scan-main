@@ -10,6 +10,7 @@ import {
   INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND,
   PLAN_BOUND_PERMISSION_EVIDENCE_KIND,
   runPermissionPreflight,
+  assertCutoverCriticalEvidence,
   sourcePolicyEvidence,
 } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { parseStageBAdministratorPreflightArgs } from "../aws/stage-b-administrator-preflight-args.mjs";
@@ -47,8 +48,21 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   });
   assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredAllowedCount, 93);
-  assert.equal(report.forbiddenDeniedCount, 23);
+  assert.equal(report.requiredAllowedCount, 94);
+  assert.equal(report.forbiddenDeniedCount, 26);
+  assert.equal(report.principalEvaluations.ecsExecVerifier.status, "valid");
+  assert.equal(report.cutoverCritical.stageAIngress, "allowed");
+  assert.equal(report.cutoverCritical.releaseEcsExec, "implicitDeny");
+  assert.equal(report.cutoverCritical.verifierEcsExec, "allowed");
+  for (const id of ["stage-a-ingress-unrelated-security-group", "stage-a-ingress-wrong-region"]) assert.equal(report.forbiddenEvaluations.find((item) => item.manifestId === id).decision, "implicitDeny");
+  for (const id of ["operator-unrelated-task", "operator-unrelated-cluster", "operator-wrong-region", "operator-unrelated-account", "operator-update-service", "operator-register-task-definition", "operator-pass-role", "operator-start-session", "operator-read-secret"]) assert.equal(report.principalEvaluations.ecsExecVerifier.forbiddenEvaluations.find((item) => item.manifestId === id).decision, "implicitDeny");
+  assert.doesNotThrow(() => assertCutoverCriticalEvidence(report));
+  const missingOperatorEvidence = structuredClone(report);
+  delete missingOperatorEvidence.principalEvaluations.ecsExecVerifier;
+  assert.throws(() => assertCutoverCriticalEvidence(missingOperatorEvidence), /ECS Exec operator simulation evidence/);
+  const missingStageAEvidence = structuredClone(report);
+  missingStageAEvidence.requiredEvaluations = missingStageAEvidence.requiredEvaluations.filter((item) => item.manifestId !== "apply-stage-a-endpoint-security-group-ingress");
+  assert.throws(() => assertCutoverCriticalEvidence(missingStageAEvidence), /apply-stage-a-endpoint-security-group-ingress/);
   assert.equal(Object.hasOwn(report, "planSha256"), false);
   assert.equal(Object.hasOwn(report, "savedPlanSha256"), false);
   assert.equal(Object.hasOwn(report, "planApprovalReportSha256"), false);

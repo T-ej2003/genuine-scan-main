@@ -75,10 +75,15 @@ gh workflow run release-gate.yml --ref main \
   -f rotation_image_digest=sha256:<64-hex> \
   -f rotation_deployment_sha=<exact-overlap-deployment-sha>
 
-# Run from the operator checkout. The helper selects the exact running backend
+# Run from the operator checkout under the dedicated verifier identity. The
+# helper independently checks the caller ARN and rejects release-deployer
+# credentials before any ECS discovery.
+# AWS_PROFILE=mscqr-production-ecs-exec-verifier
+# The helper selects the exact running backend
 # task, verifies its task definition/image/release identity, then uses ECS Exec
 # to run the image-local verifier in /app. The fixture is transferred via PTY
 # stdin and never appears in a command, environment value, or log.
+AWS_PROFILE=mscqr-production-ecs-exec-verifier \
 ROTATION_RUNTIME_PHASE=overlap \
 ROTATION_ID=<rotation-id> \
 ROTATION_DEPLOYMENT_SHA=<full-overlap-deployment-sha> \
@@ -108,6 +113,7 @@ gh workflow run release-gate.yml --ref main \
   -f rotation_deployment_sha=<exact-cleanup-deployment-sha>
 
 # Then invoke the deployment-side runtime proof inside the exact running task.
+AWS_PROFILE=mscqr-production-ecs-exec-verifier \
 ROTATION_RUNTIME_PHASE=cleanup \
 ROTATION_ID=<rotation-id> \
 ROTATION_DEPLOYMENT_SHA=<full-cleanup-deployment-sha> \
