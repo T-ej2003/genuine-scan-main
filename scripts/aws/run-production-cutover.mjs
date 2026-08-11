@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { createProductionCommandRunner, createProductionCutoverAdapters, createProductionOverlapDeploymentAdapter } from "./production-cutover-production-adapters.mjs";
+import { runProductionCutoverControlPlane, runProductionCutoverOverlapControlPlane } from "./production-cutover-control-plane.mjs";
+import { readAndAssertReadyForOverlapDeployment } from "./production-overlap-readiness-contract.mjs";
+
+const argv = process.argv.slice(2);
+const value = (name) => { const index = argv.indexOf(name); if (index < 0 || !argv[index + 1] || argv[index + 1].startsWith("--")) throw new Error(`${name} is required`); return argv[index + 1]; };
+const optionalValue = (name) => { const index = argv.indexOf(name); return index < 0 || !argv[index + 1] || argv[index + 1].startsWith("--") ? undefined : argv[index + 1]; };
+const mode = value("--mode");
+if (mode === "rotation-overlap") {
+  const sourceSha = value("--source-sha");
+  const rotationId = value("--rotation-id");
+  const rotationStateSha256 = value("--rotation-state-sha256");
+  const taskDefinitionArn = value("--task-definition");
+  const readinessFile = value("--readiness-file");
+  const readinessSha256 = value("--readiness-sha256");
+  const readiness = readAndAssertReadyForOverlapDeployment({ filePath: readinessFile, evidenceSha256: readinessSha256, sourceSha, rotationId, rotationStateSha256 });
+  const run = createProductionCommandRunner({ profile: process.env.AWS_PROFILE });
+  const result = await runProductionCutoverOverlapControlPlane({ readiness: JSON.parse(readFileSync(readinessFile, "utf8")), sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256, deployOverlap: createProductionOverlapDeploymentAdapter({ run, readinessFile, readinessSha256, sourceSha, rotationId, rotationStateSha256, imageDigest: process.env.EXPECTED_IMAGE_DIGEST, cluster: process.env.CLUSTER_NAME, service: process.env.SERVICE_NAME, expectedCurrentTaskDefinitionArn: process.env.EXPECTED_CURRENT_TASK_DEFINITION_ARN, versionUrl: process.env.VERSION_URL, expectedGitSha: process.env.EXPECTED_GIT_SHA }) });
+  process.stdout.write(`${JSON.stringify({ ready: result.readyForOverlapDeployment, taskDefinitionArn: result.deployment.taskDefinitionArn, propagateTags: result.deployment.propagateTags, updateServiceCount: result.deployment.updateServiceCount, mutationSequence: result.mutationSequence })}\n`);
+} else {
+const config = JSON.parse(readFileSync(value("--config"), "utf8"));
+if (mode !== "production") throw new Error("Unsupported production cutover mode.");
+const sourceSha = value("--source-sha");
+const rotationId = value("--rotation-id");
+const rotationStateSha256 = optionalValue("--rotation-state-sha256");
+const adapters = createProductionCutoverAdapters({ config, sourceSha, rotationId, rotationStateSha256, releaseProfile: config.releaseProfile, verifierProfile: config.verifierProfile });
+const result = await runProductionCutoverControlPlane({
+  sourceSha,
+  rotationId,
+  rotationStateSha256,
+  imageAuthorization: JSON.parse(readFileSync(config.imageAuthorizationFile, "utf8")),
+  ...adapters,
+});
+process.stdout.write(`${JSON.stringify({ readyForOnboarding: result.readyForOnboarding, mutationSequence: result.mutationSequence, transitionMatrix: result.transitionMatrix, readiness: result.readiness, onboardingEvidence: { valid: result.onboardingEvidence.valid, evidenceRef: result.onboardingEvidence.evidenceRef, evidenceSha256: result.onboardingEvidence.evidenceSha256 } })}\n`);
+}

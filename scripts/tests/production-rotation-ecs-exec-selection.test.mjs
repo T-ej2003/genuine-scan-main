@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { requireExecuteCommandEnabled, selectTargetTask } from "../aws/ecs-exec-target-selection.mjs";
+import { requireExecuteCommandEnabled, revalidateExactTargetTask, selectTargetTask } from "../aws/ecs-exec-target-selection.mjs";
 
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
 const definitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
@@ -72,4 +72,12 @@ test("unapproved task identities and unhealthy tasks are excluded", () => {
 
 test("wrong container is excluded even when the task identity tag is approved", () => {
   assert.throws(() => select([task("wrong-container", { containers: [{ name: "worker", imageDigest: digest }] })]), /no running target task/);
+});
+
+test("final exact-ARN tag revalidation rejects a replacement or changed task", () => {
+  const expected = { expectedClusterArn: clusterArn, expectedTaskDefinitionArn: definitionArn, expectedImageDigest: digest, serviceName: "mscqr-backend-servi-euw2", containerName: "backend", expectedTaskTagKey: "MSCQRExecTarget", expectedTaskTagValue: "production-backend" };
+  const selected = selectTargetTask({ ...expected, tasks: [task("selected")] }).selectedTask;
+  assert.equal(revalidateExactTargetTask({ ...expected, selectedTaskArn: selected.taskArn, tasks: [selected] }).taskArn, selected.taskArn);
+  assert.throws(() => revalidateExactTargetTask({ ...expected, selectedTaskArn: selected.taskArn, tasks: [{ ...selected, tags: [] }] }), /identity contract/);
+  assert.throws(() => revalidateExactTargetTask({ ...expected, selectedTaskArn: selected.taskArn, tasks: [{ ...selected, taskArn: `${selected.taskArn}-other` }] }), /changed/);
 });

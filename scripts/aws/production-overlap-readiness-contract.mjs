@@ -35,10 +35,15 @@ const exactKeys = (value, expected, label) => {
 };
 
 function assertStageEvidence(stage, value) {
-  exactKeys(value, ["valid", "evidenceRef", "evidenceSha256"], `${stage} evidence`);
+  exactKeys(value, ["valid", "evidenceRef", "evidenceSha256", "identityBindings"], `${stage} evidence`);
   if (value.valid !== true) fail(`${stage} evidence is not valid.`);
   if (typeof value.evidenceRef !== "string" || value.evidenceRef.trim() === "" || /[<>\0]/.test(value.evidenceRef)) fail(`${stage} evidence reference is invalid.`);
   if (!SHA256.test(value.evidenceSha256)) fail(`${stage} evidence SHA-256 is invalid.`);
+  if (!value.identityBindings || typeof value.identityBindings !== "object" || Array.isArray(value.identityBindings)
+    || Object.keys(value.identityBindings).length === 0
+    || Object.entries(value.identityBindings).some(([key, entry]) => !/^[A-Za-z][A-Za-z0-9_]*$/.test(key) || typeof entry !== "string" || entry.trim() === "" || /[<>\0]/.test(entry))) {
+    fail(`${stage} identity bindings are invalid.`);
+  }
 }
 
 export function assertReadyForOverlapDeployment(evidence, expected = {}) {
@@ -54,6 +59,8 @@ export function assertReadyForOverlapDeployment(evidence, expected = {}) {
   if (!Number.isFinite(generatedAt) || generatedAt > (expected.now ?? Date.now())) fail("READY_FOR_OVERLAP_DEPLOYMENT generatedAt is invalid");
   for (const stage of READY_FOR_OVERLAP_DEPLOYMENT_STAGES) {
     assertStageEvidence(stage, evidence[stage]);
+    if (evidence[stage].identityBindings.sourceSha !== evidence.sourceSha) fail(`${stage} source SHA binding does not match readiness source SHA.`);
+    if (evidence[stage].identityBindings.rotationId !== undefined && evidence[stage].identityBindings.rotationId !== evidence.rotationId) fail(`${stage} rotation ID binding does not match readiness rotation ID.`);
   }
   if (evidence.rotationPrepared !== true) fail("READY_FOR_OVERLAP_DEPLOYMENT requires rotationPrepared=true");
   if (evidence.ecsUpdateServiceCount !== 0) fail("READY_FOR_OVERLAP_DEPLOYMENT must be evaluated before ECS UpdateService");

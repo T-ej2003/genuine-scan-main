@@ -33,3 +33,23 @@ export const selectTargetTask = ({ tasks, expectedClusterArn, expectedTaskDefini
   matching.sort((left, right) => String(left.taskArn).localeCompare(String(right.taskArn)));
   return { selectedTask: matching[0], matchingTaskCount: matching.length };
 };
+
+export const revalidateExactTargetTask = ({ tasks, selectedTaskArn, ...expected }) => {
+  if (typeof selectedTaskArn !== "string" || !selectedTaskArn) throw new Error("selected ECS Exec task ARN is required for revalidation");
+  if (!Array.isArray(tasks) || tasks.length !== 1 || tasks[0]?.taskArn !== selectedTaskArn) throw new Error("selected ECS Exec task changed before final tag revalidation");
+  return assertSelectedTargetTask({ task: tasks[0], ...expected });
+};
+
+export function selectAndRevalidateExactTarget({ tasks, finalTasks, ...expected }) {
+  const selection = selectTargetTask({ tasks, ...expected });
+  const finalTask = revalidateExactTargetTask({ tasks: finalTasks, selectedTaskArn: selection.selectedTask.taskArn, ...expected });
+  return { ...selection, finalTask, selectedTaskArn: selection.selectedTask.taskArn, revalidatedTaskArn: finalTask.taskArn };
+}
+
+export async function executeAgainstRevalidatedTarget({ adapter, selectedTaskArn, expected, command }) {
+  if (!adapter || typeof adapter.describeTasks !== "function" || typeof adapter.executeCommand !== "function") throw new Error("ECS Exec adapter is incomplete.");
+  const response = await adapter.describeTasks({ taskArns: [selectedTaskArn], includeTags: true });
+  const task = revalidateExactTargetTask({ tasks: response?.tasks, selectedTaskArn, ...expected });
+  await adapter.executeCommand({ taskArn: task.taskArn, container: expected.containerName, command });
+  return task;
+}

@@ -39,7 +39,7 @@ function writeFixture(data, options = {}) {
     ["rotationId", "rotation-test-1234"],
     ["rotationStateSha256", "b".repeat(64)],
     ["generatedAt", new Date().toISOString()],
-    ...["imageAuthorization", "iamPreflight", "rootDrop", "releaseIdentity", "verifierIdentity", "stageA", "artifactSigning", "overlapTaskDefinition", "inventory", "rotationPrepare"].map((stage) => [stage, { valid: true, evidenceRef: `test://${stage}`, evidenceSha256: "c".repeat(64) }]),
+    ...["imageAuthorization", "iamPreflight", "rootDrop", "releaseIdentity", "verifierIdentity", "stageA", "artifactSigning", "overlapTaskDefinition", "inventory", "rotationPrepare"].map((stage) => [stage, { valid: true, evidenceRef: `test://${stage}`, evidenceSha256: "c".repeat(64), identityBindings: { sourceSha } }]),
     ["rotationPrepared", true],
     ["ecsUpdateServiceCount", 0],
   ]);
@@ -49,6 +49,7 @@ function writeFixture(data, options = {}) {
   const includeSourceMetadata = options.includeSourceMetadata
     ?? Boolean(options.versionUrl || options.expectedGitSha || options.releaseGitSha);
   const target = {
+    tags: options.targetTags === undefined ? [{ key: "MSCQRExecTarget", value: "production-backend" }] : options.targetTags,
     taskDefinition: {
       taskDefinitionArn: options.targetResponseArn || targetArn,
       status: options.status || "ACTIVE",
@@ -96,6 +97,7 @@ function writeFixture(data, options = {}) {
       taskDefinitionArn: options.runningTaskDefinitionArn || targetArn,
       containers: [{ name: containerName, imageDigest: options.runningDigest || digest }],
       taskArn: `arn:aws:ecs:${region}:${account}:task/${cluster}/${n}`,
+      tags: options.taskTags === undefined ? [{ key: "MSCQRExecTarget", value: "production-backend" }] : options.taskTags,
     })),
   };
   const taskArns = options.taskArnsResponse || { taskArns: tasks.tasks.map((task) => task.taskArn) };
@@ -211,6 +213,7 @@ function runExisting(options = {}, extraArgs = []) {
       CONTAINER_NAME: containerName,
       ...(expectedGitSha ? { EXPECTED_GIT_SHA: expectedGitSha } : {}),
       DEPLOYMENT_SOURCE_SHA: sourceSha,
+      MSCQR_GOVERNED_ORCHESTRATOR: "1",
       ...(options.versionUrl ? { VERSION_URL: options.versionUrl } : {}),
       ...(options.enableExecuteCommand ? { ENABLE_EXECUTE_COMMAND: "true" } : {}),
       ...(options.propagateTags ? { PROPAGATE_TAGS: options.propagateTags } : {}),
@@ -246,6 +249,15 @@ test("existing production-shaped target switches once without registering", () =
   assert.equal((result.calls.match(/ecs register-task-definition/g) || []).length, 0);
   assert.match(result.stdout, new RegExp(targetArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assertTempClean(result);
+});
+
+test("existing mode rejects an unmarked definition before UpdateService and a replacement task without the marker", () => {
+  const unmarkedDefinition = runExisting({ targetTags: [] });
+  assertFailure(unmarkedDefinition, /MSCQRExecTarget/);
+  assert.equal((unmarkedDefinition.calls.match(/ecs update-service/g) || []).length, 0);
+  const unmarkedTask = runExisting({ taskTags: [] });
+  assertFailure(unmarkedTask, /propagated MSCQRExecTarget/);
+  assert.equal((unmarkedTask.calls.match(/ecs update-service/g) || []).length, 2);
 });
 test("existing mode enforces the independent service load-balancer port contract", () => {
   const missing = runExisting({ targetPortMappings: [] });

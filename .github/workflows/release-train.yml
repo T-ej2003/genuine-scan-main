@@ -103,7 +103,6 @@ jobs:
             --ref "${GIT_REF:-main}" \
             -f git_ref="$TARGET_REF" \
             -f target_sha="$TARGET_SHA" \
-            -f release_train_run_id="$GITHUB_RUN_ID" \
-            -f expert_override=false
+            -f release_train_run_id="$GITHUB_RUN_ID"
 
           echo "Final action: release-gate.yml dispatched for ${TARGET_SHA}. Release Train does not deploy directly."

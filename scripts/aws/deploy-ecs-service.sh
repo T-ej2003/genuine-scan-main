@@ -150,6 +150,10 @@ require_version_verification_inputs() {
 
 require_overlap_readiness() {
   if [[ -z "$EXISTING_TASK_DEFINITION_ARN" ]]; then return; fi
+  if [[ "${MSCQR_GOVERNED_ORCHESTRATOR:-}" != "1" ]]; then
+    echo "Rotation-overlap deployment must be invoked by run-production-cutover.mjs." >&2
+    exit 1
+  fi
   require_env OVERLAP_READINESS_EVIDENCE_FILE
   require_env OVERLAP_READINESS_EVIDENCE_SHA256
   require_env ROTATION_ID
@@ -495,6 +499,8 @@ const target = targetResponse.taskDefinition;
 if (!target || target.taskDefinitionArn !== targetArn) fail("Described task definition did not match the exact requested ARN.");
 if (target.status !== "ACTIVE") fail(`Target task definition status is ${target.status || "missing"}; expected ACTIVE.`);
 if (target.family !== expectedFamily || targetMatch[3] !== expectedFamily) fail("Target task-definition family does not match the expected family.");
+const targetTags = new Map((targetResponse.tags || []).map((tag) => [tag?.key, tag?.value]));
+if (targetTags.get("MSCQRExecTarget") !== "production-backend") fail("Target task definition lacks the reviewed MSCQRExecTarget marker.");
 const runtimePlatform = target.runtimePlatform || null;
 if (runtimePlatform?.cpuArchitecture && runtimePlatform.cpuArchitecture !== "X86_64") fail(`Target runtimePlatform.cpuArchitecture is ${runtimePlatform.cpuArchitecture}; expected X86_64.`);
 const containers = Array.isArray(target.containerDefinitions) ? target.containerDefinitions : [];
@@ -620,6 +626,7 @@ NODE
     --region "$AWS_REGION" \
     --cluster "$CLUSTER_NAME" \
     --tasks "${running_task_arns[@]}" \
+    --include TAGS \
     >"$EXISTING_TASKS_FILE"
 
   node --input-type=module - "$EXISTING_POST_SERVICE_FILE" "$EXISTING_TASKS_LIST_FILE" "$EXISTING_TASKS_FILE" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_IMAGE_DIGEST" "$CONTAINER_NAME" <<'NODE'
@@ -637,6 +644,7 @@ for (const task of tasksResponse.tasks) {
   if (task.lastStatus !== "RUNNING" || task.taskDefinitionArn !== targetArn) fail("A running task is not using the exact target task definition.");
   const containers = (task.containers || []).filter((container) => container?.name === containerName);
   if (containers.length !== 1 || containers[0].imageDigest !== expectedDigest) fail("A running target container does not report the approved image digest.");
+  if (!Array.isArray(task.tags) || !task.tags.some((tag) => tag?.key === "MSCQRExecTarget" && tag?.value === "production-backend")) fail("A replacement task lacks the reviewed propagated MSCQRExecTarget marker.");
 }
 NODE
 

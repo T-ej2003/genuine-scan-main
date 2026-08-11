@@ -254,6 +254,22 @@ test("permission manifest declares the exact normal and recovery mutation matrix
   for (const entry of manifest.required.filter((candidate) => !candidate.plan)) assert.equal(entry.profiles, undefined);
 });
 
+test("IAM census executes every independent evaluation after multiple simulator failures", () => {
+  let calls = 0;
+  const report = runPermissionPreflight({
+    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: productionPlanBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "census-test",
+    simulate: ({ evaluation }) => {
+      calls += 1;
+      if (calls === 1 || calls === 7 || calls === 19) throw new Error(`fixture failure ${calls}`);
+      return allowRequiredDenyForbidden({ evaluation });
+    },
+    cloudTrail: clearCloudTrail,
+  });
+  assert.equal(report.iamEvaluationCensus.executed, report.iamEvaluationCensus.total);
+  assert.equal(calls, report.iamEvaluationCensus.total);
+  assert.ok(report.iamEvaluationCensus.invalid >= 3);
+});
+
 test("reviewed simulator registry fails closed on missing, extra, or malformed keys", () => {
   const missing = REVIEWED_SIMULATION_CONTEXT_REGISTRY.filter(({ key }) => key !== "aws:RequestedRegion");
   assert.throws(() => assertReviewedSimulationContextRegistry({ registry: missing }), /missing=aws:RequestedRegion/);
@@ -450,7 +466,9 @@ test("all 21 sanitized real AWS forbidden responses match the reviewed contracts
   for (const fixture of realForbiddenSimulations.evaluations) {
     const item = items.find(({ manifestId }) => manifestId === fixture.manifestId);
     assert.ok(item, fixture.manifestId);
-    const result = simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify(fixture.response) });
+    const response = structuredClone(fixture.response);
+    if (item.action.startsWith("s3:")) response.EvaluationResults[0].MissingContextValues = [];
+    const result = simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify(response) });
     assert.equal(result.decision, item.expectedDecision);
     assert.deepEqual(result.missingContextValues, item.expectedMissingContextValues);
   }
@@ -479,9 +497,12 @@ test("every reviewed missing-context key has a canonical policy statement origin
   assert.deepEqual([...new Set(REVIEWED_SIMULATION_CONTEXT_REGISTRY.map(({ key }) => key))].sort(), expectedKeys);
   const deleteBucket = deriveRequiredEvaluations(plan, manifest).forbidden.find(({ manifestId }) => manifestId === "backend-bucket-delete");
   assert.deepEqual(deleteBucket.context, []);
-  assert.deepEqual(deleteBucket.expectedMissingContextValues, expectedKeys);
+  assert.deepEqual(deleteBucket.expectedMissingContextValues, []);
   const passRole = deriveRequiredEvaluations(plan, manifest).forbidden.find(({ manifestId }) => manifestId === "pass-unrelated-role");
   assert.deepEqual(passRole.expectedMissingContextValues, expectedKeys.filter((key) => key !== "iam:PassedToService"));
+  for (const entry of deriveRequiredEvaluations(plan, manifest).forbidden.filter(({ action }) => action.startsWith("s3:"))) {
+    assert.deepEqual(entry.expectedMissingContextValues, [], entry.manifestId);
+  }
   for (const key of expectedKeys) assert.ok(origins.get(key).every(({ policy, sid, operator, sourcePath }) => policy && sid && operator && sourcePath), key);
   const missingOrigin = new Map(origins); missingOrigin.delete(expectedKeys[0]);
   assert.throws(() => validateManifest(manifest, { conditionKeyOrigins: missingOrigin }), /registry differs.*missing=/);
@@ -723,11 +744,20 @@ test("IAM simulation uses argv arrays and passes context explicitly", () => {
 });
 
 test("forbidden allowed evaluation fails closed", () => {
-  assert.throws(() => runPermissionPreflight({
+  let calls = 0;
+  const report = runPermissionPreflight({
     reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: "2026-08-01T11:55:00.000Z", cloudTrailSessionName: "test-session",
-    simulate: ({ evaluation }) => evaluation.id.startsWith("pass-unrelated-role") ? { decision: "allowed", matchedStatements: 1, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }),
+    simulate: ({ evaluation }) => {
+      calls += 1;
+      return evaluation.id.startsWith("pass-unrelated-role") ? { decision: "allowed", matchedStatements: 1, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation });
+    },
     cloudTrail: clearCloudTrail,
-  }), /returned decision allowed/);
+  });
+  assert.equal(report.status, "invalid");
+  assert.equal(report.iamEvaluationCensus.invalid > 0, true);
+  assert.match(report.iamEvaluationCensus.failures[0].error, /returned decision allowed/);
+  assert.equal(calls, report.iamEvaluationCensus.total);
+  assert.equal(report.iamEvaluationCensus.executed, report.iamEvaluationCensus.total);
 });
 
 test("wrong plan binding and stale reports are rejected", () => {

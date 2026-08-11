@@ -16,11 +16,6 @@ on:
         description: "Release Train run ID that dispatched this gate"
         required: false
         type: string
-      expert_override:
-        description: "Expert-only emergency override. Skips final required-gate sanity check."
-        required: false
-        type: boolean
-        default: false
       preserve_current_frontend:
         description: "Keep the currently deployed frontend task definition during a backend/RLS activation."
         required: false
@@ -125,7 +120,6 @@ jobs:
           echo "Resolved production deploy SHA: $deploy_sha"
 
       - name: Final required-gate sanity check
-        if: ${{ !inputs.expert_override || inputs.release_mode != 'normal' }}
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -137,14 +131,6 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/github/check-required-workflow-gates.mjs
-
-      - name: Expert override notice
-        if: ${{ inputs.expert_override }}
-        run: |
-          set -euo pipefail
-
-          echo "::warning::Expert override enabled. Required workflow gate sanity check was skipped."
-          echo "Use only for emergency production deployment after human verification."
 
       - name: Validate production release lifecycle mode
         env:
@@ -650,11 +636,14 @@ jobs:
           DEPLOYMENT_SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
         run: |
           set -euo pipefail
-          ./scripts/aws/deploy-ecs-service.sh \
-            --existing-task-definition "$EXISTING_TASK_DEFINITION_ARN" \
-            --expected-current-task-definition "$EXPECTED_CURRENT_TASK_DEFINITION_ARN" \
-            --expected-family "$EXPECTED_FAMILY" \
-            --expected-image-digest "$EXPECTED_IMAGE_DIGEST"
+          node scripts/aws/run-production-cutover.mjs \
+            --mode rotation-overlap \
+            --source-sha "$DEPLOYMENT_SOURCE_SHA" \
+            --rotation-id "$ROTATION_ID" \
+            --rotation-state-sha256 "$ROTATION_STATE_SHA256" \
+            --task-definition "$EXISTING_TASK_DEFINITION_ARN" \
+            --readiness-file "$OVERLAP_READINESS_EVIDENCE_FILE" \
+            --readiness-sha256 "$OVERLAP_READINESS_EVIDENCE_SHA256"
 
       - name: Verify backend health
         env:
