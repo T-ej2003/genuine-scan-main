@@ -190,9 +190,9 @@ The allowed inline-policy set is empty.
 The candidate source policy union was evaluated with AWS IAM custom-policy
 simulation against the production-shaped plan:
 
-- required evaluations: 93/93 allowed
+- required evaluations: 94/94 allowed
 - required failures: 0
-- forbidden evaluations: 23/23 denied
+- forbidden evaluations: 26/26 denied
 - forbidden allowed: 0
 - unresolved missing context: 0
 - supplementary provider reads: 55/55 allowed

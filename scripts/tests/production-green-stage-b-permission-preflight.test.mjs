@@ -47,6 +47,7 @@ import { generateImageEvidence, imageEvidenceSha256, signImageEvidence, IMAGE_EV
 import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
 import { createStageBPlanApprovalReport, createStageBPlanCaptureReport } from "../aws/stage-b-plan-approval-contract.mjs";
 import { buildStageBImagePublicationIdentity } from "../aws/stage-b-image-publication-identity.mjs";
+import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const realForbiddenSimulations = JSON.parse(fs.readFileSync("scripts/tests/fixtures/aws-iam-simulate-principal-policy-stage-b-forbidden.json", "utf8"));
@@ -60,8 +61,8 @@ const policyEvidence = (() => {
   return { roleArn, attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: [], inlinePolicies: [], permissionsBoundaryArn: null, policies, status: "valid" };
 })();
 const runPermissionPreflight = (input) => {
-  if (!input.savedPlanBytes) return runPermissionPreflightRaw({ policyEvidence, ...input });
-  if (input.planApprovalReport) return runPermissionPreflightRaw({ policyEvidence, ...input });
+  if (!input.savedPlanBytes) return runPermissionPreflightRaw({ policyEvidence, ecsExecVerifierEvidence: buildEcsExecOperatorEvidence(), ...input });
+  if (input.planApprovalReport) return runPermissionPreflightRaw({ policyEvidence, ecsExecVerifierEvidence: buildEcsExecOperatorEvidence(), ...input });
   const selectedPlan = JSON.parse(input.planBytes);
   const planBound = input.planBound === true || selectedPlan.resource_changes.length >= 70;
   const savedPlanSha256 = crypto.createHash("sha256").update(input.savedPlanBytes).digest("hex");
@@ -81,7 +82,7 @@ const runPermissionPreflight = (input) => {
   const captureBytes = Buffer.from(`${JSON.stringify(capture, null, 2)}\n`);
   const approval = createStageBPlanApprovalReport({ captureReportSha256: crypto.createHash("sha256").update(captureBytes).digest("hex"), referenceAuditPath: "/private/tmp/test-audit.json", referenceAuditSha256: referenceAudit?.sha256 || "a".repeat(64), referenceAuditCallerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", referenceAuditAt: input.now || new Date().toISOString(), toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, stageBLineage: capture.stageBLineage, stageBSerial: capture.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: input.now || new Date().toISOString(), classification: capture.classification });
   let approvalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
-  return runPermissionPreflightRaw({ policyEvidence, ...input, phase: input.phase || (planBound ? "plan-bound" : "initial"), canonicalPlanJsonBytes, planApprovalReport: approval, planApprovalReportBytes: approvalBytes, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex"), referenceAudit: referenceAudit?.report, referenceAuditBytes: referenceAudit?.bytes });
+  return runPermissionPreflightRaw({ policyEvidence, ecsExecVerifierEvidence: buildEcsExecOperatorEvidence(), ...input, phase: input.phase || (planBound ? "plan-bound" : "initial"), canonicalPlanJsonBytes, planApprovalReport: approval, planApprovalReportBytes: approvalBytes, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex"), referenceAudit: referenceAudit?.report, referenceAuditBytes: referenceAudit?.bytes });
 };
 
 function cliApprovalArgs(directory, selectedPlan = plan, selectedPlanBytes = planBytes, selectedSavedBytes = savedPlanBytes) {
@@ -499,8 +500,8 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 93);
-  assert.equal(report.forbiddenEvaluations.length, 23);
+  assert.equal(report.requiredEvaluations.length, 94);
+  assert.equal(report.forbiddenEvaluations.length, 26);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
     if (evaluation.resource.startsWith("arn:aws:") && !evaluation.resource.startsWith("arn:aws:s3:::")) assert.ok(evaluation.resource === "*" || evaluation.resource.includes(":368992683803:"), evaluation.resource);
@@ -591,7 +592,7 @@ test("recovery alias-only permission profile covers only the approved alias muta
     reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, manifest, plan: recoveryPlan, planBytes: selectedPlanBytes,
     canonicalPlanJsonBytes: selectedCanonicalPlanJsonBytes, savedPlanBytes: selectedSavedPlanBytes, planApprovalReport: approval,
     planApprovalReportBytes: approvalBytes, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex"),
-    generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "recovery-test", policyEvidence, simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail,
+    generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "recovery-test", policyEvidence, ecsExecVerifierEvidence: buildEcsExecOperatorEvidence(), simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail,
   });
   assert.equal(report.status, "valid");
   assert.equal(report.planProfile, "RECOVERY_ALIAS_ONLY");

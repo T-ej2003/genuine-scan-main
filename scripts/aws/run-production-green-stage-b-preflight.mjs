@@ -21,11 +21,13 @@ import {
   canonicalizeJson,
   collectLiveReleasePolicyEvidence,
   runPermissionPreflight,
+  assertCutoverCriticalEvidence,
   assertStageBPermissionEvidenceKind,
   INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND,
   signPermissionReport,
   verifyPermissionReportSignature,
 } from "./validate-production-green-stage-b-permissions.mjs";
+import { collectLiveEcsExecOperatorEvidence } from "./production-ecs-exec-operator-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -78,6 +80,7 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
 export function runProductionPreflightCli(argv = process.argv.slice(2), {
   caller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"], { encoding: "utf8" })).Arn,
   collectPolicies = collectLiveReleasePolicyEvidence,
+  collectEcsExecOperatorEvidence = collectLiveEcsExecOperatorEvidence,
   permissionPreflight = runPermissionPreflight,
   sign = signPermissionReport,
   verify = verifyPermissionReportSignature,
@@ -95,7 +98,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     const generatedAt = new Date().toISOString();
     const report = permissionPreflight({
       reportGeneratorCallerArn: observedCaller, simulatedRoleArn: RELEASE_ROLE_ARN, manifest, plan, planBytes,
-      generatedAt, now: generatedAt,
+      generatedAt, now: generatedAt, ecsExecVerifierEvidence: collectEcsExecOperatorEvidence(),
       policyPublishedAt: generatedAt, cloudTrailSessionName: "pre-plan-capability", policyEvidence: collectPolicies(),
       cloudTrail: () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] }), purpose: "pre-plan-capability",
       phase: "initial",
@@ -118,6 +121,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     verify({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
     assertStageBPermissionEvidenceKind(adminReport, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
     if (adminReport.purpose !== "pre-plan-capability" || adminReport.status !== "valid" || adminReport.simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Administrator pre-plan capability report is invalid.");
+    assertCutoverCriticalEvidence(adminReport);
     if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
     assertReleasePolicyEvidence(adminReport.policyEvidence);
     const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)) });

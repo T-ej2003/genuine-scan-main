@@ -1,0 +1,18 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "MfaBackedBootstrapOperatorOnly",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorTrustDocument, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_REQUIRED } from "../aws/production-ecs-exec-operator-contract.mjs";
 
 const helper = readFileSync("scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "utf8");
 const selection = readFileSync("scripts/aws/ecs-exec-target-selection.mjs", "utf8");
@@ -8,6 +9,8 @@ const deploy = readFileSync("scripts/aws/deploy-ecs-service.sh", "utf8");
 const runbook = readFileSync("documents/SECURITY_KEY_ROTATION_RUNBOOK.md", "utf8");
 const pty = readFileSync("scripts/aws/ecs-exec-fixture-pty.py", "utf8");
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json", "utf8"));
+const role = JSON.parse(readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_ROLE.json", "utf8"));
+const trust = JSON.parse(readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_TRUST_POLICY.json", "utf8"));
 const terraform = readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
 
 test("ECS Exec verifier binds the exact service, task definition, digest, and release", () => {
@@ -30,6 +33,50 @@ test("production ECS Exec policy is narrow and has no shell or mutation permissi
   assert(!actions.includes("ssm:StartSession"));
   assert.match(JSON.stringify(policy), /mscqr-prod-euw2-main/);
   assert.match(JSON.stringify(policy), /mscqr-backend-servi-euw2/);
+});
+
+test("ListTasks uses Resource * with exact cluster and region conditions", () => {
+  const required = ECS_EXEC_OPERATOR_REQUIRED.find(({ action }) => action === "ecs:ListTasks");
+  const statement = policy.Statement.find((entry) => entry.Action === "ecs:ListTasks");
+  assert.equal(required.resources[0], "*");
+  assert.deepEqual(required.context, [
+    { key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] },
+    { key: "ecs:cluster", type: "string", values: ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"] },
+  ]);
+  assert.equal(statement.Resource, "*");
+  assert.equal(statement.Condition.StringEquals["ecs:cluster"], "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main");
+  assert.equal(statement.Condition.StringEquals["aws:RequestedRegion"], "eu-west-2");
+  assert.notEqual(required.resources[0], "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main");
+});
+
+test("verifier trust and policy evidence fail closed independently", () => {
+  const exactTrust = structuredClone(trust);
+  assert.doesNotThrow(() => assertEcsExecOperatorTrustDocument(exactTrust));
+  for (const mutate of [
+    (value) => delete value.Statement[0].Condition.Bool["aws:MultiFactorAuthPresent"],
+    (value) => { value.Statement[0].Condition.Bool.awsMultiFactorAuthPresent = "false"; },
+    (value) => { value.Statement[0].Principal.AWS = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"; },
+    (value) => { value.Statement[0].Principal.AWS = "arn:aws:iam::368992683803:root"; },
+    (value) => { value.Statement[0].Principal = "*"; },
+    (value) => { value.Statement[0].Principal.Extra = "arn:aws:iam::368992683803:user/other"; },
+    (value) => value.Statement.push({ ...value.Statement[0] }),
+  ]) assert.throws(() => assertEcsExecOperatorTrustDocument((() => { const value = structuredClone(exactTrust); mutate(value); return value; })()));
+
+  const exact = buildEcsExecOperatorEvidence();
+  assert.doesNotThrow(() => assertEcsExecOperatorLiveEvidence(exact));
+  assert.throws(() => assertEcsExecOperatorLiveEvidence({ ...exact, liveTrustCanonicalSha256: "0".repeat(64) }));
+  assert.throws(() => assertEcsExecOperatorLiveEvidence({ ...exact, policy: { ...exact.policy, liveCanonicalSha256: "0".repeat(64) } }));
+});
+
+test("ECS Exec verifier has a separate MFA-backed identity and the helper rejects deployer credentials", () => {
+  assert.equal(role.roleArn, "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier");
+  assert.deepEqual(role.deploymentPermissions, []);
+  assert.equal(trust.Statement[0].Principal.AWS, "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator");
+  assert.equal(trust.Statement[0].Condition.Bool["aws:MultiFactorAuthPresent"], "true");
+  assert.match(helper, /get-caller-identity/);
+  assert.match(helper, /ECS_EXEC_OPERATOR_CALLER_PATTERN/);
+  assert.match(helper, /deployment identities are not accepted/);
+  assert.doesNotMatch(helper, /mscqr-production-release-deployer.*ExecuteCommand/);
 });
 
 test("backend task role receives only the four ECS Exec message-channel actions", () => {

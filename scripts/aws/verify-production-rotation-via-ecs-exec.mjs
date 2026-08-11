@@ -3,6 +3,7 @@ import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { requireExecuteCommandEnabled, selectTargetTask } from "./ecs-exec-target-selection.mjs";
+import { ECS_EXEC_OPERATOR_CALLER_PATTERN, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PTY_HELPER = path.join(ROOT, "scripts/aws/ecs-exec-fixture-pty.py");
@@ -71,6 +72,9 @@ const awsJson = (awsArgs) => {
     throw new Error("AWS discovery returned invalid JSON");
   }
 };
+
+const callerArn = awsJson(["sts", "get-caller-identity"]).Arn;
+if (!new RegExp(ECS_EXEC_OPERATOR_CALLER_PATTERN).test(callerArn || "")) throw new Error(`ECS Exec verifier requires ${ECS_EXEC_OPERATOR_ROLE_ARN}; deployment identities are not accepted`);
 
 const serviceResult = awsJson(["ecs", "describe-services", "--cluster", cluster, "--services", service]);
 const serviceRecord = serviceResult.services?.[0];

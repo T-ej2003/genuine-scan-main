@@ -13,6 +13,7 @@ import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateD
 import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidenceTimestamp, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
 import { assertStageBPlanApprovedBinding, STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
 import { assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
+import { assertEcsExecOperatorEvidence, assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorSourceContract, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION = 3;
@@ -27,6 +28,14 @@ export const PERMISSION_EVIDENCE_VALIDITY_MODEL = STAGE_B_DEPLOYMENT_EVIDENCE_VA
 export const ACCOUNT = "368992683803";
 export const REGION = "eu-west-2";
 export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
+export const CUTOVER_CRITICAL_CAPABILITIES = Object.freeze([
+  Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "apply-stage-a-endpoint-security-group-ingress", action: "ec2:AuthorizeSecurityGroupIngress" }),
+  Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "activate-exact-ecs-service", action: "ecs:UpdateService" }),
+  Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "rollback-exact-ecs-service", action: "ecs:UpdateService" }),
+  Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "rollback-exact-backend-task-passrole", action: "iam:PassRole" }),
+  Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "release-deployer-ecs-exec", action: "ecs:ExecuteCommand", expectedDenied: true }),
+  Object.freeze({ principal: ECS_EXEC_OPERATOR_ROLE_ARN, evaluationId: "operator-execute-production-backend", action: "ecs:ExecuteCommand" }),
+]);
 const STAGE_A_LIVE_EVIDENCE_EVALUATIONS = Object.freeze([
   ["collect-stage-a-live-subnets", "ec2:DescribeSubnets"],
   ["collect-stage-a-live-route-tables", "ec2:DescribeRouteTables"],
@@ -440,6 +449,18 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
     || JSON.stringify(report.planCapabilities.required) !== JSON.stringify(project(report.requiredEvaluations))
     || JSON.stringify(report.planCapabilities.forbidden) !== JSON.stringify(project(report.forbiddenEvaluations))) throw new Error("Permission-preflight plan capability manifest is incomplete or stale.");
   if (plan && capabilities.requiresTaskDefinitionRegistrationContexts) assertTaskDefinitionRegistrationContexts(plan, manifest);
+  if (report.phase === "initial") assertCutoverCriticalEvidence(report);
+  return true;
+}
+
+export function assertCutoverCriticalEvidence(report) {
+  const releaseResults = [...(report?.requiredEvaluations || []), ...(report?.forbiddenEvaluations || [])];
+  for (const critical of CUTOVER_CRITICAL_CAPABILITIES.filter(({ principal }) => principal === RELEASE_ROLE_ARN)) {
+    const result = releaseResults.find((item) => item.manifestId === critical.evaluationId);
+    const allowed = critical.expectedDenied ? ["implicitDeny", "explicitDeny"].includes(result?.decision) : result?.decision === "allowed";
+    if (!result || result.action !== critical.action || !allowed) throw new Error(`Cutover-critical release capability lacks valid evidence: ${critical.evaluationId}.`);
+  }
+  assertEcsExecOperatorEvidence(report);
   return true;
 }
 
@@ -667,6 +688,23 @@ function evaluation(entry, resource, { forbidden = false, contextRegistry = REVI
   return result;
 }
 
+function principalEvaluation(entry, { forbidden = false } = {}) {
+  const result = {
+    id: `${entry.id}:${entry.resources[0]}`,
+    manifestId: entry.id,
+    action: entry.action,
+    resource: entry.resources[0],
+    context: entry.context.map(({ key, type, values }) => ({ key, type, values: [...values] })),
+    expectedMissingContextValues: [...(entry.expectedMissingContextValues || [])],
+    phase: "cutover-critical",
+  };
+  if (forbidden) {
+    result.expectedDecision = entry.expectedDecision;
+    Object.defineProperty(result, "forbidden", { value: true, enumerable: false });
+  }
+  return result;
+}
+
 export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = "NORMAL_STAGE_B_RELEASE", contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY, conditionKeyOrigins = sourcePolicyConditionKeyOrigins() } = {}) {
   assertStageBPermissionProfile(permissionProfile);
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
@@ -882,6 +920,7 @@ export function runPermissionPreflight({
   simulate = ({ roleArn: sourceArn, evaluation: item }) => simulatePrincipalPolicy({ roleArn: sourceArn, evaluation: item }),
   discoverContextKeys = null,
   cloudTrail = ({ sessionName, startTime, endTime, requiredActions }) => inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions }),
+  ecsExecVerifierEvidence,
   contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY,
 } = {}) {
   if (!["initial", "plan-bound"].includes(phase)) throw new Error("Permission preflight phase is unsupported.");
@@ -913,6 +952,20 @@ export function runPermissionPreflight({
   };
   const requiredResults = derived.required.map(runSimulation);
   const forbiddenResults = derived.forbidden.map(runSimulation);
+  const runPrincipalSimulation = (entry, forbidden) => {
+    const item = principalEvaluation(entry, { forbidden });
+    const result = validateSimulationResult({ ...item, forbidden }, simulate({ roleArn: ECS_EXEC_OPERATOR_ROLE_ARN, evaluation: item }));
+    return { ...item, ...result, missingContextExactMatch: true, validation: forbidden ? (result.decision === "allowed" ? "rejected" : "accepted") : (result.decision === "allowed" ? "accepted" : "rejected") };
+  };
+  const operatorRequiredResults = ECS_EXEC_OPERATOR_REQUIRED.map((entry) => runPrincipalSimulation(entry, false));
+  const operatorForbiddenResults = ECS_EXEC_OPERATOR_FORBIDDEN.map((entry) => runPrincipalSimulation(entry, true));
+  const operatorDeniedRequired = operatorRequiredResults.filter((item) => item.decision !== "allowed");
+  const operatorAllowedForbidden = operatorForbiddenResults.filter((item) => item.decision === "allowed");
+  let operatorEvidenceError = null;
+  if (phase === "initial") {
+    try { assertEcsExecOperatorLiveEvidence(ecsExecVerifierEvidence); } catch (error) { operatorEvidenceError = error.message; }
+  }
+  const operatorStatus = operatorDeniedRequired.length === 0 && operatorAllowedForbidden.length === 0 && !operatorEvidenceError ? "valid" : "invalid";
   const cloudTrailResult = cloudTrail({ sessionName: cloudTrailSessionName, startTime: policyPublishedAt, endTime: generatedAt, requiredActions: derived.required.map((item) => item.action) });
   const deniedRequired = requiredResults.filter((item) => item.decision !== "allowed");
   const allowedForbidden = forbiddenResults.filter((item) => item.decision === "allowed");
@@ -944,6 +997,19 @@ export function runPermissionPreflight({
     cloudTrailWindow: { startTime: policyPublishedAt, endTime: generatedAt, sessionName: cloudTrailSessionName },
     requiredEvaluations: requiredResults,
     forbiddenEvaluations: forbiddenResults,
+    principalEvaluations: {
+      releaseDeployer: { principalArn: RELEASE_ROLE_ARN, requiredEvaluations: requiredResults, forbiddenEvaluations: forbiddenResults, status: deniedRequired.length === 0 && allowedForbidden.length === 0 ? "valid" : "invalid" },
+      ecsExecVerifier: { principalArn: ECS_EXEC_OPERATOR_ROLE_ARN, requiredEvaluations: operatorRequiredResults, forbiddenEvaluations: operatorForbiddenResults, status: operatorStatus },
+    },
+    ecsExecVerifierTrust: ecsExecVerifierEvidence || null,
+    cutoverCritical: {
+      stageAIngress: requiredResults.find(({ manifestId }) => manifestId === "apply-stage-a-endpoint-security-group-ingress")?.decision || null,
+      releaseForward: requiredResults.find(({ manifestId }) => manifestId === "activate-exact-ecs-service")?.decision || null,
+      releaseRollback: requiredResults.find(({ manifestId }) => manifestId === "rollback-exact-ecs-service")?.decision || null,
+      releasePassRole: requiredResults.find(({ manifestId }) => manifestId === "rollback-exact-backend-task-passrole")?.decision || null,
+      releaseEcsExec: forbiddenResults.find(({ manifestId }) => manifestId === "release-deployer-ecs-exec")?.decision || null,
+      verifierEcsExec: operatorRequiredResults.find(({ manifestId }) => manifestId === "operator-execute-production-backend")?.decision || null,
+    },
     planCapabilities: {
       schemaVersion: 1,
       required: requiredResults.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision })),
@@ -958,9 +1024,15 @@ export function runPermissionPreflight({
     forbiddenAllowedCount: allowedForbidden.length,
     forbiddenDeniedCount: forbiddenResults.filter((item) => item.decision !== "allowed").length,
     allowedCount: requiredResults.filter((item) => item.decision === "allowed").length,
-    deniedCount: deniedRequired.length + allowedForbidden.length + unresolved.length,
-    status: deniedRequired.length === 0 && allowedForbidden.length === 0 && unresolved.length === 0 && !policyEvidenceError ? "valid" : "invalid",
+    operatorRequiredAllowedCount: operatorRequiredResults.filter((item) => item.decision === "allowed").length,
+    operatorRequiredDeniedCount: operatorDeniedRequired.length,
+    operatorForbiddenAllowedCount: operatorAllowedForbidden.length,
+    operatorForbiddenDeniedCount: operatorForbiddenResults.filter((item) => item.decision !== "allowed").length,
+    operatorEvidenceError,
+    deniedCount: deniedRequired.length + allowedForbidden.length + operatorDeniedRequired.length + operatorAllowedForbidden.length + unresolved.length,
+    status: deniedRequired.length === 0 && allowedForbidden.length === 0 && operatorStatus === "valid" && unresolved.length === 0 && !policyEvidenceError ? "valid" : "invalid",
   };
+  if (phase === "initial" && report.status === "valid") assertCutoverCriticalEvidence(report);
   return report;
 }
 

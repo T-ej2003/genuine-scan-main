@@ -10,8 +10,9 @@ import {
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
-import { buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
+import { buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
+import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 
 const caller = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test";
 const shapedPolicyEvidence = () => {
@@ -42,9 +43,12 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 31, capabilities: 121, uniqueActions: 84, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 31, capabilities: 142, uniqueActions: 88, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
+  assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
+  assert.equal(first.capabilities.filter(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "ecs:ExecuteCommand").length, 0);
+  assert.equal(first.capabilities.find(({ id }) => id === "manifest-release-deployer-ecs-exec").identity, "ADMINISTRATOR");
 });
 
 test("unknown, removed, or identity-reassigned capabilities fail graph verification", () => {
@@ -100,7 +104,8 @@ test("one command keeps administrator simulation and release reads on separate i
   const admin = runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--output", adminPath, "--signature-output", signaturePath], {
     caller: () => "arn:aws:iam::368992683803:root",
     collectPolicies: shapedPolicyEvidence,
-    permissionPreflight: (input) => { administratorSimulations += 1; return { schemaVersion: 1, evidenceKind: "INITIAL_ADMIN_CAPABILITY", phase: "initial", purpose: input.purpose, status: "valid", deniedCount: 0, simulatedRoleArn: input.simulatedRoleArn, generatedAt: input.generatedAt, policyEvidence: input.policyEvidence }; },
+    collectEcsExecOperatorEvidence: () => buildEcsExecOperatorEvidence(),
+    permissionPreflight: (input) => { administratorSimulations += 1; return runPermissionPreflight({ ...input, simulate: ({ evaluation }) => ({ decision: evaluation.expectedDecision || "allowed", matchedStatements: evaluation.expectedDecision ? 0 : 1, missingContextValues: evaluation.expectedDecision ? evaluation.expectedMissingContextValues : [] }), cloudTrail: () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] }) }); },
     sign: (report, { reportBytes }) => { const canonicalPayloadSha256 = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(report))).digest("hex"); const reportFileSha256 = crypto.createHash("sha256").update(reportBytes).digest("hex"); const bindingPayload = buildPermissionReportBinding({ report, canonicalPayloadSha256, reportFileSha256, keyArn: PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm: PERMISSION_REPORT_SIGNING_ALGORITHM }); return { schemaVersion: PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, hashDomain: PERMISSION_REPORT_HASH_DOMAIN, bindingDomain: PERMISSION_REPORT_BINDING_DOMAIN, bindingSchemaVersion: PERMISSION_REPORT_BINDING_SCHEMA_VERSION, evidenceKind: report.evidenceKind, phase: report.phase, purpose: report.purpose, accountId: "368992683803", region: "eu-west-2", keyId: PERMISSION_REPORT_SIGNING_KEY_ARN, keyArn: PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm: PERMISSION_REPORT_SIGNING_ALGORITHM, canonicalPayloadSha256, reportFileSha256, signedBindingSha256: signedPermissionReportBindingSha256(bindingPayload), signatureBase64: "AQ==", signedAt: report.generatedAt }; },
   });
   assert.equal(admin.status, "valid"); assert.equal(administratorSimulations, 1);
@@ -119,10 +124,10 @@ test("invalid release capability report stops before backend readiness", () => {
   const capabilityGraph = assertStageBDeploymentCapabilityGraph();
   fs.writeFileSync(adminPath, JSON.stringify({ schemaVersion: 1, evidenceKind: "INITIAL_ADMIN_CAPABILITY", phase: "initial", purpose: "pre-plan-capability", status: "valid", simulatedRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", policyEvidence: shapedPolicyEvidence(), capabilityGraph }));
   fs.writeFileSync(signaturePath, "{}"); let continued = 0;
-  const result = runProductionPreflightCli(["--identity", "release-deployer", "--output", path.join(directory, "release.json"), "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
+  assert.throws(() => runProductionPreflightCli(["--identity", "release-deployer", "--output", path.join(directory, "release.json"), "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
     caller: () => caller, verify: () => true,
     releasePreflight: () => ({ requiredReads: { "ecs:DescribeClusters": "denied" }, failed: [{ action: "ecs:DescribeClusters" }], skipped: [], status: "blocked" }),
     continueReadiness: () => { continued += 1; }, validateCapabilityGraph: () => capabilityGraph,
-  });
-  assert.equal(result.status, "blocked"); assert.equal(continued, 0); assert.equal(result.backendReady, false);
+  }), /Cutover-critical release capability lacks valid evidence/);
+  assert.equal(continued, 0);
 });
