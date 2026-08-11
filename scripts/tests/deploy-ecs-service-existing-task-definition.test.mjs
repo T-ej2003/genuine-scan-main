@@ -263,6 +263,7 @@ test("existing mode rejects wrong account and region", () => {
 test("existing mode rejects inactive, wrong-family, and wrong-digest targets", () => {
   assertFailure(runExisting({ status: "INACTIVE" }), /ACTIVE/);
   assertFailure(runExisting({ family: "other-family" }), /family/);
+  assertFailure(runExisting({ expectedFamily: "mscqr-backend" }), /family/);
   assertFailure(runExisting({ targetDigest: "sha256:" + "1".repeat(64) }), /digest/);
 });
 test("existing mode enforces the normal X86_64 runtime guard", () => {

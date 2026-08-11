@@ -224,6 +224,7 @@ jobs:
       FRONTEND_SERVICE_NAME: mscqr-frontend-servi-euw2
       WORKER_SERVICE_NAME: ${{ vars.PRODUCTION_WORKER_SERVICE_NAME }}
       BACKEND_TASK_DEFINITION: mscqr-backend
+      ROTATION_BACKEND_TASK_DEFINITION_FAMILY: mscqr-production-rls-green-backend-candidate
       FRONTEND_TASK_DEFINITION: mscqr-frontend
       WORKER_TASK_DEFINITION: ${{ vars.PRODUCTION_WORKER_TASK_DEFINITION }}
       BACKEND_CONTAINER_NAME: backend
@@ -592,7 +593,7 @@ jobs:
           CONTAINER_NAME: ${{ env.BACKEND_CONTAINER_NAME }}
           EXISTING_TASK_DEFINITION_ARN: ${{ inputs.rotation_task_definition_arn }}
           EXPECTED_CURRENT_TASK_DEFINITION_ARN: ${{ inputs.rotation_expected_current_task_definition_arn }}
-          EXPECTED_FAMILY: ${{ env.BACKEND_TASK_DEFINITION }}
+          EXPECTED_FAMILY: ${{ env.ROTATION_BACKEND_TASK_DEFINITION_FAMILY }}
           EXPECTED_IMAGE_DIGEST: ${{ inputs.rotation_image_digest }}
           VERSION_URL: ${{ env.PUBLIC_BASE_URL }}/api/health
           EXPECTED_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}

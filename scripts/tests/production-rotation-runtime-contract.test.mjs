@@ -188,6 +188,16 @@ test("release gate keeps normal strictness and admits only governed transition m
   assert.match(packageJson.scripts["security:check-production-rotation-transition"], /check-production-rotation-transition/);
 });
 
+test("rotation transitions use the reviewed candidate family while normal releases keep the backend family", () => {
+  const normalFamily = "mscqr-backend";
+  const rotationFamily = "mscqr-production-rls-green-backend-candidate";
+  assert.ok(releaseGate.includes(`BACKEND_TASK_DEFINITION: ${normalFamily}`));
+  assert.ok(releaseGate.includes(`ROTATION_BACKEND_TASK_DEFINITION_FAMILY: ${rotationFamily}`));
+  assert.ok(releaseGate.includes("EXPECTED_FAMILY: ${{ env.ROTATION_BACKEND_TASK_DEFINITION_FAMILY }}"));
+  assert.ok(releaseGate.includes("--expected-family \"$EXPECTED_FAMILY\""));
+  assert.doesNotMatch(releaseGate.slice(releaseGate.indexOf("- name: Deploy rotation transition backend ECS service")), /EXPECTED_FAMILY: \$\{\{ env\.BACKEND_TASK_DEFINITION \}\}/);
+});
+
 const sourceSha = "a".repeat(40);
 const deploymentSha = "b".repeat(40);
 const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
