@@ -336,7 +336,7 @@ const verify = async (context) => {
   state.phase = "overlap-ready";
   state.overlapReadyAt = state.overlapReadyAt || overlapReadyAt;
   state.cleanupEligibleAt = state.cleanupEligibleAt || cleanupEligibleAt;
-  state.overlapRuntime = { deploymentSha: proof.deploymentSha, runtimeInvocationRef: proof.runtimeInvocationRef, serviceHealthy: true };
+  state.overlapRuntime = proof;
   persist(context, state);
   state.phase = "verified";
   state.verifiedAt = nowIso(clockOf(context));
@@ -379,30 +379,40 @@ const assertRetired = (current, config, timestamp) => {
   }
 };
 
-const evidenceFor = (state, config, cleanupRuntime, current) => ({
+const evidenceFor = (state, config, overlapRuntime, cleanupRuntime, current) => {
+  const verifiedOverlapSha = required(overlapRuntime.deploymentSha, "overlap runtime deployment SHA");
+  const verifiedCleanupSha = required(cleanupRuntime.deploymentSha, "cleanup runtime deployment SHA");
+  if (!fullSha(verifiedOverlapSha) || verifiedOverlapSha !== config.overlapDeploymentSha) throw new Error("overlap runtime deployment SHA is not bound to config");
+  if (!fullSha(verifiedCleanupSha) || verifiedCleanupSha !== state.cleanupDeploymentSha) throw new Error("cleanup runtime deployment SHA is not bound to state");
+  return {
   evidenceVersion: 2, rotationId: config.rotationId, recordedAt: state.overlapReadyAt, sourceSha: config.sourceSha,
   approvedBy: required(config.approvedBy, "config.approvedBy"), approverRole: required(config.approverRole, "config.approverRole"),
   reason: required(config.reason, "config.reason"), ticket: required(config.ticket, "config.ticket"), environment: "production",
   cleanupWindowComplete: true, cleanupCompletedAt: state.cleanupCompletedAt, cleanupVerifiedBy: required(state.cleanupVerifiedBy, "state.cleanupVerifiedBy"), cleanupEvidenceRef: reference(state.cleanupEvidenceRef),
   overlapReadyAt: state.overlapReadyAt, verifiedAt: state.verifiedAt, cleanupEligibleAt: state.cleanupEligibleAt, retirementTimestamp: state.retirementTimestamp,
-  cleanupDeploymentSha: state.cleanupDeploymentSha, cleanupDeploymentObservedAt: cleanupRuntime.observedAt,
+  cleanupDeploymentSha: verifiedCleanupSha, cleanupDeploymentObservedAt: cleanupRuntime.observedAt,
   proofs: {
     previousJwtSlotRetired: true, previousQrPublicSlotRetired: true, jwtPendingRetired: true, qrPrivatePendingRetired: true, qrPublicPendingRetired: true,
     cleanupDeploymentAfterRetirement: new Date(cleanupRuntime.observedAt).getTime() > new Date(state.retirementTimestamp).getTime(),
     cleanupRuntimeVerified: true, jwtPreviousRuntimeRejected: true, qrPreviousRuntimeRejected: true,
     jwtCurrentRuntimeVerify: true, qrCurrentRuntimeVerify: true, qrUnknownKeyRejected: true, serviceHealthy: true,
   },
-  linkedDeployShas: [required(config.overlapDeploymentSha, "config.overlapDeploymentSha"), state.cleanupDeploymentSha],
+  linkedDeployShas: [verifiedOverlapSha, verifiedCleanupSha],
   verificationRefs: [reference(config.verificationRef), reference(state.cleanupEvidenceRef), state.verification.runtimeInvocationRef, cleanupRuntime.runtimeInvocationRef],
   families: [
     { name: "jwt_secrets", rotatedAt: state.overlapReadyAt, operator: required(state.cleanupVerifiedBy, "state.cleanupVerifiedBy"), method: "dual-slot", currentVersionId: current.jwtCurrent.raw.versionId, previousVersionId: current.jwtPrevious.raw.versionId, verificationRef: reference(config.verificationRef) },
     { name: "qr_signing_keys", rotatedAt: state.overlapReadyAt, operator: required(state.cleanupVerifiedBy, "state.cleanupVerifiedBy"), method: "dual-slot", currentVersionId: current.qrPublicCurrent.raw.versionId, previousVersionId: current.qrPublicPrevious.raw.versionId, currentKeyVersion: state.qr.newKeyVersion, previousKeyVersion: state.qr.oldKeyVersion, verificationRef: reference(config.verificationRef) },
   ],
-});
+  };
+};
 
 const assertPersistedCleanupRuntime = (state, config, cleanupDeploymentSha, clock, cleanupEvidenceRef, identity) => {
   if (!state.cleanupRuntime || typeof state.cleanupRuntime !== "object") throw new Error("state.cleanupRuntime is required to resume cleanup");
   if (state.cleanupDeploymentSha !== cleanupDeploymentSha) throw new Error("cleanup deployment SHA does not match persisted runtime state");
+  if (!fullSha(config.overlapDeploymentSha)) throw new Error("config.overlapDeploymentSha must be a full SHA");
+  if (!state.overlapRuntime || typeof state.overlapRuntime !== "object") throw new Error("state.overlapRuntime is required to resume cleanup");
+  if (state.overlapRuntime.deploymentSha !== config.overlapDeploymentSha) throw new Error("overlap runtime deployment SHA does not match config");
+  const overlapRuntime = validateRuntimeProof({ proof: state.overlapRuntime, config, phase: "overlap", expectedDeploymentSha: config.overlapDeploymentSha, clock });
   const retirementTimestamp = isoDate(required(state.retirementTimestamp, "state.retirementTimestamp"));
   if (retirementTimestamp === null || retirementTimestamp > clock()) throw new Error("state.retirementTimestamp is invalid");
   const cleanupRuntime = validateRuntimeProof({ proof: state.cleanupRuntime, config, phase: "cleanup", expectedDeploymentSha: state.cleanupDeploymentSha, clock });
@@ -411,10 +421,10 @@ const assertPersistedCleanupRuntime = (state, config, cleanupDeploymentSha, cloc
   if (cleanupCompletedAt === null || cleanupCompletedAt < isoDate(cleanupRuntime.observedAt) || cleanupCompletedAt > clock()) throw new Error("state.cleanupCompletedAt is invalid");
   reference(state.cleanupEvidenceRef || cleanupEvidenceRef);
   required(state.cleanupVerifiedBy || identity, "state.cleanupVerifiedBy");
-  return cleanupRuntime;
+  return { overlapRuntime, cleanupRuntime };
 };
 
-const finalizeCleanup = async (context, state, cleanupRuntime) => {
+const finalizeCleanup = async (context, state, overlapRuntime, cleanupRuntime) => {
   const { config, sm, values } = context;
   const alreadyCleaned = state.phase === "cleaned";
   const current = await slots(sm, config);
@@ -424,7 +434,7 @@ const finalizeCleanup = async (context, state, cleanupRuntime) => {
     state.phase = "cleaned";
     persist(context, state);
   }
-  const evidence = evidenceFor(state, config, cleanupRuntime, current);
+  const evidence = evidenceFor(state, config, overlapRuntime, cleanupRuntime, current);
   if (values.get("evidence-out")) writeState(path.resolve(values.get("evidence-out")), evidence);
   console.log(JSON.stringify({ mode: "cleanup", phase: state.phase, rotationId: config.rotationId, cleanupDeploymentAfterRetirement: true, cleanupRuntimeVerified: true, ...(alreadyCleaned ? { idempotent: true } : {}), evidenceFile: values.get("evidence-out") || null }));
 };
@@ -483,29 +493,32 @@ const cleanup = async (context) => {
     state.cleanupCompletedAt = state.cleanupCompletedAt || nowIso(clock);
     state.phase = "cleanup-runtime-verified";
     persist(context, state);
-    await finalizeCleanup(context, state, proof);
+    const verified = assertPersistedCleanupRuntime(state, config, cleanupDeploymentSha, clock, cleanupEvidenceRef, identity);
+    await finalizeCleanup(context, state, verified.overlapRuntime, verified.cleanupRuntime);
     return;
   }
   if (state.phase === "cleanup-runtime-verified") {
     if (cleanupEvidenceRef && state.cleanupEvidenceRef && cleanupEvidenceRef !== state.cleanupEvidenceRef) throw new Error("cleanup evidence reference does not match persisted runtime state");
-    const proof = assertPersistedCleanupRuntime(state, config, cleanupDeploymentSha, clock, cleanupEvidenceRef, identity);
+    const verified = assertPersistedCleanupRuntime(state, config, cleanupDeploymentSha, clock, cleanupEvidenceRef, identity);
+    const proof = verified.cleanupRuntime;
     const hydrated = !state.cleanupCompletedAt || !state.cleanupEvidenceRef || !state.cleanupVerifiedBy;
     if (!state.cleanupCompletedAt) state.cleanupCompletedAt = proof.observedAt;
     if (!state.cleanupEvidenceRef) state.cleanupEvidenceRef = cleanupEvidenceRef;
     if (!state.cleanupVerifiedBy) state.cleanupVerifiedBy = identity;
     if (hydrated) persist(context, state);
-    await finalizeCleanup(context, state, proof);
+    await finalizeCleanup(context, state, verified.overlapRuntime, verified.cleanupRuntime);
     return;
   }
   if (state.phase === "cleaned") {
     if (cleanupEvidenceRef && state.cleanupEvidenceRef && cleanupEvidenceRef !== state.cleanupEvidenceRef) throw new Error("cleanup evidence reference does not match persisted runtime state");
-    const proof = assertPersistedCleanupRuntime(state, config, cleanupDeploymentSha, clock, cleanupEvidenceRef, identity);
+    const verified = assertPersistedCleanupRuntime(state, config, cleanupDeploymentSha, clock, cleanupEvidenceRef, identity);
+    const proof = verified.cleanupRuntime;
     const hydrated = !state.cleanupCompletedAt || !state.cleanupEvidenceRef || !state.cleanupVerifiedBy;
     if (!state.cleanupCompletedAt) state.cleanupCompletedAt = proof.observedAt;
     if (!state.cleanupEvidenceRef) state.cleanupEvidenceRef = cleanupEvidenceRef;
     if (!state.cleanupVerifiedBy) state.cleanupVerifiedBy = identity;
     if (hydrated) persist(context, state);
-    await finalizeCleanup(context, state, proof);
+    await finalizeCleanup(context, state, verified.overlapRuntime, verified.cleanupRuntime);
   }
 };
 

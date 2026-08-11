@@ -393,7 +393,10 @@ test("cleanup resumes from cleanup-runtime-verified without secret or deployment
     assert.equal(JSON.parse(readFileSync(path.join(resumedDirectory, "state.json"), "utf8")).phase, "cleaned");
     assert.equal(resumedSm.putCount - secretWritesBeforeResume, 0);
     assert.equal(ecsMutationsBeforeResume, 0);
-    assert.deepEqual(JSON.parse(readFileSync(resumedEvidenceFile, "utf8")), JSON.parse(readFileSync(normalEvidenceFile, "utf8")));
+    const normalEvidence = JSON.parse(readFileSync(normalEvidenceFile, "utf8"));
+    const resumedEvidence = JSON.parse(readFileSync(resumedEvidenceFile, "utf8"));
+    assert.deepEqual(resumedEvidence, normalEvidence);
+    assert.deepEqual(resumedEvidence.linkedDeployShas, [baseConfig.overlapDeploymentSha, cleanupSha]);
   } finally {
     rmSync(normalDirectory, { recursive: true, force: true });
     rmSync(resumedDirectory, { recursive: true, force: true });
@@ -456,6 +459,79 @@ test("cleanup-runtime-verified fails closed when persisted cleanup deployment SH
     writeFileSync(stateFile, `${JSON.stringify(state)}\n`, { mode: 0o600 });
     const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
     await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [["cleanup-deployment-sha", cleanupSha]], ["cleanup-evidence-ref"]) }), /deployment SHA is invalid/);
+    assert.equal(resumedSm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cleanup-runtime-verified rejects overlap deployment configuration drift", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-overlap-config-drift-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clockState = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext } = await interruptedCleanup(directory, sm, clockState);
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
+    const driftedConfig = { ...cleanupContext.config, overlapDeploymentSha: "d".repeat(40) };
+    await assert.rejects(cleanup({ ...cleanupContext, config: driftedConfig, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /does not match config|deployment SHA is invalid/);
+    assert.equal(resumedSm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cleanup-runtime-verified fails closed when persisted overlap runtime is missing", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-overlap-missing-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clockState = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext } = await interruptedCleanup(directory, sm, clockState);
+    const stateFile = path.join(directory, "state.json");
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    delete state.overlapRuntime;
+    writeFileSync(stateFile, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
+    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /state.overlapRuntime is required/);
+    assert.equal(resumedSm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cleanup-runtime-verified fails closed when persisted overlap runtime has the wrong SHA", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-overlap-sha-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clockState = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext } = await interruptedCleanup(directory, sm, clockState);
+    const stateFile = path.join(directory, "state.json");
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    state.overlapRuntime.deploymentSha = "d".repeat(40);
+    writeFileSync(stateFile, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
+    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /does not match config|deployment SHA is invalid/);
+    assert.equal(resumedSm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cleanup-runtime-verified revalidates overlap proof phase while cleanup proof remains valid", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-cleanup-overlap-proof-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clockState = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const { cleanupContext } = await interruptedCleanup(directory, sm, clockState);
+    const stateFile = path.join(directory, "state.json");
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    state.overlapRuntime.phase = "cleanup";
+    writeFileSync(stateFile, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
+    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /overlap runtime proof does not match this rotation/);
     assert.equal(resumedSm.putCount, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });

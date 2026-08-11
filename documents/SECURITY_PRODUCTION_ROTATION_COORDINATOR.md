@@ -86,11 +86,12 @@ retired JWT and QR previous bindings entirely while retaining every current
 binding. Only that proof can produce cleanup evidence.
 
 If the process stops after persisting `cleanup-runtime-verified`, the next
-`--cleanup` validates the persisted runtime proof and cleanup evidence identity,
+`--cleanup` revalidates the complete persisted overlap and cleanup runtime
+proofs, including their exact deployment SHAs and source identity, then
 re-reads the secret slots, re-proves retirement, and persists `cleaned` without
-retiring or deploying again. Final evidence is rebuilt from that persisted
-verified state, so repeated cleanup is idempotent and does not create new
-timestamps or proof references.
+retiring or deploying again. Final evidence links only those revalidated
+deployment identities, so configuration drift fails closed and repeated
+cleanup is idempotent.
 
 State, fixture, verification, and evidence paths must be outside the repository
 or explicitly reviewed non-secret evidence locations. They contain identifiers,
