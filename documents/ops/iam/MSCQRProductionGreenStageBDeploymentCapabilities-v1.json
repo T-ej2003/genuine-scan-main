@@ -1125,11 +1125,11 @@
         "stage-a-database"
       ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
-        "sid": "ReadStageALivePrerequisites",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAGreenRdsInstance",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "2da6892e74c8eec00d858975450e4c1f854f5ca731d85cfb00173cf22a57d22e"
       },
       "required": true,
       "mutation": false
@@ -1195,11 +1195,11 @@
         "stage-a-security-groups"
       ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
-        "sid": "ReadStageALivePrerequisites",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAProviderEndpointMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "2da6892e74c8eec00d858975450e4c1f854f5ca731d85cfb00173cf22a57d22e"
       },
       "required": true,
       "mutation": false
@@ -1262,7 +1262,7 @@
         "sid": "ReadExactStageAStateForHandoff",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "fa6ac7e5f206a03cc4c45f5f65ae33c1bd9111b0cda348b539949d46b91021ea"
+        "expectedPolicySha256": "2da6892e74c8eec00d858975450e4c1f854f5ca731d85cfb00173cf22a57d22e"
       },
       "required": true,
       "mutation": false
@@ -2029,11 +2029,11 @@
         "backend-bucket"
       ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
-        "sid": "GetStageBTerraformStateBucketLocation",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageABackendBucketLocation",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+        "expectedPolicySha256": "2da6892e74c8eec00d858975450e4c1f854f5ca731d85cfb00173cf22a57d22e"
       },
       "required": true,
       "mutation": false
@@ -2165,11 +2165,11 @@
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
       ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
-        "sid": "ListAttachedExactStageBReadOnlyCanaryRolePolicies",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "47bfd01f207470fe1a6d28bcdeae1965b1c05e2aed69d8b94b4533fd59f656a5"
+        "expectedPolicySha256": "2da6892e74c8eec00d858975450e4c1f854f5ca731d85cfb00173cf22a57d22e"
       },
       "required": true,
       "mutation": false

@@ -22,6 +22,7 @@ const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGree
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const stageA = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const initializedMetadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8"));
+const asArray = (value) => Array.isArray(value) ? value : [value];
 
 function matches(statement, action, resource, context) {
   const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
@@ -190,14 +191,51 @@ test("unrelated keys, buckets, and backend administration actions are denied", (
   assert.equal(policy.Statement.some((statement) => statement.Effect === "Allow" && statement.Action === "s3:ListBucket" && !statement.Condition), false);
 });
 
-test("the canonical Stage A managed contract is exact-state read-only", () => {
+test("the canonical Stage A managed contract is exact and recovery-scoped", () => {
   const serialized = JSON.stringify(stageA);
   assert.equal(serialized.includes("rls-green/stage-b"), false);
   assert.equal(stageA.Statement.some((statement) => statement.Sid.startsWith("StageB")), false);
-  assert.deepEqual(stageA.Statement, [{
+  assert.deepEqual(stageA.Statement[0], {
     Sid: "ReadExactStageAStateForHandoff",
     Effect: "Allow",
     Action: "s3:GetObject",
     Resource: "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate",
-  }]);
+  });
+  assert.deepEqual(stageA.Statement.map(({ Sid }) => Sid), [
+    "ReadExactStageAStateForHandoff",
+    "ReadExactStageABackendBucketLocation",
+    "WriteExactStageAState",
+    "ReadExactStageALock",
+    "WriteExactStageALock",
+    "ReleaseExactStageALock",
+    "ReadExactStageAProviderEndpointMetadata",
+    "ReadExactStageAStorageKeys",
+    "ReadExactStageAGreenRdsGroups",
+    "ReadExactStageAGreenRdsParameters",
+    "ReadExactStageAGreenRdsInstance",
+    "ReadExactStageAKmsAliases",
+    "ReadExactStageASecretMetadata",
+    "ReadExactStageACheckerRole",
+    "ReadExactStageACheckerRolePolicy",
+    "ReadExactStageAProviderLogGroups",
+    "ReadExactStageALogTags",
+    "ApplyExactStageAEndpointSecurityGroupIngress",
+  ]);
+  const stageAStatement = (sid) => stageA.Statement.find((statement) => statement.Sid === sid);
+  assert.equal(stageAStatement("ReadExactStageABackendBucketLocation").Action, "s3:GetBucketLocation");
+  assert.equal(stageAStatement("ReadExactStageABackendBucketLocation").Resource, "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2");
+  assert.deepEqual(stageAStatement("WriteExactStageAState").Action, "s3:PutObject");
+  assert.match(stageAStatement("WriteExactStageAState").Resource, /stage-a\/terraform\.tfstate$/);
+  assert.deepEqual(stageAStatement("ReadExactStageALock").Action, "s3:GetObject");
+  assert.match(stageAStatement("ReadExactStageALock").Resource, /stage-a\/terraform\.tfstate\.tflock$/);
+  assert.deepEqual(stageAStatement("WriteExactStageALock").Action, "s3:PutObject");
+  assert.match(stageAStatement("WriteExactStageALock").Resource, /stage-a\/terraform\.tfstate\.tflock$/);
+  assert.deepEqual(stageAStatement("ReleaseExactStageALock").Action, "s3:DeleteObject");
+  assert.match(stageAStatement("ReleaseExactStageALock").Resource, /stage-a\/terraform\.tfstate\.tflock$/);
+  assert.equal(stageA.Statement.some(({ Action }) => asArray(Action).includes("s3:ListBucket")), false);
+  assert.equal(stageA.Statement.some(({ Action, Resource }) => asArray(Action).includes("s3:DeleteObject") && asArray(Resource).some((value) => value.endsWith("terraform.tfstate"))), false);
+  const apply = stageA.Statement.at(-1);
+  assert.equal(apply.Action, "ec2:AuthorizeSecurityGroupIngress");
+  assert.equal(apply.Resource, "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412");
+  assert.deepEqual(apply.Condition, { StringEquals: { "aws:RequestedRegion": "eu-west-2" } });
 });
