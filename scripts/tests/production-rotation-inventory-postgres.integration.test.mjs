@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
 import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
-import { executeProductionRotationInventory } from "../security/production-rotation-state-inventory.mjs";
+import { buildRotationInventorySql, executeProductionRotationInventory } from "../security/production-rotation-state-inventory.mjs";
 
 const fixtureUrl = process.env.MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL;
 const skipOutsideCi = !fixtureUrl && process.env.CI !== "true";
@@ -12,7 +12,14 @@ const qrIds = ["00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-
 const artifactIds = ["00000000-0000-4000-8000-000000000021", "00000000-0000-4000-8000-000000000022", "00000000-0000-4000-8000-000000000023"];
 
 const runSql = (sql) => execFileSync("psql", [fixtureUrl, "-v", "ON_ERROR_STOP=1", "-c", sql], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-const runInventory = () => executeProductionRotationInventory({ env: { ...process.env, DATABASE_URL: fixtureUrl, ROTATION_INVENTORY_APPROVED: "true", ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls" } });
+const runInventory = () => {
+  try {
+    return executeProductionRotationInventory({ env: { ...process.env, DATABASE_URL: fixtureUrl, ROTATION_INVENTORY_APPROVED: "true", ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls" } });
+  } catch (error) {
+    execFileSync("psql", [fixtureUrl, "-v", "ON_ERROR_STOP=1", "--command", buildRotationInventorySql("mscqr_prod_rls")], { stdio: ["ignore", "inherit", "inherit"] });
+    throw error;
+  }
+};
 
 function assertInventoryShape(inventory) {
   assert.deepEqual(Object.keys(inventory).sort(), [...ROTATION_INVENTORY_CATEGORIES].sort());
