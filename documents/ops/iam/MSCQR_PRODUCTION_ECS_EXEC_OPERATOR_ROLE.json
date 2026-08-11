@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "roleName": "mscqr-production-ecs-exec-verifier",
   "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
+  "managedPolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
   "policyPath": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
   "trustPolicyPath": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_TRUST_POLICY.json",
   "provisioning": "administrator-only-reviewed-iam-publication",

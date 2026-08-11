@@ -24,4 +24,6 @@ stdin path; it is not a command-line argument or task-definition environment val
 
 Administrator preflight reports release-deployer and verifier evaluations separately. The report is
 invalid unless the exact Stage-A ingress, deployment, rollback, PassRole, release-deployer ECS Exec
-deny, and verifier ECS Exec allow evidence are all present.
+deny, and verifier ECS Exec allow evidence are all present. It also records live trust-policy and
+operator-policy canonical hashes; simulation evidence alone is insufficient. The ListTasks proof
+uses Resource `*` with exact production cluster and region conditions, matching AWS IAM semantics.

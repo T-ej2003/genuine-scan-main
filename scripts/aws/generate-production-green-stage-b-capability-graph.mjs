@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { RELEASE_READ_PROBES } from "./production-green-stage-b-identity-capabilities.mjs";
 import { RELEASE_POLICY_SOURCES, canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS } from "./stage-b-evidence-freshness.mjs";
-import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
+import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -110,7 +110,7 @@ function operatorAuthority(entry, forbidden) {
     return candidate.Effect === "Allow" && actions.includes(entry.action) && entry.resources.every((resource) => resources.some((allowed) => allowed === "*" || allowed === resource || (allowed.endsWith("*") && resource.startsWith(allowed.slice(0, -1)))));
   });
   if (!statement) throw new Error(`No reviewed ECS Exec operator policy authorizes ${entry.id}.`);
-  return { sourceFile: ECS_EXEC_OPERATOR_POLICY_PATH, sid: statement.Sid, livePolicyArn: ECS_EXEC_OPERATOR_ROLE_ARN, expectedVersion: "administrator-provisioned", expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(operatorPolicy))) };
+  return { sourceFile: ECS_EXEC_OPERATOR_POLICY_PATH, sid: statement.Sid, livePolicyArn: ECS_EXEC_OPERATOR_POLICY_ARN, expectedVersion: "administrator-provisioned", expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(operatorPolicy))) };
 }
 
 function terraformRuntimeActions() {

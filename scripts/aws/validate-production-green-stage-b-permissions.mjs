@@ -13,7 +13,7 @@ import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateD
 import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidenceTimestamp, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
 import { assertStageBPlanApprovedBinding, STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
 import { assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
-import { assertEcsExecOperatorEvidence, assertEcsExecOperatorSourceContract, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
+import { assertEcsExecOperatorEvidence, assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorSourceContract, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION = 3;
@@ -920,6 +920,7 @@ export function runPermissionPreflight({
   simulate = ({ roleArn: sourceArn, evaluation: item }) => simulatePrincipalPolicy({ roleArn: sourceArn, evaluation: item }),
   discoverContextKeys = null,
   cloudTrail = ({ sessionName, startTime, endTime, requiredActions }) => inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions }),
+  ecsExecVerifierEvidence,
   contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY,
 } = {}) {
   if (!["initial", "plan-bound"].includes(phase)) throw new Error("Permission preflight phase is unsupported.");
@@ -960,7 +961,11 @@ export function runPermissionPreflight({
   const operatorForbiddenResults = ECS_EXEC_OPERATOR_FORBIDDEN.map((entry) => runPrincipalSimulation(entry, true));
   const operatorDeniedRequired = operatorRequiredResults.filter((item) => item.decision !== "allowed");
   const operatorAllowedForbidden = operatorForbiddenResults.filter((item) => item.decision === "allowed");
-  const operatorStatus = operatorDeniedRequired.length === 0 && operatorAllowedForbidden.length === 0 ? "valid" : "invalid";
+  let operatorEvidenceError = null;
+  if (phase === "initial") {
+    try { assertEcsExecOperatorLiveEvidence(ecsExecVerifierEvidence); } catch (error) { operatorEvidenceError = error.message; }
+  }
+  const operatorStatus = operatorDeniedRequired.length === 0 && operatorAllowedForbidden.length === 0 && !operatorEvidenceError ? "valid" : "invalid";
   const cloudTrailResult = cloudTrail({ sessionName: cloudTrailSessionName, startTime: policyPublishedAt, endTime: generatedAt, requiredActions: derived.required.map((item) => item.action) });
   const deniedRequired = requiredResults.filter((item) => item.decision !== "allowed");
   const allowedForbidden = forbiddenResults.filter((item) => item.decision === "allowed");
@@ -996,6 +1001,7 @@ export function runPermissionPreflight({
       releaseDeployer: { principalArn: RELEASE_ROLE_ARN, requiredEvaluations: requiredResults, forbiddenEvaluations: forbiddenResults, status: deniedRequired.length === 0 && allowedForbidden.length === 0 ? "valid" : "invalid" },
       ecsExecVerifier: { principalArn: ECS_EXEC_OPERATOR_ROLE_ARN, requiredEvaluations: operatorRequiredResults, forbiddenEvaluations: operatorForbiddenResults, status: operatorStatus },
     },
+    ecsExecVerifierTrust: ecsExecVerifierEvidence || null,
     cutoverCritical: {
       stageAIngress: requiredResults.find(({ manifestId }) => manifestId === "apply-stage-a-endpoint-security-group-ingress")?.decision || null,
       releaseForward: requiredResults.find(({ manifestId }) => manifestId === "activate-exact-ecs-service")?.decision || null,
@@ -1022,6 +1028,7 @@ export function runPermissionPreflight({
     operatorRequiredDeniedCount: operatorDeniedRequired.length,
     operatorForbiddenAllowedCount: operatorAllowedForbidden.length,
     operatorForbiddenDeniedCount: operatorForbiddenResults.filter((item) => item.decision !== "allowed").length,
+    operatorEvidenceError,
     deniedCount: deniedRequired.length + allowedForbidden.length + operatorDeniedRequired.length + operatorAllowedForbidden.length + unresolved.length,
     status: deniedRequired.length === 0 && allowedForbidden.length === 0 && operatorStatus === "valid" && unresolved.length === 0 && !policyEvidenceError ? "valid" : "invalid",
   };

@@ -75,6 +75,11 @@ gh workflow run release-gate.yml --ref main \
   -f rotation_image_digest=sha256:<64-hex> \
   -f rotation_deployment_sha=<exact-overlap-deployment-sha>
 
+# Before using the verifier role, the administrator preflight must prove the
+# exact MFA-backed trust policy, the exact operator policy attachment, and
+# source/live canonical hash convergence for both. Simulation results alone do
+# not authorize ECS Exec.
+#
 # Run from the operator checkout under the dedicated verifier identity. The
 # helper independently checks the caller ARN and rejects release-deployer
 # credentials before any ECS discovery.

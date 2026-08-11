@@ -2816,9 +2816,9 @@
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
         "sid": "DescribeProductionBackendService",
-        "livePolicyArn": "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "cb2daf567a21a4ebff92fc9a1cd4d129127b7a37a9ceaf18574037a8e27ce379"
+        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
       },
       "required": true,
       "mutation": false
@@ -2849,9 +2849,9 @@
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
         "sid": "DescribeProductionBackendTasks",
-        "livePolicyArn": "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "cb2daf567a21a4ebff92fc9a1cd4d129127b7a37a9ceaf18574037a8e27ce379"
+        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
       },
       "required": true,
       "mutation": false
@@ -2882,9 +2882,9 @@
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
         "sid": "DescribeProductionCluster",
-        "livePolicyArn": "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "cb2daf567a21a4ebff92fc9a1cd4d129127b7a37a9ceaf18574037a8e27ce379"
+        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
       },
       "required": true,
       "mutation": false
@@ -2915,9 +2915,9 @@
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
         "sid": "ReadTaskDefinitionIdentity",
-        "livePolicyArn": "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "cb2daf567a21a4ebff92fc9a1cd4d129127b7a37a9ceaf18574037a8e27ce379"
+        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
       },
       "required": true,
       "mutation": false
@@ -2962,9 +2962,9 @@
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
         "sid": "ExecuteOnlyProductionBackendTasks",
-        "livePolicyArn": "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "cb2daf567a21a4ebff92fc9a1cd4d129127b7a37a9ceaf18574037a8e27ce379"
+        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
       },
       "required": true,
       "mutation": true
@@ -2978,7 +2978,7 @@
       "sourceFunction": "operator-list-production-backend-tasks",
       "action": "ecs:ListTasks",
       "resources": [
-        "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+        "*"
       ],
       "context": [
         {
@@ -2986,6 +2986,13 @@
           "type": "string",
           "values": [
             "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
           ]
         }
       ],
@@ -2995,12 +3002,92 @@
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
         "sid": "ListOnlyProductionBackendTasks",
-        "livePolicyArn": "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "cb2daf567a21a4ebff92fc9a1cd4d129127b7a37a9ceaf18574037a8e27ce379"
+        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
       },
       "required": true,
       "mutation": false
+    },
+    {
+      "id": "operator-operator-list-unrelated-cluster",
+      "phase": "runtime-verification",
+      "identity": "ECS_EXEC_VERIFIER_OPERATOR",
+      "executor": "ecs-exec-verifier",
+      "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
+      "sourceFunction": "operator-list-unrelated-cluster",
+      "action": "ecs:ListTasks",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/unrelated"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "operator-operator-list-wrong-region",
+      "phase": "runtime-verification",
+      "identity": "ECS_EXEC_VERIFIER_OPERATOR",
+      "executor": "ecs-exec-verifier",
+      "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
+      "sourceFunction": "operator-list-wrong-region",
+      "action": "ecs:ListTasks",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "us-east-1"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
     },
     {
       "id": "operator-operator-pass-role",

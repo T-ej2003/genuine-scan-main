@@ -12,6 +12,7 @@ import {
 import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
+import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 
 const caller = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test";
 const shapedPolicyEvidence = () => {
@@ -42,7 +43,7 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 31, capabilities: 140, uniqueActions: 88, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 31, capabilities: 142, uniqueActions: 88, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -103,6 +104,7 @@ test("one command keeps administrator simulation and release reads on separate i
   const admin = runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--output", adminPath, "--signature-output", signaturePath], {
     caller: () => "arn:aws:iam::368992683803:root",
     collectPolicies: shapedPolicyEvidence,
+    collectEcsExecOperatorEvidence: () => buildEcsExecOperatorEvidence(),
     permissionPreflight: (input) => { administratorSimulations += 1; return runPermissionPreflight({ ...input, simulate: ({ evaluation }) => ({ decision: evaluation.expectedDecision || "allowed", matchedStatements: evaluation.expectedDecision ? 0 : 1, missingContextValues: evaluation.expectedDecision ? evaluation.expectedMissingContextValues : [] }), cloudTrail: () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] }) }); },
     sign: (report, { reportBytes }) => { const canonicalPayloadSha256 = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(report))).digest("hex"); const reportFileSha256 = crypto.createHash("sha256").update(reportBytes).digest("hex"); const bindingPayload = buildPermissionReportBinding({ report, canonicalPayloadSha256, reportFileSha256, keyArn: PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm: PERMISSION_REPORT_SIGNING_ALGORITHM }); return { schemaVersion: PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, hashDomain: PERMISSION_REPORT_HASH_DOMAIN, bindingDomain: PERMISSION_REPORT_BINDING_DOMAIN, bindingSchemaVersion: PERMISSION_REPORT_BINDING_SCHEMA_VERSION, evidenceKind: report.evidenceKind, phase: report.phase, purpose: report.purpose, accountId: "368992683803", region: "eu-west-2", keyId: PERMISSION_REPORT_SIGNING_KEY_ARN, keyArn: PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm: PERMISSION_REPORT_SIGNING_ALGORITHM, canonicalPayloadSha256, reportFileSha256, signedBindingSha256: signedPermissionReportBindingSha256(bindingPayload), signatureBase64: "AQ==", signedAt: report.generatedAt }; },
   });

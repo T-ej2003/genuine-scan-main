@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorTrustDocument, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_REQUIRED } from "../aws/production-ecs-exec-operator-contract.mjs";
 
 const helper = readFileSync("scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "utf8");
 const selection = readFileSync("scripts/aws/ecs-exec-target-selection.mjs", "utf8");
@@ -32,6 +33,39 @@ test("production ECS Exec policy is narrow and has no shell or mutation permissi
   assert(!actions.includes("ssm:StartSession"));
   assert.match(JSON.stringify(policy), /mscqr-prod-euw2-main/);
   assert.match(JSON.stringify(policy), /mscqr-backend-servi-euw2/);
+});
+
+test("ListTasks uses Resource * with exact cluster and region conditions", () => {
+  const required = ECS_EXEC_OPERATOR_REQUIRED.find(({ action }) => action === "ecs:ListTasks");
+  const statement = policy.Statement.find((entry) => entry.Action === "ecs:ListTasks");
+  assert.equal(required.resources[0], "*");
+  assert.deepEqual(required.context, [
+    { key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] },
+    { key: "ecs:cluster", type: "string", values: ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"] },
+  ]);
+  assert.equal(statement.Resource, "*");
+  assert.equal(statement.Condition.StringEquals["ecs:cluster"], "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main");
+  assert.equal(statement.Condition.StringEquals["aws:RequestedRegion"], "eu-west-2");
+  assert.notEqual(required.resources[0], "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main");
+});
+
+test("verifier trust and policy evidence fail closed independently", () => {
+  const exactTrust = structuredClone(trust);
+  assert.doesNotThrow(() => assertEcsExecOperatorTrustDocument(exactTrust));
+  for (const mutate of [
+    (value) => delete value.Statement[0].Condition.Bool["aws:MultiFactorAuthPresent"],
+    (value) => { value.Statement[0].Condition.Bool.awsMultiFactorAuthPresent = "false"; },
+    (value) => { value.Statement[0].Principal.AWS = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"; },
+    (value) => { value.Statement[0].Principal.AWS = "arn:aws:iam::368992683803:root"; },
+    (value) => { value.Statement[0].Principal = "*"; },
+    (value) => { value.Statement[0].Principal.Extra = "arn:aws:iam::368992683803:user/other"; },
+    (value) => value.Statement.push({ ...value.Statement[0] }),
+  ]) assert.throws(() => assertEcsExecOperatorTrustDocument((() => { const value = structuredClone(exactTrust); mutate(value); return value; })()));
+
+  const exact = buildEcsExecOperatorEvidence();
+  assert.doesNotThrow(() => assertEcsExecOperatorLiveEvidence(exact));
+  assert.throws(() => assertEcsExecOperatorLiveEvidence({ ...exact, liveTrustCanonicalSha256: "0".repeat(64) }));
+  assert.throws(() => assertEcsExecOperatorLiveEvidence({ ...exact, policy: { ...exact.policy, liveCanonicalSha256: "0".repeat(64) } }));
 });
 
 test("ECS Exec verifier has a separate MFA-backed identity and the helper rejects deployer credentials", () => {

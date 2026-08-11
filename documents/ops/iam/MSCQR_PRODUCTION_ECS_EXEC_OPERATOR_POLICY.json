@@ -21,8 +21,11 @@
       "Sid": "ListOnlyProductionBackendTasks",
       "Effect": "Allow",
       "Action": "ecs:ListTasks",
-      "Resource": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
-      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+      "Resource": "*",
+      "Condition": { "StringEquals": {
+        "aws:RequestedRegion": "eu-west-2",
+        "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+      } }
     },
     {
       "Sid": "DescribeProductionCluster",

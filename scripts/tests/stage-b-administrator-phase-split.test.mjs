@@ -14,6 +14,7 @@ import {
   sourcePolicyEvidence,
 } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { parseStageBAdministratorPreflightArgs } from "../aws/stage-b-administrator-preflight-args.mjs";
+import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 
 const root = process.cwd();
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"), "utf8"));
@@ -44,6 +45,7 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
     phase: "initial",
     now,
     simulate: simulation,
+    ecsExecVerifierEvidence: buildEcsExecOperatorEvidence(),
     cloudTrail: clearCloudTrail,
   });
   assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
@@ -63,6 +65,19 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   const missingStageAEvidence = structuredClone(report);
   missingStageAEvidence.requiredEvaluations = missingStageAEvidence.requiredEvaluations.filter((item) => item.manifestId !== "apply-stage-a-endpoint-security-group-ingress");
   assert.throws(() => assertCutoverCriticalEvidence(missingStageAEvidence), /apply-stage-a-endpoint-security-group-ingress/);
+  const wrongTrust = structuredClone(report);
+  wrongTrust.ecsExecVerifierTrust.converged = false;
+  assert.throws(() => assertCutoverCriticalEvidence(wrongTrust), /trust evidence/);
+  const missingTrust = structuredClone(report);
+  delete missingTrust.ecsExecVerifierTrust;
+  assert.throws(() => assertCutoverCriticalEvidence(missingTrust), /trust evidence/);
+  const invalidTrustReport = runPermissionPreflight({
+    reportGeneratorCallerArn: "arn:aws:iam::368992683803:root", manifest, plan, planBytes, phase: "initial", generatedAt: now, now,
+    policyPublishedAt: now, cloudTrailSessionName: "pre-plan-capability", policyEvidence,
+    ecsExecVerifierEvidence: { ...buildEcsExecOperatorEvidence(), converged: false }, simulate: simulation, cloudTrail: clearCloudTrail,
+  });
+  assert.equal(invalidTrustReport.principalEvaluations.ecsExecVerifier.status, "invalid");
+  assert.equal(invalidTrustReport.status, "invalid");
   assert.equal(Object.hasOwn(report, "planSha256"), false);
   assert.equal(Object.hasOwn(report, "savedPlanSha256"), false);
   assert.equal(Object.hasOwn(report, "planApprovalReportSha256"), false);
