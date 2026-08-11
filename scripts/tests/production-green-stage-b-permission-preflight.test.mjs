@@ -468,10 +468,34 @@ test("all 21 sanitized real AWS forbidden responses match the reviewed contracts
     assert.ok(item, fixture.manifestId);
     const response = structuredClone(fixture.response);
     if (item.action.startsWith("s3:")) response.EvaluationResults[0].MissingContextValues = [];
-    const result = simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify(response) });
+    const result = simulatePrincipalPolicy({ roleArn, evaluation: item, conditionKeyOrigins: sourcePolicyConditionKeyOrigins(), run: () => JSON.stringify(response) });
     assert.equal(result.decision, item.expectedDecision);
     assert.deepEqual(result.missingContextValues, item.expectedMissingContextValues);
   }
+});
+
+test("filters unrelated role-wide MissingContextValues before action validation", () => {
+  const item = deriveRequiredEvaluations(plan, manifest).forbidden.find(({ manifestId }) => manifestId === "backend-bucket-delete");
+  const result = simulatePrincipalPolicy({
+    roleArn,
+    evaluation: item,
+    conditionKeyOrigins: sourcePolicyConditionKeyOrigins(),
+    run: () => JSON.stringify({
+      EvaluationResults: [{
+        EvalActionName: item.action,
+        EvalResourceName: item.resource,
+        EvalDecision: "implicitDeny",
+        MatchedStatements: [],
+        MissingContextValues: [
+          "aws:RequestTag/Component",
+          "aws:ResourceTag/MSCQRExecTarget",
+          "ecs:cluster",
+          "iam:PassedToService",
+        ],
+      }],
+    }),
+  });
+  assert.deepEqual(result.missingContextValues, []);
 });
 
 test("forbidden context comparison rejects missing, additional, wrong, duplicate, and misplaced values", () => {
@@ -499,7 +523,7 @@ test("every reviewed missing-context key has a canonical policy statement origin
   assert.deepEqual(deleteBucket.context, []);
   assert.deepEqual(deleteBucket.expectedMissingContextValues, []);
   const passRole = deriveRequiredEvaluations(plan, manifest).forbidden.find(({ manifestId }) => manifestId === "pass-unrelated-role");
-  assert.deepEqual(passRole.expectedMissingContextValues, expectedKeys.filter((key) => key !== "iam:PassedToService"));
+  assert.deepEqual(passRole.expectedMissingContextValues, []);
   for (const entry of deriveRequiredEvaluations(plan, manifest).forbidden.filter(({ action }) => action.startsWith("s3:"))) {
     assert.deepEqual(entry.expectedMissingContextValues, [], entry.manifestId);
   }
@@ -804,6 +828,7 @@ test("AWS simulator accepts the hand-reviewed PascalCase CLI fixture", () => {
   const result = simulatePrincipalPolicy({
     roleArn,
     evaluation: { id: "lambda-fixture", action: simulatorAllowed.EvaluationResults[0].EvalActionName, resource: simulatorAllowed.EvaluationResults[0].EvalResourceName, context: [] },
+    conditionKeyOrigins: sourcePolicyConditionKeyOrigins(),
     run: () => JSON.stringify(simulatorAllowed),
   });
   assert.deepEqual(result, { decision: "allowed", matchedStatements: 0, missingContextValues: [], organizationsAllowed: null, permissionsBoundaryAllowed: null });

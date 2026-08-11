@@ -13,7 +13,7 @@ import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateD
 import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidenceTimestamp, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
 import { assertStageBPlanApprovedBinding, STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
 import { assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
-import { assertEcsExecOperatorEvidence, assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorSourceContract, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
+import { assertEcsExecOperatorEvidence, assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorSourceContract, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION = 3;
@@ -198,21 +198,42 @@ export function sourcePolicyEvidence() {
   });
 }
 
-export function sourcePolicyConditionKeyOrigins() {
+function policyConditionKeyOrigins(document, { policy = "source", sourcePath = "" } = {}) {
   const origins = new Map();
-  for (const { name, sourcePath } of RELEASE_POLICY_SOURCES) {
-    const document = JSON.parse(fs.readFileSync(path.join(stageBRoot, sourcePath), "utf8"));
-    for (const statement of document.Statement || []) {
-      for (const [operator, condition] of Object.entries(statement.Condition || {})) {
-        for (const key of Object.keys(condition)) {
-          if (!origins.has(key)) origins.set(key, []);
-          const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
-          origins.get(key).push({ policy: name, sid: statement.Sid, operator, sourcePath, actions: actions.filter(Boolean) });
-        }
+  for (const statement of document?.Statement || []) {
+    for (const [operator, condition] of Object.entries(statement.Condition || {})) {
+      for (const key of Object.keys(condition)) {
+        if (!origins.has(key)) origins.set(key, []);
+        const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+        origins.get(key).push({ policy, sid: statement.Sid, operator, sourcePath, actions: actions.filter(Boolean) });
       }
     }
   }
   return origins;
+}
+
+export function sourcePolicyConditionKeyOrigins() {
+  const origins = new Map();
+  for (const { name, sourcePath } of RELEASE_POLICY_SOURCES) {
+    const policyOrigins = policyConditionKeyOrigins(JSON.parse(fs.readFileSync(path.join(stageBRoot, sourcePath), "utf8")), { policy: name, sourcePath });
+    for (const [key, entries] of policyOrigins) origins.set(key, [...(origins.get(key) || []), ...entries]);
+  }
+  return origins;
+}
+
+export function operatorPolicyConditionKeyOrigins() {
+  return policyConditionKeyOrigins(JSON.parse(fs.readFileSync(path.join(stageBRoot, ECS_EXEC_OPERATOR_POLICY_PATH), "utf8")), { policy: "ECS_EXEC_OPERATOR", sourcePath: ECS_EXEC_OPERATOR_POLICY_PATH });
+}
+
+function actionPatternMatches(pattern, action) {
+  const escaped = String(pattern).replace(/[.*+?^${}()|[\\]\\]/g, "\\$&").replaceAll("\\*", ".*");
+  return new RegExp(`^${escaped}$`).test(action);
+}
+
+function applicableConditionKeys(conditionKeyOrigins, action) {
+  return new Set([...conditionKeyOrigins.entries()]
+    .filter(([, entries]) => entries.some(({ actions }) => actions.some((pattern) => actionPatternMatches(pattern, action))))
+    .map(([key]) => key));
 }
 
 export function collectLiveReleasePolicyEvidence({ run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
@@ -528,10 +549,8 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
       if (!["explicitDeny", "implicitDeny"].includes(entry.expectedDecision)) throw new Error(`${entry.id} must declare its exact forbidden expectedDecision.`);
       const unexplained = expectedMissing.filter((key) => !conditionKeyOrigins.has(key));
       if (unexplained.length) throw new Error(`${entry.id} expectedMissingContextValues has no reviewed source-policy origin: ${unexplained.join(", ")}.`);
-      // MissingContextValues is produced by IAM for the specific action/resource
-      // evaluation. A policy-wide condition-key union is not an action-level
-      // diagnostic contract (for example, unrelated S3 evaluations can report
-      // ECS tag conditions). Keep only explicitly reviewed, source-origin keys.
+      const inapplicable = expectedMissing.filter((key) => !applicableConditionKeys(conditionKeyOrigins, entry.action).has(key));
+      if (inapplicable.length) throw new Error(`${entry.id} expectedMissingContextValues is not applicable to ${entry.action}: ${inapplicable.join(", ")}.`);
     } else if (entry.expectedDecision !== undefined) {
       throw new Error(`${entry.id} may declare expectedDecision only for forbidden evaluations.`);
     }
@@ -768,7 +787,7 @@ function contextArgs(context) {
   ]);
 }
 
-export function simulatePrincipalPolicy({ roleArn, evaluation: item, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
+export function simulatePrincipalPolicy({ roleArn, evaluation: item, conditionKeyOrigins, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
   const args = [
     "iam", "simulate-principal-policy",
     "--policy-source-arn", roleArn,
@@ -789,10 +808,14 @@ export function simulatePrincipalPolicy({ roleArn, evaluation: item, run = (args
     || !["allowed", "explicitDeny", "implicitDeny"].includes(result.EvalDecision)) {
     throw new Error(`IAM simulation returned malformed output for ${item.id}.`);
   }
+  const rawMissingContextValues = normalizeActualMissingContextValues(result.MissingContextValues, item.id);
+  const scopedMissingContextValues = conditionKeyOrigins
+    ? rawMissingContextValues.filter((key) => applicableConditionKeys(conditionKeyOrigins, item.action).has(key))
+    : rawMissingContextValues;
   return validateSimulationResult(item, {
     decision: result.EvalDecision,
     matchedStatements: result.MatchedStatements.length,
-    missingContextValues: result.MissingContextValues,
+    missingContextValues: scopedMissingContextValues,
     organizationsAllowed: result.OrganizationsDecisionDetail?.AllowedByOrganizations ?? null,
     permissionsBoundaryAllowed: result.PermissionsBoundaryDecisionDetail?.AllowedByPermissionsBoundary ?? null,
   });
@@ -936,7 +959,7 @@ export function runPermissionPreflight({
   phase = "plan-bound",
   policyEvidence,
   now = new Date().toISOString(),
-  simulate = ({ roleArn: sourceArn, evaluation: item }) => simulatePrincipalPolicy({ roleArn: sourceArn, evaluation: item }),
+  simulate = ({ roleArn: sourceArn, evaluation: item }) => simulatePrincipalPolicy({ roleArn: sourceArn, evaluation: item, conditionKeyOrigins: sourceArn === ECS_EXEC_OPERATOR_ROLE_ARN ? operatorPolicyConditionKeyOrigins() : sourcePolicyConditionKeyOrigins() }),
   discoverContextKeys = null,
   cloudTrail = ({ sessionName, startTime, endTime, requiredActions }) => inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions }),
   ecsExecVerifierEvidence,
