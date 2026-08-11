@@ -32,25 +32,28 @@ test("real image-reuse CLI treats report generation as a boolean option", () => 
   try {
     execFileSync("git", ["clone", "--no-local", root, worktree], { cwd: root, encoding: "utf8" });
     execFileSync("git", ["clone", "--bare", root, bareRemote], { cwd: root, encoding: "utf8" });
-    execFileSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: bareRemote, encoding: "utf8" });
-    execFileSync("git", ["update-ref", "refs/heads/main", toolingSha], { cwd: bareRemote, encoding: "utf8" });
-    execFileSync("git", ["remote", "set-url", "origin", bareRemote], { cwd: worktree, encoding: "utf8" });
-    fs.copyFileSync(path.join(worktree, compatibilityReport), reportPath);
+    const realWorktree = fs.realpathSync(worktree);
+    const realBareRemote = fs.realpathSync(bareRemote);
+    execFileSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: realBareRemote, encoding: "utf8" });
+    execFileSync("git", ["update-ref", "refs/heads/main", toolingSha], { cwd: realBareRemote, encoding: "utf8" });
+    execFileSync("git", ["remote", "set-url", "origin", realBareRemote], { cwd: realWorktree, encoding: "utf8" });
+    execFileSync("git", ["remote", "set-head", "origin", "main"], { cwd: realWorktree, encoding: "utf8" });
+    fs.copyFileSync(path.join(realWorktree, compatibilityReport), reportPath);
 
-    const generated = runCli(worktree, ["--mode", "production", imageReleaseSha, toolingSha, "--write-reviewed-report"], reportPath);
+    const generated = runCli(realWorktree, ["--mode", "production", imageReleaseSha, toolingSha, "--write-reviewed-report"], reportPath);
     assert.equal(generated.status, 0, generated.stderr);
     const generatedBytes = fs.readFileSync(reportPath, "utf8");
     assert.equal(JSON.parse(generatedBytes).comparisonHeadSha256.length, 64);
 
-    const validation = runCli(worktree, ["--mode", "production", imageReleaseSha, toolingSha], reportPath);
+    const validation = runCli(realWorktree, ["--mode", "production", imageReleaseSha, toolingSha], reportPath);
     assert.equal(validation.status, 0, validation.stderr);
     assert.equal(fs.readFileSync(reportPath, "utf8"), generatedBytes);
 
-    const unknown = runCli(worktree, ["--mode", "production", "--write-reviewd-report"], reportPath);
+    const unknown = runCli(realWorktree, ["--mode", "production", "--write-reviewd-report"], reportPath);
     assert.notEqual(unknown.status, 0);
     assert.match(unknown.stderr, /Unknown option/);
 
-    const malformed = runCli(worktree, ["--mode", "production", "not-a-sha"], reportPath);
+    const malformed = runCli(realWorktree, ["--mode", "production", "not-a-sha"], reportPath);
     assert.notEqual(malformed.status, 0);
     assert.match(malformed.stderr, /SHA positional is invalid/);
   } finally {
