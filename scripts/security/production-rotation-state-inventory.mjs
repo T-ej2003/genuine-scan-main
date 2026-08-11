@@ -26,7 +26,7 @@ export function executeProductionRotationInventory({ spawn = spawnSync, env = pr
   const role = String(env.ROTATION_INVENTORY_RLS_ROLE || "").trim();
   if (env.ROTATION_INVENTORY_APPROVED !== "true" || !ROLE_PATTERN.test(role)) throw new Error("read-only inventory requires ROTATION_INVENTORY_APPROVED=true and a reviewed RLS role");
   if (!env.DATABASE_URL) throw new Error("DATABASE_URL must be provided by the approved read-only runtime");
-  const result = spawn("psql", ["--no-psqlrc", "--tuples-only", "--no-align", "--command", buildRotationInventorySql(role)], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...env, PSQL_HISTORY: "/dev/null", PGAPPNAME: "mscqr-production-rotation-read-only-inventory" } });
+  const result = spawn("psql", [env.DATABASE_URL, "--no-psqlrc", "--tuples-only", "--no-align", "--command", buildRotationInventorySql(role)], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...env, PSQL_HISTORY: "/dev/null", PGAPPNAME: "mscqr-production-rotation-read-only-inventory" } });
   if (result.status !== 0) throw new Error("read-only rotation inventory query failed");
   try { return JSON.parse(String(result.stdout || "").trim()); } catch { throw new Error("read-only rotation inventory returned malformed metadata"); }
 }
