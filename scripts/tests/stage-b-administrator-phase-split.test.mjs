@@ -14,7 +14,7 @@ import {
   sourcePolicyEvidence,
 } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { parseStageBAdministratorPreflightArgs } from "../aws/stage-b-administrator-preflight-args.mjs";
-import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
+import { buildEcsExecOperatorEvidence, collectLiveEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 
 const root = process.cwd();
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"), "utf8"));
@@ -30,6 +30,18 @@ const simulation = ({ evaluation: item }) => ({
   missingContextValues: item.expectedDecision ? item.expectedMissingContextValues : [],
 });
 const clearCloudTrail = () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] });
+const collectLiveOperatorEvidenceFixture = () => {
+  const policy = JSON.parse(fs.readFileSync(path.join(root, "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json"), "utf8"));
+  const trust = JSON.parse(fs.readFileSync(path.join(root, "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_TRUST_POLICY.json"), "utf8"));
+  return collectLiveEcsExecOperatorEvidence({ run: (args) => {
+    if (args[1] === "get-role") return JSON.stringify({ Role: { Arn: ECS_EXEC_OPERATOR_ROLE_ARN, AssumeRolePolicyDocument: { ...trust, Statement: [{ ...trust.Statement[0], Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }] } } });
+    if (args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: [{ PolicyArn: ECS_EXEC_OPERATOR_POLICY_ARN }] });
+    if (args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: [] });
+    if (args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: ECS_EXEC_OPERATOR_POLICY_ARN, DefaultVersionId: "v1" } });
+    if (args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: policy } });
+    throw new Error(`unexpected IAM probe: ${args.join(" ")}`);
+  } });
+};
 
 test("initial capability evidence needs no plan approval and is not plan-bound", () => {
   const now = "2026-08-05T17:00:00.000Z";
@@ -45,7 +57,7 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
     phase: "initial",
     now,
     simulate: simulation,
-    ecsExecVerifierEvidence: buildEcsExecOperatorEvidence(),
+    ecsExecVerifierEvidence: collectLiveOperatorEvidenceFixture(),
     cloudTrail: clearCloudTrail,
   });
   assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");

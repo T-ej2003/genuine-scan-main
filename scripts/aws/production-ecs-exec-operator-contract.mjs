@@ -82,6 +82,12 @@ const sourceTrust = () => readJson(ECS_EXEC_OPERATOR_TRUST_POLICY_PATH);
 export const ECS_EXEC_OPERATOR_SOURCE_POLICY_SHA256 = sha256(sourcePolicy());
 export const ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256 = sha256(sourceTrust());
 
+export function normalizeMfaRequired(value) {
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  throw new Error("ECS Exec verifier MFA evidence must be the exact boolean or string true/false value.");
+}
+
 export function assertEcsExecOperatorTrustDocument(trust) {
   if (trust?.Version !== "2012-10-17" || !Array.isArray(trust.Statement) || trust.Statement.length !== 1) throw new Error("ECS Exec verifier trust policy must contain exactly one reviewed statement.");
   const statement = trust.Statement[0];
@@ -122,7 +128,7 @@ export function collectLiveEcsExecOperatorEvidence({ run = (args) => execFileSyn
   assertEcsExecOperatorTrustDocument(trust);
   const liveTrustCanonicalSha256 = sha256(trust);
   const liveCanonicalSha256 = sha256(decodeDocument(version?.Document));
-  const evidence = { roleArn: role?.Arn, sourceTrustCanonicalSha256: ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256, liveTrustCanonicalSha256, converged: liveTrustCanonicalSha256 === ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256, trustedPrincipal: trust.Statement[0].Principal.AWS, mfaRequired: trust.Statement[0].Condition.Bool["aws:MultiFactorAuthPresent"], policy: { policyArn: metadata?.Arn, defaultVersionId: metadata?.DefaultVersionId, sourceCanonicalSha256: ECS_EXEC_OPERATOR_SOURCE_POLICY_SHA256, liveCanonicalSha256, converged: liveCanonicalSha256 === ECS_EXEC_OPERATOR_SOURCE_POLICY_SHA256, attached: true, inline: false } };
+  const evidence = { roleArn: role?.Arn, sourceTrustCanonicalSha256: ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256, liveTrustCanonicalSha256, converged: liveTrustCanonicalSha256 === ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256, trustedPrincipal: trust.Statement[0].Principal.AWS, mfaRequired: normalizeMfaRequired(trust.Statement[0].Condition.Bool["aws:MultiFactorAuthPresent"]), policy: { policyArn: metadata?.Arn, defaultVersionId: metadata?.DefaultVersionId, sourceCanonicalSha256: ECS_EXEC_OPERATOR_SOURCE_POLICY_SHA256, liveCanonicalSha256, converged: liveCanonicalSha256 === ECS_EXEC_OPERATOR_SOURCE_POLICY_SHA256, attached: true, inline: false } };
   assertEcsExecOperatorLiveEvidence(evidence);
   return { ...evidence, status: "valid" };
 }
