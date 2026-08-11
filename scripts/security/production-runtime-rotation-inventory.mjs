@@ -4,12 +4,27 @@ export const ROTATION_INVENTORY_CATEGORIES = Object.freeze([
   "refreshSessions", "adminSessions", "customerSessions", "customerVerificationState", "activeInvites", "resetTokens", "emailVerification", "qrArtifacts", "printerTestQrArtifacts", "artifactRecords", "legacyComplianceArtifacts", "legacyImmutableAuditArtifacts", "oauthState", "oauthExchange", "printedQrCompatibility",
 ]);
 
+const ROTATION_METADATA_SHAPES = Object.freeze({
+  oauthState: Object.freeze({ persisted: "boolean", maxTtlSeconds: "integer" }),
+  oauthExchange: Object.freeze({ persisted: "boolean", maxTtlSeconds: "integer" }),
+  printedQrCompatibility: Object.freeze({ maxConfiguredTtlSeconds: "integer" }),
+});
+
 export function assertBoundedRotationInventory(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== [...ROTATION_INVENTORY_CATEGORIES].sort().join(",")) throw new Error("Rotation inventory categories are incomplete or unclassified.");
   for (const [name, entry] of Object.entries(value)) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`${name} inventory is malformed.`);
     if (entry.status === "NOT_APPLICABLE") {
       if (typeof entry.reason !== "string" || !entry.reason) throw new Error(`${name} not-applicable classification lacks a reason.`);
+      continue;
+    }
+    const metadataShape = ROTATION_METADATA_SHAPES[name];
+    if (metadataShape) {
+      if (Object.keys(entry).sort().join(",") !== Object.keys(metadataShape).sort().join(",")) throw new Error(`${name} inventory metadata is malformed.`);
+      for (const [key, type] of Object.entries(metadataShape)) {
+        if (type === "boolean" && typeof entry[key] !== "boolean") throw new Error(`${name}.${key} metadata is invalid.`);
+        if (type === "integer" && (!Number.isInteger(entry[key]) || entry[key] < 0)) throw new Error(`${name}.${key} metadata is invalid.`);
+      }
       continue;
     }
     if (!Number.isInteger(entry.count) || entry.count < 0) throw new Error(`${name} inventory count is invalid.`);

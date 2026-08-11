@@ -47,7 +47,11 @@ function artifactFixture() {
   return { bindings, readSecret: async (ref) => values[ref], evidenceRef: "artifact:rehearsal", evidenceSha256, provision: async () => ({ mutationCount: 1, mutationPayload: { targets: Object.values(bindings) } }) };
 }
 
-const inventory = Object.fromEntries(ROTATION_INVENTORY_CATEGORIES.map((name) => [name, { count: 0 }]));
+const inventory = Object.fromEntries(ROTATION_INVENTORY_CATEGORIES.map((name) => [name,
+  name === "oauthState" ? { persisted: false, maxTtlSeconds: 900 }
+    : name === "oauthExchange" ? { persisted: false, maxTtlSeconds: 600 }
+      : name === "printedQrCompatibility" ? { maxConfiguredTtlSeconds: 31536000 }
+        : { count: 0 }]));
 const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/rehearsal";
 const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1";
 
