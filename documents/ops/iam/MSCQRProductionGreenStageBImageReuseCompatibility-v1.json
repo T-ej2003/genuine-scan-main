@@ -4,12 +4,12 @@
   "imageReleaseSha": "c45f2d788ce29c2067bfb4e8afff46f8b1c238ea",
   "comparisonBaseSha": "c45f2d788ce29c2067bfb4e8afff46f8b1c238ea",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
-  "comparisonHeadSha256": "e53a86c403cbc99dea6714262d2eead36d732fa3a6c49c4e71e6b5ed40176107",
-  "toolingInputTreeSha256": "e53a86c403cbc99dea6714262d2eead36d732fa3a6c49c4e71e6b5ed40176107",
+  "comparisonHeadSha256": "83c74278063da0e04f6af8fcc892a07961126361f0b5c79d1aaab9cfba6eb485",
+  "toolingInputTreeSha256": "83c74278063da0e04f6af8fcc892a07961126361f0b5c79d1aaab9cfba6eb485",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
   "classificationRulesVersion": "stage-b-image-reuse-v2",
-  "generatedAt": "2026-08-11T22:43:04+01:00",
+  "generatedAt": "2026-08-11T22:52:50+01:00",
   "generatorVersion": "validate-stage-b-image-reuse@2",
   "classifiedChangedFiles": [
     {
@@ -25,6 +25,11 @@
     {
       "file": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
       "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "package.json",
+      "category": "toolingOnly",
       "imageAffecting": false
     },
     {
