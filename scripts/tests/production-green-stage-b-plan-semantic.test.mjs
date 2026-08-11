@@ -122,13 +122,14 @@ function configuration() {
       memory: ref(["each.value.memory", "each.value"]),
       network_mode: ref(["each.value.networkMode", "each.value"]),
       requires_compatibilities: ref(["each.value.requiresCompatibilities", "each.value"]),
-      tags: ref(["local.tags"]),
+      tags: ref(["each.key", "local.backend_exec_tags", "local.tags"]),
       task_role_arn: ref(["aws_iam_role.task", "each.key"]),
     },
   };
   const executor = structuredClone(candidate);
   executor.address = "aws_ecs_task_definition.executor";
   executor.for_each_expression = ref(["local.executor_definitions_for_resources"]);
+  executor.expressions.tags = ref(["local.tags"]);
   executor.expressions.execution_role_arn = ref(["aws_iam_role.execution[\"executor\"].arn", "aws_iam_role.execution[\"executor\"]", "aws_iam_role.execution"]);
   executor.expressions.task_role_arn = ref(["var.stage_a_executor_task_role_arn"]);
   return {
@@ -571,7 +572,7 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
   assert.deepEqual(census.counts, {
     nonNoopResources: 15,
     resourceActions: 15,
-    changedPaths: 386,
+    changedPaths: 387,
     afterUnknownPaths: 93,
     replacePaths: 0,
     configurationReferences: 117,

@@ -598,6 +598,7 @@ jobs:
           VERSION_URL: ${{ env.PUBLIC_BASE_URL }}/api/health
           EXPECTED_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           ENABLE_EXECUTE_COMMAND: "true"
+          PROPAGATE_TAGS: "TASK_DEFINITION"
           WAIT_FOR_STABLE: "true"
           METADATA_FILE: ${{ runner.temp }}/rotation-transition-backend.json
         run: |

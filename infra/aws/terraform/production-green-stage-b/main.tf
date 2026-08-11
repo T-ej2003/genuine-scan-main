@@ -4,6 +4,7 @@ locals {
     ManagedBy   = "Terraform"
     Component   = "full-rls-green-stage-b"
   }
+  backend_exec_tags = merge(local.tags, { MSCQRExecTarget = "production-backend" })
   confirmations = {
     full-rls-capability-preflight = ""
     full-rls-admin-bootstrap      = "MSCQR_PRODUCTION_GREEN_CREATE_AND_BOOTSTRAP_DATABASE"
@@ -434,7 +435,7 @@ resource "aws_ecs_task_definition" "candidate" {
     operating_system_family = "LINUX"
     cpu_architecture        = "X86_64"
   }
-  tags = local.tags
+  tags = each.key == "backend" ? local.backend_exec_tags : local.tags
 }
 
 resource "aws_ecs_task_definition" "executor" {

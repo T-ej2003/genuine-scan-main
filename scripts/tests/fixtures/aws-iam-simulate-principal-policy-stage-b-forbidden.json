@@ -24,6 +24,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -54,6 +55,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -84,6 +86,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -218,6 +221,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -248,6 +252,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -278,6 +283,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -334,6 +340,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -364,6 +371,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -394,6 +402,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -424,6 +433,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -454,6 +464,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -484,6 +495,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -514,6 +526,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -543,6 +556,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -572,6 +586,7 @@
               "ecs:task-memory",
               "ecs:task-definition",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:RequestTag/Environment",
               "aws:TagKeys",
               "aws:ResourceTag/Environment"
@@ -593,6 +608,7 @@
               "aws:RequestTag/Component",
               "aws:RequestTag/Environment",
               "aws:RequestTag/ManagedBy",
+              "aws:RequestTag/MSCQRExecTarget",
               "aws:ResourceTag/Component",
               "aws:ResourceTag/Environment",
               "aws:ResourceTag/ManagedBy",

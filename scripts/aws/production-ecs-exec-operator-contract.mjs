@@ -14,6 +14,8 @@ export const ECS_EXEC_OPERATOR_POLICY_PATH = "documents/ops/iam/MSCQR_PRODUCTION
 export const ECS_EXEC_OPERATOR_TRUST_POLICY_PATH = "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_TRUST_POLICY.json";
 export const ECS_EXEC_OPERATOR_ROLE_CONTRACT_PATH = "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_ROLE.json";
 export const ECS_EXEC_OPERATOR_MANIFEST_KEY = "ecsExecVerifier";
+export const ECS_EXEC_OPERATOR_TASK_TAG_KEY = "MSCQRExecTarget";
+export const ECS_EXEC_OPERATOR_TASK_TAG_VALUE = "production-backend";
 
 const clusterArn = `arn:aws:ecs:${REGION}:${ACCOUNT}:cluster/mscqr-prod-euw2-main`;
 const taskArn = `arn:aws:ecs:${REGION}:${ACCOUNT}:task/mscqr-prod-euw2-main/*`;
@@ -28,8 +30,9 @@ const executeContext = context([
   { key: "aws:RequestedRegion", values: [REGION] },
   { key: "ecs:cluster", values: [clusterArn] },
   { key: "ecs:container-name", values: ["backend"] },
+  { key: `aws:ResourceTag/${ECS_EXEC_OPERATOR_TASK_TAG_KEY}`, values: [ECS_EXEC_OPERATOR_TASK_TAG_VALUE] },
 ]);
-const forbidden = (id, action, resource, evaluationContext = []) => ({ id, action, resources: [resource], context: evaluationContext, expectedDecision: "implicitDeny", expectedMissingContextValues: [] });
+const forbidden = (id, action, resource, evaluationContext = [], expectedMissingContextValues = []) => ({ id, action, resources: [resource], context: evaluationContext, expectedDecision: "implicitDeny", expectedMissingContextValues });
 
 export const ECS_EXEC_OPERATOR_REQUIRED = Object.freeze([
   { id: "operator-execute-production-backend", action: "ecs:ExecuteCommand", resources: [taskArn], context: executeContext },
@@ -41,18 +44,40 @@ export const ECS_EXEC_OPERATOR_REQUIRED = Object.freeze([
 ]);
 
 export const ECS_EXEC_OPERATOR_FORBIDDEN = Object.freeze([
-  forbidden("operator-unrelated-task", "ecs:ExecuteCommand", `arn:aws:ecs:${REGION}:${ACCOUNT}:task/mscqr-prod-euw2-main/unrelated`, executeContext),
+  forbidden("operator-unrelated-task", "ecs:ExecuteCommand", `arn:aws:ecs:${REGION}:${ACCOUNT}:task/mscqr-prod-euw2-main/unrelated`, context([
+    { key: "aws:RequestedRegion", values: [REGION] },
+    { key: "ecs:cluster", values: [clusterArn] },
+    { key: "ecs:container-name", values: ["backend"] },
+    { key: `aws:ResourceTag/${ECS_EXEC_OPERATOR_TASK_TAG_KEY}`, values: ["unapproved"] },
+  ])),
   forbidden("operator-unrelated-cluster", "ecs:ExecuteCommand", `arn:aws:ecs:${REGION}:${ACCOUNT}:task/unrelated-cluster/unrelated`, context([
     { key: "aws:RequestedRegion", values: [REGION] },
     { key: "ecs:cluster", values: [`arn:aws:ecs:${REGION}:${ACCOUNT}:cluster/unrelated`] },
     { key: "ecs:container-name", values: ["backend"] },
+    { key: `aws:ResourceTag/${ECS_EXEC_OPERATOR_TASK_TAG_KEY}`, values: [ECS_EXEC_OPERATOR_TASK_TAG_VALUE] },
   ])),
   forbidden("operator-wrong-region", "ecs:ExecuteCommand", taskArn, context([
     { key: "aws:RequestedRegion", values: ["us-east-1"] },
     { key: "ecs:cluster", values: [clusterArn] },
     { key: "ecs:container-name", values: ["backend"] },
+    { key: `aws:ResourceTag/${ECS_EXEC_OPERATOR_TASK_TAG_KEY}`, values: [ECS_EXEC_OPERATOR_TASK_TAG_VALUE] },
   ])),
   forbidden("operator-unrelated-account", "ecs:ExecuteCommand", "arn:aws:ecs:eu-west-2:000000000000:task/mscqr-prod-euw2-main/unrelated", executeContext),
+  forbidden("operator-worker-task", "ecs:ExecuteCommand", `arn:aws:ecs:${REGION}:${ACCOUNT}:task/mscqr-prod-euw2-main/worker`, context([
+    { key: "aws:RequestedRegion", values: [REGION] }, { key: "ecs:cluster", values: [clusterArn] }, { key: "ecs:container-name", values: ["worker"] }, { key: `aws:ResourceTag/${ECS_EXEC_OPERATOR_TASK_TAG_KEY}`, values: ["worker"] },
+  ])),
+  forbidden("operator-rls-executor-task", "ecs:ExecuteCommand", `arn:aws:ecs:${REGION}:${ACCOUNT}:task/mscqr-prod-euw2-main/rls-executor`, context([
+    { key: "aws:RequestedRegion", values: [REGION] }, { key: "ecs:cluster", values: [clusterArn] }, { key: "ecs:container-name", values: ["executor"] }, { key: `aws:ResourceTag/${ECS_EXEC_OPERATOR_TASK_TAG_KEY}`, values: ["rls-executor"] },
+  ])),
+  forbidden("operator-rls-canary-task", "ecs:ExecuteCommand", `arn:aws:ecs:${REGION}:${ACCOUNT}:task/mscqr-prod-euw2-main/rls-canary`, context([
+    { key: "aws:RequestedRegion", values: [REGION] }, { key: "ecs:cluster", values: [clusterArn] }, { key: "ecs:container-name", values: ["canary"] }, { key: `aws:ResourceTag/${ECS_EXEC_OPERATOR_TASK_TAG_KEY}`, values: ["rls-canary"] },
+  ])),
+  forbidden("operator-wrong-container", "ecs:ExecuteCommand", taskArn, context([
+    { key: "aws:RequestedRegion", values: [REGION] }, { key: "ecs:cluster", values: [clusterArn] }, { key: "ecs:container-name", values: ["worker"] }, { key: `aws:ResourceTag/${ECS_EXEC_OPERATOR_TASK_TAG_KEY}`, values: [ECS_EXEC_OPERATOR_TASK_TAG_VALUE] },
+  ])),
+  forbidden("operator-missing-identity-marker", "ecs:ExecuteCommand", taskArn, context([
+    { key: "aws:RequestedRegion", values: [REGION] }, { key: "ecs:cluster", values: [clusterArn] }, { key: "ecs:container-name", values: ["backend"] },
+  ]), [`aws:ResourceTag/${ECS_EXEC_OPERATOR_TASK_TAG_KEY}`]),
   forbidden("operator-list-unrelated-cluster", "ecs:ListTasks", "*", context([
     { key: "aws:RequestedRegion", values: [REGION] },
     { key: "ecs:cluster", values: [`arn:aws:ecs:${REGION}:${ACCOUNT}:cluster/unrelated`] },
@@ -157,6 +182,8 @@ export function assertEcsExecOperatorSourceContract(manifest) {
   if (actions.includes("ecs:RunTask") || actions.includes("ecs:StopTask") || actions.includes("iam:CreateRole")) throw new Error("ECS Exec operator policy contains unrelated mutation permissions.");
   const listTasks = policy.Statement.find((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("ecs:ListTasks"));
   if (listTasks?.Resource !== "*" || listTasks.Condition?.StringEquals?.["aws:RequestedRegion"] !== REGION || listTasks.Condition?.StringEquals?.["ecs:cluster"] !== clusterArn) throw new Error("ECS Exec verifier ListTasks policy must use Resource * with exact region and cluster conditions.");
+  const execute = policy.Statement.find((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("ecs:ExecuteCommand"));
+  if (execute?.Resource !== taskArn || execute.Condition?.StringEquals?.["aws:RequestedRegion"] !== REGION || execute.Condition?.StringEquals?.["ecs:cluster"] !== clusterArn || execute.Condition?.StringEquals?.["ecs:container-name"] !== "backend" || execute.Condition?.StringEquals?.[`aws:ResourceTag/${ECS_EXEC_OPERATOR_TASK_TAG_KEY}`] !== ECS_EXEC_OPERATOR_TASK_TAG_VALUE) throw new Error("ECS Exec verifier ExecuteCommand policy must bind the exact reviewed backend task tag, cluster, region, and container.");
   const role = readJson(ECS_EXEC_OPERATOR_ROLE_CONTRACT_PATH);
   if (role.roleArn !== ECS_EXEC_OPERATOR_ROLE_ARN || role.managedPolicyArn !== ECS_EXEC_OPERATOR_POLICY_ARN || JSON.stringify(role.deploymentPermissions || []) !== "[]") throw new Error("ECS Exec verifier role contract is not bound to the exact reviewed policy and zero deployment permissions.");
   const trust = readJson(ECS_EXEC_OPERATOR_TRUST_POLICY_PATH);
@@ -170,12 +197,13 @@ export function assertEcsExecOperatorEvidence(report) {
   assertEcsExecOperatorLiveEvidence(report.ecsExecVerifierTrust);
   const required = new Map((entry.requiredEvaluations || []).map((item) => [item.manifestId, item]));
   const execute = required.get("operator-execute-production-backend");
-  if (!execute || execute.action !== "ecs:ExecuteCommand" || execute.decision !== "allowed") throw new Error("ECS Exec operator ExecuteCommand evidence is missing.");
+  if (!execute || execute.action !== "ecs:ExecuteCommand" || execute.resource !== taskArn || execute.decision !== "allowed" || !execute.context?.some(({ key, values }) => key === `aws:ResourceTag/${ECS_EXEC_OPERATOR_TASK_TAG_KEY}` && JSON.stringify(values) === JSON.stringify([ECS_EXEC_OPERATOR_TASK_TAG_VALUE]))) throw new Error("ECS Exec operator ExecuteCommand evidence is missing or does not bind the approved backend identity marker.");
   const listTasks = required.get("operator-list-production-backend-tasks");
   if (!listTasks || listTasks.action !== "ecs:ListTasks" || listTasks.resource !== "*" || listTasks.decision !== "allowed") throw new Error("ECS Exec operator ListTasks evidence is missing or uses the wrong IAM resource shape.");
-  for (const id of ["operator-list-unrelated-cluster", "operator-list-wrong-region"]) {
+  for (const id of ["operator-unrelated-task", "operator-unrelated-cluster", "operator-wrong-region", "operator-worker-task", "operator-rls-executor-task", "operator-rls-canary-task", "operator-wrong-container", "operator-missing-identity-marker", "operator-list-unrelated-cluster", "operator-list-wrong-region"]) {
     const denied = (entry.forbiddenEvaluations || []).find((item) => item.manifestId === id);
-    if (!denied || denied.resource !== "*" || !["implicitDeny", "explicitDeny"].includes(denied.decision)) throw new Error(`ECS Exec operator negative evidence is missing: ${id}.`);
+    const expected = ECS_EXEC_OPERATOR_FORBIDDEN.find((item) => item.id === id);
+    if (!denied || denied.resource !== expected?.resources?.[0] || !["implicitDeny", "explicitDeny"].includes(denied.decision)) throw new Error(`ECS Exec operator negative evidence is missing: ${id}.`);
   }
   return true;
 }

@@ -27,3 +27,19 @@ invalid unless the exact Stage-A ingress, deployment, rollback, PassRole, releas
 deny, and verifier ECS Exec allow evidence are all present. It also records live trust-policy and
 operator-policy canonical hashes; simulation evidence alone is insufficient. The ListTasks proof
 uses Resource `*` with exact production cluster and region conditions, matching AWS IAM semantics.
+
+## Approved backend task identity
+
+The verifier policy requires the task resource tag
+`MSCQRExecTarget=production-backend`. Terraform applies that tag only to the backend candidate
+task definition, and the governed rotation service switch sets `propagateTags=TASK_DEFINITION`.
+The verifier requests task tags, requires the exact marker, and revalidates the same task ARN
+immediately before `ecs:ExecuteCommand`. Worker, RLS executor, RLS canary, wrong-container,
+missing-marker, unhealthy, and ambiguous targets fail closed. This marker is the stable boundary
+across ECS task replacement; an individual task ARN is never hard-coded.
+
+The release-deployer may set this marker only during the reviewed backend
+`RegisterTaskDefinition` request. Its separate `ecs:TagResource` authority is
+limited to the standard Terraform tags and cannot add or change
+`MSCQRExecTarget`; the verifier role has no tagging authority. Non-backend
+task-definition registration statements exclude the marker entirely.

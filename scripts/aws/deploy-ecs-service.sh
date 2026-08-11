@@ -22,6 +22,8 @@ Optional environment:
   DRY_RUN           Default: false. When true, prints the register payload only.
   ENABLE_EXECUTE_COMMAND
                     Default: false. When true, the canonical service update enables ECS Exec.
+  PROPAGATE_TAGS     Optional. Existing-task-definition mode accepts only TASK_DEFINITION;
+                    used by governed rotation to propagate the reviewed task identity tag.
   METADATA_FILE     Optional path to write deployment metadata JSON.
   VERSION_URL       Backend /version URL for post-deploy verification.
   EXPECTED_GIT_SHA  Full expected git SHA for VERSION_URL verification and runtime RELEASE_GIT_SHA.
@@ -98,6 +100,15 @@ done
 
 if [[ -n "$EXISTING_TASK_DEFINITION_ARN" && -n "${IMAGE_URI:-}" ]]; then
   echo "IMAGE_URI must not be supplied in existing task-definition mode." >&2
+  exit 1
+fi
+
+if [[ -n "${PROPAGATE_TAGS:-}" && "${PROPAGATE_TAGS}" != "TASK_DEFINITION" ]]; then
+  echo "PROPAGATE_TAGS must be TASK_DEFINITION when provided." >&2
+  exit 1
+fi
+if [[ -n "${PROPAGATE_TAGS:-}" && -z "$EXISTING_TASK_DEFINITION_ARN" ]]; then
+  echo "PROPAGATE_TAGS is supported only in existing task-definition mode." >&2
   exit 1
 fi
 
@@ -414,11 +425,19 @@ if [[ -n "$EXISTING_TASK_DEFINITION_ARN" ]]; then
 
   validate_service_load_balancer_compatibility "$EXISTING_SERVICE_FILE" "$RAW_FILE"
 
-  CURRENT_EXECUTE_COMMAND_ENABLED="$(node --input-type=module - "$EXISTING_SERVICE_FILE" <<'NODE'
+CURRENT_EXECUTE_COMMAND_ENABLED="$(node --input-type=module - "$EXISTING_SERVICE_FILE" <<'NODE'
 import fs from "node:fs";
 const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 if (!Array.isArray(response.failures) || response.failures.length !== 0 || response.services?.length !== 1) throw new Error("ECS service response is malformed.");
 process.stdout.write(response.services[0].enableExecuteCommand === true ? "true" : "false");
+NODE
+)"
+
+CURRENT_PROPAGATE_TAGS="$(node --input-type=module - "$EXISTING_SERVICE_FILE" <<'NODE'
+import fs from "node:fs";
+const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!Array.isArray(response.failures) || response.failures.length !== 0 || response.services?.length !== 1) throw new Error("ECS service response is malformed.");
+process.stdout.write(response.services[0].propagateTags || "");
 NODE
 )"
 
@@ -474,7 +493,7 @@ process.stdout.write(expectedCurrentArn);
 NODE
   )"
 
-  if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" || ( "$ENABLE_EXECUTE_COMMAND" == "true" && "$CURRENT_EXECUTE_COMMAND_ENABLED" != "true" ) ]]; then
+  if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" || ( "$ENABLE_EXECUTE_COMMAND" == "true" && "$CURRENT_EXECUTE_COMMAND_ENABLED" != "true" ) || ( "$PROPAGATE_TAGS" == "TASK_DEFINITION" && "$CURRENT_PROPAGATE_TAGS" != "TASK_DEFINITION" ) ]]; then
     update_attempted=true
     update_state="UPDATE_ATTEMPTED"
     update_args=(aws ecs update-service \
@@ -764,6 +783,7 @@ update_args=(aws ecs update-service \
   --service "$SERVICE_NAME" \
   --task-definition "$NEW_TASK_DEFINITION_ARN")
 if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then update_args+=(--enable-execute-command); fi
+if [[ -n "${PROPAGATE_TAGS:-}" ]]; then update_args+=(--propagate-tags "$PROPAGATE_TAGS"); fi
 "${update_args[@]}" >/dev/null
 
 if [[ -n "${METADATA_FILE:-}" ]]; then
@@ -803,6 +823,18 @@ const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 if (!Array.isArray(response.failures) || response.failures.length !== 0 || response.services?.length !== 1 || response.services[0].enableExecuteCommand !== true) {
   throw new Error("Post-switch service does not have ECS Exec enabled.");
 }
+NODE
+fi
+if [[ -n "${PROPAGATE_TAGS:-}" ]]; then
+  aws ecs describe-services \
+    --region "$AWS_REGION" \
+    --cluster "$CLUSTER_NAME" \
+    --services "$SERVICE_NAME" \
+    >"$EXISTING_POST_SERVICE_FILE"
+  node --input-type=module - "$EXISTING_POST_SERVICE_FILE" <<'NODE'
+import fs from "node:fs";
+const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (response.services?.[0]?.propagateTags !== "TASK_DEFINITION") throw new Error("Post-switch service does not propagate task-definition tags.");
 NODE
 fi
 

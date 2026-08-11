@@ -64,6 +64,7 @@ const BROKER_MANAGED_POLICY_ARN = STAGE_B_BROKER_POLICY.arn;
 const BROKER_MANAGED_POLICY_NAME = STAGE_B_BROKER_POLICY.name;
 const BROKER_POLICY_STATEMENTS = STAGE_B_BROKER_POLICY_STATEMENTS;
 const TASK_DEFINITION_TAGS = Object.freeze({ Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" });
+const BACKEND_TASK_DEFINITION_TAGS = Object.freeze({ ...TASK_DEFINITION_TAGS, MSCQRExecTarget: "production-backend" });
 const TASK_DEFINITION_MAPPINGS = Object.freeze([
   ["backend", 'aws_ecs_task_definition.candidate["backend"]', "mscqr-production-rls-green-backend-candidate", "mscqr-production-rls-green-backend-execution", "mscqr-production-rls-green-backend-task", "1024", "2048"],
   ["worker", 'aws_ecs_task_definition.candidate["worker"]', "mscqr-production-rls-green-worker-candidate", "mscqr-production-rls-green-worker-execution", "mscqr-production-rls-green-worker-task", "512", "1024"],
@@ -79,18 +80,21 @@ const TASK_DEFINITION_MAPPINGS = Object.freeze([
   ["full-rls-verification", 'aws_ecs_task_definition.executor["full-rls-verification"]', "mscqr-production-full-rls-green-full-rls-verification", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
 ].map(([id, address, family, executionRoleName, taskRoleName, cpu, memory]) => Object.freeze({ id, address, family, cpu, memory, resource: `arn:aws:ecs:${REGION}:${ACCOUNT}:task-definition/${family}:*`, executionRoleArn: `arn:aws:iam::${ACCOUNT}:role/${executionRoleName}`, taskRoleArn: `arn:aws:iam::${ACCOUNT}:role/${taskRoleName}` })));
 
-const taskDefinitionRegisterContext = ({ cpu, memory }) => [
+const taskDefinitionRegisterContext = ({ id, cpu, memory }) => [
   { key: "aws:RequestTag/Component", type: "string", values: [TASK_DEFINITION_TAGS.Component] },
   { key: "aws:RequestTag/Environment", type: "string", values: [TASK_DEFINITION_TAGS.Environment] },
   { key: "aws:RequestTag/ManagedBy", type: "string", values: [TASK_DEFINITION_TAGS.ManagedBy] },
+  ...(id === "backend" ? [{ key: "aws:RequestTag/MSCQRExecTarget", type: "string", values: [BACKEND_TASK_DEFINITION_TAGS.MSCQRExecTarget] }] : []),
   { key: "aws:RequestedRegion", type: "string", values: [REGION] },
-  { key: "aws:TagKeys", type: "stringList", values: Object.keys(TASK_DEFINITION_TAGS) },
+  { key: "aws:TagKeys", type: "stringList", values: Object.keys(id === "backend" ? BACKEND_TASK_DEFINITION_TAGS : TASK_DEFINITION_TAGS) },
   { key: "ecs:compute-compatibility", type: "stringList", values: ["FARGATE"] },
   { key: "ecs:privileged", type: "string", values: ["false"] },
   { key: "ecs:task-cpu", type: "numeric", values: [cpu] },
   { key: "ecs:task-memory", type: "numeric", values: [memory] },
 ];
-const taskDefinitionTagContext = (context) => context.filter(({ key }) => !["ecs:task-cpu", "ecs:task-memory"].includes(key));
+const taskDefinitionTagContext = (context) => context
+  .filter(({ key }) => !["ecs:task-cpu", "ecs:task-memory", "aws:RequestTag/MSCQRExecTarget"].includes(key))
+  .map((entry) => entry.key === "aws:TagKeys" ? { ...entry, values: Object.keys(TASK_DEFINITION_TAGS) } : entry);
 const stageBRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const arnPattern = /^(?:arn:aws:[^:]+:[^:]*:368992683803:.+|arn:aws:s3:::[^/]+(?:\/.*)?)$/;
 
@@ -320,6 +324,7 @@ export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
   { key: "aws:RequestTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-b"]) },
   { key: "aws:RequestTag/Environment", type: "string", values: Object.freeze(["production"]) },
   { key: "aws:RequestTag/ManagedBy", type: "string", values: Object.freeze(["Terraform"]) },
+  { key: "aws:RequestTag/MSCQRExecTarget", type: "string", values: Object.freeze(["production-backend"]) },
   { key: "aws:RequestedRegion", type: "string", values: Object.freeze([REGION]) },
   { key: "aws:ResourceTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-b"]) },
   { key: "aws:ResourceTag/Environment", type: "string", values: Object.freeze(["production"]) },
@@ -645,7 +650,7 @@ function contextFromTaskDefinitionPlan(change, manifestMapping) {
   if (!after || after.family !== mapping.family || String(after.cpu) !== mapping.cpu || String(after.memory) !== mapping.memory
     || JSON.stringify(after.requires_compatibilities) !== JSON.stringify(["FARGATE"])
     || after.execution_role_arn !== mapping.executionRoleArn || after.task_role_arn !== mapping.taskRoleArn
-    || canonicalizeJson(after.tags) !== canonicalizeJson(TASK_DEFINITION_TAGS)) {
+    || canonicalizeJson(after.tags) !== canonicalizeJson(mapping.id === "backend" ? BACKEND_TASK_DEFINITION_TAGS : TASK_DEFINITION_TAGS)) {
     throw new Error(`${change.address} task-definition registration context does not match the reviewed family contract.`);
   }
   let containers;

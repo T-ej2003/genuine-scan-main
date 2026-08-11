@@ -141,7 +141,7 @@ const taskDefinitionAfter = (mapping) => ({
   requires_compatibilities: [contextValue(mapping, "ecs:compute-compatibility")],
   execution_role_arn: mapping.executionRoleArn,
   task_role_arn: mapping.taskRoleArn,
-  tags: { Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" },
+  tags: mapping.id === "backend" ? { Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform", MSCQRExecTarget: "production-backend" } : { Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" },
   container_definitions: JSON.stringify([{ name: mapping.id, privileged: false }]),
 });
 
@@ -241,8 +241,8 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.length, 12);
   assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 12);
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
-  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 15);
-  assert.equal(assertReviewedSimulationContextRegistry().length, 15);
+  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 16);
+  assert.equal(assertReviewedSimulationContextRegistry().length, 16);
   assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0 && !values.includes("*")));
 });
 

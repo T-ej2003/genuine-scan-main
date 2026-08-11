@@ -2818,7 +2818,7 @@
         "sid": "DescribeProductionBackendService",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
+        "expectedPolicySha256": "a6db269342dc31544c8d60247b2185a292a7d07593f5d7d44e9024cdb283536a"
       },
       "required": true,
       "mutation": false
@@ -2851,7 +2851,7 @@
         "sid": "DescribeProductionBackendTasks",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
+        "expectedPolicySha256": "a6db269342dc31544c8d60247b2185a292a7d07593f5d7d44e9024cdb283536a"
       },
       "required": true,
       "mutation": false
@@ -2884,7 +2884,7 @@
         "sid": "DescribeProductionCluster",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
+        "expectedPolicySha256": "a6db269342dc31544c8d60247b2185a292a7d07593f5d7d44e9024cdb283536a"
       },
       "required": true,
       "mutation": false
@@ -2917,7 +2917,7 @@
         "sid": "ReadTaskDefinitionIdentity",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
+        "expectedPolicySha256": "a6db269342dc31544c8d60247b2185a292a7d07593f5d7d44e9024cdb283536a"
       },
       "required": true,
       "mutation": false
@@ -2954,6 +2954,13 @@
           "values": [
             "backend"
           ]
+        },
+        {
+          "key": "aws:ResourceTag/MSCQRExecTarget",
+          "type": "string",
+          "values": [
+            "production-backend"
+          ]
         }
       ],
       "classification": "RUNTIME_VERIFICATION_MUTATION",
@@ -2964,7 +2971,7 @@
         "sid": "ExecuteOnlyProductionBackendTasks",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
+        "expectedPolicySha256": "a6db269342dc31544c8d60247b2185a292a7d07593f5d7d44e9024cdb283536a"
       },
       "required": true,
       "mutation": true
@@ -3004,7 +3011,7 @@
         "sid": "ListOnlyProductionBackendTasks",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/mscqr-production-ecs-exec-verifier",
         "expectedVersion": "administrator-provisioned",
-        "expectedPolicySha256": "9fb2188508349f0ee2b8b7904e996d5c69a932799ada3063b974cc665a468f51"
+        "expectedPolicySha256": "a6db269342dc31544c8d60247b2185a292a7d07593f5d7d44e9024cdb283536a"
       },
       "required": true,
       "mutation": false
@@ -3073,6 +3080,53 @@
           "type": "string",
           "values": [
             "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "operator-operator-missing-identity-marker",
+      "phase": "runtime-verification",
+      "identity": "ECS_EXEC_VERIFIER_OPERATOR",
+      "executor": "ecs-exec-verifier",
+      "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
+      "sourceFunction": "operator-missing-identity-marker",
+      "action": "ecs:ExecuteCommand",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        },
+        {
+          "key": "ecs:container-name",
+          "type": "string",
+          "values": [
+            "backend"
           ]
         }
       ],
@@ -3189,6 +3243,114 @@
       "mutation": true
     },
     {
+      "id": "operator-operator-rls-canary-task",
+      "phase": "runtime-verification",
+      "identity": "ECS_EXEC_VERIFIER_OPERATOR",
+      "executor": "ecs-exec-verifier",
+      "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
+      "sourceFunction": "operator-rls-canary-task",
+      "action": "ecs:ExecuteCommand",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/rls-canary"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        },
+        {
+          "key": "ecs:container-name",
+          "type": "string",
+          "values": [
+            "canary"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/MSCQRExecTarget",
+          "type": "string",
+          "values": [
+            "rls-canary"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "operator-operator-rls-executor-task",
+      "phase": "runtime-verification",
+      "identity": "ECS_EXEC_VERIFIER_OPERATOR",
+      "executor": "ecs-exec-verifier",
+      "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
+      "sourceFunction": "operator-rls-executor-task",
+      "action": "ecs:ExecuteCommand",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/rls-executor"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        },
+        {
+          "key": "ecs:container-name",
+          "type": "string",
+          "values": [
+            "executor"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/MSCQRExecTarget",
+          "type": "string",
+          "values": [
+            "rls-executor"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "operator-operator-start-session",
       "phase": "runtime-verification",
       "identity": "ECS_EXEC_VERIFIER_OPERATOR",
@@ -3253,6 +3415,13 @@
           "values": [
             "backend"
           ]
+        },
+        {
+          "key": "aws:ResourceTag/MSCQRExecTarget",
+          "type": "string",
+          "values": [
+            "production-backend"
+          ]
         }
       ],
       "classification": "FORBIDDEN",
@@ -3300,6 +3469,13 @@
           "values": [
             "backend"
           ]
+        },
+        {
+          "key": "aws:ResourceTag/MSCQRExecTarget",
+          "type": "string",
+          "values": [
+            "production-backend"
+          ]
         }
       ],
       "classification": "FORBIDDEN",
@@ -3346,6 +3522,13 @@
           "type": "string",
           "values": [
             "backend"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/MSCQRExecTarget",
+          "type": "string",
+          "values": [
+            "unapproved"
           ]
         }
       ],
@@ -3403,6 +3586,114 @@
       "mutation": true
     },
     {
+      "id": "operator-operator-worker-task",
+      "phase": "runtime-verification",
+      "identity": "ECS_EXEC_VERIFIER_OPERATOR",
+      "executor": "ecs-exec-verifier",
+      "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
+      "sourceFunction": "operator-worker-task",
+      "action": "ecs:ExecuteCommand",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/worker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        },
+        {
+          "key": "ecs:container-name",
+          "type": "string",
+          "values": [
+            "worker"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/MSCQRExecTarget",
+          "type": "string",
+          "values": [
+            "worker"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "operator-operator-wrong-container",
+      "phase": "runtime-verification",
+      "identity": "ECS_EXEC_VERIFIER_OPERATOR",
+      "executor": "ecs-exec-verifier",
+      "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
+      "sourceFunction": "operator-wrong-container",
+      "action": "ecs:ExecuteCommand",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        },
+        {
+          "key": "ecs:container-name",
+          "type": "string",
+          "values": [
+            "worker"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/MSCQRExecTarget",
+          "type": "string",
+          "values": [
+            "production-backend"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "operator-operator-wrong-region",
       "phase": "runtime-verification",
       "identity": "ECS_EXEC_VERIFIER_OPERATOR",
@@ -3433,6 +3724,13 @@
           "type": "string",
           "values": [
             "backend"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/MSCQRExecTarget",
+          "type": "string",
+          "values": [
+            "production-backend"
           ]
         }
       ],

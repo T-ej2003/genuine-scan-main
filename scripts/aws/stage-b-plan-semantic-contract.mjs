@@ -55,7 +55,7 @@ const ECS_INITIAL_CREATE_PATHS = new Set([
   "placement_constraints", "proxy_configuration", "region", "requires_compatibilities",
   "requires_compatibilities[0]", "runtime_platform[0].operating_system_family",
   "runtime_platform[0].cpu_architecture", "skip_destroy", "task_role_arn", "track_latest",
-  "tags.Component", "tags.Environment", "tags.ManagedBy", "tags_all.Component",
+  "tags.Component", "tags.Environment", "tags.ManagedBy", "tags.MSCQRExecTarget", "tags_all.Component",
   "tags_all.Environment", "tags_all.ManagedBy",
 ]);
 const ECS_INITIAL_CREATE_PROVIDER_PATHS = new Set([
@@ -173,7 +173,7 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
     memory: ["each.value.memory", "each.value"],
     network_mode: ["each.value.networkMode", "each.value"],
     requires_compatibilities: ["each.value.requiresCompatibilities", "each.value"],
-    tags: ["local.tags"],
+    tags: ["each.key", "local.backend_exec_tags", "local.tags"],
     task_role_arn: ["aws_iam_role.task", "each.key"],
   },
   "aws_ecs_task_definition.executor": {

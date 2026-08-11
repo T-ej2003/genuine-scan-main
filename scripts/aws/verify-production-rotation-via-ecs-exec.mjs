@@ -2,8 +2,8 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { requireExecuteCommandEnabled, selectTargetTask } from "./ecs-exec-target-selection.mjs";
-import { ECS_EXEC_OPERATOR_CALLER_PATTERN, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
+import { assertSelectedTargetTask, requireExecuteCommandEnabled, selectTargetTask } from "./ecs-exec-target-selection.mjs";
+import { ECS_EXEC_OPERATOR_CALLER_PATTERN, ECS_EXEC_OPERATOR_ROLE_ARN, ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PTY_HELPER = path.join(ROOT, "scripts/aws/ecs-exec-fixture-pty.py");
@@ -97,8 +97,9 @@ const taskArns = listed.taskArns || [];
 if (!taskArns.length) throw new Error("expected service has no running tasks");
 const described = awsJson(["ecs", "describe-tasks", "--cluster", cluster, "--tasks", ...taskArns, "--include", "TAGS"]);
 if (described.failures?.length || !Array.isArray(described.tasks)) throw new Error("ECS task discovery returned an invalid response");
-const selection = selectTargetTask({ tasks: described.tasks, expectedClusterArn: clusterRecord.clusterArn, expectedTaskDefinitionArn: expectedTaskDefinition, expectedImageDigest, serviceName: service, containerName: container });
+const selection = selectTargetTask({ tasks: described.tasks, expectedClusterArn: clusterRecord.clusterArn, expectedTaskDefinitionArn: expectedTaskDefinition, expectedImageDigest, serviceName: service, containerName: container, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
 const targetTask = selection.selectedTask;
+assertSelectedTargetTask({ task: targetTask, expectedClusterArn: clusterRecord.clusterArn, expectedTaskDefinitionArn: expectedTaskDefinition, expectedImageDigest, serviceName: service, containerName: container, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
 
 const remoteProofPath = `/app/uploads/.mscqr-rotation-proof-${rotationId}.json`;
 const remoteCommand = [
