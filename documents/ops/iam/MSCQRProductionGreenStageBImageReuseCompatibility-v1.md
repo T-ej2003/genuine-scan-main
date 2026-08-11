@@ -4,9 +4,9 @@ The reviewed comparison is anchored by:
 
 ```text
 image release: c45f2d788ce29c2067bfb4e8afff46f8b1c238ea
-tooling:       94356fd5f526c039e39b0d4b2674eb9bdc74d51c
+tooling:       272563689ef5c7f69974ef64dc1e78d52e57d189
 report identity: tooling-input-tree-sha256
-tooling tree:  93778ae8d634dd5021ba3943c12597e698f7d78d91bcd15c8635ff968062eea4
+tooling tree:  e53a86c403cbc99dea6714262d2eead36d732fa3a6c49c4e71e6b5ed40176107
 ```
 
 The canonical report classifies the comparison files as the compatibility report itself,
