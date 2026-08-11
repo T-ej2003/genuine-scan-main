@@ -3,21 +3,21 @@
 The reviewed comparison is anchored by:
 
 ```text
-image release: 65df3eb0b6e763095f960e66577b51f54608422e
-tooling:       94574a10889ba58bdfa348fa76cc687ae7197e85
+image release: c45f2d788ce29c2067bfb4e8afff46f8b1c238ea
+tooling:       94356fd5f526c039e39b0d4b2674eb9bdc74d51c
 report identity: tooling-input-tree-sha256
-tooling tree:  6c4c16592b3e26fa11c64a5d944e58017e399ad3312e91f162f82af1637f895b
+tooling tree:  93778ae8d634dd5021ba3943c12597e698f7d78d91bcd15c8635ff968062eea4
 ```
 
 The canonical report classifies the comparison files as the compatibility report itself,
-the Markdown companion, the ECS Exec operator contract, and two administrator/preflight tests. All are
+the permission manifest, the permission validator, and the image-reuse/preflight tests. All are
 non-image-affecting, so `imageAffectingFiles` is empty and the existing immutable images
 may be reused by the explicit two-SHA contract. `imageBuildInputsChanged` is false.
 No image rebuild is required for this compatibility transition.
 
 The report contains `comparisonBaseSha` for the image release, the complete classified
-diff, and a SHA256 of the tooling input tree with the report JSON excluded. That exclusion
-is the only self-reference break and makes regeneration deterministic. Runtime validation
+diff, and a SHA256 of the tooling input tree with the JSON and Markdown evidence excluded.
+Those exclusions break the evidence self-reference and make regeneration deterministic. Runtime validation
 recomputes the exact diff and tree digest and requires an exact report match. The
 production wrapper separately authenticates the exact pair by requiring
 `HEAD == tooling_sha == origin/main`; CI review mode validates a proposed tree without
