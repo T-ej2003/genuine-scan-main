@@ -4,16 +4,21 @@
   "imageReleaseSha": "65df3eb0b6e763095f960e66577b51f54608422e",
   "comparisonBaseSha": "65df3eb0b6e763095f960e66577b51f54608422e",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
-  "comparisonHeadSha256": "7191bc48fdeb5ef672010369f31fceaff4b889a288fcc5bc2d2610d124773fdf",
-  "toolingInputTreeSha256": "7191bc48fdeb5ef672010369f31fceaff4b889a288fcc5bc2d2610d124773fdf",
+  "comparisonHeadSha256": "64d1ab9bae25d650c0e5b79f6f18d4d19b2dd19fdab46fe6e70b675b36f3ff4a",
+  "toolingInputTreeSha256": "64d1ab9bae25d650c0e5b79f6f18d4d19b2dd19fdab46fe6e70b675b36f3ff4a",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
   "classificationRulesVersion": "stage-b-image-reuse-v2",
-  "generatedAt": "2026-08-11T13:43:20+01:00",
+  "generatedAt": "2026-08-11T14:24:47+01:00",
   "generatorVersion": "validate-stage-b-image-reuse@2",
   "classifiedChangedFiles": [
     {
       "file": "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md",
       "category": "documentationOnly",
       "imageAffecting": false
     },
