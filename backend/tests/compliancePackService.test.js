@@ -1,4 +1,5 @@
 const assert = require("assert");
+const { generateKeyPairSync } = require("node:crypto");
 const fs = require("fs");
 const path = require("path");
 const { UserRole } = require("@prisma/client");
@@ -73,9 +74,17 @@ const report = {
 };
 
 const run = async () => {
-  const secret = process.env.QR_SIGN_HMAC_SECRET;
+const secret = process.env.QR_SIGN_HMAC_SECRET;
+  const artifactKeys = generateKeyPairSync("ed25519", {
+    privateKeyEncoding: { format: "pem", type: "pkcs8" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
   delete process.env.QR_SIGN_PRIVATE_KEY;
   process.env.QR_SIGN_HMAC_SECRET = "compliance-pack-test-secret";
+  process.env.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT = artifactKeys.privateKey;
+  process.env.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT = artifactKeys.publicKey;
+  process.env.ARTIFACT_SIGN_ACTIVE_KEY_VERSION = "test-v1";
+  process.env.ARTIFACT_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ "test-v1": artifactKeys.publicKey });
   let filePath = null;
   try {
     await assert.rejects(
@@ -123,6 +132,10 @@ const run = async () => {
   } finally {
     if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
     process.env.QR_SIGN_HMAC_SECRET = secret;
+    delete process.env.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT;
+    delete process.env.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT;
+    delete process.env.ARTIFACT_SIGN_ACTIVE_KEY_VERSION;
+    delete process.env.ARTIFACT_SIGN_PUBLIC_KEYS_JSON;
   }
 };
 

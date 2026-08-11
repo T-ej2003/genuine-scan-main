@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyProductionRotationCleanupRuntime, verifyProductionRotationRuntime } from "../../dist/security/productionRotationRuntime.js";
@@ -12,11 +12,15 @@ const args = new Map();
 for (let index = 0; index < process.argv.slice(2).length; index += 1) {
   const arg = process.argv.slice(2)[index];
   if (!arg.startsWith("--")) throw new Error(`unknown argument: ${arg}`);
+  if (arg === "--fixture-stdin") {
+    args.set("fixture-stdin", true);
+    continue;
+  }
   args.set(arg.slice(2), required(process.argv.slice(2)[++index], arg));
 }
 const healthUrl = required(args.get("health-url"), "--health-url");
 const expectedReleaseSha = required(args.get("expected-release-sha"), "--expected-release-sha");
-if (!/^https?:$/.test(new URL(healthUrl).protocol)) throw new Error("--health-url must use http or https");
+if (new URL(healthUrl).protocol !== "https:") throw new Error("--health-url must use HTTPS");
 if (!/^[a-f0-9]{40}$/.test(expectedReleaseSha)) throw new Error("--expected-release-sha must be a full SHA");
 const controller = new AbortController();
 const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -38,12 +42,27 @@ const healthEvidence = {
   expectedReleaseGitSha: expectedReleaseSha,
   healthObservedAt,
 };
-const fixture = JSON.parse(readFileSync(path.resolve(required(args.get("fixture-file"), "--fixture-file")), "utf8"));
+const fixtureFile = args.get("fixture-file");
+if (fixtureFile && args.get("fixture-stdin")) throw new Error("choose exactly one fixture input mode");
+let temporaryFixturePath = null;
+if (!fixtureFile && !args.get("fixture-stdin")) throw new Error("--fixture-file or --fixture-stdin is required");
+if (args.get("fixture-stdin")) {
+  const tempDir = String(process.env.ROTATION_RUNTIME_TMP_DIR || "/tmp").trim() || "/tmp";
+  temporaryFixturePath = path.join(tempDir, `mscqr-rotation-fixture-${process.pid}.json`);
+  writeFileSync(temporaryFixturePath, readFileSync(0), { mode: 0o600, flag: "wx" });
+}
+const fixturePath = path.resolve(String(fixtureFile || temporaryFixturePath));
+let fixture;
+try {
+  fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
+} finally {
+  if (temporaryFixturePath) unlinkSync(temporaryFixturePath);
+}
 const phase = required(process.env.ROTATION_RUNTIME_PHASE, "ROTATION_RUNTIME_PHASE");
 if (phase !== "overlap" && phase !== "cleanup") throw new Error("ROTATION_RUNTIME_PHASE must be overlap or cleanup");
 const checks = phase === "overlap"
-  ? verifyProductionRotationRuntime({ currentJwtToken: required(fixture.jwtCurrentToken, "fixture.jwtCurrentToken"), previousJwtToken: required(fixture.jwtPreviousToken, "fixture.jwtPreviousToken"), previousQrToken: required(fixture.token, "fixture.token"), healthEvidence })
-  : verifyProductionRotationCleanupRuntime({ currentJwtToken: required(fixture.jwtCurrentToken, "fixture.jwtCurrentToken"), previousJwtToken: required(fixture.jwtPreviousToken, "fixture.jwtPreviousToken"), previousQrToken: required(fixture.token, "fixture.token"), healthEvidence });
+  ? verifyProductionRotationRuntime({ currentJwtToken: required(fixture.jwtCurrentToken, "fixture.jwtCurrentToken"), previousJwtToken: required(fixture.jwtPreviousToken, "fixture.jwtPreviousToken"), previousQrToken: required(fixture.token, "fixture.token"), artifactHistoricalPayload: fixture.artifactHistoricalPayload, artifactHistoricalSignature: fixture.artifactHistoricalSignature, healthEvidence })
+  : verifyProductionRotationCleanupRuntime({ currentJwtToken: required(fixture.jwtCurrentToken, "fixture.jwtCurrentToken"), previousJwtToken: required(fixture.jwtPreviousToken, "fixture.jwtPreviousToken"), previousQrToken: required(fixture.token, "fixture.token"), artifactHistoricalPayload: fixture.artifactHistoricalPayload, artifactHistoricalSignature: fixture.artifactHistoricalSignature, healthEvidence });
 const output = {
   rotationId: required(process.env.ROTATION_ID, "ROTATION_ID"),
   phase,

@@ -1,12 +1,15 @@
 import { createHash, createPrivateKey, sign as cryptoSign } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { signQrPayload, verifyQrToken } from "../services/qrTokenService";
+import { signArtifactPayload, verifyArtifactPayload } from "../services/artifactSigningService";
 import { verifyJwtWithCurrentOrPrevious } from "../utils/security";
 
 type RuntimeInput = {
   currentJwtToken: string;
   previousJwtToken: string;
   previousQrToken: string;
+  artifactHistoricalPayload?: string;
+  artifactHistoricalSignature?: unknown;
   healthEvidence: HealthEvidence;
   now?: () => number;
 };
@@ -73,7 +76,13 @@ const signUnknownKidFixture = (currentQrToken: string) => {
   return `${encodeBase64Url(payloadBytes)}.${encodeBase64Url(signature)}`;
 };
 
-export const verifyProductionRotationRuntime = ({ currentJwtToken, previousJwtToken, previousQrToken, healthEvidence, now = Date.now }: RuntimeInput) => {
+const verifyArtifactRuntime = (payload: string | undefined, envelope: unknown) => {
+  if (!payload && !envelope) return false;
+  if (!payload || !envelope || !verifyArtifactPayload(payload, envelope)) throw new Error("historical artifact signing runtime proof failed");
+  return true;
+};
+
+export const verifyProductionRotationRuntime = ({ currentJwtToken, previousJwtToken, previousQrToken, artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence, now = Date.now }: RuntimeInput) => {
   const health = validateHealthEvidence(healthEvidence, now);
   const currentJwt = requiredEnv("JWT_SECRET_CURRENT");
   const previousJwt = requiredEnv("JWT_SECRET_PREVIOUS");
@@ -110,6 +119,12 @@ export const verifyProductionRotationRuntime = ({ currentJwtToken, previousJwtTo
     unknownRejected = true;
   }
 
+  const artifactPayload = JSON.stringify({ rotationId: "runtime-artifact", phase: "overlap" });
+  const artifactSignature = signArtifactPayload(artifactPayload);
+  if (!verifyArtifactPayload(artifactPayload, artifactSignature)) {
+    throw new Error("current artifact signing runtime proof failed");
+  }
+
   return {
     jwtCurrentRuntimeVerify: true,
     jwtPreviousRuntimeVerify: true,
@@ -118,11 +133,13 @@ export const verifyProductionRotationRuntime = ({ currentJwtToken, previousJwtTo
     qrPreviousRuntimeVerify: true,
     qrTamperMatchingKeyTest: tamperRejected,
     qrUnknownKeyRejected: unknownRejected,
+    artifactCurrentRuntimeVerify: true,
+    artifactHistoricalRuntimeVerify: verifyArtifactRuntime(artifactHistoricalPayload, artifactHistoricalSignature),
     ...health,
   };
 };
 
-export const verifyProductionRotationCleanupRuntime = ({ currentJwtToken, previousJwtToken, previousQrToken, healthEvidence, now = Date.now }: RuntimeInput) => {
+export const verifyProductionRotationCleanupRuntime = ({ currentJwtToken, previousJwtToken, previousQrToken, artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence, now = Date.now }: RuntimeInput) => {
   const health = validateHealthEvidence(healthEvidence, now);
   const currentJwt = requiredEnv("JWT_SECRET_CURRENT");
   const preparedCurrentJwtToken = verifyJwtFixtureInSlot(currentJwtToken, currentJwt, "current");
@@ -150,12 +167,20 @@ export const verifyProductionRotationCleanupRuntime = ({ currentJwtToken, previo
     unknownRejected = true;
   }
 
+  const artifactPayload = JSON.stringify({ rotationId: "runtime-artifact", phase: "cleanup" });
+  const artifactSignature = signArtifactPayload(artifactPayload);
+  if (!verifyArtifactPayload(artifactPayload, artifactSignature)) {
+    throw new Error("current artifact signing runtime proof failed");
+  }
+
   return {
     jwtCurrentRuntimeVerify: true,
     jwtPreviousRuntimeRejected: previousJwtRejected,
     qrCurrentRuntimeVerify: true,
     qrPreviousRuntimeRejected: previousQrRejected,
     qrUnknownKeyRejected: unknownRejected,
+    artifactCurrentRuntimeVerify: true,
+    artifactHistoricalRuntimeVerify: verifyArtifactRuntime(artifactHistoricalPayload, artifactHistoricalSignature),
     ...health,
   };
 };

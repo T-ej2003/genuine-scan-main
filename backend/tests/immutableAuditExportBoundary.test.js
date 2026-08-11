@@ -1,9 +1,18 @@
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const { generateKeyPairSync } = require("node:crypto");
 const JSZip = require("jszip");
 
 process.env.NODE_ENV = "test";
 process.env.QR_SIGN_HMAC_SECRET = "focused-immutable-audit-export-secret";
+const artifactKeys = generateKeyPairSync("ed25519", {
+  privateKeyEncoding: { format: "pem", type: "pkcs8" },
+  publicKeyEncoding: { format: "pem", type: "spki" },
+});
+process.env.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT = artifactKeys.privateKey;
+process.env.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT = artifactKeys.publicKey;
+process.env.ARTIFACT_SIGN_ACTIVE_KEY_VERSION = "test-v1";
+process.env.ARTIFACT_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ "test-v1": artifactKeys.publicKey });
 
 const distRoot = path.resolve(__dirname, "../dist");
 const repositoryPath = require.resolve(path.join(distRoot, "rls-waves/session-c/c01/qrSystemRepository.js"));

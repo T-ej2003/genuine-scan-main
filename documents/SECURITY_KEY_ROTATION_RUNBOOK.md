@@ -8,6 +8,8 @@ This runbook covers the rotating backend secret families used by the app:
 - `TOKEN_HASH_SECRET_CURRENT` / `TOKEN_HASH_SECRET_PREVIOUS`
 - `INCIDENT_HASH_SALT_CURRENT` / `INCIDENT_HASH_SALT_PREVIOUS`
 - `IP_HASH_SALT_CURRENT` / `IP_HASH_SALT_PREVIOUS`
+- `ARTIFACT_SIGN_PRIVATE_KEY_CURRENT` / `ARTIFACT_SIGN_PUBLIC_KEY_CURRENT`
+- `ARTIFACT_SIGN_ACTIVE_KEY_VERSION` / `ARTIFACT_SIGN_PUBLIC_KEYS_JSON`
 
 Legacy single-slot variables still exist for compatibility, but production should use the dual-slot `CURRENT` / `PREVIOUS` model.
 
@@ -56,38 +58,43 @@ npm --prefix backend run security:rotate-production-signing-material -- \
   --fixture-file /secure/operator/previous-qr-fixture.json --runtime-verification-file /secure/operator/overlap-runtime.json \
   --verify
 
-# Run inside the deployed overlap task. The image workdir is /app; /api/health
-# must report the expected release SHA. Set the four deployment values from the
-# approved deployment record before invoking the command.
-cd /app
+# Run from the operator checkout. The helper selects the exact running backend
+# task, verifies its task definition/image/release identity, then uses ECS Exec
+# to run the image-local verifier in /app. The fixture is transferred via PTY
+# stdin and never appears in a command, environment value, or log.
 ROTATION_RUNTIME_PHASE=overlap \
 ROTATION_ID=<rotation-id> \
 ROTATION_DEPLOYMENT_SHA=<full-overlap-deployment-sha> \
 ROTATION_RUNTIME_INVOCATION_REF=<machine-verifiable-runtime-ref> \
-npm run security:verify-production-rotation-runtime -- \
+scripts/aws/verify-production-rotation-via-ecs-exec.sh \
+  --cluster <exact-cluster-arn> --service <exact-service-name> \
+  --task-definition <exact-task-definition-arn> --image-digest sha256:<64-hex> \
+  --expected-release-sha <full-source-sha> --phase overlap \
   --fixture-file /secure/operator/previous-qr-fixture.json \
-  --output /secure/operator/overlap-runtime.json \
   --health-url https://www.mscqr.com/api/health \
-  --expected-release-sha <full-source-sha>
+  --proof-output /secure/operator/overlap-runtime.json
 
-# After retirement and the cleanup deployment, run the same image-local command
-# with the cleanup phase and exact cleanup deployment identity.
-cd /app
+# After retirement and the cleanup deployment, invoke the same helper with
+# phase=cleanup and the exact post-retirement task identity.
 ROTATION_RUNTIME_PHASE=cleanup \
 ROTATION_ID=<rotation-id> \
 ROTATION_DEPLOYMENT_SHA=<full-cleanup-deployment-sha> \
 ROTATION_RUNTIME_INVOCATION_REF=<machine-verifiable-runtime-ref> \
-npm run security:verify-production-rotation-runtime -- \
+scripts/aws/verify-production-rotation-via-ecs-exec.sh \
+  --cluster <exact-cluster-arn> --service <exact-service-name> \
+  --task-definition <exact-cleanup-task-definition-arn> --image-digest sha256:<64-hex> \
+  --expected-release-sha <full-source-sha> --phase cleanup \
   --fixture-file /secure/operator/previous-qr-fixture.json \
-  --output /secure/operator/cleanup-runtime.json \
   --health-url https://www.mscqr.com/api/health \
-  --expected-release-sha <full-source-sha>
+  --proof-output /secure/operator/cleanup-runtime.json
 ```
 
 The config maps distinct Secrets Manager resources for JWT current/previous/pending, QR current/private,
 QR previous/public, and pending material. It also requires a reviewed `minimumGraceSeconds`. The coordinator
 writes only non-secret state and redacted runtime proof to operator-controlled mode-600 files. The deployed-task
 verifier uses the compiled application JWT and QR verification functions; it is not a public endpoint.
+Artifact packs and immutable audit exports use the independent Ed25519 artifact domain and an explicit
+`keyVersion` lookup; JWT and QR signing material are never artifact-signing fallbacks.
 `--cleanup` first retires all previous/pending slots and stops at `cleanup-deploy-required`. Only after the
 approved cleanup deployment restarts tasks may the operator resume with a cleanup runtime proof. It is never
 run by CI or implicitly by `--prepare`.

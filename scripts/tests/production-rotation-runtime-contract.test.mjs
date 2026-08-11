@@ -11,6 +11,9 @@ const jwt = read("backend/src/utils/secretConfig.ts");
 const coordinator = read("backend/scripts/security/rotate-production-signing-material.mjs");
 const runtimeVerifier = read("backend/src/security/productionRotationRuntime.ts");
 const runtimeCommand = read("backend/scripts/security/verify-production-rotation-runtime.mjs");
+const artifact = read("backend/src/services/artifactSigningService.ts");
+const compliance = read("backend/src/services/compliancePackService.ts");
+const immutableAudit = read("backend/src/services/immutableAuditExportService.ts");
 const qualityGate = read(".github/workflows/quality-gate.yml");
 const runbook = read("documents/SECURITY_KEY_ROTATION_RUNBOOK.md");
 const dockerfile = read("backend/Dockerfile");
@@ -25,8 +28,15 @@ test("rotation task template is dual-slot and Ed25519-only", () => {
     "{{QR_SIGN_ACTIVE_KEY_VERSION}}",
     "{{QR_SIGN_PUBLIC_KEY_PREVIOUS}}",
     "{{QR_SIGN_PREVIOUS_KEY_VERSION}}",
+    "{{ARTIFACT_SIGN_PRIVATE_KEY_CURRENT}}",
+    "{{ARTIFACT_SIGN_PUBLIC_KEY_CURRENT}}",
+    "{{ARTIFACT_SIGN_ACTIVE_KEY_VERSION}}",
+    "{{ARTIFACT_SIGN_PUBLIC_KEYS_JSON}}",
   ]) assert.ok(template.includes(placeholder), `missing rotation placeholder: ${placeholder}`);
   assert.doesNotMatch(template, /QR_SIGN_HMAC/);
+  assert.match(artifact, /Ed25519/);
+  assert.doesNotMatch(compliance, /QR_SIGN_(PRIVATE_KEY|HMAC)/);
+  assert.doesNotMatch(immutableAudit, /QR_SIGN_(PRIVATE_KEY|HMAC)/);
   assert.match(template, /"containerPort": 4000/);
   assert.match(template, /"protocol": "tcp"/);
 });
@@ -80,12 +90,15 @@ test("runtime verification is deployment-side and uses the application verificat
   assert.match(runtimeCommand, /ROTATION_RUNTIME_PHASE/);
   assert.match(runtimeCommand, /ROTATION_DEPLOYMENT_SHA/);
   assert.match(runtimeCommand, /--health-url/);
+  assert.match(runtimeCommand, /protocol !== "https:"/);
   assert.match(runtimeCommand, /--expected-release-sha/);
   assert.match(runtimeVerifier, /currentJwtToken/);
   assert.match(runtimeVerifier, /previousJwtToken/);
   assert.match(runtimeVerifier, /signUnknownKidFixture/);
   assert.match(runtimeVerifier, /payload\.kid = "unknown-runtime-key"/);
   assert.match(runtimeVerifier, /cryptoSign\(null/);
+  assert.match(runtimeVerifier, /signArtifactPayload/);
+  assert.match(runtimeVerifier, /verifyArtifactPayload/);
   assert.doesNotMatch(runtimeVerifier, /const currentToken = jwt\.sign/);
   assert.doesNotMatch(runtimeVerifier, /const previousToken = jwt\.sign/);
   assert.doesNotMatch(runtimeCommand, /console\.log\([^\n]*Token/);
@@ -94,10 +107,12 @@ test("runtime verification is deployment-side and uses the application verificat
 test("deployed-task verifier command matches the image filesystem and parser contract", () => {
   assert.match(dockerfile, /WORKDIR \/app/);
   assert.equal(backendPackage.scripts["security:verify-production-rotation-runtime"], "node scripts/security/verify-production-rotation-runtime.mjs");
-  for (const value of ["ROTATION_RUNTIME_PHASE", "ROTATION_ID", "ROTATION_DEPLOYMENT_SHA", "ROTATION_RUNTIME_INVOCATION_REF", "--fixture-file", "--output", "--health-url", "--expected-release-sha"]) {
+  for (const value of ["ROTATION_RUNTIME_PHASE", "ROTATION_ID", "ROTATION_DEPLOYMENT_SHA", "ROTATION_RUNTIME_INVOCATION_REF", "--fixture-file", "--proof-output", "--health-url", "--expected-release-sha"]) {
     assert.match(runbook, new RegExp(value.replaceAll("-", "\\-")), `runbook is missing ${value}`);
   }
-  assert.match(runbook, /cd \/app/);
+  assert.match(runbook, /verify-production-rotation-via-ecs-exec\.sh/);
+  assert.match(runbook, /--task-definition/);
+  assert.match(runbook, /--image-digest/);
   assert.doesNotMatch(runbook, /npm --prefix backend run security:verify-production-rotation-runtime/);
   assert.doesNotMatch(runtimeCommand, /--verification-out/);
 });
@@ -128,7 +143,7 @@ test("quality-gate security mode is strict only for production or explicit produ
   assert.equal(mode({ ref: "refs/heads/codex/rotation-fix", event: "workflow_dispatch" }), "strict");
 });
 
-test("runbook uses only the coordinator's supported runtime proof flag", () => {
+test("runbook uses only the coordinator's supported runtime proof flags", () => {
   assert.match(runbook, /--runtime-verification-file \/secure\/operator\/overlap-runtime\.json/);
   assert.doesNotMatch(runbook, /--verification-out/);
   for (const flag of ["--prepare", "--verify", "--config", "--state-file", "--fixture-file", "--runtime-verification-file"]) {
@@ -137,4 +152,5 @@ test("runbook uses only the coordinator's supported runtime proof flag", () => {
   assert.match(coordinator, /runtime-verification-file/);
   assert.match(coordinator, /cleanup-deployment-sha/);
   assert.match(coordinator, /cleanup-runtime-file/);
+  for (const env of ["ROTATION_RUNTIME_PHASE", "ROTATION_ID", "ROTATION_DEPLOYMENT_SHA", "ROTATION_RUNTIME_INVOCATION_REF"]) assert.match(runbook, new RegExp(env));
 });
