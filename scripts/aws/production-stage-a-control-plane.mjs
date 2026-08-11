@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-const REQUIRED_ADDRESS = "aws_vpc_security_group_ingress_rule.runtime_endpoints_https";
+const REQUIRED_LOGICAL_ADDRESS = "aws_vpc_security_group_ingress_rule.runtime_endpoints_https";
 const exact = (value, expected, message) => { if (value !== expected) throw new Error(message); };
 
 export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurityGroupId } = {}) {
@@ -12,13 +12,15 @@ export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurit
   });
   if (changes.length !== 1) throw new Error("Stage A plan must contain exactly one reviewed mutation.");
   const change = changes[0];
-  if (change.address !== REQUIRED_ADDRESS || JSON.stringify(change.change?.actions) !== JSON.stringify(["create"])) throw new Error("Stage A plan contains an unreviewed mutation.");
+  const expectedAddress = `${REQUIRED_LOGICAL_ADDRESS}[${JSON.stringify(runtimeSecurityGroupId)}]`;
+  if (change.address !== expectedAddress || JSON.stringify(change.change?.actions) !== JSON.stringify(["create"])) throw new Error("Stage A plan contains an unreviewed mutation.");
   const after = change.change?.after || {};
   exact(after.security_group_id, endpointSecurityGroupId, "Stage A plan endpoint security group is wrong.");
   exact(after.referenced_security_group_id, runtimeSecurityGroupId, "Stage A plan runtime security group is wrong.");
   exact(String(after.from_port), "443", "Stage A plan ingress port is wrong.");
   exact(String(after.to_port), "443", "Stage A plan ingress port is wrong.");
   exact(after.ip_protocol, "tcp", "Stage A plan ingress protocol is wrong.");
+  if (after.cidr_ipv4 !== null || after.cidr_ipv6 !== null || after.prefix_list_id !== null) throw new Error("Stage A plan ingress source is not the reviewed security group.");
   return { valid: true, changes: 1, address: change.address };
 }
 
