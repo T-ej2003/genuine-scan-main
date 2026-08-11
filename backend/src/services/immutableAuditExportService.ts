@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import JSZip from "jszip";
 import { readAuditExport } from "../rls-waves/session-c/c01/qrSystemRepository";
-import { signArtifactPayload } from "./artifactSigningService";
+import { ARTIFACT_PERSISTED_SIGNATURE_ALGORITHM, signArtifactPayload } from "./artifactSigningService";
 
 const stableStringify = (obj: any): string => {
   if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
@@ -242,7 +242,7 @@ export const buildImmutableBatchAuditPackage = async (
       alertCount: policyAlerts.length,
       chainRoot,
       integrityHash,
-      signatureAlgorithm: signature.algorithm,
+      signatureAlgorithm: ARTIFACT_PERSISTED_SIGNATURE_ALGORITHM,
     },
   };
 };

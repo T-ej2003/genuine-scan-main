@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { createHash, generateKeyPairSync, sign } = require("node:crypto");
 
-const { signArtifactPayload, validateArtifactSigningConfiguration, verifyArtifactPayload } = require("../dist/services/artifactSigningService.js");
+const { ARTIFACT_PERSISTED_SIGNATURE_ALGORITHM, signArtifactPayload, validateArtifactSigningConfiguration, verifyArtifactPayload } = require("../dist/services/artifactSigningService.js");
 
 const pair = () => generateKeyPairSync("ed25519", {
   privateKeyEncoding: { format: "pem", type: "pkcs8" },
@@ -21,6 +21,7 @@ try {
 
   validateArtifactSigningConfiguration();
   const currentEnvelope = signArtifactPayload(payload);
+  assert.equal(ARTIFACT_PERSISTED_SIGNATURE_ALGORITHM, "ed25519");
   assert.deepEqual({ algorithm: currentEnvelope.algorithm, keyVersion: currentEnvelope.keyVersion }, { algorithm: "Ed25519", keyVersion: "v2" });
   assert.equal(verifyArtifactPayload(payload, currentEnvelope), true);
   assert.equal(verifyArtifactPayload(`${payload}!`, currentEnvelope), false);

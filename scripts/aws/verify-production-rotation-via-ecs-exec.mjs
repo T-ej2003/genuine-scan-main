@@ -2,6 +2,7 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { requireExecuteCommandEnabled, selectTargetTask } from "./ecs-exec-target-selection.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PTY_HELPER = path.join(ROOT, "scripts/aws/ecs-exec-fixture-pty.py");
@@ -74,25 +75,26 @@ const awsJson = (awsArgs) => {
 const serviceResult = awsJson(["ecs", "describe-services", "--cluster", cluster, "--services", service]);
 const serviceRecord = serviceResult.services?.[0];
 if (!serviceRecord || serviceResult.failures?.length || serviceRecord.serviceName !== service) throw new Error("expected ECS service was not found");
+requireExecuteCommandEnabled(serviceRecord);
+const clusterResult = awsJson(["ecs", "describe-clusters", "--clusters", cluster]);
+const clusterRecord = clusterResult.clusters?.[0];
+if (!clusterRecord || clusterResult.failures?.length || clusterRecord.status !== "ACTIVE" || typeof clusterRecord.clusterArn !== "string") throw new Error("expected ECS cluster was not found");
 const expectedPrimaryDeployment = serviceRecord.deployments?.some((deployment) => deployment.status === "PRIMARY" && deployment.taskDefinition === expectedTaskDefinition);
 if (!expectedPrimaryDeployment) throw new Error("expected task definition is not the primary service deployment");
-
-const listed = awsJson(["ecs", "list-tasks", "--cluster", cluster, "--service-name", service, "--desired-status", "RUNNING"]);
-const taskArns = listed.taskArns || [];
-if (!taskArns.length) throw new Error("expected service has no running tasks");
-const described = awsJson(["ecs", "describe-tasks", "--cluster", cluster, "--tasks", ...taskArns, "--include", "TAGS"]);
-const candidates = (described.tasks || []).filter((task) => {
-  const taskContainer = task.containers?.find((entry) => entry.name === container);
-  return task.taskDefinitionArn === expectedTaskDefinition && task.lastStatus === "RUNNING" && task.group === `service:${service}` && taskContainer?.imageDigest === expectedImageDigest;
-});
-if (candidates.length !== 1) throw new Error("target task identity is ambiguous or does not match the expected deployment");
-const targetTask = candidates[0];
 
 const taskDefinition = awsJson(["ecs", "describe-task-definition", "--task-definition", expectedTaskDefinition]).taskDefinition;
 const taskContainer = taskDefinition?.containerDefinitions?.find((entry) => entry.name === container);
 const releaseSha = taskContainer?.environment?.find((entry) => entry.name === "RELEASE_GIT_SHA")?.value;
 const taskImage = taskContainer?.image || "";
 if (releaseSha !== expectedReleaseSha || !taskImage.endsWith(`@${expectedImageDigest}`)) throw new Error("target task definition release or image does not match the expected identity");
+
+const listed = awsJson(["ecs", "list-tasks", "--cluster", cluster, "--service-name", service, "--desired-status", "RUNNING"]);
+const taskArns = listed.taskArns || [];
+if (!taskArns.length) throw new Error("expected service has no running tasks");
+const described = awsJson(["ecs", "describe-tasks", "--cluster", cluster, "--tasks", ...taskArns, "--include", "TAGS"]);
+if (described.failures?.length || !Array.isArray(described.tasks)) throw new Error("ECS task discovery returned an invalid response");
+const selection = selectTargetTask({ tasks: described.tasks, expectedClusterArn: clusterRecord.clusterArn, expectedTaskDefinitionArn: expectedTaskDefinition, expectedImageDigest, serviceName: service, containerName: container });
+const targetTask = selection.selectedTask;
 
 const remoteProofPath = `/app/uploads/.mscqr-rotation-proof-${rotationId}.json`;
 const remoteCommand = [
@@ -149,6 +151,8 @@ if (proof.artifactHistoricalRuntimeVerify !== true) throw new Error("runtime pro
 const finalProof = {
   ...proof,
   targetTaskArn: targetTask.taskArn,
+  selectedTaskArn: targetTask.taskArn,
+  matchingTaskCount: selection.matchingTaskCount,
   targetTaskDefinitionArn: targetTask.taskDefinitionArn,
   targetImageDigest: expectedImageDigest,
   expectedReleaseSha,
@@ -160,6 +164,8 @@ console.log(JSON.stringify({
   phase,
   rotationId,
   targetTaskArn: targetTask.taskArn,
+  selectedTaskArn: targetTask.taskArn,
+  matchingTaskCount: selection.matchingTaskCount,
   targetTaskDefinitionArn: targetTask.taskDefinitionArn,
   targetImageDigest: expectedImageDigest,
   deploymentSha: expectedDeploymentSha,

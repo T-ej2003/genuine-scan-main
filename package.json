@@ -53,7 +53,7 @@
     "check:rotation-evidence-freshness": "node scripts/check-rotation-evidence-freshness.mjs",
     "check:rotation-cleanup": "node scripts/check-rotation-cleanup.mjs",
     "test:rotation-evidence-contract": "node --test scripts/tests/rotation-evidence-contract.test.mjs",
-    "test:production-rotation-contract": "node --test scripts/tests/production-rotation-runtime-contract.test.mjs",
+    "test:production-rotation-contract": "node --test scripts/tests/production-rotation-runtime-contract.test.mjs scripts/tests/production-artifact-signature-rls-contract.test.mjs scripts/tests/production-rotation-ecs-exec-selection.test.mjs scripts/tests/production-rotation-ecs-exec-contract.test.mjs scripts/tests/deploy-ecs-service-existing-task-definition.test.mjs",
     "test:production-rotation": "npm --prefix backend run test:production-rotation",
     "test:production-rotation-coordinator": "npm --prefix backend run test:production-rotation-coordinator",
     "check:security-guardrails": "node scripts/check-security-guardrails.mjs",

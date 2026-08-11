@@ -127,6 +127,7 @@ const secret = process.env.QR_SIGN_HMAC_SECRET;
     assert.equal(startInput.triggerType, "MANUAL");
     assert.equal(result.job.status, "COMPLETED");
     assert.equal(completeInput.integrityHash.length, 64);
+    assert.equal(completeInput.signatureAlgorithm, "ed25519");
     assert(filePath && fs.existsSync(filePath));
     console.log("compliance pack service tests passed");
   } finally {

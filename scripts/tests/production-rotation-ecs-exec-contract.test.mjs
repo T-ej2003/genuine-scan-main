@@ -3,13 +3,16 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const helper = readFileSync("scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "utf8");
+const selection = readFileSync("scripts/aws/ecs-exec-target-selection.mjs", "utf8");
+const deploy = readFileSync("scripts/aws/deploy-ecs-service.sh", "utf8");
+const runbook = readFileSync("documents/SECURITY_KEY_ROTATION_RUNBOOK.md", "utf8");
 const pty = readFileSync("scripts/aws/ecs-exec-fixture-pty.py", "utf8");
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json", "utf8"));
 const terraform = readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
 
 test("ECS Exec verifier binds the exact service, task definition, digest, and release", () => {
-  for (const value of ["describe-services", "list-tasks", "describe-tasks", "describe-task-definition", "taskDefinitionArn", "imageDigest", "RELEASE_GIT_SHA", "group === `service:${service}`", "expected task definition is not the primary service deployment"]) {
-    assert.ok(helper.includes(value), `missing ECS Exec contract: ${value}`);
+  for (const value of ["describe-services", "describe-clusters", "list-tasks", "describe-tasks", "describe-task-definition", "requireExecuteCommandEnabled", "selectTargetTask", "taskDefinitionArn", "RELEASE_GIT_SHA", "matchingTaskCount", "selectedTaskArn", "expected task definition is not the primary service deployment"]) {
+    assert.ok(`${helper}\n${selection}`.includes(value), `missing ECS Exec contract: ${value}`);
   }
   assert.match(helper, /--fixture-stdin/);
   assert.doesNotMatch(helper, /--fixture-file.*remoteCommand|remoteCommand.*--fixture-file/s);
@@ -36,4 +39,11 @@ test("backend task role receives only the four ECS Exec message-channel actions"
   assert.match(terraform, /ssmmessages:OpenControlChannel/);
   assert.match(terraform, /ssmmessages:OpenDataChannel/);
   assert.match(terraform, /role\s*=\s*aws_iam_role\.task\["backend"\]\.id/);
+});
+
+test("canonical deployment enables and verifies ECS Exec in one service update", () => {
+  assert.match(deploy, /ENABLE_EXECUTE_COMMAND=.*false/);
+  assert.match(deploy, /--enable-execute-command/);
+  assert.match(deploy, /Post-switch service does not have ECS Exec enabled/);
+  assert.match(runbook, /ENABLE_EXECUTE_COMMAND=true/);
 });

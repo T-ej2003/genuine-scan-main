@@ -7,6 +7,7 @@ import {
 } from "node:crypto";
 
 const ARTIFACT_ALGORITHM = "Ed25519" as const;
+export const ARTIFACT_PERSISTED_SIGNATURE_ALGORITHM = "ed25519" as const;
 const VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const MAX_HISTORICAL_PUBLIC_KEYS = 64;
 

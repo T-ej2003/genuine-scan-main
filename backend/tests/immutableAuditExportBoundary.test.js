@@ -79,6 +79,7 @@ require.cache[repositoryPath] = {
   assert.deepEqual(alerts.map(({ id }) => id), ["alert-a"]);
   assert.equal(pkg.metadata.eventCount, 2);
   assert.equal(pkg.metadata.alertCount, 1);
+  assert.equal(pkg.metadata.signatureAlgorithm, "ed25519");
   assert.ok(integrity.fileHashes["trace-events.json"]);
   assert.ok(integrity.fileHashes["policy-alerts.json"]);
 

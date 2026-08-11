@@ -58,6 +58,16 @@ npm --prefix backend run security:rotate-production-signing-material -- \
   --fixture-file /secure/operator/previous-qr-fixture.json --runtime-verification-file /secure/operator/overlap-runtime.json \
   --verify
 
+# Deploy/restart the final overlap or cleanup task through the canonical wrapper.
+# Existing-task-definition mode performs the single reviewed UpdateService call;
+# ENABLE_EXECUTE_COMMAND=true both enables ECS Exec and verifies it after stability.
+ENABLE_EXECUTE_COMMAND=true \
+scripts/aws/deploy-ecs-service.sh \
+  --existing-task-definition <exact-task-definition-arn> \
+  --expected-current-task-definition <current-service-task-definition-arn> \
+  --expected-family <exact-task-definition-family> \
+  --expected-image-digest sha256:<64-hex>
+
 # Run from the operator checkout. The helper selects the exact running backend
 # task, verifies its task definition/image/release identity, then uses ECS Exec
 # to run the image-local verifier in /app. The fixture is transferred via PTY

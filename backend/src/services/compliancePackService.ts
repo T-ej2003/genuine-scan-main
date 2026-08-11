@@ -7,7 +7,7 @@ import { UserRole } from "@prisma/client";
 
 import prisma from "../config/database";
 import { logger } from "../utils/logger";
-import { signArtifactPayload } from "./artifactSigningService";
+import { ARTIFACT_PERSISTED_SIGNATURE_ALGORITHM, signArtifactPayload } from "./artifactSigningService";
 import { downloadObjectBuffer, isObjectStorageConfigured, uploadObjectBuffer } from "./objectStorageService";
 import {
   C03AccessError,
@@ -189,7 +189,7 @@ export const buildSignedComplianceEvidencePack = async (params: {
     metadata: {
       generatedAt,
       integrityHash,
-      signatureAlgorithm: signature.algorithm,
+      signatureAlgorithm: ARTIFACT_PERSISTED_SIGNATURE_ALGORITHM,
       controls: controls.length,
     },
   };

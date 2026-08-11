@@ -24,7 +24,10 @@ Compliance and immutable-audit artifacts use independent Ed25519 signing with an
 bounded historical public-key registry. JWT, QR signing, and QR HMAC material are never artifact fallbacks;
 production startup fails closed when the artifact configuration is missing or inconsistent.
 
-The verifier selects the exact cluster/service/task definition/image/release, transfers the 0600 fixture through
+The canonical deployment wrapper receives `ENABLE_EXECUTE_COMMAND=true` for the overlap and cleanup service
+update. It performs the task-definition switch and ECS Exec enablement in one reviewed `UpdateService` mutation,
+waits for stability, and verifies the service flag before the verifier is invoked. The verifier then selects the
+exact cluster/service/task definition/image/release, transfers the 0600 fixture through
 PTY stdin, runs inside `/app`, deletes fixture and proof files, and prints only redacted proof metadata. The
 historical-artifact proof input must be an approved existing artifact envelope; it is never generated from a
 deployed secret and its payload/signature is never printed.

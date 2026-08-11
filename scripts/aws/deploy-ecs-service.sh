@@ -20,6 +20,8 @@ Required environment:
 Optional environment:
   WAIT_FOR_STABLE   Default: true
   DRY_RUN           Default: false. When true, prints the register payload only.
+  ENABLE_EXECUTE_COMMAND
+                    Default: false. When true, the canonical service update enables ECS Exec.
   METADATA_FILE     Optional path to write deployment metadata JSON.
   VERSION_URL       Backend /version URL for post-deploy verification.
   EXPECTED_GIT_SHA  Full expected git SHA for VERSION_URL verification and runtime RELEASE_GIT_SHA.
@@ -136,6 +138,12 @@ fi
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
 WAIT_FOR_STABLE="${WAIT_FOR_STABLE:-true}"
 DRY_RUN="${DRY_RUN:-false}"
+ENABLE_EXECUTE_COMMAND="${ENABLE_EXECUTE_COMMAND:-false}"
+
+case "$ENABLE_EXECUTE_COMMAND" in
+  true|false) ;;
+  *) echo "ENABLE_EXECUTE_COMMAND must be true or false." >&2; exit 1 ;;
+esac
 
 require_env AWS_REGION
 require_env CLUSTER_NAME
@@ -406,6 +414,14 @@ if [[ -n "$EXISTING_TASK_DEFINITION_ARN" ]]; then
 
   validate_service_load_balancer_compatibility "$EXISTING_SERVICE_FILE" "$RAW_FILE"
 
+  CURRENT_EXECUTE_COMMAND_ENABLED="$(node --input-type=module - "$EXISTING_SERVICE_FILE" <<'NODE'
+import fs from "node:fs";
+const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!Array.isArray(response.failures) || response.failures.length !== 0 || response.services?.length !== 1) throw new Error("ECS service response is malformed.");
+process.stdout.write(response.services[0].enableExecuteCommand === true ? "true" : "false");
+NODE
+)"
+
   PREVIOUS_TASK_DEFINITION_ARN="$(
     node --input-type=module - "$RAW_FILE" "$EXISTING_SERVICE_FILE" "$EXISTING_CALLER_FILE" "$AWS_REGION" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_CURRENT_TASK_DEFINITION_ARN" "$EXPECTED_FAMILY" "$EXPECTED_IMAGE_DIGEST" "$CONTAINER_NAME" "${EXPECTED_GIT_SHA:-}" <<'NODE'
 import fs from "node:fs";
@@ -458,15 +474,16 @@ process.stdout.write(expectedCurrentArn);
 NODE
   )"
 
-  if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" ]]; then
+  if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" || ( "$ENABLE_EXECUTE_COMMAND" == "true" && "$CURRENT_EXECUTE_COMMAND_ENABLED" != "true" ) ]]; then
     update_attempted=true
     update_state="UPDATE_ATTEMPTED"
-    if aws ecs update-service \
+    update_args=(aws ecs update-service \
       --region "$AWS_REGION" \
       --cluster "$CLUSTER_NAME" \
       --service "$SERVICE_NAME" \
-      --task-definition "$EXISTING_TASK_DEFINITION_ARN" \
-      >/dev/null; then
+      --task-definition "$EXISTING_TASK_DEFINITION_ARN")
+    if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then update_args+=(--enable-execute-command); fi
+    if "${update_args[@]}" >/dev/null; then
       update_state="UPDATE_CONFIRMED"
       existing_switch_started=true
     else
@@ -496,7 +513,7 @@ NODE
       esac
     fi
   else
-    echo "Target task definition is already active on ${SERVICE_NAME}; no service update required."
+    echo "Target task definition and requested service settings are already active on ${SERVICE_NAME}; no service update required."
   fi
 
   aws ecs wait services-stable \
@@ -510,15 +527,16 @@ NODE
     --services "$SERVICE_NAME" \
     >"$EXISTING_POST_SERVICE_FILE"
 
-  node --input-type=module - "$EXISTING_POST_SERVICE_FILE" "$EXISTING_TASKS_LIST_FILE" "$EXISTING_TASK_DEFINITION_ARN" <<'NODE'
+  node --input-type=module - "$EXISTING_POST_SERVICE_FILE" "$EXISTING_TASKS_LIST_FILE" "$EXISTING_TASK_DEFINITION_ARN" "$ENABLE_EXECUTE_COMMAND" <<'NODE'
 import fs from "node:fs";
-const [servicePath, taskListPath, targetArn] = process.argv.slice(2);
+const [servicePath, taskListPath, targetArn, enableExecuteCommand] = process.argv.slice(2);
 const response = JSON.parse(fs.readFileSync(servicePath, "utf8"));
 const fail = (message) => { throw new Error(message); };
 if (!Array.isArray(response.failures) || response.failures.length !== 0) fail("Post-switch ECS service description returned failures.");
 if (response.services?.length !== 1) fail("Post-switch ECS service description did not return exactly one service.");
 const service = response.services[0];
 if (service.status !== "ACTIVE" || service.taskDefinition !== targetArn) fail("Post-switch service is not bound to the exact target task definition.");
+if (enableExecuteCommand === "true" && service.enableExecuteCommand !== true) fail("Post-switch service does not have ECS Exec enabled.");
 const deployments = Array.isArray(service.deployments) ? service.deployments : [];
 if (deployments.length !== 1 || deployments[0]?.status !== "PRIMARY" || deployments[0]?.taskDefinition !== targetArn || deployments[0]?.pendingCount !== 0 || deployments[0]?.runningCount !== service.desiredCount || (deployments[0]?.rolloutState && deployments[0].rolloutState !== "COMPLETED")) fail("Post-switch ECS service is not stable on the exact target.");
 fs.writeFileSync(taskListPath, JSON.stringify({ targetArn, desiredCount: service.desiredCount }));
@@ -740,12 +758,13 @@ NEW_TASK_DEFINITION_ARN="$(
     --output text
 )"
 
-aws ecs update-service \
+update_args=(aws ecs update-service \
   --region "$AWS_REGION" \
   --cluster "$CLUSTER_NAME" \
   --service "$SERVICE_NAME" \
-  --task-definition "$NEW_TASK_DEFINITION_ARN" \
-  >/dev/null
+  --task-definition "$NEW_TASK_DEFINITION_ARN")
+if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then update_args+=(--enable-execute-command); fi
+"${update_args[@]}" >/dev/null
 
 if [[ -n "${METADATA_FILE:-}" ]]; then
   node --input-type=module - "$METADATA_FILE" "$CLUSTER_NAME" "$SERVICE_NAME" "$CONTAINER_NAME" "$IMAGE_URI" "$PREVIOUS_TASK_DEFINITION_ARN" "$NEW_TASK_DEFINITION_ARN" <<'NODE'
@@ -770,6 +789,21 @@ if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
     --region "$AWS_REGION" \
     --cluster "$CLUSTER_NAME" \
     --services "$SERVICE_NAME"
+fi
+
+if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then
+  aws ecs describe-services \
+    --region "$AWS_REGION" \
+    --cluster "$CLUSTER_NAME" \
+    --services "$SERVICE_NAME" \
+    >"$EXISTING_POST_SERVICE_FILE"
+  node --input-type=module - "$EXISTING_POST_SERVICE_FILE" <<'NODE'
+import fs from "node:fs";
+const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!Array.isArray(response.failures) || response.failures.length !== 0 || response.services?.length !== 1 || response.services[0].enableExecuteCommand !== true) {
+  throw new Error("Post-switch service does not have ECS Exec enabled.");
+}
+NODE
 fi
 
 echo "Deployed ${SERVICE_NAME} on ${CLUSTER_NAME}"
