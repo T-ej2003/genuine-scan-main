@@ -6,7 +6,7 @@ The reviewed comparison is anchored by:
 image release: 65df3eb0b6e763095f960e66577b51f54608422e
 tooling:       94574a10889ba58bdfa348fa76cc687ae7197e85
 report identity: tooling-input-tree-sha256
-tooling tree:  64d1ab9bae25d650c0e5b79f6f18d4d19b2dd19fdab46fe6e70b675b36f3ff4a
+tooling tree:  6c4c16592b3e26fa11c64a5d944e58017e399ad3312e91f162f82af1637f895b
 ```
 
 The canonical report classifies the comparison files as the compatibility report itself,
