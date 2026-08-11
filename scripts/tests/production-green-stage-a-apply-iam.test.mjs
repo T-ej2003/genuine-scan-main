@@ -51,7 +51,9 @@ const readCases = [
   ["kms:DescribeKey", production.storageKeyArn],
   ["kms:DescribeKey", production.approvalKeyArn],
   ["rds:DescribeDBSubnetGroups", production.subnetGroupArn],
+  ["rds:ListTagsForResource", production.subnetGroupArn],
   ["rds:DescribeDBParameterGroups", production.parameterGroupArn],
+  ["rds:ListTagsForResource", production.parameterGroupArn],
   ["iam:GetRole", production.checkerRoleArn],
   ["logs:ListTagsForResource", production.executorLogArn],
   ["logs:ListTagsForResource", production.brokerLogArn],
@@ -60,6 +62,8 @@ const readCases = [
 
 test("Stage A provider refresh actions are exact and region-bound", () => {
   for (const [action, resource] of readCases) assert.equal(allows({ action, resource, values: context() }), true, `${action} ${resource}`);
+  assert.equal(allows({ action: "rds:ListTagsForResource", resource: "arn:aws:rds:eu-west-2:368992683803:subgrp:unrelated", values: context() }), false);
+  assert.equal(allows({ action: "rds:ListTagsForResource", resource: production.subnetGroupArn, values: context("us-east-1") }), false);
   assert.equal(allows({ action: "ec2:DescribeVpcEndpoints", resource: "*", values: context("us-east-1") }), false);
   assert.equal(allows({ action: "secretsmanager:DescribeSecret", resource: "*", values: context(production.region, { "aws:ResourceTag/Component": "unrelated" }) }), false);
 });

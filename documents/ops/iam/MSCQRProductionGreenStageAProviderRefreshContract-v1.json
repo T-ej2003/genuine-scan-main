@@ -44,7 +44,8 @@
       "type": "aws_db_subnet_group",
       "addresses": ["aws_db_subnet_group.green"],
       "readActions": [
-        { "action": "rds:DescribeDBSubnetGroups", "resources": ["arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2"], "region": "eu-west-2", "sourceOfProof": "provider rds/subnet_group.go" }
+        { "action": "rds:DescribeDBSubnetGroups", "resources": ["arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2"], "region": "eu-west-2", "sourceOfProof": "provider rds/subnet_group.go" },
+        { "action": "rds:ListTagsForResource", "resources": ["arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2"], "region": "eu-west-2", "sourceOfProof": "provider rds/subnet_group.go and Stage A plan diagnostic" }
       ]
     },
     {
@@ -52,7 +53,8 @@
       "addresses": ["aws_db_parameter_group.green"],
       "readActions": [
         { "action": "rds:DescribeDBParameterGroups", "resources": ["arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"], "region": "eu-west-2", "sourceOfProof": "provider rds/parameter_group.go" },
-        { "action": "rds:DescribeDBParameters", "resources": ["arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"], "region": "eu-west-2", "sourceOfProof": "provider rds/parameter_group.go" }
+        { "action": "rds:DescribeDBParameters", "resources": ["arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"], "region": "eu-west-2", "sourceOfProof": "provider rds/parameter_group.go" },
+        { "action": "rds:ListTagsForResource", "resources": ["arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"], "region": "eu-west-2", "sourceOfProof": "provider rds/parameter_group.go and Stage A plan diagnostic" }
       ]
     },
     {

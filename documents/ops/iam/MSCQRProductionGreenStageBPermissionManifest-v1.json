@@ -124,6 +124,17 @@
       "evidence": "RDS DescribeDBInstances has no resource-level IAM type; handoff validates the reviewed green database in eu-west-2"
     },
     {
+      "id": "refresh-stage-a-rds-tags",
+      "phase": "refresh",
+      "action": "rds:ListTagsForResource",
+      "resources": [
+        "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+        "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"
+      ],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "hashicorp/aws provider refresh lists tags for the existing Stage A DB subnet and parameter groups"
+    },
+    {
       "id": "refresh-read-only-canary-roles",
       "phase": "refresh",
       "action": "iam:GetRole",
