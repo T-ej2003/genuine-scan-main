@@ -20,6 +20,7 @@ const qualityGate = read(".github/workflows/quality-gate.yml");
 const deploymentAudit = read(".github/workflows/deployment-audit.yml");
 const releaseCandidateGate = read(".github/workflows/release-candidate-gate.yml");
 const releaseGate = read(".github/workflows/release-gate.yml");
+const releaseTrain = read(".github/workflows/release-train.yml");
 const runbook = read("documents/SECURITY_KEY_ROTATION_RUNBOOK.md");
 const dockerfile = read("backend/Dockerfile");
 const backendPackage = JSON.parse(read("backend/package.json"));
@@ -177,9 +178,10 @@ test("release gate keeps normal strictness and admits only governed transition m
   assert.doesNotMatch(releaseGate.slice(lifecycleStep, deployJob), /continue-on-error/);
   assert.match(releaseGate, /release_mode:[\s\S]*rotation-overlap[\s\S]*rotation-cleanup/);
   assert.match(releaseGate, /default: normal/);
-  assert.match(releaseGate, /!inputs\.expert_override \|\| inputs\.release_mode != 'normal'/);
+  assert.doesNotMatch(releaseGate, /expert_override/);
+  assert.doesNotMatch(releaseTrain, /expert_override/);
   assert.match(releaseGate, /TARGET_EVENTS: \$\{\{ inputs\.release_mode == 'normal' && 'push,workflow_dispatch' \|\| 'push' \}\}/);
-  assert.match(releaseGate, /inputs\.release_mode != 'normal'[\s\S]*existing-task-definition/);
+  assert.match(releaseGate, /inputs\.release_mode != 'normal'[\s\S]*run-production-cutover\.mjs/);
   assert.match(releaseGate, /ENABLE_EXECUTE_COMMAND: "true"/);
   assert.match(releaseGate, /inputs\.release_mode == 'normal'[\s\S]*Publish immutable ECS images/);
   assert.match(releaseGate, /deploy-production-ecs:[\s\S]*needs: resolve-deploy-target/);
@@ -194,7 +196,7 @@ test("rotation transitions use the reviewed candidate family while normal releas
   assert.ok(releaseGate.includes(`BACKEND_TASK_DEFINITION: ${normalFamily}`));
   assert.ok(releaseGate.includes(`ROTATION_BACKEND_TASK_DEFINITION_FAMILY: ${rotationFamily}`));
   assert.ok(releaseGate.includes("EXPECTED_FAMILY: ${{ env.ROTATION_BACKEND_TASK_DEFINITION_FAMILY }}"));
-  assert.ok(releaseGate.includes("--expected-family \"$EXPECTED_FAMILY\""));
+  assert.ok(releaseGate.includes("--task-definition \"$EXISTING_TASK_DEFINITION_ARN\""));
   assert.doesNotMatch(releaseGate.slice(releaseGate.indexOf("- name: Deploy rotation transition backend ECS service")), /EXPECTED_FAMILY: \$\{\{ env\.BACKEND_TASK_DEFINITION \}\}/);
 });
 

@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "67e200188a6604c9a339da7b3e460fc34ef0fc00399bc145d14986150e453806",
+  "sourceContractSha256": "930608db7c4d3a43ffd152107f3ac51a1ffbf6a969fdcbda652858d86e9e9a32",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -100,7 +100,7 @@
     },
     {
       "path": "backend/Dockerfile",
-      "sha256": "0787220387b319b8fd61b2dad774ed9e1ff7546efaa86ba8325b758d3621fa3c"
+      "sha256": "7fd3c474d0f636aab6a5a88af092990fdf8b51ff6303c1db0ebbd7328970faa6"
     },
     {
       "path": "backend/scripts/full-rls-green-executor-core.mjs",
@@ -212,7 +212,7 @@
     },
     {
       "path": "scripts/aws/deploy-ecs-service.sh",
-      "sha256": "6a9e32e2b7b3c27eadaa4909ec9fce7a979dbf8931c459567004c6fe27e0758d"
+      "sha256": "1c12b49d2b5c8098130f20441b5d8f62dad23686a66e951516bd9e044e427d14"
     },
     {
       "path": "scripts/aws/publish-ecs-images.sh",
@@ -228,11 +228,11 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "afca2989368fc31e480bb53eb9937c02e8045f03e4fde09e85ad584e02fa0381"
+      "sha256": "62fd3168567cf13060b3b9d8845955f9fc7776c0ed4e29a09a8b446cc138c0a1"
     },
     {
       "path": ".github/workflows/release-train.yml",
-      "sha256": "ce3770e3ab165ab37d664fb3390ca57669f04636185495c48a5841b5ada682c1"
+      "sha256": "0a65a0d8268d918b5326b6c56fa5399246437a644e3ddd75f22ec28c6835b2d3"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -324,7 +324,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:67e200188a6604c9a339da7b3e460fc34ef0fc00399bc145d14986150e453806",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:930608db7c4d3a43ffd152107f3ac51a1ffbf6a969fdcbda652858d86e9e9a32",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

@@ -4,8 +4,11 @@ const requiredTrue = (value, name) => { if (value !== true) throw new Error(`${n
 
 export const validateOnboardingContract = (evidence) => {
   if (!evidence || typeof evidence !== "object") throw new Error("onboarding evidence is required");
+  if (evidence.valid !== true || typeof evidence.evidenceRef !== "string" || !/^[a-f0-9]{64}$/.test(evidence.evidenceSha256 || "")) throw new Error("onboarding evidence must be hash-bound and valid");
   if (!SHA.test(evidence.sourceSha)) throw new Error("sourceSha must be a full protected-main SHA");
   if (!DIGEST.test(evidence.imageDigest)) throw new Error("imageDigest must be a full image digest");
+  if (typeof evidence.taskDefinitionArn !== "string" || typeof evidence.taskArn !== "string" || typeof evidence.rotationId !== "string" || !evidence.taskDefinitionArn || !evidence.taskArn || !evidence.rotationId) throw new Error("onboarding task and rotation identity are required");
+  if (evidence.taskMarker !== true || evidence.ecsExecProof !== true) throw new Error("onboarding requires task marker and ECS Exec proof");
   for (const [name, value] of Object.entries({ serviceStable: evidence.serviceStable, targetTaskDefinitionMatch: evidence.targetTaskDefinitionMatch, targetImageDigestMatch: evidence.targetImageDigestMatch, health: evidence.health?.serviceHealthy })) requiredTrue(value, name);
   if (evidence.health.healthReleaseGitSha !== evidence.sourceSha) throw new Error("health release SHA does not match source SHA");
   if (!["overlap-ready", "verified"].includes(evidence.rotationPhase)) throw new Error("onboarding requires an overlap-safe rotation phase");

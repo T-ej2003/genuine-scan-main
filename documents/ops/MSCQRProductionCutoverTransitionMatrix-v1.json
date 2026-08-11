@@ -1,0 +1,378 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "scripts/aws/production-cutover-control-plane.mjs:CUTOVER_STAGE_DEFINITIONS",
+  "edges": [
+    {
+      "edgeId": "protectedMain-to-imageAuthorization",
+      "producer": "protectedMain",
+      "consumer": "imageAuthorization",
+      "producedFields": [
+        "sourceSha",
+        "evidenceSha256"
+      ],
+      "requiredFields": [
+        "sourceSha",
+        "evidenceSha256"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 0
+    },
+    {
+      "edgeId": "imageAuthorization-to-iamPreflight",
+      "producer": "imageAuthorization",
+      "consumer": "iamPreflight",
+      "producedFields": [
+        "sourceSha",
+        "evidenceSha256"
+      ],
+      "requiredFields": [
+        "sourceSha",
+        "evidenceSha256"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 1
+    },
+    {
+      "edgeId": "iamPreflight-to-identities",
+      "producer": "iamPreflight",
+      "consumer": "identities",
+      "producedFields": [
+        "status",
+        "iamEvaluationCensus",
+        "ecsExecVerifierTrust"
+      ],
+      "requiredFields": [
+        "status",
+        "iamEvaluationCensus",
+        "ecsExecVerifierTrust"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 2
+    },
+    {
+      "edgeId": "identities-to-stageA",
+      "producer": "identities",
+      "consumer": "stageA",
+      "producedFields": [
+        "releaseDeployer",
+        "verifier",
+        "rootDrop"
+      ],
+      "requiredFields": [
+        "releaseDeployer",
+        "verifier",
+        "rootDrop"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 3
+    },
+    {
+      "edgeId": "stageA-to-artifactSigning",
+      "producer": "stageA",
+      "consumer": "artifactSigning",
+      "producedFields": [
+        "evidenceRef",
+        "evidenceSha256",
+        "postconditionVerified"
+      ],
+      "requiredFields": [
+        "evidenceRef",
+        "evidenceSha256",
+        "postconditionVerified"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 4
+    },
+    {
+      "edgeId": "artifactSigning-to-overlapTaskDefinition",
+      "producer": "artifactSigning",
+      "consumer": "overlapTaskDefinition",
+      "producedFields": [
+        "activeKeyVersion",
+        "bindings"
+      ],
+      "requiredFields": [
+        "activeKeyVersion",
+        "bindings"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 5
+    },
+    {
+      "edgeId": "overlapTaskDefinition-to-registrationReadback",
+      "producer": "overlapTaskDefinition",
+      "consumer": "registrationReadback",
+      "producedFields": [
+        "taskDefinitionArn",
+        "tags",
+        "evidenceSha256"
+      ],
+      "requiredFields": [
+        "taskDefinitionArn",
+        "tags",
+        "evidenceSha256"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 6
+    },
+    {
+      "edgeId": "registrationReadback-to-inventory",
+      "producer": "registrationReadback",
+      "consumer": "inventory",
+      "producedFields": [
+        "registeredTaskDefinitionArn",
+        "evidenceSha256"
+      ],
+      "requiredFields": [
+        "registeredTaskDefinitionArn",
+        "evidenceSha256"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 7
+    },
+    {
+      "edgeId": "inventory-to-rotationPrepare",
+      "producer": "inventory",
+      "consumer": "rotationPrepare",
+      "producedFields": [
+        "evidenceRef",
+        "evidenceSha256",
+        "inventory"
+      ],
+      "requiredFields": [
+        "evidenceRef",
+        "evidenceSha256",
+        "inventory"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 8
+    },
+    {
+      "edgeId": "rotationPrepare-to-readiness",
+      "producer": "rotationPrepare",
+      "consumer": "readiness",
+      "producedFields": [
+        "rotationId",
+        "rotationStateSha256",
+        "rotationPrepared"
+      ],
+      "requiredFields": [
+        "rotationId",
+        "rotationStateSha256",
+        "rotationPrepared"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 9
+    },
+    {
+      "edgeId": "readiness-to-deployment",
+      "producer": "readiness",
+      "consumer": "deployment",
+      "producedFields": [
+        "sourceSha",
+        "rotationId",
+        "rotationStateSha256",
+        "ecsUpdateServiceCount"
+      ],
+      "requiredFields": [
+        "sourceSha",
+        "rotationId",
+        "rotationStateSha256",
+        "ecsUpdateServiceCount"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 10
+    },
+    {
+      "edgeId": "deployment-to-postDeploy",
+      "producer": "deployment",
+      "consumer": "postDeploy",
+      "producedFields": [
+        "taskDefinitionArn",
+        "propagateTags",
+        "updateServiceCount"
+      ],
+      "requiredFields": [
+        "taskDefinitionArn",
+        "propagateTags",
+        "updateServiceCount"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 11
+    },
+    {
+      "edgeId": "postDeploy-to-ecsExecSelection",
+      "producer": "postDeploy",
+      "consumer": "ecsExecSelection",
+      "producedFields": [
+        "taskArn",
+        "taskDefinitionArn",
+        "imageDigest",
+        "taskTag",
+        "selectedTaskArn"
+      ],
+      "requiredFields": [
+        "taskArn",
+        "taskDefinitionArn",
+        "imageDigest",
+        "taskTag",
+        "selectedTaskArn"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 12
+    },
+    {
+      "edgeId": "ecsExecSelection-to-ecsExecRuntime",
+      "producer": "ecsExecSelection",
+      "consumer": "ecsExecRuntime",
+      "producedFields": [
+        "selectedTaskArn",
+        "targetTaskArn",
+        "revalidatedArn",
+        "runtimeProof"
+      ],
+      "requiredFields": [
+        "selectedTaskArn",
+        "targetTaskArn",
+        "revalidatedArn",
+        "runtimeProof"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 13
+    },
+    {
+      "edgeId": "ecsExecRuntime-to-onboarding",
+      "producer": "ecsExecRuntime",
+      "consumer": "onboarding",
+      "producedFields": [
+        "runtimeProof",
+        "taskArn",
+        "sourceSha"
+      ],
+      "requiredFields": [
+        "runtimeProof",
+        "taskArn",
+        "sourceSha"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 14
+    },
+    {
+      "edgeId": "onboarding-to-onboardingEvidence",
+      "producer": "onboarding",
+      "consumer": "onboardingEvidence",
+      "producedFields": [
+        "evidenceRef",
+        "evidenceSha256",
+        "checks"
+      ],
+      "requiredFields": [
+        "evidenceRef",
+        "evidenceSha256",
+        "checks"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 15
+    },
+    {
+      "edgeId": "onboardingEvidence-to-readyForOnboarding",
+      "producer": "onboardingEvidence",
+      "consumer": "readyForOnboarding",
+      "producedFields": [
+        "valid",
+        "evidenceSha256"
+      ],
+      "requiredFields": [
+        "valid",
+        "evidenceSha256"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 16
+    }
+  ]
+}

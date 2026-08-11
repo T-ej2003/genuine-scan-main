@@ -2,7 +2,7 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { assertSelectedTargetTask, requireExecuteCommandEnabled, selectTargetTask } from "./ecs-exec-target-selection.mjs";
+import { assertSelectedTargetTask, requireExecuteCommandEnabled, selectAndRevalidateExactTarget } from "./ecs-exec-target-selection.mjs";
 import { ECS_EXEC_OPERATOR_CALLER_PATTERN, ECS_EXEC_OPERATOR_ROLE_ARN, ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
@@ -97,9 +97,15 @@ const taskArns = listed.taskArns || [];
 if (!taskArns.length) throw new Error("expected service has no running tasks");
 const described = awsJson(["ecs", "describe-tasks", "--cluster", cluster, "--tasks", ...taskArns, "--include", "TAGS"]);
 if (described.failures?.length || !Array.isArray(described.tasks)) throw new Error("ECS task discovery returned an invalid response");
-const selection = selectTargetTask({ tasks: described.tasks, expectedClusterArn: clusterRecord.clusterArn, expectedTaskDefinitionArn: expectedTaskDefinition, expectedImageDigest, serviceName: service, containerName: container, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
+const expectedTarget = { expectedClusterArn: clusterRecord.clusterArn, expectedTaskDefinitionArn: expectedTaskDefinition, expectedImageDigest, serviceName: service, containerName: container, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE };
+const selection = selectAndRevalidateExactTarget({ tasks: described.tasks, finalTasks: described.tasks, ...expectedTarget });
 const targetTask = selection.selectedTask;
 assertSelectedTargetTask({ task: targetTask, expectedClusterArn: clusterRecord.clusterArn, expectedTaskDefinitionArn: expectedTaskDefinition, expectedImageDigest, serviceName: service, containerName: container, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
+// Re-read exactly the selected ARN with tags immediately before the mutation.
+// Never replace a validated task with a later list result or operator input.
+const finalTargetResponse = awsJson(["ecs", "describe-tasks", "--cluster", cluster, "--tasks", targetTask.taskArn, "--include", "TAGS"]);
+if (finalTargetResponse.failures?.length || !Array.isArray(finalTargetResponse.tasks)) throw new Error("final ECS Exec target revalidation returned an invalid response");
+const finalTargetTask = selectAndRevalidateExactTarget({ tasks: described.tasks, finalTasks: finalTargetResponse.tasks, ...expectedTarget }).finalTask;
 
 const remoteProofPath = `/app/uploads/.mscqr-rotation-proof-${rotationId}.json`;
 const remoteCommand = [
@@ -127,7 +133,7 @@ const pty = spawnSync("python3", [
   "--cluster",
   cluster,
   "--task",
-  targetTask.taskArn,
+  finalTargetTask.taskArn,
   "--container",
   container,
   "--interactive",
@@ -155,10 +161,10 @@ if (proof.artifactHistoricalRuntimeVerify !== true) throw new Error("runtime pro
 
 const finalProof = {
   ...proof,
-  targetTaskArn: targetTask.taskArn,
+  targetTaskArn: finalTargetTask.taskArn,
   selectedTaskArn: targetTask.taskArn,
   matchingTaskCount: selection.matchingTaskCount,
-  targetTaskDefinitionArn: targetTask.taskDefinitionArn,
+  targetTaskDefinitionArn: finalTargetTask.taskDefinitionArn,
   targetImageDigest: expectedImageDigest,
   expectedReleaseSha,
   targetService: service,
@@ -168,7 +174,7 @@ writeFileSync(proofOutput, `${JSON.stringify(finalProof, null, 2)}\n`, { mode: 0
 console.log(JSON.stringify({
   phase,
   rotationId,
-  targetTaskArn: targetTask.taskArn,
+  targetTaskArn: finalTargetTask.taskArn,
   selectedTaskArn: targetTask.taskArn,
   matchingTaskCount: selection.matchingTaskCount,
   targetTaskDefinitionArn: targetTask.taskDefinitionArn,

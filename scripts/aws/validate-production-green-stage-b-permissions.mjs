@@ -528,11 +528,10 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
       if (!["explicitDeny", "implicitDeny"].includes(entry.expectedDecision)) throw new Error(`${entry.id} must declare its exact forbidden expectedDecision.`);
       const unexplained = expectedMissing.filter((key) => !conditionKeyOrigins.has(key));
       if (unexplained.length) throw new Error(`${entry.id} expectedMissingContextValues has no reviewed source-policy origin: ${unexplained.join(", ")}.`);
-      const suppliedKeys = new Set(entry.context.map(({ key }) => key));
-      const sourceExpected = entry.expectedDecision === "implicitDeny"
-        ? [...conditionKeyOrigins.keys()].filter((key) => !suppliedKeys.has(key)).sort()
-        : [];
-      if (!sameStringSet(expectedMissing, sourceExpected)) throw new Error(`${entry.id} expectedMissingContextValues differs from reviewed source-policy conditions.`);
+      // MissingContextValues is produced by IAM for the specific action/resource
+      // evaluation. A policy-wide condition-key union is not an action-level
+      // diagnostic contract (for example, unrelated S3 evaluations can report
+      // ECS tag conditions). Keep only explicitly reviewed, source-origin keys.
     } else if (entry.expectedDecision !== undefined) {
       throw new Error(`${entry.id} may declare expectedDecision only for forbidden evaluations.`);
     }
@@ -799,6 +798,21 @@ export function simulatePrincipalPolicy({ roleArn, evaluation: item, run = (args
   });
 }
 
+// This is intentionally shared by the live preflight and rehearsal.  A census
+// records every safely executable simulation before the final status fails
+// closed, preventing a first mismatch from masking later authorization gaps.
+export function runSimulationCensus({ roleArn, evaluations, simulate }) {
+  if (!Array.isArray(evaluations) || typeof simulate !== "function") throw new Error("IAM simulation census inputs are invalid.");
+  return evaluations.map((item) => {
+    try {
+      const result = validateSimulationResult(item, simulate({ roleArn, evaluation: item }));
+      return { ...item, ...result, missingContextExactMatch: true, validation: item.forbidden ? (result.decision === "allowed" ? "rejected" : "accepted") : (result.decision === "allowed" ? "accepted" : "rejected") };
+    } catch (error) {
+      return { ...item, decision: null, matchedStatements: null, missingContextValues: [], missingContextExactMatch: false, validation: "rejected", error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+}
+
 export function inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
   const response = JSON.parse(run([
     "cloudtrail", "lookup-events",
@@ -951,21 +965,14 @@ export function runPermissionPreflight({
   try { assertReleasePolicyEvidence(policyEvidence); } catch (error) { policyEvidenceError = error.message; }
   if (discoverContextKeys) assertDiscoveredSimulationContextKeys(discoverContextKeys({ roleArn: simulatedRoleArn }), { conditionKeyOrigins, registry: reviewedContextRegistry });
   const derived = deriveRequiredEvaluations(plan, manifest, { permissionProfile: permissionProfileBinding.permissionProfile, contextRegistry: reviewedContextRegistry, conditionKeyOrigins });
-  const runSimulation = (item) => {
-    const result = validateSimulationResult(item, simulate({ roleArn: simulatedRoleArn, evaluation: item }));
-    return { ...item, ...result, missingContextExactMatch: true, validation: item.forbidden ? (result.decision === "allowed" ? "rejected" : "accepted") : (result.decision === "allowed" ? "accepted" : "rejected") };
-  };
-  const requiredResults = derived.required.map(runSimulation);
-  const forbiddenResults = derived.forbidden.map(runSimulation);
-  const runPrincipalSimulation = (entry, forbidden) => {
-    const item = principalEvaluation(entry, { forbidden });
-    const result = validateSimulationResult({ ...item, forbidden }, simulate({ roleArn: ECS_EXEC_OPERATOR_ROLE_ARN, evaluation: item }));
-    return { ...item, ...result, missingContextExactMatch: true, validation: forbidden ? (result.decision === "allowed" ? "rejected" : "accepted") : (result.decision === "allowed" ? "accepted" : "rejected") };
-  };
-  const operatorRequiredResults = ECS_EXEC_OPERATOR_REQUIRED.map((entry) => runPrincipalSimulation(entry, false));
-  const operatorForbiddenResults = ECS_EXEC_OPERATOR_FORBIDDEN.map((entry) => runPrincipalSimulation(entry, true));
+  const requiredResults = runSimulationCensus({ roleArn: simulatedRoleArn, evaluations: derived.required, simulate });
+  const forbiddenResults = runSimulationCensus({ roleArn: simulatedRoleArn, evaluations: derived.forbidden, simulate });
+  const operatorRequired = ECS_EXEC_OPERATOR_REQUIRED.map((entry) => principalEvaluation(entry));
+  const operatorForbidden = ECS_EXEC_OPERATOR_FORBIDDEN.map((entry) => principalEvaluation(entry, { forbidden: true }));
+  const operatorRequiredResults = runSimulationCensus({ roleArn: ECS_EXEC_OPERATOR_ROLE_ARN, evaluations: operatorRequired, simulate });
+  const operatorForbiddenResults = runSimulationCensus({ roleArn: ECS_EXEC_OPERATOR_ROLE_ARN, evaluations: operatorForbidden, simulate });
   const operatorDeniedRequired = operatorRequiredResults.filter((item) => item.decision !== "allowed");
-  const operatorAllowedForbidden = operatorForbiddenResults.filter((item) => item.decision === "allowed");
+  const operatorAllowedForbidden = operatorForbiddenResults.filter((item) => item.decision === "allowed" || item.validation !== "accepted");
   let operatorEvidenceError = null;
   if (phase === "initial") {
     try { assertEcsExecOperatorLiveEvidence(ecsExecVerifierEvidence); } catch (error) { operatorEvidenceError = error.message; }
@@ -973,7 +980,7 @@ export function runPermissionPreflight({
   const operatorStatus = operatorDeniedRequired.length === 0 && operatorAllowedForbidden.length === 0 && !operatorEvidenceError ? "valid" : "invalid";
   const cloudTrailResult = cloudTrail({ sessionName: cloudTrailSessionName, startTime: policyPublishedAt, endTime: generatedAt, requiredActions: derived.required.map((item) => item.action) });
   const deniedRequired = requiredResults.filter((item) => item.decision !== "allowed");
-  const allowedForbidden = forbiddenResults.filter((item) => item.decision === "allowed");
+  const allowedForbidden = forbiddenResults.filter((item) => item.decision === "allowed" || item.validation !== "accepted");
   const unresolved = cloudTrailResult.unresolvedDenials || [];
   const report = {
     schemaVersion: PERMISSION_PREFLIGHT_SCHEMA_VERSION,
@@ -1034,6 +1041,14 @@ export function runPermissionPreflight({
     operatorForbiddenAllowedCount: operatorAllowedForbidden.length,
     operatorForbiddenDeniedCount: operatorForbiddenResults.filter((item) => item.decision !== "allowed").length,
     operatorEvidenceError,
+    iamEvaluationCensus: {
+      total: requiredResults.length + forbiddenResults.length + operatorRequiredResults.length + operatorForbiddenResults.length,
+      executed: requiredResults.length + forbiddenResults.length + operatorRequiredResults.length + operatorForbiddenResults.length,
+      expectedAllowPass: [...requiredResults, ...operatorRequiredResults].filter((item) => item.decision === "allowed" && item.validation === "accepted").length,
+      expectedDenyPass: [...forbiddenResults, ...operatorForbiddenResults].filter((item) => item.decision !== "allowed" && item.validation === "accepted").length,
+      invalid: [...requiredResults, ...forbiddenResults, ...operatorRequiredResults, ...operatorForbiddenResults].filter((item) => item.validation !== "accepted").length,
+      failures: [...requiredResults, ...forbiddenResults, ...operatorRequiredResults, ...operatorForbiddenResults].filter((item) => item.validation !== "accepted").map(({ id, action, resource, error, decision, missingContextValues }) => ({ id, action, resource, error: error || null, decision, missingContextValues })),
+    },
     deniedCount: deniedRequired.length + allowedForbidden.length + operatorDeniedRequired.length + operatorAllowedForbidden.length + unresolved.length,
     status: deniedRequired.length === 0 && allowedForbidden.length === 0 && operatorStatus === "valid" && unresolved.length === 0 && !policyEvidenceError ? "valid" : "invalid",
   };

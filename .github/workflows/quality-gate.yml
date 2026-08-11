@@ -443,6 +443,15 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
+      - name: Production rotation inventory PostgreSQL contract
+        env:
+          MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/mscqr_integration_admin_test
+        run: |
+          set -euo pipefail
+          test -n "$MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL"
+          (cd backend && DATABASE_URL="$MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL" npx prisma migrate deploy --schema prisma/schema.prisma)
+          node --test scripts/tests/production-rotation-inventory-postgres.integration.test.mjs
+
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 

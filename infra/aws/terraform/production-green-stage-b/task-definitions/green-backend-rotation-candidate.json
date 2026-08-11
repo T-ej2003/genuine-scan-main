@@ -13,7 +13,7 @@
     "linuxParameters": { "initProcessEnabled": true },
     "mountPoints": [{ "sourceVolume": "backend-uploads", "containerPath": "/app/uploads", "readOnly": false }],
     "privileged": false, "interactive": false, "pseudoTerminal": false,
-    "environment": [{ "name": "RELEASE_GIT_SHA", "value": "{{RELEASE_SHA}}" }, { "name": "COOKIE_SECURE", "value": "true" }, { "name": "RUN_BACKGROUND_WORKERS", "value": "false" }, { "name": "OBJECT_STORAGE_BUCKET", "value": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" }, { "name": "OBJECT_STORAGE_REGION", "value": "eu-west-2" }],
+    "environment": [{ "name": "RELEASE_GIT_SHA", "value": "{{RELEASE_SHA}}" }, { "name": "COOKIE_SECURE", "value": "true" }, { "name": "RUN_BACKGROUND_WORKERS", "value": "false" }, { "name": "OBJECT_STORAGE_BUCKET", "value": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" }, { "name": "OBJECT_STORAGE_REGION", "value": "eu-west-2" }, { "name": "ROTATION_INVENTORY_APPROVED", "value": "true" }, { "name": "ROTATION_INVENTORY_RLS_ROLE", "value": "{{ROTATION_INVENTORY_RLS_ROLE}}" }],
     "secrets": [
       { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh" },
       { "name": "AUTHENTICATED_APP_DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh" },

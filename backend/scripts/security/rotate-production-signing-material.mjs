@@ -188,13 +188,14 @@ const validateRuntimeProof = ({ file, proof: persistedProof, config, phase, expe
   return { ...proof, observedAt: new Date(observedAt).toISOString() };
 };
 
-const stateForPending = ({ config, identity, oldJwt, oldQrPublic, oldQrVersion, newJwt, newQrPublic, newQrVersion, pending }) => ({
+const stateForPending = ({ config, identity, oldJwt, oldQrPublic, oldQrVersion, newJwt, newQrPublic, newQrVersion, pending, inventoryEvidenceSha256 }) => ({
   stateVersion: 3,
   rotationId: config.rotationId,
   sourceSha: config.sourceSha,
   operator: identity,
   phase: "prepared",
   overlapDeploymentSha: config.overlapDeploymentSha,
+  inventoryEvidenceSha256,
   preparedAt: nowIso(),
   jwt: { oldFingerprint: fingerprint(oldJwt), newFingerprint: fingerprint(newJwt) },
   qr: { oldPublicFingerprint: fingerprint(oldQrPublic), newPublicFingerprint: fingerprint(newQrPublic), oldKeyVersion: oldQrVersion, newKeyVersion: newQrVersion },
@@ -234,11 +235,14 @@ const assertPrepareLineage = (state, current) => {
 };
 
 const prepare = async (context) => {
-  const { config, sm, values, identity } = context;
+  const { config, sm, values, identity, inventoryEvidenceSha256 } = context;
+  const inventoryBindingRequired = values.has("inventory-evidence-file");
+  if (inventoryBindingRequired && !/^[a-f0-9]{64}$/.test(inventoryEvidenceSha256 || "")) throw new Error("bounded inventory evidence hash is required");
   const stateFile = statePath(values);
   const fixtureFile = fixturePath(values);
   let state = readState(stateFile);
   if (state) assertState(state, config);
+  if (inventoryBindingRequired && state && state.inventoryEvidenceSha256 !== inventoryEvidenceSha256) throw new Error("rotation state is not bound to the current bounded inventory evidence");
   let current = await slots(sm, config);
   for (const [name, record] of [["jwt", current.jwtPending], ["QR private", current.qrPrivatePending], ["QR public", current.qrPublicPending]]) assertPendingOwnership(name, record.material, config.rotationId);
   if (state) assertPrepareLineage(state, current);
@@ -283,6 +287,7 @@ const prepare = async (context) => {
         qrPrivateVersionId: current.qrPrivatePending.raw.versionId,
         qrPublicVersionId: current.qrPublicPending.raw.versionId,
       },
+      inventoryEvidenceSha256: inventoryEvidenceSha256 || null,
     });
     const fixture = {
       payload: null,
@@ -321,7 +326,7 @@ const prepare = async (context) => {
     state.overlapPreparedAt = nowIso(clockOf(context));
     persist(context, state);
   }
-  console.log(JSON.stringify({ mode: "prepare", phase: state.phase, rotationId: state.rotationId, operator: identity, fixtureFile, stateFile, deploymentRequired: state.phase === "overlap-deploy-required", prepareCrashResumable: true }));
+  console.log(JSON.stringify({ mode: "prepare", phase: state.phase, rotationId: state.rotationId, operator: identity, fixtureFile, stateFile, inventoryEvidenceSha256: inventoryEvidenceSha256 || null, deploymentRequired: state.phase === "overlap-deploy-required", prepareCrashResumable: true }));
 };
 
 const verify = async (context) => {
@@ -543,7 +548,10 @@ const main = async () => {
   const config = loadConfig(path.resolve(required(values.get("config"), "--config")));
   const identity = assertIdentity(config);
   const sm = client(config);
-  const context = { config, sm, values, identity };
+  const inventoryFile = values.get("inventory-evidence-file");
+  const inventoryEvidence = inventoryFile ? JSON.parse(readFileSync(path.resolve(inventoryFile), "utf8")) : null;
+  const inventoryEvidenceSha256 = inventoryEvidence?.evidenceSha256;
+  const context = { config, sm, values, identity, inventoryEvidenceSha256 };
   if (mode === "prepare") return prepare(context);
   if (mode === "verify") return verify(context);
   if (mode === "cleanup") return cleanup(context);
