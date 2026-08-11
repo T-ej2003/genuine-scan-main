@@ -65,6 +65,6 @@ test("production-shaped rotation inventory executes against PostgreSQL for empty
     assert.equal(new Date(representative.artifactRecords.maxFinishedAt).toISOString(), "2030-02-03T00:00:00.000Z");
     assert.deepEqual(representative.artifactRecords.signatureAlgorithms, { Ed25519: 2, RSA: 1 });
   } finally {
-    runSql(`DELETE FROM public."CompliancePackJob" WHERE id IN ('${artifactIds.join("','")}'); DELETE FROM public."QRCode" WHERE id IN ('${qrIds.join("','")}'); DELETE FROM public."Licensee" WHERE id = '${licenseeId}'; DELETE FROM public."Organization" WHERE id = '${organizationId}'; DROP ROLE IF EXISTS mscqr_prod_rls;`);
+    runSql(`DELETE FROM public."CompliancePackJob" WHERE id IN ('${artifactIds.join("','")}'); DELETE FROM public."QRCode" WHERE id IN ('${qrIds.join("','")}'); DELETE FROM public."Licensee" WHERE id = '${licenseeId}'; DELETE FROM public."Organization" WHERE id = '${organizationId}'; REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM mscqr_prod_rls; REVOKE ALL PRIVILEGES ON SCHEMA public FROM mscqr_prod_rls; DROP ROLE IF EXISTS mscqr_prod_rls;`);
   }
 });
