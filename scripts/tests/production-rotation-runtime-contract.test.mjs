@@ -15,6 +15,9 @@ const artifact = read("backend/src/services/artifactSigningService.ts");
 const compliance = read("backend/src/services/compliancePackService.ts");
 const immutableAudit = read("backend/src/services/immutableAuditExportService.ts");
 const qualityGate = read(".github/workflows/quality-gate.yml");
+const deploymentAudit = read(".github/workflows/deployment-audit.yml");
+const releaseCandidateGate = read(".github/workflows/release-candidate-gate.yml");
+const releaseGate = read(".github/workflows/release-gate.yml");
 const runbook = read("documents/SECURITY_KEY_ROTATION_RUNBOOK.md");
 const dockerfile = read("backend/Dockerfile");
 const backendPackage = JSON.parse(read("backend/package.json"));
@@ -127,20 +130,51 @@ test("Stage B image classification keeps the evidence schema non-image and unkno
   assert.throws(() => imageImpactReportFor({ imageReleaseSha: "a".repeat(40), toolingSha: "b".repeat(40), toolingInputTreeSha256: "c".repeat(64), changedFiles: ["unknown/runtime.bin"] }), /unclassified/);
 });
 
-test("quality-gate security mode is strict only for production or explicit production runs", () => {
+test("pre-rotation pushes use source validation while explicit production runs stay strict", () => {
   const securityStep = qualityGate.slice(qualityGate.indexOf("- name: Security and release guardrails"));
-  assert.match(securityStep, /GITHUB_REF.*refs\/heads\/main/);
   assert.match(securityStep, /GITHUB_EVENT_NAME.*schedule/);
   assert.match(securityStep, /GITHUB_EVENT_NAME.*workflow_dispatch/);
   assert.match(securityStep, /verify:ci:security:source/);
   assert.match(securityStep, /verify:ci:security\n/);
-  assert.doesNotMatch(securityStep, /GITHUB_EVENT_NAME.*pull_request.*verify:ci:security/s);
-  const mode = ({ ref, event }) => ref === "refs/heads/main" || event === "schedule" || event === "workflow_dispatch" ? "strict" : "source";
+  assert.doesNotMatch(securityStep, /GITHUB_REF.*refs\/heads\/main/);
+
+  const deploymentStep = deploymentAudit.slice(deploymentAudit.indexOf("- name: Run full release validation"));
+  assert.match(deploymentStep, /GITHUB_EVENT_NAME.*workflow_dispatch/);
+  assert.match(deploymentStep, /verify:release:source/);
+  assert.match(deploymentStep, /verify:release\n/);
+
+  const releaseCandidateStep = releaseCandidateGate.slice(releaseCandidateGate.indexOf("- name: Release-candidate validation contract"));
+  assert.match(releaseCandidateStep, /GITHUB_EVENT_NAME.*workflow_dispatch/);
+  assert.match(releaseCandidateStep, /refs\/heads\/release-candidate/);
+  assert.match(releaseCandidateStep, /refs\/tags/);
+  assert.match(releaseCandidateStep, /verify:ci:release-candidate:source/);
+  assert.match(releaseCandidateStep, /verify:ci:release-candidate\n/);
+
+  const mode = ({ ref, event }) => event === "schedule" || event === "workflow_dispatch" || ref.startsWith("refs/heads/release-candidate/") || ref.startsWith("refs/tags/") ? "strict" : "source";
   assert.equal(mode({ ref: "refs/pull/256/merge", event: "pull_request" }), "source");
   assert.equal(mode({ ref: "refs/heads/codex/rotation-fix", event: "push" }), "source");
-  assert.equal(mode({ ref: "refs/heads/main", event: "push" }), "strict");
+  assert.equal(mode({ ref: "refs/heads/main", event: "push" }), "source");
   assert.equal(mode({ ref: "refs/heads/main", event: "schedule" }), "strict");
   assert.equal(mode({ ref: "refs/heads/codex/rotation-fix", event: "workflow_dispatch" }), "strict");
+  assert.equal(mode({ ref: "refs/heads/release-candidate/v1", event: "push" }), "strict");
+
+  const packageJson = JSON.parse(read("package.json"));
+  assert.match(packageJson.scripts["verify:guardrails"], /check:rotation-evidence-freshness/);
+  assert.match(packageJson.scripts["verify:guardrails:source"], /check:rotation-evidence-contract/);
+  assert.doesNotMatch(packageJson.scripts["verify:guardrails:source"], /check:rotation-evidence-freshness/);
+});
+
+test("release gate independently enforces strict freshness before deployment", () => {
+  const strictStep = releaseGate.indexOf("- name: Strict production rotation freshness");
+  const deployJob = releaseGate.indexOf("  deploy-production-ecs:");
+  const upstreamSanity = releaseGate.indexOf("node scripts/github/check-required-workflow-gates.mjs");
+  assert.ok(strictStep > upstreamSanity, "strict freshness must follow upstream gate sanity");
+  assert.ok(strictStep < deployJob, "strict freshness must precede the deploy job");
+  assert.match(releaseGate.slice(strictStep, deployJob), /npm run check:rotation-evidence-freshness/);
+  assert.doesNotMatch(releaseGate.slice(strictStep, deployJob), /continue-on-error|if:/);
+  assert.match(releaseGate, /TARGET_EVENTS: push,workflow_dispatch/);
+  assert.match(releaseGate, /deploy-production-ecs:[\s\S]*needs: resolve-deploy-target/);
+  assert.match(JSON.parse(read("package.json")).scripts["check:rotation-evidence-freshness"], /check-rotation-evidence-freshness/);
 });
 
 test("runbook uses only the coordinator's supported runtime proof flags", () => {

@@ -304,10 +304,17 @@ until a real governed rotation has completed. The gate contexts are explicit:
 | Scheduled DR/security validation | scheduled/manual operational run | required | required | no |
 | Release-candidate readiness | release push/manual release | required | required | downstream only |
 
-The pull-request workflows select their source-validation command from the
-workflow event. This is a semantic gate mode, not a PR, branch, or environment
-bypass. Pushes, scheduled checks, and manual production runs keep the strict
-freshness path.
+Pull requests and ordinary pushes select the source-validation command. This is
+a lifecycle gate mode, not a PR, branch, or environment bypass: it validates
+the evidence contract without claiming that a rotation occurred. Scheduled and
+explicit operational runs, release-candidate refs, and the production release
+gate keep the strict freshness path. Before the first real rotation, the valid
+state is `ROTATION_CONTRACT_VALID=true`, `ROTATION_EVIDENCE_FRESH=false`, and
+`ROTATION_CLOSED=false`.
+
+The production `release-gate` repeats `npm run check:rotation-evidence-freshness`
+after upstream gate sanity and before the deploy job. A successful source-only
+push check can therefore never authorize production deployment by itself.
 
 After a real rotation, run the strict checks without changing their threshold:
 

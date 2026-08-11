@@ -101,6 +101,11 @@ jobs:
           echo "::warning::Expert override enabled. Required workflow gate sanity check was skipped."
           echo "Use only for emergency production deployment after human verification."
 
+      - name: Strict production rotation freshness
+        run: |
+          set -euo pipefail
+          npm run check:rotation-evidence-freshness
+
   deploy-production-ecs:
     name: Deploy production ECS
     needs: resolve-deploy-target

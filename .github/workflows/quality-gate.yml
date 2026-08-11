@@ -167,7 +167,9 @@ jobs:
           SECRET_ROTATION_EVIDENCE_REF: ${{ vars.RC_SECRET_ROTATION_EVIDENCE_REF }}
           INCIDENT_DRILL_EVIDENCE_REF: ${{ vars.RC_INCIDENT_DRILL_EVIDENCE_REF }}
         run: |
-          if [ "$GITHUB_REF" = "refs/heads/main" ] || [ "$GITHUB_EVENT_NAME" = "schedule" ] || [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+          # Ordinary pushes validate source contracts. Scheduled and explicit
+          # operational runs retain the post-rotation freshness gate.
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ] || [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             npm run verify:ci:security
           else
             npm run verify:ci:security:source
