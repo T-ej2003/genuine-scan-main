@@ -43,6 +43,8 @@ test("real image-reuse CLI treats report generation as a boolean option", () => 
     execFileSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: realBareRemote, encoding: "utf8" });
     execFileSync("git", ["update-ref", "refs/heads/main", toolingSha], { cwd: realBareRemote, encoding: "utf8" });
     execFileSync("git", ["remote", "set-url", "origin", realBareRemote], { cwd: realWorktree, encoding: "utf8" });
+    execFileSync("git", ["fetch", "--no-tags", "origin", "refs/heads/main:refs/remotes/origin/main"], { cwd: realWorktree, encoding: "utf8" });
+    assert.equal(execFileSync("git", ["rev-parse", "refs/remotes/origin/main"], { cwd: realWorktree, encoding: "utf8" }).trim(), toolingSha);
     execFileSync("git", ["remote", "set-head", "origin", "main"], { cwd: realWorktree, encoding: "utf8" });
     fs.copyFileSync(path.join(realWorktree, compatibilityReport), reportPath);
 
