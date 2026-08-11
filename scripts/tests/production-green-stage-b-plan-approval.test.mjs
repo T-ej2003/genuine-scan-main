@@ -203,7 +203,7 @@ test("plan profile and broker operation registries match the emitted Stage B uni
 
 test("normal approval uses canonical address completeness instead of a fixed no-op count", () => {
   const current = assertStageBNormalPlanCompleteness(fixture, { referenceAudit: audit, strict: false });
-  assert.equal(current.classification.actionCounts["no-op"], 70);
+  assert.equal(current.classification.actionCounts["no-op"], 71);
 
   const retainedKeys = Object.keys(STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS).sort();
   assert.deepEqual(retainedKeys, [...new Set(fixtureRetainedTaskDefinitions.map((entry) => entry.terraformAddress.match(/_retained\["[a-f0-9]+-([^\"]+)"\]$/)[1]))].sort());
@@ -233,7 +233,7 @@ test("normal approval uses canonical address completeness instead of a fixed no-
   futurePlan.resource_changes.splice(futurePlan.resource_changes.findIndex((change) => change.address === "aws_dynamodb_table.replay"), 0, { address: futureAddress, type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: {}, after: {} } });
   const futureAudit = structuredClone(audit);
   futureAudit.retainedTaskDefinitions.push({ terraformAddress: futureAddress, family: "mscqr-production-full-rls-green-full-rls-verification", classification: "retained-no-op", oldTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-verification:99" });
-  assert.equal(assertStageBNormalPlanCompleteness(futurePlan, { referenceAudit: futureAudit, strict: false }).classification.actionCounts["no-op"], 71);
+  assert.equal(assertStageBNormalPlanCompleteness(futurePlan, { referenceAudit: futureAudit, strict: false }).classification.actionCounts["no-op"], 72);
 
   const rejects = (mutate, pattern) => {
     const candidate = structuredClone(fixture);

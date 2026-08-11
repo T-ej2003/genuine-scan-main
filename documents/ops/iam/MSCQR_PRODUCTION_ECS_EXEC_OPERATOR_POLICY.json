@@ -1,0 +1,58 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ExecuteOnlyProductionBackendTasks",
+      "Effect": "Allow",
+      "Action": "ecs:ExecuteCommand",
+      "Resource": [
+        "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
+          "ecs:container-name": "backend"
+        }
+      }
+    },
+    {
+      "Sid": "ListOnlyProductionBackendTasks",
+      "Effect": "Allow",
+      "Action": "ecs:ListTasks",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "DescribeProductionCluster",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeClusters",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "DescribeProductionBackendTasks",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTasks",
+      "Resource": ["arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"],
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "DescribeProductionBackendService",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeServices",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "ReadTaskDefinitionIdentity",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTaskDefinition",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "eu-west-2" }
+      }
+    }
+  ]
+}

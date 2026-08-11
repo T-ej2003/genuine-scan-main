@@ -28,6 +28,7 @@ import {
   validateQrSigningConfiguration,
 } from "./services/qrTokenService";
 import { bootstrapConfiguredSuperAdmin } from "./services/auth/superAdminBootstrapService";
+import { validateArtifactSigningConfiguration } from "./services/artifactSigningService";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -162,12 +163,23 @@ if (process.env.NODE_ENV === "production") {
     !hasAnyConfiguredSecret("PRINTER_SSE_SIGN_SECRET_CURRENT", "PRINTER_SSE_SIGN_SECRET") ? "PRINTER_SSE_SIGN_SECRET_CURRENT or PRINTER_SSE_SIGN_SECRET" : "",
     !hasAnyConfiguredSecret("INCIDENT_HASH_SALT_CURRENT", "INCIDENT_HASH_SALT") ? "INCIDENT_HASH_SALT_CURRENT or INCIDENT_HASH_SALT" : "",
     !String(process.env.AUTH_MFA_ENCRYPTION_KEY || "").trim() ? "AUTH_MFA_ENCRYPTION_KEY" : "",
+    !String(process.env.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT || "").trim() ? "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT" : "",
+    !String(process.env.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT || "").trim() ? "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT" : "",
+    !String(process.env.ARTIFACT_SIGN_ACTIVE_KEY_VERSION || "").trim() ? "ARTIFACT_SIGN_ACTIVE_KEY_VERSION" : "",
+    !String(process.env.ARTIFACT_SIGN_PUBLIC_KEYS_JSON || "").trim() ? "ARTIFACT_SIGN_PUBLIC_KEYS_JSON" : "",
   ].filter(Boolean);
 
   if (missingStrongSecurityEnv.length > 0) {
     logger.error(
       `Refusing to start: production security hardening requires ${missingStrongSecurityEnv.join(", ")}`
     );
+    process.exit(1);
+  }
+
+  try {
+    validateArtifactSigningConfiguration();
+  } catch (error) {
+    logger.error(`Refusing to start: artifact signing configuration failed validation. ${String((error as Error)?.message || error)}`);
     process.exit(1);
   }
 

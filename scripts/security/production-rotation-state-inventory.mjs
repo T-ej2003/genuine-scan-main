@@ -1,0 +1,18 @@
+import { spawnSync } from "node:child_process";
+
+const role = String(process.env.ROTATION_INVENTORY_RLS_ROLE || "").trim();
+if (process.env.ROTATION_INVENTORY_APPROVED !== "true" || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(role)) throw new Error("read-only inventory requires ROTATION_INVENTORY_APPROVED=true and a reviewed RLS role");
+if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL must be provided by the approved read-only runtime");
+const sql = `BEGIN; SET TRANSACTION READ ONLY; SET LOCAL statement_timeout = '15000ms'; SET LOCAL lock_timeout = '2000ms'; SET LOCAL ROLE "${role}"; SELECT json_build_object(
+  'refreshSessions', (SELECT json_build_object('count', count(*)::int, 'maxExpiry', max("expiresAt")) FROM public."RefreshToken" WHERE "revokedAt" IS NULL AND "expiresAt" > now()),
+  'customerSessions', (SELECT json_build_object('count', count(*)::int, 'maxExpiry', max("expiresAt")) FROM public."CustomerAuthSession" WHERE "revokedAt" IS NULL AND "expiresAt" > now()),
+  'customerVerificationState', (SELECT json_build_object('count', count(*)::int, 'maxExpiry', max("expiresAt")) FROM public."CustomerVerificationSession" WHERE "expiresAt" IS NULL OR "expiresAt" > now()),
+  'activeInvites', (SELECT json_build_object('count', count(*)::int, 'maxExpiry', max("expiresAt")) FROM public."Invite" WHERE "usedAt" IS NULL AND "expiresAt" > now()),
+  'resetTokens', (SELECT json_build_object('count', count(*)::int, 'maxExpiry', max("expiresAt")) FROM public."PasswordReset" WHERE "usedAt" IS NULL AND "expiresAt" > now()),
+  'emailVerification', (SELECT json_build_object('count', count(*)::int, 'maxExpiry', max("expiresAt")) FROM public."EmailVerificationToken" WHERE "usedAt" IS NULL AND "expiresAt" > now()),
+  'qrArtifacts', (SELECT json_build_object('count', count(*)::int, 'maxExpiry', max("tokenExpiresAt"), 'issuanceModes', coalesce(json_object_agg(mode, mode_count), '{}'::json)) FROM (SELECT "issuanceMode" AS mode, count(*)::int AS mode_count FROM public."QRCode" WHERE "tokenExpiresAt" > now() GROUP BY "issuanceMode") q),
+  'artifactRecords', (SELECT json_build_object('count', count(*)::int, 'maxFinishedAt', max("finishedAt"), 'signatureAlgorithms', coalesce(json_object_agg(algorithm, algorithm_count), '{}'::json)) FROM (SELECT "signatureAlgorithm" AS algorithm, count(*)::int AS algorithm_count FROM public."CompliancePackJob" WHERE "finishedAt" IS NOT NULL GROUP BY "signatureAlgorithm") a),
+  'oauthState', json_build_object('persisted', false, 'maxTtlSeconds', 900), 'oauthExchange', json_build_object('persisted', false, 'maxTtlSeconds', 600), 'printedQrCompatibility', json_build_object('maxConfiguredTtlSeconds', 31536000)) AS inventory; ROLLBACK;`;
+const result = spawnSync("psql", ["--no-psqlrc", "--tuples-only", "--no-align", "--command", sql], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PSQL_HISTORY: "/dev/null", PGAPPNAME: "mscqr-production-rotation-read-only-inventory" } });
+if (result.status !== 0) throw new Error("read-only rotation inventory query failed");
+try { console.log(JSON.stringify(JSON.parse(String(result.stdout || "").trim()))); } catch { throw new Error("read-only rotation inventory returned malformed metadata"); }

@@ -20,6 +20,10 @@ const smokeRequired = parseBool(process.env.SMOKE_REQUIRED, true);
 const allowDegradedReadyOnPr = parseBool(process.env.ALLOW_STAGING_SMOKE_DEGRADED_ON_PR, false);
 const isPullRequestSmoke = process.env.GITHUB_EVENT_NAME === "pull_request";
 const smokeRequestTimeoutMs = Number.parseInt(process.env.SMOKE_REQUEST_TIMEOUT_MS || "15000", 10);
+const syntheticRunId = String(process.env.SMOKE_SYNTHETIC_RUN_ID || "").trim();
+if (parseBool(process.env.SMOKE_SYNTHETIC_REQUIRED, false) && !/^[A-Za-z0-9._-]{8,100}$/.test(syntheticRunId)) {
+  throw new Error("SMOKE_SYNTHETIC_RUN_ID is required and must be a safe tagged run identifier");
+}
 
 const cookieJar = new Map();
 
@@ -75,6 +79,7 @@ const requestJson = async (url, options = {}) => {
   const timeout = setTimeout(() => controller.abort(), Number.isFinite(smokeRequestTimeoutMs) ? smokeRequestTimeoutMs : 15_000);
   const headers = {
     Accept: "application/json",
+    ...(syntheticRunId ? { "X-MSCQR-Synthetic-Smoke": syntheticRunId } : {}),
     ...(options.headers || {}),
   };
   if (cookieJar.get("aq_csrf") && !["GET", "HEAD", "OPTIONS"].includes(String(options.method || "GET").toUpperCase())) {

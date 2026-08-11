@@ -21,7 +21,7 @@ const validBackendPortMappings = [{ containerPort: 4000, hostPort: 4000, protoco
 
 const serviceResponse = (taskDefinition, deployments = [
   { status: "PRIMARY", taskDefinition, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },
-]) => ({ failures: [], services: [{ status: "ACTIVE", taskDefinition, desiredCount: 2, loadBalancers: serviceLoadBalancers, deployments }] });
+], enableExecuteCommand = false) => ({ failures: [], services: [{ status: "ACTIVE", taskDefinition, desiredCount: 2, loadBalancers: serviceLoadBalancers, deployments, enableExecuteCommand }] });
 
 function writeFixture(data, options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ecs-existing-target-"));
@@ -62,8 +62,8 @@ function writeFixture(data, options = {}) {
       { status: "PRIMARY", taskDefinition: options.currentTaskDefinition || fromArn, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },
       { status: "ACTIVE", taskDefinition: fromArn, pendingCount: 1, runningCount: 1 },
     ]
-    : undefined);
-  const post = serviceResponse(targetArn);
+    : undefined, options.initialExecEnabled === true);
+  const post = serviceResponse(targetArn, undefined, options.postExecEnabled ?? options.enableExecuteCommand === true);
   const targetDeployment = serviceResponse(fromArn, [
     { status: "PRIMARY", taskDefinition: fromArn, pendingCount: 1, runningCount: 2, rolloutState: "IN_PROGRESS" },
     { status: "ACTIVE", taskDefinition: targetArn, pendingCount: 0, runningCount: 0 },
@@ -196,6 +196,7 @@ function runExisting(options = {}, extraArgs = []) {
       CONTAINER_NAME: containerName,
       ...(expectedGitSha ? { EXPECTED_GIT_SHA: expectedGitSha } : {}),
       ...(options.versionUrl ? { VERSION_URL: options.versionUrl } : {}),
+      ...(options.enableExecuteCommand ? { ENABLE_EXECUTE_COMMAND: "true" } : {}),
       FAKE_DATA: fixture.dir,
       FAKE_SCENARIO: options.scenario || "",
       TMPDIR: fixture.tempDir,
@@ -245,6 +246,13 @@ test("existing mode enforces the independent service load-balancer port contract
   assert.equal((corrected.calls.match(/ecs update-service/g) || []).length, 1);
   assert.equal((corrected.calls.match(/ecs register-task-definition/g) || []).length, 0);
   assertTempClean(corrected);
+});
+test("existing mode enables ECS Exec in the same canonical service update", () => {
+  const result = runExisting({ enableExecuteCommand: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assert.match(result.calls, /--enable-execute-command/);
+  assertTempClean(result);
 });
 
 test("existing mode rejects an unrevisioned target", () => assertFailure(runExisting({ targetArgument: `arn:aws:ecs:${region}:${account}:task-definition/${targetFamily}` }), /full ARN.*revision/));

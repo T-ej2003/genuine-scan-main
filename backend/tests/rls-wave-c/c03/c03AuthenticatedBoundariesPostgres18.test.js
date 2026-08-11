@@ -84,7 +84,7 @@ async function main() {
   });
   const result = (suffix) => ({
     fileName: `pack-${suffix}.zip`, storageKey: `private/${suffix}.zip`, integrityHash: crypto.createHash("sha256").update(suffix).digest("hex"),
-    signatureAlgorithm: "hmac-sha256", controls: 4, generatedAt: new Date().toISOString(), storageMode: "object-storage",
+    signatureAlgorithm: "ed25519", controls: 4, generatedAt: new Date().toISOString(), storageMode: "object-storage",
   });
   const start = (request = requestId("start")) => withC03ActorTransaction(actorBoundary("compliance-pack-start", request),
     (tx, authority) => repository.startCompliancePackJobInTransaction(tx, authority, { triggerType: "MANUAL", from: null, to: null }));

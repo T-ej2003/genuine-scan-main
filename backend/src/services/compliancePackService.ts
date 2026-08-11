@@ -1,13 +1,13 @@
 import fs from "fs";
 import path from "path";
-import { createHash, createHmac, createPrivateKey, randomUUID, sign as cryptoSign } from "crypto";
+import { createHash, randomUUID } from "crypto";
 
 import JSZip from "jszip";
 import { UserRole } from "@prisma/client";
 
 import prisma from "../config/database";
 import { logger } from "../utils/logger";
-import { getQrSigningHmacSecret } from "../utils/secretConfig";
+import { ARTIFACT_PERSISTED_SIGNATURE_ALGORITHM, signArtifactPayload } from "./artifactSigningService";
 import { downloadObjectBuffer, isObjectStorageConfigured, uploadObjectBuffer } from "./objectStorageService";
 import {
   C03AccessError,
@@ -33,13 +33,6 @@ const ensureDir = (dir: string) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 };
 
-const toBase64Url = (buf: Buffer) =>
-  buf
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-
 const stableStringify = (obj: any): string => {
   if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
   if (Array.isArray(obj)) return `[${obj.map((v) => stableStringify(v)).join(",")}]`;
@@ -48,8 +41,6 @@ const stableStringify = (obj: any): string => {
 };
 
 const sha256Hex = (v: Buffer | string) => createHash("sha256").update(v).digest("hex");
-
-const normalizePem = (value: string) => value.replace(/\\n/g, "\n").trim();
 
 const parseIntEnv = (key: string, fallback: number, min: number, max: number) => {
   const raw = Number(String(process.env[key] || "").trim());
@@ -95,20 +86,6 @@ const requireComplianceSecurity = (
     throw new C03AccessError("A bounded compliance licensee scope is required", 400);
   }
   return { ...verified, licenseeId: boundedLicenseeId };
-};
-
-const signPayload = (payload: string) => {
-  const payloadHash = createHash("sha256").update(payload).digest();
-  const privateKeyPem = process.env.QR_SIGN_PRIVATE_KEY;
-  if (privateKeyPem) {
-    const key = createPrivateKey(normalizePem(privateKeyPem));
-    const signature = cryptoSign(null, payloadHash, key);
-    return { algorithm: "ed25519", signature: toBase64Url(signature) };
-  }
-
-  const secret = getQrSigningHmacSecret();
-  const signature = createHmac("sha256", secret).update(payloadHash).digest();
-  return { algorithm: "hmac-sha256", signature: toBase64Url(signature) };
 };
 
 const compliancePackDir = () => path.resolve(__dirname, "../../uploads/compliance-packs");
@@ -167,7 +144,7 @@ export const buildSignedComplianceEvidencePack = async (params: {
       "Verification:",
       "1) Hash each file with SHA-256 and compare with integrity.fileHashes",
       "2) Recompute integrityHash from canonical payload",
-      "3) Verify signature with configured signing key",
+      "3) Verify signature with the artifact public-key registry",
     ].join("\n"),
   };
 
@@ -185,7 +162,7 @@ export const buildSignedComplianceEvidencePack = async (params: {
   };
   const integrityCanonical = stableStringify(integrityPayload);
   const integrityHash = sha256Hex(integrityCanonical);
-  const signature = signPayload(integrityCanonical);
+  const signature = signArtifactPayload(integrityCanonical);
 
   files["integrity.json"] = JSON.stringify(
     {
@@ -212,7 +189,7 @@ export const buildSignedComplianceEvidencePack = async (params: {
     metadata: {
       generatedAt,
       integrityHash,
-      signatureAlgorithm: signature.algorithm,
+      signatureAlgorithm: ARTIFACT_PERSISTED_SIGNATURE_ALGORITHM,
       controls: controls.length,
     },
   };

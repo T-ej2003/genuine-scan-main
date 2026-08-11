@@ -3592,6 +3592,102 @@
       "mutation": true
     },
     {
+      "id": "runtime-ssmmessages-createcontrolchannel",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "ssmmessages:CreateControlChannel",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
+      "id": "runtime-ssmmessages-createdatachannel",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "ssmmessages:CreateDataChannel",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
+      "id": "runtime-ssmmessages-opencontrolchannel",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "ssmmessages:OpenControlChannel",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
+      "id": "runtime-ssmmessages-opendatachannel",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "ssmmessages:OpenDataChannel",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
       "id": "runtime-sts-assumerole",
       "phase": "runtime-activation-boundary",
       "identity": "SERVICE_RUNTIME",

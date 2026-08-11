@@ -1,14 +1,7 @@
-import { createHash, createHmac, createPrivateKey, sign as cryptoSign } from "crypto";
+import { createHash } from "crypto";
 import JSZip from "jszip";
-import { getQrSigningHmacSecret } from "../utils/secretConfig";
 import { readAuditExport } from "../rls-waves/session-c/c01/qrSystemRepository";
-
-const toBase64Url = (buf: Buffer) =>
-  buf
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+import { ARTIFACT_PERSISTED_SIGNATURE_ALGORITHM, signArtifactPayload } from "./artifactSigningService";
 
 const stableStringify = (obj: any): string => {
   if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
@@ -18,29 +11,6 @@ const stableStringify = (obj: any): string => {
 };
 
 const sha256Hex = (v: Buffer | string) => createHash("sha256").update(v).digest("hex");
-
-const normalizePem = (value: string) => value.replace(/\\n/g, "\n").trim();
-
-type SignatureResult = {
-  algorithm: "ed25519" | "hmac-sha256";
-  signature: string;
-};
-
-const signIntegrityPayload = (payload: string): SignatureResult => {
-  const payloadHash = createHash("sha256").update(payload).digest();
-
-  const privateKeyPem = process.env.QR_SIGN_PRIVATE_KEY;
-  if (privateKeyPem) {
-    const key = createPrivateKey(normalizePem(privateKeyPem));
-    const signature = cryptoSign(null, payloadHash, key);
-    return { algorithm: "ed25519", signature: toBase64Url(signature) };
-  }
-
-  const signature = createHmac("sha256", getQrSigningHmacSecret())
-    .update(payloadHash)
-    .digest();
-  return { algorithm: "hmac-sha256", signature: toBase64Url(signature) };
-};
 
 const escapeCsv = (v: any) => {
   const s = v == null ? "" : String(v);
@@ -217,7 +187,7 @@ export const buildImmutableBatchAuditPackage = async (
   };
   const integrityCanonical = stableStringify(integrityPayload);
   const integrityHash = sha256Hex(integrityCanonical);
-  const signature = signIntegrityPayload(integrityCanonical);
+  const signature = signArtifactPayload(integrityCanonical);
 
   files["integrity.json"] = JSON.stringify(
     {
@@ -249,7 +219,7 @@ export const buildImmutableBatchAuditPackage = async (
     "Verification:",
     "1) Hash each file with SHA-256 and compare to integrity.json.fileHashes",
     "2) Recreate canonical integrity payload and compare integrityHash",
-    "3) Verify signature using configured signing key/secret",
+    "3) Verify signature using the artifact public-key registry",
   ].join("\n");
 
   const zip = new JSZip();
@@ -272,7 +242,7 @@ export const buildImmutableBatchAuditPackage = async (
       alertCount: policyAlerts.length,
       chainRoot,
       integrityHash,
-      signatureAlgorithm: signature.algorithm,
+      signatureAlgorithm: ARTIFACT_PERSISTED_SIGNATURE_ALGORITHM,
     },
   };
 };

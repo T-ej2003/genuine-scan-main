@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { generateKeyPairSync } = require("node:crypto");
+const { createHash, generateKeyPairSync, sign } = require("node:crypto");
 const jwt = require("jsonwebtoken");
 
 const { getJwtSecret, verifyJwtWithCurrentOrPrevious } = require("../dist/utils/security.js");
@@ -27,11 +27,17 @@ try {
 
   const old = keys();
   const current = keys();
+  const artifact = keys();
+  const artifactHistorical = keys();
   process.env.QR_SIGN_PRIVATE_KEY_CURRENT = current.privateKey;
   process.env.QR_SIGN_PUBLIC_KEY_CURRENT = current.publicKey;
   process.env.QR_SIGN_ACTIVE_KEY_VERSION = "current-v2";
   process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS = old.publicKey;
   process.env.QR_SIGN_PREVIOUS_KEY_VERSION = "old-v1";
+  process.env.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT = artifact.privateKey;
+  process.env.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT = artifact.publicKey;
+  process.env.ARTIFACT_SIGN_ACTIVE_KEY_VERSION = "artifact-v1";
+  process.env.ARTIFACT_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ "artifact-old": artifactHistorical.publicKey, "artifact-v1": artifact.publicKey });
   delete process.env.QR_SIGN_PRIVATE_KEY;
   delete process.env.QR_SIGN_PUBLIC_KEY;
   const currentToken = signQrPayload(payload("current-v2"));
@@ -56,8 +62,14 @@ try {
 
   const preparedCurrentJwtToken = jwt.sign({ rotationId: "prepared-new-current" }, "jwt-current", { algorithm: "HS256" });
   const preparedPreviousJwtToken = jwt.sign({ rotationId: "prepared-old-current" }, "jwt-previous", { algorithm: "HS256" });
+  const artifactHistoricalPayload = JSON.stringify({ artifact: "historical-runtime-fixture" });
+  const artifactHistoricalSignature = {
+    algorithm: "Ed25519",
+    keyVersion: "artifact-old",
+    signature: sign(null, createHash("sha256").update(artifactHistoricalPayload).digest(), artifactHistorical.privateKey).toString("base64url"),
+  };
   const healthEvidence = { serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: "a".repeat(40), expectedReleaseGitSha: "a".repeat(40), healthObservedAt: new Date().toISOString() };
-  const overlapRuntime = verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence });
+  const overlapRuntime = verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence });
   assert.deepEqual(overlapRuntime, {
     jwtCurrentRuntimeVerify: true,
     jwtPreviousRuntimeVerify: true,
@@ -66,6 +78,8 @@ try {
     qrPreviousRuntimeVerify: true,
     qrTamperMatchingKeyTest: true,
     qrUnknownKeyRejected: true,
+    artifactCurrentRuntimeVerify: true,
+    artifactHistoricalRuntimeVerify: true,
     serviceHealthy: true,
     healthHttpStatus: 200,
     healthReleaseGitSha: "a".repeat(40),
@@ -86,11 +100,12 @@ try {
   delete process.env.JWT_SECRET_PREVIOUS;
   delete process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS;
   delete process.env.QR_SIGN_PREVIOUS_KEY_VERSION;
-  const cleanupRuntime = verifyProductionRotationCleanupRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence });
+  const cleanupRuntime = verifyProductionRotationCleanupRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence });
   assert.equal(cleanupRuntime.jwtPreviousRuntimeRejected, true);
   assert.equal(cleanupRuntime.qrPreviousRuntimeRejected, true);
   assert.equal(cleanupRuntime.jwtCurrentRuntimeVerify, true);
   assert.equal(cleanupRuntime.qrCurrentRuntimeVerify, true);
+  assert.equal(cleanupRuntime.artifactHistoricalRuntimeVerify, true);
 
   assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence: { ...healthEvidence, serviceHealthy: false } }), /health/i);
   assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence: { ...healthEvidence, healthHttpStatus: 500 } }), /health/i);

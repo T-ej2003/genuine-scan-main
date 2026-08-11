@@ -10,6 +10,7 @@
   "containerDefinitions": [{
     "name": "backend", "image": "{{BACKEND_IMAGE}}", "essential": true,
     "entryPoint": ["/usr/local/bin/start-runtime.sh"], "readonlyRootFilesystem": true,
+    "linuxParameters": { "initProcessEnabled": true },
     "mountPoints": [{ "sourceVolume": "backend-uploads", "containerPath": "/app/uploads", "readOnly": false }],
     "privileged": false, "interactive": false, "pseudoTerminal": false,
     "environment": [{ "name": "RELEASE_GIT_SHA", "value": "{{RELEASE_SHA}}" }, { "name": "COOKIE_SECURE", "value": "true" }, { "name": "RUN_BACKGROUND_WORKERS", "value": "false" }, { "name": "OBJECT_STORAGE_BUCKET", "value": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" }, { "name": "OBJECT_STORAGE_REGION", "value": "eu-west-2" }],
@@ -31,6 +32,11 @@
       { "name": "QR_SIGN_ACTIVE_KEY_VERSION", "valueFrom": "{{QR_SIGN_ACTIVE_KEY_VERSION}}" },
       { "name": "QR_SIGN_PUBLIC_KEY_PREVIOUS", "valueFrom": "{{QR_SIGN_PUBLIC_KEY_PREVIOUS}}" },
       { "name": "QR_SIGN_PREVIOUS_KEY_VERSION", "valueFrom": "{{QR_SIGN_PREVIOUS_KEY_VERSION}}" },
+      { "name": "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "valueFrom": "{{ARTIFACT_SIGN_PRIVATE_KEY_CURRENT}}" },
+      { "name": "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "valueFrom": "{{ARTIFACT_SIGN_PUBLIC_KEY_CURRENT}}" },
+      { "name": "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "valueFrom": "{{ARTIFACT_SIGN_ACTIVE_KEY_VERSION}}" },
+      { "name": "ARTIFACT_SIGN_PUBLIC_KEYS_JSON", "valueFrom": "{{ARTIFACT_SIGN_PUBLIC_KEYS_JSON}}" },
+      { "name": "ROTATION_RUNTIME_TMP_DIR", "value": "/app/uploads" },
       { "name": "REDIS_URL", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs:REDIS_URL::" },
       { "name": "SCAN_FINGERPRINT_SECRET", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/scan-fingerprint-secret-3wsoIV" },
       { "name": "TOKEN_HASH_SECRET_CURRENT", "valueFrom": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/token-hash-secret-current-1j79IN" }
