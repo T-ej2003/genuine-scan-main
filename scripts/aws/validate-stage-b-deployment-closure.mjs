@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { STAGE_B_RESOURCE_ACTION_MATRIX } from "./stage-b-deployment-contract.mjs";
+import { assertStageBClosureMatrixCoverage } from "./stage-b-deployment-contract.mjs";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendManifest, assertStageBTerraformBackendPolicy } from "./stage-b-terraform-backend-contract.mjs";
 import { PERMISSION_EVIDENCE_MAX_AGE_MS, PERMISSION_EVIDENCE_VALIDITY_MODEL, assertPermissionEvaluationBindings, assertPermissionReportPlanBinding, assertReleasePolicyEvidence, validateManifest, verifyPermissionReportSignature, assertStageBPermissionEvidenceKind, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, resolveStageBPermissionProfile } from "./validate-production-green-stage-b-permissions.mjs";
@@ -175,11 +175,7 @@ const declarations = filesUnder(terraformRoot)
   .flatMap((file) => [...fs.readFileSync(file, "utf8").matchAll(/^resource\s+"([^"]+)"\s+"([^"]+)"\s*\{/gm)]
     .map((match) => `${match[1]}.${match[2]}`));
 const matrixBases = matrix.resources.map((entry) => entry.addressPattern.split("[")[0]);
-for (const declaration of declarations) assert(matrixBases.includes(declaration), `Terraform resource has no closure matrix entry: ${declaration}`);
-for (const contractPattern of Object.keys(STAGE_B_RESOURCE_ACTION_MATRIX)) {
-  const base = contractPattern.split("[")[0];
-  assert(matrixBases.includes(base), `Shared classifier contract has no closure matrix entry: ${base}`);
-}
+assertStageBClosureMatrixCoverage({ declarations, matrixBases });
 
 const fixtureRetainedAddresses = fixture.resource_changes.filter((change) => change.address?.includes("_retained[")).map((change) => change.address);
 const structuralFixture = assertStageBNormalPlanCompleteness(fixture, { expectedRetainedAddresses: fixtureRetainedAddresses, strict: false });

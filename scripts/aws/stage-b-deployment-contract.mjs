@@ -40,6 +40,7 @@ export const STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES = Object.freeze([
   ...Object.keys(taskRoleNames).map((key) => `aws_iam_role.task["${key}"]`),
   ...Object.keys(executionRoleNames).map((key) => `aws_iam_role_policy.execution["${key}"]`),
   ...[...candidateStoragePolicyKeys].map((key) => `aws_iam_role_policy.candidate_object_storage["${key}"]`),
+  "aws_iam_role_policy.backend_ecs_exec",
   "aws_iam_role_policy.executor_runtime",
   "aws_dynamodb_table.replay",
   "aws_iam_policy.broker",
@@ -107,6 +108,7 @@ export const STAGE_B_RESOURCE_ACTION_MATRIX = Object.freeze({
   "aws_iam_role.task[*]": Object.freeze({ type: "aws_iam_role", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact task-role name and account" }),
   "aws_iam_role_policy.execution[*]": Object.freeze({ type: "aws_iam_role_policy", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact execution role and policy name" }),
   "aws_iam_role_policy.candidate_object_storage[*]": Object.freeze({ type: "aws_iam_role_policy", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact candidate task role and policy name" }),
+  "aws_iam_role_policy.backend_ecs_exec": Object.freeze({ type: "aws_iam_role_policy", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact backend task role and ECS Exec SSM-channel policy name" }),
   "aws_iam_role_policy.executor_runtime": Object.freeze({ type: "aws_iam_role_policy", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact Stage A executor task role and policy name" }),
   "aws_ecs_task_definition.candidate[*]": Object.freeze({ type: "aws_ecs_task_definition", actions: Object.freeze([["create"], ["no-op"], ["create", "delete"], ["delete", "create"]]), identity: "exact current candidate family/address; replacement only for reviewed container-definition rotation" }),
   "aws_ecs_task_definition.executor[*]": Object.freeze({ type: "aws_ecs_task_definition", actions: Object.freeze([["create"], ["no-op"], ["create", "delete"], ["delete", "create"]]), identity: "exact current executor family/address; replacement only for reviewed container-definition rotation" }),
@@ -119,6 +121,17 @@ export const STAGE_B_RESOURCE_ACTION_MATRIX = Object.freeze({
   "aws_lambda_alias.reviewed": Object.freeze({ type: "aws_lambda_alias", actions: Object.freeze([["create"], ["update"], ["no-op"]]), identity: "exact reviewed alias" }),
   "aws_lambda_permission.release_deployer": Object.freeze({ type: "aws_lambda_permission", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact reviewed-alias release permission" }),
 });
+
+export function assertStageBClosureMatrixCoverage({ declarations, matrixBases }) {
+  for (const declaration of declarations) {
+    if (!matrixBases.includes(declaration)) throw new Error(`Terraform resource has no closure matrix entry: ${declaration}`);
+  }
+  for (const contractPattern of Object.keys(STAGE_B_RESOURCE_ACTION_MATRIX)) {
+    const base = contractPattern.split("[")[0];
+    if (!matrixBases.includes(base)) throw new Error(`Shared classifier contract has no closure matrix entry: ${base}`);
+  }
+  return true;
+}
 
 function assertKnown(value, expected, label, strict) {
   if (value === undefined || value === null) {
@@ -258,6 +271,7 @@ function assertStageBResourceIdentity(change, kind, key, strict) {
   if (kind === "task-role") assertRoleIdentity(change, taskRoleNames[key], strict);
   if (kind === "execution-policy") assertPolicyRoleIdentity(change, executionRoleNames[key], "stage-b-exact-image-logs-and-secrets", strict);
   if (kind === "candidate-storage-policy") assertPolicyRoleIdentity(change, taskRoleNames[key], "stage-b-object-storage", strict);
+  if (kind === "backend-ecs-exec-policy") assertPolicyRoleIdentity(change, taskRoleNames.backend, "stage-b-backend-ecs-exec-ssm-channels", strict);
   if (kind === "executor-runtime-policy") assertPolicyRoleIdentity(change, "mscqr-production-full-rls-green-executor-task", "stage-b-executor-runtime", strict);
   if (kind === "replay") {
     assertKnown(after.name, "mscqr-production-rls-stage-b-replay", "Stage B replay table name", strict);
@@ -376,6 +390,7 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
   else if ((key = /^aws_iam_role\.task\["([^"]+)"\]$/.exec(address)?.[1]) && taskRoleNames[key]) { kind = "task-role"; actionContract = [["create"], ["no-op"]]; }
   else if ((key = /^aws_iam_role_policy\.execution\["([^"]+)"\]$/.exec(address)?.[1]) && executionPolicyKeys.has(key)) { kind = "execution-policy"; actionContract = [["create"], ["no-op"]]; }
   else if ((key = /^aws_iam_role_policy\.candidate_object_storage\["([^"]+)"\]$/.exec(address)?.[1]) && candidateStoragePolicyKeys.has(key)) { kind = "candidate-storage-policy"; actionContract = [["create"], ["no-op"]]; }
+  else if (address === "aws_iam_role_policy.backend_ecs_exec") { kind = "backend-ecs-exec-policy"; actionContract = [["create"], ["no-op"]]; }
   else if (address === "aws_iam_role_policy.executor_runtime") { kind = "executor-runtime-policy"; actionContract = [["create"], ["no-op"]]; }
   else if (address === "aws_dynamodb_table.replay") { kind = "replay"; actionContract = [["create"], ["no-op"]]; }
   else if (address === "aws_lambda_function.broker") { kind = "broker-function"; actionContract = [["create"], ["update"], ["no-op"]]; }
@@ -384,7 +399,7 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
   else if (address.startsWith("aws_ecs_task_definition.")) throw new Error(`Stage B resource rejected at address ${address} ${type} ${JSON.stringify(actions)}; unknown Stage B task-definition family or address.`);
   else throw new Error(`Stage B resource rejected at address ${address} ${type} ${JSON.stringify(actions)}; no exact contract layer exists.`);
 
-  if (type !== ({ log: "aws_cloudwatch_log_group", "execution-role": "aws_iam_role", "task-role": "aws_iam_role", "execution-policy": "aws_iam_role_policy", "candidate-storage-policy": "aws_iam_role_policy", "executor-runtime-policy": "aws_iam_role_policy", replay: "aws_dynamodb_table", "broker-function": "aws_lambda_function", "broker-alias": "aws_lambda_alias", "release-permission": "aws_lambda_permission" })[kind]) throw new Error(`Stage B resource rejected: ${address} ${type} ${JSON.stringify(actions)}; resource type does not match the exact contract.`);
+  if (type !== ({ log: "aws_cloudwatch_log_group", "execution-role": "aws_iam_role", "task-role": "aws_iam_role", "execution-policy": "aws_iam_role_policy", "candidate-storage-policy": "aws_iam_role_policy", "backend-ecs-exec-policy": "aws_iam_role_policy", "executor-runtime-policy": "aws_iam_role_policy", replay: "aws_dynamodb_table", "broker-function": "aws_lambda_function", "broker-alias": "aws_lambda_alias", "release-permission": "aws_lambda_permission" })[kind]) throw new Error(`Stage B resource rejected: ${address} ${type} ${JSON.stringify(actions)}; resource type does not match the exact contract.`);
   if (!Array.isArray(change.change?.actions) || change.change.actions.length === 0) throw new Error(`Stage B resource rejected at address ${address} ${type}; actions are missing or malformed.`);
   if (validateActions && !actionContract.some((expected) => exactActions(actions, expected))) throw new Error(`Stage B resource rejected at address ${address} ${type} ${JSON.stringify(actions)}; unsupported lifecycle action.`);
   assertStageBResourceIdentity(change, kind, key, strict);

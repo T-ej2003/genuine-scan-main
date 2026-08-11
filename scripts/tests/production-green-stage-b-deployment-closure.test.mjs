@@ -1,11 +1,43 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { classifyStageBPlan } from "../aws/stage-b-deployment-contract.mjs";
+import { assertStageBClosureMatrixCoverage, classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "../aws/stage-b-deployment-contract.mjs";
 import { assertStageBNormalPlanCompleteness } from "../aws/stage-b-plan-approval-contract.mjs";
 
 const fixturePath = "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json";
 const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+const closureMatrix = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.json", "utf8"));
+
+test("backend ECS Exec policy has one exact closure entry and only the four channel actions", () => {
+  const entries = closureMatrix.resources.filter(({ addressPattern }) => addressPattern === "aws_iam_role_policy.backend_ecs_exec");
+  assert.equal(entries.length, 1);
+  assert.deepEqual(entries[0], {
+    addressPattern: "aws_iam_role_policy.backend_ecs_exec",
+    type: "aws_iam_role_policy",
+    actions: ["create", "no-op"],
+    identity: "exact backend task role and stage-b-backend-ecs-exec-ssm-channels policy",
+    layers: ["plan-validator", "permission-manifest", "apply-wrapper"],
+  });
+  assert.deepEqual(STAGE_B_RESOURCE_ACTION_MATRIX["aws_iam_role_policy.backend_ecs_exec"], {
+    type: "aws_iam_role_policy",
+    actions: [["create"], ["no-op"]],
+    identity: "exact backend task role and ECS Exec SSM-channel policy name",
+  });
+  const terraform = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  const block = terraform.match(/resource "aws_iam_role_policy" "backend_ecs_exec"[\s\S]*?(?=\nresource )/)?.[0] || "";
+  const actions = [...block.matchAll(/"(ssmmessages:[A-Za-z]+Channel)"/g)].map(([, action]) => action);
+  assert.deepEqual(actions, ["ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel", "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel"]);
+  assert.doesNotMatch(block, /ssm:(StartSession|SendCommand|GetParameter)|ecs:ExecuteCommand|iam:|ec2:/);
+  assert.equal((block.match(/Resource\s*=\s*"\*"/g) || []).length, 1);
+});
+
+test("removing a closure entry or adding an unknown resource fails closed", () => {
+  const declarations = ["aws_iam_role_policy.backend_ecs_exec"];
+  const matrixBases = closureMatrix.resources.map(({ addressPattern }) => addressPattern.split("[")[0]);
+  assert.doesNotThrow(() => assertStageBClosureMatrixCoverage({ declarations, matrixBases }));
+  assert.throws(() => assertStageBClosureMatrixCoverage({ declarations, matrixBases: matrixBases.filter((base) => base !== "aws_iam_role_policy.backend_ecs_exec") }), /no closure matrix entry: aws_iam_role_policy\.backend_ecs_exec/);
+  assert.throws(() => assertStageBClosureMatrixCoverage({ declarations: [...declarations, "aws_iam_role_policy.unknown"], matrixBases }), /no closure matrix entry: aws_iam_role_policy\.unknown/);
+});
 
 test("production closure binds signed permission evidence to every selected plan artifact", () => {
   const source = fs.readFileSync("scripts/aws/validate-stage-b-deployment-closure.mjs", "utf8");
@@ -60,7 +92,7 @@ test("pull-request closure rejects recovery inputs without production approval",
 test("production-shaped Stage B plan is fully classified with zero destroys", () => {
   const retained = fixture.resource_changes.filter((change) => change.address.includes("_retained[")).map((change) => change.address);
   const result = assertStageBNormalPlanCompleteness(fixture, { expectedRetainedAddresses: retained, strict: false }).classification;
-  assert.equal(result.actionCounts["no-op"], 70);
+  assert.equal(result.actionCounts["no-op"], 71);
   assert.equal(result.actionCounts.create, 12);
   assert.equal(result.actionCounts.update, 3);
   assert.deepEqual(result.unclassifiedResources, []);

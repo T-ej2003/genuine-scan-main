@@ -6,7 +6,7 @@
     "expected": {
       "create": 12,
       "update": 3,
-      "no-op": 70,
+      "no-op": 71,
       "delete": 0,
       "replacement": 0
     }
@@ -219,6 +219,17 @@
     },
     {
       "address": "aws_iam_role_policy.candidate_object_storage[\"backend\"]",
+      "type": "aws_iam_role_policy",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {},
+        "after": {}
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.backend_ecs_exec",
       "type": "aws_iam_role_policy",
       "change": {
         "actions": [
