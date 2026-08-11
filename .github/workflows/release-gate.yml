@@ -26,6 +26,43 @@ on:
         required: false
         type: boolean
         default: false
+      release_mode:
+        description: "Governed production release mode."
+        required: false
+        type: choice
+        options:
+          - normal
+          - rotation-overlap
+          - rotation-cleanup
+        default: normal
+      rotation_id:
+        description: "Rotation ID for a governed transition."
+        required: false
+        type: string
+      rotation_state_json:
+        description: "Redacted coordinator state JSON; metadata only."
+        required: false
+        type: string
+      rotation_state_sha256:
+        description: "SHA-256 of the exact redacted coordinator state bytes."
+        required: false
+        type: string
+      rotation_task_definition_arn:
+        description: "Exact pre-registered backend transition task definition ARN."
+        required: false
+        type: string
+      rotation_expected_current_task_definition_arn:
+        description: "Exact task definition ARN currently owned by the backend service."
+        required: false
+        type: string
+      rotation_image_digest:
+        description: "Immutable digest expected in the transition task definition."
+        required: false
+        type: string
+      rotation_deployment_sha:
+        description: "Exact overlap or cleanup deployment SHA bound to coordinator state."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -80,12 +117,12 @@ jobs:
           echo "Resolved production deploy SHA: $deploy_sha"
 
       - name: Final required-gate sanity check
-        if: ${{ !inputs.expert_override }}
+        if: ${{ !inputs.expert_override || inputs.release_mode != 'normal' }}
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.resolve.outputs.deploy_sha }}
-          TARGET_EVENTS: push,workflow_dispatch
+          TARGET_EVENTS: ${{ inputs.release_mode == 'normal' && 'push,workflow_dispatch' || 'push' }}
           REQUIRED_WORKFLOW_FILES: quality-gate.yml,secret-scan.yml,deployment-audit.yml,auth-security-tests.yml,release-candidate-gate.yml
           MAX_ATTEMPTS: 1
           POLL_SECONDS: 0
@@ -101,10 +138,50 @@ jobs:
           echo "::warning::Expert override enabled. Required workflow gate sanity check was skipped."
           echo "Use only for emergency production deployment after human verification."
 
-      - name: Strict production rotation freshness
+      - name: Validate production release lifecycle mode
+        env:
+          RELEASE_MODE: ${{ inputs.release_mode }}
+          SOURCE_SHA: ${{ steps.resolve.outputs.deploy_sha }}
+          ROTATION_ID: ${{ inputs.rotation_id }}
+          ROTATION_STATE_JSON: ${{ inputs.rotation_state_json }}
+          ROTATION_STATE_SHA256: ${{ inputs.rotation_state_sha256 }}
+          ROTATION_TASK_DEFINITION_ARN: ${{ inputs.rotation_task_definition_arn }}
+          ROTATION_EXPECTED_CURRENT_TASK_DEFINITION_ARN: ${{ inputs.rotation_expected_current_task_definition_arn }}
+          ROTATION_IMAGE_DIGEST: ${{ inputs.rotation_image_digest }}
+          ROTATION_DEPLOYMENT_SHA: ${{ inputs.rotation_deployment_sha }}
         run: |
           set -euo pipefail
-          npm run check:rotation-evidence-freshness
+          case "$RELEASE_MODE" in
+            normal)
+              npm run check:rotation-evidence-freshness
+              ;;
+            rotation-overlap|rotation-cleanup)
+              for name in ROTATION_ID ROTATION_STATE_JSON ROTATION_STATE_SHA256 ROTATION_TASK_DEFINITION_ARN ROTATION_EXPECTED_CURRENT_TASK_DEFINITION_ARN ROTATION_IMAGE_DIGEST ROTATION_DEPLOYMENT_SHA; do
+                if [ -z "${!name:-}" ]; then
+                  echo "::error::${name} is required for ${RELEASE_MODE}."
+                  exit 1
+                fi
+              done
+              state_file="$RUNNER_TEMP/rotation-state.json"
+              printf '%s' "$ROTATION_STATE_JSON" > "$state_file"
+              chmod 600 "$state_file"
+              npm run security:check-production-rotation-transition -- \
+                --mode "$RELEASE_MODE" \
+                --state-file "$state_file" \
+                --state-sha256 "$ROTATION_STATE_SHA256" \
+                --source-sha "$SOURCE_SHA" \
+                --rotation-id "$ROTATION_ID" \
+                --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
+                --task-definition "$ROTATION_TASK_DEFINITION_ARN" \
+                --expected-current-task-definition "$ROTATION_EXPECTED_CURRENT_TASK_DEFINITION_ARN" \
+                --image-digest "$ROTATION_IMAGE_DIGEST"
+              rm -f "$state_file"
+              ;;
+            *)
+              echo "::error::Unsupported release_mode: $RELEASE_MODE"
+              exit 1
+              ;;
+          esac
 
   deploy-production-ecs:
     name: Deploy production ECS
@@ -147,6 +224,7 @@ jobs:
       FRONTEND_SERVICE_NAME: mscqr-frontend-servi-euw2
       WORKER_SERVICE_NAME: ${{ vars.PRODUCTION_WORKER_SERVICE_NAME }}
       BACKEND_TASK_DEFINITION: mscqr-backend
+      ROTATION_BACKEND_TASK_DEFINITION_FAMILY: mscqr-production-rls-green-backend-candidate
       FRONTEND_TASK_DEFINITION: mscqr-frontend
       WORKER_TASK_DEFINITION: ${{ vars.PRODUCTION_WORKER_TASK_DEFINITION }}
       BACKEND_CONTAINER_NAME: backend
@@ -315,13 +393,16 @@ jobs:
           echo "AWS account verified for production deployment."
 
       - name: Login to Amazon ECR
+        if: ${{ inputs.release_mode == 'normal' }}
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set up Docker Buildx
+        if: ${{ inputs.release_mode == 'normal' }}
         uses: docker/setup-buildx-action@v4
 
       - name: Generate and verify checksum-bound production RLS package
         id: rls-package
+        if: ${{ inputs.release_mode == 'normal' }}
         env:
           PRODUCTION_RLS_APPROVAL_SECRET_ARN: ${{ vars.PRODUCTION_RLS_APPROVAL_SECRET_ARN }}
           PRODUCTION_RLS_APPROVAL_KMS_KEY_ARN: ${{ vars.PRODUCTION_RLS_APPROVAL_KMS_KEY_ARN }}
@@ -366,11 +447,13 @@ jobs:
           echo "worker_metadata_file=$RUNNER_TEMP/worker-deployment.json" >> "$GITHUB_OUTPUT"
 
       - name: Enforce ECR repository controls
+        if: ${{ inputs.release_mode == 'normal' }}
         run: |
           set -euo pipefail
           ./scripts/aws/apply-ecr-repository-controls.sh all
 
       - name: Publish immutable ECS images
+        if: ${{ inputs.release_mode == 'normal' }}
         env:
           AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
           IMAGE_TAG: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
@@ -418,6 +501,7 @@ jobs:
 
       - name: Resolve backend, frontend, and worker digest refs
         id: images
+        if: ${{ inputs.release_mode == 'normal' }}
         env:
           IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
         run: |
@@ -445,6 +529,7 @@ jobs:
           NODE
 
       - name: Require complete production worker deployment configuration
+        if: ${{ inputs.release_mode == 'normal' }}
         run: |
           set -euo pipefail
           if [ -z "$WORKER_SERVICE_NAME" ] || [ -z "$WORKER_TASK_DEFINITION" ]; then
@@ -454,6 +539,7 @@ jobs:
 
       - name: Apply and verify checksum-bound production RLS package
         id: database-release
+        if: ${{ inputs.release_mode == 'normal' }}
         env:
           MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256: ${{ steps.rls-package.outputs.source_contract_sha256 }}
           MSCQR_FULL_RLS_MIGRATION_SET_DIGEST: ${{ steps.rls-package.outputs.migration_set_digest }}
@@ -472,6 +558,7 @@ jobs:
           node scripts/aws/apply-production-full-rls-release.mjs
 
       - name: Upload immutable production database receipt
+        if: ${{ inputs.release_mode == 'normal' }}
         uses: actions/upload-artifact@v7
         with:
           name: production-rls-release-receipt
@@ -480,6 +567,7 @@ jobs:
           retention-days: 90
 
       - name: Deploy backend ECS service
+        if: ${{ inputs.release_mode == 'normal' }}
         env:
           CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
           SERVICE_NAME: ${{ env.BACKEND_SERVICE_NAME }}
@@ -496,6 +584,30 @@ jobs:
           set -euo pipefail
           ./scripts/aws/deploy-ecs-service.sh
 
+      - name: Deploy rotation transition backend ECS service
+        if: ${{ inputs.release_mode != 'normal' }}
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
+          SERVICE_NAME: ${{ env.BACKEND_SERVICE_NAME }}
+          CONTAINER_NAME: ${{ env.BACKEND_CONTAINER_NAME }}
+          EXISTING_TASK_DEFINITION_ARN: ${{ inputs.rotation_task_definition_arn }}
+          EXPECTED_CURRENT_TASK_DEFINITION_ARN: ${{ inputs.rotation_expected_current_task_definition_arn }}
+          EXPECTED_FAMILY: ${{ env.ROTATION_BACKEND_TASK_DEFINITION_FAMILY }}
+          EXPECTED_IMAGE_DIGEST: ${{ inputs.rotation_image_digest }}
+          VERSION_URL: ${{ env.PUBLIC_BASE_URL }}/api/health
+          EXPECTED_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          ENABLE_EXECUTE_COMMAND: "true"
+          WAIT_FOR_STABLE: "true"
+          METADATA_FILE: ${{ runner.temp }}/rotation-transition-backend.json
+        run: |
+          set -euo pipefail
+          ./scripts/aws/deploy-ecs-service.sh \
+            --existing-task-definition "$EXISTING_TASK_DEFINITION_ARN" \
+            --expected-current-task-definition "$EXPECTED_CURRENT_TASK_DEFINITION_ARN" \
+            --expected-family "$EXPECTED_FAMILY" \
+            --expected-image-digest "$EXPECTED_IMAGE_DIGEST"
+
       - name: Verify backend health
         env:
           SMOKE_PATHS: /api/health /health/ready
@@ -504,6 +616,7 @@ jobs:
           ./scripts/aws/verify-production-smoke.sh
 
       - name: Deploy worker ECS service
+        if: ${{ inputs.release_mode == 'normal' }}
         env:
           CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
           SERVICE_NAME: ${{ env.WORKER_SERVICE_NAME }}
@@ -521,7 +634,7 @@ jobs:
           ./scripts/aws/deploy-ecs-service.sh
 
       - name: Deploy frontend ECS service
-        if: ${{ !inputs.preserve_current_frontend }}
+        if: ${{ inputs.release_mode == 'normal' && !inputs.preserve_current_frontend }}
         env:
           CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
           SERVICE_NAME: ${{ env.FRONTEND_SERVICE_NAME }}
@@ -536,12 +649,13 @@ jobs:
           ./scripts/aws/deploy-ecs-service.sh
 
       - name: Verify frontend and public health
-        if: ${{ !inputs.preserve_current_frontend }}
+        if: ${{ inputs.release_mode == 'normal' && !inputs.preserve_current_frontend }}
         run: |
           set -euo pipefail
           ./scripts/aws/verify-production-smoke.sh
 
       - name: Summarize ECS production deployment
+        if: ${{ inputs.release_mode == 'normal' }}
         env:
           BACKEND_METADATA_FILE: ${{ steps.image-meta.outputs.backend_metadata_file }}
           FRONTEND_METADATA_FILE: ${{ steps.image-meta.outputs.frontend_metadata_file }}

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { validateRotationTransition } from "../security/check-production-rotation-transition.mjs";
 
 const read = (path) => readFileSync(path, "utf8");
 const template = read("infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-rotation-candidate.json");
@@ -164,17 +166,100 @@ test("pre-rotation pushes use source validation while explicit production runs s
   assert.doesNotMatch(packageJson.scripts["verify:guardrails:source"], /check:rotation-evidence-freshness/);
 });
 
-test("release gate independently enforces strict freshness before deployment", () => {
-  const strictStep = releaseGate.indexOf("- name: Strict production rotation freshness");
+test("release gate keeps normal strictness and admits only governed transition modes", () => {
+  const lifecycleStep = releaseGate.indexOf("- name: Validate production release lifecycle mode");
   const deployJob = releaseGate.indexOf("  deploy-production-ecs:");
   const upstreamSanity = releaseGate.indexOf("node scripts/github/check-required-workflow-gates.mjs");
-  assert.ok(strictStep > upstreamSanity, "strict freshness must follow upstream gate sanity");
-  assert.ok(strictStep < deployJob, "strict freshness must precede the deploy job");
-  assert.match(releaseGate.slice(strictStep, deployJob), /npm run check:rotation-evidence-freshness/);
-  assert.doesNotMatch(releaseGate.slice(strictStep, deployJob), /continue-on-error|if:/);
-  assert.match(releaseGate, /TARGET_EVENTS: push,workflow_dispatch/);
+  assert.ok(lifecycleStep > upstreamSanity, "lifecycle validation must follow upstream gate sanity");
+  assert.ok(lifecycleStep < deployJob, "lifecycle validation must precede the deploy job");
+  assert.match(releaseGate.slice(lifecycleStep, deployJob), /normal\)[\s\S]*npm run check:rotation-evidence-freshness/);
+  assert.match(releaseGate.slice(lifecycleStep, deployJob), /security:check-production-rotation-transition/);
+  assert.doesNotMatch(releaseGate.slice(lifecycleStep, deployJob), /continue-on-error/);
+  assert.match(releaseGate, /release_mode:[\s\S]*rotation-overlap[\s\S]*rotation-cleanup/);
+  assert.match(releaseGate, /default: normal/);
+  assert.match(releaseGate, /!inputs\.expert_override \|\| inputs\.release_mode != 'normal'/);
+  assert.match(releaseGate, /TARGET_EVENTS: \$\{\{ inputs\.release_mode == 'normal' && 'push,workflow_dispatch' \|\| 'push' \}\}/);
+  assert.match(releaseGate, /inputs\.release_mode != 'normal'[\s\S]*existing-task-definition/);
+  assert.match(releaseGate, /ENABLE_EXECUTE_COMMAND: "true"/);
+  assert.match(releaseGate, /inputs\.release_mode == 'normal'[\s\S]*Publish immutable ECS images/);
   assert.match(releaseGate, /deploy-production-ecs:[\s\S]*needs: resolve-deploy-target/);
-  assert.match(JSON.parse(read("package.json")).scripts["check:rotation-evidence-freshness"], /check-rotation-evidence-freshness/);
+  const packageJson = JSON.parse(read("package.json"));
+  assert.match(packageJson.scripts["check:rotation-evidence-freshness"], /check-rotation-evidence-freshness/);
+  assert.match(packageJson.scripts["security:check-production-rotation-transition"], /check-production-rotation-transition/);
+});
+
+test("rotation transitions use the reviewed candidate family while normal releases keep the backend family", () => {
+  const normalFamily = "mscqr-backend";
+  const rotationFamily = "mscqr-production-rls-green-backend-candidate";
+  assert.ok(releaseGate.includes(`BACKEND_TASK_DEFINITION: ${normalFamily}`));
+  assert.ok(releaseGate.includes(`ROTATION_BACKEND_TASK_DEFINITION_FAMILY: ${rotationFamily}`));
+  assert.ok(releaseGate.includes("EXPECTED_FAMILY: ${{ env.ROTATION_BACKEND_TASK_DEFINITION_FAMILY }}"));
+  assert.ok(releaseGate.includes("--expected-family \"$EXPECTED_FAMILY\""));
+  assert.doesNotMatch(releaseGate.slice(releaseGate.indexOf("- name: Deploy rotation transition backend ECS service")), /EXPECTED_FAMILY: \$\{\{ env\.BACKEND_TASK_DEFINITION \}\}/);
+});
+
+const sourceSha = "a".repeat(40);
+const deploymentSha = "b".repeat(40);
+const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+const expectedCurrentTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47";
+const imageDigest = `sha256:${"c".repeat(64)}`;
+const makeState = (phase, extra = {}) => ({
+  stateVersion: 3,
+  rotationId: "rotation-gate-test",
+  sourceSha,
+  phase,
+  overlapDeploymentSha: deploymentSha,
+  preparedAt: "2026-08-11T00:00:00.000Z",
+  overlapPreparedAt: "2026-08-11T00:01:00.000Z",
+  jwt: { oldFingerprint: "1".repeat(16), newFingerprint: "2".repeat(16) },
+  qr: { oldPublicFingerprint: "3".repeat(16), newPublicFingerprint: "4".repeat(16) },
+  pending: { jwtVersionId: "jwt-version-1", qrPrivateVersionId: "qr-private-1", qrPublicVersionId: "qr-public-1" },
+  ...extra,
+});
+const transitionArgs = (mode, state, overrides = {}) => {
+  const rawState = JSON.stringify(state);
+  return {
+    mode,
+    state,
+    rawState,
+    sourceSha,
+    rotationId: "rotation-gate-test",
+    deploymentSha,
+    taskDefinitionArn,
+    expectedCurrentTaskDefinitionArn,
+    imageDigest,
+    stateSha256: createHash("sha256").update(rawState).digest("hex"),
+    now: Date.parse("2026-08-11T02:00:00.000Z"),
+    ...overrides,
+  };
+};
+
+test("rotation overlap and cleanup transitions validate state without final freshness", async () => {
+  const overlapState = makeState("overlap-deploy-required");
+  assert.equal(validateRotationTransition(transitionArgs("rotation-overlap", overlapState)).phase, "overlap-deploy-required");
+
+  const cleanupState = makeState("cleanup-deploy-required", {
+    cleanupDeploymentSha: deploymentSha,
+    cleanupEligibleAt: "2026-08-11T01:00:00.000Z",
+    retirementTimestamp: "2026-08-11T01:10:00.000Z",
+    verifiedAt: "2026-08-11T00:30:00.000Z",
+    overlapRuntime: { phase: "overlap", deploymentSha: deploymentSha },
+  });
+  assert.equal(validateRotationTransition(transitionArgs("rotation-cleanup", cleanupState)).phase, "cleanup-deploy-required");
+});
+
+test("rotation transition validator fails closed for missing, foreign, premature, or closed state", async () => {
+  const overlapState = makeState("overlap-deploy-required");
+  assert.throws(() => validateRotationTransition(transitionArgs("rotation-bypass", overlapState)), /unsupported rotation release mode/);
+  assert.throws(() => validateRotationTransition(transitionArgs("rotation-overlap", makeState("overlap-deploy-required", { jwtCurrentToken: "redacted" }))), /metadata only/);
+  assert.throws(() => validateRotationTransition(transitionArgs("rotation-overlap", makeState("prepared"))), /overlap-deploy-required/);
+  assert.throws(() => validateRotationTransition(transitionArgs("rotation-overlap", overlapState, { sourceSha: "d".repeat(40) })), /source SHA/);
+  assert.throws(() => validateRotationTransition(transitionArgs("rotation-overlap", overlapState, { rotationId: "foreign-rotation" })), /rotationId/);
+  assert.throws(() => validateRotationTransition(transitionArgs("rotation-overlap", makeState("cleaned"))), /overlap-deploy-required/);
+  const beforeGrace = makeState("cleanup-deploy-required", { cleanupDeploymentSha: deploymentSha, cleanupEligibleAt: "2026-08-11T03:00:00.000Z", retirementTimestamp: "2026-08-11T01:10:00.000Z", verifiedAt: "2026-08-11T00:30:00.000Z", overlapRuntime: {} });
+  assert.throws(() => validateRotationTransition(transitionArgs("rotation-cleanup", beforeGrace)), /grace window/);
+  const retirementIncomplete = makeState("retirement-complete", { cleanupDeploymentSha: deploymentSha, cleanupEligibleAt: "2026-08-11T01:00:00.000Z", retirementTimestamp: "2026-08-11T01:10:00.000Z", verifiedAt: "2026-08-11T00:30:00.000Z", overlapRuntime: {} });
+  assert.throws(() => validateRotationTransition(transitionArgs("rotation-cleanup", retirementIncomplete)), /cleanup-deploy-required/);
 });
 
 test("runbook uses only the coordinator's supported runtime proof flags", () => {
@@ -187,4 +272,7 @@ test("runbook uses only the coordinator's supported runtime proof flags", () => 
   assert.match(coordinator, /cleanup-deployment-sha/);
   assert.match(coordinator, /cleanup-runtime-file/);
   for (const env of ["ROTATION_RUNTIME_PHASE", "ROTATION_ID", "ROTATION_DEPLOYMENT_SHA", "ROTATION_RUNTIME_INVOCATION_REF"]) assert.match(runbook, new RegExp(env));
+  for (const mode of ["rotation-overlap", "rotation-cleanup"]) assert.match(runbook, new RegExp(`release_mode=${mode}`));
+  assert.match(runbook, /gh workflow run release-gate\.yml/);
+  assert.doesNotMatch(runbook, /# Deploy\/restart[\s\S]*scripts\/aws\/deploy-ecs-service\.sh/);
 });
