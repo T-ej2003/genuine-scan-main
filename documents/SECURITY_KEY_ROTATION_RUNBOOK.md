@@ -11,6 +11,14 @@ This runbook covers the rotating backend secret families used by the app:
 
 Legacy single-slot variables still exist for compatibility, but production should use the dual-slot `CURRENT` / `PREVIOUS` model.
 
+Production Ed25519 QR rotation uses the same two-deploy overlap contract:
+
+- `QR_SIGN_PRIVATE_KEY_CURRENT` and `QR_SIGN_PUBLIC_KEY_CURRENT` are the only signing slots.
+- `QR_SIGN_ACTIVE_KEY_VERSION` is the current payload `kid`.
+- `QR_SIGN_PUBLIC_KEY_PREVIOUS` and `QR_SIGN_PREVIOUS_KEY_VERSION` are the only previous verification slot.
+- A previous private key is never deployed for verification.
+- Verification accepts exactly the current key or the one declared previous key; unknown `kid` values fail closed.
+
 ## Principles
 
 - Never commit secrets to git.
@@ -29,9 +37,64 @@ openssl rand -base64 48
 
 - Writers always use the `*_CURRENT` secret.
 - Verification accepts both `*_CURRENT` and `*_PREVIOUS` during the cutover window.
+- During overlap, cookies sealed before rotation open with the previous-derived AES-GCM key while all new cookies seal with the current key only.
 - JWTs include a `kid` derived from the active signing secret.
 - Versioned hashes are stored with a prefix, so historic hashes remain comparable during the cutover.
 - After the cutover window, `*_PREVIOUS` is removed in a second deploy.
+
+The canonical production coordinator is `backend/scripts/security/rotate-production-signing-material.mjs`.
+It requires an external, operator-owned JSON config containing only secret resource identifiers and the expected
+release role; it never prints secret values. Run one explicit mode at a time:
+
+```bash
+npm --prefix backend run security:rotate-production-signing-material -- \
+  --config /secure/operator/rotation.json --state-file /secure/operator/rotation-state.json \
+  --fixture-file /secure/operator/previous-qr-fixture.json --prepare
+
+npm --prefix backend run security:rotate-production-signing-material -- \
+  --config /secure/operator/rotation.json --state-file /secure/operator/rotation-state.json \
+  --fixture-file /secure/operator/previous-qr-fixture.json --runtime-verification-file /secure/operator/overlap-runtime.json \
+  --verify
+
+# Run inside the deployed overlap task. The image workdir is /app; /api/health
+# must report the expected release SHA. Set the four deployment values from the
+# approved deployment record before invoking the command.
+cd /app
+ROTATION_RUNTIME_PHASE=overlap \
+ROTATION_ID=<rotation-id> \
+ROTATION_DEPLOYMENT_SHA=<full-overlap-deployment-sha> \
+ROTATION_RUNTIME_INVOCATION_REF=<machine-verifiable-runtime-ref> \
+npm run security:verify-production-rotation-runtime -- \
+  --fixture-file /secure/operator/previous-qr-fixture.json \
+  --output /secure/operator/overlap-runtime.json \
+  --health-url https://www.mscqr.com/api/health \
+  --expected-release-sha <full-source-sha>
+
+# After retirement and the cleanup deployment, run the same image-local command
+# with the cleanup phase and exact cleanup deployment identity.
+cd /app
+ROTATION_RUNTIME_PHASE=cleanup \
+ROTATION_ID=<rotation-id> \
+ROTATION_DEPLOYMENT_SHA=<full-cleanup-deployment-sha> \
+ROTATION_RUNTIME_INVOCATION_REF=<machine-verifiable-runtime-ref> \
+npm run security:verify-production-rotation-runtime -- \
+  --fixture-file /secure/operator/previous-qr-fixture.json \
+  --output /secure/operator/cleanup-runtime.json \
+  --health-url https://www.mscqr.com/api/health \
+  --expected-release-sha <full-source-sha>
+```
+
+The config maps distinct Secrets Manager resources for JWT current/previous/pending, QR current/private,
+QR previous/public, and pending material. It also requires a reviewed `minimumGraceSeconds`. The coordinator
+writes only non-secret state and redacted runtime proof to operator-controlled mode-600 files. The deployed-task
+verifier uses the compiled application JWT and QR verification functions; it is not a public endpoint.
+`--cleanup` first retires all previous/pending slots and stops at `cleanup-deploy-required`. Only after the
+approved cleanup deployment restarts tasks may the operator resume with a cleanup runtime proof. It is never
+run by CI or implicitly by `--prepare`.
+
+After cleanup deployment, the previous JWT cookie key and previous QR/JWT bindings are absent: old cookies
+must fail to open, current cookies must continue to work, and the cleanup runtime proof must include a real
+healthy `/api/health` observation for the expected release SHA.
 
 ## Standard Two-Deploy Rotation
 
@@ -101,20 +164,17 @@ Wait at least:
 
 For this repo, the practical minimum is the full refresh-token window if you want zero forced re-auth on refresh rotation. If that is too long for the incident, rotate immediately and accept forced reauthentication.
 
-### 5. Cleanup Deploy
+### 5. Retire, Then Cleanup Deploy
 
-After the cutover window:
-
-```bash
-unset JWT_SECRET_PREVIOUS
-unset QR_SIGN_HMAC_SECRET_PREVIOUS
-unset PRINTER_SSE_SIGN_SECRET_PREVIOUS
-unset TOKEN_HASH_SECRET_PREVIOUS
-unset INCIDENT_HASH_SALT_PREVIOUS
-unset IP_HASH_SALT_PREVIOUS
-```
-
-Redeploy again. At that point only the new `CURRENT` secrets remain.
+After the persisted `cleanupEligibleAt` deadline, run coordinator `--cleanup`.
+It retires `JWT_SECRET_PREVIOUS`, `QR_SIGN_PUBLIC_KEY_PREVIOUS`, and all three
+pending slots with one immutable `retirementTimestamp`, then stops at
+`cleanup-deploy-required`. Deploy/restart tasks after those writes, run the
+deployment-side verifier with `ROTATION_RUNTIME_PHASE=cleanup`, and resume
+`--cleanup` with that proof. A cleanup deployment observed before retirement is
+rejected. The Stage B task definition must be rendered with
+`production_rotation_cleanup_enabled=true`; that mode omits the retired JWT
+previous, QR previous public, and QR previous key-version bindings entirely.
 
 Mark cleanup in `.security/rotation-evidence.json`:
 
@@ -122,6 +182,8 @@ Mark cleanup in `.security/rotation-evidence.json`:
 - `cleanupCompletedAt=<timestamp>`
 - `cleanupVerifiedBy=<operator>`
 - `linkedDeployShas` includes both deploy SHAs
+- previous JWT/QR rejected after cleanup while current JWT/QR remain valid
+- all previous and pending slots carry explicit retired metadata
 
 ## Secret-Specific Notes
 
@@ -199,15 +261,49 @@ Rollback is allowed only if the new deployment is broken and the previous secret
 
 ## CI policy checks
 
-- `npm run check:rotation-evidence`
+- `npm run check:rotation-evidence-contract` validates the committed rotation
+  evidence shape used by source/control-plane CI. It deliberately exercises a
+  non-production stale fixture and reports `ROTATION_EVIDENCE_FRESH=false`.
+- `npm run check:rotation-evidence-freshness` validates the real
+  `.security/rotation-evidence.json` and enforces the 120-day production
+  freshness limit plus cleanup proof.
+- `npm run check:rotation-evidence` remains the strict production alias for
+  `check:rotation-evidence-freshness`.
 - `npm run check:rotation-cleanup`
 
-When the rotation window is closed, run with:
+Source implementation PRs require the contract, runtime, coordinator, secret
+leakage, and security checks. They do not constitute a production rotation and
+must not be required to make stale operational evidence fresh.
+
+Production release, deployment, scheduled security, and release-candidate
+readiness gates require `check:rotation-evidence-freshness` and must remain red
+until a real governed rotation has completed. The gate contexts are explicit:
+
+| Consumer | Context | Contract | Freshness | Mutation-capable |
+| --- | --- | --- | --- | --- |
+| Source PR validation | pull request | required | reported, not required | no |
+| Stage B source closure | pull request | required | not required | no |
+| Production release/deployment | protected push/manual release | required | required | downstream only |
+| Scheduled DR/security validation | scheduled/manual operational run | required | required | no |
+| Release-candidate readiness | release push/manual release | required | required | downstream only |
+
+The pull-request workflows select their source-validation command from the
+workflow event. This is a semantic gate mode, not a PR, branch, or environment
+bypass. Pushes, scheduled checks, and manual production runs keep the strict
+freshness path.
+
+After a real rotation, run the strict checks without changing their threshold:
 
 ```bash
-ROTATION_WINDOW_COMPLETE=true npm run check:rotation-evidence
+ROTATION_WINDOW_COMPLETE=true npm run check:rotation-evidence-freshness
 ROTATION_WINDOW_COMPLETE=true npm run check:rotation-cleanup
 ```
+
+The recorded evidence file is not refreshed by source implementation PRs. The
+governed lifecycle remains: merge the reviewed mechanism, execute prepare and
+the overlap deployment, verify current and previous JWT/QR material, observe
+the grace window, execute cleanup, generate machine-verifiable evidence, then
+allow the strict freshness gate to pass.
 
 ## Operational Notes
 

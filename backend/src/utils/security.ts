@@ -7,12 +7,6 @@ import {
 } from "./secretConfig";
 import { normalizeClientIp } from "./ipAddress";
 
-const must = (key: string) => {
-  const v = String(process.env[key] || "").trim();
-  if (!v) throw new Error(`Missing required env var: ${key}`);
-  return v;
-};
-
 const fingerprintWithVersion = (opaqueValue: string, version: SecretVersion) =>
   `${version.id}:${hmacSha256Hex(opaqueValue, version.value)}`;
 
@@ -22,11 +16,6 @@ const legacyFingerprint = (opaqueValue: string, legacyKeys: string[]) => {
     if (secret) return hmacSha256Hex(opaqueValue, secret);
   }
   return "";
-};
-
-const legacyJwtSecret = () => {
-  const legacy = String(process.env.JWT_SECRET || "").trim();
-  return legacy || must("JWT_SECRET");
 };
 
 export const getJwtSecret = () => getJwtSecretSet().current.value;
@@ -108,14 +97,11 @@ export const verifyJwtWithCurrentOrPrevious = <T>(token: string, verify: (secret
     }
   }
 
-  const legacy = legacyJwtSecret();
-  for (const version of versions) {
-    if (version.value === legacy) {
-      throw lastError instanceof Error ? lastError : new Error("Invalid token");
-    }
+  if (versions[0]?.source === "JWT_SECRET") {
+    return verify(versions[0].value);
   }
 
-  return verify(legacy);
+  throw lastError instanceof Error ? lastError : new Error("Invalid token");
 };
 
 export const getSecretVersionId = (resolver: () => { current: SecretVersion }) => resolver().current.id;
