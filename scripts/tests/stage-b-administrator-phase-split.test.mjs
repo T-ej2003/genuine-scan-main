@@ -34,7 +34,7 @@ const collectLiveOperatorEvidenceFixture = () => {
   const policy = JSON.parse(fs.readFileSync(path.join(root, "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json"), "utf8"));
   const trust = JSON.parse(fs.readFileSync(path.join(root, "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_TRUST_POLICY.json"), "utf8"));
   return collectLiveEcsExecOperatorEvidence({ run: (args) => {
-    if (args[1] === "get-role") return JSON.stringify({ Role: { Arn: ECS_EXEC_OPERATOR_ROLE_ARN, AssumeRolePolicyDocument: { ...trust, Statement: [{ ...trust.Statement[0], Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }] } } });
+    if (args[1] === "get-role") return JSON.stringify({ Role: { Arn: ECS_EXEC_OPERATOR_ROLE_ARN, AssumeRolePolicyDocument: { ...trust, Statement: [{ ...trust.Statement[0], Condition: { Bool: { "aws:MultiFactorAuthPresent": true } } }] } } });
     if (args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: [{ PolicyArn: ECS_EXEC_OPERATOR_POLICY_ARN }] });
     if (args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: [] });
     if (args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: ECS_EXEC_OPERATOR_POLICY_ARN, DefaultVersionId: "v1" } });

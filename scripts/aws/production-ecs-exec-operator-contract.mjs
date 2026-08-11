@@ -88,6 +88,15 @@ export function normalizeMfaRequired(value) {
   throw new Error("ECS Exec verifier MFA evidence must be the exact boolean or string true/false value.");
 }
 
+export function normalizeEcsExecOperatorTrustDocument(rawTrust) {
+  if (!rawTrust || typeof rawTrust !== "object" || Array.isArray(rawTrust)) throw new Error("ECS Exec verifier trust evidence must be an object.");
+  const trust = structuredClone(rawTrust);
+  const mfa = trust.Statement?.[0]?.Condition?.Bool?.["aws:MultiFactorAuthPresent"];
+  if (normalizeMfaRequired(mfa) !== true) throw new Error("ECS Exec verifier trust policy must require MFA.");
+  trust.Statement[0].Condition.Bool["aws:MultiFactorAuthPresent"] = "true";
+  return trust;
+}
+
 export function assertEcsExecOperatorTrustDocument(trust) {
   if (trust?.Version !== "2012-10-17" || !Array.isArray(trust.Statement) || trust.Statement.length !== 1) throw new Error("ECS Exec verifier trust policy must contain exactly one reviewed statement.");
   const statement = trust.Statement[0];
@@ -124,7 +133,7 @@ export function collectLiveEcsExecOperatorEvidence({ run = (args) => execFileSyn
   if (inlineNames.length !== 0 || attached.length !== 1 || attached[0]?.PolicyArn !== ECS_EXEC_OPERATOR_POLICY_ARN) throw new Error("ECS Exec verifier live policy attachment set is not the reviewed exact set.");
   const metadata = JSON.parse(run(["iam", "get-policy", "--policy-arn", ECS_EXEC_OPERATOR_POLICY_ARN, "--output", "json", "--no-cli-pager"])).Policy;
   const version = JSON.parse(run(["iam", "get-policy-version", "--policy-arn", ECS_EXEC_OPERATOR_POLICY_ARN, "--version-id", metadata?.DefaultVersionId, "--output", "json", "--no-cli-pager"])).PolicyVersion;
-  const trust = decodeDocument(role?.AssumeRolePolicyDocument);
+  const trust = normalizeEcsExecOperatorTrustDocument(decodeDocument(role?.AssumeRolePolicyDocument));
   assertEcsExecOperatorTrustDocument(trust);
   const liveTrustCanonicalSha256 = sha256(trust);
   const liveCanonicalSha256 = sha256(decodeDocument(version?.Document));

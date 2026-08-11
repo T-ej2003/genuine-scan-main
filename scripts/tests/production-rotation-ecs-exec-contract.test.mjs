@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorTrustDocument, buildEcsExecOperatorEvidence, collectLiveEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_REQUIRED, normalizeMfaRequired } from "../aws/production-ecs-exec-operator-contract.mjs";
+import { assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorTrustDocument, buildEcsExecOperatorEvidence, collectLiveEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256, normalizeEcsExecOperatorTrustDocument, normalizeMfaRequired } from "../aws/production-ecs-exec-operator-contract.mjs";
 
 const helper = readFileSync("scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "utf8");
 const selection = readFileSync("scripts/aws/ecs-exec-target-selection.mjs", "utf8");
@@ -78,11 +78,29 @@ test("live MFA evidence normalizes only exact boolean forms", () => {
   for (const value of ["TRUE", "1", 1, null, undefined, "yes"]) assert.throws(() => normalizeMfaRequired(value), /exact boolean or string/);
 });
 
+test("live trust normalization precedes strict validation and source hashing", () => {
+  const booleanTrust = structuredClone(trust);
+  booleanTrust.Statement[0].Condition.Bool["aws:MultiFactorAuthPresent"] = true;
+  const normalized = normalizeEcsExecOperatorTrustDocument(booleanTrust);
+  assert.equal(normalized.Statement[0].Condition.Bool["aws:MultiFactorAuthPresent"], "true");
+  assert.doesNotThrow(() => assertEcsExecOperatorTrustDocument(normalized));
+  const stringTrust = normalizeEcsExecOperatorTrustDocument(trust);
+  assert.deepEqual(normalized, stringTrust);
+  for (const value of [false, "false", "TRUE", "1", 1, null, undefined]) {
+    const invalid = structuredClone(trust);
+    invalid.Statement[0].Condition.Bool["aws:MultiFactorAuthPresent"] = value;
+    assert.throws(() => normalizeEcsExecOperatorTrustDocument(invalid));
+  }
+  const missing = structuredClone(trust);
+  delete missing.Statement[0].Condition.Bool["aws:MultiFactorAuthPresent"];
+  assert.throws(() => normalizeEcsExecOperatorTrustDocument(missing));
+});
+
 test("live-style trust evidence reaches validation with boolean MFA", () => {
   const sourcePolicy = JSON.parse(readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json", "utf8"));
   const sourceTrust = JSON.parse(readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_TRUST_POLICY.json", "utf8"));
   const evidence = collectLiveEcsExecOperatorEvidence({ run: (args) => {
-    if (args[1] === "get-role") return JSON.stringify({ Role: { Arn: "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier", AssumeRolePolicyDocument: { ...sourceTrust, Statement: [{ ...sourceTrust.Statement[0], Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }] } } });
+    if (args[1] === "get-role") return JSON.stringify({ Role: { Arn: "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier", AssumeRolePolicyDocument: { ...sourceTrust, Statement: [{ ...sourceTrust.Statement[0], Condition: { Bool: { "aws:MultiFactorAuthPresent": true } } }] } } });
     if (args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: [{ PolicyArn: ECS_EXEC_OPERATOR_POLICY_ARN }] });
     if (args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: [] });
     if (args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: ECS_EXEC_OPERATOR_POLICY_ARN, DefaultVersionId: "v1" } });
@@ -90,6 +108,7 @@ test("live-style trust evidence reaches validation with boolean MFA", () => {
     throw new Error(`unexpected IAM probe: ${args.join(" ")}`);
   } });
   assert.equal(evidence.mfaRequired, true);
+  assert.equal(evidence.liveTrustCanonicalSha256, ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256);
   assert.doesNotThrow(() => assertEcsExecOperatorLiveEvidence(evidence));
 });
 
