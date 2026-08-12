@@ -86,6 +86,7 @@ export const ECS_EXEC_OPERATOR_FORBIDDEN = Object.freeze([
     { key: "aws:RequestedRegion", values: ["us-east-1"] },
     { key: "ecs:cluster", values: [clusterArn] },
   ])),
+  forbidden("operator-run-predeployment-inventory", "ecs:RunTask", `arn:aws:ecs:${REGION}:${ACCOUNT}:task-definition/mscqr-production-rls-green-predeployment-inventory:*`, taskContext),
   forbidden("operator-update-service", "ecs:UpdateService", serviceArn, taskContext),
   forbidden("operator-register-task-definition", "ecs:RegisterTaskDefinition", "*", regionContext),
   forbidden("operator-pass-role", "iam:PassRole", "*", context([{ key: "iam:PassedToService", values: ["ecs-tasks.amazonaws.com"] }])),

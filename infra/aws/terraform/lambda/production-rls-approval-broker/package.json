@@ -4,6 +4,7 @@
   "type": "module",
   "engines": { "node": "24.x" },
   "dependencies": {
+    "@aws-sdk/client-cloudwatch-logs": "3.1055.0",
     "@aws-sdk/client-dynamodb": "3.1055.0",
     "@aws-sdk/client-ecs": "3.1055.0",
     "@aws-sdk/client-kms": "3.1055.0",

@@ -14,5 +14,7 @@ export async function establishEcsExecVerifierSession({ adapter, mfaSerial, mfaC
   const assumed = await adapter.assumeRole({ roleArn: ECS_EXEC_OPERATOR_ROLE_ARN, sessionName, mfaSerial, mfaCode });
   const assumedArn = assumed?.callerArn || await adapter.getAssumedCallerIdentity?.(assumed);
   if (!verifier.test(assumedArn || "")) throw new Error("Verifier session did not resolve to the reviewed assumed role.");
-  return { valid: true, evidenceRef: `sts:${ECS_EXEC_OPERATOR_ROLE_ARN}`, evidenceSha256: createHash("sha256").update(`${ECS_EXEC_OPERATOR_ROLE_ARN}\n${assumedArn}`).digest("hex"), roleArn: ECS_EXEC_OPERATOR_ROLE_ARN, callerArn: assumedArn };
+  const evidence = { valid: true, evidenceRef: `sts:${ECS_EXEC_OPERATOR_ROLE_ARN}`, evidenceSha256: createHash("sha256").update(`${ECS_EXEC_OPERATOR_ROLE_ARN}\n${assumedArn}`).digest("hex"), roleArn: ECS_EXEC_OPERATOR_ROLE_ARN, callerArn: assumedArn, expiration: assumed?.expiration };
+  if (assumed?.session) Object.defineProperty(evidence, "session", { value: assumed.session, enumerable: false });
+  return evidence;
 }

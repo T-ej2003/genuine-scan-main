@@ -137,13 +137,13 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   }));
 });
 
-test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and eleven final-write statements", () => {
+test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and twelve final-write statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
-  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids.slice(0, -1), "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", finalWriteSids.at(-1)]);
+  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids.slice(0, -1), "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", finalWriteSids.at(-1), "InvokeExactPreDeploymentInventoryBrokerAlias"]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues"]).size, 31);
+  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", "InvokeExactPreDeploymentInventoryBrokerAlias"]).size, 32);
   for (const sid of movedSids) {
     if (sid === "DescribeStageBTasksReadOnly") continue;
     assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
@@ -226,7 +226,13 @@ test("retry write companion is exact and tag-constrained", () => {
   assert.equal(statementsForAction(policies.finalWrite, "lambda:CreateAlias").length, 0);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:DeleteAlias").length, 0);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:AddPermission").length, 0);
-  assert.equal(statementsForAction(policies.finalWrite, "lambda:InvokeFunction").length, 0);
+  assert.deepEqual(statementOf(policies.finalWrite, "InvokeExactPreDeploymentInventoryBrokerAlias"), {
+    Sid: "InvokeExactPreDeploymentInventoryBrokerAlias",
+    Effect: "Allow",
+    Action: "lambda:InvokeFunction",
+    Resource: `${broker}:reviewed`,
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
   assert.equal(policies.finalWrite.Statement.some((statement) => actionsOf(statement).some((action) => action.startsWith("lambda:") && statement.Resource === "*")), false);
   const brokerPolicyArn = "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime";
   assert.deepEqual(statementOf(policies.finalWrite, "UpdateExactStageBBrokerManagedPolicy"), {
@@ -357,7 +363,11 @@ test("Terraform isolates broker runtime permissions in one dedicated managed pol
   assert.match(source, /name\s*=\s*"mscqr-production-rls-approval-broker-runtime"/);
   for (const sid of [
     "RunOnlyApprovedExecutorAndCanaryRevisions",
+    "RunOnlyApprovedPreDeploymentInventory",
+    "ReadAndStopOnlyPreDeploymentInventory",
+    "TagOnlyPreDeploymentInventoryTasks",
     "PassOnlyApprovedTaskRoles",
+    "ReadOnlyPreDeploymentInventoryLogs",
     "ClaimOnlyStageBReplayRows",
     "ReadOnlyStageAApproval",
     "VerifyOnlyStageAApprovalKey",
@@ -444,7 +454,7 @@ test("Terraform role refresh reads are complete and narrowly scoped", () => {
 test("the source-controlled policies carry only the reviewed read, recovery, retry, and signature-verification actions", () => {
   const actions = [...policies.v4.Statement, ...policies.audit.Statement, ...policies.finalWrite.Statement].flatMap(actionsOf);
   for (const forbidden of [
-    "ecs:RunTask", "ecs:StopTask", "ecs:DeleteService", "lambda:InvokeFunction",
+    "ecs:RunTask", "ecs:StopTask", "ecs:DeleteService",
     "iam:CreateRole", "iam:UpdateAssumeRolePolicy",
     "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "sts:AssumeRole",
     "kms:Decrypt", "rds:Connect", "route53:ChangeResourceRecordSets",

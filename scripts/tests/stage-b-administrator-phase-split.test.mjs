@@ -62,14 +62,14 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   });
   assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredAllowedCount, 103);
-  assert.equal(report.forbiddenDeniedCount, 29);
+  assert.equal(report.requiredAllowedCount, 107);
+  assert.equal(report.forbiddenDeniedCount, 28);
   assert.equal(report.principalEvaluations.ecsExecVerifier.status, "valid");
   assert.equal(report.cutoverCritical.stageAIngress, "allowed");
   assert.equal(report.cutoverCritical.releaseEcsExec, "implicitDeny");
   assert.equal(report.cutoverCritical.verifierEcsExec, "allowed");
   for (const id of ["stage-a-ingress-unrelated-security-group", "stage-a-ingress-wrong-region"]) assert.equal(report.forbiddenEvaluations.find((item) => item.manifestId === id).decision, "implicitDeny");
-  for (const id of ["operator-unrelated-task", "operator-unrelated-cluster", "operator-wrong-region", "operator-unrelated-account", "operator-update-service", "operator-register-task-definition", "operator-pass-role", "operator-start-session", "operator-read-secret"]) assert.equal(report.principalEvaluations.ecsExecVerifier.forbiddenEvaluations.find((item) => item.manifestId === id).decision, "implicitDeny");
+  for (const id of ["operator-unrelated-task", "operator-unrelated-cluster", "operator-wrong-region", "operator-unrelated-account", "operator-run-predeployment-inventory", "operator-update-service", "operator-register-task-definition", "operator-pass-role", "operator-start-session", "operator-read-secret"]) assert.equal(report.principalEvaluations.ecsExecVerifier.forbiddenEvaluations.find((item) => item.manifestId === id).decision, "implicitDeny");
   assert.doesNotThrow(() => assertCutoverCriticalEvidence(report));
   const missingOperatorEvidence = structuredClone(report);
   delete missingOperatorEvidence.principalEvaluations.ecsExecVerifier;

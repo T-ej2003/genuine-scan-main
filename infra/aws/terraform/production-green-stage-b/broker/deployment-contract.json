@@ -6,6 +6,15 @@
   "runtime": "nodejs24.x",
   "handler": "index.handler",
   "taskStartAuthority": "broker-only",
+  "preDeploymentInventoryOperation": {
+    "name": "production-predeployment-rotation-inventory",
+    "taskDefinitionFamily": "mscqr-production-rls-green-predeployment-inventory",
+    "execution": "one bounded Fargate task through this broker only",
+    "resultChannel": "exact task awslogs stream, one structured aggregate JSON record",
+    "command": ["node", "/app/scripts/production-rotation-state-inventory.mjs"],
+    "publicIp": "DISABLED",
+    "governedPostDeploymentSelector": false
+  },
   "taskOverridesAllowed": false,
   "replayStore": { "required": true, "partitionKey": { "name": "approvalMode", "type": "S" }, "ttlAttribute": "expiresAt", "conditionalWrite": "attribute_not_exists(approvalMode)", "launchFailureRecovery": "explicit ECS failures release the claim; transport-uncertain launches remain blocked for reviewed reconciliation" },
   "receiptStore": { "required": true, "writeOnce": true, "prefix": "rls-broker-receipts/" },

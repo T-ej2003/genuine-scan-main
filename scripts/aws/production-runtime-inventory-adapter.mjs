@@ -14,9 +14,10 @@ const parseAggregateInventory = (output) => {
  * Production transport for bounded inventory. The only command is repository-owned;
  * the operator cannot provide a shell command or a database credential.
  */
-export function createProductionRuntimeInventoryAdapter({ ecs, expected } = {}) {
+export function createProductionRuntimeInventoryAdapter({ ecs, expected, getVerifierSession } = {}) {
   if (!ecs || typeof ecs.describeService !== "function" || typeof ecs.listTasks !== "function" || typeof ecs.describeTasks !== "function" || typeof ecs.executeCommand !== "function") throw new Error("Runtime inventory ECS adapter is incomplete.");
-  return async ({ taskDefinitionArn } = {}) => {
+  return async ({ taskDefinitionArn, verifierSession } = {}) => {
+    if (typeof getVerifierSession === "function" && verifierSession !== getVerifierSession()) throw new Error("Runtime inventory received a verifier session different from the established cutover session.");
     const service = await ecs.describeService();
     requireExecuteCommandEnabled(service);
     const listed = await ecs.listTasks();

@@ -14,6 +14,12 @@ const REQUIRED_BINDINGS = Object.freeze(["JWT_SECRET_CURRENT", "JWT_SECRET_PREVI
 export const OVERLAP_TASK_MARKER = Object.freeze({ key: "MSCQRExecTarget", value: "production-backend" });
 export const OVERLAP_TASK_TEMPLATE_PATH = "infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-rotation-candidate.json";
 
+export function canonicalBackendDatabaseSecretReference() {
+  const value = JSON.parse(fs.readFileSync(TEMPLATE_PATH, "utf8")).containerDefinitions?.find(({ name }) => name === "backend")?.secrets?.find(({ name }) => name === "DATABASE_URL")?.valueFrom;
+  if (!SECRET_REF.test(value || "")) throw new Error("Canonical backend DATABASE_URL secret reference is unavailable.");
+  return value;
+}
+
 const replace = (value, bindings) => Array.isArray(value) ? value.map((item) => replace(item, bindings)) : value && typeof value === "object"
   ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replace(item, bindings)]))
   : typeof value === "string" ? value.replace(/{{([A-Z0-9_]+)}}/g, (_, key) => {

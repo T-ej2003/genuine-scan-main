@@ -205,6 +205,26 @@ executor families (`admin-bootstrap`, `admin-ownership`, `capability-preflight`,
 
 ## Readiness closure and task-definition rotation
 
+The production cutover uses two distinct runtime-verification boundaries. Before
+rotation preparation, the release path registers the fixed
+`mscqr-production-rls-green-predeployment-inventory` task definition and invokes
+the reviewed broker operation `production-predeployment-rotation-inventory`.
+The broker launches exactly one terminating Fargate task in the reviewed private
+subnets/security group, with the approved backend digest, injected `DATABASE_URL`,
+and the fixed `node /app/scripts/production-rotation-state-inventory.mjs`
+command. The task emits one aggregate JSON record to its exact CloudWatch Logs
+stream; the broker reads only that stream, validates the bounded inventory
+schema, and stops/cleans up the task. No caller supplies a command, image, role,
+network, database URL, or log group, and the verifier is never granted
+`ecs:RunTask` or `iam:PassRole`.
+
+The sequence is therefore: one MFA-backed in-memory verifier session, bounded
+pre-deployment inventory, rotation preparation, overlap task registration,
+readiness, one governed `UpdateService`, stabilization, and only then the
+post-deployment exact-task ECS Exec selector. The selector still requires the
+authorized digest, `MSCQRExecTarget=production-backend`, connected
+`ExecuteCommandAgent`, exact task identity, and immediate ARN revalidation.
+
 Before generating administrator evidence, run the source-controlled local readiness
 check with the exact protected SHA and private output paths:
 

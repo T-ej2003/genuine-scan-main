@@ -1,4 +1,5 @@
 locals {
+  ecs_cluster_name = element(split("/", var.ecs_cluster_arn), 1)
   tags = {
     Environment = "production"
     ManagedBy   = "Terraform"
@@ -176,10 +177,31 @@ locals {
         Resource = values(local.active_broker_task_definition_arns)
       },
       {
+        Sid      = "RunOnlyApprovedPreDeploymentInventory"
+        Effect   = "Allow"
+        Action   = ["ecs:RunTask"]
+        Resource = ["arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-production-rls-green-predeployment-inventory:*"]
+      },
+      {
+        Sid    = "ReadAndStopOnlyPreDeploymentInventory"
+        Effect = "Allow"
+        Action = ["ecs:DescribeTaskDefinition", "ecs:DescribeTasks", "ecs:StopTask"]
+        Resource = [
+          "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-production-rls-green-predeployment-inventory:*",
+          "arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.ecs_cluster_name}/*",
+        ]
+      },
+      {
+        Sid      = "TagOnlyPreDeploymentInventoryTasks"
+        Effect   = "Allow"
+        Action   = ["ecs:TagResource"]
+        Resource = "arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.ecs_cluster_name}/*"
+      },
+      {
         Sid      = "PassOnlyApprovedTaskRoles"
         Effect   = "Allow"
         Action   = ["iam:PassRole"]
-        Resource = [var.stage_a_executor_task_role_arn, aws_iam_role.execution["executor"].arn, aws_iam_role.task["canary"].arn, aws_iam_role.execution["canary"].arn]
+        Resource = [var.stage_a_executor_task_role_arn, aws_iam_role.execution["executor"].arn, aws_iam_role.task["canary"].arn, aws_iam_role.execution["canary"].arn, aws_iam_role.task["backend"].arn, aws_iam_role.execution["backend"].arn]
         Condition = {
           StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
         }
@@ -213,6 +235,12 @@ locals {
         Effect   = "Allow"
         Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "${trimsuffix(var.stage_a_broker_log_group_arn, ":*")}:log-stream:*"
+      },
+      {
+        Sid      = "ReadOnlyPreDeploymentInventoryLogs"
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogStreams", "logs:GetLogEvents"]
+        Resource = "${trimsuffix(local.execution_log_group_arns["backend"], ":*")}:log-stream:*"
       }
     ]
   }
@@ -506,21 +534,31 @@ resource "aws_lambda_function" "broker" {
   runtime          = "nodejs24.x"
   filename         = var.broker_package_path
   source_code_hash = filebase64sha256(var.broker_package_path)
-  timeout          = 30
+  timeout          = 180
   publish          = true
 
   environment {
     variables = var.stage_b_recovery_only ? var.stage_b_recovery_broker_environment : {
-      BROKER_REPLAY_TABLE               = aws_dynamodb_table.replay.name
-      BROKER_RECEIPT_BUCKET             = trimprefix(var.receipt_bucket_arn, "arn:aws:s3:::")
-      BROKER_CLUSTER_ARN                = var.ecs_cluster_arn
-      BROKER_APPROVAL_SECRET_ARN        = var.approval_secret_arn
-      BROKER_EXECUTOR_SECURITY_GROUP_ID = var.stage_a_executor_security_group_id
-      BROKER_PRIVATE_SUBNETS_JSON       = jsonencode(var.private_subnet_ids)
-      BROKER_TASK_DEFINITIONS_JSON      = jsonencode(local.active_broker_task_definition_arns)
-      BROKER_TASK_TEMPLATE_HASHES_JSON  = jsonencode(local.broker_template_hashes)
-      BROKER_APPROVAL_EXPECTED_JSON     = jsonencode(local.broker_approval_expected)
-      BROKER_IMAGES_JSON                = jsonencode(local.broker_images)
+      BROKER_REPLAY_TABLE                  = aws_dynamodb_table.replay.name
+      BROKER_RECEIPT_BUCKET                = trimprefix(var.receipt_bucket_arn, "arn:aws:s3:::")
+      BROKER_CLUSTER_ARN                   = var.ecs_cluster_arn
+      BROKER_APPROVAL_SECRET_ARN           = var.approval_secret_arn
+      BROKER_EXECUTOR_SECURITY_GROUP_ID    = var.stage_a_executor_security_group_id
+      BROKER_PRIVATE_SUBNETS_JSON          = jsonencode(var.private_subnet_ids)
+      BROKER_TASK_DEFINITIONS_JSON         = jsonencode(local.active_broker_task_definition_arns)
+      BROKER_TASK_TEMPLATE_HASHES_JSON     = jsonencode(local.broker_template_hashes)
+      BROKER_APPROVAL_EXPECTED_JSON        = jsonencode(local.broker_approval_expected)
+      BROKER_IMAGES_JSON                   = jsonencode(local.broker_images)
+      INVENTORY_TASK_DEFINITION_FAMILY_ARN = "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-production-rls-green-predeployment-inventory:1"
+      INVENTORY_IMAGE_DIGEST               = var.backend_image
+      INVENTORY_TASK_ROLE_ARN              = aws_iam_role.task["backend"].arn
+      INVENTORY_EXECUTION_ROLE_ARN         = aws_iam_role.execution["backend"].arn
+      INVENTORY_DATABASE_URL_ARN           = "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh"
+      INVENTORY_RLS_ROLE                   = "mscqr_prod_rls_read"
+      INVENTORY_PRIVATE_SUBNETS_JSON       = jsonencode(var.private_subnet_ids)
+      INVENTORY_SECURITY_GROUPS_JSON       = jsonencode([var.stage_a_executor_security_group_id])
+      INVENTORY_ASSIGN_PUBLIC_IP           = "DISABLED"
+      INVENTORY_LOG_GROUP_NAME             = local.logs.backend
     }
   }
   tags = local.tags

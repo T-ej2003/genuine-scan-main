@@ -241,8 +241,8 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.length, 12);
   assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 12);
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
-  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 17);
-  assert.equal(assertReviewedSimulationContextRegistry().length, 17);
+  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 18);
+  assert.equal(assertReviewedSimulationContextRegistry().length, 18);
   assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0 && !values.includes("*")));
 });
 
@@ -545,8 +545,8 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 103);
-  assert.equal(report.forbiddenEvaluations.length, 29);
+  assert.equal(report.requiredEvaluations.length, 107);
+  assert.equal(report.forbiddenEvaluations.length, 28);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
     if (evaluation.resource.startsWith("arn:aws:") && !evaluation.resource.startsWith("arn:aws:s3:::")) assert.ok(evaluation.resource === "*" || evaluation.resource.includes(":368992683803:"), evaluation.resource);
@@ -890,14 +890,14 @@ test("the exact twelve task-definition creates expand to registration, tagging, 
   })), plan.resource_changes[1]] };
   const derived = deriveRequiredEvaluations(fullPlan, manifest);
   assert.equal(derived.coveredChanges.length, 13);
-  assert.equal(derived.required.filter((item) => item.action === "ecs:RegisterTaskDefinition").length, 12);
-  assert.equal(derived.required.filter((item) => item.action === "ecs:TagResource").length, 12);
+  assert.equal(derived.required.filter((item) => item.action === "ecs:RegisterTaskDefinition").length, 13);
+  assert.equal(derived.required.filter((item) => item.action === "ecs:TagResource").length, 13);
   assert.equal(derived.required.filter((item) => item.action === "iam:PassRole").length, 26);
 });
 
 test("task-definition registration context is complete and bound to each planned family", () => {
   const productionPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
-  const registrations = deriveRequiredEvaluations(productionPlan, manifest).required.filter(({ action }) => action === "ecs:RegisterTaskDefinition");
+  const registrations = deriveRequiredEvaluations(productionPlan, manifest).required.filter(({ action, manifestId }) => action === "ecs:RegisterTaskDefinition" && manifest.taskDefinitionMappings.some(({ id }) => manifestId === `${id}-register`));
   assert.equal(registrations.length, 12);
   for (const registration of registrations) {
     assert.deepEqual(registration.context.filter(({ key }) => key.startsWith("ecs:")).map(({ key, type, values }) => ({ key, type, values })), [

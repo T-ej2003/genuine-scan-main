@@ -9,7 +9,6 @@ import { writeJsonAtomically } from "../aws/validate-stage-b-image-reuse.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const compatibilityReport = "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json";
-const imageReleaseSha = "c45f2d788ce29c2067bfb4e8afff46f8b1c238ea";
 
 function runCli(worktree, args, reportPath) {
   const tracePath = process.env.STAGE_B_CLI_TEST_TRACE_PATH;
@@ -33,6 +32,9 @@ test("real image-reuse CLI treats report generation as a boolean option", () => 
   const tracePath = path.join(temporaryRoot, "git-args.log");
   const gitWrapper = path.join(temporaryRoot, "git");
   const toolingSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  // Keep this CLI fixture image-neutral: production impact classification is
+  // covered separately; this test owns the parser/report lifecycle.
+  const imageReleaseSha = toolingSha;
   try {
     execFileSync("git", ["clone", "--no-local", root, worktree], { cwd: root, encoding: "utf8" });
     execFileSync("git", ["clone", "--bare", root, bareRemote], { cwd: root, encoding: "utf8" });

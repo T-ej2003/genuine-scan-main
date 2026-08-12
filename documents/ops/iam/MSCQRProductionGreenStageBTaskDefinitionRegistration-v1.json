@@ -48,7 +48,8 @@
         "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-role-verify:*",
         "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-rollback:*",
         "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-runtime-policy:*",
-        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-verification:*"
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-verification:*",
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*"
       ],
       "Condition": {
         "StringEquals": {
@@ -110,6 +111,28 @@
       }
     },
     {
+      "Sid": "RegisterExactPreDeploymentInventoryTaskDefinition",
+      "Effect": "Allow",
+      "Action": "ecs:RegisterTaskDefinition",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Component": "full-rls-green-stage-b",
+          "aws:RequestTag/MSCQRPreDeploymentInventory": "rotation-inventory",
+          "ecs:privileged": "false"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": ["Component", "Environment", "ManagedBy", "MSCQRPreDeploymentInventory"],
+          "ecs:compute-compatibility": ["FARGATE"]
+        },
+        "NumericEquals": { "ecs:task-cpu": 256, "ecs:task-memory": 512 },
+        "Null": { "ecs:compute-compatibility": "false" }
+      }
+    },
+    {
       "Sid": "DescribeOnlyExactStageBTaskDefinitions",
       "Effect": "Allow",
       "Action": "ecs:DescribeTaskDefinition",
@@ -131,6 +154,13 @@
           "aws:RequestedRegion": "eu-west-2"
         }
       }
+    },
+    {
+      "Sid": "TagExactPreDeploymentInventoryTaskDefinition",
+      "Effect": "Allow",
+      "Action": "ecs:TagResource",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
     },
     {
       "Sid": "PassOnlyExactStageBTaskRolesToEcsTasks",

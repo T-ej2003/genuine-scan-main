@@ -65,11 +65,11 @@ export function assertBoundedRotationInventory(value) {
 
 // execute runs inside the approved application/RLS runtime boundary. It receives
 // no database URL from the operator and returns only the existing aggregate JSON.
-export async function produceRuntimeRotationInventory({ execute, sourceSha, rotationId, taskDefinitionArn, registeredTaskDefinitionArn } = {}) {
+export async function produceRuntimeRotationInventory({ execute, sourceSha, rotationId, taskDefinitionArn, registeredTaskDefinitionArn, verifierSession } = {}) {
   if (typeof execute !== "function" || !/^[a-f0-9]{40}$/.test(sourceSha || "") || typeof rotationId !== "string" || !rotationId || (taskDefinitionArn !== undefined && typeof taskDefinitionArn !== "string")) throw new Error("Runtime inventory inputs are invalid.");
-  const result = await execute({ sourceSha, rotationId, taskDefinitionArn });
+  const result = await execute({ sourceSha, rotationId, taskDefinitionArn, verifierSession });
   const value = result?.inventory && typeof result.inventory === "object" ? result.inventory : result;
   assertBoundedRotationInventory(value);
   const bytes = Buffer.from(JSON.stringify(value));
-  return { valid: true, evidenceRef: `runtime-inventory:${rotationId}`, evidenceSha256: createHash("sha256").update(bytes).digest("hex"), inventory: value, ...(typeof result?.taskDefinitionArn === "string" ? { taskDefinitionArn: result.taskDefinitionArn } : {}), ...(typeof result?.taskArn === "string" ? { taskArn: result.taskArn } : {}), ...(typeof registeredTaskDefinitionArn === "string" ? { registeredTaskDefinitionArn } : {}) };
+  return { valid: true, evidenceRef: `runtime-inventory:${rotationId}`, evidenceSha256: createHash("sha256").update(bytes).digest("hex"), inventory: value, ...(typeof result?.taskDefinitionArn === "string" ? { taskDefinitionArn: result.taskDefinitionArn } : {}), ...(typeof result?.taskArn === "string" ? { taskArn: result.taskArn } : {}), ...(typeof result?.mutationCount === "number" ? { mutationCount: result.mutationCount } : {}), ...(result?.mutationPayload ? { mutationPayload: result.mutationPayload } : {}), ...(typeof registeredTaskDefinitionArn === "string" ? { registeredTaskDefinitionArn } : {}) };
 }

@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { generateKeyPairSync } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { assertStageAPlan } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { buildOnboardingEvidenceFingerprint, runStrictOnboardingProbes, STRICT_ONBOARDING_CHECKS } from "../security/production-strict-onboarding.mjs";
 import { ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
+import { createProductionPreDeploymentInventoryAdapter } from "../aws/production-predeployment-inventory-adapter.mjs";
 
 const sourceSha = "a".repeat(40);
 const imageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"b".repeat(64)}`;
@@ -147,8 +149,51 @@ test("the real cutover orchestrator reaches synthetic onboarding with ordered mu
   const input = fixtureInput();
   const result = await runProductionCutoverControlPlane(input);
   assert.equal(result.readyForOnboarding, true);
-  assert.deepEqual(result.mutationSequence.map(({ name }) => name), ["M2_STAGE_A_APPLY", "M3_ARTIFACT_SECRET_PROVISION", "M4_REGISTER_TASK_DEFINITION", "M5_ROTATION_STATE_PERSISTENCE", "M6_ECS_UPDATE_SERVICE"]);
+  assert.deepEqual(result.mutationSequence.map(({ name }) => name), ["M2_STAGE_A_APPLY", "M3_ARTIFACT_SECRET_PROVISION", "M5_ROTATION_STATE_PERSISTENCE", "M4_REGISTER_TASK_DEFINITION", "M6_ECS_UPDATE_SERVICE"]);
   assert.equal(result.transitionMatrix.every((edge) => edge.result === "PASS"), true);
+});
+
+test("the real predeployment adapter feeds the same cutover spine before deployment", async () => {
+  const input = fixtureInput();
+  const order = [];
+  let registeredDefinition;
+  const preAdapter = createProductionPreDeploymentInventoryAdapter({
+    sourceSha,
+    imageDigest: imageDigest,
+    config: { inventoryApprovalId: "APR-STAGE-B-0001", rotationInventoryRlsRole: "mscqr_prod_rls_read", inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend", overlapTaskInput: { backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings: { ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } } },
+    run: (args) => {
+      if (args[0] === "ecs" && args[1] === "register-task-definition") {
+        const payload = JSON.parse(args[3]);
+        const { tags, ...definition } = payload;
+        registeredDefinition = definition;
+        return JSON.stringify({ taskDefinition: { ...definition, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:22" }, tags });
+      }
+      if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: { ...registeredDefinition, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:22", status: "ACTIVE" } });
+      if (args[0] === "lambda" && args[1] === "invoke") {
+        writeFileSync(args.at(-4), JSON.stringify({ status: "completed", sourceSha, rotationId, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:22", taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/inventory-22", inventory }));
+        return JSON.stringify({ StatusCode: 200 });
+      }
+      throw new Error(`unexpected predeployment command: ${args.join(" ")}`);
+    },
+  });
+  input.preDeploymentInventory = { execute: async ({ rotationId: currentRotationId }) => { order.push("PREDEPLOY_INVENTORY"); return preAdapter.run({ rotationId: currentRotationId }); } };
+  const originalRotation = input.rotationPrepare.run;
+  input.rotationPrepare.run = async (...args) => { order.push("ROTATION_PREPARE"); return originalRotation(...args); };
+  const originalRegister = input.overlapTask.register;
+  input.overlapTask.register = async (...args) => { order.push("TASK_REGISTER"); return originalRegister(...args); };
+  const originalDeploy = input.deployOverlap.run;
+  input.deployOverlap.run = async (...args) => { order.push("UPDATE_SERVICE"); return originalDeploy(...args); };
+  const originalPostDeploy = input.postDeploy.run;
+  input.postDeploy.run = async (...args) => { order.push("STABILIZATION", "POSTDEPLOY"); return originalPostDeploy(...args); };
+  const originalExec = input.ecsExec.run;
+  input.ecsExec.run = async (...args) => { order.push("ECS_EXEC"); return originalExec(...args); };
+  const originalOnboarding = input.onboarding.run;
+  input.onboarding.run = async (...args) => { order.push("ONBOARDING"); return originalOnboarding(...args); };
+  const result = await runProductionCutoverControlPlane(input);
+  order.push("ROTATION_CLOSE");
+  assert.deepEqual(order, ["PREDEPLOY_INVENTORY", "ROTATION_PREPARE", "TASK_REGISTER", "UPDATE_SERVICE", "STABILIZATION", "POSTDEPLOY", "ECS_EXEC", "ONBOARDING", "ROTATION_CLOSE"]);
+  assert.equal(result.readyForOnboarding, true);
+  assert.equal(result.mutationSequence.filter(({ name }) => name === "M6_ECS_UPDATE_SERVICE").length, 1);
 });
 
 test("bootstrap ARNs replace stale overlap bindings on the real control-plane path", async () => {
@@ -298,7 +343,7 @@ test("every cutover failure injection fails closed", async () => {
   const failureResults = [];
   const mutationOrder = ["M2_STAGE_A_APPLY", "M3_ARTIFACT_SECRET_PROVISION", "M4_REGISTER_TASK_DEFINITION", "M5_ROTATION_STATE_PERSISTENCE", "M6_ECS_UPDATE_SERVICE"];
   const boundaryFor = (id) => id.startsWith("stage-a") || id === "saved-plan-bytes-changed" ? "stageA" : id.startsWith("artifact-") ? "artifactSigning" : id.startsWith("td-") || id === "registration-readback-mismatch" ? "taskDefinition" : id.startsWith("inventory-") ? "inventory" : id.startsWith("rotation-") ? "rotationPrepare" : id.startsWith("readiness-") ? "readiness" : id.startsWith("deployment-") ? "deployment" : id.startsWith("replacement-") ? "postDeploy" : id.startsWith("ecs-exec-") ? "ecsExec" : id.startsWith("onboarding-") ? "onboarding" : id.startsWith("iam-") ? "iam" : "identity";
-  const maxMutation = { identity: -1, iam: -1, stageA: 0, artifactSigning: 0, taskDefinition: 2, inventory: 2, rotationPrepare: 2, readiness: 3, deployment: 3, postDeploy: 4, ecsExec: 4, onboarding: 4 };
+  const maxMutation = { identity: -1, iam: -1, stageA: 0, artifactSigning: 0, taskDefinition: 3, inventory: 2, rotationPrepare: 2, readiness: 3, deployment: 3, postDeploy: 4, ecsExec: 4, onboarding: 4 };
   for (const [id, inject] of failCases) {
     const input = fixtureInput();
     inject(input);

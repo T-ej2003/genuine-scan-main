@@ -35,6 +35,14 @@ test("non-image-affecting pull-request impact is merge-ready for reviewed reuse"
   assert.equal(report.deploymentAuthorized, false);
 });
 
+test("the reviewed broker Lambda package is control-plane-only", () => {
+  for (const file of [
+    "infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs",
+    "infra/aws/terraform/lambda/production-rls-approval-broker/package.json",
+    "infra/aws/terraform/lambda/production-rls-approval-broker/package-lock.json",
+  ]) assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "controlPlaneOnly", imageAffecting: false });
+});
+
 test("package-lock image impact is merge-ready but requires fresh protected-main images", () => {
   const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["package-lock.json"] });
   assert.deepEqual(report.imageAffectingFiles, ["package-lock.json"]);
