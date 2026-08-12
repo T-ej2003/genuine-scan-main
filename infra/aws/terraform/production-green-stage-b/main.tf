@@ -60,9 +60,13 @@ locals {
       )]
     }
   ) : local.backend_definition
-  candidate_definitions = {
-    for kind, rendered in local.rendered_candidates : kind => kind == "backend" ? local.backend_definition_for_mode : jsondecode(rendered)
-  }
+  candidate_definitions = merge(
+    { backend = local.backend_definition_for_mode },
+    {
+      for kind, rendered in local.rendered_candidates : kind => jsondecode(rendered)
+      if kind != "backend"
+    }
+  )
   executor_template = replace(replace(replace(replace(replace(replace(file("${path.module}/task-definitions/green-activation-executor.json"), "{{EXECUTOR_IMAGE}}", var.executor_image), "{{RELEASE_SHA}}", var.image_release_sha), "{{SOURCE_CONTRACT_SHA256}}", var.source_contract_sha256), "{{MIGRATION_SET_DIGEST}}", var.migration_set_digest), "{{PACKAGE_CHECKSUM_SHA256}}", var.package_checksum_sha256), "{{RECEIPT_BUCKET}}", trimprefix(var.receipt_bucket_arn, "arn:aws:s3:::"))
   executor_definitions = {
     for mode, confirmation in local.confirmations : mode => jsondecode(
