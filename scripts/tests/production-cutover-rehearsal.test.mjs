@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { generateKeyPairSync } from "node:crypto";
 import { assertStageAPlan } from "../aws/production-stage-a-control-plane.mjs";
+import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { buildOnboardingEvidenceFingerprint, runStrictOnboardingProbes, STRICT_ONBOARDING_CHECKS } from "../security/production-strict-onboarding.mjs";
@@ -117,6 +118,29 @@ test("Stage A accepts only the reviewed indexed for_each instance", () => {
     stageAPlan({ actions: ["create", "delete"] }),
     stageAPlan({ extra: [{ address: "aws_vpc_security_group.foo", change: { actions: ["create"], after: {} } }] }),
   ]) assert.throws(() => assertStageAPlan(plan, inputs));
+});
+
+test("Stage A postcondition reads exact SG-to-SG ingress from production-shaped AWS responses", () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  const rule = (overrides = {}) => ({
+    GroupId: "sg-endpoint", ReferencedGroupInfo: { GroupId: "sg-runtime" }, IsEgress: false,
+    IpProtocol: "tcp", FromPort: 443, ToPort: 443, ...overrides,
+  });
+  const calls = [];
+  const read = (rules) => describeStageAIngress({ run: (args) => { calls.push(args); return JSON.stringify({ SecurityGroupRules: rules }); }, ...inputs });
+  assert.deepEqual(read([rule()]), { present: true });
+  assert.equal(calls[0].some((arg) => String(arg).includes("referenced-group-id")), false);
+  for (const rules of [
+    [rule({ ReferencedGroupInfo: { GroupId: "sg-other" } })],
+    [rule({ ReferencedGroupInfo: undefined })],
+    [rule({ GroupId: "sg-other" })],
+    [rule({ IsEgress: true })],
+    [rule({ IpProtocol: "udp" })],
+    [rule({ FromPort: 80 })],
+    [rule({ ToPort: 80 })],
+    [{ GroupId: "sg-endpoint", CidrIpv4: "10.0.0.0/8", IsEgress: false, IpProtocol: "tcp", FromPort: 443, ToPort: 443 }],
+    [{ GroupId: "sg-endpoint", PrefixListId: "pl-unsupported", IsEgress: false, IpProtocol: "tcp", FromPort: 443, ToPort: 443 }],
+  ]) assert.deepEqual(read(rules), { present: false });
 });
 
 test("the real cutover orchestrator reaches synthetic onboarding with ordered mutation intents", async () => {
