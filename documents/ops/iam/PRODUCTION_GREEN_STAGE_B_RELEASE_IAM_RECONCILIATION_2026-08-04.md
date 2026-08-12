@@ -23,7 +23,7 @@ required.
 The canonical FinalApplyWrite SHA-256 changes from
 `04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`
 to
-`2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09`.
+`2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2`.
 
 The existing-task-definition traffic switch is intentionally owned by the same
 release-deployer identity used by the canonical wrapper. FinalApplyWrite grants
@@ -190,9 +190,9 @@ The allowed inline-policy set is empty.
 The candidate source policy union was evaluated with AWS IAM custom-policy
 simulation against the production-shaped plan:
 
-- required evaluations: 94/94 allowed
+- required evaluations: 103/103 allowed
 - required failures: 0
-- forbidden evaluations: 26/26 denied
+- forbidden evaluations: 29/29 denied
 - forbidden allowed: 0
 - unresolved missing context: 0
 - supplementary provider reads: 55/55 allowed

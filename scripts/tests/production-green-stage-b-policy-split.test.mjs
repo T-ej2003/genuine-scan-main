@@ -137,13 +137,13 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   }));
 });
 
-test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and nine final-write statements", () => {
+test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and eleven final-write statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
-  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids]);
+  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids.slice(0, -1), "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", finalWriteSids.at(-1)]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids]).size, 29);
+  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues"]).size, 31);
   for (const sid of movedSids) {
     if (sid === "DescribeStageBTasksReadOnly") continue;
     assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
@@ -447,7 +447,7 @@ test("the source-controlled policies carry only the reviewed read, recovery, ret
     "ecs:RunTask", "ecs:StopTask", "ecs:DeleteService", "lambda:InvokeFunction",
     "iam:CreateRole", "iam:UpdateAssumeRolePolicy",
     "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "sts:AssumeRole",
-    "secretsmanager:GetSecretValue", "kms:Decrypt", "rds:Connect", "route53:ChangeResourceRecordSets",
+    "kms:Decrypt", "rds:Connect", "route53:ChangeResourceRecordSets",
     "elasticloadbalancing:ModifyListener",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
   assert.equal(actions.includes("iam:GetRole"), true);
@@ -463,6 +463,10 @@ test("the source-controlled policies carry only the reviewed read, recovery, ret
   assert.equal(actions.includes("lambda:PublishVersion"), true);
   assert.equal(actions.includes("lambda:UpdateAlias"), true);
   assert.equal(actions.includes("iam:PassRole"), true);
+  assert.equal(actions.includes("secretsmanager:CreateSecret"), true);
+  assert.equal(actions.includes("secretsmanager:DescribeSecret"), true);
+  assert.equal(actions.includes("secretsmanager:GetSecretValue"), true);
+  assert.equal(actions.includes("secretsmanager:PutSecretValue"), true);
   assert.equal(actions.includes("iam:CreatePolicyVersion"), true);
   assert.equal(actions.includes("iam:DeletePolicyVersion"), true);
   assert.equal(actions.includes("iam:PutRolePolicy"), false);

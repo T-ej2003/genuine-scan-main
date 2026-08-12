@@ -113,6 +113,38 @@
       "Resource": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
     },
     {
+      "Sid": "BootstrapExactArtifactSigningSecretContainers",
+      "Effect": "Allow",
+      "Action": "secretsmanager:CreateSecret",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "secretsmanager:Name": [
+            "mscqr/production/rls-green/artifact-signing/private-key-current",
+            "mscqr/production/rls-green/artifact-signing/public-key-current",
+            "mscqr/production/rls-green/artifact-signing/active-key-version",
+            "mscqr/production/rls-green/artifact-signing/public-keys-json"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ManageExactArtifactSigningSecretValues",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:PutSecretValue"
+      ],
+      "Resource": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
       "Sid": "VerifyExactStageBPermissionReportSignature",
       "Effect": "Allow",
       "Action": "kms:Verify",
