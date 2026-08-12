@@ -75,6 +75,20 @@ test("Terraform rotation mode is opt-in and references exact Secrets Manager JSO
   assert.match(variables, /current and previous secret references\/version references must be distinct/);
 });
 
+test("Stage B candidate definitions keep both rotation modes type-compatible", () => {
+  assert.match(terraform, /candidate_definitions = merge\(/);
+  assert.match(terraform, /\{ backend = local\.backend_definition_for_mode \}/);
+  assert.match(terraform, /if kind != "backend"/);
+  assert.doesNotMatch(terraform, /kind == "backend" \? local\.backend_definition_for_mode/);
+});
+
+test("rotation task secret entries remain ECS valueFrom objects", () => {
+  const rotation = JSON.parse(template).containerDefinitions[0];
+  assert.equal(rotation.environment.find(({ name }) => name === "ROTATION_RUNTIME_TMP_DIR")?.value, "/app/uploads");
+  assert.equal(rotation.secrets.some(({ name, value }) => name === "ROTATION_RUNTIME_TMP_DIR" || value !== undefined), false);
+  assert.equal(rotation.secrets.every(({ valueFrom }) => typeof valueFrom === "string" && valueFrom.length > 0), true);
+});
+
 test("overlap secret set is bounded into the backend execution role", () => {
   const overlapSecrets = ["jwt_current", "jwt_previous", "qr_private_current", "qr_public_current", "qr_current_version", "qr_public_previous", "qr_previous_version", "artifact_private_current", "artifact_public_current", "artifact_active_version", "artifact_public_keys_json"];
   const templateNames = new Set(JSON.parse(template).containerDefinitions[0].secrets.map(({ name }) => name));
