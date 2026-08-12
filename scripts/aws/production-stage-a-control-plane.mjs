@@ -7,12 +7,18 @@ const exact = (value, expected, message) => { if (value !== expected) throw new 
 export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurityGroupId } = {}) {
   if (!plan || !Array.isArray(plan.resource_changes) || !endpointSecurityGroupId || !runtimeSecurityGroupId) throw new Error("Stage A plan inputs are incomplete.");
   const expectedAddress = `${REQUIRED_LOGICAL_ADDRESS}[${JSON.stringify(runtimeSecurityGroupId)}]`;
-  const unexpected = plan.resource_changes.filter((change) => change.address !== expectedAddress && (change.change?.actions || []).some((action) => !["no-op", "read"].includes(action)));
+  const changes = plan.resource_changes.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.address !== "string" || !entry.address.trim()) throw new Error("Stage A plan contains a malformed resource entry.");
+    if (!entry.change || typeof entry.change !== "object" || Array.isArray(entry.change)) throw new Error("Stage A plan resource change is malformed.");
+    const actions = entry.change.actions;
+    if (!Array.isArray(actions) || actions.length === 0 || !actions.every((action) => typeof action === "string")) throw new Error("Stage A plan resource actions are malformed.");
+    return { entry, actions };
+  });
+  const unexpected = changes.filter(({ entry, actions }) => entry.address !== expectedAddress && actions.some((action) => !["no-op", "read"].includes(action)));
   if (unexpected.length) throw new Error("Stage A plan contains an unreviewed mutation.");
-  const reviewed = plan.resource_changes.filter((change) => change.address === expectedAddress);
+  const reviewed = changes.filter(({ entry }) => entry.address === expectedAddress);
   if (reviewed.length !== 1) throw new Error("Stage A plan must contain exactly one reviewed ingress instance.");
-  const change = reviewed[0];
-  const actions = change.change?.actions || [];
+  const { entry: change, actions } = reviewed[0];
   if (JSON.stringify(actions) !== JSON.stringify(["create"]) && JSON.stringify(actions) !== JSON.stringify(["no-op"])) throw new Error("Stage A plan contains an unreviewed ingress action.");
   const after = change.change?.after || {};
   exact(after.security_group_id, endpointSecurityGroupId, "Stage A plan endpoint security group is wrong.");

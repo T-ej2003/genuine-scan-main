@@ -122,6 +122,53 @@ test("Stage A accepts only the reviewed indexed for_each instance", () => {
   ]) assert.throws(() => assertStageAPlan(plan, inputs));
 });
 
+test("Stage A rejects malformed unexpected entries before any apply", async () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  const malformedEntries = [
+    { address: "aws_vpc_security_group.foo", change: {} },
+    { address: "aws_vpc_security_group.foo", change: { actions: [] } },
+    { address: "aws_vpc_security_group.foo", change: { actions: null } },
+    { address: "aws_vpc_security_group.foo", change: { actions: "no-op" } },
+    { address: "aws_vpc_security_group.foo" },
+    { address: "aws_vpc_security_group.foo", change: { actions: ["no-op", null] } },
+  ];
+  for (const entry of malformedEntries) {
+    assert.throws(() => assertStageAPlan({ resource_changes: [stageAPlan().resource_changes[0], entry] }, inputs));
+    let applyCalls = 0;
+    await assert.rejects(() => runStageAControlPlane({
+      adapter: {
+        createSavedPlan: async () => ({ sourceSha: "a".repeat(40), savedPlanSha256: "b".repeat(64), evidenceRef: "terraform-plan:test", evidenceSha256: "b".repeat(64), plan: { resource_changes: [stageAPlan().resource_changes[0], entry] } }),
+        applySavedPlan: async () => { applyCalls += 1; },
+        describeIngress: async () => ({ present: true }),
+      },
+      ...inputs,
+      sourceSha: "a".repeat(40),
+    }));
+    assert.equal(applyCalls, 0);
+  }
+});
+
+test("Stage A applies exact create once and reads the postcondition", async () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  const saved = { sourceSha: "a".repeat(40), savedPlanSha256: "b".repeat(64), evidenceRef: "terraform-plan:test", evidenceSha256: "b".repeat(64), plan: stageAPlan() };
+  let applyCalls = 0;
+  let postconditionReads = 0;
+  const result = await runStageAControlPlane({
+    adapter: {
+      createSavedPlan: async () => saved,
+      applySavedPlan: async () => { applyCalls += 1; },
+      describeIngress: async () => { postconditionReads += 1; return { present: true }; },
+    },
+    ...inputs,
+    sourceSha: saved.sourceSha,
+  });
+  assert.equal(result.alreadyConverged, false);
+  assert.equal(result.appliedExactSavedPlan, true);
+  assert.equal(result.mutationCount, 1);
+  assert.equal(applyCalls, 1);
+  assert.equal(postconditionReads, 1);
+});
+
 test("Stage A recognizes the exact indexed no-op as already converged", async () => {
   const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
   const saved = { sourceSha: "a".repeat(40), savedPlanSha256: "b".repeat(64), evidenceRef: "terraform-plan:test", evidenceSha256: "b".repeat(64), plan: stageAPlan({ actions: ["no-op"] }) };
