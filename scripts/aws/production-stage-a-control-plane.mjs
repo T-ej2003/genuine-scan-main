@@ -6,14 +6,20 @@ const exact = (value, expected, message) => { if (value !== expected) throw new 
 
 export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurityGroupId } = {}) {
   if (!plan || !Array.isArray(plan.resource_changes) || !endpointSecurityGroupId || !runtimeSecurityGroupId) throw new Error("Stage A plan inputs are incomplete.");
-  const changes = plan.resource_changes.filter((change) => {
-    const actions = change.change?.actions || [];
-    return actions.length === 0 || !actions.every((action) => ["no-op", "read"].includes(action));
-  });
-  if (changes.length !== 1) throw new Error("Stage A plan must contain exactly one reviewed mutation.");
-  const change = changes[0];
   const expectedAddress = `${REQUIRED_LOGICAL_ADDRESS}[${JSON.stringify(runtimeSecurityGroupId)}]`;
-  if (change.address !== expectedAddress || JSON.stringify(change.change?.actions) !== JSON.stringify(["create"])) throw new Error("Stage A plan contains an unreviewed mutation.");
+  const changes = plan.resource_changes.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.address !== "string" || !entry.address.trim()) throw new Error("Stage A plan contains a malformed resource entry.");
+    if (!entry.change || typeof entry.change !== "object" || Array.isArray(entry.change)) throw new Error("Stage A plan resource change is malformed.");
+    const actions = entry.change.actions;
+    if (!Array.isArray(actions) || actions.length === 0 || !actions.every((action) => typeof action === "string")) throw new Error("Stage A plan resource actions are malformed.");
+    return { entry, actions };
+  });
+  const unexpected = changes.filter(({ entry, actions }) => entry.address !== expectedAddress && actions.some((action) => !["no-op", "read"].includes(action)));
+  if (unexpected.length) throw new Error("Stage A plan contains an unreviewed mutation.");
+  const reviewed = changes.filter(({ entry }) => entry.address === expectedAddress);
+  if (reviewed.length !== 1) throw new Error("Stage A plan must contain exactly one reviewed ingress instance.");
+  const { entry: change, actions } = reviewed[0];
+  if (JSON.stringify(actions) !== JSON.stringify(["create"]) && JSON.stringify(actions) !== JSON.stringify(["no-op"])) throw new Error("Stage A plan contains an unreviewed ingress action.");
   const after = change.change?.after || {};
   exact(after.security_group_id, endpointSecurityGroupId, "Stage A plan endpoint security group is wrong.");
   exact(after.referenced_security_group_id, runtimeSecurityGroupId, "Stage A plan runtime security group is wrong.");
@@ -21,7 +27,7 @@ export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurit
   exact(String(after.to_port), "443", "Stage A plan ingress port is wrong.");
   exact(after.ip_protocol, "tcp", "Stage A plan ingress protocol is wrong.");
   if (after.cidr_ipv4 !== null || after.cidr_ipv6 !== null || after.prefix_list_id !== null) throw new Error("Stage A plan ingress source is not the reviewed security group.");
-  return { valid: true, changes: 1, address: change.address };
+  return { valid: true, changes: actions[0] === "create" ? 1 : 0, address: change.address, actions, alreadyConverged: actions[0] === "no-op" };
 }
 
 export async function runStageAControlPlane({ adapter, endpointSecurityGroupId, runtimeSecurityGroupId, sourceSha } = {}) {
@@ -31,10 +37,10 @@ export async function runStageAControlPlane({ adapter, endpointSecurityGroupId, 
   if (!/^[a-f0-9]{64}$/.test(saved?.savedPlanSha256 || "")) throw new Error("Stage A saved plan bytes are not hash-bound.");
   const plan = saved?.plan;
   const validation = assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurityGroupId });
-  await adapter.applySavedPlan(saved);
+  if (!validation.alreadyConverged) await adapter.applySavedPlan(saved);
   const rule = await adapter.describeIngress({ endpointSecurityGroupId, runtimeSecurityGroupId, protocol: "tcp", fromPort: 443, toPort: 443 });
   if (rule?.present !== true) throw new Error("Stage A endpoint ingress postcondition is absent.");
-  return { valid: true, ...validation, appliedExactSavedPlan: true, postconditionVerified: true, evidenceRef: saved.evidenceRef, evidenceSha256: saved.evidenceSha256 };
+  return { valid: true, ...validation, appliedExactSavedPlan: !validation.alreadyConverged, postconditionVerified: true, evidenceRef: saved.evidenceRef, evidenceSha256: saved.evidenceSha256, mutationCount: validation.alreadyConverged ? 0 : 1 };
 }
 
 export function createTerraformStageAAdapter({ terraform = "terraform", root = "infra/aws/terraform/production-green-stage-a", backendArgs = [], planPath, run, describeIngress, sourceSha, region = "eu-west-2" } = {}) {
