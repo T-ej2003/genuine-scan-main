@@ -408,6 +408,45 @@ test("Stage A checker source-role policy refresh is an exact preflight capabilit
   assert.equal(exact.requiredEvaluations.filter(({ manifestId }) => manifestId === entry.id).every(({ decision }) => decision === "allowed"), true);
 });
 
+test("Stage A checker trust update is an exact preflight capability", () => {
+  const roleB = "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker";
+  const entry = manifest.required.find(({ id }) => id === "apply-stage-a-checker-role-trust");
+  assert.deepEqual(entry, {
+    id: "apply-stage-a-checker-role-trust",
+    phase: "apply",
+    action: "iam:UpdateAssumeRolePolicy",
+    resources: [roleB],
+    context: [],
+    evidence: "Exact Role B trust transition admitted by the Stage A semantic gate; Terraform changes only the obsolete second-hop-MFA trust to the exact Role A principal",
+  });
+  const evaluations = deriveRequiredEvaluations(plan, manifest).required.filter(({ manifestId }) => manifestId === entry.id);
+  assert.deepEqual(evaluations.map(({ action, resource }) => [action, resource]), [["iam:UpdateAssumeRolePolicy", roleB]]);
+  const input = {
+    reportGeneratorCallerArn: generatorArn,
+    simulatedRoleArn: roleArn,
+    plan,
+    planBytes,
+    savedPlanBytes,
+    manifest,
+    generatedAt: now,
+    now,
+    policyPublishedAt: now,
+    cloudTrailSessionName: "checker-trust-preflight",
+    cloudTrail: clearCloudTrail,
+  };
+  const missing = runPermissionPreflight({
+    ...input,
+    simulate: ({ evaluation }) => evaluation.manifestId === entry.id
+      ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] }
+      : allowRequiredDenyForbidden({ evaluation }),
+  });
+  assert.equal(missing.status, "invalid");
+  assert.equal(missing.requiredEvaluations.find(({ manifestId }) => manifestId === entry.id).decision, "implicitDeny");
+  const exact = runPermissionPreflight({ ...input, simulate: allowRequiredDenyForbidden });
+  assert.equal(exact.status, "valid");
+  assert.equal(exact.requiredEvaluations.find(({ manifestId }) => manifestId === entry.id).decision, "allowed");
+});
+
 test("Stage A live-evidence policy source contains no mutation permission", () => {
   const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));
   const statement = policy.Statement.find((item) => item.Sid === "ReadStageALivePrerequisites");
@@ -617,7 +656,7 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 152);
+  assert.equal(report.requiredEvaluations.length, 153);
   assert.equal(report.forbiddenEvaluations.length, 28);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);

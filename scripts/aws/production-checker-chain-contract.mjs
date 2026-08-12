@@ -1,4 +1,4 @@
-import { STAGE_A_CHECKER_POLICY } from "./production-stage-a-control-plane.mjs";
+import { assertStageACheckerRoleTrustDocument, STAGE_A_CHECKER_POLICY } from "./production-stage-a-control-plane.mjs";
 
 export const CHECKER_ACCOUNT = "368992683803";
 export const CHECKER_USER_ARN = `arn:aws:iam::${CHECKER_ACCOUNT}:user/mscqr-production-checker-operator`;
@@ -31,11 +31,8 @@ export function assertRoleATrustDocument(document) {
 }
 
 export function assertRoleBTrustDocument(document) {
-  const statement = oneStatement(document, "Checker target-role trust");
-  exactAction(statement, "sts:AssumeRole", "Checker target-role trust");
-  if (JSON.stringify(statement.Principal) !== JSON.stringify({ AWS: CHECKER_SOURCE_ROLE_ARN })) throw new Error("Checker target-role trust principal is not the exact source role.");
-  if (statement.Condition !== undefined) throw new Error("Checker target-role trust must not require a non-executable second-hop MFA condition.");
-  return { exact: true, secondHopMfaRequired: false, principal: CHECKER_SOURCE_ROLE_ARN, roleArn: CHECKER_TARGET_ROLE_ARN };
+  const trust = assertStageACheckerRoleTrustDocument(document);
+  return { exact: true, secondHopMfaRequired: trust.secondHopMfaRequired, principal: CHECKER_SOURCE_ROLE_ARN, roleArn: CHECKER_TARGET_ROLE_ARN };
 }
 
 export function assertRoleAAssumeTargetPolicyDocument(document) {
