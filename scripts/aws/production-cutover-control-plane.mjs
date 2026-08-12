@@ -8,6 +8,10 @@ import { assertReadyForOverlapDeployment } from "./production-overlap-readiness-
 import { produceRuntimeRotationInventory } from "../security/production-runtime-rotation-inventory.mjs";
 import { produceOnboardingEvidence } from "../security/produce-production-onboarding-evidence.mjs";
 import { validateOnboardingContract } from "../security/production-onboarding-contract.mjs";
+import { assertImageEvidence, imageEvidenceSha256 } from "./production-green-stage-b-image-evidence.mjs";
+import { assertImageImpactReport, assertProductionImageReuseResult } from "./validate-stage-b-image-reuse.mjs";
+import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
+import { imageAuthorizationSha256 } from "./production-image-authorization.mjs";
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -114,7 +118,7 @@ function recordMutation(mutations, name, result) {
   if (count > 0) mutations.push({ name, count, payloadSha256: result?.mutationPayload ? sha(result.mutationPayload) : null });
 }
 
-export function assertImageAuthorization(value, sourceSha) {
+export function assertImageAuthorization(value, sourceSha, { now, verifyImageEvidence } = {}) {
   if (value?.valid !== true || value.sourceSha !== sourceSha || !SHA256.test(value.evidenceSha256 || "")) throw new Error("Authorized image evidence is invalid.");
   for (const field of ["signatureVerified", "attestationVerified", "provenanceVerified"]) if (value[field] !== true) throw new Error(`Image ${field} is not verified.`);
   if (value.imageReuseCompatible !== true || value.imageBuildInputsChanged !== false || !SHA40.test(value.imageReleaseSha || "") || !/^\d+$/.test(String(value.workflowRunId || ""))) throw new Error("Image authorization is not bound to canonical compatibility and publication evidence.");
@@ -122,6 +126,37 @@ export function assertImageAuthorization(value, sourceSha) {
   for (const image of value.images) if (!new Set(["backend", "worker", "rls-executor", "rls-canary"]).has(image.service) || !/^sha256:[a-f0-9]{64}$/.test(image.digest || "")) throw new Error(`Image authorization record is invalid: ${image.service || "unknown"}.`);
   const backend = value.images.find(({ service }) => service === "backend")?.digest;
   if (value.backendDigest !== undefined && value.backendDigest !== backend) throw new Error("Image authorization backend digest aliases disagree.");
+  if (value.imageEvidence || value.imageReuseEvidence || value.schemaVersion === 2) {
+    if (!value.imageEvidence || !value.imageEvidenceSignature || !value.imageReuseEvidence) throw new Error("Canonical image authorization inputs are incomplete.");
+    if (value.imageEvidenceSha256 !== imageEvidenceSha256(value.imageEvidence)) throw new Error("Image authorization image evidence hash is wrong.");
+    if (value.imageReuseEvidenceSha256 !== canonicalSha256(value.imageReuseEvidence)) throw new Error("Image authorization image-reuse evidence hash is wrong.");
+    if (value.evidenceSha256 !== imageAuthorizationSha256(value) || value.authorizationSha256 !== value.evidenceSha256) throw new Error("Image authorization envelope hash is wrong.");
+    assertImageEvidence(value.imageEvidence, {
+      signatureArtifact: value.imageEvidenceSignature,
+      imageReleaseSha: value.imageEvidence.imageReleaseSha,
+      workflowRunId: value.imageEvidence.workflowRunId,
+      artifactSha256: value.imageEvidence.canonicalArtifactSha256,
+      now,
+      ...(verifyImageEvidence ? { verifySignature: verifyImageEvidence } : {}),
+    });
+    assertImageImpactReport({
+      report: value.imageReuseEvidence,
+      imageReleaseSha: value.imageEvidence.imageReleaseSha,
+      toolingSha: sourceSha,
+      toolingInputTreeSha256: value.imageReuseEvidence.toolingInputTreeSha256,
+      changedFiles: value.imageReuseEvidence.classifiedChangedFiles,
+    });
+    assertProductionImageReuseResult({
+      ...value.imageReuseEvidence,
+      imageBuildInputsChanged: value.imageReuseEvidence.newImagesRequired === true,
+    });
+    if (value.imageEvidence.imageReleaseSha !== value.imageReleaseSha || String(value.imageEvidence.workflowRunId) !== String(value.workflowRunId)
+      || value.imageEvidence.images.some(({ service, digest }) => value.images.find((candidate) => candidate.service === service)?.digest !== digest)
+      || value.imageReuseEvidence.imageReuseCompatible !== value.imageReuseCompatible
+      || value.imageReuseEvidence.newImagesRequired !== value.imageBuildInputsChanged) {
+      throw new Error("Image authorization envelope diverges from its validated inputs.");
+    }
+  }
 }
 
 export const authorizedBackendDigest = (value) => value?.backendDigest || value?.backend?.digest || value?.backend?.imageDigest || value?.backendImageDigest || value?.images?.find(({ service }) => service === "backend")?.digest;

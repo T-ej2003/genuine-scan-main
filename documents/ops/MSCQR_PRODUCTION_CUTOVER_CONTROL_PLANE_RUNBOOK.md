@@ -60,6 +60,10 @@ The rotation config's logical `qr.previousKeyVersion` must equal the live task's
 Secrets Manager references. Bootstrap and execution share the canonical image-authorization validator,
 including evidence, signature, attestation, provenance, source-SHA, workflow, release, service-record,
 and digest checks.
+The source-bound authorization is produced only by `scripts/aws/production-image-authorization.mjs`.
+It composes the signed four-image evidence with the canonical image-impact/reuse report and the
+current protected-main SHA, then writes one hash-bound private authorization file. Operators must
+not copy, relabel, or edit an older authorization artifact.
 
 Cutover input ownership is explicit:
 
