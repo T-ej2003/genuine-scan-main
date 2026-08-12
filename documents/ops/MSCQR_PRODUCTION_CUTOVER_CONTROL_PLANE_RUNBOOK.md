@@ -6,7 +6,8 @@ Rehearsal uses the same orchestrator with deterministic adapters; it does not du
 
 The ordering is image authorization, IAM census/convergence, identity establishment, Stage-A saved-plan
 validation/apply/postcondition, artifact-signing validation, overlap task-definition materialization and
-tag-on-create registration, bounded runtime inventory, rotation preparation, hash-bound readiness,
+tag-on-create registration, bounded runtime inventory, rotation preparation, exact rotation Terraform
+execution-role convergence, hash-bound readiness,
 governed overlap deployment, service/task verification, exact-ARN ECS Exec verification, and strict
 onboarding evidence.
 
@@ -69,6 +70,15 @@ derives the image-impact transition from the two commits and checked-out git tre
 compares the supplied reuse report to that result, composes it with the signed four-image evidence
 and current protected-main SHA, then writes one hash-bound private authorization file. Operators
 must not copy, relabel, or edit an older authorization artifact.
+
+After `rotationPrepare`, the control plane writes a private overlay containing
+`production_rotation_enabled=true` and the exact eleven ECS secret references, then runs the existing
+Stage-B Terraform root with the canonical Stage-B tfvars as the base and a targeted plan for
+`aws_iam_role_policy.execution["backend"]`. The plan is structurally restricted to that reviewed
+execution-role policy and is applied exactly once. The resulting role policy is read back and must
+contain the eleven base Secrets Manager ARNs derived from those ECS references, with no unrelated
+production rotation access. This phase is distinct from Stage A; overlap task registration and
+`UpdateService` are rejected unless its convergence evidence is present.
 
 Cutover input ownership is explicit:
 

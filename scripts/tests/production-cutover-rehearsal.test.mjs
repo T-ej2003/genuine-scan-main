@@ -78,7 +78,11 @@ function fixtureInput(overrides = {}) {
       describeIngress: async () => ({ present: true }),
     },
   };
-  const secretBindings = Object.fromEntries(["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"].map((name) => [name, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:rehearsal-${name}`]));
+  const ecsJsonKeyBindings = new Set(["JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"]);
+  const secretBindings = Object.fromEntries(["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"].map((name) => {
+    const base = `arn:aws:secretsmanager:eu-west-2:368992683803:secret:rehearsal-${name}`;
+    return [name, ecsJsonKeyBindings.has(name) ? `${base}:value::` : base];
+  }));
   return {
     sourceSha, rotationId, rotationStateSha256,
     imageAuthorization: structuredClone(imageAuthorizationFixture.authorization),
@@ -90,6 +94,7 @@ function fixtureInput(overrides = {}) {
     overlapTask: { input: { backendImage: imageDigest, releaseSha: sourceSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } }, register: async () => { mutations.push("M4_REGISTER_TASK_DEFINITION"); return { taskDefinition: { taskDefinitionArn } }; }, describe: async (arn) => ({ taskDefinitionArn: arn, family: "mscqr-production-rls-green-backend-candidate", status: "ACTIVE", tags: [{ key: "MSCQRExecTarget", value: "production-backend" }] }) },
     inventory: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", execute: async () => ({ inventory, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", taskArn }) },
     rotationPrepare: { run: async () => { mutations.push("M5_ROTATION_STATE_PERSISTENCE"); return { valid: true, prepared: true, rotationId, rotationStateSha256, evidenceRef: "rotation:rehearsal", evidenceSha256, mutationCount: 1 }; } },
+    rotationInfrastructure: { run: async ({ sourceSha: currentSourceSha, rotationId: currentRotationId, secretBindings }) => { mutations.push("M5_ROTATION_INFRA_CONVERGENCE"); const overlapSecretSet = Object.values(secretBindings).filter((value) => typeof value === "string" && value.startsWith("arn:aws:secretsmanager:")).map((value) => value.replace(/:value::$/, "")); return { valid: true, converged: true, rotationEnabled: true, sourceSha: currentSourceSha, rotationId: currentRotationId, applyCount: 1, overlapSecretSet, authorizedOverlapSecretSet: overlapSecretSet, unrelatedSecretAccess: false, evidenceRef: "terraform:rotation-infrastructure", evidenceSha256, mutationCount: 1 }; } },
     deployOverlap: { run: async ({ taskDefinitionArn: arn }) => { mutations.push("M6_ECS_UPDATE_SERVICE"); return { updateServiceCount: 1, propagateTags: "TASK_DEFINITION", taskDefinitionArn: arn, mutationPayload: { cluster: "mscqr-prod-euw2-main", service: "mscqr-backend-servi-euw2", taskDefinition: arn, enableExecuteCommand: true, propagateTags: "TASK_DEFINITION" } }; } },
     postDeploy: { run: async () => ({ valid: true, taskArn, taskDefinitionArn, imageDigest: digest, taskTag: "MSCQRExecTarget=production-backend", evidenceRef: "deploy:rehearsal", evidenceSha256 }) },
     ecsExec: { run: async () => ({ valid: true, evidenceRef: "exec:rehearsal", evidenceSha256 }) },
@@ -218,7 +223,12 @@ test("the real cutover orchestrator reaches synthetic onboarding with ordered mu
   const input = fixtureInput();
   const result = await runProductionCutoverControlPlane(input);
   assert.equal(result.readyForOnboarding, true);
-  assert.deepEqual(result.mutationSequence.map(({ name }) => name), ["M2_STAGE_A_APPLY", "M3_ARTIFACT_SECRET_PROVISION", "M5_ROTATION_STATE_PERSISTENCE", "M4_REGISTER_TASK_DEFINITION", "M6_ECS_UPDATE_SERVICE"]);
+  assert.deepEqual(result.mutationSequence.map(({ name }) => name), ["M2_STAGE_A_APPLY", "M3_ARTIFACT_SECRET_PROVISION", "M5_ROTATION_STATE_PERSISTENCE", "M5_ROTATION_INFRA_CONVERGENCE", "M4_REGISTER_TASK_DEFINITION", "M6_ECS_UPDATE_SERVICE"]);
+  assert.equal(result.results.rotationInfrastructure.applyCount, 1);
+  assert.equal(result.results.rotationInfrastructure.overlapSecretCount, 11);
+  assert.equal(result.results.rotationInfrastructure.authorizedOverlapSecretCount, 11);
+  assert.equal(result.results.rotationInfrastructure.unrelatedSecretAccess, false);
+  assert.equal(result.mutationSequence.find(({ name }) => name === "M5_ROTATION_INFRA_CONVERGENCE").count, 1);
   assert.equal(result.transitionMatrix.every((edge) => edge.result === "PASS"), true);
 });
 
@@ -248,6 +258,8 @@ test("the real predeployment adapter feeds the same cutover spine before deploym
   input.preDeploymentInventory = { execute: async ({ rotationId: currentRotationId }) => { order.push("PREDEPLOY_INVENTORY"); return preAdapter.run({ rotationId: currentRotationId }); } };
   const originalRotation = input.rotationPrepare.run;
   input.rotationPrepare.run = async (...args) => { order.push("ROTATION_PREPARE"); return originalRotation(...args); };
+  const originalRotationInfrastructure = input.rotationInfrastructure.run;
+  input.rotationInfrastructure.run = async (...args) => { order.push("ROTATION_INFRA"); return originalRotationInfrastructure(...args); };
   const originalRegister = input.overlapTask.register;
   input.overlapTask.register = async (...args) => { order.push("TASK_REGISTER"); return originalRegister(...args); };
   const originalDeploy = input.deployOverlap.run;
@@ -260,9 +272,16 @@ test("the real predeployment adapter feeds the same cutover spine before deploym
   input.onboarding.run = async (...args) => { order.push("ONBOARDING"); return originalOnboarding(...args); };
   const result = await runProductionCutoverControlPlane(input);
   order.push("ROTATION_CLOSE");
-  assert.deepEqual(order, ["PREDEPLOY_INVENTORY", "ROTATION_PREPARE", "TASK_REGISTER", "UPDATE_SERVICE", "STABILIZATION", "POSTDEPLOY", "ECS_EXEC", "ONBOARDING", "ROTATION_CLOSE"]);
+  assert.deepEqual(order, ["PREDEPLOY_INVENTORY", "ROTATION_PREPARE", "ROTATION_INFRA", "TASK_REGISTER", "UPDATE_SERVICE", "STABILIZATION", "POSTDEPLOY", "ECS_EXEC", "ONBOARDING", "ROTATION_CLOSE"]);
   assert.equal(result.readyForOnboarding, true);
   assert.equal(result.mutationSequence.filter(({ name }) => name === "M6_ECS_UPDATE_SERVICE").length, 1);
+});
+
+test("missing rotation infrastructure convergence fails before task registration or ECS update", async () => {
+  const input = fixtureInput({ rotationInfrastructure: undefined });
+  await assert.rejects(() => runProductionCutoverControlPlane(input), /Rotation infrastructure convergence is required/);
+  assert.equal(input._mutations.includes("M4_REGISTER_TASK_DEFINITION"), false);
+  assert.equal(input._mutations.includes("M6_ECS_UPDATE_SERVICE"), false);
 });
 
 test("bootstrap ARNs replace stale overlap bindings on the real control-plane path", async () => {
@@ -295,6 +314,26 @@ test("bootstrap ARNs replace stale overlap bindings on the real control-plane pa
   assert.equal(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").image, imageDigest);
   assert.equal(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").environment.find(({ name }) => name === "RELEASE_GIT_SHA").value, sourceSha);
   assert.equal(result.results.overlapTaskDefinition.valid, true);
+});
+
+test("post-prepare overlap registration uses JSON-key references for promoted current secrets", async () => {
+  const input = fixtureInput();
+  const current = input.overlapTask.input.secretBindings;
+  const overlapSecretBindings = Object.fromEntries(Object.entries(current).map(([name, value]) => [name,
+    ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"].includes(name) ? `${value}:value::` : value]));
+  input.rotationPrepare.run = async () => ({ valid: true, prepared: true, rotationId, rotationStateSha256, evidenceRef: "rotation:rehearsal", evidenceSha256, mutationCount: 1, overlapSecretBindings });
+  let registeredPayload;
+  input.overlapTask.register = async (payload) => {
+    registeredPayload = payload;
+    return { taskDefinition: { taskDefinitionArn } };
+  };
+  await runProductionCutoverControlPlane(input);
+  const secrets = registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").secrets;
+  const values = Object.fromEntries(secrets.map(({ name, valueFrom }) => [name, valueFrom]));
+  for (const name of ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"]) {
+    assert.match(values[name], /:value::$/);
+    assert.doesNotMatch(values[name], /:value::.*:value::/);
+  }
 });
 
 test("a bootstrap result that disagrees with the artifact adapter fails before registration", async () => {

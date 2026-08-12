@@ -14,6 +14,11 @@ import { assertCanonicalImageReuseEvidence, imageAuthorizationSha256 } from "./p
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
+const OVERLAP_SECRET_KEYS = Object.freeze([
+  "JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT",
+  "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION",
+  "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON",
+]);
 
 export const CUTOVER_STAGE_DEFINITIONS = Object.freeze([
   ["protectedMain", "imageAuthorization", "protected-main-to-image-authorization", ["sourceSha", "evidenceSha256"]],
@@ -23,7 +28,8 @@ export const CUTOVER_STAGE_DEFINITIONS = Object.freeze([
   ["stageA", "artifactSigning", "stage-a-to-artifact-signing", ["evidenceRef", "evidenceSha256", "postconditionVerified"]],
   ["artifactSigning", "preDeploymentInventory", "artifact-signing-to-predeployment-inventory", ["evidenceRef", "evidenceSha256"]],
   ["preDeploymentInventory", "rotationPrepare", "predeployment-inventory-to-rotation-prepare", ["evidenceRef", "evidenceSha256", "inventory"]],
-  ["rotationPrepare", "overlapTaskDefinition", "rotation-prepare-to-overlap-task-definition", ["rotationId", "rotationStateSha256", "rotationPrepared"]],
+  ["rotationPrepare", "rotationInfrastructure", "rotation-prepare-to-rotation-infrastructure", ["rotationId", "rotationStateSha256", "rotationPrepared"]],
+  ["rotationInfrastructure", "overlapTaskDefinition", "rotation-infrastructure-to-overlap-task-definition", ["rotationId", "rotationStateSha256", "rotationInfraConverged"]],
   ["overlapTaskDefinition", "registrationReadback", "overlap-task-definition-to-registration-readback", ["taskDefinitionArn", "tags", "evidenceSha256"]],
   ["registrationReadback", "readiness", "registration-readback-to-readiness", ["sourceSha", "rotationId", "rotationStateSha256"]],
   ["readiness", "deployment", "readiness-to-overlap-deployment", ["sourceSha", "rotationId", "rotationStateSha256", "ecsUpdateServiceCount"]],
@@ -49,6 +55,56 @@ const requiredEvidence = (name, value, fallbackIdentity = {}) => {
 };
 
 const stageEvidence = (name, value, fallbackIdentity) => requiredEvidence(name, value?.evidence || value, fallbackIdentity);
+const baseSecretArn = (value) => String(value || "").replace(/:value::$/, "");
+
+export function buildRotationTerraformInputs({ secretBindings, sourceSha, rotationId } = {}) {
+  if (!SHA40.test(sourceSha || "") || !rotationId || !secretBindings || typeof secretBindings !== "object") throw new Error("Rotation Terraform inputs are incomplete.");
+  const values = Object.fromEntries(OVERLAP_SECRET_KEYS.map((name) => {
+    const value = secretBindings[name];
+    if (typeof value !== "string" || !/^arn:aws:secretsmanager:eu-west-2:368992683803:secret:[A-Za-z0-9/_+=.@-]+(?::value::)?$/.test(value) || value.includes(":value:::value::")) throw new Error(`Rotation Terraform binding is invalid: ${name}.`);
+    return [name, value];
+  }));
+  if (new Set(Object.values(values).map(baseSecretArn)).size !== OVERLAP_SECRET_KEYS.length) throw new Error("Rotation Terraform bindings must identify distinct Secrets Manager resources.");
+  return {
+    production_rotation_enabled: true,
+    production_rotation_secret_value_from: {
+      jwt_current: values.JWT_SECRET_CURRENT, jwt_previous: values.JWT_SECRET_PREVIOUS,
+      qr_private_current: values.QR_SIGN_PRIVATE_KEY_CURRENT, qr_public_current: values.QR_SIGN_PUBLIC_KEY_CURRENT,
+      qr_current_version: values.QR_SIGN_ACTIVE_KEY_VERSION, qr_public_previous: values.QR_SIGN_PUBLIC_KEY_PREVIOUS,
+      qr_previous_version: values.QR_SIGN_PREVIOUS_KEY_VERSION, artifact_private_current: values.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT,
+      artifact_public_current: values.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT, artifact_active_version: values.ARTIFACT_SIGN_ACTIVE_KEY_VERSION,
+      artifact_public_keys_json: values.ARTIFACT_SIGN_PUBLIC_KEYS_JSON,
+    }, sourceSha, rotationId,
+  };
+}
+
+export function renderRotationTerraformInput(inputs) {
+  const entries = Object.entries(inputs.production_rotation_secret_value_from).map(([key, value]) => `    ${key} = ${JSON.stringify(value)}`).join("\n");
+  return `production_rotation_enabled = true\nproduction_rotation_secret_value_from = {\n${entries}\n}\n`;
+}
+
+export function assertRotationInfrastructurePlan(plan, { sourceSha, rotationId, secretBindings } = {}) {
+  buildRotationTerraformInputs({ secretBindings, sourceSha, rotationId });
+  if (!plan || !Array.isArray(plan.resource_changes)) throw new Error("Rotation infrastructure plan is malformed.");
+  const changes = plan.resource_changes.map((entry) => {
+    if (!entry || typeof entry.address !== "string" || !entry.change || !Array.isArray(entry.change.actions) || entry.change.actions.length === 0 || !entry.change.actions.every((action) => typeof action === "string")) throw new Error("Rotation infrastructure plan contains malformed resource actions.");
+    return entry;
+  });
+  const target = changes.find(({ address }) => address === 'aws_iam_role_policy.execution["backend"]');
+  if (!target || JSON.stringify(target.change.actions) !== JSON.stringify(["update"])) throw new Error("Rotation infrastructure plan must update only the reviewed backend execution-role policy.");
+  if (changes.some(({ address, change }) => address !== 'aws_iam_role_policy.execution["backend"]' && change.actions.some((action) => !["no-op", "read"].includes(action)))) throw new Error("Rotation infrastructure plan contains an unreviewed mutation.");
+  return { valid: true, target: target.address, actions: target.change.actions };
+}
+
+export function assertRotationInfrastructureConverged(result, { sourceSha, rotationId, secretBindings } = {}) {
+  const expected = buildRotationTerraformInputs({ secretBindings, sourceSha, rotationId });
+  if (result?.converged !== true || result.rotationEnabled !== true || result.sourceSha !== sourceSha || result.rotationId !== rotationId || result.applyCount !== 1) throw new Error("Rotation infrastructure did not converge exactly once before overlap registration.");
+  const expectedArns = new Set(Object.values(expected.production_rotation_secret_value_from).map(baseSecretArn));
+  const actualArns = new Set((result.overlapSecretSet || []).map(baseSecretArn));
+  const authorizedArns = new Set((result.authorizedOverlapSecretSet || []).map(baseSecretArn));
+  if (actualArns.size !== expectedArns.size || [...expectedArns].some((arn) => !actualArns.has(arn)) || authorizedArns.size !== expectedArns.size || [...expectedArns].some((arn) => !authorizedArns.has(arn)) || result.unrelatedSecretAccess !== false) throw new Error("Rotation infrastructure secret authorization is not exact.");
+  return { ...result, rotationInfraConverged: true, overlapSecretCount: expectedArns.size, authorizedOverlapSecretCount: authorizedArns.size };
+}
 
 function assertIdentityEvidence(identities) {
   if (identities?.releaseDeployer?.valid !== true || identities?.verifier?.valid !== true || identities?.rootDrop?.valid !== true) throw new Error("Required operational identities are invalid.");
@@ -173,7 +229,7 @@ function assertIamReport(report) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
-  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, identities: suppliedIdentities, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, identities: suppliedIdentities, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
   if (!SHA40.test(sourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
   const mutations = [];
   const results = { protectedMain: { valid: true, sourceSha, evidenceSha256: imageAuthorization?.evidenceSha256 } , imageAuthorization };
@@ -232,11 +288,27 @@ export async function runProductionCutoverControlPlane(input = {}) {
   recordMutation(mutations, "M5_ROTATION_STATE_PERSISTENCE", rotation);
   results.rotationPrepare = { ...rotation, sourceSha, rotationPrepared: rotation.prepared === true, inventory: inventoryResult.inventory };
 
+  if (rotation.overlapSecretBindings) {
+    runtimeOverlapTask = {
+      ...runtimeOverlapTask,
+      input: {
+        ...runtimeOverlapTask?.input,
+        secretBindings: { ...runtimeOverlapTask?.input?.secretBindings, ...rotation.overlapSecretBindings },
+        postPrepare: true,
+      },
+    };
+  }
+
+  if (!rotationInfrastructure || typeof rotationInfrastructure.run !== "function") throw new Error("Rotation infrastructure convergence is required before overlap registration.");
+  const rotationInfraResult = assertRotationInfrastructureConverged(await rotationInfrastructure.run({ sourceSha, rotationId, rotationStateSha256, rotation, secretBindings: runtimeOverlapTask.input?.secretBindings }), { sourceSha, rotationId, secretBindings: runtimeOverlapTask.input?.secretBindings });
+  recordMutation(mutations, "M5_ROTATION_INFRA_CONVERGENCE", rotationInfraResult);
+  results.rotationInfrastructure = { ...rotationInfraResult, sourceSha, rotationId, rotationStateSha256, rotationPrepared: true };
+
   assertOverlapInputBinding(runtimeOverlapTask, imageAuthorization, results.artifactSigning, sourceSha);
   const task = await registerOverlapTaskDefinition(runtimeOverlapTask);
   recordMutation(mutations, "M4_REGISTER_TASK_DEFINITION", task);
-  results.overlapTaskDefinition = { ...task, sourceSha, rotationId, rotationStateSha256, rotationPrepared: true, activeKeyVersion: artifact.activeKeyVersion, bindings: task.input?.secretBindings || runtimeOverlapTask.input?.secretBindings };
-  results.registrationReadback = { ...results.overlapTaskDefinition, registeredTaskDefinitionArn: task.taskDefinitionArn, sourceSha, rotationId, rotationStateSha256: rotation.rotationStateSha256, rotationPrepared: true };
+  results.overlapTaskDefinition = { ...task, sourceSha, rotationId, rotationStateSha256, rotationPrepared: true, rotationInfraConverged: true, activeKeyVersion: artifact.activeKeyVersion, bindings: task.input?.secretBindings || runtimeOverlapTask.input?.secretBindings };
+  results.registrationReadback = { ...results.overlapTaskDefinition, registeredTaskDefinitionArn: task.taskDefinitionArn, sourceSha, rotationId, rotationStateSha256: rotation.rotationStateSha256, rotationPrepared: true, rotationInfraConverged: true };
 
   const stages = {
     imageAuthorization: stageEvidence("imageAuthorization", imageAuthorization, { sourceSha }),

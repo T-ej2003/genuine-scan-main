@@ -359,7 +359,7 @@ export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
   { key: "ecs:task-definition", type: "stringList", values: Object.freeze(["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"]) },
   { key: "ecs:task-memory", type: "numeric", values: Object.freeze(["512", "1024", "2048"]) },
   { key: "iam:PassedToService", type: "string", values: Object.freeze(["ecs-tasks.amazonaws.com"]) },
-  { key: "secretsmanager:Name", type: "string", values: Object.freeze(["mscqr/production/rls-green/artifact-signing/private-key-current", "mscqr/production/rls-green/artifact-signing/public-key-current", "mscqr/production/rls-green/artifact-signing/active-key-version", "mscqr/production/rls-green/artifact-signing/public-keys-json"]) },
+  { key: "secretsmanager:Name", type: "string", values: Object.freeze(["mscqr/production/rls-green/artifact-signing/private-key-current", "mscqr/production/rls-green/artifact-signing/public-key-current", "mscqr/production/rls-green/artifact-signing/active-key-version", "mscqr/production/rls-green/artifact-signing/public-keys-json", "mscqr/prod/rotation/jwt-previous", "mscqr/prod/rotation/jwt-pending", "mscqr/prod/rotation/qr-private-pending", "mscqr/prod/rotation/qr-public-previous", "mscqr/prod/rotation/qr-public-pending", "mscqr/prod/rotation/qr-current-version", "mscqr/prod/rotation/qr-previous-version"]) },
 ]);
 
 export function assertReviewedSimulationContextRegistry({ conditionKeyOrigins = sourcePolicyConditionKeyOrigins(), registry = REVIEWED_SIMULATION_CONTEXT_REGISTRY } = {}) {

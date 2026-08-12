@@ -23,7 +23,17 @@ required.
 The canonical FinalApplyWrite SHA-256 changes from
 `04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`
 to
-`6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee`.
+`1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf`.
+
+The policy also contains the narrowly bounded initial legacy-to-dual-slot
+rotation bootstrap. It permits only the seven exact `mscqr/prod/rotation/*`
+secret names for creation and tagging, and scopes subsequent metadata/value access to that
+namespace in `eu-west-2`. The bootstrap never reads legacy current values. The
+existing coordinator additionally receives GetSecretValue and PutSecretValue
+only for the exact legacy JWT-current, QR-private-current, and QR-public-current
+resources needed for configured-slot prepare/promote/rollback; DescribeSecret is
+not granted for those legacy resources and unrelated `mscqr/prod/*` resources
+remain denied.
 
 The existing-task-definition traffic switch is intentionally owned by the same
 release-deployer identity used by the canonical wrapper. FinalApplyWrite grants
@@ -40,10 +50,12 @@ wildcard service updates. The source change requires administrator publication
 of the new managed-policy version after merge; no live IAM change is performed
 by this document.
 
-The exact pre-deployment inventory `ecs:TagResource` permission is intentionally
-owned by FinalApplyWrite, while inventory registration and readback remain in
-TaskDefinitionRegistration. This keeps both AWS managed-policy documents below
-the 6,144-character policy-size limit without widening the resource scope.
+The exact pre-deployment inventory `ecs:TagResource` permission is owned by
+TaskDefinitionRegistration alongside inventory registration and readback. The
+rotation coordinator's legacy-current secret access remains in FinalApplyWrite.
+The resulting AWS-relevant policy sizes are FinalApplyWrite 6,076 characters
+and TaskDefinitionRegistration 5,326 characters, both below the
+6,144-character limit without widening any resource scope.
 
 Primary references:
 
@@ -195,7 +207,7 @@ The allowed inline-policy set is empty.
 The candidate source policy union was evaluated with AWS IAM custom-policy
 simulation against the production-shaped plan:
 
-- required evaluations: 107/107 allowed
+- required evaluations: 148/148 allowed
 - required failures: 0
 - forbidden evaluations: 29/29 denied
 - forbidden allowed: 0

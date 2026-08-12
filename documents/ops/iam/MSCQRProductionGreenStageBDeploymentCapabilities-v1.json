@@ -589,7 +589,7 @@
         "sid": "UpdateExactStageBBackendService",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": true
@@ -762,10 +762,10 @@
       "probeIds": [],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
-        "sid": "BootstrapExactArtifactSigningSecretContainers",
+        "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": false
@@ -802,10 +802,10 @@
       "probeIds": [],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
-        "sid": "BootstrapExactArtifactSigningSecretContainers",
+        "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": false
@@ -842,10 +842,10 @@
       "probeIds": [],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
-        "sid": "BootstrapExactArtifactSigningSecretContainers",
+        "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": false
@@ -882,10 +882,10 @@
       "probeIds": [],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
-        "sid": "BootstrapExactArtifactSigningSecretContainers",
+        "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": false
@@ -988,10 +988,10 @@
       "probeIds": [],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
-        "sid": "ManageExactArtifactSigningSecretValues",
+        "sid": "ManageExactProductionSecretValues",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": false
@@ -1021,10 +1021,10 @@
       "probeIds": [],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
-        "sid": "ManageExactArtifactSigningSecretValues",
+        "sid": "ManageExactProductionSecretValues",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": false
@@ -1493,7 +1493,7 @@
         "sid": "ReadStageALivePrerequisites",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
       },
       "required": true,
       "mutation": false
@@ -1563,7 +1563,7 @@
         "sid": "ReadStageALivePrerequisites",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
       },
       "required": true,
       "mutation": false
@@ -1633,7 +1633,7 @@
         "sid": "ReadStageALivePrerequisites",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
       },
       "required": true,
       "mutation": false
@@ -1862,7 +1862,7 @@
         "sid": "DescribeStageBTaskDefinitionsReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
       },
       "required": true,
       "mutation": true
@@ -1893,6 +1893,634 @@
       "mutation": true
     },
     {
+      "id": "manifest-initial-dual-slot-bootstrap-create-jwt-pending",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-jwt-pending",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/jwt-pending"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-create-jwt-previous",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-jwt-previous",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/jwt-previous"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-create-qr-current-version",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-qr-current-version",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/qr-current-version"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-create-qr-previous-version",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-qr-previous-version",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/qr-previous-version"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-create-qr-private-pending",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-qr-private-pending",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/qr-private-pending"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-create-qr-public-pending",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-qr-public-pending",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/qr-public-pending"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-create-qr-public-previous",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-qr-public-previous",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/qr-public-previous"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-describe-secret",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-describe-secret",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageASecretMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "b9451405973903ce6f3f1330e2a884bf4e7153e524cb44135718637aa52b8917"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-get-secret-value",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-get-secret-value",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactProductionSecretValues",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-put-secret-value",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-put-secret-value",
+      "action": "secretsmanager:PutSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactProductionSecretValues",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-tag-jwt-pending",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-jwt-pending",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-tag-jwt-previous",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-jwt-previous",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-tag-qr-current-version",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-qr-current-version",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-tag-qr-previous-version",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-qr-previous-version",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-tag-qr-private-pending",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-qr-private-pending",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-tag-qr-public-pending",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-qr-public-pending",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-initial-dual-slot-bootstrap-tag-qr-public-previous",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-qr-public-previous",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "manifest-invoke-predeployment-inventory-broker",
       "phase": "wrapper-apply",
       "identity": "RELEASE_DEPLOYER",
@@ -1916,11 +2544,11 @@
       "probe": "plan-derived-simulation",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
         "sid": "InvokeExactPreDeploymentInventoryBrokerAlias",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "d2a04fcd973bf29f1266fdfa740a515c36b1ce5e31535f897de2303ad79d31ee"
       },
       "required": true,
       "mutation": true
@@ -2011,7 +2639,7 @@
         "sid": "PruneExactStageBBrokerManagedPolicyVersions",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": true
@@ -2065,7 +2693,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": true
@@ -2101,7 +2729,7 @@
         "sid": "ReadStageBBrokerConfiguration",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
       },
       "required": true,
       "mutation": false
@@ -2176,7 +2804,7 @@
         "sid": "DescribeStageBServicesReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
       },
       "required": true,
       "mutation": false
@@ -2218,7 +2846,7 @@
         "sid": "ListStageBServicesReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
       },
       "required": true,
       "mutation": false
@@ -2253,7 +2881,7 @@
         "sid": "DescribeStageBTaskDefinitionsReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
       },
       "required": true,
       "mutation": false
@@ -2293,7 +2921,7 @@
         "sid": "DescribeStageBTasksReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
       },
       "required": true,
       "mutation": false
@@ -2335,7 +2963,7 @@
         "sid": "ListStageBTasksReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
       },
       "required": true,
       "mutation": false
@@ -2785,7 +3413,7 @@
         "sid": "RegisterExactPreDeploymentInventoryTaskDefinition",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a05898e6d359c07d5597e2b5ec6edd6753d450d557f1e98da0425136fc7a1d9d"
+        "expectedPolicySha256": "d2a04fcd973bf29f1266fdfa740a515c36b1ce5e31535f897de2303ad79d31ee"
       },
       "required": true,
       "mutation": true
@@ -2851,7 +3479,7 @@
         "sid": "PassExactLegacyBackendRolesForReviewedRollback",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": true
@@ -2884,7 +3512,7 @@
         "sid": "PassExactLegacyBackendRolesForReviewedRollback",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": true
@@ -2931,10 +3559,80 @@
         "sid": "UpdateExactStageBBackendService",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "manifest-rotation-coordinator-read-exact-legacy-current-secrets",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "rotation-coordinator-read-exact-legacy-current-secrets",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactLegacyCurrentRotationSecrets",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-rotation-coordinator-write-exact-legacy-current-secrets",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "rotation-coordinator-write-exact-legacy-current-secrets",
+      "action": "secretsmanager:PutSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactLegacyCurrentRotationSecrets",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
+      },
+      "required": true,
+      "mutation": false
     },
     {
       "id": "manifest-set-stage-b-log-retention",
@@ -3062,11 +3760,11 @@
       "probe": "plan-derived-simulation",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
         "sid": "TagExactPreDeploymentInventoryTaskDefinition",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "d2a04fcd973bf29f1266fdfa740a515c36b1ce5e31535f897de2303ad79d31ee"
       },
       "required": true,
       "mutation": true
@@ -3186,7 +3884,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": true
@@ -3240,7 +3938,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": true
@@ -3265,7 +3963,7 @@
         "sid": "UpdateExactStageBBrokerManagedPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": true
@@ -3359,7 +4057,7 @@
         "sid": "UpdateExactStageBBrokerReviewedAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee"
+        "expectedPolicySha256": "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf"
       },
       "required": true,
       "mutation": true

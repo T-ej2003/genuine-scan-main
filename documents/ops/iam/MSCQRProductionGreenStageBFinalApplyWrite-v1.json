@@ -113,7 +113,7 @@
       "Resource": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
     },
     {
-      "Sid": "BootstrapExactArtifactSigningSecretContainers",
+      "Sid": "BootstrapExactProductionSecretContainers",
       "Effect": "Allow",
       "Action": "secretsmanager:CreateSecret",
       "Resource": "*",
@@ -124,20 +124,31 @@
             "mscqr/production/rls-green/artifact-signing/private-key-current",
             "mscqr/production/rls-green/artifact-signing/public-key-current",
             "mscqr/production/rls-green/artifact-signing/active-key-version",
-            "mscqr/production/rls-green/artifact-signing/public-keys-json"
+            "mscqr/production/rls-green/artifact-signing/public-keys-json",
+            "mscqr/prod/rotation/jwt-previous",
+            "mscqr/prod/rotation/jwt-pending",
+            "mscqr/prod/rotation/qr-private-pending",
+            "mscqr/prod/rotation/qr-public-previous",
+            "mscqr/prod/rotation/qr-public-pending",
+            "mscqr/prod/rotation/qr-current-version",
+            "mscqr/prod/rotation/qr-previous-version"
           ]
         }
       }
     },
     {
-      "Sid": "ManageExactArtifactSigningSecretValues",
+      "Sid": "TagExactInitialRotationSecretContainers",
       "Effect": "Allow",
-      "Action": [
-        "secretsmanager:DescribeSecret",
-        "secretsmanager:GetSecretValue",
-        "secretsmanager:PutSecretValue"
+      "Action": "secretsmanager:TagResource",
+      "Resource": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-*"
       ],
-      "Resource": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/*",
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "eu-west-2"
@@ -145,24 +156,46 @@
       }
     },
     {
-      "Sid": "VerifyExactStageBPermissionReportSignature",
+      "Sid": "ManageExactProductionSecretValues",
       "Effect": "Allow",
-      "Action": "kms:Verify",
-      "Resource": "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:PutSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
     },
     {
-      "Sid": "InvokeExactPreDeploymentInventoryBrokerAlias",
+      "Sid": "ManageExactLegacyCurrentRotationSecrets",
       "Effect": "Allow",
-      "Action": "lambda:InvokeFunction",
-      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
-      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
-    },
-    {
-      "Sid": "TagExactPreDeploymentInventoryTaskDefinition",
-      "Effect": "Allow",
-      "Action": "ecs:TagResource",
-      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*",
-      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+      "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:PutSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
     }
   ]
 }

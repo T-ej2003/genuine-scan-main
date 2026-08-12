@@ -36,6 +36,7 @@ const result = prepareProductionCutoverRuntime({
   outputDirectory,
   approval,
   rotationBindings,
+  rotationId: rotationBindings?.rotationId,
   imageAuthorization,
   iamEvidence,
   artifactBindingFile: required("artifact-binding"),
@@ -44,6 +45,10 @@ const result = prepareProductionCutoverRuntime({
   currentTaskDefinition,
   inventoryApprovalId: args.get("inventory-approval-id"),
   onboardingPaths,
+  stageBTfvarsPath: required("stage-b-tfvars"),
+  stageBTfvarsBindingReportPath: required("stage-b-tfvars-binding-report"),
+  stageBTfvarsBindingReportSha256: required("stage-b-tfvars-binding-report-sha256"),
+  stageBTerraformDataDir: required("stage-b-terraform-data-dir"),
   constructAdapters: ({ config, sourceSha, rotationId }) => createProductionCutoverAdapters({ config, sourceSha, rotationId }),
 });
 process.stdout.write(`${JSON.stringify({

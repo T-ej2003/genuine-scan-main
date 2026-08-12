@@ -3,10 +3,12 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync, 
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import { createProductionCutoverAdapters } from "../aws/production-cutover-production-adapters.mjs";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { assertUniqueSecretBindingNames, buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
@@ -56,6 +58,12 @@ function evidenceFiles(directory, repositoryRoot) {
   const iamEvidence = file("iam-evidence.json", { status: "valid", iamEvaluationCensus: { total: 158, executed: 158, invalid: 0, failures: [] }, evidenceSha256: "d".repeat(64) });
   const rootDrop = file("root-drop.json", { valid: true, callerArn: "arn:aws:iam::368992683803:root", evidenceSha256: "e".repeat(64) });
   const stageAPlan = file("stage-a.tfplan", "binary-fixture");
+  const tfvarsBytes = Buffer.from("production_rotation_enabled = false\n");
+  const stageBTfvarsPath = path.join(directory, "stage-b.tfvars");
+  writeFileSync(stageBTfvarsPath, tfvarsBytes, { mode: 0o600 }); chmodSync(stageBTfvarsPath, 0o600);
+  const stageBTfvarsBindingReportPath = file("stage-b.tfvars.binding.json", { schemaVersion: 2, tfvarsSchemaVersion: 1, tfvarsFormat: "hcl", tfvarsFileName: "stage-b.tfvars", tfvarsExtension: ".tfvars", generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs", tfvarsSha256: createHash("sha256").update(tfvarsBytes).digest("hex") });
+  const stageBTerraformDataDir = path.join(directory, "terraform-data");
+  mkdirSync(stageBTerraformDataDir, { mode: 0o700 }); chmodSync(stageBTerraformDataDir, 0o700);
   const artifactBinding = path.join(repositoryRoot, `documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime-${process.pid}.json`);
   writeFileSync(artifactBinding, JSON.stringify({ bindings: {
     ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-a",
@@ -64,7 +72,7 @@ function evidenceFiles(directory, repositoryRoot) {
     ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-d",
   } }, null, 2));
   chmodSync(artifactBinding, 0o600);
-  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, rootDrop, stageAPlan, artifactBinding };
+  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
 }
 
 function fullInput(directory, repositoryRoot) {
@@ -80,6 +88,10 @@ function fullInput(directory, repositoryRoot) {
     artifactBindingFile: evidence.artifactBinding,
     rootDropEvidenceFile: evidence.rootDrop,
     stageAPlanPath: evidence.stageAPlan,
+    stageBTfvarsPath: evidence.stageBTfvarsPath,
+    stageBTfvarsBindingReportPath: evidence.stageBTfvarsBindingReportPath,
+    stageBTfvarsBindingReportSha256: evidence.stageBTfvarsBindingReportSha256,
+    stageBTerraformDataDir: evidence.stageBTerraformDataDir,
     currentTaskDefinition: taskDefinition(),
     inventoryApprovalId: "APR-STAGE-B-0001",
     onboardingPaths: paths,
@@ -125,9 +137,78 @@ test("LIVE_QR_VERSION_BINDING rejects an operator value that differs from live p
 
 test("QR secret identifiers remain bindings and are never logical key versions", () => {
   const result = rotationBindingsToTaskBindings(bindings);
-  assert.match(result.QR_SIGN_ACTIVE_KEY_VERSION, /^arn:aws:secretsmanager:/);
-  assert.match(result.QR_SIGN_PREVIOUS_KEY_VERSION, /^arn:aws:secretsmanager:/);
+  assert.match(result.QR_SIGN_ACTIVE_KEY_VERSION, /:value::$/);
+  assert.match(result.QR_SIGN_PREVIOUS_KEY_VERSION, /:value::$/);
   assert.notEqual(result.QR_SIGN_PREVIOUS_KEY_VERSION, bindings.qr.previousKeyVersion);
+});
+
+test("rotation task bindings preserve SDK base ARNs and derive ECS JSON-key references", () => {
+  const result = rotationBindingsToTaskBindings(bindings);
+  assert.equal(result.JWT_SECRET_CURRENT, bindings.jwt.currentSecretId);
+  assert.equal(result.QR_SIGN_PRIVATE_KEY_CURRENT, bindings.qr.privateCurrentSecretId);
+  assert.equal(result.QR_SIGN_PUBLIC_KEY_CURRENT, bindings.qr.publicCurrentSecretId);
+  for (const name of ["JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"]) {
+    assert.equal(result[name].endsWith(":value::"), true);
+    assert.doesNotMatch(result[name], /:value::.*:value::/);
+  }
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE KEY|SecretString/);
+});
+
+test("post-prepare current bindings use ECS JSON-key references while SDK bindings stay base ARNs", async () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    const result = prepareProductionCutoverRuntime(input);
+    const prepare = createProductionRotationPrepareAdapter({
+      coordinator: "backend/scripts/security/rotate-production-signing-material.mjs",
+      configFile: result.configPath,
+      stateFile: result.phasePaths.rotationStateFile,
+      fixtureFile: result.phasePaths.rotationFixtureFile,
+      run: async () => {
+        writeFileSync(result.phasePaths.rotationStateFile, JSON.stringify({ rotationId: result.config.rotationId, phase: "overlap-deploy-required", sourceSha }), { mode: 0o600 });
+        writeFileSync(result.phasePaths.rotationFixtureFile, JSON.stringify({ payload: null, signature: null, token: null }), { mode: 0o600 });
+        return JSON.stringify({ rotationId: result.config.rotationId, phase: "overlap-deploy-required" });
+      },
+    });
+    const prepared = await prepare.run({ rotationId: result.config.rotationId, inventory: { evidenceSha256: "f".repeat(64) } });
+    for (const name of ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"]) {
+      assert.match(prepared.overlapSecretBindings[name], /:value::$/);
+      assert.doesNotMatch(result.config.jwt.currentSecretId + result.config.qr.privateCurrentSecretId + result.config.qr.publicCurrentSecretId, /:value::/);
+    }
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("overlap task rejects duplicate secret names instead of ambiguous bindings", () => {
+  const definition = { containerDefinitions: [{ secrets: [{ name: "JWT_SECRET_CURRENT" }, { name: "JWT_SECRET_CURRENT" }] }] };
+  assert.throws(() => assertUniqueSecretBindingNames(definition), /duplicate secret binding names/);
+});
+
+test("overlap task rejects legacy/ECS reference confusion and double JSON-key suffixes", () => {
+  const secretBindings = {
+    ...rotationBindingsToTaskBindings(bindings),
+    ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-private",
+    ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-public",
+    ARTIFACT_SIGN_ACTIVE_KEY_VERSION: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-version",
+    ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-registry",
+    ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read",
+  };
+  const input = {
+    backendImage: image,
+    releaseSha: sourceSha,
+    backendLogGroup: "/ecs/mscqr-production/rls-green-backend",
+    secretBindings,
+  };
+  assert.doesNotThrow(() => buildOverlapTaskDefinition(input));
+  for (const name of ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"]) {
+    assert.throws(() => buildOverlapTaskDefinition({ ...input, secretBindings: { ...secretBindings, [name]: `${secretBindings[name]}:value::` } }), /wrong SDK\/ECS reference shape/);
+  }
+  for (const name of ["JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"]) {
+    assert.throws(() => buildOverlapTaskDefinition({ ...input, secretBindings: { ...secretBindings, [name]: secretBindings[name].replace(/:value::$/, "") } }), /wrong SDK\/ECS reference shape/);
+    assert.throws(() => buildOverlapTaskDefinition({ ...input, secretBindings: { ...secretBindings, [name]: `${secretBindings[name]}:value::` } }), /exact production reference|wrong SDK\/ECS reference shape/);
+  }
 });
 
 test("BOOTSTRAP_DOWNSTREAM_IMAGE_AUTHORIZATION uses the canonical validator", () => {

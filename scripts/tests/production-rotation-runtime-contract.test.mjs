@@ -75,6 +75,23 @@ test("Terraform rotation mode is opt-in and references exact Secrets Manager JSO
   assert.match(variables, /current and previous secret references\/version references must be distinct/);
 });
 
+test("overlap secret set is bounded into the backend execution role", () => {
+  const overlapSecrets = ["jwt_current", "jwt_previous", "qr_private_current", "qr_public_current", "qr_current_version", "qr_public_previous", "qr_previous_version", "artifact_private_current", "artifact_public_current", "artifact_active_version", "artifact_public_keys_json"];
+  const templateNames = new Set(JSON.parse(template).containerDefinitions[0].secrets.map(({ name }) => name));
+  for (const name of ["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"]) assert.equal(templateNames.has(name), true, name);
+  assert.match(terraform, /overlap_rotation_secret_arns = var\.production_rotation_enabled/);
+  assert.match(terraform, /backend_execution_secret_arns = var\.production_rotation_enabled/);
+  assert.match(terraform, /trimsuffix\(value, ":value::"\)/);
+  assert.match(terraform, /alltrue\(\[for arn in local\.overlap_rotation_secret_arns : contains\(local\.backend_execution_secret_arns, arn\) && !strcontains\(arn, "\*"\)\]\)/);
+  const executionPolicy = terraform.match(/resource "aws_iam_role_policy" "execution"[\s\S]*?(?=\nresource )/)?.[0] || "";
+  assert.match(executionPolicy, /secretsmanager:GetSecretValue/);
+  assert.match(executionPolicy, /local\.backend_execution_secret_arns/);
+  const secretStatement = executionPolicy.match(/Sid\s*=\s*"ReadOnlyExactInjectedSecrets"[\s\S]*?\n      \}/)?.[0] || "";
+  assert.doesNotMatch(secretStatement, /Resource\s*=\s*["']\*["']/);
+  assert.doesNotMatch(secretStatement, /mscqr\/prod\/\*/);
+  assert.doesNotMatch(secretStatement, /kms:Decrypt/);
+});
+
 test("coordinator exposes explicit resumable phases and no implicit cleanup", () => {
   for (const mode of ["--prepare", "--verify", "--cleanup", "--status"]) assert.match(coordinator, new RegExp(mode.slice(2)));
   assert.match(coordinator, /exactly one of --prepare, --verify, --cleanup, or --status/);

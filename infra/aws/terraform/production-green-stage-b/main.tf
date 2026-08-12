@@ -105,6 +105,10 @@ locals {
     ])
   }
   active_execution_secret_arns = var.stage_b_recovery_only ? var.stage_b_recovery_execution_secret_arns : local.execution_secret_arns
+  overlap_rotation_secret_arns = var.production_rotation_enabled ? distinct([
+    for value in values(var.production_rotation_secret_value_from) : trimsuffix(value, ":value::")
+  ]) : []
+  backend_execution_secret_arns = var.production_rotation_enabled ? distinct(concat(local.execution_secret_arns.backend, local.overlap_rotation_secret_arns)) : local.execution_secret_arns.backend
   execution_log_group_arns = merge(
     { for kind, log_group in aws_cloudwatch_log_group.stage_b : kind => log_group.arn },
     { executor = var.stage_a_executor_log_group_arn }
@@ -277,6 +281,16 @@ locals {
   }
 }
 
+check "overlap_execution_role_secret_contract" {
+  assert {
+    condition = !var.production_rotation_enabled || (
+      length(local.backend_execution_secret_arns) == length(distinct(local.backend_execution_secret_arns)) &&
+      alltrue([for arn in local.overlap_rotation_secret_arns : contains(local.backend_execution_secret_arns, arn) && !strcontains(arn, "*")])
+    )
+    error_message = "The overlap backend execution role must authorize every exact rotation secret ARN without wildcard access."
+  }
+}
+
 resource "aws_cloudwatch_log_group" "stage_b" {
   for_each          = local.stage_b_logs
   name              = each.value
@@ -320,7 +334,7 @@ resource "aws_iam_role_policy" "execution" {
         Sid      = "ReadOnlyExactInjectedSecrets"
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
-        Resource = local.active_execution_secret_arns[each.key]
+        Resource = each.key == "backend" && !var.stage_b_recovery_only ? local.backend_execution_secret_arns : local.active_execution_secret_arns[each.key]
       }
     ]
   })

@@ -60,14 +60,14 @@ test("broker alias update is authorized on the exact broker function resource", 
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: STAGE_B.brokerAliasArn, context }), false);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: `${functionArn}:other`, context }), false);
   assert.equal(finalWrite.Statement.some((statement) => list(statement.Action).some((action) => ["lambda:CreateAlias", "lambda:DeleteAlias"].includes(action))), false);
-  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee");
+  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf");
 });
 
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 107);
+  assert.equal(evaluations.required.length, 148);
   assert.equal(evaluations.forbidden.length, 28);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
@@ -107,6 +107,20 @@ test("production-shaped required and forbidden resources reconcile to the source
     assert.equal(allows(forbidden), false, manifestId);
   }
   assert.deepEqual(registrations.flatMap(({ context }) => context).filter(({ key }) => key.startsWith("ecs:")).map(({ key }) => key).filter((key, index, keys) => keys.indexOf(key) === index).sort(), ["ecs:cluster", "ecs:compute-compatibility", "ecs:privileged", "ecs:task-cpu", "ecs:task-definition", "ecs:task-memory"]);
+});
+
+test("rotation coordinator legacy-current secret access is exact and action-bounded", () => {
+  const finalWrite = policies.find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").document;
+  const legacy = [
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex",
+  ];
+  const context = [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }];
+  for (const resource of legacy) for (const action of ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"]) assert.equal(allows({ action, resource, context }), true, `${action} ${resource}`);
+  assert.equal(allows({ action: "secretsmanager:DescribeSecret", resource: legacy[0], context }), false);
+  assert.equal(allows({ action: "secretsmanager:GetSecretValue", resource: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/unrelated", context }), false);
+  assert.deepEqual(finalWrite.Statement.find(({ Sid }) => Sid === "ManageExactLegacyCurrentRotationSecrets").Resource, legacy);
 });
 
 test("IAM reconciliation documentation matches generated policy evidence", () => {

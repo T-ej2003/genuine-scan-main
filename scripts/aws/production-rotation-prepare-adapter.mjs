@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { rotationBindingsToPostPrepareTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -45,6 +46,7 @@ export function createProductionRotationPrepareAdapter({ run, coordinator, confi
         if (persistedRotationId !== rotationId || response.phase !== "overlap-deploy-required") throw new Error("Rotation coordinator did not persist the expected prepared phase.");
         const rotationStateSha256 = hashFile(stateFile);
         if (!SHA256.test(rotationStateSha256)) throw new Error("Persisted rotation state hash is invalid.");
+        const config = JSON.parse(readFileSync(configFile, "utf8"));
         return {
           valid: true,
           prepared: true,
@@ -53,6 +55,7 @@ export function createProductionRotationPrepareAdapter({ run, coordinator, confi
           inventoryEvidenceSha256: inventory.evidenceSha256,
           evidenceRef: `rotation-state:${persistedRotationId}`,
           evidenceSha256: createHash("sha256").update(`${persistedRotationId}:${rotationStateSha256}:${inventory.evidenceSha256}`).digest("hex"),
+          overlapSecretBindings: rotationBindingsToPostPrepareTaskBindings(config),
           mutationCount: 1,
         };
       } finally {

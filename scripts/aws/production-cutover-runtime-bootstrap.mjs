@@ -7,14 +7,14 @@ import { loadApprovedArtifactSigningBindings } from "./production-artifact-signi
 import { buildOverlapTaskDefinition } from "./production-overlap-task-definition.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { RELEASE_ROLE_ARN } from "./production-identity-adapters.mjs";
-import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
+import { assertImageAuthorization, authorizedBackendDigest, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const ARN = new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:[A-Za-z0-9/_+=.@-]+(?::[A-Za-z0-9_-]+::)?$`);
+const BASE_ARN = new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:[A-Za-z0-9/_+=.@-]+$`);
 const ROTATION_ID = /^[A-Za-z0-9._-]{8,128}$/;
 const REQUIRED_SECRET_BINDINGS = Object.freeze([
   "jwt.currentSecretId", "jwt.previousSecretId", "jwt.pendingSecretId",
@@ -52,11 +52,14 @@ function assertBindings(bindings = {}) {
     const [group, field] = key.split(".");
     return bindings[group][field];
   });
-  if (refs.some((value) => !ARN.test(value))) throw new Error("Rotation secret bindings must be exact eu-west-2 production Secrets Manager references.");
+  if (refs.some((value) => !BASE_ARN.test(value))) throw new Error("Rotation SDK bindings must be base eu-west-2 production Secrets Manager identifiers.");
   if (new Set(refs).size !== refs.length) throw new Error("Rotation secret bindings must be distinct.");
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(bindings.qr.previousKeyVersion)) throw new Error("qr.previousKeyVersion is invalid.");
   assertNoSecretMaterial(bindings, "Rotation secret binding manifest");
-  return Object.freeze({ jwt: Object.freeze({ ...bindings.jwt }), qr: Object.freeze({ ...bindings.qr }) });
+  const checked = { jwt: Object.freeze({ ...bindings.jwt }), qr: Object.freeze({ ...bindings.qr }) };
+  const ecs = rotationBindingsToTaskBindings(checked);
+  if (bindings.ecs && JSON.stringify(bindings.ecs) !== JSON.stringify(ecs)) throw new Error("ECS rotation bindings do not match the canonical base-ARN bindings.");
+  return Object.freeze({ ...checked, ecs: Object.freeze(ecs) });
 }
 
 function readInputFile(filePath, repositoryRoot, label) {
@@ -86,6 +89,8 @@ function discoverGit({ run = execFileSync } = {}) {
 function phasePaths(directory) {
   return {
     rotationConfigFile: path.join(directory, "rotation-config.json"),
+    rotationTerraformInputFile: path.join(directory, "rotation-infrastructure.tfvars"),
+    rotationTerraformPlanFile: path.join(directory, "rotation-infrastructure.tfplan"),
     rotationStateFile: path.join(directory, "rotation-state.json"),
     rotationFixtureFile: path.join(directory, "rotation-fixture.json"),
     runtimeProofFixtureFile: path.join(directory, "rotation-fixture.json"),
@@ -95,7 +100,7 @@ function phasePaths(directory) {
 
 function assertFutureArtifactsAbsent(paths, repositoryRoot) {
   for (const [name, filePath] of Object.entries(paths)) {
-    if (!["rotationConfigFile", "rotationStateFile", "rotationFixtureFile", "runtimeProofFixtureFile", "readinessEvidenceFile"].includes(name)) continue;
+    if (!["rotationConfigFile", "rotationTerraformInputFile", "rotationTerraformPlanFile", "rotationStateFile", "rotationFixtureFile", "runtimeProofFixtureFile", "readinessEvidenceFile"].includes(name)) continue;
     ensureStageBPrivateDirectory({ directory: path.dirname(filePath), repositoryRoot, create: false });
     const stat = lstatSync(filePath, { throwIfNoEntry: false });
     if (!stat) continue;
@@ -145,6 +150,11 @@ export function prepareProductionCutoverRuntime({
   currentTaskDefinition,
   inventoryApprovalId,
   onboardingPaths,
+  stageBTfvarsPath,
+  stageBTfvarsBindingReportPath,
+  stageBTfvarsBindingReportSha256,
+  stageBTerraformDataDir,
+  rotationId: requestedRotationId,
   constructAdapters,
   imageAuthorizationValidation,
 } = {}) {
@@ -163,7 +173,8 @@ export function prepareProductionCutoverRuntime({
   try {
     if (!protectedSha || !SHA40.test(protectedSha)) throw new Error("protected-main source SHA is unresolved.");
     if (!rotationBindings) throw new Error("rotation secret binding manifest is required; current/previous/pending JWT/QR bindings are not derivable from the legacy live task.");
-    const rotationId = `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
+    const rotationId = requestedRotationId || `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
+    if (!ROTATION_ID.test(rotationId)) throw new Error("Requested rotation ID is invalid.");
     if (!imageAuthorization) throw new Error("image authorization evidence is required.");
     assertImageAuthorization(imageAuthorization, protectedSha, imageAuthorizationValidation);
     const backendImageDigest = authorizedBackendDigest(imageAuthorization);
@@ -180,6 +191,10 @@ export function prepareProductionCutoverRuntime({
     const approvalConfig = buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, liveCurrentKeyVersion: currentKeyVersion });
     if (!onboardingPaths || Object.keys(onboardingPaths).length !== 7 || Object.values(onboardingPaths).some((value) => typeof value !== "string" || !value.startsWith("/"))) throw new Error("Reviewed onboarding path map is required.");
     if (!inventoryApprovalId || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(inventoryApprovalId)) throw new Error("Inventory approval ID is required.");
+    if (!stageBTfvarsPath || !stageBTfvarsBindingReportPath || !SHA256.test(stageBTfvarsBindingReportSha256 || "") || !stageBTerraformDataDir) throw new Error("Canonical Stage B tfvars and Terraform data directory are required for rotation infrastructure convergence.");
+    ensureStageBPrivateFile({ filePath: stageBTfvarsPath, repositoryRoot, label: "Canonical Stage B tfvars" });
+    ensureStageBPrivateFile({ filePath: stageBTfvarsBindingReportPath, repositoryRoot, label: "Canonical Stage B tfvars binding report" });
+    ensureStageBPrivateDirectory({ directory: stageBTerraformDataDir, repositoryRoot, create: false, normalize: true, label: "Canonical Stage B Terraform data directory" });
     const overlapTaskInput = buildOverlapTaskDefinition({
       backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${backendImageDigest}`,
       releaseSha: protectedSha,
@@ -190,6 +205,15 @@ export function prepareProductionCutoverRuntime({
         ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read",
       },
     }).taskDefinition;
+    const rotationTerraformInputs = buildRotationTerraformInputs({
+      sourceSha: protectedSha,
+      rotationId: approvalConfig.rotationId,
+      secretBindings: { ...rotationBindingsToPostPrepareTaskBindings(rotationBindings), ...artifactBindings },
+    });
+    const rotationTerraformInputFile = path.join(directory, "rotation-infrastructure.tfvars");
+    const existingRotationInput = lstatSync(rotationTerraformInputFile, { throwIfNoEntry: false });
+    if (existingRotationInput) throw new Error("rotationTerraformInputFile must not already exist.");
+    const writtenRotationInput = writeStageBPrivateFileAtomic({ filePath: rotationTerraformInputFile, bytes: Buffer.from(renderRotationTerraformInput(rotationTerraformInputs)), repositoryRoot, label: "Rotation Terraform input" });
     staticBindings = {
       ...approvalConfig,
       artifactBindingFile: path.resolve(artifactBindingFile),
@@ -214,6 +238,12 @@ export function prepareProductionCutoverRuntime({
       inventoryLogGroupName: STAGE_B.inventoryLogGroupName,
       overlapTaskInput: { backendImage: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.image, releaseSha: protectedSha, backendLogGroup: STAGE_B.inventoryLogGroupName, secretBindings: { ...rotationBindingsToTaskBindings(rotationBindings), ...artifactBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
       ...paths,
+      stageBTfvarsPath: path.resolve(stageBTfvarsPath),
+      stageBTfvarsBindingReportPath: path.resolve(stageBTfvarsBindingReportPath),
+      stageBTfvarsBindingReportSha256,
+      stageBTerraformDataDir: path.resolve(stageBTerraformDataDir),
+      rotationTerraformInputFile: writtenRotationInput.path,
+      rotationTerraformInputSha256: writtenRotationInput.sha256,
       onboardingBaseUrl: baseUrl,
       onboardingPaths,
       rotationHealthUrl: `${baseUrl}/api/health`,
@@ -230,7 +260,7 @@ export function prepareProductionCutoverRuntime({
     generatedBy: "scripts/aws/prepare-production-cutover-runtime.mjs",
     protectedMainSha: protectedSha || null,
     staticBindingSha256: staticBindings ? canonicalHash(staticBindings) : null,
-    phaseArtifacts: { rotationState: paths.rotationStateFile, rotationFixture: paths.rotationFixtureFile, readinessEvidence: paths.readinessEvidenceFile },
+    phaseArtifacts: { rotationState: paths.rotationStateFile, rotationFixture: paths.rotationFixtureFile, readinessEvidence: paths.readinessEvidenceFile, rotationTerraformInput: paths.rotationTerraformInputFile },
     blockers: [...new Set(blockers)],
     readyToConsumeMfa: blockers.length === 0,
   };
@@ -243,15 +273,31 @@ export function prepareProductionCutoverRuntime({
   return { readyToConsumeMfa: true, runtimeDirectory: directory, configPath, manifestPath, staticBindingSha256: manifest.staticBindingSha256, protectedMainSha: protectedSha, nextCommand: command, config: staticBindings, phasePaths: paths };
 }
 
+function envelopeEcsValueFrom(secretId, name) {
+  if (!BASE_ARN.test(secretId || "")) throw new Error(`${name} must be a base Secrets Manager identifier before ECS JSON-key binding.`);
+  return `${secretId}:value::`;
+}
+
 function rotationBindingsToTaskBindings(bindings) {
+  if (!bindings?.jwt || !bindings?.qr) throw new Error("Rotation SDK bindings are required before ECS binding derivation.");
   return {
     JWT_SECRET_CURRENT: bindings.jwt.currentSecretId,
-    JWT_SECRET_PREVIOUS: bindings.jwt.previousSecretId,
+    JWT_SECRET_PREVIOUS: envelopeEcsValueFrom(bindings.jwt.previousSecretId, "JWT previous"),
     QR_SIGN_PRIVATE_KEY_CURRENT: bindings.qr.privateCurrentSecretId,
     QR_SIGN_PUBLIC_KEY_CURRENT: bindings.qr.publicCurrentSecretId,
-    QR_SIGN_ACTIVE_KEY_VERSION: bindings.qr.currentKeyVersionSecretId,
-    QR_SIGN_PUBLIC_KEY_PREVIOUS: bindings.qr.publicPreviousSecretId,
-    QR_SIGN_PREVIOUS_KEY_VERSION: bindings.qr.previousKeyVersionSecretId,
+    QR_SIGN_ACTIVE_KEY_VERSION: envelopeEcsValueFrom(bindings.qr.currentKeyVersionSecretId, "QR current key version"),
+    QR_SIGN_PUBLIC_KEY_PREVIOUS: envelopeEcsValueFrom(bindings.qr.publicPreviousSecretId, "QR previous public key"),
+    QR_SIGN_PREVIOUS_KEY_VERSION: envelopeEcsValueFrom(bindings.qr.previousKeyVersionSecretId, "QR previous key version"),
+  };
+}
+
+export function rotationBindingsToPostPrepareTaskBindings(bindings) {
+  const ecs = rotationBindingsToTaskBindings(bindings);
+  return {
+    ...ecs,
+    JWT_SECRET_CURRENT: envelopeEcsValueFrom(bindings.jwt.currentSecretId, "JWT current"),
+    QR_SIGN_PRIVATE_KEY_CURRENT: envelopeEcsValueFrom(bindings.qr.privateCurrentSecretId, "QR private current"),
+    QR_SIGN_PUBLIC_KEY_CURRENT: envelopeEcsValueFrom(bindings.qr.publicCurrentSecretId, "QR public current"),
   };
 }
 
@@ -262,6 +308,7 @@ export function parseBootstrapArgs(argv) {
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
     "minimum-grace-seconds", "rotation-bindings", "image-authorization", "iam-evidence",
     "artifact-binding", "root-drop-evidence", "stage-a-plan", "inventory-approval-id", "onboarding-paths",
+    "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
   ]);
   const values = new Map();
   for (let index = 0; index < argv.length; index += 1) {

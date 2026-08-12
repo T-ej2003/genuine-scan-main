@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +16,9 @@ import { assertSelectedTargetTask, selectTargetTask } from "./ecs-exec-target-se
 import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
 import { persistOverlapReadinessEvidence } from "./produce-production-overlap-readiness-evidence.mjs";
 import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, ARTIFACT_SIGNING_RUNTIME_BINDING_PATH } from "./production-artifact-signing-bootstrap.mjs";
+import { assertStageBCanonicalTfvarsFile } from "./generate-production-green-stage-b-tfvars.mjs";
+import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from "./stage-b-artifact-contract.mjs";
+import { assertRotationInfrastructurePlan, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -127,6 +131,42 @@ const runtimeProofCommand = ({ sourceSha, rotationId, deploymentSha, healthUrl, 
   ].join("; ");
 };
 
+export function createProductionRotationInfrastructureAdapter({ run = execFileSync, releaseProfile, root = path.resolve("infra/aws/terraform/production-green-stage-b"), config } = {}) {
+  if (!config?.stageBTfvarsPath || !config.stageBTfvarsBindingReportPath || !config.stageBTfvarsBindingReportSha256 || !config.rotationTerraformInputFile || !config.rotationTerraformPlanFile || !config.stageBTerraformDataDir) throw new Error("Canonical rotation Terraform inputs are required.");
+  const terraformEnv = { ...process.env, AWS_REGION: REGION, AWS_DEFAULT_REGION: REGION, TF_DATA_DIR: config.stageBTerraformDataDir, TF_WORKSPACE: "default", ...(releaseProfile ? { AWS_PROFILE: releaseProfile } : {}) };
+  const terraform = (args, encoding = "utf8") => run("terraform", [`-chdir=${root}`, ...args], { cwd: process.cwd(), env: terraformEnv, encoding, stdio: ["ignore", "pipe", "pipe"] });
+  return {
+    async run({ sourceSha, rotationId, secretBindings }) {
+      const tfvarsBytes = readFileSync(config.stageBTfvarsPath);
+      const reportBytes = readFileSync(config.stageBTfvarsBindingReportPath);
+      assertStageBPrivateFile({ filePath: config.stageBTfvarsPath, repositoryRoot: process.cwd(), label: "Canonical Stage B tfvars" });
+      assertStageBPrivateFile({ filePath: config.stageBTfvarsBindingReportPath, repositoryRoot: process.cwd(), label: "Canonical Stage B tfvars binding report" });
+      ensureStageBPrivateDirectory({ directory: config.stageBTerraformDataDir, repositoryRoot: process.cwd(), create: false, normalize: true, label: "Canonical Stage B Terraform data directory" });
+      if (sha256(reportBytes) !== config.stageBTfvarsBindingReportSha256) throw new Error("Canonical Stage B tfvars binding report changed before rotation infrastructure convergence.");
+      if (sha256(readFileSync(config.rotationTerraformInputFile)) !== config.rotationTerraformInputSha256) throw new Error("Rotation Terraform input changed before convergence.");
+      assertStageBCanonicalTfvarsFile({ tfvarsPath: config.stageBTfvarsPath, bindingReport: JSON.parse(reportBytes), tfvarsBytes });
+      const rotationInputs = buildRotationTerraformInputs({ secretBindings, sourceSha, rotationId });
+      if (readFileSync(config.rotationTerraformInputFile, "utf8") !== renderRotationTerraformInput(rotationInputs)) throw new Error("Rotation Terraform input does not match the post-prepare overlap bindings.");
+      const target = ROTATION_EXECUTION_POLICY_ADDRESS;
+      terraform(["init", "-upgrade=false", "-input=false", "-lockfile=readonly", "-no-color"]);
+      terraform(["plan", "-input=false", "-refresh=true", "-var-file", config.stageBTfvarsPath, "-var-file", config.rotationTerraformInputFile, "-target", target, "-out", config.rotationTerraformPlanFile, "-no-color"]);
+      assertStageBPrivateFile({ filePath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan" });
+      const plan = JSON.parse(terraform(["show", "-json", config.rotationTerraformPlanFile]));
+      assertRotationInfrastructurePlan(plan, { sourceSha, rotationId, secretBindings });
+      terraform(["apply", "-input=false", "-no-color", config.rotationTerraformPlanFile]);
+      const policy = parseJson((args) => run("aws", args, { cwd: process.cwd(), env: terraformEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), ["iam", "get-role-policy", "--role-name", ROTATION_EXECUTION_ROLE, "--policy-name", "stage-b-exact-image-logs-and-secrets"]);
+      let document;
+      try { document = JSON.parse(decodeURIComponent(policy.PolicyVersion?.Document || policy.PolicyDocument || "{}")); } catch { throw new Error("Backend execution-role policy is not readable after rotation convergence."); }
+      const overlapSecretSet = Object.values(rotationInputs.production_rotation_secret_value_from).map((value) => value.replace(/:value::$/, ""));
+      const authorizedSecretSet = [...new Set((document.Statement || []).filter((statement) => statement?.Effect === "Allow" && (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("secretsmanager:GetSecretValue")).flatMap((statement) => Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource]).filter(Boolean))];
+      const authorizedOverlapSecretSet = overlapSecretSet.filter((arn) => authorizedSecretSet.includes(arn));
+      if (authorizedOverlapSecretSet.length !== overlapSecretSet.length) throw new Error("Backend execution role is missing a required rotation secret permission.");
+      const unrelatedSecretAccess = authorizedOverlapSecretSet.length !== new Set(overlapSecretSet).size;
+      return { valid: true, converged: true, rotationEnabled: true, sourceSha, rotationId, applyCount: 1, overlapSecretSet, authorizedOverlapSecretSet, unrelatedSecretAccess, evidenceRef: "terraform:rotation-infrastructure", evidenceSha256: sha256(Buffer.from(JSON.stringify({ sourceSha, rotationId, overlapSecretSet, authorizedOverlapSecretSet }))), mutationCount: 1, mutationPayload: { target, rotationInputSha256: sha256(readFileSync(config.rotationTerraformInputFile)), planSha256: sha256(readFileSync(config.rotationTerraformPlanFile)) } };
+    },
+  };
+}
+
 export function createProductionCutoverAdapters({ config, sourceSha, rotationId, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier" } = {}) {
   if (!config || typeof config !== "object") throw new Error("Production cutover adapter configuration is required.");
   const releaseRun = createProductionCommandRunner({ profile: releaseProfile });
@@ -165,6 +205,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     describeIngress: async ({ endpointSecurityGroupId, runtimeSecurityGroupId }) => describeStageAIngress({ run: releaseRun, endpointSecurityGroupId, runtimeSecurityGroupId }),
   });
   const overlapRegistration = createAwsOverlapTaskRegistrationAdapter({ run: async (args) => releaseRun(args) });
+  const rotationInfrastructure = createProductionRotationInfrastructureAdapter({ run: execFileSync, releaseProfile, config });
   const inventoryExecute = createProductionRuntimeInventoryAdapter({
     ecs: verifierEcs,
     getVerifierSession: requireVerifierSession,
@@ -197,6 +238,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       stateFile: config.rotationStateFile,
       fixtureFile: config.rotationFixtureFile,
     }),
+    rotationInfrastructure,
     readiness: config.readinessEvidenceFile ? {
       persist: async (evidence) => persistOverlapReadinessEvidence({ outputPath: config.readinessEvidenceFile, evidence }),
     } : undefined,
