@@ -39,6 +39,40 @@ configuration binds the approved rotation ID, source SHA, grace window, and curr
 JWT/QR secret identifiers. Those are live rotation-state inputs, not derivable secret names, and no
 secret values belong in that configuration.
 
+Before MFA, use `npm run stage-b:prepare-cutover-runtime --` with the reviewed approval metadata.
+This private preflight derives protected-main SHA, production region and role, overlap deployment
+SHA, current runtime metadata, image/IAM/artifact evidence references, and phase-owned output paths.
+It validates the complete adapter graph and writes only an identifier-only rotation config and a
+redacted manifest in a 0700 runtime directory; config and manifest files are atomic 0600 outputs.
+It never creates rotation state or the rotation fixture. Those remain outputs of the coordinator's
+`--prepare` phase. The command emits one exact `run-production-cutover.mjs` command only after all
+pre-MFA inputs are valid. The pre-MFA bootstrap does not collect onboarding MFA. The onboarding
+adapter reads `MSCQR_ONBOARDING_MFA_CODE` only after the live login response enters the MFA challenge
+boundary; the code is never written to rotation config, manifests, command lines, or evidence.
+The rotation config's logical `qr.previousKeyVersion` must equal the live task's
+`QR_SIGN_ACTIVE_KEY_VERSION`; separate `QR_SIGN_*_KEY_VERSION` task bindings remain identifier-only
+Secrets Manager references. Bootstrap and execution share the canonical image-authorization validator,
+including evidence, signature, attestation, provenance, source-SHA, workflow, release, service-record,
+and digest checks.
+
+Cutover input ownership is explicit:
+
+| Class | Inputs |
+| --- | --- |
+| Repository-derived | region, release role, protected-main SHA, overlap deployment SHA, policy constants, phase paths, inventory role/log target |
+| AWS read-only | current task definition ARN, HTTPS production base URL, current QR key-version metadata |
+| Existing runtime artifacts | image authorization, IAM evidence, Stage-A plan/root evidence, artifact binding file |
+| Human approval | ticket, approver identity/role, reason, verification reference, grace-window policy value |
+| Identifier-only external binding | dual-slot JWT/QR secret references, including current/previous key-version references not present in the legacy task |
+| Prepare-generated | rotation state and rotation fixture |
+| Later-phase generated | readiness, post-deploy, ECS Exec, onboarding, and rotation-close evidence |
+| Prohibited | secret values, signing material, DATABASE_URL, MFA codes, and temporary AWS credentials |
+
+The dual-slot identifier manifest is required because the legacy production task exposes only
+single-slot JWT/QR bindings and the repository has no canonical name/provisioner for the missing
+dual-slot references. The bootstrap validates its exact eu-west-2/account scope and never treats
+that manifest as a source of secret values.
+
 Production AWS adapter service commands are invoked through the `aws` executable with the reviewed
 profile and `eu-west-2` region; Terraform and runtime commands remain distinct executables. Rotation
 deployment receives the SHA returned by the successful preparation step, not a stale command-line

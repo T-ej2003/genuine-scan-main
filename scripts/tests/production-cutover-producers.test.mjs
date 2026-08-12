@@ -165,6 +165,8 @@ test("cookie-authenticated onboarding retains all cookies and replays the CSRF t
 
 test("strict onboarding adapter uses the cookie and CSRF boundary on its real probe graph", async () => {
   const requests = [];
+  let mfaReads = 0;
+  let currentMfaCode = "123456";
   const proof = { jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true, artifactCurrentRuntimeVerify: true, artifactHistoricalRuntimeVerify: true };
   const response = (status, payload, setCookie = []) => ({ status, ok: status >= 200 && status < 300, headers: { getSetCookie: () => setCookie }, json: async () => payload });
   const fetchImpl = async (url, options) => {
@@ -183,17 +185,35 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
   const run = createStrictHttpOnboardingAdapter({
     baseUrl: "https://fixture.example",
     paths,
-    credentials: { email: "admin@example.invalid", password: "fixture-password", mfaCode: "123456" },
+    credentials: { email: "admin@example.invalid", password: "fixture-password", mfaCode: "000000" },
+    getMfaCode: () => { mfaReads += 1; return currentMfaCode; },
     runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
     ecsExecEvidence: async () => ({ valid: true, proof }),
     rotationStateReadback: async () => ({ rotationId: "rotation-test-1", phase: "overlap-deploy-required" }),
     fetchImpl,
   });
+  assert.equal(mfaReads, 0);
   const evidence = await run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1" });
   assert.equal(evidence.valid, true);
+  assert.equal(mfaReads, 1);
+  assert.ok(requests.findIndex(({ url }) => url.endsWith("/mfa/challenge/begin")) > requests.findIndex(({ url }) => url.endsWith("/login")));
+  assert.ok(requests.findIndex(({ url }) => url.endsWith("/mfa/challenge/complete")) > requests.findIndex(({ url }) => url.endsWith("/mfa/challenge/begin")));
   const refresh = requests.find(({ url }) => url.endsWith("/api/auth/refresh"));
   assert.equal(refresh.options.headers["x-csrf-token"], "csrf");
   assert.match(refresh.options.headers.Cookie, /aq_access=access/);
   assert.match(refresh.options.headers.Cookie, /aq_refresh=refresh/);
   assert.match(refresh.options.headers.Cookie, /aq_db_session=session/);
+
+  currentMfaCode = undefined;
+  const missing = createStrictHttpOnboardingAdapter({
+    baseUrl: "https://fixture.example",
+    paths,
+    credentials: { email: "admin@example.invalid", password: "fixture-password" },
+    getMfaCode: () => currentMfaCode,
+    runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
+    ecsExecEvidence: async () => ({ valid: true, proof }),
+    rotationStateReadback: async () => ({ rotationId: "rotation-test-1", phase: "overlap-deploy-required" }),
+    fetchImpl,
+  });
+  await assert.rejects(() => missing({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1" }), /Mandatory onboarding check failed: superAdminLogin/);
 });
