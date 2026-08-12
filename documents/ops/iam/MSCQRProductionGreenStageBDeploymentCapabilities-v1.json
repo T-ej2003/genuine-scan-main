@@ -589,7 +589,7 @@
         "sid": "UpdateExactStageBBackendService",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09"
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
       },
       "required": true,
       "mutation": true
@@ -726,6 +726,371 @@
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
         "expectedVersion": "signed-administrator-evidence",
         "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "manifest-artifact-signing-bootstrap-create-active-version",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-create-active-version",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/production/rls-green/artifact-signing/active-key-version"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactArtifactSigningSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-artifact-signing-bootstrap-create-private-key",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-create-private-key",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/production/rls-green/artifact-signing/private-key-current"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactArtifactSigningSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-artifact-signing-bootstrap-create-public-key",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-create-public-key",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/production/rls-green/artifact-signing/public-key-current"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactArtifactSigningSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-artifact-signing-bootstrap-create-public-registry",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-create-public-registry",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/production/rls-green/artifact-signing/public-keys-json"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactArtifactSigningSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-artifact-signing-bootstrap-create-unapproved-secret",
+      "phase": "refresh-only",
+      "identity": "ADMINISTRATOR",
+      "executor": "iam-simulator",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-create-unapproved-secret",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/production/unrelated"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "manifest-artifact-signing-bootstrap-describe-secret",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-describe-secret",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageASecretMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "b9451405973903ce6f3f1330e2a884bf4e7153e524cb44135718637aa52b8917"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-artifact-signing-bootstrap-get-secret-value",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-get-secret-value",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactArtifactSigningSecretValues",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-artifact-signing-bootstrap-put-secret-value",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-put-secret-value",
+      "action": "secretsmanager:PutSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactArtifactSigningSecretValues",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-artifact-signing-bootstrap-read-unrelated-secret",
+      "phase": "refresh-only",
+      "identity": "ADMINISTRATOR",
+      "executor": "iam-simulator",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-read-unrelated-secret",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/other-secret-AbCd12"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "manifest-artifact-signing-bootstrap-write-unrelated-secret",
+      "phase": "refresh-only",
+      "identity": "ADMINISTRATOR",
+      "executor": "iam-simulator",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-write-unrelated-secret",
+      "action": "secretsmanager:PutSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/other-secret-AbCd12"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
       },
       "required": true,
       "mutation": true
@@ -1603,7 +1968,7 @@
         "sid": "PruneExactStageBBrokerManagedPolicyVersions",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09"
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
       },
       "required": true,
       "mutation": true
@@ -1657,7 +2022,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09"
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
       },
       "required": true,
       "mutation": true
@@ -2344,7 +2709,7 @@
         "sid": "PassExactLegacyBackendRolesForReviewedRollback",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09"
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
       },
       "required": true,
       "mutation": true
@@ -2377,7 +2742,7 @@
         "sid": "PassExactLegacyBackendRolesForReviewedRollback",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09"
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
       },
       "required": true,
       "mutation": true
@@ -2424,7 +2789,7 @@
         "sid": "UpdateExactStageBBackendService",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09"
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
       },
       "required": true,
       "mutation": true
@@ -2646,7 +3011,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09"
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
       },
       "required": true,
       "mutation": true
@@ -2700,7 +3065,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09"
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
       },
       "required": true,
       "mutation": true
@@ -2725,7 +3090,7 @@
         "sid": "UpdateExactStageBBrokerManagedPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09"
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
       },
       "required": true,
       "mutation": true
@@ -2819,7 +3184,7 @@
         "sid": "UpdateExactStageBBrokerReviewedAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09"
+        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
       },
       "required": true,
       "mutation": true

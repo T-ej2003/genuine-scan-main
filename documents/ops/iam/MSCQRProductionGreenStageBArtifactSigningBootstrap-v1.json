@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "accountId": "368992683803",
+  "region": "eu-west-2",
+  "namespace": "mscqr/production/rls-green/artifact-signing/",
+  "names": {
+    "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT": "mscqr/production/rls-green/artifact-signing/private-key-current",
+    "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT": "mscqr/production/rls-green/artifact-signing/public-key-current",
+    "ARTIFACT_SIGN_ACTIVE_KEY_VERSION": "mscqr/production/rls-green/artifact-signing/active-key-version",
+    "ARTIFACT_SIGN_PUBLIC_KEYS_JSON": "mscqr/production/rls-green/artifact-signing/public-keys-json"
+  }
+}

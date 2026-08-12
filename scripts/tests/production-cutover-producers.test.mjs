@@ -64,6 +64,7 @@ test("production AWS command runner executes service operations through aws", ()
   assert.equal(calls[2].args[0], "iam");
   assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-test");
   assert.equal(calls[0].options.env.AWS_DEFAULT_REGION, "eu-west-2");
+  assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
 });
 
 test("production inventory targets the stable backend, not the pending overlap revision", () => {

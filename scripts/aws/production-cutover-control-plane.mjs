@@ -174,6 +174,10 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.stageA = { ...stageAResult, ...identities, sourceSha };
 
   let artifact;
+  if (typeof artifactSigning?.bootstrap === "function") {
+    const bootstrapped = await artifactSigning.bootstrap();
+    recordMutation(mutations, "M3_ARTIFACT_SECRET_BOOTSTRAP", bootstrapped);
+  }
   if (typeof artifactSigning?.provision === "function") {
     const provisioned = await artifactSigning.provision();
     recordMutation(mutations, "M3_ARTIFACT_SECRET_PROVISION", provisioned);

@@ -13,6 +13,7 @@ import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from
 import { assertSelectedTargetTask, selectTargetTask } from "./ecs-exec-target-selection.mjs";
 import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
 import { persistOverlapReadinessEvidence } from "./produce-production-overlap-readiness-evidence.mjs";
+import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, ARTIFACT_SIGNING_RUNTIME_BINDING_PATH } from "./production-artifact-signing-bootstrap.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -31,7 +32,7 @@ export function createProductionCommandRunner({ profile, region = REGION, exec =
     const isAwsService = AWS_SERVICE_COMMANDS.has(command[0]);
     const normalized = isAwsService && !command.includes("--region") ? [...command, "--region", region] : command;
     const executable = isAwsService ? "aws" : normalized[0];
-    return exec(executable, normalized.slice(isAwsService ? 0 : 1), { cwd: process.cwd(), env, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return exec(executable, normalized.slice(isAwsService ? 0 : 1), { cwd: process.cwd(), env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   };
 }
 
@@ -141,7 +142,13 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   };
   const rotationStateReadback = async () => jsonFile(config.rotationStateFile);
   const readIamEvidence = () => ({ ...jsonFile(config.iamEvidenceFile), evidence: jsonFile(config.iamEvidenceFile).evidence || { valid: true, evidenceRef: `iam:${config.iamEvidenceFile}`, evidenceSha256: config.iamEvidenceSha256 } });
-  const artifact = createAwsArtifactSigningAdapter({ run: async (args) => releaseRun(args), approvedBindings: config.artifactBindingFile, activeKeyVersion: config.artifactActiveKeyVersion });
+  const artifact = createAwsArtifactSigningAdapter({
+    run: async (args) => releaseRun(args),
+    approvedBindings: config.artifactBindingFile,
+    bootstrapContractFile: config.artifactBootstrapContractFile || ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH,
+    bindingOutputFile: config.artifactBindingOutputFile || ARTIFACT_SIGNING_RUNTIME_BINDING_PATH,
+    activeKeyVersion: config.artifactActiveKeyVersion,
+  });
   const stageA = createTerraformStageAAdapter({
     root: config.stageARoot,
     planPath: config.stageAPlanPath,

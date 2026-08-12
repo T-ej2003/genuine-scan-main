@@ -24,6 +24,18 @@ The bounded inventory command is repository-owned and runs inside the approved b
 operator supplies no `DATABASE_URL`; only aggregate counts, explicit not-applicable classifications,
 and hash-bound evidence leave the runtime boundary.
 
+Artifact signing bootstraps four identifier-only containers from the reviewed
+`MSCQRProductionGreenStageBArtifactSigningBootstrap-v1.json` names. It performs targeted exact-name
+`DescribeSecret` calls, creates only missing containers, captures AWS-returned ARNs, and writes the
+runtime binding file atomically. It never uses `ListSecrets`, predicts ARN suffixes, or writes secret
+values to bindings or evidence; the existing Ed25519 producer initializes values only after the four
+bindings load successfully.
+
+The later rotation coordinator remains intentionally operator-supplied: its reviewed external
+configuration binds the approved rotation ID, source SHA, grace window, and current/previous/pending
+JWT/QR secret identifiers. Those are live rotation-state inputs, not derivable secret names, and no
+secret values belong in that configuration.
+
 Production AWS adapter service commands are invoked through the `aws` executable with the reviewed
 profile and `eu-west-2` region; Terraform and runtime commands remain distinct executables. Rotation
 deployment receives the SHA returned by the successful preparation step, not a stale command-line

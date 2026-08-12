@@ -18,7 +18,7 @@ const conditionsMatch = (condition = {}, evaluation) => {
     for (const [key, expectedValue] of Object.entries(entries)) {
       const expected = list(expectedValue).map(String);
       const actual = context.get(key);
-      if (operator === "StringEquals" && (!actual || actual.length !== expected.length || !actual.every((value) => expected.includes(value)))) return false;
+      if (operator === "StringEquals" && (!actual || actual.length !== 1 || !expected.includes(actual[0]))) return false;
       if (operator === "ArnEquals" && (!actual || actual.length !== 1 || !expected.includes(actual[0]))) return false;
       if (operator === "StringEqualsIfExists" && actual && (actual.length !== expected.length || !actual.every((value) => expected.includes(value)))) return false;
       if (operator === "ForAllValues:StringEquals" && (!actual || !actual.every((value) => expected.includes(value)))) return false;
@@ -60,15 +60,15 @@ test("broker alias update is authorized on the exact broker function resource", 
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: STAGE_B.brokerAliasArn, context }), false);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: `${functionArn}:other`, context }), false);
   assert.equal(finalWrite.Statement.some((statement) => list(statement.Action).some((action) => ["lambda:CreateAlias", "lambda:DeleteAlias"].includes(action))), false);
-  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "2322db86790f2b627838c16c9dd112b8b9511618be5e9707151175ff6a1f3d09");
+  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2");
 });
 
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 94);
-  assert.equal(evaluations.forbidden.length, 26);
+  assert.equal(evaluations.required.length, 103);
+  assert.equal(evaluations.forbidden.length, 29);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
   const registrations = evaluations.required.filter(({ action }) => action === "ecs:RegisterTaskDefinition");
