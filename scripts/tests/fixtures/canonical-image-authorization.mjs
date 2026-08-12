@@ -57,6 +57,6 @@ export function makeCanonicalImageAuthorization({ sourceSha } = {}) {
   const imageEvidenceSignature = signImageEvidence(imageEvidence, { now: observedAt, sign: () => "AQ==" });
   const verifyImageEvidence = ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true });
   const imageReuseEvidence = deriveStageBImageImpactReport({ imageReleaseSha, toolingSha: sourceSha });
-  const authorization = createImageAuthorization({ sourceSha, currentHead: sourceSha, originMainHead: sourceSha, imageEvidence, imageEvidenceSignature, imageReuseEvidence, now: observedAt, verifyImageEvidence });
+  const authorization = createImageAuthorization({ sourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: sourceSha, freshRemoteMainSha: sourceSha }, imageEvidence, imageEvidenceSignature, imageReuseEvidence, now: observedAt, verifyImageEvidence });
   return { authorization, now: observedAt, verifyImageEvidence, imageReleaseSha, workflowRunId, digests };
 }

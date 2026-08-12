@@ -34,6 +34,8 @@ const bindings = {
 function gitFixture() {
   return (file, args) => {
     if (file === "git" && args[0] === "status") return "";
+    if (file === "git" && args[0] === "fetch") return "";
+    if (file === "git" && args[0] === "rev-parse" && args[1] === "FETCH_HEAD") return sourceSha + "\n";
     if (file === "git" && args[0] === "rev-parse") return sourceSha + "\n";
     throw new Error("unexpected git call: " + file + " " + args.join(" "));
   };
@@ -177,6 +179,48 @@ test("DERIVABLE_FIELDS_NOT_OPERATOR_REQUIRED rejects source SHA override", () =>
     const result = prepareProductionCutoverRuntime({ ...fullInput(directory, process.cwd()), sourceSha: "a".repeat(40) });
     assert.equal(result.readyToConsumeMfa, false);
     assert.match(result.blockers.join("\n"), /does not match protected main/);
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("BOOTSTRAP_FRESH_MAIN rejects stale remote identity before MFA or config generation", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    input.git = (file, args) => {
+      if (args[0] === "status") return "";
+      if (args[0] === "fetch") return "";
+      if (args[0] === "rev-parse" && args[1] === "FETCH_HEAD") return "b".repeat(40);
+      if (args[0] === "rev-parse" && args[1] === "HEAD") return sourceSha;
+      if (args[0] === "rev-parse") return sourceSha;
+      throw new Error(`unexpected git call: ${file} ${args.join(" ")}`);
+    };
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join("\n"), /freshly fetched protected main/);
+    assert.equal(existsSync(path.join(result.runtimeDirectory, "rotation-config.json")), false);
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("BOOTSTRAP_FRESH_MAIN rejects fetch failure without falling back to origin/main", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    input.git = (file, args) => {
+      if (args[0] === "status") return "";
+      if (args[0] === "fetch") throw new Error("network unavailable");
+      if (args[0] === "rev-parse" && args[1] === "origin/main") return sourceSha;
+      throw new Error(`unexpected git call: ${file} ${args.join(" ")}`);
+    };
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join("\n"), /Fresh protected-main fetch failed/);
+    assert.equal(existsSync(path.join(result.runtimeDirectory, "rotation-config.json")), false);
   } finally {
     rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
     rmSync(directory, { recursive: true, force: true });

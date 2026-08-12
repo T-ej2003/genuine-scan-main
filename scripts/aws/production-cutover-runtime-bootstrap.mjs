@@ -8,6 +8,7 @@ import { buildOverlapTaskDefinition } from "./production-overlap-task-definition
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { RELEASE_ROLE_ARN } from "./production-identity-adapters.mjs";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
+import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -77,10 +78,9 @@ export function deriveRuntimeMetadata(taskDefinition) {
 function discoverGit({ run = execFileSync } = {}) {
   const status = String(run("git", ["status", "--porcelain=v1"], { encoding: "utf8" }));
   if (status.trim()) throw new Error("Protected-main execution tree is not clean.");
-  const sourceSha = String(run("git", ["rev-parse", "HEAD"], { encoding: "utf8" })).trim();
-  const mainSha = String(run("git", ["rev-parse", "origin/main"], { encoding: "utf8" })).trim();
-  if (!SHA40.test(sourceSha) || sourceSha !== mainSha) throw new Error("HEAD is not the exact fetched protected main.");
-  return sourceSha;
+  const fresh = readFreshProtectedMainIdentity({ run: (args) => run("git", args, { encoding: "utf8" }) });
+  if (!SHA40.test(fresh.headSha) || fresh.headSha !== fresh.freshRemoteMainSha) throw new Error("HEAD is not the exact freshly fetched protected main.");
+  return fresh.headSha;
 }
 
 function phasePaths(directory) {

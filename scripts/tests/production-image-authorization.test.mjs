@@ -25,6 +25,7 @@ import {
   verifyImageEvidenceSignature,
 } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { buildStageBImagePublicationIdentity } from "../aws/stage-b-image-publication-identity.mjs";
+import { readFreshProtectedMainIdentity } from "../aws/stage-b-deployment-identity.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
@@ -104,8 +105,7 @@ const imageReuseEvidence = deriveStageBImageImpactReport({ imageReleaseSha, tool
 function produce(overrides = {}) {
   return createImageAuthorization({
     sourceSha,
-    currentHead: sourceSha,
-    originMainHead: sourceSha,
+    freshProtectedMain: { fetchSucceeded: true, headSha: sourceSha, freshRemoteMainSha: sourceSha },
     imageEvidence: overrides.imageEvidence || imageEvidence,
     imageEvidenceSignature: overrides.imageEvidenceSignature || imageEvidenceSignature,
     imageReuseEvidence: overrides.imageReuseEvidence || imageReuseEvidence,
@@ -126,7 +126,7 @@ test("canonical 594-to-96 reuse evidence produces downstream-accepted authorizat
 });
 
 test("producer rejects rebinding, image-affecting reuse, and changed image evidence", () => {
-  assert.throws(() => createImageAuthorization({ ...produce(), sourceSha, currentHead: "b".repeat(40), originMainHead: sourceSha }), /source SHA/);
+  assert.throws(() => createImageAuthorization({ ...produce(), sourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: "b".repeat(40), freshRemoteMainSha: sourceSha } }), /source SHA/);
   const imageAffecting = imageImpactReportFor({ imageReleaseSha, toolingSha: sourceSha, toolingInputTreeSha256: imageReuseEvidence.toolingInputTreeSha256, changedFiles: ["backend/src/app.ts"] });
   assert.throws(() => produce({ imageReuseEvidence: imageAffecting }), /stale|unsafe|compatible|independently derived/);
   assert.throws(() => produce({ imageEvidence: { ...imageEvidence, workflowRunId: "31582010245" } }), /different report|publication|workflow|signature identity/);
@@ -209,11 +209,54 @@ test("CLI emits one private source-bound authorization artifact", () => {
       "--image-signature", write("image-evidence.signature.json", imageEvidenceSignature),
       "--image-reuse-evidence", write("image-reuse.json", imageReuseEvidence),
       "--output", output,
-    ], { currentHead: sourceSha, originMainHead: sourceSha, now: observedAt, verifyImageEvidence });
+    ], { git: (args) => {
+      if (args[0] === "fetch") return "";
+      if (args[0] === "rev-parse" && args[1] === "FETCH_HEAD") return sourceSha;
+      if (args[0] === "rev-parse" && args[1] === "HEAD") return sourceSha;
+      throw new Error(`unexpected git call: ${args.join(" ")}`);
+    }, now: observedAt, verifyImageEvidence });
     assert.equal(fs.statSync(output).mode & 0o777, 0o600);
     const emitted = JSON.parse(fs.readFileSync(output, "utf8"));
     assert.doesNotThrow(() => assertImageAuthorization(emitted, sourceSha, { now: observedAt, verifyImageEvidence }));
     assert.equal(emitted.evidenceSha256, imageAuthorizationSha256(emitted));
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("fresh protected-main identity rejects stale refs, fetch failures, and SHA rebinding without writing authorization", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-fresh-main-"));
+  const output = path.join(directory, "image-authorization.json");
+  const args = ["--source-sha", sourceSha, "--image-evidence", path.join(directory, "image.json"), "--image-signature", path.join(directory, "signature.json"), "--image-reuse-evidence", path.join(directory, "reuse.json"), "--output", output];
+  const run = ({ head = sourceSha, fresh = sourceSha, fetchFailure = false } = {}) => {
+    const calls = [];
+    const git = (gitArgs) => {
+      calls.push([...gitArgs]);
+      if (gitArgs[0] === "fetch") {
+        if (fetchFailure) throw new Error("network unavailable");
+        return "";
+      }
+      if (gitArgs[0] === "rev-parse" && gitArgs[1] === "FETCH_HEAD") return fresh;
+      if (gitArgs[0] === "rev-parse" && gitArgs[1] === "HEAD") return head;
+      if (gitArgs[0] === "rev-parse" && gitArgs[1] === "refs/remotes/origin/main") return sourceSha;
+      throw new Error(`unexpected git call: ${gitArgs.join(" ")}`);
+    };
+    return { git, calls };
+  };
+  try {
+    for (const [name, fixture, message] of [
+      ["STALE_REMOTE_TRACKING_REF", { head: sourceSha, fresh: "b".repeat(40) }, /freshly fetched protected main/],
+      ["FETCH_FAILURE", { fetchFailure: true }, /Fresh protected-main fetch failed/],
+      ["HEAD_BEHIND_REMOTE", { head: sourceSha, fresh: "b".repeat(40) }, /freshly fetched protected main/],
+      ["SOURCE_SHA_REBINDING", { head: "b".repeat(40), fresh: "b".repeat(40) }, /freshly fetched protected main/],
+    ]) {
+      const { git, calls } = run(fixture);
+      assert.throws(() => runCli(args, { git }), message, name);
+      assert.equal(fs.existsSync(output), false, `${name} wrote authorization`);
+      assert.equal(calls.some(([command, ref]) => command === "rev-parse" && ref === "refs/remotes/origin/main"), false, `${name} consulted stale tracking ref`);
+    }
+    const valid = readFreshProtectedMainIdentity({ run: run().git });
+    assert.deepEqual(valid, { fetchSucceeded: true, freshRemoteMainSha: sourceSha, headSha: sourceSha });
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

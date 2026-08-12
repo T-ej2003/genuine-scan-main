@@ -61,7 +61,11 @@ Secrets Manager references. Bootstrap and execution share the canonical image-au
 including evidence, signature, attestation, provenance, source-SHA, workflow, release, service-record,
 and digest checks.
 The source-bound authorization is produced only by `scripts/aws/production-image-authorization.mjs`.
-It independently derives the image-impact transition from the two commits and checked-out git tree,
+Before producing it, the shared protected-main identity helper performs a successful `git fetch origin main`
+and resolves the fetched commit from `FETCH_HEAD`; it never treats a stale `refs/remotes/origin/main` as
+fresh production identity. HEAD, the requested source SHA, and that fetched SHA must be identical, or no
+authorization is written. The same helper is used by the pre-MFA bootstrap and release gate. It independently
+derives the image-impact transition from the two commits and checked-out git tree,
 compares the supplied reuse report to that result, composes it with the signed four-image evidence
 and current protected-main SHA, then writes one hash-bound private authorization file. Operators
 must not copy, relabel, or edit an older authorization artifact.

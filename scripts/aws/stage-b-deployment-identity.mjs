@@ -129,24 +129,42 @@ function exists(cwd, name) {
   return fs.existsSync(path.resolve(cwd, gitPath(cwd, name)));
 }
 
-export function readStageBProtectedMainCheckout({ cwd = process.cwd(), fetchOriginMain = true } = {}) {
-  if (fetchOriginMain) git(cwd, ["fetch", "--no-tags", "origin", "main"]);
-  const currentHead = git(cwd, ["rev-parse", "HEAD"]);
-  let originMainHead;
-  try { originMainHead = git(cwd, ["rev-parse", "refs/remotes/origin/main"]); } catch { originMainHead = undefined; }
+export function readFreshProtectedMainIdentity({ cwd = process.cwd(), expectedSourceSha, run = (args) => git(cwd, args) } = {}) {
+  try {
+    run(["fetch", "--no-tags", "origin", "main"]);
+  } catch (error) {
+    throw new Error(`Fresh protected-main fetch failed: ${error.message}`);
+  }
+  const freshRemoteMainSha = String(run(["rev-parse", "FETCH_HEAD"])).trim();
+  const headSha = String(run(["rev-parse", "HEAD"])).trim();
+  requireSha(freshRemoteMainSha, "Fresh remote main SHA");
+  requireSha(headSha, "Current checkout HEAD");
+  if (expectedSourceSha !== undefined && (headSha !== expectedSourceSha || freshRemoteMainSha !== expectedSourceSha)) {
+    throw new Error("Requested source SHA does not match the freshly fetched protected main.");
+  }
+  return Object.freeze({ fetchSucceeded: true, freshRemoteMainSha, headSha });
+}
+
+export function readStageBProtectedMainCheckout({ cwd = process.cwd(), fetchOriginMain = true, run = (args) => git(cwd, args) } = {}) {
+  const fresh = fetchOriginMain ? readFreshProtectedMainIdentity({ cwd, run }) : undefined;
+  const currentHead = fresh?.headSha || run(["rev-parse", "HEAD"]);
+  let originMainHead = fresh?.freshRemoteMainSha;
+  if (!fetchOriginMain) {
+    try { originMainHead = String(run(["rev-parse", "refs/remotes/origin/main"])).trim(); } catch { originMainHead = undefined; }
+  }
   let remoteDefaultBranch;
   try {
-    remoteDefaultBranch = git(cwd, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]).replace(/^refs\/remotes\/origin\//, "");
+    remoteDefaultBranch = String(run(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])).trim().replace(/^refs\/remotes\/origin\//, "");
   } catch {
-    try { remoteDefaultBranch = /^ref: refs\/heads\/([^\s]+)\s+HEAD$/m.exec(git(cwd, ["ls-remote", "--symref", "origin", "HEAD"]))?.[1]; } catch { remoteDefaultBranch = undefined; }
+    try { remoteDefaultBranch = /^ref: refs\/heads\/([^\s]+)\s+HEAD$/m.exec(run(["ls-remote", "--symref", "origin", "HEAD"]))?.[1]; } catch { remoteDefaultBranch = undefined; }
   }
   const isAncestor = originMainHead === undefined ? false : (() => {
-    try { git(cwd, ["merge-base", "--is-ancestor", currentHead, "refs/remotes/origin/main"]); return true; } catch { return false; }
+    try { run(["merge-base", "--is-ancestor", currentHead, originMainHead]); return true; } catch { return false; }
   })();
-  const porcelainStatus = git(cwd, ["status", "--porcelain=v1", "--untracked-files=all"]);
+  const porcelainStatus = String(run(["status", "--porcelain=v1", "--untracked-files=all"]));
   const repositoryState = {
     remoteDefaultBranch,
-    shallow: git(cwd, ["rev-parse", "--is-shallow-repository"]) === "true",
+    shallow: run(["rev-parse", "--is-shallow-repository"]) === "true",
     mergeInProgress: exists(cwd, "MERGE_HEAD"),
     rebaseInProgress: exists(cwd, "rebase-merge") || exists(cwd, "rebase-apply"),
     cherryPickInProgress: exists(cwd, "CHERRY_PICK_HEAD"),

@@ -13,6 +13,7 @@ import {
   ensureStageBPrivateFile,
   writeStageBPrivateFileAtomic,
 } from "./stage-b-artifact-contract.mjs";
+import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -63,8 +64,7 @@ export function assertCanonicalImageReuseEvidence(imageEvidence, reuseEvidence, 
 
 export function createImageAuthorization({
   sourceSha,
-  currentHead,
-  originMainHead,
+  freshProtectedMain,
   imageEvidence,
   imageEvidenceSignature,
   imageReuseEvidence,
@@ -72,7 +72,9 @@ export function createImageAuthorization({
   verifyImageEvidence,
 } = {}) {
   requireSha(sourceSha, "Protected-main source SHA");
-  if (currentHead !== sourceSha || originMainHead !== sourceSha) throw new Error("Image authorization source SHA does not match protected main.");
+  if (freshProtectedMain?.fetchSucceeded !== true || freshProtectedMain.headSha !== sourceSha || freshProtectedMain.freshRemoteMainSha !== sourceSha) {
+    throw new Error("Image authorization source SHA does not match freshly fetched protected main.");
+  }
   if (!imageEvidence || typeof imageEvidence !== "object" || Array.isArray(imageEvidence)) throw new Error("Canonical image evidence is required.");
   requireSha(imageEvidence.imageReleaseSha, "Image evidence release SHA");
   if (!WORKFLOW_RUN.test(String(imageEvidence.workflowRunId || ""))) throw new Error("Image evidence workflow run is missing or malformed.");
@@ -149,15 +151,17 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   const imageSignaturePath = requiredOption(argv, "--image-signature");
   const imageReuseEvidencePath = requiredOption(argv, "--image-reuse-evidence");
   const outputPath = requiredOption(argv, "--output");
-  const currentHead = deps.currentHead || git(["rev-parse", "HEAD"]);
-  const originMainHead = deps.originMainHead || git(["rev-parse", "origin/main"]);
+  const freshProtectedMain = deps.freshProtectedMain || readFreshProtectedMainIdentity({
+    cwd: repositoryRoot,
+    expectedSourceSha: sourceSha,
+    run: deps.git || git,
+  });
   const { value: imageEvidence } = readJsonPrivate(imageEvidencePath, "Image evidence");
   const { value: imageEvidenceSignature } = readJsonPrivate(imageSignaturePath, "Image evidence signature");
   const { value: imageReuseEvidence } = readJsonPrivate(imageReuseEvidencePath, "Image-reuse evidence");
   const authorization = createImageAuthorization({
     sourceSha,
-    currentHead,
-    originMainHead,
+    freshProtectedMain,
     imageEvidence,
     imageEvidenceSignature,
     imageReuseEvidence,
