@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   assertImageImpactReport,
@@ -87,6 +88,18 @@ test("the Gitleaks baseline is tooling-only while unknown paths remain fail-clos
   assert.deepEqual(report.imageAffectingFiles, []);
   assert.equal(report.imageReuseCompatible, true);
   assert.throws(() => imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["unknown/security-scan-output.bin"] }), /unclassified/);
+});
+
+test("historical Gitleaks remediation matches only the diagnosed fingerprint", () => {
+  const target = "c1fbb3030c0a84c07299657822ac7b4faadef426:scripts/tests/production-cutover-producers.test.mjs:generic-api-key:174";
+  const ignored = readFileSync(new URL("../../.gitleaksignore", import.meta.url), "utf8").split(/\r?\n/).filter(Boolean);
+  assert.equal(ignored.filter((entry) => entry === target).length, 1);
+
+  const fingerprints = new Set(ignored.filter((entry) => !entry.startsWith("#")));
+  assert.equal(fingerprints.has(target), true);
+  assert.equal(fingerprints.has("c1fbb3030c0a84c07299657822ac7b4faadef426:scripts/tests/production-cutover-producers.test.mjs:generic-api-key:175"), false);
+  assert.equal(fingerprints.has("a".repeat(40) + ":scripts/tests/production-cutover-producers.test.mjs:generic-api-key:174"), false);
+  assert.equal(fingerprints.has("c1fbb3030c0a84c07299657822ac7b4faadef426:scripts/tests/production-cutover-producers.test.mjs:private-key:174"), false);
 });
 
 test("false compatibility and unknown classification fail closed", () => {
