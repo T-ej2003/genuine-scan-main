@@ -2,9 +2,12 @@ const SHA = /^[a-f0-9]{40}$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const requiredTrue = (value, name) => { if (value !== true) throw new Error(`${name} is required`); };
 
-export const PRODUCTION_ONBOARDING_RESERVED_NONOWNING_LICENSEE_ID = "00000000-0000-4302-8000-000000000001";
+// This is the immutable isolationLicensee emitted by
+// backend/scripts/production-green-canary-provision.mjs for the reviewed
+// production-green-pretraffic-canary-v1 contract.
+export const PRODUCTION_GREEN_CANARY_ISOLATION_LICENSEE_ID = "4e5d6a2d-42cd-4b87-ac85-793e2e72b95c";
 export const PRODUCTION_ONBOARDING_PATHS = Object.freeze({
-  tenantIsolation: `/api/manufacturers?licenseeId=${PRODUCTION_ONBOARDING_RESERVED_NONOWNING_LICENSEE_ID}`,
+  tenantIsolation: `/api/licensees/${PRODUCTION_GREEN_CANARY_ISOLATION_LICENSEE_ID}`,
   rbac: "/api/manufacturer/printer-agent/status",
   auditPath: "/api/audit/logs",
   printerTrust: "/api/manufacturer/printers",

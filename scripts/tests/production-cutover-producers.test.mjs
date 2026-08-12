@@ -171,18 +171,23 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
   const proof = { jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true, artifactCurrentRuntimeVerify: true, artifactHistoricalRuntimeVerify: true };
   const response = (status, payload, setCookie = []) => ({ status, ok: status >= 200 && status < 300, headers: { getSetCookie: () => setCookie }, json: async () => payload });
   const rotationFixtureFile = path.join(os.tmpdir(), `mscqr-onboarding-qr-fixture-${process.pid}.json`);
-  fs.writeFileSync(rotationFixtureFile, JSON.stringify({ token: "eyJxdF9pZCI6InByaW50ZXItdGVzdDpyb3RhdGlvbi1zeW50aGV0aWMiLCJsaWNlbnNlZV9pZCI6InJvdGF0aW9uIiwiaWF0IjoxNzAwMDAwMDAwLCJub25jZSI6ImZpeHR1cmUifQ.A" }));
+  fs.writeFileSync(rotationFixtureFile, JSON.stringify({ token: "synthetic-qr-fixture-token" }));
+  let tenantLoginObserved = false;
   const fetchImpl = async (url, options) => {
     requests.push({ url, options });
-    if (url.endsWith("/api/auth/login")) return response(200, { data: { auth: { sessionStage: "MFA_BOOTSTRAP" } } }, ["aq_access=access; Path=/", "aq_refresh=refresh; Path=/", "aq_db_session=session; Path=/", "aq_csrf=csrf; Path=/"]);
+    if (url.endsWith("/api/auth/login")) {
+      const tenant = options.body?.includes("tenant@example.invalid");
+      if (tenant) tenantLoginObserved = true;
+      return response(200, { data: { auth: { sessionStage: "MFA_BOOTSTRAP" }, user: tenant ? { role: "LICENSEE_ADMIN", licenseeId: "tenant-licensee" } : { role: "PLATFORM_SUPER_ADMIN", licenseeId: null } } }, ["aq_access=access; Path=/", "aq_refresh=refresh; Path=/", "aq_db_session=session; Path=/", "aq_csrf=csrf; Path=/"]);
+    }
     if (url.endsWith("/api/auth/mfa/challenge/begin")) return response(200, { data: { ticket: "ticket" } });
     if (url.endsWith("/api/auth/mfa/challenge/complete")) return response(200, {});
     if (url.endsWith("/api/auth/refresh") && options.headers["x-csrf-token"] !== "csrf") return response(403, {});
     if (url.endsWith("/version")) return response(200, { releaseGitSha: "a".repeat(40) });
     if (url.endsWith("/api/health/ready")) return response(200, { status: "ready", dependencies: { database: { ready: true }, redis: { ready: true }, objectStorage: { ready: true } } });
-    if (url.includes("/api/manufacturers?licenseeId=")) return response(404, {});
+    if (url.includes("/api/licensees/")) return tenantLoginObserved ? response(403, {}) : response(500, {});
     if (url.endsWith("/api/manufacturer/printer-agent/status")) return response(403, {});
-    if (url.includes("/api/verify/ROTATION-SYNTHETIC?t=")) return response(url.endsWith("B") ? 400 : 200, {});
+    if (url.endsWith("/api/verify/ROTATION-SYNTHETIC")) return response(options.headers["x-mscqr-verification-token"] === "synthetic-qr-fixture-token" ? 200 : 400, {});
     return response(200, {});
   };
   const paths = PRODUCTION_ONBOARDING_PATHS;
@@ -191,6 +196,8 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     paths,
     credentials: { email: "admin@example.invalid", password: "fixture-password", mfaCode: "000000" },
     getMfaCode: () => { mfaReads += 1; return currentMfaCode; },
+    tenantCredentials: { email: "tenant@example.invalid", password: "tenant-fixture-password" },
+    getTenantMfaCode: () => "654321",
     runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
     ecsExecEvidence: async () => ({ valid: true, proof }),
     rotationStateReadback: async () => ({ rotationId: "rotation-test-1", phase: "overlap-deploy-required" }),
@@ -208,6 +215,12 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
   assert.match(refresh.options.headers.Cookie, /aq_access=access/);
   assert.match(refresh.options.headers.Cookie, /aq_refresh=refresh/);
   assert.match(refresh.options.headers.Cookie, /aq_db_session=session/);
+  const qrRequests = requests.filter(({ url }) => url.endsWith("/api/verify/ROTATION-SYNTHETIC"));
+  assert.equal(qrRequests.length, 2);
+  assert.ok(qrRequests.every(({ url }) => !url.includes("synthetic-qr-fixture-token") && !url.includes("?t=")));
+  assert.equal(qrRequests[0].options.headers["x-mscqr-verification-token"], "synthetic-qr-fixture-token");
+  assert.notEqual(qrRequests[0].options.headers["x-mscqr-verification-token"], qrRequests[1].options.headers["x-mscqr-verification-token"]);
+  assert.ok(requests.some(({ url, options }) => url.includes("/api/licensees/") && tenantLoginObserved && options.headers.Cookie.includes("aq_access=access")));
 
   currentMfaCode = undefined;
   const missing = createStrictHttpOnboardingAdapter({

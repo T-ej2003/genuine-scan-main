@@ -120,7 +120,10 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
   if (!params.success || !query.success) return publicFailure(res, 400, "Invalid verification request");
 
   const code = normalizeCode(params.data.code || "");
-  const token = query.data.t || null;
+  const headerToken = String(req.get("x-mscqr-verification-token") || "").trim() || null;
+  const queryToken = query.data.t || null;
+  if (headerToken && queryToken && headerToken !== queryToken) return publicFailure(res, 400, "Invalid verification request");
+  const token = headerToken || queryToken;
   if (!token && !code) return publicFailure(res, 400, "Invalid QR code format");
   if (!token && !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(code)) {
     return publicFailure(res, 400, "Invalid QR code format");

@@ -22,6 +22,8 @@ test("rotation closure remains separate and requires cleanup evidence", () => {
 
 test("canonical onboarding manifest is deterministic and keeps the shared verification route semantics", () => {
   assert.deepEqual(assertOnboardingPaths(), PRODUCTION_ONBOARDING_PATHS);
+  assert.match(PRODUCTION_ONBOARDING_PATHS.tenantIsolation, /^\/api\/licensees\/[a-f0-9-]+$/);
+  assert.doesNotMatch(PRODUCTION_ONBOARDING_PATHS.tenantIsolation, /\?/);
   assert.equal(PRODUCTION_ONBOARDING_PATHS.antiCloning, PRODUCTION_ONBOARDING_PATHS.publicQrVerification);
   assert.throws(() => assertOnboardingPaths({ ...PRODUCTION_ONBOARDING_PATHS, tenantIsolation: "/api/other" }), /tenantIsolation/);
 });

@@ -99,6 +99,7 @@ export const createBackendApp = () => {
         "X-Device-Fp",
         "X-CSRF-Token",
         "X-Captcha-Token",
+        "X-MSCQR-Verification-Token",
         "Cache-Control",
         "Pragma",
       ],

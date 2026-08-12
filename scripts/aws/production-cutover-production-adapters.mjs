@@ -14,6 +14,7 @@ import { establishReleaseDeployerIdentity, establishVerifierIdentity, createAwsS
 import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 import { assertSelectedTargetTask, selectTargetTask } from "./ecs-exec-target-selection.mjs";
 import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
+import { resolveSmokeAdminMfaCode } from "../lib/staging-smoke-totp.mjs";
 import { persistOverlapReadinessEvidence } from "./produce-production-overlap-readiness-evidence.mjs";
 import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, ARTIFACT_SIGNING_RUNTIME_BINDING_PATH } from "./production-artifact-signing-bootstrap.mjs";
 import { assertStageBCanonicalTfvarsFile } from "./generate-production-green-stage-b-tfvars.mjs";
@@ -269,6 +270,8 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       paths: config.onboardingPaths,
       credentials: { email: process.env.MSCQR_ONBOARDING_EMAIL, password: process.env.MSCQR_ONBOARDING_PASSWORD },
       getMfaCode: () => process.env.MSCQR_ONBOARDING_MFA_CODE,
+      tenantCredentials: { email: process.env.MSCQR_CANARY_ORDINARY_EMAIL, password: process.env.MSCQR_CANARY_ORDINARY_PASSWORD },
+      getTenantMfaCode: () => resolveSmokeAdminMfaCode({ code: process.env.MSCQR_CANARY_ORDINARY_MFA_CODE, secret: process.env.MSCQR_CANARY_ORDINARY_MFA_SECRET }),
       runtimeReadback,
       ecsExecEvidence: async () => latestEcsExecProof || { valid: false },
       rotationStateReadback,
