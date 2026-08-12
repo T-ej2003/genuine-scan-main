@@ -3,6 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync, 
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import { createProductionCutoverAdapters } from "../aws/production-cutover-production-adapters.mjs";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
@@ -57,6 +58,12 @@ function evidenceFiles(directory, repositoryRoot) {
   const iamEvidence = file("iam-evidence.json", { status: "valid", iamEvaluationCensus: { total: 158, executed: 158, invalid: 0, failures: [] }, evidenceSha256: "d".repeat(64) });
   const rootDrop = file("root-drop.json", { valid: true, callerArn: "arn:aws:iam::368992683803:root", evidenceSha256: "e".repeat(64) });
   const stageAPlan = file("stage-a.tfplan", "binary-fixture");
+  const tfvarsBytes = Buffer.from("production_rotation_enabled = false\n");
+  const stageBTfvarsPath = path.join(directory, "stage-b.tfvars");
+  writeFileSync(stageBTfvarsPath, tfvarsBytes, { mode: 0o600 }); chmodSync(stageBTfvarsPath, 0o600);
+  const stageBTfvarsBindingReportPath = file("stage-b.tfvars.binding.json", { schemaVersion: 2, tfvarsSchemaVersion: 1, tfvarsFormat: "hcl", tfvarsFileName: "stage-b.tfvars", tfvarsExtension: ".tfvars", generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs", tfvarsSha256: createHash("sha256").update(tfvarsBytes).digest("hex") });
+  const stageBTerraformDataDir = path.join(directory, "terraform-data");
+  mkdirSync(stageBTerraformDataDir, { mode: 0o700 }); chmodSync(stageBTerraformDataDir, 0o700);
   const artifactBinding = path.join(repositoryRoot, `documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime-${process.pid}.json`);
   writeFileSync(artifactBinding, JSON.stringify({ bindings: {
     ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-a",
@@ -65,7 +72,7 @@ function evidenceFiles(directory, repositoryRoot) {
     ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-d",
   } }, null, 2));
   chmodSync(artifactBinding, 0o600);
-  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, rootDrop, stageAPlan, artifactBinding };
+  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
 }
 
 function fullInput(directory, repositoryRoot) {
@@ -81,6 +88,10 @@ function fullInput(directory, repositoryRoot) {
     artifactBindingFile: evidence.artifactBinding,
     rootDropEvidenceFile: evidence.rootDrop,
     stageAPlanPath: evidence.stageAPlan,
+    stageBTfvarsPath: evidence.stageBTfvarsPath,
+    stageBTfvarsBindingReportPath: evidence.stageBTfvarsBindingReportPath,
+    stageBTfvarsBindingReportSha256: evidence.stageBTfvarsBindingReportSha256,
+    stageBTerraformDataDir: evidence.stageBTerraformDataDir,
     currentTaskDefinition: taskDefinition(),
     inventoryApprovalId: "APR-STAGE-B-0001",
     onboardingPaths: paths,

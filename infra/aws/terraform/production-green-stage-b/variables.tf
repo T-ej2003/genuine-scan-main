@@ -59,7 +59,7 @@ variable "production_rotation_secret_value_from" {
   }
   validation {
     condition = !var.production_rotation_enabled || alltrue([
-      for value in values(var.production_rotation_secret_value_from) : can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+:[A-Za-z0-9_-]+::$", value))
+      for key, value in var.production_rotation_secret_value_from : contains(["artifact_private_current", "artifact_public_current", "artifact_active_version", "artifact_public_keys_json"], key) ? can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", value)) : can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+:[A-Za-z0-9_-]+::$", value))
     ])
     error_message = "Production rotation task definitions require exact Secrets Manager JSON-key valueFrom references when enabled."
   }
@@ -145,7 +145,7 @@ check "production_rotation_contract" {
   assert {
     condition = (!var.production_rotation_cleanup_enabled || var.production_rotation_enabled) && (!var.production_rotation_enabled || (
       alltrue([
-        for value in values(var.production_rotation_secret_value_from) : can(regex("^arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:.+:[A-Za-z0-9_-]+::$", value))
+        for key, value in var.production_rotation_secret_value_from : contains(["artifact_private_current", "artifact_public_current", "artifact_active_version", "artifact_public_keys_json"], key) ? can(regex("^arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:.+$", value)) : can(regex("^arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:.+:[A-Za-z0-9_-]+::$", value))
       ]) &&
       var.production_rotation_secret_value_from.jwt_current != var.production_rotation_secret_value_from.jwt_previous &&
       var.production_rotation_secret_value_from.qr_public_current != var.production_rotation_secret_value_from.qr_public_previous &&

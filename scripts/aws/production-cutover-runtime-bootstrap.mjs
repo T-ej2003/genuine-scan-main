@@ -7,7 +7,7 @@ import { loadApprovedArtifactSigningBindings } from "./production-artifact-signi
 import { buildOverlapTaskDefinition } from "./production-overlap-task-definition.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { RELEASE_ROLE_ARN } from "./production-identity-adapters.mjs";
-import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
+import { assertImageAuthorization, authorizedBackendDigest, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 
 const ACCOUNT = STAGE_B.account;
@@ -89,6 +89,8 @@ function discoverGit({ run = execFileSync } = {}) {
 function phasePaths(directory) {
   return {
     rotationConfigFile: path.join(directory, "rotation-config.json"),
+    rotationTerraformInputFile: path.join(directory, "rotation-infrastructure.tfvars"),
+    rotationTerraformPlanFile: path.join(directory, "rotation-infrastructure.tfplan"),
     rotationStateFile: path.join(directory, "rotation-state.json"),
     rotationFixtureFile: path.join(directory, "rotation-fixture.json"),
     runtimeProofFixtureFile: path.join(directory, "rotation-fixture.json"),
@@ -98,7 +100,7 @@ function phasePaths(directory) {
 
 function assertFutureArtifactsAbsent(paths, repositoryRoot) {
   for (const [name, filePath] of Object.entries(paths)) {
-    if (!["rotationConfigFile", "rotationStateFile", "rotationFixtureFile", "runtimeProofFixtureFile", "readinessEvidenceFile"].includes(name)) continue;
+    if (!["rotationConfigFile", "rotationTerraformInputFile", "rotationTerraformPlanFile", "rotationStateFile", "rotationFixtureFile", "runtimeProofFixtureFile", "readinessEvidenceFile"].includes(name)) continue;
     ensureStageBPrivateDirectory({ directory: path.dirname(filePath), repositoryRoot, create: false });
     const stat = lstatSync(filePath, { throwIfNoEntry: false });
     if (!stat) continue;
@@ -148,6 +150,10 @@ export function prepareProductionCutoverRuntime({
   currentTaskDefinition,
   inventoryApprovalId,
   onboardingPaths,
+  stageBTfvarsPath,
+  stageBTfvarsBindingReportPath,
+  stageBTfvarsBindingReportSha256,
+  stageBTerraformDataDir,
   rotationId: requestedRotationId,
   constructAdapters,
   imageAuthorizationValidation,
@@ -185,6 +191,10 @@ export function prepareProductionCutoverRuntime({
     const approvalConfig = buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, liveCurrentKeyVersion: currentKeyVersion });
     if (!onboardingPaths || Object.keys(onboardingPaths).length !== 7 || Object.values(onboardingPaths).some((value) => typeof value !== "string" || !value.startsWith("/"))) throw new Error("Reviewed onboarding path map is required.");
     if (!inventoryApprovalId || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(inventoryApprovalId)) throw new Error("Inventory approval ID is required.");
+    if (!stageBTfvarsPath || !stageBTfvarsBindingReportPath || !SHA256.test(stageBTfvarsBindingReportSha256 || "") || !stageBTerraformDataDir) throw new Error("Canonical Stage B tfvars and Terraform data directory are required for rotation infrastructure convergence.");
+    ensureStageBPrivateFile({ filePath: stageBTfvarsPath, repositoryRoot, label: "Canonical Stage B tfvars" });
+    ensureStageBPrivateFile({ filePath: stageBTfvarsBindingReportPath, repositoryRoot, label: "Canonical Stage B tfvars binding report" });
+    ensureStageBPrivateDirectory({ directory: stageBTerraformDataDir, repositoryRoot, create: false, normalize: true, label: "Canonical Stage B Terraform data directory" });
     const overlapTaskInput = buildOverlapTaskDefinition({
       backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${backendImageDigest}`,
       releaseSha: protectedSha,
@@ -195,6 +205,15 @@ export function prepareProductionCutoverRuntime({
         ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read",
       },
     }).taskDefinition;
+    const rotationTerraformInputs = buildRotationTerraformInputs({
+      sourceSha: protectedSha,
+      rotationId: approvalConfig.rotationId,
+      secretBindings: { ...rotationBindingsToPostPrepareTaskBindings(rotationBindings), ...artifactBindings },
+    });
+    const rotationTerraformInputFile = path.join(directory, "rotation-infrastructure.tfvars");
+    const existingRotationInput = lstatSync(rotationTerraformInputFile, { throwIfNoEntry: false });
+    if (existingRotationInput) throw new Error("rotationTerraformInputFile must not already exist.");
+    const writtenRotationInput = writeStageBPrivateFileAtomic({ filePath: rotationTerraformInputFile, bytes: Buffer.from(renderRotationTerraformInput(rotationTerraformInputs)), repositoryRoot, label: "Rotation Terraform input" });
     staticBindings = {
       ...approvalConfig,
       artifactBindingFile: path.resolve(artifactBindingFile),
@@ -219,6 +238,12 @@ export function prepareProductionCutoverRuntime({
       inventoryLogGroupName: STAGE_B.inventoryLogGroupName,
       overlapTaskInput: { backendImage: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.image, releaseSha: protectedSha, backendLogGroup: STAGE_B.inventoryLogGroupName, secretBindings: { ...rotationBindingsToTaskBindings(rotationBindings), ...artifactBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
       ...paths,
+      stageBTfvarsPath: path.resolve(stageBTfvarsPath),
+      stageBTfvarsBindingReportPath: path.resolve(stageBTfvarsBindingReportPath),
+      stageBTfvarsBindingReportSha256,
+      stageBTerraformDataDir: path.resolve(stageBTerraformDataDir),
+      rotationTerraformInputFile: writtenRotationInput.path,
+      rotationTerraformInputSha256: writtenRotationInput.sha256,
       onboardingBaseUrl: baseUrl,
       onboardingPaths,
       rotationHealthUrl: `${baseUrl}/api/health`,
@@ -235,7 +260,7 @@ export function prepareProductionCutoverRuntime({
     generatedBy: "scripts/aws/prepare-production-cutover-runtime.mjs",
     protectedMainSha: protectedSha || null,
     staticBindingSha256: staticBindings ? canonicalHash(staticBindings) : null,
-    phaseArtifacts: { rotationState: paths.rotationStateFile, rotationFixture: paths.rotationFixtureFile, readinessEvidence: paths.readinessEvidenceFile },
+    phaseArtifacts: { rotationState: paths.rotationStateFile, rotationFixture: paths.rotationFixtureFile, readinessEvidence: paths.readinessEvidenceFile, rotationTerraformInput: paths.rotationTerraformInputFile },
     blockers: [...new Set(blockers)],
     readyToConsumeMfa: blockers.length === 0,
   };
@@ -283,6 +308,7 @@ export function parseBootstrapArgs(argv) {
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
     "minimum-grace-seconds", "rotation-bindings", "image-authorization", "iam-evidence",
     "artifact-binding", "root-drop-evidence", "stage-a-plan", "inventory-approval-id", "onboarding-paths",
+    "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
   ]);
   const values = new Map();
   for (let index = 0; index < argv.length; index += 1) {
