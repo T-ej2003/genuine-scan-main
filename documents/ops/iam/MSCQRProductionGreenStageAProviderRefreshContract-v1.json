@@ -105,9 +105,9 @@
     },
     {
       "type": "aws_iam_role_policy",
-      "addresses": ["aws_iam_role_policy.checker"],
+      "addresses": ["aws_iam_role_policy.checker", "aws_iam_role_policy.checker_assume_target"],
       "readActions": [
-        { "action": "iam:GetRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"], "sourceOfProof": "provider iam/role_policy.go" }
+        { "action": "iam:GetRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"], "sourceOfProof": "provider iam/role_policy.go" }
       ]
     },
     {

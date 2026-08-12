@@ -3107,6 +3107,32 @@
       "mutation": false
     },
     {
+      "id": "manifest-refresh-stage-a-checker-inline-policy",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-checker-inline-policy",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRolePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "manifest-refresh-stage-a-rds-tags",
       "phase": "refresh-only",
       "identity": "RELEASE_DEPLOYER",

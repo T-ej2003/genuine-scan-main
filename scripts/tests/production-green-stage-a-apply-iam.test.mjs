@@ -26,6 +26,8 @@ const production = Object.freeze({
   brokerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
 });
 
+const checkerPolicyRefresh = refreshContract.resourceTypes.find(({ type }) => type === "aws_iam_role_policy");
+
 const context = (region = production.region, overrides = {}) => ({
   "aws:RequestedRegion": region,
   "aws:ResourceTag/Environment": "production",
@@ -87,6 +89,12 @@ test("the independent Stage A resource graph has a reviewed refresh contract", (
       }
     }
   }
+  assert.deepEqual(checkerPolicyRefresh.addresses, ["aws_iam_role_policy.checker", "aws_iam_role_policy.checker_assume_target"]);
+  assert.deepEqual(checkerPolicyRefresh.readActions, [{
+    action: "iam:GetRolePolicy",
+    resources: [production.checkerSourceRoleArn, production.checkerRoleArn],
+    sourceOfProof: "provider iam/role_policy.go",
+  }]);
 });
 
 test("the S3 backend contract covers exact state and lockfile lifecycle only", () => {

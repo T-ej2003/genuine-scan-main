@@ -365,6 +365,49 @@ test("Stage A live-evidence simulations fail closed for denied or wrong-region r
   assert.throws(() => validateManifest(wrongRegion), /live-evidence permission mapping/);
 });
 
+test("Stage A checker source-role policy refresh is an exact preflight capability", () => {
+  const sourceRole = "arn:aws:iam::368992683803:role/mscqr-production-independent-checker";
+  const targetRole = "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker";
+  const entry = manifest.required.find(({ id }) => id === "refresh-stage-a-checker-inline-policy");
+  assert.deepEqual(entry, {
+    id: "refresh-stage-a-checker-inline-policy",
+    phase: "refresh",
+    action: "iam:GetRolePolicy",
+    resources: [sourceRole, targetRole],
+    context: [],
+    evidence: "locked hashicorp/aws provider refresh of the Stage A checker policy and exact source-role checker role-chain policy",
+  });
+  const evaluations = deriveRequiredEvaluations(plan, manifest).required.filter(({ manifestId }) => manifestId === entry.id);
+  assert.deepEqual(evaluations.map(({ action, resource }) => [action, resource]), [
+    ["iam:GetRolePolicy", sourceRole],
+    ["iam:GetRolePolicy", targetRole],
+  ]);
+  const input = {
+    reportGeneratorCallerArn: generatorArn,
+    simulatedRoleArn: roleArn,
+    plan,
+    planBytes,
+    savedPlanBytes,
+    manifest,
+    generatedAt: now,
+    now,
+    policyPublishedAt: now,
+    cloudTrailSessionName: "checker-policy-preflight",
+    cloudTrail: clearCloudTrail,
+  };
+  const missingSource = runPermissionPreflight({
+    ...input,
+    simulate: ({ evaluation }) => evaluation.action === "iam:GetRolePolicy" && evaluation.resource === sourceRole
+      ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] }
+      : allowRequiredDenyForbidden({ evaluation }),
+  });
+  assert.equal(missingSource.status, "invalid");
+  assert.equal(missingSource.requiredEvaluations.find(({ manifestId, resource }) => manifestId === entry.id && resource === sourceRole).decision, "implicitDeny");
+  const exact = runPermissionPreflight({ ...input, simulate: allowRequiredDenyForbidden });
+  assert.equal(exact.status, "valid");
+  assert.equal(exact.requiredEvaluations.filter(({ manifestId }) => manifestId === entry.id).every(({ decision }) => decision === "allowed"), true);
+});
+
 test("Stage A live-evidence policy source contains no mutation permission", () => {
   const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));
   const statement = policy.Statement.find((item) => item.Sid === "ReadStageALivePrerequisites");
@@ -574,7 +617,7 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 149);
+  assert.equal(report.requiredEvaluations.length, 151);
   assert.equal(report.forbiddenEvaluations.length, 28);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
