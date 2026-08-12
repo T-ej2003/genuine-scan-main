@@ -62,10 +62,11 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   });
   assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredAllowedCount, 148);
+  assert.equal(report.requiredAllowedCount, 149);
   assert.equal(report.forbiddenDeniedCount, 28);
   assert.equal(report.principalEvaluations.ecsExecVerifier.status, "valid");
   assert.equal(report.cutoverCritical.stageAIngress, "allowed");
+  assert.equal(report.cutoverCritical.stageACheckerRoleChain, "allowed");
   assert.equal(report.cutoverCritical.releaseEcsExec, "implicitDeny");
   assert.equal(report.cutoverCritical.verifierEcsExec, "allowed");
   for (const id of ["stage-a-ingress-unrelated-security-group", "stage-a-ingress-wrong-region"]) assert.equal(report.forbiddenEvaluations.find((item) => item.manifestId === id).decision, "implicitDeny");
@@ -75,8 +76,8 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   delete missingOperatorEvidence.principalEvaluations.ecsExecVerifier;
   assert.throws(() => assertCutoverCriticalEvidence(missingOperatorEvidence), /ECS Exec operator simulation evidence/);
   const missingStageAEvidence = structuredClone(report);
-  missingStageAEvidence.requiredEvaluations = missingStageAEvidence.requiredEvaluations.filter((item) => item.manifestId !== "apply-stage-a-endpoint-security-group-ingress");
-  assert.throws(() => assertCutoverCriticalEvidence(missingStageAEvidence), /apply-stage-a-endpoint-security-group-ingress/);
+  missingStageAEvidence.requiredEvaluations = missingStageAEvidence.requiredEvaluations.filter((item) => item.manifestId !== "apply-stage-a-checker-role-chain-policy");
+  assert.throws(() => assertCutoverCriticalEvidence(missingStageAEvidence), /apply-stage-a-checker-role-chain-policy/);
   const wrongTrust = structuredClone(report);
   wrongTrust.ecsExecVerifierTrust.converged = false;
   assert.throws(() => assertCutoverCriticalEvidence(wrongTrust), /trust evidence/);

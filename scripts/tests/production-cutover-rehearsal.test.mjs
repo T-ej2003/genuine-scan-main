@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertStageAPlan, createTerraformStageAAdapter, runStageAControlPlane } from "../aws/production-stage-a-control-plane.mjs";
+import { assertStageAPlan, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
@@ -20,6 +20,18 @@ const rotationId = "rotation-rehearsal-1";
 const rotationStateSha256 = "c".repeat(64);
 const evidenceSha256 = "d".repeat(64);
 const validEvidence = (ref) => ({ valid: true, evidenceRef: ref, evidenceSha256 });
+const checkerPolicyDocument = ({ action = STAGE_A_CHECKER_POLICY.action, resource = STAGE_A_CHECKER_POLICY.resource, extraStatements = [] } = {}) => JSON.stringify({
+  Version: "2012-10-17",
+  Statement: [{ Sid: STAGE_A_CHECKER_POLICY.sid, Effect: "Allow", Action: action, Resource: resource }, ...extraStatements],
+});
+const checkerPolicyChange = (actions = ["create"], after = {}) => ({
+  address: STAGE_A_CHECKER_POLICY.address,
+  type: STAGE_A_CHECKER_POLICY.type,
+  change: {
+    actions,
+    after: { role: STAGE_A_CHECKER_POLICY.role, name: STAGE_A_CHECKER_POLICY.name, policy: checkerPolicyDocument(), ...after },
+  },
+});
 
 function iamFixture() {
   const required = [
@@ -75,7 +87,7 @@ function fixtureInput(overrides = {}) {
     endpointSecurityGroupId: "sg-endpoint",
     runtimeSecurityGroupId: "sg-runtime",
     adapter: {
-      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
+      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }, checkerPolicyChange()] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
       applySavedPlan: async () => { mutations.push("M2_STAGE_A_APPLY"); },
       describeIngress: async () => ({ present: true }),
     },
@@ -106,8 +118,8 @@ function fixtureInput(overrides = {}) {
   };
 }
 
-const stageAPlan = ({ address = 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', actions = ["create"], after = {}, extra = [] } = {}) => ({
-  resource_changes: [{ address, change: { actions, after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null, ...after } } }, ...extra],
+const stageAPlan = ({ address = 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', actions = ["create"], checkerActions = actions, after = {}, checkerAfter = {}, extra = [] } = {}) => ({
+  resource_changes: [{ address, change: { actions, after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null, ...after } } }, checkerPolicyChange(checkerActions, checkerAfter), ...extra],
 });
 
 test("Stage A accepts only the reviewed indexed for_each instance", () => {
@@ -132,6 +144,20 @@ test("Stage A accepts only the reviewed indexed for_each instance", () => {
   ]) assert.throws(() => assertStageAPlan(plan, inputs));
 });
 
+test("Stage A admits only the exact checker role-chain policy semantics", () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  assert.equal(assertStageAPlan(stageAPlan(), inputs).valid, true);
+  for (const checkerAfter of [
+    { policy: checkerPolicyDocument({ action: "sts:*" }) },
+    { policy: checkerPolicyDocument({ resource: "*" }) },
+    { policy: checkerPolicyDocument({ resource: "arn:aws:iam::368992683803:role/other" }) },
+    { policy: checkerPolicyDocument({ extraStatements: [{ Sid: "Extra", Effect: "Allow", Action: "sts:AssumeRole", Resource: STAGE_A_CHECKER_POLICY.resource }] }) },
+    { role: "mscqr-production-release-deployer" },
+  ]) assert.throws(() => assertStageAPlan(stageAPlan({ checkerAfter }), inputs));
+  assert.throws(() => assertStageAPlan(stageAPlan({ checkerActions: ["update"] }), inputs));
+  assert.throws(() => assertStageAPlan(stageAPlan({ extra: [{ address: "aws_iam_role_policy.unrelated", type: "aws_iam_role_policy", change: { actions: ["create"], after: {} } }] }), inputs));
+});
+
 test("Stage A rejects malformed unexpected entries before any apply", async () => {
   const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
   const malformedEntries = [
@@ -143,7 +169,7 @@ test("Stage A rejects malformed unexpected entries before any apply", async () =
     { address: "aws_vpc_security_group.foo", change: { actions: ["no-op", null] } },
   ];
   for (const entry of malformedEntries) {
-    assert.throws(() => assertStageAPlan({ resource_changes: [stageAPlan().resource_changes[0], entry] }, inputs));
+    assert.throws(() => assertStageAPlan({ resource_changes: [stageAPlan().resource_changes[0], stageAPlan().resource_changes[1], entry] }, inputs));
     let applyCalls = 0;
     await assert.rejects(() => runStageAControlPlane({
       adapter: {
@@ -174,7 +200,7 @@ test("Stage A applies exact create once and reads the postcondition", async () =
   });
   assert.equal(result.alreadyConverged, false);
   assert.equal(result.appliedExactSavedPlan, true);
-  assert.equal(result.mutationCount, 1);
+  assert.equal(result.mutationCount, 2);
   assert.equal(applyCalls, 1);
   assert.equal(postconditionReads, 1);
 });

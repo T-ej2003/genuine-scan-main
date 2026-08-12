@@ -30,6 +30,7 @@ export const REGION = "eu-west-2";
 export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
 export const CUTOVER_CRITICAL_CAPABILITIES = Object.freeze([
   Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "apply-stage-a-endpoint-security-group-ingress", action: "ec2:AuthorizeSecurityGroupIngress" }),
+  Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "apply-stage-a-checker-role-chain-policy", action: "iam:PutRolePolicy" }),
   Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "activate-exact-ecs-service", action: "ecs:UpdateService" }),
   Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "rollback-exact-ecs-service", action: "ecs:UpdateService" }),
   Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "rollback-exact-backend-task-passrole", action: "iam:PassRole" }),
@@ -1052,6 +1053,7 @@ export function runPermissionPreflight({
     ecsExecVerifierTrust: ecsExecVerifierEvidence || null,
     cutoverCritical: {
       stageAIngress: requiredResults.find(({ manifestId }) => manifestId === "apply-stage-a-endpoint-security-group-ingress")?.decision || null,
+      stageACheckerRoleChain: requiredResults.find(({ manifestId }) => manifestId === "apply-stage-a-checker-role-chain-policy")?.decision || null,
       releaseForward: requiredResults.find(({ manifestId }) => manifestId === "activate-exact-ecs-service")?.decision || null,
       releaseRollback: requiredResults.find(({ manifestId }) => manifestId === "rollback-exact-ecs-service")?.decision || null,
       releasePassRole: requiredResults.find(({ manifestId }) => manifestId === "rollback-exact-backend-task-passrole")?.decision || null,
