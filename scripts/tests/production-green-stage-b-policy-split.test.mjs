@@ -26,6 +26,7 @@ const canonical = (policy) => ({
   Statement: [...policy.Statement].sort((a, b) => a.Sid.localeCompare(b.Sid)),
 });
 const awsCharacterCount = (policy) => JSON.stringify(policy).replace(/\s/g, "").length;
+const resourceMatches = (pattern, resource) => pattern === resource || (pattern.endsWith("*") && resource.startsWith(pattern.slice(0, -1)));
 
 const movedSids = [
   "ListAttachedRolePoliciesReadOnly",
@@ -36,7 +37,7 @@ const movedSids = [
   "DescribeStageBTaskDefinitionsReadOnly",
   "ReadStageBBrokerConfiguration",
 ];
-const auditAdditionSids = ["ReadStageBBrokerReviewedAlias"];
+const auditAdditionSids = ["ReadStageBBrokerReviewedAlias", "VerifyExactStageBPermissionReportSignature"];
 const stageALiveEvidenceSids = ["ReadStageALivePrerequisites"];
 const controlSids = [
   "TagExactStageBLogs",
@@ -59,7 +60,6 @@ const finalWriteSids = [
   "UpdateExactStageBBrokerReviewedAlias",
   "UpdateExactStageBBrokerManagedPolicy",
   "PruneExactStageBBrokerManagedPolicyVersions",
-  "VerifyExactStageBPermissionReportSignature",
 ];
 const readOnlyCanaryRoles = [
   "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
@@ -111,7 +111,7 @@ test("all policy artifacts parse and historical v2/v3 remain byte-stable", () =>
 test("v4 and the companion policy fit the AWS managed-policy document limit", () => {
   assert.equal(awsCharacterCount(policies.v3), 6651);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
-  assert.equal(awsCharacterCount(policies.audit), 2251);
+  assert.equal(awsCharacterCount(policies.audit), 2432);
   assert.ok(awsCharacterCount(policies.finalWrite) < 6144);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.ok(awsCharacterCount(policies.audit) < 6144);
@@ -130,6 +130,7 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBReadOnlyCanaryExecutionRolePolicy"));
   correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBBrokerManagedPolicy"));
   correctedV3.Statement.push(statementOf(policies.audit, "ReadStageBBrokerReviewedAlias"));
+  correctedV3.Statement.push(statementOf(policies.audit, "VerifyExactStageBPermissionReportSignature"));
   correctedV3.Statement.push(statementOf(policies.audit, "ReadStageALivePrerequisites"));
   correctedV3.Statement = correctedV3.Statement.map((statement) => statement.Sid === "DescribeStageBTasksReadOnly" ? statementOf(policies.audit, "DescribeStageBTasksReadOnly") : statement);
   assert.deepEqual(canonical(correctedV3), canonical({
@@ -141,10 +142,10 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
 test("the split keeps the reviewed policy boundaries and adds two exact initial-rotation statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
-  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids.slice(0, -1), "BootstrapExactProductionSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets", finalWriteSids.at(-1), "InvokeExactPreDeploymentInventoryBrokerAlias"]);
+  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids, "BootstrapExactProductionSecretContainers", "TagExactInitialRotationSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets"]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactProductionSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets", "InvokeExactPreDeploymentInventoryBrokerAlias", "TagExactPreDeploymentInventoryTaskDefinition"]).size, 34);
+  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactProductionSecretContainers", "TagExactInitialRotationSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets", "InvokeExactPreDeploymentInventoryBrokerAlias", "TagExactPreDeploymentInventoryTaskDefinition"]).size, 35);
   for (const sid of movedSids) {
     if (sid === "DescribeStageBTasksReadOnly") continue;
     assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
@@ -159,6 +160,24 @@ test("pre-deployment inventory policy documents fit AWS size limits and keep tag
   assert.ok(awsCharacterCount(parse("documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json")) <= 6144);
   assert.equal(statementOf(policies.finalWrite, "TagExactPreDeploymentInventoryTaskDefinition"), undefined);
   assert.equal(statementOf(parse("documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json"), "TagExactPreDeploymentInventoryTaskDefinition").Resource, "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*");
+});
+
+test("tagged initial rotation secrets require exact TagResource authority", () => {
+  const finalWrite = policies.finalWrite;
+  const statement = statementOf(finalWrite, "TagExactInitialRotationSecretContainers");
+  const rotation = statement.Resource;
+  const context = [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }];
+  assert.equal(statement.Action, "secretsmanager:TagResource");
+  assert.equal(statement.Condition.StringEquals["aws:RequestedRegion"], "eu-west-2");
+  assert.equal(rotation.length, 7);
+  for (const resource of rotation) assert.equal(resourceMatches(resource, resource.replace(/\*$/, "abc123")), true);
+  assert.equal(rotation.some((resource) => resource.endsWith("mscqr/prod/*")), false);
+  assert.equal(rotation.some((resource) => resource === "*"), false);
+  assert.equal(rotation.some((resource) => resourceMatches(resource, "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/unrelated-abc123")), false);
+  const tagEvaluations = policies.manifest.required.filter(({ action }) => action === "secretsmanager:TagResource");
+  assert.equal(tagEvaluations.length, 7);
+  const createEvaluations = policies.manifest.required.filter(({ action, id }) => action === "secretsmanager:CreateSecret" && id.startsWith("initial-dual-slot-bootstrap-create-"));
+  assert.equal(createEvaluations.length, 7);
 });
 
 test("DescribeTaskDefinition is isolated, wildcard-only, and read-only", () => {
@@ -247,7 +266,7 @@ test("retry write companion is exact and tag-constrained", () => {
   assert.equal(statementsForAction(policies.finalWrite, "lambda:CreateAlias").length, 0);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:DeleteAlias").length, 0);
   assert.equal(statementsForAction(policies.finalWrite, "lambda:AddPermission").length, 0);
-  assert.deepEqual(statementOf(policies.finalWrite, "InvokeExactPreDeploymentInventoryBrokerAlias"), {
+  assert.deepEqual(statementOf(policies.taskDefinitionRegistration, "InvokeExactPreDeploymentInventoryBrokerAlias"), {
     Sid: "InvokeExactPreDeploymentInventoryBrokerAlias",
     Effect: "Allow",
     Action: "lambda:InvokeFunction",
@@ -273,7 +292,7 @@ test("retry write companion is exact and tag-constrained", () => {
 });
 
 test("permission-report verification is limited to the fixed Stage B KMS key", () => {
-  assert.deepEqual(statementOf(policies.finalWrite, "VerifyExactStageBPermissionReportSignature"), {
+  assert.deepEqual(statementOf(policies.audit, "VerifyExactStageBPermissionReportSignature"), {
     Sid: "VerifyExactStageBPermissionReportSignature",
     Effect: "Allow",
     Action: "kms:Verify",
@@ -529,8 +548,8 @@ test("the runbook targets v4 and the companion policy for the separately authori
   assert.match(runbook, /actual AWS-managed-policy\s+version ID/i);
 });
 
-test("historical policy bytes remain unchanged while the active runtime correction is explicit", () => {
-  assert.equal(sha256(read(paths.audit)), "f6b1c2726ee20ac80f37ce5452996a4f679eb64af1f0263b09f55700d79b1d71");
+test("active read-only companion policy records the bounded signature verifier", () => {
+  assert.equal(sha256(read(paths.audit)), "38ecce64a6b7497f74ac2360cbc3dbf6af877017287dc6be635660965c31b0d0");
 });
 
 test("runbook is companion-first and verifies complete policy attachments before provider mutation", () => {

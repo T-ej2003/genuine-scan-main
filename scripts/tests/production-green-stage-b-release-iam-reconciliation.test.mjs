@@ -60,14 +60,14 @@ test("broker alias update is authorized on the exact broker function resource", 
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: STAGE_B.brokerAliasArn, context }), false);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: `${functionArn}:other`, context }), false);
   assert.equal(finalWrite.Statement.some((statement) => list(statement.Action).some((action) => ["lambda:CreateAlias", "lambda:DeleteAlias"].includes(action))), false);
-  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "40801b7e163422d494bbc45722095336cedc904fcfa6a25c5873a71ea78c8a24");
+  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf");
 });
 
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 141);
+  assert.equal(evaluations.required.length, 148);
   assert.equal(evaluations.forbidden.length, 28);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);

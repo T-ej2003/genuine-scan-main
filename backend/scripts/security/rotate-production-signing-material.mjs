@@ -212,7 +212,7 @@ const validateRuntimeProof = ({ file, proof: persistedProof, config, phase, expe
   return { ...proof, observedAt: new Date(observedAt).toISOString() };
 };
 
-const stateForPending = ({ config, identity, oldJwt, oldQrPublic, oldQrVersion, newJwt, newQrPublic, newQrVersion, pending, inventoryEvidenceSha256 }) => ({
+const stateForPending = ({ config, identity, oldJwt, oldQrPrivate, oldQrPublic, oldQrVersion, newJwt, newQrPublic, newPrivate, newQrVersion, pending, inventoryEvidenceSha256 }) => ({
   stateVersion: 3,
   rotationId: config.rotationId,
   sourceSha: config.sourceSha,
@@ -222,7 +222,7 @@ const stateForPending = ({ config, identity, oldJwt, oldQrPublic, oldQrVersion, 
   inventoryEvidenceSha256,
   preparedAt: nowIso(),
   jwt: { oldFingerprint: fingerprint(oldJwt), newFingerprint: fingerprint(newJwt) },
-  qr: { oldPublicFingerprint: fingerprint(oldQrPublic), newPublicFingerprint: fingerprint(newQrPublic), oldKeyVersion: oldQrVersion, newKeyVersion: newQrVersion },
+  qr: { oldPrivateFingerprint: fingerprint(oldQrPrivate), oldPublicFingerprint: fingerprint(oldQrPublic), newPrivateFingerprint: fingerprint(newPrivate), newPublicFingerprint: fingerprint(newQrPublic), oldKeyVersion: oldQrVersion, newKeyVersion: newQrVersion },
   pending,
 });
 
@@ -245,22 +245,40 @@ const assertStateSlots = (state, current) => {
 };
 
 const assertPrepareLineage = (state, current) => {
-  const currentFingerprint = fingerprint(current.jwtCurrent.material.value);
-  const previousFingerprint = current.jwtPrevious.material.value ? fingerprint(current.jwtPrevious.material.value) : null;
-  if (state.phase === "prepared") {
-    const oldCurrent = currentFingerprint === state.jwt?.oldFingerprint;
-    const promotedCurrent = currentFingerprint === state.jwt?.newFingerprint;
-    if (!oldCurrent && !promotedCurrent) throw new Error("current JWT does not match prepared rotation lineage");
-    if (previousFingerprint && previousFingerprint !== state.jwt?.oldFingerprint) throw new Error("previous JWT does not match prepared rotation lineage");
-    if (promotedCurrent && previousFingerprint !== state.jwt?.oldFingerprint) throw new Error("prepared promotion is incomplete or foreign");
-    const qrPromoted = fingerprint(current.qrPublicCurrent.material.value) === state.qr?.newPublicFingerprint;
-    if (qrPromoted) assertQrVersionSlots(current, state);
-    else if (qrSlotValue(current.qrPreviousVersion)) throw new Error("QR previous key-version slot is populated before promotion");
-    return;
+  const check = (record, oldFingerprint, newFingerprint, name, keyVersion = null, oldKeyVersion = null) => {
+    if (!record.material.value) throw new Error(`${name} is empty during prepared promotion`);
+    const valueFingerprint = fingerprint(record.material.value);
+    if (valueFingerprint !== oldFingerprint && valueFingerprint !== newFingerprint) throw new Error(`${name} does not match prepared rotation lineage`);
+    if (record.material.metadata.keyVersion && record.material.metadata.keyVersion !== (valueFingerprint === newFingerprint ? keyVersion : oldKeyVersion)) throw new Error(`${name} key version is not bound to prepared rotation lineage`);
+    if (valueFingerprint === newFingerprint) {
+      if (record.material.metadata.rotationId !== state.rotationId || record.material.metadata.materialFingerprint !== newFingerprint) throw new Error(`${name} metadata is not bound to this rotation`);
+      if (keyVersion && record.material.metadata.keyVersion !== keyVersion) throw new Error(`${name} key version is not bound to this rotation`);
+      return true;
+    }
+    return false;
+  };
+  const jwtCurrentNew = check(current.jwtCurrent, state.jwt?.oldFingerprint, state.jwt?.newFingerprint, "current JWT");
+  if (current.jwtPrevious.material.value) check(current.jwtPrevious, state.jwt?.oldFingerprint, state.jwt?.oldFingerprint, "previous JWT");
+  if (jwtCurrentNew && !current.jwtPrevious.material.value) throw new Error("prepared JWT promotion is incomplete");
+
+  const qrPrivateNew = check(current.qrPrivateCurrent, state.qr?.oldPrivateFingerprint, state.qr?.newPrivateFingerprint, "current QR private key", state.qr?.newKeyVersion, state.qr?.oldKeyVersion);
+  const qrPublicNew = check(current.qrPublicCurrent, state.qr?.oldPublicFingerprint, state.qr?.newPublicFingerprint, "current QR public key", state.qr?.newKeyVersion, state.qr?.oldKeyVersion);
+  if (qrPublicNew && !qrPrivateNew) throw new Error("prepared QR public promotion is ahead of its private key");
+  if (current.qrPublicPrevious.material.value) check(current.qrPublicPrevious, state.qr?.oldPublicFingerprint, state.qr?.oldPublicFingerprint, "previous QR public key", state.qr?.oldKeyVersion, state.qr?.oldKeyVersion);
+
+  const currentVersion = qrSlotValue(current.qrCurrentVersion);
+  const previousVersion = qrSlotValue(current.qrPreviousVersion);
+  if (currentVersion !== state.qr?.oldKeyVersion && currentVersion !== state.qr?.newKeyVersion) throw new Error("current QR key-version slot does not match prepared rotation lineage");
+  if (previousVersion && previousVersion !== state.qr?.oldKeyVersion) throw new Error("previous QR key-version slot does not match prepared rotation lineage");
+  if (current.qrCurrentVersion.material.metadata.keyVersion && current.qrCurrentVersion.material.metadata.keyVersion !== currentVersion) throw new Error("current QR key-version metadata is inconsistent");
+  if (current.qrPreviousVersion.material.metadata.keyVersion && current.qrPreviousVersion.material.metadata.keyVersion !== previousVersion) throw new Error("previous QR key-version metadata is inconsistent");
+  if (currentVersion === state.qr?.newKeyVersion && (!qrPrivateNew || !qrPublicNew || previousVersion !== state.qr?.oldKeyVersion)) throw new Error("prepared QR promotion is incomplete");
+  if (previousVersion && !current.qrPublicPrevious.material.value) throw new Error("previous QR key-version slot exists without previous QR public key");
+  if (current.qrPublicPrevious.material.value && !previousVersion && state.phase !== "prepared") throw new Error("previous QR public key exists without its key-version slot");
+  if (state.phase !== "prepared") {
+    if (!jwtCurrentNew) throw new Error("current JWT does not match rotation state");
+    assertQrVersionSlots(current, state);
   }
-  if (currentFingerprint !== state.jwt?.newFingerprint) throw new Error("current JWT does not match rotation state");
-  if (previousFingerprint && previousFingerprint !== state.jwt?.oldFingerprint) throw new Error("previous JWT does not match rotation state");
-  assertQrVersionSlots(current, state);
 };
 
 const prepare = async (context) => {
@@ -273,9 +291,9 @@ const prepare = async (context) => {
   if (state) assertState(state, config);
   if (inventoryBindingRequired && state && state.inventoryEvidenceSha256 !== inventoryEvidenceSha256) throw new Error("rotation state is not bound to the current bounded inventory evidence");
   let current = await slots(sm, config);
-  assertQrVersionSlots(current);
   for (const [name, record] of [["jwt", current.jwtPending], ["QR private", current.qrPrivatePending], ["QR public", current.qrPublicPending]]) assertPendingOwnership(name, record.material, config.rotationId);
   if (state) assertPrepareLineage(state, current);
+  else assertQrVersionSlots(current);
 
   if (!state) {
     assertJwtPreviousSlotAvailable(current.jwtPrevious.material);
@@ -312,7 +330,7 @@ const prepare = async (context) => {
       if (fingerprint(record.material.value) !== fingerprint(expected) || record.material.metadata.rotationId !== config.rotationId) throw new Error(`${name} pending material could not be resumed safely`);
     }
     state = stateForPending({
-      config, identity, oldJwt, oldQrPublic, oldQrVersion, newJwt, newQrPublic: newPublic, newQrVersion,
+      config, identity, oldJwt, oldQrPrivate: current.qrPrivateCurrent.material.value, oldQrPublic, oldQrVersion, newJwt, newQrPublic: newPublic, newPrivate, newQrVersion,
       pending: {
         jwtVersionId: current.jwtPending.raw.versionId,
         qrPrivateVersionId: current.qrPrivatePending.raw.versionId,

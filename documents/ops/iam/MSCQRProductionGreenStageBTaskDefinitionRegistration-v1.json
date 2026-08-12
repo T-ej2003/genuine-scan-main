@@ -172,6 +172,13 @@
           "aws:RequestedRegion": "eu-west-2"
         }
       }
+    },
+    {
+      "Sid": "InvokeExactPreDeploymentInventoryBrokerAlias",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
     }
   ]
 }

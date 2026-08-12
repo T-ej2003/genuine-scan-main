@@ -284,6 +284,81 @@ test("prepare resumes after QR private pending write crash and derives its publi
   }
 });
 
+test("prepare resumes every durable promotion write without regenerating rotation material", async () => {
+  for (const failAfterPut of [1, 2, 3, 4, 5, 6, 7]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), `mscqr-rotation-promotion-crash-${failAfterPut}-`));
+    try {
+      const initial = seededRotationSecrets();
+      const sm = fakeSecrets(initial, { failAfterPut });
+      await assert.rejects(prepare(contextFor(directory, baseConfig, sm)), /simulated process crash/);
+      const pendingBefore = Object.fromEntries([
+        baseConfig.jwt.pendingSecretId, baseConfig.qr.privatePendingSecretId, baseConfig.qr.publicPendingSecretId,
+      ].map((id) => [id, sm.values.get(id)]));
+      const resumedSm = fakeSecrets(Object.fromEntries(sm.values));
+      await prepare(contextFor(directory, baseConfig, resumedSm));
+      for (const [id, payload] of Object.entries(pendingBefore)) assert.equal(resumedSm.values.get(id), payload, `pending material changed after failure ${failAfterPut}`);
+      const state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
+      assert.equal(state.phase, "overlap-deploy-required");
+      assert.equal(JSON.parse(resumedSm.values.get(baseConfig.qr.currentKeyVersionSecretId)).value, state.qr.newKeyVersion);
+      assert.equal(JSON.parse(resumedSm.values.get(baseConfig.qr.previousKeyVersionSecretId)).value, state.qr.oldKeyVersion);
+      assert.equal(JSON.parse(resumedSm.values.get(baseConfig.qr.publicPreviousSecretId)).value, JSON.parse(initial[baseConfig.qr.publicCurrentSecretId]).value);
+      assert.equal(JSON.parse(resumedSm.values.get(baseConfig.jwt.previousSecretId)).value, "old-jwt-material");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("prepared promotion rejects foreign QR material instead of normalizing it", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-promotion-tamper-"));
+  try {
+    const initial = seededRotationSecrets();
+    const sm = fakeSecrets(initial, { failAfterPut: 7 });
+    await assert.rejects(prepare(contextFor(directory, baseConfig, sm)), /simulated process crash/);
+    const foreign = makeKeys();
+    sm.values.set(baseConfig.qr.publicCurrentSecretId, material(foreign.publicKey, {
+      rotationId: baseConfig.rotationId, family: "qr_signing_keys", slot: "current-public",
+      keyVersion: "foreign-version", materialFingerprint: fingerprint(foreign.publicKey),
+    }));
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values));
+    await assert.rejects(prepare(contextFor(directory, baseConfig, resumedSm)), /current QR public key|prepared QR public key|key version/);
+    assert.equal(resumedSm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("prepared promotion rejects every unrecognized partial state", async () => {
+  const cases = [
+    ["wrong rotation id", 6, (sm) => {
+      const record = JSON.parse(sm.values.get(baseConfig.jwt.currentSecretId));
+      record.rotationId = "foreign-rotation";
+      sm.values.set(baseConfig.jwt.currentSecretId, JSON.stringify(record));
+    }],
+    ["wrong QR key version", 4, (sm) => {
+      const record = JSON.parse(sm.values.get(baseConfig.qr.privateCurrentSecretId));
+      record.keyVersion = "foreign-version";
+      sm.values.set(baseConfig.qr.privateCurrentSecretId, JSON.stringify(record));
+    }],
+    ["corrupted envelope", 4, (sm) => sm.values.set(baseConfig.qr.privateCurrentSecretId, "{malformed")],
+    ["unexpected JWT previous", 1, (sm) => sm.values.set(baseConfig.jwt.previousSecretId, material("foreign-jwt"))],
+    ["unexpected QR previous", 1, (sm) => sm.values.set(baseConfig.qr.publicPreviousSecretId, material("foreign-public"))],
+  ];
+  for (const [label, failAfterPut, mutate] of cases) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-partial-reject-"));
+    try {
+      const sm = fakeSecrets(seededRotationSecrets(), { failAfterPut });
+      await assert.rejects(prepare(contextFor(directory, baseConfig, sm)), /simulated process crash/);
+      mutate(sm);
+      const resumedSm = fakeSecrets(Object.fromEntries(sm.values));
+      await assert.rejects(prepare(contextFor(directory, baseConfig, resumedSm)), undefined, label);
+      assert.equal(resumedSm.putCount, 0, label);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
 test("prepare recovers when local state write fails after all secret writes and reuses versions and payloads", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-state-crash-"));
   try {

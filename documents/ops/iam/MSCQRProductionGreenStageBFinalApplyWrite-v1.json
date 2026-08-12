@@ -137,6 +137,25 @@
       }
     },
     {
+      "Sid": "TagExactInitialRotationSecretContainers",
+      "Effect": "Allow",
+      "Action": "secretsmanager:TagResource",
+      "Resource": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
       "Sid": "ManageExactProductionSecretValues",
       "Effect": "Allow",
       "Action": [
@@ -177,19 +196,6 @@
           "aws:RequestedRegion": "eu-west-2"
         }
       }
-    },
-    {
-      "Sid": "VerifyExactStageBPermissionReportSignature",
-      "Effect": "Allow",
-      "Action": "kms:Verify",
-      "Resource": "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
-    },
-    {
-      "Sid": "InvokeExactPreDeploymentInventoryBrokerAlias",
-      "Effect": "Allow",
-      "Action": "lambda:InvokeFunction",
-      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
-      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
     }
   ]
 }
