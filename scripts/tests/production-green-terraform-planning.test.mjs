@@ -7,6 +7,7 @@ const source = fs.readFileSync(`${root}/main.tf`, "utf8");
 const variables = fs.readFileSync(`${root}/variables.tf`, "utf8");
 const outputs = fs.readFileSync(`${root}/outputs.tf`, "utf8");
 const readme = fs.readFileSync(`${root}/README.md`, "utf8");
+const checkerContract = JSON.parse(fs.readFileSync("documents/security/rls-program/production-full-rls-executor-contract.json", "utf8"));
 const tfvarsExample = fs.readFileSync(`${root}/terraform.tfvars.example`, "utf8");
 const receiptPattern = /^arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an$/;
 
@@ -22,7 +23,38 @@ test("Stage A keeps checker and protected deployer distinct", () => {
   assert.match(variables, /mscqr-production-release-deployer/);
 });
 
-test("Stage A owns the exact MFA checker role chain without wildcard escalation", () => {
+test("checker chain has one MFA boundary and an exact role-to-role target", () => {
+  const checkerTrust = source.match(/resource "aws_iam_role" "checker" \{([\s\S]*?)\n\}/)?.[1] || "";
+  const chainPolicy = source.match(/resource "aws_iam_role_policy" "checker_assume_target" \{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(variables, /var\.checker_principal_arns\s*==\s*toset\(\["arn:aws:iam::368992683803:role\/mscqr-production-independent-checker"\]\)/);
+  assert.match(checkerTrust, /Principal\s*=\s*\{\s*AWS\s*=\s*var\.checker_principal_arns\s*\}/);
+  assert.match(checkerTrust, /Action\s*=\s*"sts:AssumeRole"/);
+  assert.doesNotMatch(checkerTrust, /MultiFactorAuthPresent|Principal\s*=\s*"\*"|Resource\s*=\s*"\*"/);
+  assert.match(chainPolicy, /role\s*=\s*local\.checker_assumer_role_name/);
+  assert.match(chainPolicy, /Action\s*=\s*"sts:AssumeRole"/);
+  assert.match(chainPolicy, /Resource\s*=\s*aws_iam_role\.checker\.arn/);
+  assert.doesNotMatch(chainPolicy, /sts:\*|Resource\s*=\s*"\*"/);
+  for (const forbidden of [
+    "arn:aws:iam::368992683803:root",
+    "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator",
+    "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy",
+    "arn:aws:iam::368992683803:role/mscqr-production-backend-runtime",
+  ]) assert.doesNotMatch(variables, new RegExp(forbidden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.deepEqual(checkerContract.checkerAuthentication, {
+    sourceIamUser: "arn:aws:iam::368992683803:user/mscqr-production-checker-operator",
+    mfaSerial: "arn:aws:iam::368992683803:mfa/mscqr-production-checker-operator",
+    sourceRole: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+    sourceTrustRequiresMfa: true,
+    targetRole: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+    targetTrustPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+    targetTrustRequiresFreshMfa: false,
+    targetTrustReason: "AWS role chaining does not carry a fresh MFA request; the exact source-role trust is reachable only through the MFA-gated checker IAM user.",
+    sourceRolePermission: "sts:AssumeRole on the exact targetRole only",
+    sessionBinding: "The exact target-role STS session ARN is recorded in and signed by the approval artifact.",
+  });
+});
+
+test("Stage A owns the exact checker role chain without wildcard escalation", () => {
   const chain = source.match(/resource "aws_iam_role_policy" "checker_assume_target" \{([\s\S]*?)\n\}/)?.[1] || "";
   assert.match(source, /checker_assumer_role_name\s*=\s*"mscqr-production-independent-checker"/);
   assert.match(tfvarsExample, /checker_principal_arns\s*=\s*\["arn:aws:iam::368992683803:role\/mscqr-production-independent-checker"\]/);
@@ -32,8 +64,10 @@ test("Stage A owns the exact MFA checker role chain without wildcard escalation"
   assert.match(chain, /Resource\s*=\s*aws_iam_role\.checker\.arn/);
   assert.doesNotMatch(chain, /sts:\*|Resource\s*=\s*"\*"|release-deployer|bootstrap|root/i);
   const trust = source.match(/resource "aws_iam_role" "checker" \{([\s\S]*?)\n\}/)?.[1] || "";
-  assert.match(trust, /Condition\s*=\s*\{ Bool = \{ "aws:MultiFactorAuthPresent" = "true" \} \}/);
   assert.match(trust, /Principal\s*=\s*\{ AWS = var\.checker_principal_arns \}/);
+  assert.doesNotMatch(trust, /MultiFactorAuthPresent/);
+  assert.equal(checkerContract.checkerAuthentication.sourceTrustRequiresMfa, true);
+  assert.equal(checkerContract.checkerAuthentication.targetTrustRequiresFreshMfa, false);
 });
 
 test("Stage A owns no blue infrastructure or release activation", () => {

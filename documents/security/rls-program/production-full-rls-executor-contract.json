@@ -60,6 +60,18 @@
     "checkerIdentity": "exact STS assumed-role session ARN",
     "rollbackExpiryGraceHours": 24
   },
+  "checkerAuthentication": {
+    "sourceIamUser": "arn:aws:iam::368992683803:user/mscqr-production-checker-operator",
+    "mfaSerial": "arn:aws:iam::368992683803:mfa/mscqr-production-checker-operator",
+    "sourceRole": "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+    "sourceTrustRequiresMfa": true,
+    "targetRole": "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+    "targetTrustPrincipal": "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+    "targetTrustRequiresFreshMfa": false,
+    "targetTrustReason": "AWS role chaining does not carry a fresh MFA request; the exact source-role trust is reachable only through the MFA-gated checker IAM user.",
+    "sourceRolePermission": "sts:AssumeRole on the exact targetRole only",
+    "sessionBinding": "The exact target-role STS session ARN is recorded in and signed by the approval artifact."
+  },
   "execution": {
     "brokerAlias": "mscqr-production-rls-approval-broker:reviewed",
     "directEcsRunTaskAllowed": false,

@@ -6692,6 +6692,7 @@
     "strict-backend-metadata",
     "tf-workspace-default",
     "no-workspace-select-or-migration",
+    "checker-user-mfa-to-independent-role-chain",
     "structural-normal-resource-universe-append-only-retained-history",
     "no-service-database-alb-dns-traffic-or-secret-value-change"
   ]

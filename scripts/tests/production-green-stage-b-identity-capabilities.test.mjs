@@ -49,6 +49,7 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
   assert.equal(first.capabilities.filter(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "ecs:ExecuteCommand").length, 0);
   assert.equal(first.capabilities.find(({ id }) => id === "manifest-release-deployer-ecs-exec").identity, "ADMINISTRATOR");
+  assert(first.configurationContracts.includes("checker-user-mfa-to-independent-role-chain"));
 });
 
 test("unknown, removed, or identity-reassigned capabilities fail graph verification", () => {

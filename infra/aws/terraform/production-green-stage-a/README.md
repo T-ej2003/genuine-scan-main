@@ -33,6 +33,12 @@ Stage A also manages the one exact inline role-chain policy on the existing
 `sts:AssumeRole` into the Stage A-owned
 `mscqr-production-rls-independent-checker` role. It does not own the source
 role, its trust policy, or any other source-role permission.
+The checker IAM user must enter that source role through its MFA-gated trust;
+the role-to-role trust intentionally has no second-hop MFA condition because
+AWS role chaining does not create a fresh MFA request. The target trusts only
+the exact source role, and the final target-role session ARN is bound into the
+signed approval. The second-hop profile must not add another `mfa_serial` or
+substitute a different principal.
 
 Stage A creates no ECS task definition, ECS service, Lambda function, image
 binding, runtime secret value, broker invocation, canary, or traffic switch.
