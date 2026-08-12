@@ -145,6 +145,7 @@ export function prepareProductionCutoverRuntime({
   currentTaskDefinition,
   inventoryApprovalId,
   onboardingPaths,
+  rotationId: requestedRotationId,
   constructAdapters,
   imageAuthorizationValidation,
 } = {}) {
@@ -163,7 +164,8 @@ export function prepareProductionCutoverRuntime({
   try {
     if (!protectedSha || !SHA40.test(protectedSha)) throw new Error("protected-main source SHA is unresolved.");
     if (!rotationBindings) throw new Error("rotation secret binding manifest is required; current/previous/pending JWT/QR bindings are not derivable from the legacy live task.");
-    const rotationId = `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
+    const rotationId = requestedRotationId || `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
+    if (!ROTATION_ID.test(rotationId)) throw new Error("Requested rotation ID is invalid.");
     if (!imageAuthorization) throw new Error("image authorization evidence is required.");
     assertImageAuthorization(imageAuthorization, protectedSha, imageAuthorizationValidation);
     const backendImageDigest = authorizedBackendDigest(imageAuthorization);

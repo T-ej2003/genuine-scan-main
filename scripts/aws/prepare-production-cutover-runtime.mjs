@@ -36,6 +36,7 @@ const result = prepareProductionCutoverRuntime({
   outputDirectory,
   approval,
   rotationBindings,
+  rotationId: rotationBindings?.rotationId,
   imageAuthorization,
   iamEvidence,
   artifactBindingFile: required("artifact-binding"),

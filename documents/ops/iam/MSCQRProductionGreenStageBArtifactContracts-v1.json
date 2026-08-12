@@ -105,6 +105,25 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "initial-dual-slot-rotation-bindings",
+      "kind": "file",
+      "producer": "scripts/aws/production-initial-dual-slot-bootstrap.mjs:bootstrapInitialDualSlotRotation",
+      "consumers": [
+        "scripts/aws/prepare-production-cutover-runtime.mjs",
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-dual-slot-rotation-bindings",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "stage-a-state-backup",
       "kind": "file",
       "producer": "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight",

@@ -23,7 +23,13 @@ required.
 The canonical FinalApplyWrite SHA-256 changes from
 `04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`
 to
-`6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee`.
+`908483fde7c4ca5a8a29835fb7be68a2729058c73a6715fe7a7bc1bccaa43f33`.
+
+The policy also contains the narrowly bounded initial legacy-to-dual-slot
+rotation bootstrap. It permits only the seven exact `mscqr/prod/rotation/*`
+secret names for creation, and scopes subsequent metadata/value access to that
+namespace in `eu-west-2`. The bootstrap never reads legacy current values and
+the existing coordinator remains the pending-material/phase-state producer.
 
 The existing-task-definition traffic switch is intentionally owned by the same
 release-deployer identity used by the canonical wrapper. FinalApplyWrite grants
@@ -195,7 +201,7 @@ The allowed inline-policy set is empty.
 The candidate source policy union was evaluated with AWS IAM custom-policy
 simulation against the production-shaped plan:
 
-- required evaluations: 107/107 allowed
+- required evaluations: 135/135 allowed
 - required failures: 0
 - forbidden evaluations: 29/29 denied
 - forbidden allowed: 0

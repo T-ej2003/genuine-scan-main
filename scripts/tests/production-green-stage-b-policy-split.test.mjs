@@ -138,13 +138,13 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   }));
 });
 
-test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and thirteen final-write statements", () => {
+test("the split keeps the reviewed policy boundaries and adds two exact initial-rotation statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
-  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids.slice(0, -1), "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", finalWriteSids.at(-1), "InvokeExactPreDeploymentInventoryBrokerAlias", "TagExactPreDeploymentInventoryTaskDefinition"]);
+  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids.slice(0, -1), "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", "BootstrapExactInitialDualSlotSecretContainers", "ManageExactInitialDualSlotSecretValues", finalWriteSids.at(-1), "InvokeExactPreDeploymentInventoryBrokerAlias", "TagExactPreDeploymentInventoryTaskDefinition"]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", "InvokeExactPreDeploymentInventoryBrokerAlias", "TagExactPreDeploymentInventoryTaskDefinition"]).size, 33);
+  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", "BootstrapExactInitialDualSlotSecretContainers", "ManageExactInitialDualSlotSecretValues", "InvokeExactPreDeploymentInventoryBrokerAlias", "TagExactPreDeploymentInventoryTaskDefinition"]).size, 35);
   for (const sid of movedSids) {
     if (sid === "DescribeStageBTasksReadOnly") continue;
     assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
@@ -395,7 +395,7 @@ test("Terraform isolates broker runtime permissions in one dedicated managed pol
     "VerifyOnlyStageAApprovalKey",
     "WriteOnlyBrokerReceipts",
     "WriteOnlyStageABrokerLogs",
-  ]) assert.equal(source.includes(`Sid      = "${sid}"`), true, sid);
+  ]) assert.match(source, new RegExp(`Sid\\s+=\\s+"${sid}"`), sid);
   assert.match(source, /policy_arn\s*=\s*aws_iam_policy\.broker\.arn/);
 });
 

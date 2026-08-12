@@ -108,6 +108,10 @@ const storedMaterial = (result) => {
   }
   return { value: result.value, metadata: { legacy: true } };
 };
+const isInitialEmptySlot = (material) => material?.value === ""
+  && material.metadata?.initialMigration === true
+  && material.metadata?.slot === "empty"
+  && ["jwt_secrets", "qr_signing_keys"].includes(material.metadata?.family);
 const putMaterial = async (sm, id, material, metadata, token) => {
   const payload = JSON.stringify({ ...metadata, value: material });
   return sm.send(new PutSecretValueCommand({
@@ -141,6 +145,7 @@ const slots = async (sm, config) => {
 
 const isRetired = (material) => !material.value && material.metadata?.slot?.endsWith("-retired") && Boolean(isoDate(material.metadata.retiredAt));
 const assertPendingOwnership = (name, material, rotationId) => {
+  if (isInitialEmptySlot(material)) return;
   if (isRetired(material)) return;
   if (!material.value) {
     if (Object.keys(material.metadata || {}).length) throw new Error(`${name} pending slot has non-retired metadata`);
@@ -151,6 +156,7 @@ const assertPendingOwnership = (name, material, rotationId) => {
 };
 
 const assertJwtPreviousSlotAvailable = (material) => {
+  if (isInitialEmptySlot(material)) return;
   if (material.value || (!isRetired(material) && Object.keys(material.metadata || {}).length)) {
     throw new Error("JWT_PREVIOUS_SLOT_NOT_RETIRED");
   }
