@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createProductionCutoverAdapters } from "../aws/production-cutover-production-adapters.mjs";
+import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 
@@ -25,7 +26,7 @@ const bindings = {
     currentKeyVersionSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr-current-version-i",
     previousKeyVersionSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr-previous-version-j",
     publicPendingSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr-public-pending-h",
-    previousKeyVersion: "qr-v0",
+    previousKeyVersion: "qr-v1",
   },
 };
 
@@ -47,11 +48,11 @@ function taskDefinition() {
 
 function evidenceFiles(directory, repositoryRoot) {
   const file = (name, value) => { const target = path.join(directory, name); writeFileSync(target, JSON.stringify(value) + "\n", { mode: 0o600 }); chmodSync(target, 0o600); return target; };
-  const imageAuthorization = file("image-authorization.json", { valid: true, sourceSha, imageReuseCompatible: true, imageBuildInputsChanged: false, images: [{ service: "backend", digest }, { service: "worker", digest }, { service: "rls-executor", digest }, { service: "rls-canary", digest }] });
+  const imageAuthorization = file("image-authorization.json", { valid: true, sourceSha, evidenceSha256: "a".repeat(64), signatureVerified: true, attestationVerified: true, provenanceVerified: true, imageReleaseSha: "b".repeat(40), workflowRunId: "31559932307", imageReuseCompatible: true, imageBuildInputsChanged: false, images: [{ service: "backend", digest }, { service: "worker", digest }, { service: "rls-executor", digest }, { service: "rls-canary", digest }] });
   const iamEvidence = file("iam-evidence.json", { status: "valid", iamEvaluationCensus: { total: 158, executed: 158, invalid: 0, failures: [] }, evidenceSha256: "d".repeat(64) });
   const rootDrop = file("root-drop.json", { valid: true, callerArn: "arn:aws:iam::368992683803:root", evidenceSha256: "e".repeat(64) });
   const stageAPlan = file("stage-a.tfplan", "binary-fixture");
-  const artifactBinding = path.join(repositoryRoot, "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json");
+  const artifactBinding = path.join(repositoryRoot, `documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime-${process.pid}.json`);
   writeFileSync(artifactBinding, JSON.stringify({ bindings: {
     ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-a",
     ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-key-current-b",
@@ -78,7 +79,6 @@ function fullInput(directory, repositoryRoot) {
     currentTaskDefinition: taskDefinition(),
     inventoryApprovalId: "APR-STAGE-B-0001",
     onboardingPaths: paths,
-    onboardingCredentials: { email: "admin@example.invalid", password: "fixture-password", mfaCode: "123456" },
     constructAdapters: ({ config, sourceSha: actualSha, rotationId }) => createProductionCutoverAdapters({ config, sourceSha: actualSha, rotationId }),
   };
 }
@@ -94,11 +94,76 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     assert.equal(existsSync(result.phasePaths.rotationStateFile), false);
     assert.equal(existsSync(result.phasePaths.rotationFixtureFile), false);
     assert.equal(result.config.onboardingBaseUrl, "https://www.mscqr.com");
+    assert.equal(result.config.qr.previousKeyVersion, "qr-v1");
     assert.equal(result.config.expectedRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");
     assert.equal(result.config.overlapTaskInput.secretBindings.ARTIFACT_SIGN_ACTIVE_KEY_VERSION.includes("artifact-signing"), true);
     assert.doesNotMatch(readFileSync(result.configPath, "utf8"), /PRIVATE KEY|SecretString|fixture-password|123456/);
   } finally {
     rmSync(path.join(repositoryRoot, "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("LIVE_QR_VERSION_BINDING rejects an operator value that differs from live production", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    input.rotationBindings = { ...bindings, qr: { ...bindings.qr, previousKeyVersion: "qr-v0" } };
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join("\n"), /must equal the live QR_SIGN_ACTIVE_KEY_VERSION/);
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("QR secret identifiers remain bindings and are never logical key versions", () => {
+  const result = rotationBindingsToTaskBindings(bindings);
+  assert.match(result.QR_SIGN_ACTIVE_KEY_VERSION, /^arn:aws:secretsmanager:/);
+  assert.match(result.QR_SIGN_PREVIOUS_KEY_VERSION, /^arn:aws:secretsmanager:/);
+  assert.notEqual(result.QR_SIGN_PREVIOUS_KEY_VERSION, bindings.qr.previousKeyVersion);
+});
+
+test("BOOTSTRAP_DOWNSTREAM_IMAGE_AUTHORIZATION uses the canonical validator", () => {
+  const directory = fsTemp();
+  const malformedFields = [
+    "evidenceSha256", "signatureVerified", "attestationVerified", "provenanceVerified",
+    "imageReleaseSha", "workflowRunId",
+  ];
+  try {
+    const input = fullInput(directory, process.cwd());
+    const valid = JSON.parse(readFileSync(input.imageAuthorization.filePath, "utf8"));
+    assert.doesNotThrow(() => assertImageAuthorization(valid, sourceSha));
+    for (const field of malformedFields) {
+      const malformed = { ...valid };
+      delete malformed[field];
+      assert.throws(() => assertImageAuthorization(malformed, sourceSha));
+      input.imageAuthorization = { ...malformed, filePath: input.imageAuthorization.filePath };
+      rmSync(path.join(input.outputDirectory, "cutover-runtime-manifest.json"), { force: true });
+      const result = prepareProductionCutoverRuntime(input);
+      assert.equal(result.readyToConsumeMfa, false, `${field} must block bootstrap`);
+      input.imageAuthorization = { ...valid, filePath: input.imageAuthorization.filePath };
+    }
+    const variants = [
+      { images: valid.images.slice(0, 3) },
+      { images: [...valid.images, { service: "unexpected", digest }] },
+      { sourceSha: "a".repeat(40) },
+    ];
+    for (const variant of variants) {
+      const malformed = { ...valid, ...variant };
+      assert.throws(() => assertImageAuthorization(malformed, sourceSha));
+      input.imageAuthorization = { ...malformed, filePath: input.imageAuthorization.filePath };
+      rmSync(path.join(input.outputDirectory, "cutover-runtime-manifest.json"), { force: true });
+      assert.equal(prepareProductionCutoverRuntime(input).readyToConsumeMfa, false);
+    }
+    const wrongDigest = { ...valid, images: valid.images.map((image) => image.service === "backend" ? { ...image, digest: "not-a-digest" } : image) };
+    assert.throws(() => assertImageAuthorization(wrongDigest, sourceSha), /record/);
+    input.imageAuthorization = { ...wrongDigest, filePath: input.imageAuthorization.filePath };
+    rmSync(path.join(input.outputDirectory, "cutover-runtime-manifest.json"), { force: true });
+    assert.equal(prepareProductionCutoverRuntime(input).readyToConsumeMfa, false);
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -203,3 +268,5 @@ function fsTemp() {
   chmodSync(directory, 0o700);
   return directory;
 }
+
+test.after(() => rmSync(path.join(process.cwd(), `documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime-${process.pid}.json`), { force: true }));

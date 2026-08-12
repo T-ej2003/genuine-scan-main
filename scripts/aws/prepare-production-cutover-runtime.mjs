@@ -44,7 +44,6 @@ const result = prepareProductionCutoverRuntime({
   currentTaskDefinition,
   inventoryApprovalId: args.get("inventory-approval-id"),
   onboardingPaths,
-  onboardingCredentials: { email: process.env.MSCQR_ONBOARDING_EMAIL, password: process.env.MSCQR_ONBOARDING_PASSWORD, mfaCode: process.env.MSCQR_ONBOARDING_MFA_CODE },
   constructAdapters: ({ config, sourceSha, rotationId }) => createProductionCutoverAdapters({ config, sourceSha, rotationId }),
 });
 process.stdout.write(`${JSON.stringify({

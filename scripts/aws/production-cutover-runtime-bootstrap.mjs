@@ -7,6 +7,7 @@ import { loadApprovedArtifactSigningBindings } from "./production-artifact-signi
 import { buildOverlapTaskDefinition } from "./production-overlap-task-definition.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { RELEASE_ROLE_ARN } from "./production-identity-adapters.mjs";
+import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -64,15 +65,7 @@ function readInputFile(filePath, repositoryRoot, label) {
   return { path: resolved.path, value, sha256: hash(readFileSync(resolved.path)) };
 }
 
-function deriveBackendImage(imageAuthorization) {
-  if (!imageAuthorization || imageAuthorization.valid !== true || imageAuthorization.sourceSha === undefined) throw new Error("Image authorization evidence is incomplete.");
-  if (imageAuthorization.imageReuseCompatible !== true || imageAuthorization.imageBuildInputsChanged !== false) throw new Error("Image authorization does not prove reuse.");
-  const image = imageAuthorization.images?.find(({ service }) => service === "backend");
-  if (!image || !/^sha256:[a-f0-9]{64}$/.test(image.digest || "")) throw new Error("Authorized backend image digest is missing.");
-  return image.digest;
-}
-
-function deriveRuntimeMetadata(taskDefinition) {
+export function deriveRuntimeMetadata(taskDefinition) {
   const environment = taskDefinition?.containerDefinitions?.find(({ name }) => name === "backend")?.environment || [];
   const baseUrl = environment.find(({ name }) => ["PUBLIC_APP_URL", "APP_URL", "WEB_APP_BASE_URL"].includes(name))?.value;
   const currentKeyVersion = environment.find(({ name }) => name === "QR_SIGN_ACTIVE_KEY_VERSION")?.value;
@@ -112,10 +105,13 @@ function assertFutureArtifactsAbsent(paths, repositoryRoot) {
   }
 }
 
-export function buildProductionRotationConfig({ sourceSha, rotationId, approval, bindings, overlapDeploymentSha = sourceSha } = {}) {
+export function buildProductionRotationConfig({ sourceSha, rotationId, approval, bindings, liveCurrentKeyVersion, overlapDeploymentSha = sourceSha } = {}) {
   if (!SHA40.test(sourceSha || "") || !ROTATION_ID.test(rotationId || "")) throw new Error("Production rotation identity is invalid.");
   const checkedApproval = assertApproval(approval);
   const checkedBindings = assertBindings(bindings);
+  if (liveCurrentKeyVersion !== undefined) {
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(liveCurrentKeyVersion) || checkedBindings.qr.previousKeyVersion !== liveCurrentKeyVersion) throw new Error("qr.previousKeyVersion must equal the live QR_SIGN_ACTIVE_KEY_VERSION.");
+  }
   if (!SHA40.test(overlapDeploymentSha || "")) throw new Error("overlapDeploymentSha must be a full protected-main SHA.");
   return {
     region: REGION,
@@ -149,7 +145,6 @@ export function prepareProductionCutoverRuntime({
   currentTaskDefinition,
   inventoryApprovalId,
   onboardingPaths,
-  onboardingCredentials = {},
   constructAdapters,
 } = {}) {
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Production cutover runtime directory" });
@@ -168,10 +163,10 @@ export function prepareProductionCutoverRuntime({
     if (!protectedSha || !SHA40.test(protectedSha)) throw new Error("protected-main source SHA is unresolved.");
     if (!rotationBindings) throw new Error("rotation secret binding manifest is required; current/previous/pending JWT/QR bindings are not derivable from the legacy live task.");
     const rotationId = `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
-    const approvalConfig = buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings });
     if (!imageAuthorization) throw new Error("image authorization evidence is required.");
-    if (imageAuthorization.sourceSha !== protectedSha) throw new Error("Image authorization source SHA does not match protected main.");
-    const backendImageDigest = deriveBackendImage(imageAuthorization);
+    assertImageAuthorization(imageAuthorization, protectedSha);
+    const backendImageDigest = authorizedBackendDigest(imageAuthorization);
+    if (!backendImageDigest) throw new Error("Authorized backend image digest is missing.");
     if (!iamEvidence || iamEvidence.status !== "valid" || iamEvidence.iamEvaluationCensus?.executed !== iamEvidence.iamEvaluationCensus?.total || iamEvidence.iamEvaluationCensus?.invalid !== 0) throw new Error("IAM evidence is incomplete.");
     if (!artifactBindingFile) throw new Error("Existing artifact-signing runtime binding file is required.");
     const artifactBindings = loadApprovedArtifactSigningBindings(artifactBindingFile);
@@ -180,10 +175,10 @@ export function prepareProductionCutoverRuntime({
     if (!stageAPlanPath) throw new Error("Preserved Stage-A saved-plan path is required.");
     ensureStageBPrivateFile({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" });
     const taskDefinition = currentTaskDefinition?.taskDefinition || currentTaskDefinition;
-    const { baseUrl } = deriveRuntimeMetadata(taskDefinition);
+    const { baseUrl, currentKeyVersion } = deriveRuntimeMetadata(taskDefinition);
+    const approvalConfig = buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, liveCurrentKeyVersion: currentKeyVersion });
     if (!onboardingPaths || Object.keys(onboardingPaths).length !== 7 || Object.values(onboardingPaths).some((value) => typeof value !== "string" || !value.startsWith("/"))) throw new Error("Reviewed onboarding path map is required.");
     if (!inventoryApprovalId || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(inventoryApprovalId)) throw new Error("Inventory approval ID is required.");
-    for (const [name, value] of Object.entries({ email: onboardingCredentials.email, password: onboardingCredentials.password, mfaCode: onboardingCredentials.mfaCode })) if (typeof value !== "string" || !value) throw new Error(`Onboarding credential ${name} is required at runtime and must not be written to the bootstrap output.`);
     const overlapTaskInput = buildOverlapTaskDefinition({
       backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${backendImageDigest}`,
       releaseSha: protectedSha,

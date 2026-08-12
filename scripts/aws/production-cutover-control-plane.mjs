@@ -114,7 +114,7 @@ function recordMutation(mutations, name, result) {
   if (count > 0) mutations.push({ name, count, payloadSha256: result?.mutationPayload ? sha(result.mutationPayload) : null });
 }
 
-function assertImageAuthorization(value, sourceSha) {
+export function assertImageAuthorization(value, sourceSha) {
   if (value?.valid !== true || value.sourceSha !== sourceSha || !SHA256.test(value.evidenceSha256 || "")) throw new Error("Authorized image evidence is invalid.");
   for (const field of ["signatureVerified", "attestationVerified", "provenanceVerified"]) if (value[field] !== true) throw new Error(`Image ${field} is not verified.`);
   if (value.imageReuseCompatible !== true || value.imageBuildInputsChanged !== false || !SHA40.test(value.imageReleaseSha || "") || !/^\d+$/.test(String(value.workflowRunId || ""))) throw new Error("Image authorization is not bound to canonical compatibility and publication evidence.");
@@ -124,7 +124,7 @@ function assertImageAuthorization(value, sourceSha) {
   if (value.backendDigest !== undefined && value.backendDigest !== backend) throw new Error("Image authorization backend digest aliases disagree.");
 }
 
-const authorizedBackendDigest = (value) => value?.backendDigest || value?.backend?.digest || value?.backend?.imageDigest || value?.backendImageDigest;
+export const authorizedBackendDigest = (value) => value?.backendDigest || value?.backend?.digest || value?.backend?.imageDigest || value?.backendImageDigest || value?.images?.find(({ service }) => service === "backend")?.digest;
 
 function assertOverlapInputBinding(overlapTask, imageAuthorization, artifact, sourceSha) {
   const input = overlapTask?.input;

@@ -46,7 +46,14 @@ It validates the complete adapter graph and writes only an identifier-only rotat
 redacted manifest in a 0700 runtime directory; config and manifest files are atomic 0600 outputs.
 It never creates rotation state or the rotation fixture. Those remain outputs of the coordinator's
 `--prepare` phase. The command emits one exact `run-production-cutover.mjs` command only after all
-pre-MFA inputs are valid.
+pre-MFA inputs are valid. The pre-MFA bootstrap does not collect onboarding MFA. The onboarding
+adapter reads `MSCQR_ONBOARDING_MFA_CODE` only after the live login response enters the MFA challenge
+boundary; the code is never written to rotation config, manifests, command lines, or evidence.
+The rotation config's logical `qr.previousKeyVersion` must equal the live task's
+`QR_SIGN_ACTIVE_KEY_VERSION`; separate `QR_SIGN_*_KEY_VERSION` task bindings remain identifier-only
+Secrets Manager references. Bootstrap and execution share the canonical image-authorization validator,
+including evidence, signature, attestation, provenance, source-SHA, workflow, release, service-record,
+and digest checks.
 
 Cutover input ownership is explicit:
 

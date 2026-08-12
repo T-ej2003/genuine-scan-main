@@ -40,7 +40,7 @@ export function createCookieAuthenticatedRequest({ baseUrl, fetchImpl = fetch } 
   return { request, cookieJar };
 }
 
-export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials, runtimeReadback, ecsExecEvidence, rotationStateReadback, fetchImpl = fetch } = {}) {
+export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials, getMfaCode, runtimeReadback, ecsExecEvidence, rotationStateReadback, fetchImpl = fetch } = {}) {
   if (!/^https:\/\//.test(String(baseUrl || ""))) throw new Error("Strict onboarding base URL must use HTTPS.");
   if (!paths || REQUIRED_PATHS.some((name) => typeof paths[name] !== "string" || !paths[name])) throw new Error("Strict onboarding endpoint map is incomplete.");
   if (typeof runtimeReadback !== "function" || typeof ecsExecEvidence !== "function" || typeof rotationStateReadback !== "function") throw new Error("Strict onboarding runtime evidence adapters are required.");
@@ -74,10 +74,11 @@ export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials,
         if (!login.response.ok) return false;
         const auth = login.payload?.data?.auth;
         if (auth?.sessionStage === "MFA_BOOTSTRAP") {
-          if (!/^[0-9]{6,8}$/.test(String(credentials?.mfaCode || ""))) return false;
+          const mfaCode = typeof getMfaCode === "function" ? getMfaCode() : undefined;
+          if (!/^[0-9]{6,8}$/.test(String(mfaCode || ""))) return false;
           const begun = await request("/api/auth/mfa/challenge/begin", { method: "POST", body: {} });
           if (!begun.response.ok || typeof begun.payload?.data?.ticket !== "string") return false;
-          const completed = await request("/api/auth/mfa/challenge/complete", { method: "POST", body: { ticket: begun.payload.data.ticket, code: credentials.mfaCode } });
+          const completed = await request("/api/auth/mfa/challenge/complete", { method: "POST", body: { ticket: begun.payload.data.ticket, code: mfaCode } });
           mfaCompleted = completed.response.ok;
           return mfaCompleted;
         }
