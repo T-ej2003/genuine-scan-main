@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateOnboardingContract, validateRotationClosedContract } from "../security/production-onboarding-contract.mjs";
+import { assertOnboardingPaths, PRODUCTION_ONBOARDING_PATHS, validateOnboardingContract, validateRotationClosedContract } from "../security/production-onboarding-contract.mjs";
 
 const names = ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "cookieCurrentSealOnly", "cookiePreviousOpenDuringOverlap", "artifactCurrentRuntimeVerify", "artifactHistoricalRuntimeVerify"];
 const acceptance = ["superAdminLogin", "mfa", "authMe", "refresh", "dashboardStats", "qrStats", "tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "dbReady", "redisReady", "objectStorageReady", "stageANetworkingReady"];
@@ -18,4 +18,10 @@ test("rotation closure remains separate and requires cleanup evidence", () => {
   const evidence = { cleanupEligibleAt: new Date(Date.now() - 1000).toISOString(), previousSlotsRetired: true, pendingSlotsRetired: true, cleanupDeploymentAfterRetirement: true, cleanupRuntimeVerified: true, oldJwtRejected: true, oldQrRejected: true, freshFinalRotationEvidence: true };
   assert.equal(validateRotationClosedContract(evidence), true);
   assert.throws(() => validateRotationClosedContract({ ...evidence, cleanupRuntimeVerified: false }), /cleanupRuntimeVerified/);
+});
+
+test("canonical onboarding manifest is deterministic and keeps the shared verification route semantics", () => {
+  assert.deepEqual(assertOnboardingPaths(), PRODUCTION_ONBOARDING_PATHS);
+  assert.equal(PRODUCTION_ONBOARDING_PATHS.antiCloning, PRODUCTION_ONBOARDING_PATHS.publicQrVerification);
+  assert.throws(() => assertOnboardingPaths({ ...PRODUCTION_ONBOARDING_PATHS, tenantIsolation: "/api/other" }), /tenantIsolation/);
 });

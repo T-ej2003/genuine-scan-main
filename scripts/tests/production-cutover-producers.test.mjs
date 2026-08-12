@@ -12,6 +12,7 @@ import { assertNoOnboardingEvidenceLeak } from "../security/production-strict-on
 import { createProductionInteractiveEcsExecRunner } from "../aws/production-ecs-exec-command.mjs";
 import { executeProductionRotationInventory, buildRotationInventorySql } from "../security/production-rotation-state-inventory.mjs";
 import { createCookieAuthenticatedRequest, createStrictHttpOnboardingAdapter, parseSetCookieHeaders } from "../security/production-strict-onboarding-http.mjs";
+import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
 
 const digest = `sha256:${"b".repeat(64)}`;
 const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/one";
@@ -169,6 +170,8 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
   let currentMfaCode = "123456";
   const proof = { jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true, artifactCurrentRuntimeVerify: true, artifactHistoricalRuntimeVerify: true };
   const response = (status, payload, setCookie = []) => ({ status, ok: status >= 200 && status < 300, headers: { getSetCookie: () => setCookie }, json: async () => payload });
+  const rotationFixtureFile = path.join(os.tmpdir(), `mscqr-onboarding-qr-fixture-${process.pid}.json`);
+  fs.writeFileSync(rotationFixtureFile, JSON.stringify({ token: "eyJxdF9pZCI6InByaW50ZXItdGVzdDpyb3RhdGlvbi1zeW50aGV0aWMiLCJsaWNlbnNlZV9pZCI6InJvdGF0aW9uIiwiaWF0IjoxNzAwMDAwMDAwLCJub25jZSI6ImZpeHR1cmUifQ.A" }));
   const fetchImpl = async (url, options) => {
     requests.push({ url, options });
     if (url.endsWith("/api/auth/login")) return response(200, { data: { auth: { sessionStage: "MFA_BOOTSTRAP" } } }, ["aq_access=access; Path=/", "aq_refresh=refresh; Path=/", "aq_db_session=session; Path=/", "aq_csrf=csrf; Path=/"]);
@@ -177,11 +180,12 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     if (url.endsWith("/api/auth/refresh") && options.headers["x-csrf-token"] !== "csrf") return response(403, {});
     if (url.endsWith("/version")) return response(200, { releaseGitSha: "a".repeat(40) });
     if (url.endsWith("/api/health/ready")) return response(200, { status: "ready", dependencies: { database: { ready: true }, redis: { ready: true }, objectStorage: { ready: true } } });
-    if (url.endsWith("/api/tenantIsolation") || url.endsWith("/api/rbac")) return response(403, {});
-    if (url.endsWith("/api/antiCloning")) return response(409, {});
+    if (url.includes("/api/manufacturers?licenseeId=")) return response(404, {});
+    if (url.endsWith("/api/manufacturer/printer-agent/status")) return response(403, {});
+    if (url.includes("/api/verify/ROTATION-SYNTHETIC?t=")) return response(url.endsWith("B") ? 400 : 200, {});
     return response(200, {});
   };
-  const paths = Object.fromEntries(["tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "artifactSigning", "publicQrVerification"].map((name) => [name, `/api/${name}`]));
+  const paths = PRODUCTION_ONBOARDING_PATHS;
   const run = createStrictHttpOnboardingAdapter({
     baseUrl: "https://fixture.example",
     paths,
@@ -190,6 +194,7 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
     ecsExecEvidence: async () => ({ valid: true, proof }),
     rotationStateReadback: async () => ({ rotationId: "rotation-test-1", phase: "overlap-deploy-required" }),
+    rotationFixtureFile,
     fetchImpl,
   });
   assert.equal(mfaReads, 0);
@@ -213,7 +218,9 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
     ecsExecEvidence: async () => ({ valid: true, proof }),
     rotationStateReadback: async () => ({ rotationId: "rotation-test-1", phase: "overlap-deploy-required" }),
+    rotationFixtureFile,
     fetchImpl,
   });
   await assert.rejects(() => missing({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1" }), /Mandatory onboarding check failed: superAdminLogin/);
+  fs.rmSync(rotationFixtureFile, { force: true });
 });

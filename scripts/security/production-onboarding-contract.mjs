@@ -2,6 +2,27 @@ const SHA = /^[a-f0-9]{40}$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const requiredTrue = (value, name) => { if (value !== true) throw new Error(`${name} is required`); };
 
+export const PRODUCTION_ONBOARDING_RESERVED_NONOWNING_LICENSEE_ID = "00000000-0000-4302-8000-000000000001";
+export const PRODUCTION_ONBOARDING_PATHS = Object.freeze({
+  tenantIsolation: `/api/manufacturers?licenseeId=${PRODUCTION_ONBOARDING_RESERVED_NONOWNING_LICENSEE_ID}`,
+  rbac: "/api/manufacturer/printer-agent/status",
+  auditPath: "/api/audit/logs",
+  printerTrust: "/api/manufacturer/printers",
+  antiCloning: "/api/verify/:code",
+  artifactSigning: "/api/internal/release",
+  publicQrVerification: "/api/verify/:code",
+});
+
+export const assertOnboardingPaths = (paths = PRODUCTION_ONBOARDING_PATHS) => {
+  if (!paths || Object.keys(paths).length !== 7) throw new Error("onboarding path manifest must contain exactly seven probes");
+  for (const [name, value] of Object.entries(paths)) {
+    if (!Object.hasOwn(PRODUCTION_ONBOARDING_PATHS, name) || typeof value !== "string" || value !== PRODUCTION_ONBOARDING_PATHS[name]) {
+      throw new Error(`onboarding path ${name} is invalid`);
+    }
+  }
+  return Object.freeze({ ...paths });
+};
+
 export const validateOnboardingContract = (evidence) => {
   if (!evidence || typeof evidence !== "object") throw new Error("onboarding evidence is required");
   if (evidence.valid !== true || typeof evidence.evidenceRef !== "string" || !/^[a-f0-9]{64}$/.test(evidence.evidenceSha256 || "")) throw new Error("onboarding evidence must be hash-bound and valid");

@@ -37,3 +37,16 @@ deployed secret and its payload/signature is never printed.
 Use a dedicated synthetic tenant/account and approved secret-store credentials. Run login, MFA, `/api/auth/me`,
 refresh, dashboard stats, QR stats, and public `/api/verify/:code` with a tagged synthetic run identifier.
 Customer credentials and customer QR payloads are prohibited; provisioning is operational and not performed here.
+
+## Deterministic security probes
+
+The strict production probe manifest is generated from the mounted route contract. `tenantIsolation` reads
+`GET /api/manufacturers?licenseeId=00000000-0000-4302-8000-000000000001`; this reserved non-owning fixture must
+remain absent from production, so a `403` or `404` is required and any successful data response fails closed.
+`rbac` reads `GET /api/manufacturer/printer-agent/status`, while the audit, printer-trust, and artifact-signing
+probes use their reviewed read endpoints.
+
+`antiCloning` and `publicQrVerification` intentionally share `GET /api/verify/:code`. After rotation preparation,
+the coordinator's 0600 rotation fixture supplies the identifier-only synthetic signed token in memory: the public
+probe verifies it, and the anti-cloning probe changes one signature byte and requires the route's rejection status.
+The token is never placed in the onboarding manifest, command line, logs, or onboarding evidence.

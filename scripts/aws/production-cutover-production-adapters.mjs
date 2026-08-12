@@ -272,6 +272,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       runtimeReadback,
       ecsExecEvidence: async () => latestEcsExecProof || { valid: false },
       rotationStateReadback,
+      rotationFixtureFile: config.rotationFixtureFile,
     }) },
   };
 }

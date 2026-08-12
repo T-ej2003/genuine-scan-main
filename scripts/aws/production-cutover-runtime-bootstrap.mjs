@@ -9,6 +9,7 @@ import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { RELEASE_ROLE_ARN } from "./production-identity-adapters.mjs";
 import { assertImageAuthorization, authorizedBackendDigest, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
+import { assertOnboardingPaths, PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -189,7 +190,13 @@ export function prepareProductionCutoverRuntime({
     const taskDefinition = currentTaskDefinition?.taskDefinition || currentTaskDefinition;
     const { baseUrl, currentKeyVersion } = deriveRuntimeMetadata(taskDefinition);
     const approvalConfig = buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, liveCurrentKeyVersion: currentKeyVersion });
-    if (!onboardingPaths || Object.keys(onboardingPaths).length !== 7 || Object.values(onboardingPaths).some((value) => typeof value !== "string" || !value.startsWith("/"))) throw new Error("Reviewed onboarding path map is required.");
+    const reviewedOnboardingPaths = assertOnboardingPaths(onboardingPaths || PRODUCTION_ONBOARDING_PATHS);
+    const onboardingPathsArtifact = writeStageBPrivateFileAtomic({
+      filePath: path.join(directory, "onboarding-paths.json"),
+      bytes: Buffer.from(`${JSON.stringify(reviewedOnboardingPaths, null, 2)}\n`),
+      repositoryRoot,
+      label: "Canonical onboarding path manifest",
+    });
     if (!inventoryApprovalId || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(inventoryApprovalId)) throw new Error("Inventory approval ID is required.");
     if (!stageBTfvarsPath || !stageBTfvarsBindingReportPath || !SHA256.test(stageBTfvarsBindingReportSha256 || "") || !stageBTerraformDataDir) throw new Error("Canonical Stage B tfvars and Terraform data directory are required for rotation infrastructure convergence.");
     ensureStageBPrivateFile({ filePath: stageBTfvarsPath, repositoryRoot, label: "Canonical Stage B tfvars" });
@@ -245,7 +252,9 @@ export function prepareProductionCutoverRuntime({
       rotationTerraformInputFile: writtenRotationInput.path,
       rotationTerraformInputSha256: writtenRotationInput.sha256,
       onboardingBaseUrl: baseUrl,
-      onboardingPaths,
+      onboardingPaths: reviewedOnboardingPaths,
+      onboardingPathsFile: onboardingPathsArtifact.path,
+      onboardingPathsSha256: onboardingPathsArtifact.sha256,
       rotationHealthUrl: `${baseUrl}/api/health`,
       rotationDeploymentSha: protectedSha,
       runtimeInvocationRef: approvalConfig.verificationRef,

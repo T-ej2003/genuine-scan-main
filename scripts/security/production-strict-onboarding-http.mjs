@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { runStrictOnboardingProbes } from "./production-strict-onboarding.mjs";
+import { assertOnboardingPaths } from "./production-onboarding-contract.mjs";
 
 const REQUIRED_PATHS = Object.freeze(["tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "artifactSigning", "publicQrVerification"]);
 const trim = (value) => String(value || "").replace(/\/+$/, "");
@@ -7,6 +9,23 @@ const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 function splitSetCookieHeader(value) {
   return String(value || "").split(/,(?=\s*[^=;,\s]+=)/).map((part) => part.trim()).filter(Boolean);
 }
+
+const readRotationQrFixtureToken = (fixtureFile) => {
+  if (typeof fixtureFile !== "string" || !fixtureFile) throw new Error("Rotation QR fixture file is required for public verification probes.");
+  let fixture;
+  try { fixture = JSON.parse(readFileSync(fixtureFile, "utf8")); } catch { throw new Error("Rotation QR fixture is unavailable or malformed."); }
+  if (typeof fixture?.token !== "string" || !fixture.token.trim()) throw new Error("Rotation QR fixture token is missing.");
+  return fixture.token.trim();
+};
+
+const tamperToken = (token) => `${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`;
+
+const resolveQrProbePath = (template, token) => {
+  if (typeof template !== "string" || !template.endsWith("/:code")) throw new Error("QR onboarding probe must use the reviewed /api/verify/:code route.");
+  const url = new URL(template.replace(/:code$/, "ROTATION-SYNTHETIC"), "https://onboarding.invalid");
+  url.searchParams.set("t", token);
+  return `${url.pathname}${url.search}`;
+};
 
 export function parseSetCookieHeaders(values) {
   const lines = (Array.isArray(values) ? values : splitSetCookieHeader(values)).flatMap((value) => splitSetCookieHeader(value));
@@ -40,9 +59,10 @@ export function createCookieAuthenticatedRequest({ baseUrl, fetchImpl = fetch } 
   return { request, cookieJar };
 }
 
-export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials, getMfaCode, runtimeReadback, ecsExecEvidence, rotationStateReadback, fetchImpl = fetch } = {}) {
+export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials, getMfaCode, runtimeReadback, ecsExecEvidence, rotationStateReadback, rotationFixtureFile, fetchImpl = fetch } = {}) {
   if (!/^https:\/\//.test(String(baseUrl || ""))) throw new Error("Strict onboarding base URL must use HTTPS.");
-  if (!paths || REQUIRED_PATHS.some((name) => typeof paths[name] !== "string" || !paths[name])) throw new Error("Strict onboarding endpoint map is incomplete.");
+  const reviewedPaths = assertOnboardingPaths(paths);
+  if (REQUIRED_PATHS.some((name) => typeof reviewedPaths[name] !== "string" || !reviewedPaths[name])) throw new Error("Strict onboarding endpoint map is incomplete.");
   if (typeof runtimeReadback !== "function" || typeof ecsExecEvidence !== "function" || typeof rotationStateReadback !== "function") throw new Error("Strict onboarding runtime evidence adapters are required.");
   const { request } = createCookieAuthenticatedRequest({ baseUrl, fetchImpl });
   let mfaCompleted = false;
@@ -90,13 +110,13 @@ export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials,
       refresh: async () => ok("/api/auth/refresh", { method: "POST", body: {} }),
       dashboardStats: async () => ok("/api/dashboard/stats"),
       qrStats: async () => ok("/api/qr/stats"),
-      publicQrVerification: async () => ok(paths.publicQrVerification),
-      artifactSigning: async () => ok(paths.artifactSigning),
-      tenantIsolation: async () => { const { response } = await request(paths.tenantIsolation); return [403, 404].includes(response.status); },
-      rbac: async () => { const { response } = await request(paths.rbac); return [403, 404].includes(response.status); },
-      auditPath: async () => ok(paths.auditPath),
-      printerTrust: async () => ok(paths.printerTrust),
-      antiCloning: async () => { const { response } = await request(paths.antiCloning); return [400, 401, 403, 409, 422].includes(response.status); },
+      publicQrVerification: async () => ok(resolveQrProbePath(reviewedPaths.publicQrVerification, readRotationQrFixtureToken(rotationFixtureFile))),
+      artifactSigning: async () => ok(reviewedPaths.artifactSigning),
+      tenantIsolation: async () => { const { response } = await request(reviewedPaths.tenantIsolation); return [403, 404].includes(response.status); },
+      rbac: async () => { const { response } = await request(reviewedPaths.rbac); return [403, 404].includes(response.status); },
+      auditPath: async () => ok(reviewedPaths.auditPath),
+      printerTrust: async () => ok(reviewedPaths.printerTrust),
+      antiCloning: async () => { const token = readRotationQrFixtureToken(rotationFixtureFile); const { response } = await request(resolveQrProbePath(reviewedPaths.antiCloning, tamperToken(token))); return [400, 401, 403, 409, 422].includes(response.status); },
       jwtCurrentRuntimeVerify: async () => proofCheck("jwtCurrentRuntimeVerify"),
       jwtPreviousRuntimeVerify: async () => proofCheck("jwtPreviousRuntimeVerify"),
       jwtInvalidRuntimeRejected: async () => proofCheck("jwtInvalidRuntimeRejected"),
