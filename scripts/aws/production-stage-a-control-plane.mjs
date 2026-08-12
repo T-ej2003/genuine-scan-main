@@ -1,8 +1,20 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 const REQUIRED_LOGICAL_ADDRESS = "aws_vpc_security_group_ingress_rule.runtime_endpoints_https";
+const SHA256 = /^[a-f0-9]{64}$/;
 const exact = (value, expected, message) => { if (value !== expected) throw new Error(message); };
+
+function readAndVerifyPlanSha256(planPath, expectedSha256) {
+  if (!SHA256.test(expectedSha256 || "")) throw new Error("Stage A preserved plan SHA-256 is missing or malformed.");
+  let bytes;
+  try { bytes = fs.readFileSync(planPath); } catch { throw new Error("Stage A preserved plan is missing or unreadable."); }
+  const actualSha256 = createHash("sha256").update(bytes).digest("hex");
+  const expected = Buffer.from(expectedSha256, "hex");
+  const actual = Buffer.from(actualSha256, "hex");
+  if (!timingSafeEqual(actual, expected)) throw new Error("Stage A preserved plan SHA-256 does not match the bootstrap binding.");
+  return actualSha256;
+}
 
 export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurityGroupId } = {}) {
   if (!plan || !Array.isArray(plan.resource_changes) || !endpointSecurityGroupId || !runtimeSecurityGroupId) throw new Error("Stage A plan inputs are incomplete.");
@@ -43,7 +55,7 @@ export async function runStageAControlPlane({ adapter, endpointSecurityGroupId, 
   return { valid: true, ...validation, appliedExactSavedPlan: !validation.alreadyConverged, postconditionVerified: true, evidenceRef: saved.evidenceRef, evidenceSha256: saved.evidenceSha256, mutationCount: validation.alreadyConverged ? 0 : 1 };
 }
 
-export function createTerraformStageAAdapter({ terraform = "terraform", root = "infra/aws/terraform/production-green-stage-a", backendArgs = [], planPath, run, describeIngress, sourceSha, region = "eu-west-2" } = {}) {
+export function createTerraformStageAAdapter({ terraform = "terraform", root = "infra/aws/terraform/production-green-stage-a", backendArgs = [], planPath, stageAPlanSha256, run, describeIngress, sourceSha, region = "eu-west-2" } = {}) {
   if (typeof run !== "function" || typeof describeIngress !== "function" || !path.isAbsolute(planPath || "")) throw new Error("Stage A Terraform adapter is incomplete.");
   if (sourceSha && !/^[a-f0-9]{40}$/.test(sourceSha)) throw new Error("Stage A source SHA is invalid.");
   if (!/^[a-z]{2}-[a-z]+-[0-9]$/.test(region)) throw new Error("Stage A region is invalid.");
@@ -51,18 +63,23 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
   return {
     async createSavedPlan() {
       if (fs.existsSync(planPath)) {
+        readAndVerifyPlanSha256(planPath, stageAPlanSha256);
         await run([terraform, `-chdir=${root}`, "init", "-upgrade=false", "-input=false", "-backend=false"]);
       } else {
+        if (stageAPlanSha256 !== undefined) throw new Error("Stage A preserved plan is missing.");
         await run([terraform, `-chdir=${root}`, "init", "-upgrade=false", "-input=false", ...backendArgs]);
         await run([terraform, `-chdir=${root}`, "plan", "-input=false", "-out", planPath]);
       }
       const plan = JSON.parse(await run([terraform, `-chdir=${root}`, "show", "-json", planPath]));
       const bytes = fs.readFileSync(planPath);
       savedPlanSha256 = createHash("sha256").update(bytes).digest("hex");
+      if (stageAPlanSha256 !== undefined) readAndVerifyPlanSha256(planPath, stageAPlanSha256);
       return { plan, planPath, savedPlanSha256, sourceSha, region, terraformRoot: root, evidenceRef: `terraform-plan:${planPath}`, evidenceSha256: savedPlanSha256 };
     },
     async applySavedPlan(saved) {
-      if (!saved || saved.planPath !== planPath || saved.savedPlanSha256 !== savedPlanSha256 || createHash("sha256").update(fs.readFileSync(planPath)).digest("hex") !== savedPlanSha256) throw new Error("Stage A saved plan changed after validation.");
+      if (!saved || saved.planPath !== planPath || saved.savedPlanSha256 !== savedPlanSha256) throw new Error("Stage A saved plan changed after validation.");
+      const currentSha256 = stageAPlanSha256 === undefined ? createHash("sha256").update(fs.readFileSync(planPath)).digest("hex") : readAndVerifyPlanSha256(planPath, stageAPlanSha256);
+      if (currentSha256 !== savedPlanSha256) throw new Error("Stage A saved plan changed after validation.");
       await run([terraform, `-chdir=${root}`, "apply", "-input=false", planPath]);
     },
     describeIngress,

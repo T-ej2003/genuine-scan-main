@@ -199,6 +199,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   const stageA = createTerraformStageAAdapter({
     root: config.stageARoot,
     planPath: config.stageAPlanPath,
+    stageAPlanSha256: config.stageAPlanSha256,
     backendArgs: config.stageABackendArgs || [],
     sourceSha,
     region: REGION,
