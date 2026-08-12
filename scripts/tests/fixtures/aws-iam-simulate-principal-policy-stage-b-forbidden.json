@@ -505,32 +505,15 @@
       }
     },
     {
-      "manifestId": "invoke-broker",
+      "manifestId": "release-deployer-ecs-exec",
       "response": {
         "EvaluationResults": [
           {
-            "EvalActionName": "lambda:InvokeFunction",
-            "EvalResourceName": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
+            "EvalActionName": "ecs:ExecuteCommand",
+            "EvalResourceName": "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*",
             "EvalDecision": "implicitDeny",
             "MatchedStatements": [],
-            "MissingContextValues": [
-              "aws:ResourceTag/Component",
-              "aws:ResourceTag/ManagedBy",
-              "ecs:task-cpu",
-              "ecs:cluster",
-              "iam:PassedToService",
-              "ecs:compute-compatibility",
-              "aws:RequestedRegion",
-              "ecs:privileged",
-              "aws:RequestTag/Component",
-              "ecs:task-memory",
-              "ecs:task-definition",
-              "aws:RequestTag/ManagedBy",
-              "aws:RequestTag/MSCQRExecTarget",
-              "aws:RequestTag/Environment",
-              "aws:TagKeys",
-              "aws:ResourceTag/Environment"
-            ]
+            "MissingContextValues": []
           }
         ]
       }

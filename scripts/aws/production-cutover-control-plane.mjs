@@ -18,11 +18,11 @@ export const CUTOVER_STAGE_DEFINITIONS = Object.freeze([
   ["iamPreflight", "identities", "iam-preflight-to-identities", ["status", "iamEvaluationCensus", "ecsExecVerifierTrust"]],
   ["identities", "stageA", "identities-to-stage-a", ["releaseDeployer", "verifier", "rootDrop"]],
   ["stageA", "artifactSigning", "stage-a-to-artifact-signing", ["evidenceRef", "evidenceSha256", "postconditionVerified"]],
-  ["artifactSigning", "overlapTaskDefinition", "artifact-signing-to-overlap-task-definition", ["activeKeyVersion", "bindings"]],
+  ["artifactSigning", "preDeploymentInventory", "artifact-signing-to-predeployment-inventory", ["evidenceRef", "evidenceSha256"]],
+  ["preDeploymentInventory", "rotationPrepare", "predeployment-inventory-to-rotation-prepare", ["evidenceRef", "evidenceSha256", "inventory"]],
+  ["rotationPrepare", "overlapTaskDefinition", "rotation-prepare-to-overlap-task-definition", ["rotationId", "rotationStateSha256", "rotationPrepared"]],
   ["overlapTaskDefinition", "registrationReadback", "overlap-task-definition-to-registration-readback", ["taskDefinitionArn", "tags", "evidenceSha256"]],
-  ["registrationReadback", "inventory", "registration-readback-to-inventory", ["registeredTaskDefinitionArn", "evidenceSha256"]],
-  ["inventory", "rotationPrepare", "inventory-to-rotation-prepare", ["evidenceRef", "evidenceSha256", "inventory"]],
-  ["rotationPrepare", "readiness", "rotation-prepare-to-readiness", ["rotationId", "rotationStateSha256", "rotationPrepared"]],
+  ["registrationReadback", "readiness", "registration-readback-to-readiness", ["sourceSha", "rotationId", "rotationStateSha256"]],
   ["readiness", "deployment", "readiness-to-overlap-deployment", ["sourceSha", "rotationId", "rotationStateSha256", "ecsUpdateServiceCount"]],
   ["deployment", "postDeploy", "overlap-deployment-to-service-stable", ["taskDefinitionArn", "propagateTags", "updateServiceCount"]],
   ["postDeploy", "ecsExecSelection", "service-stable-to-ecs-exec-selection", ["taskArn", "taskDefinitionArn", "imageDigest", "taskTag", "selectedTaskArn"]],
@@ -149,7 +149,7 @@ function assertIamReport(report) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
-  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, iam, iamReport = iam?.report, identities: suppliedIdentities, stageA, artifactSigning, overlapTask, inventory, rotationPrepare, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, iam, iamReport = iam?.report, identities: suppliedIdentities, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
   if (!SHA40.test(sourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
   const mutations = [];
   const results = { protectedMain: { valid: true, sourceSha, evidenceSha256: imageAuthorization?.evidenceSha256 } , imageAuthorization };
@@ -194,21 +194,25 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.artifactSigning = { ...artifact, sourceSha, evidenceRef: artifactSigning.evidenceRef || `artifact-signing:${artifact.activeKeyVersion}`, evidenceSha256: artifactSigning.evidenceSha256 || sha(artifact), postconditionVerified: stageAResult.postconditionVerified };
   if (/secret|password|token|private/i.test(results.artifactSigning.evidenceRef)) throw new Error("Artifact signing evidence reference is unsafe.");
 
-  assertOverlapInputBinding(runtimeOverlapTask, imageAuthorization, results.artifactSigning, sourceSha);
-  const task = await registerOverlapTaskDefinition(runtimeOverlapTask);
-  recordMutation(mutations, "M4_REGISTER_TASK_DEFINITION", task);
-  results.overlapTaskDefinition = { ...task, sourceSha, activeKeyVersion: artifact.activeKeyVersion, bindings: task.input?.secretBindings || runtimeOverlapTask.input?.secretBindings };
-  results.registrationReadback = { ...results.overlapTaskDefinition, registeredTaskDefinitionArn: task.taskDefinitionArn };
+  const verifierSession = identities.verifier?.session;
+  const preDeploymentExecute = preDeploymentInventory?.execute || inventory?.execute;
+  const inventoryResult = await produceRuntimeRotationInventory({ execute: preDeploymentExecute, sourceSha, rotationId, taskDefinitionArn: preDeploymentInventory?.taskDefinitionArn || inventory?.taskDefinitionArn, verifierSession });
+  if (inventoryResult.mutationCount) recordMutation(mutations, "M4_REGISTER_PREDEPLOYMENT_INVENTORY_TASK_DEFINITION", inventoryResult);
+  results.preDeploymentInventory = { ...inventoryResult, sourceSha, rotationId };
+  results.inventory = results.preDeploymentInventory;
+  results.runtimeInventory = results.preDeploymentInventory;
 
-  const inventoryResult = await produceRuntimeRotationInventory({ execute: inventory?.execute, sourceSha, rotationId, taskDefinitionArn: inventory?.taskDefinitionArn, registeredTaskDefinitionArn: task.taskDefinitionArn });
-  results.inventory = { ...inventoryResult, sourceSha, rotationId, registeredTaskDefinitionArn: task.taskDefinitionArn };
-  results.runtimeInventory = results.inventory;
-
-  const rotation = await rotationPrepare.run({ inventory: inventoryResult, rotationId, taskDefinitionArn: task.taskDefinitionArn });
+  const rotation = await rotationPrepare.run({ inventory: inventoryResult, rotationId });
   if (rotation?.prepared !== true || rotation.rotationId !== rotationId || !SHA256.test(rotation.rotationStateSha256 || "") || (expectedRotationStateSha256 !== undefined && rotation.rotationStateSha256 !== expectedRotationStateSha256)) throw new Error("Rotation preparation is not bound to the persisted state.");
   const rotationStateSha256 = rotation.rotationStateSha256;
   recordMutation(mutations, "M5_ROTATION_STATE_PERSISTENCE", rotation);
   results.rotationPrepare = { ...rotation, sourceSha, rotationPrepared: rotation.prepared === true, inventory: inventoryResult.inventory };
+
+  assertOverlapInputBinding(runtimeOverlapTask, imageAuthorization, results.artifactSigning, sourceSha);
+  const task = await registerOverlapTaskDefinition(runtimeOverlapTask);
+  recordMutation(mutations, "M4_REGISTER_TASK_DEFINITION", task);
+  results.overlapTaskDefinition = { ...task, sourceSha, rotationId, rotationStateSha256, rotationPrepared: true, activeKeyVersion: artifact.activeKeyVersion, bindings: task.input?.secretBindings || runtimeOverlapTask.input?.secretBindings };
+  results.registrationReadback = { ...results.overlapTaskDefinition, registeredTaskDefinitionArn: task.taskDefinitionArn, sourceSha, rotationId, rotationStateSha256: rotation.rotationStateSha256, rotationPrepared: true };
 
   const stages = {
     imageAuthorization: stageEvidence("imageAuthorization", imageAuthorization, { sourceSha }),
@@ -233,14 +237,14 @@ export async function runProductionCutoverControlPlane(input = {}) {
   recordMutation(mutations, "M6_ECS_UPDATE_SERVICE", deployment);
   results.deployment = { ...deployment, sourceSha, rotationId, rotationStateSha256, ecsUpdateServiceCount: deployment.updateServiceCount };
 
-  const deployed = await postDeploy.run({ deployment, taskDefinitionArn: task.taskDefinitionArn });
+  const deployed = await postDeploy.run({ deployment, taskDefinitionArn: task.taskDefinitionArn, verifierSession });
   if (deployed?.valid !== true) throw new Error("Post-deployment verification is invalid.");
   const expectedImageDigest = task.taskDefinition.containerDefinitions?.find(({ name }) => name === "backend")?.image?.split("@").at(-1);
   if (deployed.taskDefinitionArn !== task.taskDefinitionArn || deployed.imageDigest !== expectedImageDigest || deployed.taskTag !== "MSCQRExecTarget=production-backend" || typeof deployed.taskArn !== "string") throw new Error("Replacement task did not converge to the reviewed task-definition, digest, and execution marker.");
   results.postDeploy = { ...deployed, sourceSha, rotationId, selectedTaskArn: deployed.taskArn, propagateTags: deployment.propagateTags, updateServiceCount: deployment.updateServiceCount };
 
   let execProof = { valid: true, evidenceRef: "ecs-exec:rehearsal", evidenceSha256: sha({ taskArn: deployed.taskArn }) };
-  if (ecsExec?.run) execProof = await ecsExec.run({ taskArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, sourceSha, rotationId });
+  if (ecsExec?.run) execProof = await ecsExec.run({ taskArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, sourceSha, rotationId, verifierSession });
   if (execProof?.valid !== true) throw new Error("ECS Exec runtime proof is invalid.");
   results.ecsExec = { ...execProof, sourceSha, rotationId, taskArn: deployed.taskArn, selectedTaskArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, taskTag: "MSCQRExecTarget=production-backend", targetTaskArn: deployed.taskArn, revalidatedArn: deployed.taskArn, runtimeProof: true };
   results.ecsExecSelection = { valid: true, evidenceRef: execProof.evidenceRef, evidenceSha256: execProof.evidenceSha256, sourceSha, rotationId, taskArn: deployed.taskArn, selectedTaskArn: deployed.taskArn, targetTaskArn: deployed.taskArn, revalidatedArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, taskTag: "MSCQRExecTarget=production-backend", runtimeProof: true };

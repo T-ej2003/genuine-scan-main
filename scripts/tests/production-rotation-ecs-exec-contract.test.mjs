@@ -57,7 +57,7 @@ test("ExecuteCommand evidence binds an immutable task identity marker", () => {
   const required = ECS_EXEC_OPERATOR_REQUIRED.find(({ action }) => action === "ecs:ExecuteCommand");
   assert.equal(required.resources[0], "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*");
   assert.deepEqual(required.context.find(({ key }) => key === "aws:ResourceTag/MSCQRExecTarget"), { key: "aws:ResourceTag/MSCQRExecTarget", type: "string", values: ["production-backend"] });
-  for (const id of ["operator-unrelated-task", "operator-worker-task", "operator-rls-executor-task", "operator-rls-canary-task", "operator-wrong-container", "operator-missing-identity-marker"]) {
+  for (const id of ["operator-unrelated-task", "operator-worker-task", "operator-rls-executor-task", "operator-rls-canary-task", "operator-wrong-container", "operator-missing-identity-marker", "operator-run-predeployment-inventory"]) {
     assert.ok(ECS_EXEC_OPERATOR_FORBIDDEN.some((entry) => entry.id === id), `missing negative ${id}`);
   }
 });

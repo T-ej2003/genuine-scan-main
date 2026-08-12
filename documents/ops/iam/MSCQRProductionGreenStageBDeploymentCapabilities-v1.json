@@ -589,7 +589,7 @@
         "sid": "UpdateExactStageBBackendService",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": true
@@ -765,7 +765,7 @@
         "sid": "BootstrapExactArtifactSigningSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": false
@@ -805,7 +805,7 @@
         "sid": "BootstrapExactArtifactSigningSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": false
@@ -845,7 +845,7 @@
         "sid": "BootstrapExactArtifactSigningSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": false
@@ -885,7 +885,7 @@
         "sid": "BootstrapExactArtifactSigningSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": false
@@ -991,7 +991,7 @@
         "sid": "ManageExactArtifactSigningSecretValues",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": false
@@ -1024,7 +1024,7 @@
         "sid": "ManageExactArtifactSigningSecretValues",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": false
@@ -1833,6 +1833,41 @@
       "mutation": true
     },
     {
+      "id": "manifest-describe-predeployment-inventory-task-definition",
+      "phase": "wrapper-apply",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "describe-predeployment-inventory-task-definition",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "direct",
+      "probeIds": [
+        "audit-task-definition"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeStageBTaskDefinitionsReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "56eb148a9a925e56c83c074680aa91588a61747505f143b3a12b5f4a6c152f62"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "manifest-execute-ecs-task",
       "phase": "refresh-only",
       "identity": "ADMINISTRATOR",
@@ -1858,26 +1893,34 @@
       "mutation": true
     },
     {
-      "id": "manifest-invoke-broker",
-      "phase": "refresh-only",
-      "identity": "ADMINISTRATOR",
-      "executor": "iam-simulator",
+      "id": "manifest-invoke-predeployment-inventory-broker",
+      "phase": "wrapper-apply",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
       "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
-      "sourceFunction": "invoke-broker",
+      "sourceFunction": "invoke-predeployment-inventory-broker",
       "action": "lambda:InvokeFunction",
       "resources": [
-        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"
       ],
-      "context": [],
-      "classification": "FORBIDDEN",
-      "probe": "administrator-simulation",
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
       "probeIds": [],
       "policy": {
-        "sourceFile": null,
-        "sid": "implicit-deny",
-        "livePolicyArn": null,
-        "expectedVersion": null,
-        "expectedPolicySha256": null
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "InvokeExactPreDeploymentInventoryBrokerAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": true
@@ -1968,7 +2011,7 @@
         "sid": "PruneExactStageBBrokerManagedPolicyVersions",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": true
@@ -2022,7 +2065,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": true
@@ -2649,6 +2692,105 @@
       "mutation": false
     },
     {
+      "id": "manifest-register-predeployment-inventory-task-definition",
+      "phase": "wrapper-apply",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "register-predeployment-inventory-task-definition",
+      "action": "ecs:RegisterTaskDefinition",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:RequestTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:RequestTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:RequestTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-b"
+          ]
+        },
+        {
+          "key": "aws:RequestTag/MSCQRPreDeploymentInventory",
+          "type": "string",
+          "values": [
+            "rotation-inventory"
+          ]
+        },
+        {
+          "key": "aws:TagKeys",
+          "type": "stringList",
+          "values": [
+            "Component",
+            "Environment",
+            "ManagedBy",
+            "MSCQRPreDeploymentInventory"
+          ]
+        },
+        {
+          "key": "ecs:compute-compatibility",
+          "type": "stringList",
+          "values": [
+            "FARGATE"
+          ]
+        },
+        {
+          "key": "ecs:privileged",
+          "type": "string",
+          "values": [
+            "false"
+          ]
+        },
+        {
+          "key": "ecs:task-cpu",
+          "type": "numeric",
+          "values": [
+            "256"
+          ]
+        },
+        {
+          "key": "ecs:task-memory",
+          "type": "numeric",
+          "values": [
+            "512"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "RegisterExactStageBTaskDefinitions1024",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c5207787b5401e3cbc0351fd67e8ed7279d2afd084f6614f9826186e2d3f53c4"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "manifest-release-deployer-ecs-exec",
       "phase": "refresh-only",
       "identity": "ADMINISTRATOR",
@@ -2709,7 +2851,7 @@
         "sid": "PassExactLegacyBackendRolesForReviewedRollback",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": true
@@ -2742,7 +2884,7 @@
         "sid": "PassExactLegacyBackendRolesForReviewedRollback",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": true
@@ -2789,7 +2931,7 @@
         "sid": "UpdateExactStageBBackendService",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": true
@@ -2892,6 +3034,39 @@
         "livePolicyArn": null,
         "expectedVersion": null,
         "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "manifest-tag-predeployment-inventory-task-definition",
+      "phase": "wrapper-apply",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "tag-predeployment-inventory-task-definition",
+      "action": "ecs:TagResource",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "TagExactPreDeploymentInventoryTaskDefinition",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c5207787b5401e3cbc0351fd67e8ed7279d2afd084f6614f9826186e2d3f53c4"
       },
       "required": true,
       "mutation": true
@@ -3011,7 +3186,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": true
@@ -3065,7 +3240,7 @@
         "sid": "UpdateExactStageBBrokerFunctionRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": true
@@ -3090,7 +3265,7 @@
         "sid": "UpdateExactStageBBrokerManagedPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": true
@@ -3184,7 +3359,7 @@
         "sid": "UpdateExactStageBBrokerReviewedAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2"
+        "expectedPolicySha256": "64fc2eafb25c3fdf2a773978f7ecd2ebe575b710377a0aeef2fe940a0dc307ad"
       },
       "required": true,
       "mutation": true
@@ -3733,6 +3908,46 @@
           "type": "string",
           "values": [
             "rls-executor"
+          ]
+        }
+      ],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "operator-operator-run-predeployment-inventory",
+      "phase": "runtime-verification",
+      "identity": "ECS_EXEC_VERIFIER_OPERATOR",
+      "executor": "ecs-exec-verifier",
+      "sourceFile": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",
+      "sourceFunction": "operator-run-predeployment-inventory",
+      "action": "ecs:RunTask",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
           ]
         }
       ],
@@ -4865,6 +5080,54 @@
       "mutation": false
     },
     {
+      "id": "runtime-ecs-describetaskdefinition",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
+      "id": "runtime-ecs-describetasks",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "ecs:DescribeTasks",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
       "id": "runtime-ecs-runtask",
       "phase": "runtime-activation-boundary",
       "identity": "SERVICE_RUNTIME",
@@ -4872,6 +5135,54 @@
       "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
       "sourceFunction": "generated runtime IAM policy",
       "action": "ecs:RunTask",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
+      "id": "runtime-ecs-stoptask",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "ecs:StopTask",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
+      "id": "runtime-ecs-tagresource",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "ecs:TagResource",
       "resources": [
         "terraform-derived-runtime-resource"
       ],
@@ -4944,6 +5255,54 @@
       "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
       "sourceFunction": "generated runtime IAM policy",
       "action": "logs:CreateLogStream",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
+      "id": "runtime-logs-describelogstreams",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "logs:DescribeLogStreams",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
+      "id": "runtime-logs-getlogevents",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "logs:GetLogEvents",
       "resources": [
         "terraform-derived-runtime-resource"
       ],

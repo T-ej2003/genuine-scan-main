@@ -1,0 +1,36 @@
+{
+  "family": "mscqr-production-rls-green-predeployment-inventory",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "{{INVENTORY_EXECUTION_ROLE_ARN}}",
+  "taskRoleArn": "{{INVENTORY_TASK_ROLE_ARN}}",
+  "containerDefinitions": [{
+    "name": "inventory",
+    "image": "{{BACKEND_IMAGE}}",
+    "essential": true,
+    "entryPoint": ["node"],
+    "command": ["/app/scripts/production-rotation-state-inventory.mjs"],
+    "readonlyRootFilesystem": true,
+    "privileged": false,
+    "interactive": false,
+    "pseudoTerminal": false,
+    "environment": [
+      { "name": "RELEASE_GIT_SHA", "value": "{{RELEASE_SHA}}" },
+      { "name": "ROTATION_INVENTORY_APPROVED", "value": "true" },
+      { "name": "ROTATION_INVENTORY_RLS_ROLE", "value": "{{ROTATION_INVENTORY_RLS_ROLE}}" }
+    ],
+    "secrets": [
+      { "name": "DATABASE_URL", "valueFrom": "{{DATABASE_URL}}" }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-region": "eu-west-2",
+        "awslogs-group": "{{INVENTORY_LOG_GROUP}}",
+        "awslogs-stream-prefix": "predeployment-inventory"
+      }
+    }
+  }]
+}

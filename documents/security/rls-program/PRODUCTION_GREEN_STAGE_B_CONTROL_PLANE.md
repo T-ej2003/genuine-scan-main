@@ -126,6 +126,24 @@ endpoint topology; no illustrative price is encoded in this release contract.
 5. Stop on any broker receipt, executor receipt, catalogue, or canary mismatch.
 6. Never change `mscqr-frontend:20` or traffic before mandatory green canaries pass.
 
+## Pre-deployment inventory broker boundary
+
+The pre-deployment rotation inventory is a separate, terminating Fargate task. The broker
+requires the normalized `mscqr-production-rls-green-predeployment-inventory` task definition
+to contain exactly one `inventory` container, the approved immutable backend digest, fixed
+`node /app/scripts/production-rotation-state-inventory.mjs` execution, the reviewed
+`DATABASE_URL` secret reference, read-only root filesystem, and the reviewed awslogs target.
+The broker requests `DescribeTaskDefinition` with `TAGS` and validates tags from the AWS
+response's top-level `tags` field; nested mock-only tags are rejected.
+
+The broker polls at most 30 times at 2 seconds, with a 100-second operation deadline and a
+20-second log-retrieval budget. Its Lambda timeout is 180 seconds, leaving a 30-second
+cleanup margin so timeout and `StopTask` handling execute before the platform deadline.
+`RunTask` is fixed to one Fargate task in the reviewed private subnets/security group with
+public IP assignment disabled and no overrides. Any sidecar, extra environment/secret,
+mount, port, capability, privilege, image, command, entrypoint, role, or log target fails
+before launch. The post-deployment governed ECS Exec selector remains a separate later gate.
+
 ## Next AWS deployment package
 
 Create the endpoint/endpoint-SG policy, Lambda function/version/`reviewed` alias and

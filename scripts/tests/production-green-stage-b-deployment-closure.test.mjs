@@ -142,6 +142,27 @@ const canonicalBrokerPolicy = () => ({
       ],
     },
     {
+      Sid: "RunOnlyApprovedPreDeploymentInventory",
+      Effect: "Allow",
+      Action: ["ecs:RunTask"],
+      Resource: ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*"]
+    },
+    {
+      Sid: "ReadAndStopOnlyPreDeploymentInventory",
+      Effect: "Allow",
+      Action: ["ecs:DescribeTaskDefinition", "ecs:DescribeTasks", "ecs:StopTask"],
+      Resource: [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*",
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*",
+      ],
+    },
+    {
+      Sid: "TagOnlyPreDeploymentInventoryTasks",
+      Effect: "Allow",
+      Action: ["ecs:TagResource"],
+      Resource: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*",
+    },
+    {
       Sid: "PassOnlyApprovedTaskRoles",
       Effect: "Allow",
       Action: ["iam:PassRole"],
@@ -150,6 +171,8 @@ const canonicalBrokerPolicy = () => ({
         "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
         "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
         "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
       ],
       Condition: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } },
     },
@@ -158,6 +181,7 @@ const canonicalBrokerPolicy = () => ({
     { Sid: "VerifyOnlyStageAApprovalKey", Effect: "Allow", Action: ["kms:Verify"], Resource: "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478" },
     { Sid: "WriteOnlyBrokerReceipts", Effect: "Allow", Action: ["s3:PutObject"], Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-broker-receipts/*" },
     { Sid: "WriteOnlyStageABrokerLogs", Effect: "Allow", Action: ["logs:CreateLogStream", "logs:PutLogEvents"], Resource: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:log-stream:*" },
+    { Sid: "ReadOnlyPreDeploymentInventoryLogs", Effect: "Allow", Action: ["logs:DescribeLogStreams", "logs:GetLogEvents"], Resource: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:log-stream:*" },
   ],
 });
 

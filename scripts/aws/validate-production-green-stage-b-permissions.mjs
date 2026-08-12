@@ -346,6 +346,7 @@ export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
   { key: "aws:RequestTag/Environment", type: "string", values: Object.freeze(["production"]) },
   { key: "aws:RequestTag/ManagedBy", type: "string", values: Object.freeze(["Terraform"]) },
   { key: "aws:RequestTag/MSCQRExecTarget", type: "string", values: Object.freeze(["production-backend"]) },
+  { key: "aws:RequestTag/MSCQRPreDeploymentInventory", type: "string", values: Object.freeze(["rotation-inventory"]) },
   { key: "aws:RequestedRegion", type: "string", values: Object.freeze([REGION]) },
   { key: "aws:ResourceTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-b"]) },
   { key: "aws:ResourceTag/Environment", type: "string", values: Object.freeze(["production"]) },

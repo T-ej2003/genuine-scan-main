@@ -197,6 +197,9 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
       "local.broker_approval_expected", "local.broker_images", "local.broker_template_hashes",
       "var.approval_secret_arn", "var.ecs_cluster_arn", "var.private_subnet_ids", "var.receipt_bucket_arn",
       "var.stage_a_executor_security_group_id", "var.stage_b_recovery_broker_environment", "var.stage_b_recovery_only",
+      "aws_iam_role.execution", "aws_iam_role.execution[\"backend\"]", "aws_iam_role.execution[\"backend\"].arn",
+      "aws_iam_role.task", "aws_iam_role.task[\"backend\"]", "aws_iam_role.task[\"backend\"].arn",
+      "local.logs.backend", "var.account_id", "var.aws_region", "var.backend_image",
     ],
     filename: ["var.broker_package_path"],
     role: ["var.stage_a_broker_role_arn"],
@@ -541,6 +544,9 @@ const BROKER_ENVIRONMENT_VARIABLES = Object.freeze([
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
   "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
+  "INVENTORY_ASSIGN_PUBLIC_IP", "INVENTORY_EXECUTION_ROLE_ARN", "INVENTORY_IMAGE_DIGEST",
+  "INVENTORY_LOG_GROUP_NAME", "INVENTORY_PRIVATE_SUBNETS_JSON", "INVENTORY_SECURITY_GROUPS_JSON",
+  "INVENTORY_TASK_DEFINITION_FAMILY_ARN", "INVENTORY_TASK_ROLE_ARN",
 ]);
 const brokerTaskDefinitionModes = Object.freeze(Object.fromEntries([
   ["full-rls-application-canary", STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']],
@@ -563,6 +569,16 @@ function assertConcreteBrokerEnvironment(variables) {
     || variables.BROKER_CLUSTER_ARN !== STAGE_B.clusterArn
     || variables.BROKER_APPROVAL_SECRET_ARN !== STAGE_B.approvalSecretArn
     || variables.BROKER_EXECUTOR_SECURITY_GROUP_ID !== STAGE_B.executorSecurityGroupId) {
+    throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables");
+  }
+  if (variables.INVENTORY_ASSIGN_PUBLIC_IP !== "DISABLED"
+    || variables.INVENTORY_LOG_GROUP_NAME !== STAGE_B.inventoryLogGroupName
+    || variables.INVENTORY_TASK_DEFINITION_FAMILY_ARN !== `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:1`
+    || !/^\d{12}\.dkr\.ecr\.[^@]+@sha256:[a-f0-9]{64}$/.test(variables.INVENTORY_IMAGE_DIGEST)
+    || variables.INVENTORY_TASK_ROLE_ARN !== `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-task`
+    || variables.INVENTORY_EXECUTION_ROLE_ARN !== `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-execution`
+    || JSON.stringify(parseEnvironmentJson(variables.INVENTORY_PRIVATE_SUBNETS_JSON, "INVENTORY_PRIVATE_SUBNETS_JSON")) !== JSON.stringify(STAGE_B.privateSubnetIds)
+    || JSON.stringify(parseEnvironmentJson(variables.INVENTORY_SECURITY_GROUPS_JSON, "INVENTORY_SECURITY_GROUPS_JSON")) !== JSON.stringify([STAGE_B.executorSecurityGroupId])) {
     throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables");
   }
   const taskDefinitions = parseEnvironmentJson(variables.BROKER_TASK_DEFINITIONS_JSON, "BROKER_TASK_DEFINITIONS_JSON");

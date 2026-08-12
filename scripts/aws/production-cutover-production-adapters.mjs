@@ -6,6 +6,7 @@ import { createAwsArtifactSigningAdapter } from "./production-artifact-signing-s
 import { createAwsOverlapTaskRegistrationAdapter } from "./production-overlap-task-definition.mjs";
 import { createTerraformStageAAdapter } from "./production-stage-a-control-plane.mjs";
 import { createProductionRuntimeInventoryAdapter } from "./production-runtime-inventory-adapter.mjs";
+import { createProductionPreDeploymentInventoryAdapter } from "./production-predeployment-inventory-adapter.mjs";
 import { createProductionRotationPrepareAdapter } from "./production-rotation-prepare-adapter.mjs";
 import { createProductionInteractiveEcsExecRunner, extractMarkedJson } from "./production-ecs-exec-command.mjs";
 import { establishReleaseDeployerIdentity, establishVerifierIdentity, createAwsStsRunner } from "./production-identity-adapters.mjs";
@@ -131,8 +132,13 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   const releaseRun = createProductionCommandRunner({ profile: releaseProfile });
   const releaseSts = createAwsStsRunner({ profile: releaseProfile });
   const verifierSts = createAwsStsRunner({ profile: config.bootstrapProfile || verifierProfile });
-  const verifierInteractive = () => createProductionInteractiveEcsExecRunner({ spawn: verifierSts.spawnAsVerifier });
-  const verifierEcs = createLazyEcsAdapter(() => verifierSts.runAsVerifier, verifierInteractive);
+  let verifierSession = null;
+  const requireVerifierSession = () => {
+    if (!verifierSession) throw new Error("Verifier session must be established before verifier-owned operations.");
+    return verifierSession;
+  };
+  const verifierInteractive = () => createProductionInteractiveEcsExecRunner({ spawn: requireVerifierSession().spawn });
+  const verifierEcs = createLazyEcsAdapter(() => requireVerifierSession().run, verifierInteractive);
   let latestEcsExecProof = null;
   const runtimeReadback = async ({ imageDigest, taskDefinitionArn, taskArn }) => {
     const service = await verifierEcs.describeService();
@@ -161,20 +167,28 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   const overlapRegistration = createAwsOverlapTaskRegistrationAdapter({ run: async (args) => releaseRun(args) });
   const inventoryExecute = createProductionRuntimeInventoryAdapter({
     ecs: verifierEcs,
+    getVerifierSession: requireVerifierSession,
     expected: { expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: config.inventoryTaskDefinitionArn || config.expectedCurrentTaskDefinitionArn, expectedImageDigest: config.backendImageDigest, serviceName: SERVICE, containerName: CONTAINER },
   });
+  const preDeploymentInventory = createProductionPreDeploymentInventoryAdapter({ run: async (args) => releaseRun(args), sourceSha, imageDigest: config.backendImageDigest, config });
   return {
     iam: { report: readIamEvidence(), reconcile: async () => ({ mutationCount: 0 }) },
     identities: {
-      establish: async () => ({
-        rootDrop: jsonFile(config.rootDropEvidenceFile),
-        releaseDeployer: await establishReleaseDeployerIdentity({ adapter: releaseSts }),
-        verifier: await establishVerifierIdentity({ adapter: verifierSts, mfaSerial: process.env.MSCQR_VERIFIER_MFA_SERIAL, mfaCode: process.env.MSCQR_VERIFIER_MFA_CODE }),
-      }),
+      establish: async () => {
+        const releaseDeployer = await establishReleaseDeployerIdentity({ adapter: releaseSts });
+        const verifier = await establishVerifierIdentity({ adapter: verifierSts, mfaSerial: process.env.MSCQR_VERIFIER_MFA_SERIAL, mfaCode: process.env.MSCQR_VERIFIER_MFA_CODE });
+        verifierSession = verifier.session || verifierSts.getVerifierSession();
+        return {
+          rootDrop: jsonFile(config.rootDropEvidenceFile),
+          releaseDeployer,
+          verifier,
+        };
+      },
     },
     stageA: { adapter: stageA, endpointSecurityGroupId: config.endpointSecurityGroupId, runtimeSecurityGroupId: config.runtimeSecurityGroupId },
     artifactSigning: artifact,
     overlapTask: { input: config.overlapTaskInput, register: overlapRegistration, describe: async (arn) => parseJson(releaseRun, ["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]).taskDefinition },
+    preDeploymentInventory: { execute: async ({ rotationId: currentRotationId }) => preDeploymentInventory.run({ rotationId: currentRotationId }) },
     inventory: { execute: inventoryExecute, taskDefinitionArn: config.inventoryTaskDefinitionArn || config.expectedCurrentTaskDefinitionArn },
     rotationPrepare: createProductionRotationPrepareAdapter({
       run: async (args) => releaseRun(args),
@@ -187,7 +201,8 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       persist: async (evidence) => persistOverlapReadinessEvidence({ outputPath: config.readinessEvidenceFile, evidence }),
     } : undefined,
     deployOverlap: createProductionOverlapDeploymentAdapter({ run: releaseRun, profile: releaseProfile, readinessFile: config.readinessEvidenceFile, sourceSha, rotationId, imageDigest: config.backendImageDigest, expectedCurrentTaskDefinitionArn: config.expectedCurrentTaskDefinitionArn, versionUrl: config.rotationHealthUrl, expectedGitSha: sourceSha }),
-    postDeploy: { run: async ({ taskDefinitionArn }) => {
+    postDeploy: { run: async ({ taskDefinitionArn, verifierSession: suppliedVerifierSession }) => {
+      if (suppliedVerifierSession !== requireVerifierSession()) throw new Error("Post-deploy verification received a verifier session different from the established cutover session.");
       const service = await verifierEcs.describeService();
       if (service?.status !== "ACTIVE" || service?.runningCount !== service?.desiredCount || service?.pendingCount !== 0) throw new Error("ECS service is not stable after overlap deployment.");
       const listed = await verifierEcs.listTasks();
@@ -196,7 +211,8 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       const image = config.backendImageDigest;
       return { valid: true, taskArn: task.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: image, taskTag: `${ECS_EXEC_OPERATOR_TASK_TAG_KEY}=${ECS_EXEC_OPERATOR_TASK_TAG_VALUE}`, evidenceRef: `task:${task.taskArn}`, evidenceSha256: config.postDeployEvidenceSha256 };
     } },
-    ecsExec: { run: async ({ taskArn, taskDefinitionArn, imageDigest, sourceSha, rotationId }) => {
+    ecsExec: { run: async ({ taskArn, taskDefinitionArn, imageDigest, sourceSha, rotationId, verifierSession: suppliedVerifierSession }) => {
+      if (suppliedVerifierSession !== requireVerifierSession()) throw new Error("ECS Exec verification received a verifier session different from the established cutover session.");
       const result = await verifierEcs.describeTasks({ taskArns: [taskArn], includeTags: true });
       const task = result.tasks?.[0];
       assertSelectedTargetTask({ task, expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: taskDefinitionArn, expectedImageDigest: imageDigest, serviceName: SERVICE, containerName: CONTAINER, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });

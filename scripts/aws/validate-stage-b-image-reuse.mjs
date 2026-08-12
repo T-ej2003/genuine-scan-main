@@ -32,6 +32,7 @@ const IMAGE_INPUTS = [
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/workflows\//;
 const TERRAFORM = /^infra\/aws\/terraform\/production-green-stage-(?:a|b)\//;
+const CONTROL_PLANE = /^infra\/aws\/terraform\/lambda\/production-rls-approval-broker\/(?:index\.mjs|package\.json|package-lock\.json)$/;
 const TEST = /(?:^|\/)(?:tests?|fixtures)(?:\/|\.)|\.test\.[^.]+$/;
 const TOOLING_ONLY = new Set([".gitleaks-baseline.json", ".gitleaksignore", ".security/rotation-evidence.schema.json"]);
 
@@ -43,6 +44,7 @@ const canonicalJson = (value) => {
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
 export function classifyStageBImageReusePath(file) {
+  if (CONTROL_PLANE.test(file)) return { file, category: "controlPlaneOnly", imageAffecting: false };
   if (IMAGE_INPUTS.some((pattern) => pattern.test(file))) {
     const category = /package-lock|lock$/.test(file) ? "dependencyLockfile" : /Dockerfile|dockerignore|workflow.*image-build/.test(file) ? "dockerBuildConfiguration" : /^backend\//.test(file) || /^shared\//.test(file) ? "runtimeApplicationSource" : /generated/.test(file) ? "generatedRuntimePackage" : "imageBuildInput";
     return { file, category, imageAffecting: true };

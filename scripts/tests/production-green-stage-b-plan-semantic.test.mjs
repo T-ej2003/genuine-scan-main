@@ -143,6 +143,9 @@ function configuration() {
           "local.broker_approval_expected", "local.broker_images", "local.broker_template_hashes",
           "var.approval_secret_arn", "var.ecs_cluster_arn", "var.private_subnet_ids", "var.receipt_bucket_arn",
           "var.stage_a_executor_security_group_id", "var.stage_b_recovery_broker_environment", "var.stage_b_recovery_only",
+          "aws_iam_role.execution", "aws_iam_role.execution[\"backend\"]", "aws_iam_role.execution[\"backend\"].arn",
+          "aws_iam_role.task", "aws_iam_role.task[\"backend\"]", "aws_iam_role.task[\"backend\"].arn",
+          "local.logs.backend", "var.account_id", "var.aws_region", "var.backend_image",
         ]) }],
         filename: ref(["var.broker_package_path"]), role: ref(["var.stage_a_broker_role_arn"]), publish: { constant_value: true }, source_code_hash: ref(["var.broker_package_path"]), tags: ref(["local.tags"]),
       } },
@@ -427,7 +430,7 @@ function baselinePlan() {
     after: {
       function_name: "mscqr-production-rls-approval-broker", role: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
       handler: "index.handler", runtime: "nodejs24.x", filename: "/private/tmp/broker.zip", source_code_hash: "baseline-source-code-hash",
-      memory_size: 128, package_type: "Zip", reserved_concurrent_executions: -1, skip_destroy: false, timeout: 30, publish: true, region: "eu-west-2",
+      memory_size: 128, package_type: "Zip", reserved_concurrent_executions: -1, skip_destroy: false, timeout: 180, publish: true, region: "eu-west-2",
       environment: [{}], tags, tags_all: { ...tags },
     },
     after_unknown: { architectures: [true], arn: true, code_sha256: true, environment: [{ variables: true }], id: true, invoke_arn: true, last_modified: true, qualified_arn: true, qualified_invoke_arn: true, response_streaming_invoke_arn: true, signing_job_arn: true, signing_profile_version_arn: true, source_code_size: true, version: true },
@@ -460,12 +463,16 @@ function canonicalBrokerPolicy() {
     Version: "2012-10-17",
     Statement: [
       { Sid: "RunOnlyApprovedExecutorAndCanaryRevisions", Effect: "Allow", Action: ["ecs:RunTask"], Resource: [STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]'], ...executorFamilies].map(taskDefinitionArn) },
-      { Sid: "PassOnlyApprovedTaskRoles", Effect: "Allow", Action: ["iam:PassRole"], Resource: [STAGE_B.executorRoleArn, STAGE_B.executorExecutionRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution"], Condition: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } } },
+      { Sid: "RunOnlyApprovedPreDeploymentInventory", Effect: "Allow", Action: ["ecs:RunTask"], Resource: [taskDefinitionArn(STAGE_B.inventoryTaskDefinitionFamily)] },
+      { Sid: "ReadAndStopOnlyPreDeploymentInventory", Effect: "Allow", Action: ["ecs:DescribeTaskDefinition", "ecs:DescribeTasks", "ecs:StopTask"], Resource: [`arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:*`, `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/*`] },
+      { Sid: "TagOnlyPreDeploymentInventoryTasks", Effect: "Allow", Action: ["ecs:TagResource"], Resource: `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/*` },
+      { Sid: "PassOnlyApprovedTaskRoles", Effect: "Allow", Action: ["iam:PassRole"], Resource: [STAGE_B.executorRoleArn, STAGE_B.executorExecutionRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution", "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution"], Condition: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } } },
       { Sid: "ClaimOnlyStageBReplayRows", Effect: "Allow", Action: ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem"], Resource: "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay" },
       { Sid: "ReadOnlyStageAApproval", Effect: "Allow", Action: ["secretsmanager:GetSecretValue"], Resource: STAGE_B.approvalSecretArn },
       { Sid: "VerifyOnlyStageAApprovalKey", Effect: "Allow", Action: ["kms:Verify"], Resource: STAGE_B.approvalKmsKeyArn },
       { Sid: "WriteOnlyBrokerReceipts", Effect: "Allow", Action: ["s3:PutObject"], Resource: `arn:aws:s3:::${STAGE_B.receiptBucket}/rls-broker-receipts/*` },
       { Sid: "WriteOnlyStageABrokerLogs", Effect: "Allow", Action: ["logs:CreateLogStream", "logs:PutLogEvents"], Resource: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:log-stream:*" },
+      { Sid: "ReadOnlyPreDeploymentInventoryLogs", Effect: "Allow", Action: ["logs:DescribeLogStreams", "logs:GetLogEvents"], Resource: `arn:aws:logs:${STAGE_B.region}:${STAGE_B.account}:log-group:${STAGE_B.inventoryLogGroupName}:log-stream:*` },
     ],
   };
 }
@@ -486,6 +493,14 @@ function resolvedBrokerEnvironment() {
     BROKER_REPLAY_TABLE: "mscqr-production-rls-stage-b-replay",
     BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskDefinitions),
     BROKER_TASK_TEMPLATE_HASHES_JSON: JSON.stringify({ backend: "e".repeat(64), worker: "f".repeat(64), executor: "1".repeat(64), canary: "2".repeat(64) }),
+    INVENTORY_ASSIGN_PUBLIC_IP: "DISABLED",
+    INVENTORY_EXECUTION_ROLE_ARN: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+    INVENTORY_IMAGE_DIGEST: image("1"),
+    INVENTORY_LOG_GROUP_NAME: STAGE_B.inventoryLogGroupName,
+    INVENTORY_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds),
+    INVENTORY_SECURITY_GROUPS_JSON: JSON.stringify([STAGE_B.executorSecurityGroupId]),
+    INVENTORY_TASK_DEFINITION_FAMILY_ARN: `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:1`,
+    INVENTORY_TASK_ROLE_ARN: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
   };
 }
 

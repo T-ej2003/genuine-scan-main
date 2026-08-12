@@ -52,12 +52,16 @@ export const STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES = Object.freeze([
 
 export const STAGE_B_BROKER_POLICY_STATEMENTS = Object.freeze([
   Object.freeze(["RunOnlyApprovedExecutorAndCanaryRevisions", Object.freeze(["ecs:RunTask"])]),
+  Object.freeze(["RunOnlyApprovedPreDeploymentInventory", Object.freeze(["ecs:RunTask"])]),
+  Object.freeze(["ReadAndStopOnlyPreDeploymentInventory", Object.freeze(["ecs:DescribeTaskDefinition", "ecs:DescribeTasks", "ecs:StopTask"])]),
+  Object.freeze(["TagOnlyPreDeploymentInventoryTasks", Object.freeze(["ecs:TagResource"])]),
   Object.freeze(["PassOnlyApprovedTaskRoles", Object.freeze(["iam:PassRole"])]),
   Object.freeze(["ClaimOnlyStageBReplayRows", Object.freeze(["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem"])]),
   Object.freeze(["ReadOnlyStageAApproval", Object.freeze(["secretsmanager:GetSecretValue"])]),
   Object.freeze(["VerifyOnlyStageAApprovalKey", Object.freeze(["kms:Verify"])]),
   Object.freeze(["WriteOnlyBrokerReceipts", Object.freeze(["s3:PutObject"])]),
   Object.freeze(["WriteOnlyStageABrokerLogs", Object.freeze(["logs:CreateLogStream", "logs:PutLogEvents"])]),
+  Object.freeze(["ReadOnlyPreDeploymentInventoryLogs", Object.freeze(["logs:DescribeLogStreams", "logs:GetLogEvents"])]),
 ]);
 
 export const STAGE_B_BROKER_POLICY = Object.freeze({
@@ -71,12 +75,15 @@ const brokerTaskDefinitionFamilies = Object.freeze(Object.entries(STAGE_B_TASK_D
   .map(([, family]) => family));
 const sortedBrokerTaskDefinitionFamilies = Object.freeze([...brokerTaskDefinitionFamilies].sort());
 const brokerTaskDefinitionPattern = new RegExp(`^arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/(?:${brokerTaskDefinitionFamilies.join("|")}):[1-9][0-9]*$`);
+const inventoryTaskDefinitionPattern = new RegExp(`^arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:[1-9][0-9]*$`);
 
 const brokerPassRoleArns = Object.freeze([
   STAGE_B.executorRoleArn,
   STAGE_B.executorExecutionRoleArn,
   `arn:aws:iam::${STAGE_B.account}:role/${executionRoleNames.canary}`,
   `arn:aws:iam::${STAGE_B.account}:role/${taskRoleNames.canary}`,
+  `arn:aws:iam::${STAGE_B.account}:role/${taskRoleNames.backend}`,
+  `arn:aws:iam::${STAGE_B.account}:role/${executionRoleNames.backend}`,
 ]);
 
 const brokerPolicyResources = Object.freeze({
@@ -84,22 +91,30 @@ const brokerPolicyResources = Object.freeze({
     && resource.length === brokerTaskDefinitionFamilies.length
     && [...resource].sort().every((arn, index) => arn === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${sortedBrokerTaskDefinitionFamilies[index]}:${String(arn).split(":").pop()}`
       && brokerTaskDefinitionPattern.test(arn)),
+  RunOnlyApprovedPreDeploymentInventory: (resource) => Array.isArray(resource) && resource.length === 1 && (inventoryTaskDefinitionPattern.test(resource[0]) || resource[0] === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:*`),
+  ReadAndStopOnlyPreDeploymentInventory: (resource) => Array.isArray(resource) && resource.length === 2 && resource.includes(`arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:*`) && resource.includes(`arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/*`),
+  TagOnlyPreDeploymentInventoryTasks: (resource) => resource === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/*`,
   PassOnlyApprovedTaskRoles: (resource) => Array.isArray(resource) && JSON.stringify([...resource].sort()) === JSON.stringify([...brokerPassRoleArns].sort()),
   ClaimOnlyStageBReplayRows: (resource) => resource === `arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/mscqr-production-rls-stage-b-replay`,
   ReadOnlyStageAApproval: (resource) => resource === STAGE_B.approvalSecretArn,
   VerifyOnlyStageAApprovalKey: (resource) => resource === STAGE_B.approvalKmsKeyArn,
   WriteOnlyBrokerReceipts: (resource) => resource === `arn:aws:s3:::${STAGE_B.receiptBucket}/rls-broker-receipts/*`,
   WriteOnlyStageABrokerLogs: (resource) => resource === `arn:aws:logs:${STAGE_B.region}:${STAGE_B.account}:log-group:/aws/lambda/mscqr-production-rls-approval-broker:log-stream:*`,
+  ReadOnlyPreDeploymentInventoryLogs: (resource) => resource === `arn:aws:logs:${STAGE_B.region}:${STAGE_B.account}:log-group:${STAGE_B.inventoryLogGroupName}:log-stream:*`,
 });
 
 const brokerPolicyConditions = Object.freeze({
   RunOnlyApprovedExecutorAndCanaryRevisions: null,
+  RunOnlyApprovedPreDeploymentInventory: null,
+  ReadAndStopOnlyPreDeploymentInventory: null,
+  TagOnlyPreDeploymentInventoryTasks: null,
   PassOnlyApprovedTaskRoles: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } },
   ClaimOnlyStageBReplayRows: null,
   ReadOnlyStageAApproval: null,
   VerifyOnlyStageAApprovalKey: null,
   WriteOnlyBrokerReceipts: null,
   WriteOnlyStageABrokerLogs: null,
+  ReadOnlyPreDeploymentInventoryLogs: null,
 });
 
 export const STAGE_B_RESOURCE_ACTION_MATRIX = Object.freeze({
@@ -197,12 +212,16 @@ function assertTerraformPolicySource(terraformConfiguration, strict) {
   }
   const sourceResourceExpressions = {
     RunOnlyApprovedExecutorAndCanaryRevisions: "Resource = values(local.active_broker_task_definition_arns)",
-    PassOnlyApprovedTaskRoles: "Resource = [var.stage_a_executor_task_role_arn, aws_iam_role.execution[\"executor\"].arn, aws_iam_role.task[\"canary\"].arn, aws_iam_role.execution[\"canary\"].arn]",
+    RunOnlyApprovedPreDeploymentInventory: "Resource = [\"arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-production-rls-green-predeployment-inventory:*\"]",
+    ReadAndStopOnlyPreDeploymentInventory: "Resource = [\n          \"arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-production-rls-green-predeployment-inventory:*\",\n          \"arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.ecs_cluster_name}/*\",\n        ]",
+    TagOnlyPreDeploymentInventoryTasks: "Resource = \"arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.ecs_cluster_name}/*\"",
+    PassOnlyApprovedTaskRoles: "Resource = [var.stage_a_executor_task_role_arn, aws_iam_role.execution[\"executor\"].arn, aws_iam_role.task[\"canary\"].arn, aws_iam_role.execution[\"canary\"].arn, aws_iam_role.task[\"backend\"].arn, aws_iam_role.execution[\"backend\"].arn]",
     ClaimOnlyStageBReplayRows: "Resource = aws_dynamodb_table.replay.arn",
     ReadOnlyStageAApproval: "Resource = var.approval_secret_arn",
     VerifyOnlyStageAApprovalKey: "Resource = var.approval_kms_key_arn",
     WriteOnlyBrokerReceipts: "Resource = \"${var.receipt_bucket_arn}/rls-broker-receipts/*\"",
     WriteOnlyStageABrokerLogs: "Resource = \"${trimsuffix(var.stage_a_broker_log_group_arn, \":*\")}:log-stream:*\"",
+    ReadOnlyPreDeploymentInventoryLogs: "Resource = \"${trimsuffix(local.execution_log_group_arns[\"backend\"], \":*\")}:log-stream:*\"",
   };
   for (const [sid, expression] of Object.entries(sourceResourceExpressions)) {
     const statementStart = source.indexOf(`Sid      = "${sid}"`);

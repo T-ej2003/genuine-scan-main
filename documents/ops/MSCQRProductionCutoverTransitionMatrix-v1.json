@@ -109,16 +109,16 @@
       "ordinal": 4
     },
     {
-      "edgeId": "artifactSigning-to-overlapTaskDefinition",
+      "edgeId": "artifactSigning-to-preDeploymentInventory",
       "producer": "artifactSigning",
-      "consumer": "overlapTaskDefinition",
+      "consumer": "preDeploymentInventory",
       "producedFields": [
-        "activeKeyVersion",
-        "bindings"
+        "evidenceRef",
+        "evidenceSha256"
       ],
       "requiredFields": [
-        "activeKeyVersion",
-        "bindings"
+        "evidenceRef",
+        "evidenceSha256"
       ],
       "schemaMatch": true,
       "identityMatch": true,
@@ -127,6 +127,50 @@
       "negativeTest": true,
       "result": "PASS",
       "ordinal": 5
+    },
+    {
+      "edgeId": "preDeploymentInventory-to-rotationPrepare",
+      "producer": "preDeploymentInventory",
+      "consumer": "rotationPrepare",
+      "producedFields": [
+        "evidenceRef",
+        "evidenceSha256",
+        "inventory"
+      ],
+      "requiredFields": [
+        "evidenceRef",
+        "evidenceSha256",
+        "inventory"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 6
+    },
+    {
+      "edgeId": "rotationPrepare-to-overlapTaskDefinition",
+      "producer": "rotationPrepare",
+      "consumer": "overlapTaskDefinition",
+      "producedFields": [
+        "rotationId",
+        "rotationStateSha256",
+        "rotationPrepared"
+      ],
+      "requiredFields": [
+        "rotationId",
+        "rotationStateSha256",
+        "rotationPrepared"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 7
     },
     {
       "edgeId": "overlapTaskDefinition-to-registrationReadback",
@@ -148,63 +192,21 @@
       "shaBindingMatch": true,
       "negativeTest": true,
       "result": "PASS",
-      "ordinal": 6
-    },
-    {
-      "edgeId": "registrationReadback-to-inventory",
-      "producer": "registrationReadback",
-      "consumer": "inventory",
-      "producedFields": [
-        "registeredTaskDefinitionArn",
-        "evidenceSha256"
-      ],
-      "requiredFields": [
-        "registeredTaskDefinitionArn",
-        "evidenceSha256"
-      ],
-      "schemaMatch": true,
-      "identityMatch": true,
-      "resourceMatch": true,
-      "shaBindingMatch": true,
-      "negativeTest": true,
-      "result": "PASS",
-      "ordinal": 7
-    },
-    {
-      "edgeId": "inventory-to-rotationPrepare",
-      "producer": "inventory",
-      "consumer": "rotationPrepare",
-      "producedFields": [
-        "evidenceRef",
-        "evidenceSha256",
-        "inventory"
-      ],
-      "requiredFields": [
-        "evidenceRef",
-        "evidenceSha256",
-        "inventory"
-      ],
-      "schemaMatch": true,
-      "identityMatch": true,
-      "resourceMatch": true,
-      "shaBindingMatch": true,
-      "negativeTest": true,
-      "result": "PASS",
       "ordinal": 8
     },
     {
-      "edgeId": "rotationPrepare-to-readiness",
-      "producer": "rotationPrepare",
+      "edgeId": "registrationReadback-to-readiness",
+      "producer": "registrationReadback",
       "consumer": "readiness",
       "producedFields": [
+        "sourceSha",
         "rotationId",
-        "rotationStateSha256",
-        "rotationPrepared"
+        "rotationStateSha256"
       ],
       "requiredFields": [
+        "sourceSha",
         "rotationId",
-        "rotationStateSha256",
-        "rotationPrepared"
+        "rotationStateSha256"
       ],
       "schemaMatch": true,
       "identityMatch": true,
