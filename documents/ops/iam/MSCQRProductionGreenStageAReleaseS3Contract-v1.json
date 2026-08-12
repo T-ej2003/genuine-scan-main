@@ -216,6 +216,12 @@
       "Effect": "Allow",
       "Action": "iam:PutRolePolicy",
       "Resource": "arn:aws:iam::368992683803:role/mscqr-production-independent-checker"
+    },
+    {
+      "Sid": "ApplyExactStageACheckerRoleTrust",
+      "Effect": "Allow",
+      "Action": "iam:UpdateAssumeRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
     }
   ]
 }

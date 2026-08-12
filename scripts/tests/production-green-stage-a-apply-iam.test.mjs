@@ -121,8 +121,12 @@ test("Stage A apply identity permits only the exact checker role-chain inline po
   assert.equal(allows({ action: "iam:GetRolePolicy", resource: "arn:aws:iam::368992683803:role/unrelated", values: context() }), false);
   assert.equal(allows({ action: "iam:PutRolePolicy", resource: production.checkerSourceRoleArn, values: context() }), true);
   assert.equal(allows({ action: "iam:PutRolePolicy", resource: production.checkerRoleArn, values: context() }), false);
-  for (const action of ["iam:AttachRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:PassRole", "iam:CreateRole", "iam:*"]) {
-    assert.equal(allows({ action, resource: production.checkerSourceRoleArn, values: context() }), false, action);
+  assert.equal(allows({ action: "iam:UpdateAssumeRolePolicy", resource: production.checkerRoleArn, values: context() }), true);
+  for (const resource of [production.checkerSourceRoleArn, "arn:aws:iam::368992683803:role/unrelated", "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"]) {
+    assert.equal(allows({ action: "iam:UpdateAssumeRolePolicy", resource, values: context() }), false, resource);
+  }
+  for (const action of ["iam:AttachRolePolicy", "iam:PassRole", "iam:CreateRole", "iam:DeleteRole", "iam:*"]) {
+    assert.equal(allows({ action, resource: production.checkerRoleArn, values: context() }), false, action);
   }
 });
 
