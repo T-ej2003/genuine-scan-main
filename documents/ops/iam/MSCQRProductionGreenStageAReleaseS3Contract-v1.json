@@ -169,7 +169,10 @@
       "Sid": "ReadExactStageACheckerRolePolicy",
       "Effect": "Allow",
       "Action": "iam:GetRolePolicy",
-      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+      ]
     },
     {
       "Sid": "ReadExactStageAProviderLogGroups",
