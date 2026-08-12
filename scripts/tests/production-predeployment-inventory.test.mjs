@@ -277,14 +277,26 @@ test("broker configuration fixes cluster, task, network, roles, and log scope", 
 test("broker source policy contains only the bounded inventory capability", () => {
   const source = readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
   assert.match(source, /Sid\s+=\s+"RunOnlyApprovedPreDeploymentInventory"[\s\S]*?ecs:RunTask/);
-  assert.match(source, /Sid\s+=\s+"ReadAndStopOnlyPreDeploymentInventory"[\s\S]*?ecs:DescribeTaskDefinition[\s\S]*?ecs:DescribeTasks[\s\S]*?ecs:StopTask/);
+  assert.match(source, /Sid\s+=\s+"DescribeOnlyPreDeploymentInventoryTaskDefinitions"[\s\S]*?Action\s+=\s+\["ecs:DescribeTaskDefinition"\][\s\S]*?Resource\s+=\s+"\*"/);
+  assert.match(source, /Sid\s+=\s+"DescribeOnlyPreDeploymentInventoryTaskDefinitions"[\s\S]*?Condition\s*=\s+\{\s*StringEquals\s*=\s+\{\s*"aws:RequestedRegion"\s*=\s+var\.aws_region\s*\}\s*\}/);
+  assert.match(source, /Sid\s+=\s+"ReadAndStopOnlyPreDeploymentInventory"[\s\S]*?ecs:DescribeTasks[\s\S]*?ecs:StopTask/);
+  assert.doesNotMatch(source, /Sid\s+=\s+"ReadAndStopOnlyPreDeploymentInventory"[\s\S]*?ecs:DescribeTaskDefinition/);
   assert.match(source, /Sid\s+=\s+"ReadOnlyPreDeploymentInventoryLogs"[\s\S]*?logs:DescribeLogStreams[\s\S]*?logs:GetLogEvents/);
   assert.match(source, /Sid\s+=\s+"PassOnlyApprovedTaskRoles"[\s\S]*?aws_iam_role\.task\["backend"\]\.arn[\s\S]*?aws_iam_role\.execution\["backend"\]\.arn/);
-  assert.doesNotMatch(source, /RunOnlyApprovedPreDeploymentInventory[\s\S]{0,500}Resource\s*=\s*"\*"/);
+  const runTaskStatement = source.slice(source.indexOf('Sid      = "RunOnlyApprovedPreDeploymentInventory"'), source.indexOf('Sid      = "DescribeOnlyPreDeploymentInventoryTaskDefinitions"'));
+  assert.doesNotMatch(runTaskStatement, /Resource\s*=\s*"\*"/);
   assert.match(readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"), /register-predeployment-inventory-task-definition/);
   assert.match(readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"), /invoke-predeployment-inventory-broker/);
   assert.match(readFileSync("infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs", "utf8"), /PREDEPLOYMENT_INVENTORY_OPERATION/);
   assert.match(readFileSync("infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs", "utf8"), /DescribeTaskDefinitionCommand\(\{ taskDefinition, include: \["TAGS"\] \}\)/);
   assert.match(readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8"), /timeout\s+=\s+180/);
   assert.ok(PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS * 1000 > PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS + PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS);
+});
+
+test("broker SDK clients are fixed to the reviewed production region and endpoint", () => {
+  const source = readFileSync("infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs", "utf8");
+  assert.match(source, /new ECSClient\(\{ region: STAGE_B\.region \}\)/);
+  assert.match(source, /new CloudWatchLogsClient\(\{ region: STAGE_B\.region \}\)/);
+  assert.doesNotMatch(source, /endpoint\s*:/i);
+  assert.doesNotMatch(source, /AWS_ENDPOINT_URL|AWS_REGION\s*\}|process\.env\.AWS_REGION/);
 });

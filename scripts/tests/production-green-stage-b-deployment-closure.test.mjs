@@ -148,11 +148,17 @@ const canonicalBrokerPolicy = () => ({
       Resource: ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*"]
     },
     {
+      Sid: "DescribeOnlyPreDeploymentInventoryTaskDefinitions",
+      Effect: "Allow",
+      Action: ["ecs:DescribeTaskDefinition"],
+      Resource: "*",
+      Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+    },
+    {
       Sid: "ReadAndStopOnlyPreDeploymentInventory",
       Effect: "Allow",
-      Action: ["ecs:DescribeTaskDefinition", "ecs:DescribeTasks", "ecs:StopTask"],
+      Action: ["ecs:DescribeTasks", "ecs:StopTask"],
       Resource: [
-        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*",
         "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*",
       ],
     },
@@ -209,6 +215,14 @@ test("broker policy condition drift fails closed even when actions remain canoni
   const plan = concreteBrokerPlan();
   const policy = JSON.parse(plan.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after.policy);
   policy.Statement.find((statement) => statement.Sid === "PassOnlyApprovedTaskRoles").Condition.StringEquals["iam:PassedToService"] = "lambda.amazonaws.com";
+  plan.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after.policy = JSON.stringify(policy);
+  assert.throws(() => classifyStageBPlan(plan, { strict: false }), /condition differs/);
+});
+
+test("predeployment DescribeTaskDefinition region condition drift fails closed", () => {
+  const plan = concreteBrokerPlan();
+  const policy = JSON.parse(plan.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after.policy);
+  policy.Statement.find((statement) => statement.Sid === "DescribeOnlyPreDeploymentInventoryTaskDefinitions").Condition.StringEquals["aws:RequestedRegion"] = "us-east-1";
   plan.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after.policy = JSON.stringify(policy);
   assert.throws(() => classifyStageBPlan(plan, { strict: false }), /condition differs/);
 });

@@ -1841,7 +1841,7 @@
       "sourceFunction": "describe-predeployment-inventory-task-definition",
       "action": "ecs:DescribeTaskDefinition",
       "resources": [
-        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*"
+        "*"
       ],
       "context": [
         {
@@ -2785,7 +2785,7 @@
         "sid": "RegisterExactPreDeploymentInventoryTaskDefinition",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "bde713298ccb67d6cd11dbe517d4f306cf438065b0ccce31aaa45ceb94e45185"
+        "expectedPolicySha256": "a05898e6d359c07d5597e2b5ec6edd6753d450d557f1e98da0425136fc7a1d9d"
       },
       "required": true,
       "mutation": true

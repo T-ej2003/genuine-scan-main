@@ -507,8 +507,19 @@ function assertNoDuplicateOrOverlap(requiredEntries, forbiddenEntries) {
   for (const entry of requiredEntries) {
     for (const resource of entry.resources) {
       const tuple = normalizeEvaluationTuple(entry, resource);
-      if (!entry.generated && requiredByTuple.has(tuple)) throw new Error(`Permission manifest duplicate required evaluation tuple: ${requiredByTuple.get(tuple)} and ${entry.id}.`);
-      if (!requiredByTuple.has(tuple)) requiredByTuple.set(tuple, entry.id);
+      const previous = requiredByTuple.get(tuple);
+      if (previous && !entry.generated && !previous.generated) {
+        const distinctApprovedPhase = previous.phases.size === 1
+          && !previous.phases.has(entry.phase)
+          && [previous.phases.values().next().value, entry.phase].sort().join("/") === "apply/reference-audit";
+        if (!distinctApprovedPhase) throw new Error(`Permission manifest duplicate required evaluation tuple: ${previous.ids.at(-1)} and ${entry.id}.`);
+      }
+      if (previous) {
+        previous.ids.push(entry.id);
+        previous.phases.add(entry.phase);
+      } else {
+        requiredByTuple.set(tuple, { ids: [entry.id], phases: new Set([entry.phase]), generated: entry.generated });
+      }
     }
   }
   const forbiddenByTuple = new Map();
@@ -518,7 +529,7 @@ function assertNoDuplicateOrOverlap(requiredEntries, forbiddenEntries) {
       if (forbiddenByTuple.has(tuple)) throw new Error(`Permission manifest duplicate forbidden evaluation tuple: ${forbiddenByTuple.get(tuple)} and ${entry.id}.`);
       forbiddenByTuple.set(tuple, entry.id);
       if (requiredByTuple.has(tuple)) {
-        throw new Error(`Permission manifest required/forbidden overlap: required ${requiredByTuple.get(tuple)}, forbidden ${entry.id}, action ${entry.action}, resource ${resource}, context ${tuple}.`);
+        throw new Error(`Permission manifest required/forbidden overlap: required ${requiredByTuple.get(tuple).ids[0]}, forbidden ${entry.id}, action ${entry.action}, resource ${resource}, context ${tuple}.`);
       }
     }
   }

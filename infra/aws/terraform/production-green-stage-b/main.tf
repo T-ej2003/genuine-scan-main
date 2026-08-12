@@ -183,11 +183,19 @@ locals {
         Resource = ["arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-production-rls-green-predeployment-inventory:*"]
       },
       {
+        Sid      = "DescribeOnlyPreDeploymentInventoryTaskDefinitions"
+        Effect   = "Allow"
+        Action   = ["ecs:DescribeTaskDefinition"]
+        Resource = "*"
+        Condition = {
+          StringEquals = { "aws:RequestedRegion" = var.aws_region }
+        }
+      },
+      {
         Sid    = "ReadAndStopOnlyPreDeploymentInventory"
         Effect = "Allow"
-        Action = ["ecs:DescribeTaskDefinition", "ecs:DescribeTasks", "ecs:StopTask"]
+        Action = ["ecs:DescribeTasks", "ecs:StopTask"]
         Resource = [
-          "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-production-rls-green-predeployment-inventory:*",
           "arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.ecs_cluster_name}/*",
         ]
       },

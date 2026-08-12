@@ -53,7 +53,8 @@ export const STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES = Object.freeze([
 export const STAGE_B_BROKER_POLICY_STATEMENTS = Object.freeze([
   Object.freeze(["RunOnlyApprovedExecutorAndCanaryRevisions", Object.freeze(["ecs:RunTask"])]),
   Object.freeze(["RunOnlyApprovedPreDeploymentInventory", Object.freeze(["ecs:RunTask"])]),
-  Object.freeze(["ReadAndStopOnlyPreDeploymentInventory", Object.freeze(["ecs:DescribeTaskDefinition", "ecs:DescribeTasks", "ecs:StopTask"])]),
+  Object.freeze(["DescribeOnlyPreDeploymentInventoryTaskDefinitions", Object.freeze(["ecs:DescribeTaskDefinition"])]),
+  Object.freeze(["ReadAndStopOnlyPreDeploymentInventory", Object.freeze(["ecs:DescribeTasks", "ecs:StopTask"])]),
   Object.freeze(["TagOnlyPreDeploymentInventoryTasks", Object.freeze(["ecs:TagResource"])]),
   Object.freeze(["PassOnlyApprovedTaskRoles", Object.freeze(["iam:PassRole"])]),
   Object.freeze(["ClaimOnlyStageBReplayRows", Object.freeze(["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem"])]),
@@ -92,7 +93,8 @@ const brokerPolicyResources = Object.freeze({
     && [...resource].sort().every((arn, index) => arn === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${sortedBrokerTaskDefinitionFamilies[index]}:${String(arn).split(":").pop()}`
       && brokerTaskDefinitionPattern.test(arn)),
   RunOnlyApprovedPreDeploymentInventory: (resource) => Array.isArray(resource) && resource.length === 1 && (inventoryTaskDefinitionPattern.test(resource[0]) || resource[0] === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:*`),
-  ReadAndStopOnlyPreDeploymentInventory: (resource) => Array.isArray(resource) && resource.length === 2 && resource.includes(`arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:*`) && resource.includes(`arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/*`),
+  DescribeOnlyPreDeploymentInventoryTaskDefinitions: (resource) => resource === "*",
+  ReadAndStopOnlyPreDeploymentInventory: (resource) => Array.isArray(resource) && resource.length === 1 && resource[0] === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/*`,
   TagOnlyPreDeploymentInventoryTasks: (resource) => resource === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/*`,
   PassOnlyApprovedTaskRoles: (resource) => Array.isArray(resource) && JSON.stringify([...resource].sort()) === JSON.stringify([...brokerPassRoleArns].sort()),
   ClaimOnlyStageBReplayRows: (resource) => resource === `arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/mscqr-production-rls-stage-b-replay`,
@@ -106,6 +108,7 @@ const brokerPolicyResources = Object.freeze({
 const brokerPolicyConditions = Object.freeze({
   RunOnlyApprovedExecutorAndCanaryRevisions: null,
   RunOnlyApprovedPreDeploymentInventory: null,
+  DescribeOnlyPreDeploymentInventoryTaskDefinitions: { StringEquals: { "aws:RequestedRegion": STAGE_B.region } },
   ReadAndStopOnlyPreDeploymentInventory: null,
   TagOnlyPreDeploymentInventoryTasks: null,
   PassOnlyApprovedTaskRoles: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } },
@@ -171,7 +174,7 @@ function normalizedPolicyShape(document) {
     if (!statement || statement.Effect !== "Allow" || !statement.Sid || !Array.isArray(statement.Action) || statement.NotAction || statement.NotResource) {
       throw new Error("Broker managed-policy document contains an unsupported statement.");
     }
-    if (statement.Resource === "*" || (Array.isArray(statement.Resource) && statement.Resource.includes("*"))) {
+    if (statement.Resource === "*" && statement.Sid !== "DescribeOnlyPreDeploymentInventoryTaskDefinitions") {
       throw new Error("Broker managed-policy document contains a wildcard resource.");
     }
     const actions = [...statement.Action].sort();
@@ -213,7 +216,8 @@ function assertTerraformPolicySource(terraformConfiguration, strict) {
   const sourceResourceExpressions = {
     RunOnlyApprovedExecutorAndCanaryRevisions: "Resource = values(local.active_broker_task_definition_arns)",
     RunOnlyApprovedPreDeploymentInventory: "Resource = [\"arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-production-rls-green-predeployment-inventory:*\"]",
-    ReadAndStopOnlyPreDeploymentInventory: "Resource = [\n          \"arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-production-rls-green-predeployment-inventory:*\",\n          \"arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.ecs_cluster_name}/*\",\n        ]",
+    DescribeOnlyPreDeploymentInventoryTaskDefinitions: "Resource = \"*\"",
+    ReadAndStopOnlyPreDeploymentInventory: "Resource = [\n          \"arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.ecs_cluster_name}/*\",\n        ]",
     TagOnlyPreDeploymentInventoryTasks: "Resource = \"arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.ecs_cluster_name}/*\"",
     PassOnlyApprovedTaskRoles: "Resource = [var.stage_a_executor_task_role_arn, aws_iam_role.execution[\"executor\"].arn, aws_iam_role.task[\"canary\"].arn, aws_iam_role.execution[\"canary\"].arn, aws_iam_role.task[\"backend\"].arn, aws_iam_role.execution[\"backend\"].arn]",
     ClaimOnlyStageBReplayRows: "Resource = aws_dynamodb_table.replay.arn",
@@ -230,10 +234,16 @@ function assertTerraformPolicySource(terraformConfiguration, strict) {
     const statement = source.slice(statementStart, nextStatement >= 0 ? nextStatement : source.length).replace(/\s+/g, " ");
     if (!statement.includes(expression.replace(/\s+/g, " "))) throw new Error(`Broker managed-policy source resource is not canonical: ${sid}`);
     const expectedCondition = brokerPolicyConditions[sid];
-    if (expectedCondition && !statement.includes('Condition = { StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" } }')) throw new Error(`Broker managed-policy source condition is not canonical: ${sid}`);
+    if (expectedCondition) {
+      const conditionExpression = sid === "PassOnlyApprovedTaskRoles"
+        ? 'Condition = { StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" } }'
+        : 'Condition = { StringEquals = { "aws:RequestedRegion" = var.aws_region } }';
+      if (!statement.includes(conditionExpression)) throw new Error(`Broker managed-policy source condition is not canonical: ${sid}`);
+    }
     if (!expectedCondition && /\bCondition\s*=/.test(statement)) throw new Error(`Broker managed-policy source contains an unexpected condition: ${sid}`);
   }
-  if (/NotAction|NotResource|Resource\s*=\s*"\*"/.test(source)) throw new Error("Broker managed-policy source contains an unsupported wildcard contract.");
+  const sourceWithoutApprovedWildcard = source.replace(/Sid\s*=\s*"DescribeOnlyPreDeploymentInventoryTaskDefinitions"[\s\S]*?Resource\s*=\s*"\*"/, "");
+  if (/NotAction|NotResource|Resource\s*=\s*"\*"/.test(sourceWithoutApprovedWildcard)) throw new Error("Broker managed-policy source contains an unsupported wildcard contract.");
 }
 
 function assertBrokerPolicyChange(change, { strict, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false }) {
