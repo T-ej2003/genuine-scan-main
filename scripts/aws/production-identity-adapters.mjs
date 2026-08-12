@@ -4,7 +4,7 @@ import { establishEcsExecVerifierSession } from "./establish-production-ecs-exec
 import { ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 
 const ACCOUNT = "368992683803";
-const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
+export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
 const RELEASE_CALLER = new RegExp(`^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`);
 export const VERIFIER_SESSION_MIN_REMAINING_MS = 60_000;
 
