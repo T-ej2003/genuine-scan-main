@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { bootstrapInitialDualSlotRotation, deriveLegacyRotationBaseline, INITIAL_DUAL_SLOT_NAMES, assertInitialDualSlotBindings } from "../aws/production-initial-dual-slot-bootstrap.mjs";
-import { buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { buildProductionRotationConfig, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const rotationId = "rotation-initial-20260812";
@@ -84,6 +84,10 @@ test("clean legacy topology creates exact dual-slot resources and identifier-onl
     assert.equal(result.bindings.jwt.currentSecretId, legacy.jwt);
     assert.equal(result.bindings.qr.publicCurrentSecretId, legacy.qrPublic);
     assert.equal(result.bindings.qr.previousKeyVersion, "2026-04-20");
+    assert.deepEqual(result.bindings.ecs, rotationBindingsToTaskBindings(result.bindings));
+    assert.match(result.bindings.ecs.JWT_SECRET_PREVIOUS, /:value::$/);
+    assert.equal(result.bindings.ecs.JWT_SECRET_CURRENT, legacy.jwt);
+    assert.equal(fixture.calls.filter(({ name, input }) => ["GetSecretValueCommand", "PutSecretValueCommand", "DescribeSecretCommand"].includes(name) && /:value::$/.test(input.SecretId || "")).length, 0);
     assert.equal(fixture.calls.filter(({ name }) => name === "DeleteSecretCommand").length, 0);
   } finally { rmSync(output.directory, { recursive: true, force: true }); }
 });

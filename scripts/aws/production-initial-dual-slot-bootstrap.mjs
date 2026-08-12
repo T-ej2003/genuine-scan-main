@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { rotationBindingsToTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
 
 const requireBackend = createRequire(path.resolve("backend/package.json"));
 const {
@@ -146,6 +147,7 @@ export function assertInitialDualSlotBindings(bindings) {
   if (refs.some((value) => !SECRET_ARN.test(String(value || ""))) || new Set(refs).size !== refs.length) throw new Error("Initial dual-slot bindings must contain distinct production secret ARNs.");
   if (!VERSION.test(bindings?.qr?.previousKeyVersion || "")) throw new Error("Initial dual-slot previous QR key version is invalid.");
   if (!SHA40.test(bindings?.sourceSha || "") || !ROTATION_ID.test(bindings?.rotationId || "")) throw new Error("Initial dual-slot identity binding is invalid.");
+  if (bindings?.ecs && JSON.stringify(bindings.ecs) !== JSON.stringify(rotationBindingsToTaskBindings(bindings))) throw new Error("Initial dual-slot ECS bindings do not match the canonical SDK bindings.");
   return true;
 }
 
@@ -209,6 +211,7 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
       pendingKeyVersion: existingMaterial.qrPublicPending.keyVersion,
     },
   };
+  bindings.ecs = rotationBindingsToTaskBindings(bindings);
   assertInitialDualSlotBindings(bindings);
   const output = JSON.stringify(bindings, null, 2) + "\n";
   const existingOutput = lstatSync(outputFile, { throwIfNoEntry: false });

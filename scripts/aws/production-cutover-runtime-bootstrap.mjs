@@ -14,7 +14,7 @@ const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const ARN = new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:[A-Za-z0-9/_+=.@-]+(?::[A-Za-z0-9_-]+::)?$`);
+const BASE_ARN = new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:[A-Za-z0-9/_+=.@-]+$`);
 const ROTATION_ID = /^[A-Za-z0-9._-]{8,128}$/;
 const REQUIRED_SECRET_BINDINGS = Object.freeze([
   "jwt.currentSecretId", "jwt.previousSecretId", "jwt.pendingSecretId",
@@ -52,11 +52,14 @@ function assertBindings(bindings = {}) {
     const [group, field] = key.split(".");
     return bindings[group][field];
   });
-  if (refs.some((value) => !ARN.test(value))) throw new Error("Rotation secret bindings must be exact eu-west-2 production Secrets Manager references.");
+  if (refs.some((value) => !BASE_ARN.test(value))) throw new Error("Rotation SDK bindings must be base eu-west-2 production Secrets Manager identifiers.");
   if (new Set(refs).size !== refs.length) throw new Error("Rotation secret bindings must be distinct.");
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(bindings.qr.previousKeyVersion)) throw new Error("qr.previousKeyVersion is invalid.");
   assertNoSecretMaterial(bindings, "Rotation secret binding manifest");
-  return Object.freeze({ jwt: Object.freeze({ ...bindings.jwt }), qr: Object.freeze({ ...bindings.qr }) });
+  const checked = { jwt: Object.freeze({ ...bindings.jwt }), qr: Object.freeze({ ...bindings.qr }) };
+  const ecs = rotationBindingsToTaskBindings(checked);
+  if (bindings.ecs && JSON.stringify(bindings.ecs) !== JSON.stringify(ecs)) throw new Error("ECS rotation bindings do not match the canonical base-ARN bindings.");
+  return Object.freeze({ ...checked, ecs: Object.freeze(ecs) });
 }
 
 function readInputFile(filePath, repositoryRoot, label) {
@@ -245,15 +248,21 @@ export function prepareProductionCutoverRuntime({
   return { readyToConsumeMfa: true, runtimeDirectory: directory, configPath, manifestPath, staticBindingSha256: manifest.staticBindingSha256, protectedMainSha: protectedSha, nextCommand: command, config: staticBindings, phasePaths: paths };
 }
 
+function envelopeEcsValueFrom(secretId, name) {
+  if (!BASE_ARN.test(secretId || "")) throw new Error(`${name} must be a base Secrets Manager identifier before ECS JSON-key binding.`);
+  return `${secretId}:value::`;
+}
+
 function rotationBindingsToTaskBindings(bindings) {
+  if (!bindings?.jwt || !bindings?.qr) throw new Error("Rotation SDK bindings are required before ECS binding derivation.");
   return {
     JWT_SECRET_CURRENT: bindings.jwt.currentSecretId,
-    JWT_SECRET_PREVIOUS: bindings.jwt.previousSecretId,
+    JWT_SECRET_PREVIOUS: envelopeEcsValueFrom(bindings.jwt.previousSecretId, "JWT previous"),
     QR_SIGN_PRIVATE_KEY_CURRENT: bindings.qr.privateCurrentSecretId,
     QR_SIGN_PUBLIC_KEY_CURRENT: bindings.qr.publicCurrentSecretId,
-    QR_SIGN_ACTIVE_KEY_VERSION: bindings.qr.currentKeyVersionSecretId,
-    QR_SIGN_PUBLIC_KEY_PREVIOUS: bindings.qr.publicPreviousSecretId,
-    QR_SIGN_PREVIOUS_KEY_VERSION: bindings.qr.previousKeyVersionSecretId,
+    QR_SIGN_ACTIVE_KEY_VERSION: envelopeEcsValueFrom(bindings.qr.currentKeyVersionSecretId, "QR current key version"),
+    QR_SIGN_PUBLIC_KEY_PREVIOUS: envelopeEcsValueFrom(bindings.qr.publicPreviousSecretId, "QR previous public key"),
+    QR_SIGN_PREVIOUS_KEY_VERSION: envelopeEcsValueFrom(bindings.qr.previousKeyVersionSecretId, "QR previous key version"),
   };
 }
 

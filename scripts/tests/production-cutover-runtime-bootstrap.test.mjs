@@ -7,6 +7,7 @@ import { createProductionCutoverAdapters } from "../aws/production-cutover-produ
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
@@ -125,9 +126,46 @@ test("LIVE_QR_VERSION_BINDING rejects an operator value that differs from live p
 
 test("QR secret identifiers remain bindings and are never logical key versions", () => {
   const result = rotationBindingsToTaskBindings(bindings);
-  assert.match(result.QR_SIGN_ACTIVE_KEY_VERSION, /^arn:aws:secretsmanager:/);
-  assert.match(result.QR_SIGN_PREVIOUS_KEY_VERSION, /^arn:aws:secretsmanager:/);
+  assert.match(result.QR_SIGN_ACTIVE_KEY_VERSION, /:value::$/);
+  assert.match(result.QR_SIGN_PREVIOUS_KEY_VERSION, /:value::$/);
   assert.notEqual(result.QR_SIGN_PREVIOUS_KEY_VERSION, bindings.qr.previousKeyVersion);
+});
+
+test("rotation task bindings preserve SDK base ARNs and derive ECS JSON-key references", () => {
+  const result = rotationBindingsToTaskBindings(bindings);
+  assert.equal(result.JWT_SECRET_CURRENT, bindings.jwt.currentSecretId);
+  assert.equal(result.QR_SIGN_PRIVATE_KEY_CURRENT, bindings.qr.privateCurrentSecretId);
+  assert.equal(result.QR_SIGN_PUBLIC_KEY_CURRENT, bindings.qr.publicCurrentSecretId);
+  for (const name of ["JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"]) {
+    assert.equal(result[name].endsWith(":value::"), true);
+    assert.doesNotMatch(result[name], /:value::.*:value::/);
+  }
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE KEY|SecretString/);
+});
+
+test("overlap task rejects legacy/ECS reference confusion and double JSON-key suffixes", () => {
+  const secretBindings = {
+    ...rotationBindingsToTaskBindings(bindings),
+    ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-private",
+    ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-public",
+    ARTIFACT_SIGN_ACTIVE_KEY_VERSION: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-version",
+    ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-registry",
+    ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read",
+  };
+  const input = {
+    backendImage: image,
+    releaseSha: sourceSha,
+    backendLogGroup: "/ecs/mscqr-production/rls-green-backend",
+    secretBindings,
+  };
+  assert.doesNotThrow(() => buildOverlapTaskDefinition(input));
+  for (const name of ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"]) {
+    assert.throws(() => buildOverlapTaskDefinition({ ...input, secretBindings: { ...secretBindings, [name]: `${secretBindings[name]}:value::` } }), /wrong SDK\/ECS reference shape/);
+  }
+  for (const name of ["JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"]) {
+    assert.throws(() => buildOverlapTaskDefinition({ ...input, secretBindings: { ...secretBindings, [name]: secretBindings[name].replace(/:value::$/, "") } }), /wrong SDK\/ECS reference shape/);
+    assert.throws(() => buildOverlapTaskDefinition({ ...input, secretBindings: { ...secretBindings, [name]: `${secretBindings[name]}:value::` } }), /exact production reference|wrong SDK\/ECS reference shape/);
+  }
 });
 
 test("BOOTSTRAP_DOWNSTREAM_IMAGE_AUTHORIZATION uses the canonical validator", () => {
