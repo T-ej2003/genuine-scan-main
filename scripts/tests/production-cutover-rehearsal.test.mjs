@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateKeyPairSync } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { assertStageAPlan, runStageAControlPlane } from "../aws/production-stage-a-control-plane.mjs";
+import { createHash, generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { assertStageAPlan, createTerraformStageAAdapter, runStageAControlPlane } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
@@ -194,6 +196,87 @@ test("Stage A recognizes the exact indexed no-op as already converged", async ()
   assert.equal(result.appliedExactSavedPlan, false);
   assert.equal(result.mutationCount, 0);
   assert.equal(applyCalls, 0);
+});
+
+test("Stage A resumes an existing saved plan without a state backend", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-resume-"));
+  const planPath = path.join(directory, "stage-a.tfplan");
+  const planBytes = Buffer.from("preserved-plan-bytes");
+  writeFileSync(planPath, planBytes, { mode: 0o600 });
+  const stageAPlanSha256 = createHash("sha256").update(planBytes).digest("hex");
+  const calls = [];
+  try {
+    const adapter = createTerraformStageAAdapter({
+      root: "infra/aws/terraform/production-green-stage-a",
+      planPath,
+      stageAPlanSha256,
+      backendArgs: ["-backend-config=must-not-be-used"],
+      sourceSha: "a".repeat(40),
+      run: async (args) => {
+        calls.push(args);
+        if (args.includes("show")) return JSON.stringify(stageAPlan({ actions: ["no-op"] }));
+        if (args.includes("-backend=false")) return "";
+        throw new Error(`unexpected Terraform call: ${args.join(" ")}`);
+      },
+      describeIngress: async () => ({ present: true }),
+    });
+    const result = await runStageAControlPlane({ adapter, endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime", sourceSha: "a".repeat(40) });
+    assert.equal(result.alreadyConverged, true);
+    assert.equal(result.mutationCount, 0);
+    assert.equal(calls.some((args) => args.includes("must-not-be-used")), false);
+    assert.equal(calls.some((args) => args.includes("plan")), false);
+    assert.equal(calls.filter((args) => args.includes("show")).length, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Stage A rejects an invalid preserved-plan digest before Terraform show", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-plan-hash-"));
+  const planPath = path.join(directory, "stage-a.tfplan");
+  writeFileSync(planPath, "preserved-plan-bytes", { mode: 0o600 });
+  const calls = [];
+  try {
+    const adapter = createTerraformStageAAdapter({ planPath, stageAPlanSha256: "0".repeat(64), run: async (args) => { calls.push(args); return ""; }, describeIngress: async () => ({ present: true }) });
+    await assert.rejects(() => adapter.createSavedPlan(), /SHA-256 does not match/);
+    assert.equal(calls.length, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("Stage A rejects malformed or missing preserved-plan digest bindings", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-plan-hash-"));
+  const planPath = path.join(directory, "stage-a.tfplan");
+  writeFileSync(planPath, "preserved-plan-bytes", { mode: 0o600 });
+  try {
+    for (const stageAPlanSha256 of [undefined, "not-a-sha"]) {
+      const adapter = createTerraformStageAAdapter({ planPath, stageAPlanSha256, run: async () => "", describeIngress: async () => ({ present: true }) });
+      await assert.rejects(() => adapter.createSavedPlan(), /SHA-256 is missing or malformed/);
+    }
+    const missingPlan = path.join(directory, "missing.tfplan");
+    const adapter = createTerraformStageAAdapter({ planPath: missingPlan, stageAPlanSha256: "a".repeat(64), run: async () => "", describeIngress: async () => ({ present: true }) });
+    await assert.rejects(() => adapter.createSavedPlan(), /preserved plan is missing/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("Stage A rechecks the preserved-plan digest immediately before apply", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-plan-hash-"));
+  const planPath = path.join(directory, "stage-a.tfplan");
+  const planBytes = Buffer.from("preserved-plan-bytes");
+  writeFileSync(planPath, planBytes, { mode: 0o600 });
+  const stageAPlanSha256 = createHash("sha256").update(planBytes).digest("hex");
+  let applyCalls = 0;
+  try {
+    const adapter = createTerraformStageAAdapter({
+      planPath, stageAPlanSha256,
+      run: async (args) => { if (args.includes("apply")) applyCalls += 1; return args.includes("show") ? JSON.stringify(stageAPlan()) : ""; },
+      describeIngress: async () => ({ present: true }),
+    });
+    const saved = await adapter.createSavedPlan();
+    writeFileSync(planPath, "tampered-plan-bytes", { mode: 0o600 });
+    const originalRun = adapter.applySavedPlan;
+    await assert.rejects(() => originalRun(saved), /saved plan changed|SHA-256 does not match/);
+    assert.equal(applyCalls, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("Stage A postcondition reads exact SG-to-SG ingress from production-shaped AWS responses", () => {

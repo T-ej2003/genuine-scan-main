@@ -229,7 +229,7 @@ export function prepareProductionCutoverRuntime({
       iamEvidenceSha256: iamEvidence.evidence?.evidenceSha256 || iamEvidence.evidenceSha256 || null,
       rootDropEvidenceFile: rootDrop.path,
       rootDropEvidenceSha256: rootDrop.sha256,
-      stageARoot: path.resolve("infra/aws/terraform/production-green-stage-b"),
+      stageARoot: path.resolve("infra/aws/terraform/production-green-stage-a"),
       stageAPlanPath: path.resolve(stageAPlanPath),
       stageAPlanSha256: ensureStageBPrivateFile({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" }).sha256,
       artifactBindingSha256: hash(readFileSync(artifactBindingFile)),
