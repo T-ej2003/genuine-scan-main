@@ -28,6 +28,12 @@ GitHub deploy, and application/runtime roles cannot assume the release role.
 No GitHub OIDC trust is added here; that later migration requires separate
 review. The checker must be distinct from the release deployer.
 
+Stage A also manages the one exact inline role-chain policy on the existing
+`mscqr-production-independent-checker` role that permits only
+`sts:AssumeRole` into the Stage A-owned
+`mscqr-production-rls-independent-checker` role. It does not own the source
+role, its trust policy, or any other source-role permission.
+
 Stage A creates no ECS task definition, ECS service, Lambda function, image
 binding, runtime secret value, broker invocation, canary, or traffic switch.
 The executor security group has no default egress. It permits only green-DB
