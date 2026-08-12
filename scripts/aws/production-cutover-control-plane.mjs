@@ -11,6 +11,7 @@ import { validateOnboardingContract } from "../security/production-onboarding-co
 import { assertImageEvidence, imageEvidenceSha256 } from "./production-green-stage-b-image-evidence.mjs";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { assertCanonicalImageReuseEvidence, imageAuthorizationSha256 } from "./production-image-authorization.mjs";
+import { assertCheckerChainStructuralEvidence } from "./production-checker-chain-contract.mjs";
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -222,6 +223,7 @@ function assertIamReport(report) {
   if (report.iamEvaluationCensus && report.iamEvaluationCensus.executed !== report.iamEvaluationCensus.total) throw new Error("IAM census is incomplete.");
   if (report.iamEvaluationCensus?.invalid !== 0 || (report.iamEvaluationCensus?.failures || []).length !== 0) throw new Error("IAM census contains failed evaluations.");
   assertCutoverCriticalEvidence(report);
+  if (report.checkerTrust?.exact !== true || report.checkerTrust?.mfaRequired !== true) throw new Error("Live Role-A MFA trust evidence is required before checker readiness.");
 }
 
 /**
@@ -229,7 +231,7 @@ function assertIamReport(report) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
-  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, identities: suppliedIdentities, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, identities: suppliedIdentities, checkerChain, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
   if (!SHA40.test(sourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
   const mutations = [];
   const results = { protectedMain: { valid: true, sourceSha, evidenceSha256: imageAuthorization?.evidenceSha256 } , imageAuthorization };
@@ -239,6 +241,11 @@ export async function runProductionCutoverControlPlane(input = {}) {
   if (typeof iam?.reconcile === "function") recordMutation(mutations, "M1_IAM_RECONCILIATION", await iam.reconcile());
   assertIamReport(iamReport);
   results.iamPreflight = { ...iamReport, sourceSha, evidenceSha256: (iamReport.evidence || iamReport).evidenceSha256 };
+
+  if (typeof checkerChain?.verifySourceTrust !== "function" || typeof checkerChain?.verifyComplete !== "function") throw new Error("Live checker-chain trust assertion is required before Stage A convergence.");
+  const sourceTrust = await checkerChain.verifySourceTrust();
+  if (sourceTrust?.exact !== true || sourceTrust?.mfaRequired !== true) throw new Error("Live Role-A trust is not the exact MFA-gated checker-user trust.");
+  results.checkerSourceTrust = { ...sourceTrust, sourceSha, evidenceSha256: sha(sourceTrust) };
 
   const identities = typeof suppliedIdentities?.establish === "function" ? await suppliedIdentities.establish() : suppliedIdentities;
   assertIdentityEvidence(identities);
@@ -252,6 +259,8 @@ export async function runProductionCutoverControlPlane(input = {}) {
   const stageAResult = await runStageAControlPlane({ ...stageA, sourceSha });
   recordMutation(mutations, "M2_STAGE_A_APPLY", stageAResult);
   results.stageA = { ...stageAResult, ...identities, sourceSha };
+  const checkerChainEvidence = await checkerChain.verifyComplete();
+  results.checkerChain = { ...assertCheckerChainStructuralEvidence(checkerChainEvidence), sourceSha, evidenceSha256: sha(checkerChainEvidence) };
 
   let artifact;
   let runtimeOverlapTask = overlapTask;

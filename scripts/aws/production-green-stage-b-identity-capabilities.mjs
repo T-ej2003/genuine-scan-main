@@ -8,6 +8,7 @@ import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.
 import { RELEASE_CALLER_PATTERN } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
+import { CHECKER_SOURCE_ROLE_NAME, assertRoleATrustResponse } from "./production-checker-chain-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const IDENTITY_CAPABILITY_MATRIX_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -39,6 +40,7 @@ export const RELEASE_READ_PROBES = Object.freeze([
   ["refresh-broker-policy", "iam:GetPolicy", ["iam", "get-policy", "--policy-arn", policyArn]],
   ["refresh-broker-policy-versions", "iam:ListPolicyVersions", ["iam", "list-policy-versions", "--policy-arn", policyArn]],
   ["refresh-broker-attachments", "iam:ListAttachedRolePolicies", ["iam", "list-attached-role-policies", "--role-name", roleName(STAGE_B.brokerRoleArn)]],
+  ["checker-role-a-trust", "iam:GetRole", ["iam", "get-role", "--role-name", CHECKER_SOURCE_ROLE_NAME]],
   ...canaryRoles.flatMap((name) => [
     [`refresh-${name}-role`, "iam:GetRole", ["iam", "get-role", "--role-name", name]],
     [`refresh-${name}-inline-policies`, "iam:ListRolePolicies", ["iam", "list-role-policies", "--role-name", name]],
@@ -71,7 +73,7 @@ export function runReleaseReadPreflight({
   readIdentityCapabilityMatrix();
   ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot: root, create: true, normalize: true });
   const requiredReads = {}; const failed = []; const responses = new Map(); let total = 0;
-  let caller;
+  let caller; let checkerTrust = null;
   for (const probe of RELEASE_READ_PROBES) {
     total += 1;
     const outputPath = path.join(outputDirectory, `${probe.id}.json`);
@@ -86,6 +88,7 @@ export function runReleaseReadPreflight({
         caller = JSON.parse(response).Arn;
         if (!new RegExp(RELEASE_CALLER_PATTERN).test(caller || "")) throw new Error("WrongCaller");
       }
+      if (probe.id === "checker-role-a-trust") checkerTrust = assertRoleATrustResponse(JSON.parse(response));
       if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed";
     } catch (error) {
       requiredReads[probe.action] = "denied";
@@ -112,5 +115,5 @@ export function runReleaseReadPreflight({
     try { run(probe.args, probe); if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed"; }
     catch (error) { requiredReads[probe.action] = "denied"; failed.push({ id: probe.id, action: probe.action, classification: safeError(error) }); }
   }
-  return { schemaVersion: RELEASE_PREFLIGHT_SCHEMA_VERSION, caller: caller || null, account: STAGE_B.account, region, total, allowed: total - failed.length, requiredReads, failed, skipped: [], status: failed.length === 0 ? "valid" : "blocked" };
+  return { schemaVersion: RELEASE_PREFLIGHT_SCHEMA_VERSION, caller: caller || null, account: STAGE_B.account, region, total, allowed: total - failed.length, requiredReads, checkerTrust, failed, skipped: [], status: failed.length === 0 && checkerTrust?.exact === true && checkerTrust?.mfaRequired === true ? "valid" : "blocked" };
 }

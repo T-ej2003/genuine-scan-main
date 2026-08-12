@@ -614,7 +614,7 @@
         "sid": "ApplyExactStageACheckerRoleChainPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
       },
       "required": true,
       "mutation": true
@@ -647,7 +647,7 @@
         "sid": "ApplyExactStageAEndpointSecurityGroupIngress",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
       },
       "required": true,
       "mutation": true
@@ -983,7 +983,7 @@
         "sid": "ReadExactStageASecretMetadata",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
       },
       "required": true,
       "mutation": false
@@ -1553,7 +1553,7 @@
         "sid": "ReadExactStageAGreenRdsInstance",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
       },
       "required": true,
       "mutation": false
@@ -1623,7 +1623,7 @@
         "sid": "ReadExactStageAProviderEndpointMetadata",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
       },
       "required": true,
       "mutation": false
@@ -1686,7 +1686,7 @@
         "sid": "ReadExactStageAStateForHandoff",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
       },
       "required": true,
       "mutation": false
@@ -2231,7 +2231,7 @@
         "sid": "ReadExactStageASecretMetadata",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
       },
       "required": true,
       "mutation": false
@@ -3093,6 +3093,7 @@
       "classification": "TERRAFORM_REFRESH_READ",
       "probe": "direct",
       "probeIds": [
+        "checker-role-a-trust",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
       ],
@@ -3127,7 +3128,36 @@
         "sid": "ReadExactStageACheckerRolePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-checker-role-trust",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-checker-role-trust",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-independent-checker"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "checker-role-a-trust",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
       },
       "required": true,
       "mutation": false
@@ -3161,7 +3191,7 @@
         "sid": "ReadExactStageAGreenRdsTags",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
       },
       "required": true,
       "mutation": false
@@ -3188,7 +3218,7 @@
         "sid": "ReadExactStageABackendBucketLocation",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
       },
       "required": true,
       "mutation": false
@@ -3324,7 +3354,7 @@
         "sid": "ReadExactStageACheckerRole",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef"
+        "expectedPolicySha256": "c4c6afcce2c33b08f7ab5ae65c53ba74b3e3322c997270b1fed9ce67e14e3c4d"
       },
       "required": true,
       "mutation": false
@@ -6379,6 +6409,10 @@
       "action": "iam:ListAttachedRolePolicies"
     },
     {
+      "id": "checker-role-a-trust",
+      "action": "iam:GetRole"
+    },
+    {
       "id": "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
       "action": "iam:GetRole"
     },
@@ -6455,6 +6489,14 @@
     {
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
       "action": "rds:DescribeDBInstances"
+    },
+    {
+      "sourceFile": "scripts/aws/production-checker-chain-contract.mjs",
+      "action": "iam:GetRole"
+    },
+    {
+      "sourceFile": "scripts/aws/production-checker-chain-contract.mjs",
+      "action": "iam:GetRolePolicy"
     },
     {
       "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
@@ -6692,7 +6734,7 @@
     "strict-backend-metadata",
     "tf-workspace-default",
     "no-workspace-select-or-migration",
-    "checker-user-mfa-to-independent-role-chain",
+    "checker-user-mfa-live-trust-to-independent-role-chain",
     "structural-normal-resource-universe-append-only-retained-history",
     "no-service-database-alb-dns-traffic-or-secret-value-change"
   ]

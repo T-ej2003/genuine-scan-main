@@ -42,6 +42,10 @@ fresh `aws:MultiFactorAuthPresent` condition on the role-to-role request, becaus
 AWS role chaining does not provide a new MFA request. The exact target-role STS
 session ARN is signed and recorded; the release operator cannot sign. Never add
 `mfa_serial` to the second-hop profile or substitute another principal.
+Before any target-role convergence or checker approval, release preflight reads the
+live source-role trust and requires this exact semantic policy. A stale Terraform or
+configuration document cannot satisfy the gate; drift stops the cutover before the
+target-role trust is changed.
 
 ## Local dry run
 

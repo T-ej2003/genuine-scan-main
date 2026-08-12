@@ -12,6 +12,7 @@ import { buildOnboardingEvidenceFingerprint, runStrictOnboardingProbes, STRICT_O
 import { ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
 import { createProductionPreDeploymentInventoryAdapter } from "../aws/production-predeployment-inventory-adapter.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
+import { CHECKER_SOURCE_ROLE_ARN, CHECKER_TARGET_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
@@ -57,6 +58,7 @@ function iamFixture() {
     },
     ecsExecVerifierTrust: buildEcsExecOperatorEvidence(),
     iamEvaluationCensus: { total: all.length, executed: all.length, invalid: 0, failures: [] },
+    checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN },
   };
 }
 
@@ -103,6 +105,10 @@ function fixtureInput(overrides = {}) {
     imageAuthorization: structuredClone(imageAuthorizationFixture.authorization),
     imageAuthorizationValidation: { now: imageAuthorizationFixture.now, verifyImageEvidence: imageAuthorizationFixture.verifyImageEvidence },
     iamReport: iamFixture(),
+    checkerChain: {
+      verifySourceTrust: async () => ({ exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }),
+      verifyComplete: async () => ({ valid: true, sourceTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }, sourcePermission: { exact: true, action: "sts:AssumeRole", resource: CHECKER_TARGET_ROLE_ARN }, targetTrust: { exact: true, secondHopMfaRequired: false, principal: CHECKER_SOURCE_ROLE_ARN, roleArn: CHECKER_TARGET_ROLE_ARN }, checkerUserExact: true, firstHopMfaRequired: true, roleAAssumeTargetPermissionExact: true, roleBTrustExactRoleA: true, roleBSecondHopMfaRequired: false }),
+    },
     identities: { rootDrop: { ...validEvidence("root:drop"), callerArn: "arn:aws:iam::368992683803:root" }, releaseDeployer: { ...validEvidence("sts:release"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/rehearsal" }, verifier: { ...validEvidence("sts:verifier"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/rehearsal" } },
     stageA,
     artifactSigning: artifactFixture(),
@@ -392,6 +398,15 @@ test("missing rotation infrastructure convergence fails before task registration
   await assert.rejects(() => runProductionCutoverControlPlane(input), /Rotation infrastructure convergence is required/);
   assert.equal(input._mutations.includes("M4_REGISTER_TASK_DEFINITION"), false);
   assert.equal(input._mutations.includes("M6_ECS_UPDATE_SERVICE"), false);
+});
+
+test("drifted Role-A trust fails before Stage-A or target-role convergence", async () => {
+  const input = fixtureInput({ checkerChain: {
+    verifySourceTrust: async () => ({ exact: false, mfaRequired: false }),
+    verifyComplete: async () => { throw new Error("must not reach target-role verification"); },
+  } });
+  await assert.rejects(() => runProductionCutoverControlPlane(input), /Live Role-A trust/);
+  assert.equal(input._mutations.includes("M2_STAGE_A_APPLY"), false);
 });
 
 test("bootstrap ARNs replace stale overlap bindings on the real control-plane path", async () => {
