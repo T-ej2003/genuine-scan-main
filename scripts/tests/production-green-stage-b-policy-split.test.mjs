@@ -137,13 +137,13 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   }));
 });
 
-test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and twelve final-write statements", () => {
+test("the split has seven moved statements, two audit-only additions, eleven provider-control statements, and thirteen final-write statements", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
-  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids.slice(0, -1), "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", finalWriteSids.at(-1), "InvokeExactPreDeploymentInventoryBrokerAlias"]);
+  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids.slice(0, -1), "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", finalWriteSids.at(-1), "InvokeExactPreDeploymentInventoryBrokerAlias", "TagExactPreDeploymentInventoryTaskDefinition"]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", "InvokeExactPreDeploymentInventoryBrokerAlias"]).size, 32);
+  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactArtifactSigningSecretContainers", "ManageExactArtifactSigningSecretValues", "InvokeExactPreDeploymentInventoryBrokerAlias", "TagExactPreDeploymentInventoryTaskDefinition"]).size, 33);
   for (const sid of movedSids) {
     if (sid === "DescribeStageBTasksReadOnly") continue;
     assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
@@ -151,6 +151,13 @@ test("the split has seven moved statements, two audit-only additions, eleven pro
   for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "ReadExactStageBBrokerManagedPolicy"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
   }
+});
+
+test("pre-deployment inventory policy documents fit AWS size limits and keep tag authority exact", () => {
+  assert.ok(awsCharacterCount(parse(paths.finalWrite)) <= 6144);
+  assert.ok(awsCharacterCount(parse("documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json")) <= 6144);
+  assert.equal(statementOf(policies.finalWrite, "TagExactPreDeploymentInventoryTaskDefinition").Resource, "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*");
+  assert.equal(statementOf(parse("documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json"), "TagExactPreDeploymentInventoryTaskDefinition"), undefined);
 });
 
 test("DescribeTaskDefinition is isolated, wildcard-only, and read-only", () => {
