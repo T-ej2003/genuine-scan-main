@@ -13,7 +13,61 @@ export const STAGE_A_CHECKER_POLICY = Object.freeze({
   action: "sts:AssumeRole",
   resource: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
 });
+export const STAGE_A_CHECKER_ROLE_TRUST = Object.freeze({
+  address: "aws_iam_role.checker",
+  type: "aws_iam_role",
+  name: "mscqr-production-rls-independent-checker",
+  principal: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+  action: "sts:AssumeRole",
+});
 const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
+const stable = (value) => value && typeof value === "object" && !Array.isArray(value)
+  ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]))
+  : Array.isArray(value) ? value.map(stable) : value;
+const stableJson = (value) => JSON.stringify(stable(value));
+const exactPrincipal = (value, expected) => value === expected || (Array.isArray(value) && value.length === 1 && value[0] === expected);
+const decodePolicy = (value, label) => {
+  if (typeof value !== "string") throw new Error(`${label} is missing.`);
+  try { return JSON.parse(value); } catch { throw new Error(`${label} is malformed.`); }
+};
+
+export function assertStageACheckerRoleTrustDocument(document, { allowObsoleteSecondHopMfa = false } = {}) {
+  if (!document || document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== 1
+    || Object.keys(document).sort().join(",") !== "Statement,Version") throw new Error("Stage A checker role trust envelope is not exact.");
+  const [statement] = document.Statement;
+  const expectedKeys = allowObsoleteSecondHopMfa ? "Action,Condition,Effect,Principal" : "Action,Effect,Principal";
+  if (!statement || Object.keys(statement).sort().join(",") !== expectedKeys
+    || statement.Effect !== "Allow" || statement.Action !== STAGE_A_CHECKER_ROLE_TRUST.action
+    || !statement.Principal || Object.keys(statement.Principal).length !== 1
+    || !exactPrincipal(statement.Principal.AWS, STAGE_A_CHECKER_ROLE_TRUST.principal)) {
+    throw new Error("Stage A checker role trust semantics are not exact.");
+  }
+  if (allowObsoleteSecondHopMfa) {
+    if (stableJson(statement.Condition) !== stableJson({ Bool: { "aws:MultiFactorAuthPresent": "true" } })) throw new Error("Stage A checker role trust does not match the only recognized obsolete second-hop MFA state.");
+  } else if (statement.Condition !== undefined) throw new Error("Stage A checker role trust must not require second-hop MFA.");
+  return { exact: true, principal: STAGE_A_CHECKER_ROLE_TRUST.principal, action: STAGE_A_CHECKER_ROLE_TRUST.action, secondHopMfaRequired: allowObsoleteSecondHopMfa };
+}
+
+function assertStageACheckerRoleTrustChange(entry) {
+  if (entry.type !== STAGE_A_CHECKER_ROLE_TRUST.type) throw new Error("Stage A checker role trust resource type is wrong.");
+  const change = entry.change;
+  if (!exactActions(change?.actions, ["update"]) && !exactActions(change?.actions, ["no-op"])) throw new Error("Stage A checker role trust must be an update-only or converged no-op change.");
+  const before = change?.before;
+  const after = change?.after;
+  if (!before || typeof before !== "object" || Array.isArray(before) || !after || typeof after !== "object" || Array.isArray(after)) throw new Error("Stage A checker role trust before/after values are missing.");
+  for (const value of [before, after]) if (value.name !== STAGE_A_CHECKER_ROLE_TRUST.name) throw new Error("Stage A checker role identity is wrong.");
+  const beforeWithoutTrust = { ...before }; delete beforeWithoutTrust.assume_role_policy;
+  const afterWithoutTrust = { ...after }; delete afterWithoutTrust.assume_role_policy;
+  if (stableJson(beforeWithoutTrust) !== stableJson(afterWithoutTrust)) throw new Error("Stage A checker role trust change contains unrelated role mutations.");
+  if (exactActions(change.actions, ["update"])) {
+    assertStageACheckerRoleTrustDocument(decodePolicy(before.assume_role_policy, "Stage A checker role previous trust"), { allowObsoleteSecondHopMfa: true });
+    assertStageACheckerRoleTrustDocument(decodePolicy(after.assume_role_policy, "Stage A checker role next trust"));
+    return { valid: true, alreadyConverged: false, mutationCount: 1 };
+  }
+  assertStageACheckerRoleTrustDocument(decodePolicy(before.assume_role_policy, "Stage A checker role converged previous trust"));
+  assertStageACheckerRoleTrustDocument(decodePolicy(after.assume_role_policy, "Stage A checker role converged trust"));
+  return { valid: true, alreadyConverged: true, mutationCount: 0 };
+}
 
 function readAndVerifyPlanSha256(planPath, expectedSha256) {
   if (!SHA256.test(expectedSha256 || "")) throw new Error("Stage A preserved plan SHA-256 is missing or malformed.");
@@ -36,7 +90,11 @@ export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurit
     if (!Array.isArray(actions) || actions.length === 0 || !actions.every((action) => typeof action === "string")) throw new Error("Stage A plan resource actions are malformed.");
     return { entry, actions };
   });
+  const checkerRole = changes.filter(({ entry }) => entry.address === STAGE_A_CHECKER_ROLE_TRUST.address);
+  if (checkerRole.length !== 1) throw new Error("Stage A plan must contain exactly one reviewed checker role trust resource.");
+  const checkerRoleValidation = assertStageACheckerRoleTrustChange(checkerRole[0].entry);
   const unexpected = changes.filter(({ entry, actions }) => entry.address !== expectedAddress && entry.address !== STAGE_A_CHECKER_POLICY.address
+    && entry.address !== STAGE_A_CHECKER_ROLE_TRUST.address
     && !exactActions(actions, ["no-op"]) && !exactActions(actions, ["read"]));
   if (unexpected.length) throw new Error("Stage A plan contains an unreviewed mutation.");
   const reviewed = changes.filter(({ entry }) => entry.address === expectedAddress);
@@ -70,8 +128,8 @@ export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurit
   exact(String(after.to_port), "443", "Stage A plan ingress port is wrong.");
   exact(after.ip_protocol, "tcp", "Stage A plan ingress protocol is wrong.");
   if (after.cidr_ipv4 !== null || after.cidr_ipv6 !== null || after.prefix_list_id !== null) throw new Error("Stage A plan ingress source is not the reviewed security group.");
-  const mutationCount = [actions, checkerActions].filter((value) => exactActions(value, ["create"])).length;
-  return { valid: true, changes: mutationCount, address: change.address, actions, checkerActions, alreadyConverged: exactActions(actions, ["no-op"]) && exactActions(checkerActions, ["no-op"]) };
+  const mutationCount = [actions, checkerActions].filter((value) => exactActions(value, ["create"])).length + checkerRoleValidation.mutationCount;
+  return { valid: true, changes: mutationCount, address: change.address, actions, checkerActions, checkerRoleActions: checkerRole[0].actions, alreadyConverged: exactActions(actions, ["no-op"]) && exactActions(checkerActions, ["no-op"]) && checkerRoleValidation.alreadyConverged };
 }
 
 export async function runStageAControlPlane({ adapter, endpointSecurityGroupId, runtimeSecurityGroupId, sourceSha } = {}) {

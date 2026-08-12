@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertStageAPlan, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY } from "../aws/production-stage-a-control-plane.mjs";
+import { assertStageAPlan, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
@@ -31,6 +31,19 @@ const checkerPolicyChange = (actions = ["create"], after = {}) => ({
   change: {
     actions,
     after: { role: STAGE_A_CHECKER_POLICY.role, name: STAGE_A_CHECKER_POLICY.name, policy: checkerPolicyDocument(), ...after },
+  },
+});
+const checkerRoleTrustDocument = ({ condition } = {}) => JSON.stringify({
+  Version: "2012-10-17",
+  Statement: [{ Effect: "Allow", Principal: { AWS: STAGE_A_CHECKER_ROLE_TRUST.principal }, Action: STAGE_A_CHECKER_ROLE_TRUST.action, ...(condition ? { Condition: condition } : {}) }],
+});
+const checkerRoleChange = ({ actions = ["no-op"], before = {}, after = {} } = {}) => ({
+  address: STAGE_A_CHECKER_ROLE_TRUST.address,
+  type: STAGE_A_CHECKER_ROLE_TRUST.type,
+  change: {
+    actions,
+    before: { name: STAGE_A_CHECKER_ROLE_TRUST.name, assume_role_policy: checkerRoleTrustDocument({ condition: actions[0] === "update" ? { Bool: { "aws:MultiFactorAuthPresent": "true" } } : undefined }), ...before },
+    after: { name: STAGE_A_CHECKER_ROLE_TRUST.name, assume_role_policy: checkerRoleTrustDocument(), ...after },
   },
 });
 
@@ -90,7 +103,7 @@ function fixtureInput(overrides = {}) {
     endpointSecurityGroupId: "sg-endpoint",
     runtimeSecurityGroupId: "sg-runtime",
     adapter: {
-      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }, checkerPolicyChange()] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
+      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }, checkerPolicyChange(), checkerRoleChange()] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
       applySavedPlan: async () => { mutations.push("M2_STAGE_A_APPLY"); },
       describeIngress: async () => ({ present: true }),
     },
@@ -125,8 +138,8 @@ function fixtureInput(overrides = {}) {
   };
 }
 
-const stageAPlan = ({ address = 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', actions = ["create"], checkerActions = actions, after = {}, checkerAfter = {}, extra = [] } = {}) => ({
-  resource_changes: [{ address, change: { actions, after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null, ...after } } }, checkerPolicyChange(checkerActions, checkerAfter), ...extra],
+const stageAPlan = ({ address = 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', actions = ["create"], checkerActions = actions, after = {}, checkerAfter = {}, checkerRole = checkerRoleChange(), extra = [] } = {}) => ({
+  resource_changes: [{ address, change: { actions, after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null, ...after } } }, checkerPolicyChange(checkerActions, checkerAfter), checkerRole, ...extra],
 });
 
 test("Stage A accepts only the reviewed indexed for_each instance", () => {
@@ -163,6 +176,31 @@ test("Stage A admits only the exact checker role-chain policy semantics", () => 
   ]) assert.throws(() => assertStageAPlan(stageAPlan({ checkerAfter }), inputs));
   assert.throws(() => assertStageAPlan(stageAPlan({ checkerActions: ["update"] }), inputs));
   assert.throws(() => assertStageAPlan(stageAPlan({ extra: [{ address: "aws_iam_role_policy.unrelated", type: "aws_iam_role_policy", change: { actions: ["create"], after: {} } }] }), inputs));
+});
+
+test("Stage A admits only the exact Role-B trust transition", () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  const oldCondition = { Bool: { "aws:MultiFactorAuthPresent": "true" } };
+  assert.equal(assertStageAPlan(stageAPlan({ checkerRole: checkerRoleChange({ actions: ["update"] }) }), inputs).valid, true);
+  for (const checkerRole of [
+    checkerRoleChange({ actions: ["no-op"], before: { assume_role_policy: checkerRoleTrustDocument({ condition: oldCondition }) } }),
+    checkerRoleChange({ actions: ["create"] }),
+    checkerRoleChange({ actions: ["delete"] }),
+    checkerRoleChange({ actions: ["update", "delete"] }),
+    checkerRoleChange({ actions: ["update"], after: { assume_role_policy: checkerRoleTrustDocument({ condition: oldCondition }) } }),
+    checkerRoleChange({ actions: ["update"], after: { assume_role_policy: checkerRoleTrustDocument({ condition: { Bool: { "aws:MultiFactorAuthPresent": "false" } } }) } }),
+    checkerRoleChange({ actions: ["update"], after: { assume_role_policy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: "*" }, Action: "sts:AssumeRole" }] }) } }),
+    checkerRoleChange({ actions: ["update"], after: { assume_role_policy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:root" }, Action: "sts:AssumeRole" }] }) } }),
+    checkerRoleChange({ actions: ["update"], after: { assume_role_policy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: CHECKER_USER_ARN }, Action: "sts:AssumeRole" }] }) } }),
+    checkerRoleChange({ actions: ["update"], after: { assume_role_policy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/other" }, Action: "sts:AssumeRole" }] }) } }),
+    checkerRoleChange({ actions: ["update"], after: { assume_role_policy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: STAGE_A_CHECKER_ROLE_TRUST.principal }, Action: ["sts:AssumeRole", "sts:TagSession"] }] }) } }),
+    checkerRoleChange({ actions: ["update"], after: { name: "other-role" } }),
+    checkerRoleChange({ actions: ["update"], after: { permissions_boundary: "arn:aws:iam::368992683803:policy/other" } }),
+    checkerRoleChange({ actions: ["update"], after: { tags: { Changed: "true" } } }),
+    checkerRoleChange({ actions: ["update"], after: { max_session_duration: 7200 } }),
+    checkerRoleChange({ actions: ["update"], before: { tags: { Stable: "true" } } }),
+  ]) assert.throws(() => assertStageAPlan(stageAPlan({ checkerRole }), inputs));
+  assert.throws(() => assertStageAPlan(stageAPlan({ checkerRole: checkerRoleChange({ actions: ["update"] }), extra: [{ address: "aws_iam_role.unrelated", type: "aws_iam_role", change: { actions: ["update"], before: {}, after: {} } }] }), inputs));
 });
 
 test("Stage A rejects malformed unexpected entries before any apply", async () => {
