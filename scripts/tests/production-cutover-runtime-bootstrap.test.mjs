@@ -10,11 +10,12 @@ import { createProductionRotationPrepareAdapter } from "../aws/production-rotati
 import { parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { assertUniqueSecretBindingNames, buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
+import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
 const image = "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@" + digest;
-const paths = Object.fromEntries(["tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "artifactSigning", "publicQrVerification"].map((name) => [name, "/api/" + name]));
+const paths = PRODUCTION_ONBOARDING_PATHS;
 const bindings = {
   jwt: {
     currentSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-current-a",
@@ -110,6 +111,9 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     assert.equal(existsSync(result.configPath), true);
     assert.equal(existsSync(result.phasePaths.rotationStateFile), false);
     assert.equal(existsSync(result.phasePaths.rotationFixtureFile), false);
+    assert.equal(existsSync(result.config.onboardingPathsFile), true);
+    assert.equal(statSync(result.config.onboardingPathsFile).mode & 0o777, 0o600);
+    assert.deepEqual(JSON.parse(readFileSync(result.config.onboardingPathsFile, "utf8")), paths);
     assert.equal(result.config.onboardingBaseUrl, "https://www.mscqr.com");
     assert.equal(result.config.qr.previousKeyVersion, "qr-v1");
     assert.equal(result.config.expectedRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");

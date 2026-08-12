@@ -187,7 +187,7 @@ const keyPair = () => generateKeyPairSync("ed25519", {
 const qrVersion = (publicKey) => sha256(publicKey).slice(0, 16);
 
 const makePreviousQrFixture = (privatePem, publicPem, oldVersion, file) => {
-  const payload = { qr_id: "rotation-synthetic", batch_id: null, licensee_id: "rotation", iat: 1_700_000_000, nonce: sha256(`${oldVersion}:fixture`).slice(0, 24), kid: oldVersion };
+  const payload = { qr_id: "printer-test:rotation-synthetic", batch_id: null, licensee_id: "rotation", iat: 1_700_000_000, nonce: sha256(`${oldVersion}:fixture`).slice(0, 24), kid: oldVersion };
   const bytes = Buffer.from(JSON.stringify(payload));
   const signature = cryptoSign(null, createHash("sha256").update(bytes).digest(), createPrivateKey(privatePem));
   if (!cryptoVerify(null, createHash("sha256").update(bytes).digest(), createPublicKey(publicPem), signature)) throw new Error("failed to create previous QR fixture");

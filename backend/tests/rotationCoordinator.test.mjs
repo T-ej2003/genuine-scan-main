@@ -214,6 +214,7 @@ test("promotion writes pre-rotation current to previous and pending to current",
     const state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
     assert.equal(state.jwt.oldFingerprint, fingerprint("old-jwt-material"));
     const fixture = JSON.parse(readFileSync(path.join(directory, "previous-qr.json"), "utf8"));
+    assert.equal(fixture.payload.qr_id, "printer-test:rotation-synthetic");
     assert.doesNotThrow(() => jwt.verify(fixture.jwtPreviousToken, "old-jwt-material", { algorithms: ["HS256"] }));
     assert.doesNotThrow(() => jwt.verify(fixture.jwtCurrentToken, JSON.parse(sm.values.get(baseConfig.jwt.currentSecretId)).value, { algorithms: ["HS256"] }));
     assert.throws(() => jwt.verify(fixture.jwtPreviousToken, "historical-wrong-secret", { algorithms: ["HS256"] }));

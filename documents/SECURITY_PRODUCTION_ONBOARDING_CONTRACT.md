@@ -34,6 +34,22 @@ deployed secret and its payload/signature is never printed.
 
 ## Onboarding smoke
 
-Use a dedicated synthetic tenant/account and approved secret-store credentials. Run login, MFA, `/api/auth/me`,
-refresh, dashboard stats, QR stats, and public `/api/verify/:code` with a tagged synthetic run identifier.
+Use the reviewed production-green canary tenant/account and approved secret-store credentials. Run login, MFA,
+`/api/auth/me`, refresh, dashboard stats, QR stats, and public `/api/verify/:code` with a tagged synthetic run identifier.
 Customer credentials and customer QR payloads are prohibited; provisioning is operational and not performed here.
+
+## Deterministic security probes
+
+The strict production probe manifest is generated from the mounted route contract. `tenantIsolation` logs in with
+the existing production-green canary `LICENSEE_ADMIN` principal and reads the deterministic isolation-control
+licensee `GET /api/licensees/4e5d6a2d-42cd-4b87-ac85-793e2e72b95c`; the target is deliberately outside that
+principal's tenant and `403` or `404` is required. A platform-admin session, a fabricated target, and a successful
+empty response are not valid tenant-isolation evidence. `rbac` reads `GET /api/manufacturer/printer-agent/status`,
+while the audit, printer-trust, and artifact-signing probes use their reviewed read endpoints.
+
+`antiCloning` and `publicQrVerification` intentionally share `GET /api/verify/:code`. After rotation preparation,
+the coordinator's 0600 rotation fixture supplies the identifier-only synthetic signed token in memory. The public
+and anti-cloning probes send it through the dedicated `X-MSCQR-Verification-Token` header, never the query string;
+the public probe verifies it, and the anti-cloning probe changes one signature byte and requires the route's rejection
+status. The backend records only the route template, so the token is never placed in the onboarding manifest, URL,
+nginx/application request logs, command line, or onboarding evidence.

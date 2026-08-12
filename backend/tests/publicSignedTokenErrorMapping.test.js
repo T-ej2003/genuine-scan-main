@@ -77,7 +77,7 @@ mockModule("controllers/verify/shared.js", {
 
 const { verifyQRCode } = require("../dist/controllers/verify/verificationHandlers");
 
-const run = async (nextScenario) => {
+const run = async (nextScenario, headerTransport = false) => {
   scenario = nextScenario;
   const res = {
     statusCode: 200,
@@ -87,9 +87,9 @@ const run = async (nextScenario) => {
   };
   await verifyQRCode({
     params: {},
-    query: { t: "signed-token-value" },
+    query: headerTransport ? {} : { t: "signed-token-value" },
     ip: "192.0.2.1",
-    get: () => "",
+    get: (name) => headerTransport && String(name).toLowerCase() === "x-mscqr-verification-token" ? "signed-token-value" : "",
     requestId: "signed-token-error-test",
     customer: null,
   }, res);
@@ -117,6 +117,7 @@ const run = async (nextScenario) => {
     assert.doesNotMatch(JSON.stringify(res.body), /P2010|P0001|SQL|provider|CONTEXT/i);
   }
   assert.equal((await run("success")).statusCode, 200);
+  assert.equal((await run("success", true)).statusCode, 200, "header transport must preserve public verification semantics");
   console.log("public signed-token error mapping test passed");
 })().catch((error) => {
   console.error(error);
