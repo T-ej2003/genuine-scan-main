@@ -301,6 +301,26 @@ test("bootstrap ARNs replace stale overlap bindings on the real control-plane pa
   assert.equal(result.results.overlapTaskDefinition.valid, true);
 });
 
+test("post-prepare overlap registration uses JSON-key references for promoted current secrets", async () => {
+  const input = fixtureInput();
+  const current = input.overlapTask.input.secretBindings;
+  const overlapSecretBindings = Object.fromEntries(Object.entries(current).map(([name, value]) => [name,
+    ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"].includes(name) ? `${value}:value::` : value]));
+  input.rotationPrepare.run = async () => ({ valid: true, prepared: true, rotationId, rotationStateSha256, evidenceRef: "rotation:rehearsal", evidenceSha256, mutationCount: 1, overlapSecretBindings });
+  let registeredPayload;
+  input.overlapTask.register = async (payload) => {
+    registeredPayload = payload;
+    return { taskDefinition: { taskDefinitionArn } };
+  };
+  await runProductionCutoverControlPlane(input);
+  const secrets = registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").secrets;
+  const values = Object.fromEntries(secrets.map(({ name, valueFrom }) => [name, valueFrom]));
+  for (const name of ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"]) {
+    assert.match(values[name], /:value::$/);
+    assert.doesNotMatch(values[name], /:value::.*:value::/);
+  }
+});
+
 test("a bootstrap result that disagrees with the artifact adapter fails before registration", async () => {
   const input = fixtureInput();
   const runtimeBindings = Object.fromEntries(["ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"].map((name, index) => [name, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:wrong-runtime-${index}-Unique` ]));

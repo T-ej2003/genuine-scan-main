@@ -26,6 +26,8 @@ const baseConfig = {
     publicCurrentSecretId: "qr-public-current",
     publicPreviousSecretId: "qr-public-previous",
     publicPendingSecretId: "qr-public-pending",
+    currentKeyVersionSecretId: "qr-current-version",
+    previousKeyVersionSecretId: "qr-previous-version",
   },
 };
 
@@ -92,6 +94,8 @@ const initialSecrets = () => {
       [baseConfig.jwt.currentSecretId]: material("old-jwt-material"),
       [baseConfig.qr.privateCurrentSecretId]: material(keys.privateKey, { keyVersion: "legacy-v1" }),
       [baseConfig.qr.publicCurrentSecretId]: material(keys.publicKey, { keyVersion: "legacy-v1" }),
+      [baseConfig.qr.currentKeyVersionSecretId]: material("legacy-v1", { family: "qr_key_versions", slot: "current" }),
+      [baseConfig.qr.previousKeyVersionSecretId]: material("", { family: "qr_key_versions", slot: "previous-empty" }),
     },
   };
 };

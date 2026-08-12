@@ -266,6 +266,16 @@ function rotationBindingsToTaskBindings(bindings) {
   };
 }
 
+export function rotationBindingsToPostPrepareTaskBindings(bindings) {
+  const ecs = rotationBindingsToTaskBindings(bindings);
+  return {
+    ...ecs,
+    JWT_SECRET_CURRENT: envelopeEcsValueFrom(bindings.jwt.currentSecretId, "JWT current"),
+    QR_SIGN_PRIVATE_KEY_CURRENT: envelopeEcsValueFrom(bindings.qr.privateCurrentSecretId, "QR private current"),
+    QR_SIGN_PUBLIC_KEY_CURRENT: envelopeEcsValueFrom(bindings.qr.publicCurrentSecretId, "QR public current"),
+  };
+}
+
 const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
 
 export function parseBootstrapArgs(argv) {

@@ -7,7 +7,7 @@ import { createProductionCutoverAdapters } from "../aws/production-cutover-produ
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
-import { buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
+import { assertUniqueSecretBindingNames, buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
@@ -141,6 +141,38 @@ test("rotation task bindings preserve SDK base ARNs and derive ECS JSON-key refe
     assert.doesNotMatch(result[name], /:value::.*:value::/);
   }
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE KEY|SecretString/);
+});
+
+test("post-prepare current bindings use ECS JSON-key references while SDK bindings stay base ARNs", async () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    const result = prepareProductionCutoverRuntime(input);
+    const prepare = createProductionRotationPrepareAdapter({
+      coordinator: "backend/scripts/security/rotate-production-signing-material.mjs",
+      configFile: result.configPath,
+      stateFile: result.phasePaths.rotationStateFile,
+      fixtureFile: result.phasePaths.rotationFixtureFile,
+      run: async () => {
+        writeFileSync(result.phasePaths.rotationStateFile, JSON.stringify({ rotationId: result.config.rotationId, phase: "overlap-deploy-required", sourceSha }), { mode: 0o600 });
+        writeFileSync(result.phasePaths.rotationFixtureFile, JSON.stringify({ payload: null, signature: null, token: null }), { mode: 0o600 });
+        return JSON.stringify({ rotationId: result.config.rotationId, phase: "overlap-deploy-required" });
+      },
+    });
+    const prepared = await prepare.run({ rotationId: result.config.rotationId, inventory: { evidenceSha256: "f".repeat(64) } });
+    for (const name of ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"]) {
+      assert.match(prepared.overlapSecretBindings[name], /:value::$/);
+      assert.doesNotMatch(result.config.jwt.currentSecretId + result.config.qr.privateCurrentSecretId + result.config.qr.publicCurrentSecretId, /:value::/);
+    }
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("overlap task rejects duplicate secret names instead of ambiguous bindings", () => {
+  const definition = { containerDefinitions: [{ secrets: [{ name: "JWT_SECRET_CURRENT" }, { name: "JWT_SECRET_CURRENT" }] }] };
+  assert.throws(() => assertUniqueSecretBindingNames(definition), /duplicate secret binding names/);
 });
 
 test("overlap task rejects legacy/ECS reference confusion and double JSON-key suffixes", () => {

@@ -232,6 +232,17 @@ export async function runProductionCutoverControlPlane(input = {}) {
   recordMutation(mutations, "M5_ROTATION_STATE_PERSISTENCE", rotation);
   results.rotationPrepare = { ...rotation, sourceSha, rotationPrepared: rotation.prepared === true, inventory: inventoryResult.inventory };
 
+  if (rotation.overlapSecretBindings) {
+    runtimeOverlapTask = {
+      ...runtimeOverlapTask,
+      input: {
+        ...runtimeOverlapTask?.input,
+        secretBindings: { ...runtimeOverlapTask?.input?.secretBindings, ...rotation.overlapSecretBindings },
+        postPrepare: true,
+      },
+    };
+  }
+
   assertOverlapInputBinding(runtimeOverlapTask, imageAuthorization, results.artifactSigning, sourceSha);
   const task = await registerOverlapTaskDefinition(runtimeOverlapTask);
   recordMutation(mutations, "M4_REGISTER_TASK_DEFINITION", task);

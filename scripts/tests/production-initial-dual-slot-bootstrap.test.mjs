@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign as signSignature, verify as verifySignature } from "node:crypto";
+import { createRequire } from "node:module";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { bootstrapInitialDualSlotRotation, deriveLegacyRotationBaseline, INITIAL_DUAL_SLOT_NAMES, assertInitialDualSlotBindings } from "../aws/production-initial-dual-slot-bootstrap.mjs";
-import { buildProductionRotationConfig, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { buildProductionRotationConfig, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
+import { prepare } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
+
+const jwt = createRequire(path.resolve("backend/package.json"))("jsonwebtoken");
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const rotationId = "rotation-initial-20260812";
@@ -172,4 +178,67 @@ test("generated bindings satisfy the existing cutover coordinator config contrac
 test("legacy current baseline derivation never reads secret values", () => {
   const baseline = deriveLegacyRotationBaseline(taskDefinition);
   assert.deepEqual(baseline, { jwtCurrent: legacy.jwt, qrPrivateCurrent: legacy.qrPrivate, qrPublicCurrent: legacy.qrPublic, qrCurrentVersion: "2026-04-20" });
+});
+
+test("FULL_INITIAL_MIGRATION_SIMULATION keeps envelopes out of ECS and rotates QR key/version atomically", async () => {
+  const fixture = fakeSecrets(); const output = tempOutput(); const directory = fsTemp();
+  const legacyKeys = generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
+  try {
+    fixture.states.set(legacy.jwt, { arn: legacy.jwt, secretString: "legacy-jwt-material" });
+    fixture.states.set(legacy.qrPrivate, { arn: legacy.qrPrivate, secretString: legacyKeys.privateKey });
+    fixture.states.set(legacy.qrPublic, { arn: legacy.qrPublic, secretString: legacyKeys.publicKey });
+    const bootstrapped = await bootstrapInitialDualSlotRotation({ send: fixture.send, taskDefinition, sourceSha, rotationId, outputFile: output.file });
+    const config = buildProductionRotationConfig({
+      sourceSha, rotationId, liveCurrentKeyVersion: "2026-04-20",
+      approval: { ticket: "MSCQR-PROD-CUTOVER-2026-08-12", approvedBy: "approved", approverRole: "release", reason: "rotation", verificationRef: "https://example.invalid/ref", minimumGraceSeconds: 2592000 },
+      bindings: bootstrapped.bindings,
+    });
+    const stateFile = path.join(directory, "state.json"); const fixtureFile = path.join(directory, "fixture.json");
+    await prepare({ config, sm: fixture, identity: "arn:aws:sts::368992683803:assumed-role/release/test", inventoryEvidenceSha256: null, values: new Map([["state-file", stateFile], ["fixture-file", fixtureFile]]) });
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.phase, "overlap-deploy-required");
+    const stored = (id) => {
+      const record = fixture.states.get(id) || [...fixture.states.values()].find(({ arn }) => arn === id);
+      return JSON.parse(record.secretString);
+    };
+    const promoted = {
+      jwtCurrent: stored(config.jwt.currentSecretId),
+      qrPrivateCurrent: stored(config.qr.privateCurrentSecretId),
+      qrPublicCurrent: stored(config.qr.publicCurrentSecretId),
+      qrCurrentVersion: stored(config.qr.currentKeyVersionSecretId),
+      qrPublicPrevious: stored(config.qr.publicPreviousSecretId),
+      qrPreviousVersion: stored(config.qr.previousKeyVersionSecretId),
+    };
+    assert.equal(promoted.qrCurrentVersion.value, state.qr.newKeyVersion);
+    assert.equal(promoted.qrPreviousVersion.value, state.qr.oldKeyVersion);
+    assert.equal(promoted.qrPublicCurrent.keyVersion, promoted.qrCurrentVersion.value);
+    assert.equal(promoted.qrPublicPrevious.keyVersion, promoted.qrPreviousVersion.value);
+    assert.notEqual(promoted.qrCurrentVersion.value, promoted.qrPreviousVersion.value);
+
+    const rotationEcs = rotationBindingsToPostPrepareTaskBindings(config);
+    const artifact = Object.fromEntries(["private", "public", "active", "registry"].map((name) => [`ARTIFACT_SIGN_${name === "private" ? "PRIVATE_KEY_CURRENT" : name === "public" ? "PUBLIC_KEY_CURRENT" : name === "active" ? "ACTIVE_KEY_VERSION" : "PUBLIC_KEYS_JSON"}`, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-${name}`]));
+    const task = buildOverlapTaskDefinition({ backendImage: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:" + "a".repeat(64), releaseSha: sourceSha, backendLogGroup: "/ecs/rotation", postPrepare: true, secretBindings: { ...rotationEcs, ...artifact, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } });
+    const taskSecrets = Object.fromEntries(task.taskDefinition.containerDefinitions[0].secrets.map(({ name, valueFrom }) => [name, valueFrom]));
+    for (const name of ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"]) assert.match(taskSecrets[name], /:value::$/);
+    const injected = (name) => {
+      const base = taskSecrets[name].replace(/:value::$/, "");
+      const record = fixture.states.get(base) || [...fixture.states.values()].find(({ arn }) => arn === base);
+      return JSON.parse(record.secretString).value;
+    };
+    assert.doesNotMatch(injected("JWT_SECRET_CURRENT"), /^\{/);
+    assert.ok(createPublicKey(injected("QR_SIGN_PUBLIC_KEY_CURRENT")));
+    assert.ok(createPublicKey(injected("QR_SIGN_PUBLIC_KEY_PREVIOUS")));
+    const token = jwt.sign({ rotationId, slot: "current" }, injected("JWT_SECRET_CURRENT"), { algorithm: "HS256", noTimestamp: true });
+    assert.equal(jwt.verify(token, injected("JWT_SECRET_CURRENT"), { algorithms: ["HS256"] }).rotationId, rotationId);
+    const currentPayload = Buffer.from(JSON.stringify({ rotationId, kid: injected("QR_SIGN_ACTIVE_KEY_VERSION") }));
+    const currentSignature = signSignature(null, createHash("sha256").update(currentPayload).digest(), createPrivateKey(injected("QR_SIGN_PRIVATE_KEY_CURRENT")));
+    assert.equal(verifySignature(null, createHash("sha256").update(currentPayload).digest(), createPublicKey(injected("QR_SIGN_PUBLIC_KEY_CURRENT")), currentSignature), true);
+    const previousPayload = Buffer.from(JSON.stringify({ rotationId, kid: injected("QR_SIGN_PREVIOUS_KEY_VERSION") }));
+    const previousSignature = signSignature(null, createHash("sha256").update(previousPayload).digest(), createPrivateKey(legacyKeys.privateKey));
+    assert.equal(verifySignature(null, createHash("sha256").update(previousPayload).digest(), createPublicKey(injected("QR_SIGN_PUBLIC_KEY_PREVIOUS")), previousSignature), true);
+
+    const rollback = { qrPublic: legacyKeys.publicKey, qrVersion: "2026-04-20" };
+    assert.equal(createHash("sha256").update(rollback.qrPublic).digest("hex").slice(0, 16) !== state.qr.newKeyVersion, true);
+    assert.equal(rollback.qrVersion, state.qr.oldKeyVersion);
+  } finally { rmSync(output.directory, { recursive: true, force: true }); rmSync(directory, { recursive: true, force: true }); }
 });
