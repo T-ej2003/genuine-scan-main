@@ -243,6 +243,20 @@ function toolingInputTreeSha256(toolingSha) {
   return computeStageBToolingInputTreeSha256({ files: entries.map(({ file }) => file), blobSha256: (file) => blobByFile.get(file) });
 }
 
+export function deriveStageBImageImpactReport({ imageReleaseSha, toolingSha } = {}) {
+  assert(SHA.test(imageReleaseSha || ""), "Image release SHA must be a full commit SHA.");
+  assert(SHA.test(toolingSha || ""), "Tooling SHA must be a full commit SHA.");
+  git(["rev-parse", "--verify", `${imageReleaseSha}^{commit}`]);
+  git(["rev-parse", "--verify", `${toolingSha}^{commit}`]);
+  const files = changedFiles(imageReleaseSha, toolingSha);
+  return imageImpactReportFor({
+    imageReleaseSha,
+    toolingSha,
+    changedFiles: files,
+    toolingInputTreeSha256: toolingInputTreeSha256(toolingSha),
+  });
+}
+
 function imageImpactReportPath() {
   return process.env.STAGE_B_IMAGE_IMPACT_REPORT_PATH || path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH);
 }

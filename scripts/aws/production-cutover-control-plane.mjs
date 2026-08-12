@@ -8,6 +8,9 @@ import { assertReadyForOverlapDeployment } from "./production-overlap-readiness-
 import { produceRuntimeRotationInventory } from "../security/production-runtime-rotation-inventory.mjs";
 import { produceOnboardingEvidence } from "../security/produce-production-onboarding-evidence.mjs";
 import { validateOnboardingContract } from "../security/production-onboarding-contract.mjs";
+import { assertImageEvidence, imageEvidenceSha256 } from "./production-green-stage-b-image-evidence.mjs";
+import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
+import { assertCanonicalImageReuseEvidence, imageAuthorizationSha256 } from "./production-image-authorization.mjs";
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -114,14 +117,35 @@ function recordMutation(mutations, name, result) {
   if (count > 0) mutations.push({ name, count, payloadSha256: result?.mutationPayload ? sha(result.mutationPayload) : null });
 }
 
-export function assertImageAuthorization(value, sourceSha) {
-  if (value?.valid !== true || value.sourceSha !== sourceSha || !SHA256.test(value.evidenceSha256 || "")) throw new Error("Authorized image evidence is invalid.");
+export function assertImageAuthorization(value, sourceSha, { now, verifyImageEvidence } = {}) {
+  if (!SHA40.test(sourceSha || "") || value?.schemaVersion !== 2 || value.valid !== true || value.sourceSha !== sourceSha || !SHA256.test(value.evidenceSha256 || "")
+    || !value.imageEvidence || !value.imageEvidenceSignature || !value.imageReuseEvidence
+    || !SHA256.test(value.imageEvidenceSha256 || "") || !SHA256.test(value.imageReuseEvidenceSha256 || "")
+    || !SHA256.test(value.authorizationSha256 || "")) throw new Error("Canonical image authorization is incomplete or invalid.");
   for (const field of ["signatureVerified", "attestationVerified", "provenanceVerified"]) if (value[field] !== true) throw new Error(`Image ${field} is not verified.`);
   if (value.imageReuseCompatible !== true || value.imageBuildInputsChanged !== false || !SHA40.test(value.imageReleaseSha || "") || !/^\d+$/.test(String(value.workflowRunId || ""))) throw new Error("Image authorization is not bound to canonical compatibility and publication evidence.");
   if (!Array.isArray(value.images) || value.images.length !== 4 || new Set(value.images.map(({ service }) => service)).size !== 4) throw new Error("Image authorization must contain exactly four image records.");
   for (const image of value.images) if (!new Set(["backend", "worker", "rls-executor", "rls-canary"]).has(image.service) || !/^sha256:[a-f0-9]{64}$/.test(image.digest || "")) throw new Error(`Image authorization record is invalid: ${image.service || "unknown"}.`);
   const backend = value.images.find(({ service }) => service === "backend")?.digest;
   if (value.backendDigest !== undefined && value.backendDigest !== backend) throw new Error("Image authorization backend digest aliases disagree.");
+  if (value.imageEvidenceSha256 !== imageEvidenceSha256(value.imageEvidence)) throw new Error("Image authorization image evidence hash is wrong.");
+  if (value.imageReuseEvidenceSha256 !== canonicalSha256(value.imageReuseEvidence)) throw new Error("Image authorization image-reuse evidence hash is wrong.");
+  if (value.evidenceSha256 !== imageAuthorizationSha256(value) || value.authorizationSha256 !== value.evidenceSha256) throw new Error("Image authorization envelope hash is wrong.");
+  assertImageEvidence(value.imageEvidence, {
+    signatureArtifact: value.imageEvidenceSignature,
+    imageReleaseSha: value.imageEvidence.imageReleaseSha,
+    workflowRunId: value.imageEvidence.workflowRunId,
+    artifactSha256: value.imageEvidence.canonicalArtifactSha256,
+    now,
+    ...(verifyImageEvidence ? { verifySignature: verifyImageEvidence } : {}),
+  });
+  assertCanonicalImageReuseEvidence(value.imageEvidence, value.imageReuseEvidence, sourceSha);
+  if (value.imageEvidence.imageReleaseSha !== value.imageReleaseSha || String(value.imageEvidence.workflowRunId) !== String(value.workflowRunId)
+    || value.imageEvidence.images.some(({ service, digest }) => value.images.find((candidate) => candidate.service === service)?.digest !== digest)
+    || value.imageReuseEvidence.imageReuseCompatible !== value.imageReuseCompatible
+    || value.imageReuseEvidence.newImagesRequired !== value.imageBuildInputsChanged) {
+    throw new Error("Image authorization envelope diverges from its validated inputs.");
+  }
 }
 
 export const authorizedBackendDigest = (value) => value?.backendDigest || value?.backend?.digest || value?.backend?.imageDigest || value?.backendImageDigest || value?.images?.find(({ service }) => service === "backend")?.digest;
@@ -149,12 +173,12 @@ function assertIamReport(report) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
-  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, iam, iamReport = iam?.report, identities: suppliedIdentities, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, identities: suppliedIdentities, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
   if (!SHA40.test(sourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
   const mutations = [];
   const results = { protectedMain: { valid: true, sourceSha, evidenceSha256: imageAuthorization?.evidenceSha256 } , imageAuthorization };
 
-  assertImageAuthorization(imageAuthorization, sourceSha);
+  assertImageAuthorization(imageAuthorization, sourceSha, imageAuthorizationValidation);
 
   if (typeof iam?.reconcile === "function") recordMutation(mutations, "M1_IAM_RECONCILIATION", await iam.reconcile());
   assertIamReport(iamReport);

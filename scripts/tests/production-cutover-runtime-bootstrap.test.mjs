@@ -7,9 +7,10 @@ import { createProductionCutoverAdapters } from "../aws/production-cutover-produ
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
-const sourceSha = "b".repeat(40);
-const digest = "sha256:" + "c".repeat(64);
+const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
+const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
 const image = "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@" + digest;
 const paths = Object.fromEntries(["tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "artifactSigning", "publicQrVerification"].map((name) => [name, "/api/" + name]));
 const bindings = {
@@ -33,6 +34,8 @@ const bindings = {
 function gitFixture() {
   return (file, args) => {
     if (file === "git" && args[0] === "status") return "";
+    if (file === "git" && args[0] === "fetch") return "";
+    if (file === "git" && args[0] === "rev-parse" && args[1] === "FETCH_HEAD") return sourceSha + "\n";
     if (file === "git" && args[0] === "rev-parse") return sourceSha + "\n";
     throw new Error("unexpected git call: " + file + " " + args.join(" "));
   };
@@ -48,7 +51,8 @@ function taskDefinition() {
 
 function evidenceFiles(directory, repositoryRoot) {
   const file = (name, value) => { const target = path.join(directory, name); writeFileSync(target, JSON.stringify(value) + "\n", { mode: 0o600 }); chmodSync(target, 0o600); return target; };
-  const imageAuthorization = file("image-authorization.json", { valid: true, sourceSha, evidenceSha256: "a".repeat(64), signatureVerified: true, attestationVerified: true, provenanceVerified: true, imageReleaseSha: "b".repeat(40), workflowRunId: "31559932307", imageReuseCompatible: true, imageBuildInputsChanged: false, images: [{ service: "backend", digest }, { service: "worker", digest }, { service: "rls-executor", digest }, { service: "rls-canary", digest }] });
+  const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha });
+  const imageAuthorization = file("image-authorization.json", imageAuthorizationFixture.authorization);
   const iamEvidence = file("iam-evidence.json", { status: "valid", iamEvaluationCensus: { total: 158, executed: 158, invalid: 0, failures: [] }, evidenceSha256: "d".repeat(64) });
   const rootDrop = file("root-drop.json", { valid: true, callerArn: "arn:aws:iam::368992683803:root", evidenceSha256: "e".repeat(64) });
   const stageAPlan = file("stage-a.tfplan", "binary-fixture");
@@ -60,7 +64,7 @@ function evidenceFiles(directory, repositoryRoot) {
     ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-d",
   } }, null, 2));
   chmodSync(artifactBinding, 0o600);
-  return { imageAuthorization, iamEvidence, rootDrop, stageAPlan, artifactBinding };
+  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, rootDrop, stageAPlan, artifactBinding };
 }
 
 function fullInput(directory, repositoryRoot) {
@@ -80,6 +84,7 @@ function fullInput(directory, repositoryRoot) {
     inventoryApprovalId: "APR-STAGE-B-0001",
     onboardingPaths: paths,
     constructAdapters: ({ config, sourceSha: actualSha, rotationId }) => createProductionCutoverAdapters({ config, sourceSha: actualSha, rotationId }),
+    imageAuthorizationValidation: { now: evidence.imageAuthorizationFixture.now, verifyImageEvidence: evidence.imageAuthorizationFixture.verifyImageEvidence },
   };
 }
 
@@ -134,7 +139,7 @@ test("BOOTSTRAP_DOWNSTREAM_IMAGE_AUTHORIZATION uses the canonical validator", ()
   try {
     const input = fullInput(directory, process.cwd());
     const valid = JSON.parse(readFileSync(input.imageAuthorization.filePath, "utf8"));
-    assert.doesNotThrow(() => assertImageAuthorization(valid, sourceSha));
+    assert.doesNotThrow(() => assertImageAuthorization(valid, sourceSha, input.imageAuthorizationValidation));
     for (const field of malformedFields) {
       const malformed = { ...valid };
       delete malformed[field];
@@ -174,6 +179,48 @@ test("DERIVABLE_FIELDS_NOT_OPERATOR_REQUIRED rejects source SHA override", () =>
     const result = prepareProductionCutoverRuntime({ ...fullInput(directory, process.cwd()), sourceSha: "a".repeat(40) });
     assert.equal(result.readyToConsumeMfa, false);
     assert.match(result.blockers.join("\n"), /does not match protected main/);
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("BOOTSTRAP_FRESH_MAIN rejects stale remote identity before MFA or config generation", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    input.git = (file, args) => {
+      if (args[0] === "status") return "";
+      if (args[0] === "fetch") return "";
+      if (args[0] === "rev-parse" && args[1] === "FETCH_HEAD") return "b".repeat(40);
+      if (args[0] === "rev-parse" && args[1] === "HEAD") return sourceSha;
+      if (args[0] === "rev-parse") return sourceSha;
+      throw new Error(`unexpected git call: ${file} ${args.join(" ")}`);
+    };
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join("\n"), /freshly fetched protected main/);
+    assert.equal(existsSync(path.join(result.runtimeDirectory, "rotation-config.json")), false);
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("BOOTSTRAP_FRESH_MAIN rejects fetch failure without falling back to origin/main", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    input.git = (file, args) => {
+      if (args[0] === "status") return "";
+      if (args[0] === "fetch") throw new Error("network unavailable");
+      if (args[0] === "rev-parse" && args[1] === "origin/main") return sourceSha;
+      throw new Error(`unexpected git call: ${file} ${args.join(" ")}`);
+    };
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join("\n"), /Fresh protected-main fetch failed/);
+    assert.equal(existsSync(path.join(result.runtimeDirectory, "rotation-config.json")), false);
   } finally {
     rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
     rmSync(directory, { recursive: true, force: true });

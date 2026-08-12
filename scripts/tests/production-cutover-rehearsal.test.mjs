@@ -9,10 +9,11 @@ import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOp
 import { buildOnboardingEvidenceFingerprint, runStrictOnboardingProbes, STRICT_ONBOARDING_CHECKS } from "../security/production-strict-onboarding.mjs";
 import { ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
 import { createProductionPreDeploymentInventoryAdapter } from "../aws/production-predeployment-inventory-adapter.mjs";
+import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
-const sourceSha = "a".repeat(40);
-const imageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"b".repeat(64)}`;
-const digest = `sha256:${"b".repeat(64)}`;
+const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
+const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
+const imageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`;
 const rotationId = "rotation-rehearsal-1";
 const rotationStateSha256 = "c".repeat(64);
 const evidenceSha256 = "d".repeat(64);
@@ -66,6 +67,7 @@ const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/ms
 
 function fixtureInput(overrides = {}) {
   const mutations = [];
+  const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha });
   const strictProbes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
   const stageA = {
     endpointSecurityGroupId: "sg-endpoint",
@@ -79,7 +81,8 @@ function fixtureInput(overrides = {}) {
   const secretBindings = Object.fromEntries(["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"].map((name) => [name, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:rehearsal-${name}`]));
   return {
     sourceSha, rotationId, rotationStateSha256,
-    imageAuthorization: { ...validEvidence("images:rehearsal"), sourceSha, imageReleaseSha: "e".repeat(40), workflowRunId: "31509287814", imageReuseCompatible: true, imageBuildInputsChanged: false, images: ["backend", "worker", "rls-executor", "rls-canary"].map((service) => ({ service, digest })), signatureVerified: true, attestationVerified: true, provenanceVerified: true },
+    imageAuthorization: structuredClone(imageAuthorizationFixture.authorization),
+    imageAuthorizationValidation: { now: imageAuthorizationFixture.now, verifyImageEvidence: imageAuthorizationFixture.verifyImageEvidence },
     iamReport: iamFixture(),
     identities: { rootDrop: { ...validEvidence("root:drop"), callerArn: "arn:aws:iam::368992683803:root" }, releaseDeployer: { ...validEvidence("sts:release"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/rehearsal" }, verifier: { ...validEvidence("sts:verifier"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/rehearsal" } },
     stageA,
@@ -317,7 +320,7 @@ test("rotation preparation hash is the only deployment authorization hash", asyn
 
 test("invalid predecessor stops before the next mutation boundary", async () => {
   const input = fixtureInput({ imageAuthorization: { ...validEvidence("images:bad"), sourceSha: "f".repeat(40), imageReleaseSha: "e".repeat(40), workflowRunId: "31509287814", imageReuseCompatible: true, imageBuildInputsChanged: false, images: ["backend", "worker", "rls-executor", "rls-canary"].map((service) => ({ service, digest })), signatureVerified: true, attestationVerified: true, provenanceVerified: true } });
-  await assert.rejects(() => runProductionCutoverControlPlane(input), /image evidence/i);
+  await assert.rejects(() => runProductionCutoverControlPlane(input), /canonical image authorization|image evidence/i);
   assert.deepEqual(input._mutations, []);
 });
 
