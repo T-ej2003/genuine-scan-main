@@ -23,7 +23,7 @@ required.
 The canonical FinalApplyWrite SHA-256 changes from
 `04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`
 to
-`2f8280cd09270cf0e63b0300d64394439e52fb490e615a3219f1784b8d933ef2`.
+`6fd22c68f6ecf1721a5cdabbf79379cf2a94f87f215de885093126c2d70edbee`.
 
 The existing-task-definition traffic switch is intentionally owned by the same
 release-deployer identity used by the canonical wrapper. FinalApplyWrite grants
@@ -39,6 +39,11 @@ It does not grant service creation/deletion, task-definition deregistration, or
 wildcard service updates. The source change requires administrator publication
 of the new managed-policy version after merge; no live IAM change is performed
 by this document.
+
+The exact pre-deployment inventory `ecs:TagResource` permission is intentionally
+owned by FinalApplyWrite, while inventory registration and readback remain in
+TaskDefinitionRegistration. This keeps both AWS managed-policy documents below
+the 6,144-character policy-size limit without widening the resource scope.
 
 Primary references:
 
@@ -190,7 +195,7 @@ The allowed inline-policy set is empty.
 The candidate source policy union was evaluated with AWS IAM custom-policy
 simulation against the production-shaped plan:
 
-- required evaluations: 103/103 allowed
+- required evaluations: 107/107 allowed
 - required failures: 0
 - forbidden evaluations: 29/29 denied
 - forbidden allowed: 0
