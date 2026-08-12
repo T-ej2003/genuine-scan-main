@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { generateKeyPairSync } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { assertStageAPlan } from "../aws/production-stage-a-control-plane.mjs";
+import { assertStageAPlan, runStageAControlPlane } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
@@ -120,6 +120,25 @@ test("Stage A accepts only the reviewed indexed for_each instance", () => {
     stageAPlan({ actions: ["create", "delete"] }),
     stageAPlan({ extra: [{ address: "aws_vpc_security_group.foo", change: { actions: ["create"], after: {} } }] }),
   ]) assert.throws(() => assertStageAPlan(plan, inputs));
+});
+
+test("Stage A recognizes the exact indexed no-op as already converged", async () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  const saved = { sourceSha: "a".repeat(40), savedPlanSha256: "b".repeat(64), evidenceRef: "terraform-plan:test", evidenceSha256: "b".repeat(64), plan: stageAPlan({ actions: ["no-op"] }) };
+  let applyCalls = 0;
+  const result = await runStageAControlPlane({
+    adapter: {
+      createSavedPlan: async () => saved,
+      applySavedPlan: async () => { applyCalls += 1; },
+      describeIngress: async () => ({ present: true }),
+    },
+    ...inputs,
+    sourceSha: saved.sourceSha,
+  });
+  assert.equal(result.alreadyConverged, true);
+  assert.equal(result.appliedExactSavedPlan, false);
+  assert.equal(result.mutationCount, 0);
+  assert.equal(applyCalls, 0);
 });
 
 test("Stage A postcondition reads exact SG-to-SG ingress from production-shaped AWS responses", () => {

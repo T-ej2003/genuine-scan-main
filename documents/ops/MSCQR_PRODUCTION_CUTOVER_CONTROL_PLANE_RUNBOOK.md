@@ -20,6 +20,12 @@ rotation-overlap invocation unless it is marked as invoked by the governed orche
 tags are requested with `DescribeTasks --include TAGS` immediately before ECS Exec; the exact selected
 task ARN is reused without reselection.
 
+When resuming after the preserved Stage-A ingress mutation, the canonical refreshed Stage-A plan may
+be the exact indexed `no-op` for `aws_vpc_security_group_ingress_rule.runtime_endpoints_https["<runtime-security-group-id>"]`.
+That state is validated with the same endpoint/runtime/protocol/port/source assertions, the ingress
+postcondition is re-read, and no Terraform apply is issued. Only an exact `create` plan may apply the
+validated saved plan.
+
 The bounded inventory command is repository-owned and runs inside the approved backend runtime. The
 operator supplies no `DATABASE_URL`; only aggregate counts, explicit not-applicable classifications,
 and hash-bound evidence leave the runtime boundary.
