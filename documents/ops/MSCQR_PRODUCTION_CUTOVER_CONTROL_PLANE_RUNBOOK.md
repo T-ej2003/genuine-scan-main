@@ -61,9 +61,10 @@ Secrets Manager references. Bootstrap and execution share the canonical image-au
 including evidence, signature, attestation, provenance, source-SHA, workflow, release, service-record,
 and digest checks.
 The source-bound authorization is produced only by `scripts/aws/production-image-authorization.mjs`.
-It composes the signed four-image evidence with the canonical image-impact/reuse report and the
-current protected-main SHA, then writes one hash-bound private authorization file. Operators must
-not copy, relabel, or edit an older authorization artifact.
+It independently derives the image-impact transition from the two commits and checked-out git tree,
+compares the supplied reuse report to that result, composes it with the signed four-image evidence
+and current protected-main SHA, then writes one hash-bound private authorization file. Operators
+must not copy, relabel, or edit an older authorization artifact.
 
 Cutover input ownership is explicit:
 

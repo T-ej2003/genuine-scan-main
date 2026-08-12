@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { assertImageEvidence, imageEvidenceSha256 } from "./production-green-stage-b-image-evidence.mjs";
 import {
-  assertImageImpactReport,
+  deriveStageBImageImpactReport,
   assertProductionImageReuseResult,
 } from "./validate-stage-b-image-reuse.mjs";
 import {
@@ -52,27 +52,19 @@ function assertImageRecords(images) {
   }
 }
 
-function assertReuseEvidence(imageEvidence, reuseEvidence, sourceSha) {
+export function assertCanonicalImageReuseEvidence(imageEvidence, reuseEvidence, sourceSha) {
   if (!reuseEvidence || typeof reuseEvidence !== "object" || Array.isArray(reuseEvidence)) throw new Error("Canonical image-reuse evidence is required.");
   if (reuseEvidence.imageReleaseSha !== imageEvidence.imageReleaseSha || reuseEvidence.toolingSha !== sourceSha) throw new Error("Image-reuse evidence is not bound to the image release and protected-main SHA.");
-  assertImageImpactReport({
-    report: reuseEvidence,
-    imageReleaseSha: imageEvidence.imageReleaseSha,
-    toolingSha: sourceSha,
-    toolingInputTreeSha256: reuseEvidence.toolingInputTreeSha256,
-    changedFiles: reuseEvidence.classifiedChangedFiles,
-  });
-  assertProductionImageReuseResult({
-    ...reuseEvidence,
-    imageBuildInputsChanged: reuseEvidence.newImagesRequired === true,
-  });
-  if (reuseEvidence.imageReuseCompatible !== true || reuseEvidence.newImagesRequired !== false) throw new Error("Image-reuse evidence is not compatible with immutable image reuse.");
+  const derived = deriveStageBImageImpactReport({ imageReleaseSha: imageEvidence.imageReleaseSha, toolingSha: sourceSha });
+  if (canonicalSha256(reuseEvidence) !== canonicalSha256(derived)) throw new Error("Image-reuse evidence does not match the independently derived git impact report.");
+  assertProductionImageReuseResult({ ...derived, imageBuildInputsChanged: derived.newImagesRequired });
+  return derived;
 }
 
 export function createImageAuthorization({
   sourceSha,
-  currentHead = sourceSha,
-  originMainHead = sourceSha,
+  currentHead,
+  originMainHead,
   imageEvidence,
   imageEvidenceSignature,
   imageReuseEvidence,
@@ -94,12 +86,13 @@ export function createImageAuthorization({
     ...(verifyImageEvidence ? { verifySignature: verifyImageEvidence } : {}),
   });
   assertImageRecords(imageEvidence.images);
-  assertReuseEvidence(imageEvidence, imageReuseEvidence, sourceSha);
+  assertCanonicalImageReuseEvidence(imageEvidence, imageReuseEvidence, sourceSha);
 
   const images = imageEvidence.images.map(({ service, digest }) => ({ service, digest }));
   const authorization = {
     schemaVersion: IMAGE_AUTHORIZATION_SCHEMA_VERSION,
     valid: true,
+    evidenceRef: `image-evidence:${imageEvidence.workflowRunId}`,
     sourceSha,
     imageReleaseSha: imageEvidence.imageReleaseSha,
     workflowRunId: String(imageEvidence.workflowRunId),

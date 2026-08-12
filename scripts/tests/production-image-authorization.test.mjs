@@ -7,11 +7,13 @@ import test from "node:test";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import {
   createImageAuthorization,
+  assertCanonicalImageReuseEvidence,
   imageAuthorizationSha256,
   runCli,
 } from "../aws/production-image-authorization.mjs";
 import {
   assertImageImpactReport,
+  deriveStageBImageImpactReport,
   imageImpactReportFor,
   STAGE_B_IMAGE_REUSE_RULES_VERSION,
 } from "../aws/validate-stage-b-image-reuse.mjs";
@@ -97,12 +99,7 @@ const imageEvidence = generateImageEvidence({
 });
 const imageEvidenceSignature = signImageEvidence(imageEvidence, { now: observedAt, sign: () => "AQ==" });
 const verifyImageEvidence = ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true });
-const imageReuseEvidence = imageImpactReportFor({
-  imageReleaseSha,
-  toolingSha: sourceSha,
-  toolingInputTreeSha256: "14ebe0f3271a5883c042dbbc6569d584eb75b4d750b9cb90d5918541d0fd4821",
-  changedFiles: ["scripts/aws/production-stage-a-control-plane.mjs"],
-});
+const imageReuseEvidence = deriveStageBImageImpactReport({ imageReleaseSha, toolingSha: sourceSha });
 
 function produce(overrides = {}) {
   return createImageAuthorization({
@@ -131,7 +128,7 @@ test("canonical 594-to-96 reuse evidence produces downstream-accepted authorizat
 test("producer rejects rebinding, image-affecting reuse, and changed image evidence", () => {
   assert.throws(() => createImageAuthorization({ ...produce(), sourceSha, currentHead: "b".repeat(40), originMainHead: sourceSha }), /source SHA/);
   const imageAffecting = imageImpactReportFor({ imageReleaseSha, toolingSha: sourceSha, toolingInputTreeSha256: imageReuseEvidence.toolingInputTreeSha256, changedFiles: ["backend/src/app.ts"] });
-  assert.throws(() => produce({ imageReuseEvidence: imageAffecting }), /stale|unsafe|compatible/);
+  assert.throws(() => produce({ imageReuseEvidence: imageAffecting }), /stale|unsafe|compatible|independently derived/);
   assert.throws(() => produce({ imageEvidence: { ...imageEvidence, workflowRunId: "31582010245" } }), /different report|publication|workflow|signature identity/);
   assert.throws(() => produce({ imageReuseEvidence: { ...imageReuseEvidence, imageReleaseSha: "b".repeat(40) } }), /different|comparison|bound/);
   const tamperedImage = { ...imageEvidence, images: imageEvidence.images.map((image) => image.service === "backend" ? { ...image, digest: `sha256:${"f".repeat(64)}` } : image) };
@@ -167,6 +164,33 @@ test("canonical image evidence and reuse validators are the only producer gates"
   assert.doesNotThrow(() => assertImageEvidence(imageEvidence, { signatureArtifact: imageEvidenceSignature, imageReleaseSha, workflowRunId, artifactSha256, now: observedAt, verifySignature: verifyImageEvidence }));
   assert.doesNotThrow(() => assertImageImpactReport({ report: imageReuseEvidence, imageReleaseSha, toolingSha: sourceSha, toolingInputTreeSha256: imageReuseEvidence.toolingInputTreeSha256, changedFiles: imageReuseEvidence.classifiedChangedFiles }));
   assert.equal(imageReuseEvidence.classificationRulesVersion, STAGE_B_IMAGE_REUSE_RULES_VERSION);
+});
+
+test("producer rejects caller-supplied impact claims and stale reuse reports", () => {
+  const affectedRelease = sourceSha;
+  const affectedSource = "9215f8b7902fa19d734b53da171228b51aa4b026";
+  const derived = deriveStageBImageImpactReport({ imageReleaseSha: affectedRelease, toolingSha: affectedSource });
+  assert.equal(derived.imageReuseCompatible, false);
+  const malicious = { ...derived, classifiedChangedFiles: [], imageAffectingFiles: [], toolingInputTreeSha256: "1".repeat(64), imageReuseCompatible: true, newImagesRequired: false, reason: "forged" };
+  assert.throws(() => assertCanonicalImageReuseEvidence({ imageReleaseSha: affectedRelease }, malicious, affectedSource), /independently derived/);
+  const stale = imageImpactReportFor({ imageReleaseSha: affectedRelease, toolingSha: affectedSource, changedFiles: [], toolingInputTreeSha256: "2".repeat(64) });
+  assert.throws(() => assertCanonicalImageReuseEvidence({ imageReleaseSha: affectedRelease }, stale, affectedSource), /independently derived/);
+});
+
+test("legacy asserted authorization is rejected without canonical v2 evidence", () => {
+  assert.throws(() => assertImageAuthorization({
+    valid: true,
+    sourceSha,
+    evidenceSha256: "a".repeat(64),
+    signatureVerified: true,
+    attestationVerified: true,
+    provenanceVerified: true,
+    imageReuseCompatible: true,
+    imageBuildInputsChanged: false,
+    imageReleaseSha,
+    workflowRunId,
+    images: Object.keys(digests).map((service) => ({ service, digest: digests[service] })),
+  }, sourceSha), /Canonical image authorization/);
 });
 
 test("CLI emits one private source-bound authorization artifact", () => {

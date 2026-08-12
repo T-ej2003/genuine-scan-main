@@ -146,6 +146,7 @@ export function prepareProductionCutoverRuntime({
   inventoryApprovalId,
   onboardingPaths,
   constructAdapters,
+  imageAuthorizationValidation,
 } = {}) {
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Production cutover runtime directory" });
   const paths = phasePaths(directory);
@@ -164,7 +165,7 @@ export function prepareProductionCutoverRuntime({
     if (!rotationBindings) throw new Error("rotation secret binding manifest is required; current/previous/pending JWT/QR bindings are not derivable from the legacy live task.");
     const rotationId = `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
     if (!imageAuthorization) throw new Error("image authorization evidence is required.");
-    assertImageAuthorization(imageAuthorization, protectedSha);
+    assertImageAuthorization(imageAuthorization, protectedSha, imageAuthorizationValidation);
     const backendImageDigest = authorizedBackendDigest(imageAuthorization);
     if (!backendImageDigest) throw new Error("Authorized backend image digest is missing.");
     if (!iamEvidence || iamEvidence.status !== "valid" || iamEvidence.iamEvaluationCensus?.executed !== iamEvidence.iamEvaluationCensus?.total || iamEvidence.iamEvaluationCensus?.invalid !== 0) throw new Error("IAM evidence is incomplete.");
