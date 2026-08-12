@@ -1,5 +1,6 @@
 locals {
-  tags = merge({ Environment = "production", ManagedBy = "Terraform", Component = "full-rls-green-stage-a" }, var.tags)
+  tags                      = merge({ Environment = "production", ManagedBy = "Terraform", Component = "full-rls-green-stage-a" }, var.tags)
+  checker_assumer_role_name = "mscqr-production-independent-checker"
   executor_interface_endpoint_services = toset([
     "ecr.api",
     "ecr.dkr",
@@ -219,6 +220,17 @@ resource "aws_iam_role_policy" "checker" {
   role = aws_iam_role.checker.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [{
     Effect = "Allow", Action = ["kms:GetPublicKey", "kms:Sign", "kms:Verify"], Resource = aws_kms_key.approval.arn
+  }] })
+}
+
+resource "aws_iam_role_policy" "checker_assume_target" {
+  name = "mscqr-production-independent-checker-role-chain"
+  role = local.checker_assumer_role_name
+  policy = jsonencode({ Version = "2012-10-17", Statement = [{
+    Sid      = "AssumeExactRlsIndependentChecker"
+    Effect   = "Allow"
+    Action   = "sts:AssumeRole"
+    Resource = aws_iam_role.checker.arn
   }] })
 }
 

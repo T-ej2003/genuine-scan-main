@@ -6,6 +6,6 @@ s3_prefix_list_id     = "pl-xxxxxxxxxxxxxxxxx"
 vpc_dns_resolver_cidr = "10.0.0.2/32"
 
 # External prerequisites. Do not infer these from root credentials or deploy roles.
-checker_principal_arns = ["arn:aws:iam::368992683803:role/<approved-independent-checker-principal>"]
+checker_principal_arns = ["arn:aws:iam::368992683803:role/mscqr-production-independent-checker"]
 release_role_arn       = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
 receipt_bucket_arn     = "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"

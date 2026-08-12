@@ -206,6 +206,12 @@
           "aws:RequestedRegion": "eu-west-2"
         }
       }
+    },
+    {
+      "Sid": "ApplyExactStageACheckerRoleChainPolicy",
+      "Effect": "Allow",
+      "Action": "iam:PutRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-independent-checker"
     }
   ]
 }

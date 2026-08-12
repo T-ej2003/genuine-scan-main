@@ -19,6 +19,7 @@ const production = Object.freeze({
   subnetGroupArn: "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
   parameterGroupArn: "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18",
   checkerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+  checkerSourceRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
   executorLogArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green",
   brokerLogArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker",
   executorRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
@@ -103,12 +104,20 @@ test("Stage A apply permits only the exact endpoint security-group ingress", () 
   assert.equal(allows({ action: "ec2:AuthorizeSecurityGroupIngress", resource: production.endpointSecurityGroupArn, values: context("us-east-1") }), false);
 });
 
+test("Stage A apply identity permits only the exact checker role-chain inline policy", () => {
+  assert.equal(allows({ action: "iam:PutRolePolicy", resource: production.checkerSourceRoleArn, values: context() }), true);
+  assert.equal(allows({ action: "iam:PutRolePolicy", resource: production.checkerRoleArn, values: context() }), false);
+  for (const action of ["iam:AttachRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:PassRole", "iam:CreateRole", "iam:*"]) {
+    assert.equal(allows({ action, resource: production.checkerSourceRoleArn, values: context() }), false, action);
+  }
+});
+
 test("Stage A policy has no unrelated mutation or secret/value authority", () => {
   const actions = statements.flatMap(({ Action }) => asArray(Action));
   for (const forbidden of [
     "ec2:RevokeSecurityGroupIngress", "ec2:ModifySecurityGroupRules", "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup",
     "rds:ModifyDBInstance", "rds:ModifyDBCluster", "rds:DeleteDBInstance", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecret",
-    "secretsmanager:ListSecretVersionIds", "kms:PutKeyPolicy", "kms:ScheduleKeyDeletion", "iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:PassRole",
+    "secretsmanager:ListSecretVersionIds", "kms:PutKeyPolicy", "kms:ScheduleKeyDeletion", "iam:AttachRolePolicy", "iam:PassRole",
     "logs:DeleteLogGroup", "ec2:RevokeSecurityGroupIngress", "ec2:ModifySecurityGroupRules", "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup", "ecs:UpdateService", "ecs:RegisterTaskDefinition",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
   assert.equal(actions.some((action) => /^(ec2|rds|secretsmanager|kms):\*$/.test(action)), false);
