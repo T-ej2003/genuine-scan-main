@@ -26,6 +26,8 @@ const production = Object.freeze({
   brokerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
 });
 
+const checkerPolicyRefresh = refreshContract.resourceTypes.find(({ type }) => type === "aws_iam_role_policy");
+
 const context = (region = production.region, overrides = {}) => ({
   "aws:RequestedRegion": region,
   "aws:ResourceTag/Environment": "production",
@@ -56,6 +58,8 @@ const readCases = [
   ["rds:DescribeDBParameterGroups", production.parameterGroupArn],
   ["rds:ListTagsForResource", production.parameterGroupArn],
   ["iam:GetRole", production.checkerRoleArn],
+  ["iam:GetRolePolicy", production.checkerSourceRoleArn],
+  ["iam:GetRolePolicy", production.checkerRoleArn],
   ["logs:ListTagsForResource", production.executorLogArn],
   ["logs:ListTagsForResource", production.brokerLogArn],
   ["secretsmanager:DescribeSecret", "*"],
@@ -67,6 +71,7 @@ test("Stage A provider refresh actions are exact and region-bound", () => {
   assert.equal(allows({ action: "rds:ListTagsForResource", resource: production.subnetGroupArn, values: context("us-east-1") }), false);
   assert.equal(allows({ action: "ec2:DescribeVpcEndpoints", resource: "*", values: context("us-east-1") }), false);
   assert.equal(allows({ action: "secretsmanager:DescribeSecret", resource: "*", values: context(production.region, { "aws:ResourceTag/Component": "unrelated" }) }), false);
+  assert.equal(allows({ action: "iam:GetRolePolicy", resource: "arn:aws:iam::368992683803:role/unrelated", values: context() }), false);
 });
 
 test("the independent Stage A resource graph has a reviewed refresh contract", () => {
@@ -84,6 +89,12 @@ test("the independent Stage A resource graph has a reviewed refresh contract", (
       }
     }
   }
+  assert.deepEqual(checkerPolicyRefresh.addresses, ["aws_iam_role_policy.checker", "aws_iam_role_policy.checker_assume_target"]);
+  assert.deepEqual(checkerPolicyRefresh.readActions, [{
+    action: "iam:GetRolePolicy",
+    resources: [production.checkerSourceRoleArn, production.checkerRoleArn],
+    sourceOfProof: "provider iam/role_policy.go",
+  }]);
 });
 
 test("the S3 backend contract covers exact state and lockfile lifecycle only", () => {
@@ -105,6 +116,9 @@ test("Stage A apply permits only the exact endpoint security-group ingress", () 
 });
 
 test("Stage A apply identity permits only the exact checker role-chain inline policy", () => {
+  assert.equal(allows({ action: "iam:GetRolePolicy", resource: production.checkerSourceRoleArn, values: context() }), true);
+  assert.equal(allows({ action: "iam:GetRolePolicy", resource: production.checkerRoleArn, values: context() }), true);
+  assert.equal(allows({ action: "iam:GetRolePolicy", resource: "arn:aws:iam::368992683803:role/unrelated", values: context() }), false);
   assert.equal(allows({ action: "iam:PutRolePolicy", resource: production.checkerSourceRoleArn, values: context() }), true);
   assert.equal(allows({ action: "iam:PutRolePolicy", resource: production.checkerRoleArn, values: context() }), false);
   for (const action of ["iam:AttachRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:PassRole", "iam:CreateRole", "iam:*"]) {

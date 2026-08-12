@@ -124,6 +124,17 @@
       "evidence": "RDS DescribeDBInstances has no resource-level IAM type; handoff validates the reviewed green database in eu-west-2"
     },
     {
+      "id": "refresh-stage-a-checker-inline-policy",
+      "phase": "refresh",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+      ],
+      "context": [],
+      "evidence": "locked hashicorp/aws provider refresh of the Stage A checker policy and exact source-role checker role-chain policy"
+    },
+    {
       "id": "refresh-stage-a-rds-tags",
       "phase": "refresh",
       "action": "rds:ListTagsForResource",

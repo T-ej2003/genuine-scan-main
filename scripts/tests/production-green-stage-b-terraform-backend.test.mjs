@@ -255,4 +255,8 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
   const checkerApply = stageAStatement("ApplyExactStageACheckerRoleChainPolicy");
   assert.equal(checkerApply.Action, "iam:PutRolePolicy");
   assert.equal(checkerApply.Resource, "arn:aws:iam::368992683803:role/mscqr-production-independent-checker");
+  assert.deepEqual(stageAStatement("ReadExactStageACheckerRolePolicy").Resource, [
+    "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+    "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+  ]);
 });
