@@ -37,6 +37,20 @@ export function createProductionCommandRunner({ profile, region = REGION, exec =
 
 const parseJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 
+export function describeStageAIngress({ run, endpointSecurityGroupId, runtimeSecurityGroupId } = {}) {
+  const response = parseJson(run, ["ec2", "describe-security-group-rules", "--filters", `Name=group-id,Values=${endpointSecurityGroupId}`]);
+  return {
+    present: (response.SecurityGroupRules || []).some((rule) =>
+      rule.GroupId === endpointSecurityGroupId &&
+      rule.ReferencedGroupInfo?.GroupId === runtimeSecurityGroupId &&
+      rule.IsEgress === false &&
+      rule.IpProtocol === "tcp" &&
+      rule.FromPort === 443 &&
+      rule.ToPort === 443,
+    ),
+  };
+}
+
 export function createProductionOverlapDeploymentAdapter({ run, runScript = execFileSync, profile, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), cluster = CLUSTER, service = SERVICE, expectedCurrentTaskDefinitionArn, readinessFile, readinessSha256, sourceSha, rotationId, imageDigest, expectedFamily = "mscqr-production-rls-green-backend-candidate", versionUrl, expectedGitSha } = {}) {
   if (typeof runScript !== "function" || !path.isAbsolute(deployScript)) throw new Error("Production overlap deployment runner is required.");
   return {
@@ -135,10 +149,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     sourceSha,
     region: REGION,
     run: async (args) => releaseRun(args),
-    describeIngress: async ({ endpointSecurityGroupId, runtimeSecurityGroupId }) => {
-      const response = parseJson(releaseRun, ["ec2", "describe-security-group-rules", "--filters", `Name=group-id,Values=${endpointSecurityGroupId}`, `Name=referenced-group-id,Values=${runtimeSecurityGroupId}`]);
-      return { present: (response.SecurityGroupRules || []).some((rule) => rule.IpProtocol === "tcp" && rule.FromPort === 443 && rule.ToPort === 443 && rule.IsEgress === false) };
-    },
+    describeIngress: async ({ endpointSecurityGroupId, runtimeSecurityGroupId }) => describeStageAIngress({ run: releaseRun, endpointSecurityGroupId, runtimeSecurityGroupId }),
   });
   const overlapRegistration = createAwsOverlapTaskRegistrationAdapter({ run: async (args) => releaseRun(args) });
   const inventoryExecute = createProductionRuntimeInventoryAdapter({
