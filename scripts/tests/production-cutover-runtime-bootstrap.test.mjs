@@ -116,6 +116,7 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     assert.deepEqual(JSON.parse(readFileSync(result.config.onboardingPathsFile, "utf8")), paths);
     assert.equal(result.config.onboardingBaseUrl, "https://www.mscqr.com");
     assert.equal(result.config.qr.previousKeyVersion, "qr-v1");
+    assert.match(result.config.stageARoot, /production-green-stage-a$/);
     assert.equal(result.config.expectedRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");
     assert.equal(result.config.overlapTaskInput.secretBindings.ARTIFACT_SIGN_ACTIVE_KEY_VERSION.includes("artifact-signing"), true);
     assert.doesNotMatch(readFileSync(result.configPath, "utf8"), /PRIVATE KEY|SecretString|fixture-password|123456/);

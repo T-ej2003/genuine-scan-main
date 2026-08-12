@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { generateKeyPairSync } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { assertStageAPlan, runStageAControlPlane } from "../aws/production-stage-a-control-plane.mjs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { assertStageAPlan, createTerraformStageAAdapter, runStageAControlPlane } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
@@ -194,6 +195,36 @@ test("Stage A recognizes the exact indexed no-op as already converged", async ()
   assert.equal(result.appliedExactSavedPlan, false);
   assert.equal(result.mutationCount, 0);
   assert.equal(applyCalls, 0);
+});
+
+test("Stage A resumes an existing saved plan without a state backend", async () => {
+  const directory = mkdtempSync("/private/tmp/mscqr-stage-a-resume-");
+  const planPath = path.join(directory, "stage-a.tfplan");
+  writeFileSync(planPath, "preserved-plan-bytes", { mode: 0o600 });
+  const calls = [];
+  try {
+    const adapter = createTerraformStageAAdapter({
+      root: "infra/aws/terraform/production-green-stage-a",
+      planPath,
+      backendArgs: ["-backend-config=must-not-be-used"],
+      sourceSha: "a".repeat(40),
+      run: async (args) => {
+        calls.push(args);
+        if (args.includes("show")) return JSON.stringify(stageAPlan({ actions: ["no-op"] }));
+        if (args.includes("-backend=false")) return "";
+        throw new Error(`unexpected Terraform call: ${args.join(" ")}`);
+      },
+      describeIngress: async () => ({ present: true }),
+    });
+    const result = await runStageAControlPlane({ adapter, endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime", sourceSha: "a".repeat(40) });
+    assert.equal(result.alreadyConverged, true);
+    assert.equal(result.mutationCount, 0);
+    assert.equal(calls.some((args) => args.includes("must-not-be-used")), false);
+    assert.equal(calls.some((args) => args.includes("plan")), false);
+    assert.equal(calls.filter((args) => args.includes("show")).length, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("Stage A postcondition reads exact SG-to-SG ingress from production-shaped AWS responses", () => {

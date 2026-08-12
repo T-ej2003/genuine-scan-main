@@ -50,8 +50,12 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
   let savedPlanSha256 = null;
   return {
     async createSavedPlan() {
-      await run([terraform, `-chdir=${root}`, "init", "-upgrade=false", "-input=false", ...backendArgs]);
-      await run([terraform, `-chdir=${root}`, "plan", "-input=false", "-out", planPath]);
+      if (fs.existsSync(planPath)) {
+        await run([terraform, `-chdir=${root}`, "init", "-upgrade=false", "-input=false", "-backend=false"]);
+      } else {
+        await run([terraform, `-chdir=${root}`, "init", "-upgrade=false", "-input=false", ...backendArgs]);
+        await run([terraform, `-chdir=${root}`, "plan", "-input=false", "-out", planPath]);
+      }
       const plan = JSON.parse(await run([terraform, `-chdir=${root}`, "show", "-json", planPath]));
       const bytes = fs.readFileSync(planPath);
       savedPlanSha256 = createHash("sha256").update(bytes).digest("hex");
