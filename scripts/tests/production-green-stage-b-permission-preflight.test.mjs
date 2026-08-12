@@ -419,6 +419,35 @@ test("runtime wrapper ECS reads simulate with the actual DescribeTasks Resource 
   assert.equal(denied.decision, "implicitDeny");
 });
 
+test("predeployment DescribeTaskDefinition allows only eu-west-2", () => {
+  const sourceEvaluation = deriveRequiredEvaluations(plan, manifest).required.find(({ manifestId }) => manifestId === "describe-predeployment-inventory-task-definition");
+  assert.equal(sourceEvaluation.action, "ecs:DescribeTaskDefinition");
+  assert.equal(sourceEvaluation.resource, "*");
+  const simulate = (evaluation, decision, missing = []) => simulatePrincipalPolicy({
+    roleArn,
+    evaluation,
+    run: (args) => {
+      const contextIndex = args.indexOf("--context-entries");
+      if (decision === "allowed") assert.equal(args[contextIndex + 1], "ContextKeyName=aws:RequestedRegion,ContextKeyValues=eu-west-2,ContextKeyType=string");
+      return JSON.stringify({ EvaluationResults: [{ EvalActionName: evaluation.action, EvalResourceName: evaluation.resource, EvalDecision: decision, MatchedStatements: decision === "allowed" ? [{}] : [], MissingContextValues: missing }] });
+    },
+  });
+  assert.equal(simulate(sourceEvaluation, "allowed").decision, "allowed");
+  const otherRegion = { ...sourceEvaluation, context: sourceEvaluation.context.map((entry) => entry.key === "aws:RequestedRegion" ? { ...entry, values: ["us-east-1"] } : entry) };
+  const otherResult = simulatePrincipalPolicy({
+    roleArn,
+    evaluation: otherRegion,
+    run: (args) => {
+      assert.match(args[args.indexOf("--context-entries") + 1], /ContextKeyValues=us-east-1/);
+      return JSON.stringify({ EvaluationResults: [{ EvalActionName: otherRegion.action, EvalResourceName: "*", EvalDecision: "implicitDeny", MatchedStatements: [], MissingContextValues: [] }] });
+    },
+  });
+  assert.equal(otherResult.decision, "implicitDeny");
+  const missingRegion = { ...sourceEvaluation, context: sourceEvaluation.context.filter((entry) => entry.key !== "aws:RequestedRegion"), expectedMissingContextValues: ["aws:RequestedRegion"], expectedDecision: "implicitDeny" };
+  Object.defineProperty(missingRegion, "forbidden", { value: true });
+  assert.equal(simulate(missingRegion, "implicitDeny", ["aws:RequestedRegion"]).decision, "implicitDeny");
+});
+
 const listBucketEvaluation = () => deriveRequiredEvaluations(plan, manifest).forbidden.find((item) => item.manifestId === "backend-list-bucket-not-required");
 const deniedListBucketSimulation = ({ evaluation }) => evaluation.manifestId === "backend-list-bucket-not-required"
   ? { decision: evaluation.expectedDecision, matchedStatements: 0, missingContextValues: evaluation.expectedMissingContextValues }

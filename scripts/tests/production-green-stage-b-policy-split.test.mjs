@@ -11,6 +11,7 @@ const paths = {
   v4: "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
   audit: "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
   finalWrite: "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+  taskDefinitionRegistration: "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
   manifest: "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
 };
 const read = (path) => fs.readFileSync(path, "utf8");
@@ -170,6 +171,19 @@ test("DescribeTaskDefinition is isolated, wildcard-only, and read-only", () => {
     Resource: "*",
     Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
   });
+});
+
+test("release task-definition registration uses AWS-required wildcard read scope", () => {
+  const matches = statementsForAction(policies.taskDefinitionRegistration, "ecs:DescribeTaskDefinition");
+  assert.equal(matches.length, 1);
+  assert.deepEqual(matches[0], {
+    Sid: "DescribeOnlyExactStageBTaskDefinitions",
+    Effect: "Allow",
+    Action: "ecs:DescribeTaskDefinition",
+    Resource: "*",
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
+  assert.equal(matches.some((statement) => actionsOf(statement).some((action) => action !== "ecs:DescribeTaskDefinition")), false);
 });
 
 test("deregistration authority is absent and retention remains resource-scoped", () => {
@@ -371,6 +385,7 @@ test("Terraform isolates broker runtime permissions in one dedicated managed pol
   for (const sid of [
     "RunOnlyApprovedExecutorAndCanaryRevisions",
     "RunOnlyApprovedPreDeploymentInventory",
+    "DescribeOnlyPreDeploymentInventoryTaskDefinitions",
     "ReadAndStopOnlyPreDeploymentInventory",
     "TagOnlyPreDeploymentInventoryTasks",
     "PassOnlyApprovedTaskRoles",
