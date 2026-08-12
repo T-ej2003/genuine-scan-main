@@ -20,6 +20,7 @@ import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, ARTIFACT_SIGNING_RUNTIME_BIND
 import { assertStageBCanonicalTfvarsFile } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from "./stage-b-artifact-contract.mjs";
 import { assertRotationInfrastructurePlan, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
+import { createLiveCheckerChainAssertionAdapter } from "./production-checker-chain-contract.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -206,6 +207,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     run: async (args) => releaseRun(args),
     describeIngress: async ({ endpointSecurityGroupId, runtimeSecurityGroupId }) => describeStageAIngress({ run: releaseRun, endpointSecurityGroupId, runtimeSecurityGroupId }),
   });
+  const checkerChain = createLiveCheckerChainAssertionAdapter({ run: releaseRun });
   const overlapRegistration = createAwsOverlapTaskRegistrationAdapter({ run: async (args) => releaseRun(args) });
   const rotationInfrastructure = createProductionRotationInfrastructureAdapter({ run: execFileSync, releaseProfile, config });
   const inventoryExecute = createProductionRuntimeInventoryAdapter({
@@ -216,6 +218,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   const preDeploymentInventory = createProductionPreDeploymentInventoryAdapter({ run: async (args) => releaseRun(args), sourceSha, imageDigest: config.backendImageDigest, config });
   return {
     iam: { report: readIamEvidence(), reconcile: async () => ({ mutationCount: 0 }) },
+    checkerChain,
     identities: {
       establish: async () => {
         const releaseDeployer = await establishReleaseDeployerIdentity({ adapter: releaseSts });

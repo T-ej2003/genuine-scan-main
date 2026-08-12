@@ -34,7 +34,18 @@ The JSON object has exactly these fields:
 }
 ```
 
-The checker assumes the dedicated signer role with MFA. The exact STS session ARN is signed and recorded; the release operator cannot sign.
+The checker authentication boundary is the exact checker IAM user assuming
+`mscqr-production-independent-checker` with MFA. That source role may assume
+only `mscqr-production-rls-independent-checker`; the target trust therefore
+contains only that exact role principal and intentionally does not require a
+fresh `aws:MultiFactorAuthPresent` condition on the role-to-role request, because
+AWS role chaining does not provide a new MFA request. The exact target-role STS
+session ARN is signed and recorded; the release operator cannot sign. Never add
+`mfa_serial` to the second-hop profile or substitute another principal.
+Before any target-role convergence or checker approval, release preflight reads the
+live source-role trust and requires this exact semantic policy. A stale Terraform or
+configuration document cannot satisfy the gate; drift stops the cutover before the
+target-role trust is changed.
 
 ## Local dry run
 
@@ -126,7 +137,11 @@ AWS_REGION=eu-west-2 IMAGE_TAG='<approved-release-sha>' \
 ```
 
 Generate the source-contract and ordered migration digests locally.
-5. The independent checker assumes `mscqr-production-rls-independent-checker` with MFA. It first performs an unsigned local validation, then explicitly signs the exact v2 input; the input contains every v2 field except `signatureBase64` and no unknown fields:
+5. The checker uses the MFA-backed source-role session from the authentication
+boundary above, then assumes `mscqr-production-rls-independent-checker` through
+the exact role chain. It first performs an unsigned local validation, then
+explicitly signs the exact v2 input; the input contains every v2 field except
+`signatureBase64` and no unknown fields:
 
 ```sh
 node scripts/aws/create-production-green-stage-b-approval.mjs \

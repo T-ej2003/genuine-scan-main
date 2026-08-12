@@ -10,6 +10,7 @@ import { ensureStageBTerraformBackendMetadataPrivate } from "../aws/stage-b-terr
 import { STAGE_B_EXPECTED_CHECK_ADDRESSES, STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 import { runRefreshOnly } from "../refresh-production-green-stage-b.mjs";
 import { STAGE_B_ARTIFACT_CONTRACTS, STAGE_B_PRIVATE_FILE_MODE, STAGE_B_PRIVATE_DIRECTORY_MODE, canonicalStageBArtifactContracts, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "../aws/stage-b-artifact-contract.mjs";
+import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-artifact-contract-"));
@@ -44,6 +45,7 @@ test("real release-read and backend producers normalize generated permissions", 
   const stateBytes = Buffer.from(`${JSON.stringify(state)}\n`);
   const run = (args, probe) => {
     if (probe.id === "caller") return JSON.stringify({ Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test" });
+    if (probe.id === "checker-role-a-trust") return JSON.stringify({ Role: { Arn: CHECKER_SOURCE_ROLE_ARN, AssumeRolePolicyDocument: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: CHECKER_USER_ARN }, Action: "sts:AssumeRole", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }] } } });
     if (probe.id === "stage-a-state" || probe.id === "stage-b-state") { fs.writeFileSync(args.at(-1), stateBytes); return ""; }
     if (probe.id === "audit-services" || probe.id === "audit-tasks" || probe.id === "refresh-broker-policy") return "{}";
     if (probe.id.includes("inline-policies")) return JSON.stringify({ PolicyNames: [] });

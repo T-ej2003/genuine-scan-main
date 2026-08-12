@@ -160,6 +160,7 @@
         "iam:ListRolePolicies"
       ],
       "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
         "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
         "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
         "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"

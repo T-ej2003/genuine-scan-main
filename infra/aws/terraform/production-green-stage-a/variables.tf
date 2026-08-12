@@ -26,8 +26,8 @@ variable "vpc_dns_resolver_cidr" {
 variable "checker_principal_arns" {
   type = set(string)
   validation {
-    condition     = length(var.checker_principal_arns) > 0 && alltrue([for arn in var.checker_principal_arns : can(regex("^arn:aws:iam::368992683803:(user|role)/", arn))])
-    error_message = "checker_principal_arns must contain approved exact account principals."
+    condition     = var.checker_principal_arns == toset(["arn:aws:iam::368992683803:role/mscqr-production-independent-checker"])
+    error_message = "checker_principal_arns must contain only the exact MFA-gated independent checker role."
   }
 }
 variable "release_role_arn" {

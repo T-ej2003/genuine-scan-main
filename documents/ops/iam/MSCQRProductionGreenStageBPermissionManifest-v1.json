@@ -124,6 +124,14 @@
       "evidence": "RDS DescribeDBInstances has no resource-level IAM type; handoff validates the reviewed green database in eu-west-2"
     },
     {
+      "id": "refresh-stage-a-checker-role-trust",
+      "phase": "preflight",
+      "action": "iam:GetRole",
+      "resources": ["arn:aws:iam::368992683803:role/mscqr-production-independent-checker"],
+      "context": [],
+      "evidence": "Live read-only assertion of the exact MFA-gated checker IAM user trust before target-role convergence or approval"
+    },
+    {
       "id": "refresh-stage-a-checker-inline-policy",
       "phase": "refresh",
       "action": "iam:GetRolePolicy",

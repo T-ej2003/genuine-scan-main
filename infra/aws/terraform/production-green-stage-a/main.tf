@@ -191,9 +191,10 @@ resource "aws_db_instance" "green" {
 
 resource "aws_iam_role" "checker" {
   name = "mscqr-production-rls-independent-checker"
+  # MFA is enforced when the exact checker IAM user enters the source role.
+  # Role chaining does not provide a fresh MFA request to this trust policy.
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
-    Effect    = "Allow", Principal = { AWS = var.checker_principal_arns }, Action = "sts:AssumeRole",
-    Condition = { Bool = { "aws:MultiFactorAuthPresent" = "true" } }
+    Effect = "Allow", Principal = { AWS = var.checker_principal_arns }, Action = "sts:AssumeRole"
   }] })
   tags = local.tags
 }
