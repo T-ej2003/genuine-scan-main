@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { generateKeyPairSync } from "node:crypto";
+import { assertStageAPlan } from "../aws/production-stage-a-control-plane.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { buildOnboardingEvidenceFingerprint, runStrictOnboardingProbes, STRICT_ONBOARDING_CHECKS } from "../security/production-strict-onboarding.mjs";
@@ -67,7 +68,7 @@ function fixtureInput(overrides = {}) {
     endpointSecurityGroupId: "sg-endpoint",
     runtimeSecurityGroupId: "sg-runtime",
     adapter: {
-      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: "aws_vpc_security_group_ingress_rule.runtime_endpoints_https", change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp" } } }] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
+      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
       applySavedPlan: async () => { mutations.push("M2_STAGE_A_APPLY"); },
       describeIngress: async () => ({ present: true }),
     },
@@ -91,6 +92,32 @@ function fixtureInput(overrides = {}) {
     _mutations: mutations,
   };
 }
+
+const stageAPlan = ({ address = 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', actions = ["create"], after = {}, extra = [] } = {}) => ({
+  resource_changes: [{ address, change: { actions, after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null, ...after } } }, ...extra],
+});
+
+test("Stage A accepts only the reviewed indexed for_each instance", () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  assert.equal(assertStageAPlan(stageAPlan(), inputs).valid, true);
+  for (const plan of [
+    stageAPlan({ address: "aws_vpc_security_group_ingress_rule.runtime_endpoints_https" }),
+    stageAPlan({ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-endpoint"]' }),
+    stageAPlan({ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-third"]' }),
+    stageAPlan({ address: 'aws_security_group.runtime_endpoints_https["sg-endpoint"]' }),
+    stageAPlan({ after: { security_group_id: "sg-other" } }),
+    stageAPlan({ after: { referenced_security_group_id: "sg-other" } }),
+    stageAPlan({ after: { from_port: 80 } }),
+    stageAPlan({ after: { ip_protocol: "udp" } }),
+    stageAPlan({ after: { cidr_ipv4: "10.0.0.0/8" } }),
+    stageAPlan({ after: { cidr_ipv6: "::/0" } }),
+    stageAPlan({ after: { prefix_list_id: "pl-unsupported" } }),
+    stageAPlan({ actions: ["update"] }),
+    stageAPlan({ actions: ["delete"] }),
+    stageAPlan({ actions: ["create", "delete"] }),
+    stageAPlan({ extra: [{ address: "aws_vpc_security_group.foo", change: { actions: ["create"], after: {} } }] }),
+  ]) assert.throws(() => assertStageAPlan(plan, inputs));
+});
 
 test("the real cutover orchestrator reaches synthetic onboarding with ordered mutation intents", async () => {
   const input = fixtureInput();
