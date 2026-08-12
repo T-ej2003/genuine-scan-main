@@ -174,9 +174,17 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.stageA = { ...stageAResult, ...identities, sourceSha };
 
   let artifact;
+  let runtimeOverlapTask = overlapTask;
   if (typeof artifactSigning?.bootstrap === "function") {
     const bootstrapped = await artifactSigning.bootstrap();
     recordMutation(mutations, "M3_ARTIFACT_SECRET_BOOTSTRAP", bootstrapped);
+    runtimeOverlapTask = {
+      ...overlapTask,
+      input: {
+        ...overlapTask?.input,
+        secretBindings: { ...overlapTask?.input?.secretBindings, ...bootstrapped.bindings },
+      },
+    };
   }
   if (typeof artifactSigning?.provision === "function") {
     const provisioned = await artifactSigning.provision();
@@ -186,10 +194,10 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.artifactSigning = { ...artifact, sourceSha, evidenceRef: artifactSigning.evidenceRef || `artifact-signing:${artifact.activeKeyVersion}`, evidenceSha256: artifactSigning.evidenceSha256 || sha(artifact), postconditionVerified: stageAResult.postconditionVerified };
   if (/secret|password|token|private/i.test(results.artifactSigning.evidenceRef)) throw new Error("Artifact signing evidence reference is unsafe.");
 
-  assertOverlapInputBinding(overlapTask, imageAuthorization, results.artifactSigning, sourceSha);
-  const task = await registerOverlapTaskDefinition(overlapTask);
+  assertOverlapInputBinding(runtimeOverlapTask, imageAuthorization, results.artifactSigning, sourceSha);
+  const task = await registerOverlapTaskDefinition(runtimeOverlapTask);
   recordMutation(mutations, "M4_REGISTER_TASK_DEFINITION", task);
-  results.overlapTaskDefinition = { ...task, sourceSha, activeKeyVersion: artifact.activeKeyVersion, bindings: task.input?.secretBindings || overlapTask.input?.secretBindings };
+  results.overlapTaskDefinition = { ...task, sourceSha, activeKeyVersion: artifact.activeKeyVersion, bindings: task.input?.secretBindings || runtimeOverlapTask.input?.secretBindings };
   results.registrationReadback = { ...results.overlapTaskDefinition, registeredTaskDefinitionArn: task.taskDefinitionArn };
 
   const inventoryResult = await produceRuntimeRotationInventory({ execute: inventory?.execute, sourceSha, rotationId, taskDefinitionArn: inventory?.taskDefinitionArn, registeredTaskDefinitionArn: task.taskDefinitionArn });

@@ -41,16 +41,50 @@ export async function provisionArtifactSigningDomain({ bindings, approvedBinding
   if (!approvedBindings || !ARTIFACT_SIGNING_BINDINGS.every((name) => bindings?.[name] === approvedBindings[name])) throw new Error("Artifact signing secret target is outside the reviewed allowlist.");
   const values = Object.fromEntries(await Promise.all(ARTIFACT_SIGNING_BINDINGS.map(async (name) => [name, await readSecret(bindings?.[name])])));
   const populated = ARTIFACT_SIGNING_BINDINGS.filter((name) => String(values[name] || "").trim());
-  if (populated.length !== 0 && populated.length !== ARTIFACT_SIGNING_BINDINGS.length) throw new Error("Artifact signing domain is partial; refusing repair.");
+  let writes = {};
   if (populated.length === 0) {
     const pair = generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
-    const writes = {
+    writes = {
       ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: pair.privateKey,
       ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: pair.publicKey,
       ARTIFACT_SIGN_ACTIVE_KEY_VERSION: activeKeyVersion,
       ARTIFACT_SIGN_PUBLIC_KEYS_JSON: JSON.stringify({ [activeKeyVersion]: pair.publicKey }),
     };
-    for (const name of ARTIFACT_SIGNING_BINDINGS) await putSecret({ secretRef: bindings[name], value: writes[name] });
+  } else if (populated.length !== ARTIFACT_SIGNING_BINDINGS.length) {
+    const privateValue = String(values.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT || "").trim();
+    const publicValue = String(values.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT || "").trim();
+    if (!privateValue && publicValue) throw new Error("Artifact signing partial domain cannot recover a private key from a public key.");
+    if (!privateValue && !publicValue && String(values.ARTIFACT_SIGN_PUBLIC_KEYS_JSON || "").trim()) throw new Error("Artifact signing partial domain cannot recover a private key while preserving the existing public registry.");
+    let resolvedPrivate = privateValue;
+    let resolvedPublic = publicValue;
+    if (!resolvedPrivate && !resolvedPublic) {
+      const pair = generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
+      resolvedPrivate = pair.privateKey;
+      resolvedPublic = pair.publicKey;
+    } else if (resolvedPrivate && !resolvedPublic) {
+      resolvedPublic = createPublicKey(createPrivateKey(pem(resolvedPrivate, "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT"))).export({ format: "pem", type: "spki" });
+    }
+    const resolvedActive = String(values.ARTIFACT_SIGN_ACTIVE_KEY_VERSION || activeKeyVersion).trim();
+    if (!version.test(resolvedActive)) throw new Error("Artifact signing active key version is invalid.");
+    const resolvedRegistry = String(values.ARTIFACT_SIGN_PUBLIC_KEYS_JSON || "").trim() || JSON.stringify({ [resolvedActive]: resolvedPublic });
+    if (values.ARTIFACT_SIGN_PUBLIC_KEYS_JSON) {
+      let registry;
+      try { registry = JSON.parse(resolvedRegistry); } catch { throw new Error("Artifact signing partial public registry is not JSON."); }
+      if (!registry || typeof registry !== "object" || Array.isArray(registry) || !Object.hasOwn(registry, resolvedActive)) throw new Error("Artifact signing partial public registry does not contain the active key.");
+      if (resolvedPrivate && !publicValue) {
+        const registryKey = createPublicKey(pem(registry[resolvedActive], "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"));
+        const derivedKey = createPublicKey(pem(resolvedPublic, "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT"));
+        if (fingerprint(registryKey) !== fingerprint(derivedKey)) throw new Error("Artifact signing partial public registry does not match the existing private key.");
+      }
+    }
+    writes = {
+      ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: privateValue ? null : resolvedPrivate,
+      ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: publicValue ? null : resolvedPublic,
+      ARTIFACT_SIGN_ACTIVE_KEY_VERSION: values.ARTIFACT_SIGN_ACTIVE_KEY_VERSION ? null : resolvedActive,
+      ARTIFACT_SIGN_PUBLIC_KEYS_JSON: values.ARTIFACT_SIGN_PUBLIC_KEYS_JSON ? null : resolvedRegistry,
+    };
   }
-  return verifyArtifactSigningDomain({ bindings, readSecret });
+  for (const name of ARTIFACT_SIGNING_BINDINGS) if (writes[name]) await putSecret({ secretRef: bindings[name], value: writes[name] });
+  const result = await verifyArtifactSigningDomain({ bindings, readSecret });
+  return { ...result, mutationCount: Object.values(writes).filter(Boolean).length };
 }

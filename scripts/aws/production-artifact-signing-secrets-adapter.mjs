@@ -23,14 +23,18 @@ export function loadApprovedArtifactSigningBindings(filePath) {
 export function createAwsArtifactSigningAdapter({ run, approvedBindings, bootstrapContractFile = ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, bindingOutputFile = ARTIFACT_SIGNING_RUNTIME_BINDING_PATH, activeKeyVersion = ARTIFACT_SIGNING_INITIAL_KEY_VERSION } = {}) {
   if (typeof run !== "function") throw new Error("AWS Secrets Manager runner is required.");
   let bindings = approvedBindings ? loadApprovedArtifactSigningBindings(approvedBindings) : null;
+  let uninitializedSecretRefs = new Set();
   const currentBindings = () => {
     if (!bindings) throw new Error("Artifact signing bindings have not been bootstrapped.");
     return bindings;
   };
   const readSecret = async (secretRef) => {
     if (!Object.values(currentBindings()).includes(secretRef)) throw new Error("Artifact signing read target is outside the reviewed allowlist.");
+    if (uninitializedSecretRefs.has(secretRef)) return "";
     const response = JSON.parse(await run(["secretsmanager", "get-secret-value", "--secret-id", secretRef, "--output", "json", "--no-cli-pager"]));
-    return response.SecretString || (response.SecretBinary ? Buffer.from(response.SecretBinary, "base64").toString("utf8") : "");
+    if (typeof response.SecretString === "string") return response.SecretString;
+    if (response.SecretBinary) return Buffer.from(response.SecretBinary, "base64").toString("utf8");
+    throw new Error("Artifact signing secret value response is malformed.");
   };
   const putSecret = async ({ secretRef, value }) => {
     if (!Object.values(currentBindings()).includes(secretRef) || typeof value !== "string" || !value) throw new Error("Artifact signing write target is outside the reviewed allowlist.");
@@ -39,6 +43,7 @@ export function createAwsArtifactSigningAdapter({ run, approvedBindings, bootstr
     try {
       writeFileSync(valueFile, value, { mode: 0o600 });
       await run(["secretsmanager", "put-secret-value", "--secret-id", secretRef, "--secret-string", `file://${valueFile}`, "--output", "json", "--no-cli-pager"]);
+      uninitializedSecretRefs.delete(secretRef);
       return { mutationCount: 1, secretRef };
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -49,6 +54,7 @@ export function createAwsArtifactSigningAdapter({ run, approvedBindings, bootstr
     bootstrap: async () => {
       const result = await bootstrapArtifactSigningBindings({ run, contractFile: bootstrapContractFile, outputFile: bindingOutputFile });
       bindings = loadApprovedArtifactSigningBindings(result.bindingFile);
+      uninitializedSecretRefs = new Set(result.uninitializedSecretRefs);
       return { mutationCount: result.createSecretCount, ...result };
     },
     readSecret,

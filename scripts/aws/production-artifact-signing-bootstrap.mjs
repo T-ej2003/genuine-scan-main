@@ -39,6 +39,16 @@ const exactArn = (value) => {
   return value;
 };
 
+const hasCurrentVersion = (metadata) => {
+  if (metadata.VersionIdsToStages === undefined) return false;
+  const versions = metadata.VersionIdsToStages;
+  if (!versions || typeof versions !== "object" || Array.isArray(versions)) throw new Error("AWS returned malformed artifact signing secret version metadata.");
+  return Object.values(versions).some((stages) => {
+    if (!Array.isArray(stages) || stages.some((stage) => typeof stage !== "string")) throw new Error("AWS returned malformed artifact signing secret staging metadata.");
+    return stages.includes("AWSCURRENT");
+  });
+};
+
 const writeBindingsAtomically = (outputPath, bindings) => {
   const resolved = assertReviewedPath(outputPath, RUNTIME_BINDING_NAME);
   mkdirSync(path.dirname(resolved), { recursive: true, mode: 0o700 });
@@ -61,6 +71,7 @@ export async function bootstrapArtifactSigningBindings({ run, contractFile = ART
   const contract = loadArtifactSigningBootstrapContract(contractFile);
   const bindings = {};
   const created = [];
+  const uninitializedSecretRefs = [];
   for (const name of ARTIFACT_SIGNING_BINDINGS) {
     const canonicalName = contract.names[name];
     let metadata;
@@ -78,8 +89,9 @@ export async function bootstrapArtifactSigningBindings({ run, contractFile = ART
     }
     if (metadata.Name !== canonicalName) throw new Error(`Artifact signing secret name mismatch for ${name}.`);
     bindings[name] = exactArn(metadata.ARN);
+    if (created.includes(name) || !hasCurrentVersion(metadata)) uninitializedSecretRefs.push(bindings[name]);
   }
   if (new Set(Object.values(bindings)).size !== ARTIFACT_SIGNING_BINDINGS.length) throw new Error("Artifact signing bootstrap returned duplicate secret ARNs.");
   const evidence = writeBindingsAtomically(outputFile, bindings);
-  return { valid: true, bindings, created, createSecretCount: created.length, bindingFile: evidence.path, evidenceSha256: evidence.evidenceSha256 };
+  return { valid: true, bindings, created, uninitializedSecretRefs, createSecretCount: created.length, bindingFile: evidence.path, evidenceSha256: evidence.evidenceSha256 };
 }

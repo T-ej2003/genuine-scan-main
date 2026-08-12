@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import test from "node:test";
 import { ARTIFACT_SIGNING_BINDINGS } from "../aws/production-artifact-signing-domain.mjs";
@@ -22,13 +23,29 @@ function fakeRunner({ existing = {}, createFailure = null } = {}) {
         error.stderr = "ResourceNotFoundException";
         throw error;
       }
-      return JSON.stringify({ Name: name, ARN: existing[name] });
+      const state = typeof existing[name] === "string" ? { arn: existing[name], initialized: true, value: "fixture-value" } : existing[name];
+      return JSON.stringify({ Name: name, ARN: state.arn, VersionIdsToStages: state.initialized ? { fixture: ["AWSCURRENT"] } : {} });
     }
     if (operation === "create-secret") {
       if (createFailure === name) throw new Error("CreateSecret denied");
       const arn = suffix(name.split("/").at(-1));
-      existing[name] = arn;
+      existing[name] = { arn, initialized: false, value: null };
       return JSON.stringify({ Name: name, ARN: arn });
+    }
+    if (operation === "get-secret-value") {
+      const state = Object.values(existing).find((candidate) => (typeof candidate === "string" ? candidate : candidate?.arn) === name) || Object.values(existing).find((candidate) => (typeof candidate === "string" ? candidate : candidate?.arn) === name);
+      const normalized = typeof state === "string" ? { initialized: true, value: "fixture-value" } : state;
+      if (!normalized?.initialized) throw new Error("GetSecretValue unexpectedly called for value-less secret");
+      return JSON.stringify({ SecretString: normalized.value });
+    }
+    if (operation === "put-secret-value") {
+      const secretRef = args[args.indexOf("--secret-id") + 1];
+      const state = Object.values(existing).find((candidate) => (typeof candidate === "string" ? candidate : candidate?.arn) === secretRef);
+      if (!state || typeof state === "string") throw new Error("Fixture secret state is not writable.");
+      const valueFile = args[args.indexOf("--secret-string") + 1].replace(/^file:\/\//, "");
+      state.value = readFileSync(valueFile, "utf8");
+      state.initialized = true;
+      return JSON.stringify({ ARN: secretRef, VersionId: "fixture-version", VersionStages: ["AWSCURRENT"] });
     }
     throw new Error(`Unexpected operation: ${operation}`);
   };
@@ -69,6 +86,22 @@ test("empty environment creates exactly four containers and emits identifiers on
   const bytes = readFileSync(result.bindingFile, "utf8");
   assert.doesNotMatch(bytes, /BEGIN .*PRIVATE KEY|SecretString|password|token/i);
   assert.equal(fixture.calls.some((args) => args.includes("list-secrets")), false);
+});
+
+test("value-less existing containers are marked uninitialized without GetSecretValue", async () => {
+  const existing = Object.fromEntries(ARTIFACT_SIGNING_BINDINGS.map((name) => [names[name], { arn: suffix(name.toLowerCase()), initialized: false, value: null }]));
+  const fixture = fakeRunner({ existing });
+  const result = await bootstrapArtifactSigningBindings({ run: fixture.run });
+  assert.deepEqual(new Set(result.uninitializedSecretRefs), new Set(Object.values(result.bindings)));
+  assert.equal(fixture.calls.some((args) => args[1] === "get-secret-value"), false);
+});
+
+test("initialized metadata is preserved and marked ready", async () => {
+  const existing = Object.fromEntries(ARTIFACT_SIGNING_BINDINGS.map((name) => [names[name], { arn: suffix(name.toLowerCase()), initialized: true, value: `preserved-${name}` }]));
+  const fixture = fakeRunner({ existing });
+  const result = await bootstrapArtifactSigningBindings({ run: fixture.run });
+  assert.deepEqual(result.uninitializedSecretRefs, []);
+  assert.equal(fixture.calls.filter((args) => args[1] === "create-secret").length, 0);
 });
 
 test("full environment reuses all four ARNs without CreateSecret", async () => {
@@ -137,8 +170,39 @@ test("production artifact adapter invokes the bootstrap path", async () => {
   assert.equal(fixture.calls.some((args) => args[1] === "list-secrets"), false);
 });
 
+test("value-less containers initialize through the existing artifact producer", async () => {
+  const fixture = fakeRunner();
+  const adapter = createAwsArtifactSigningAdapter({ run: fixture.run });
+  await adapter.bootstrap();
+  const result = await adapter.provision();
+  assert.equal(result.valid, true);
+  assert.equal(fixture.calls.filter((args) => args[1] === "put-secret-value").length, 4);
+  assert.equal(Object.values(fixture.existing).every((state) => state.initialized === true), true);
+});
+
+test("partial initialized/value-less domains fill only missing values", async () => {
+  const pair = generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
+  const existing = {
+    [names.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT]: { arn: suffix("private-key-current"), initialized: true, value: pair.privateKey },
+    [names.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT]: { arn: suffix("public-key-current"), initialized: false, value: null },
+    [names.ARTIFACT_SIGN_ACTIVE_KEY_VERSION]: { arn: suffix("active-key-version"), initialized: true, value: "v1" },
+    [names.ARTIFACT_SIGN_PUBLIC_KEYS_JSON]: { arn: suffix("public-keys-json"), initialized: false, value: null },
+  };
+  const fixture = fakeRunner({ existing });
+  const adapter = createAwsArtifactSigningAdapter({ run: fixture.run });
+  await adapter.bootstrap();
+  const before = existing[names.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].value;
+  const result = await adapter.provision();
+  assert.equal(result.valid, true);
+  assert.equal(existing[names.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].value, before);
+  assert.equal(existing[names.ARTIFACT_SIGN_ACTIVE_KEY_VERSION].value, "v1");
+  assert.equal(fixture.calls.filter((args) => args[1] === "put-secret-value").length, 2);
+});
+
 test("approved adapter denies GetSecretValue and PutSecretValue failures without widening targets", async () => {
+  const existing = Object.fromEntries(ARTIFACT_SIGNING_BINDINGS.map((name) => [names[name], { arn: suffix(name.toLowerCase()), initialized: true, value: "fixture" }]));
   const fixture = denyOperationRunner("get-secret-value");
+  Object.assign(fixture.existing, existing);
   const adapter = createAwsArtifactSigningAdapter({ run: fixture.run });
   await adapter.bootstrap();
   await assert.rejects(() => adapter.readSecret(adapter.bindings.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT), /get-secret-value denied/);
@@ -148,4 +212,16 @@ test("approved adapter denies GetSecretValue and PutSecretValue failures without
   await putAdapter.bootstrap();
   await assert.rejects(() => putAdapter.putSecret({ secretRef: putAdapter.bindings.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT, value: "fixture" }), /put-secret-value denied/);
   assert.equal(putFixture.calls.some((args) => args.includes("list-secrets")), false);
+});
+
+test("unknown GetSecretValue failures remain fail-closed", async () => {
+  const existing = Object.fromEntries(ARTIFACT_SIGNING_BINDINGS.map((name) => [names[name], { arn: suffix(name.toLowerCase()), initialized: true, value: "fixture" }]));
+  const fixture = fakeRunner({ existing });
+  const run = async (args) => {
+    if (args[1] === "get-secret-value") throw new Error("InternalServiceError");
+    return fixture.run(args);
+  };
+  const adapter = createAwsArtifactSigningAdapter({ run });
+  await adapter.bootstrap();
+  await assert.rejects(() => adapter.readSecret(adapter.bindings.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT), /InternalServiceError/);
 });

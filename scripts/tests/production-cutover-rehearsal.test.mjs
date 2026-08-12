@@ -151,6 +151,46 @@ test("the real cutover orchestrator reaches synthetic onboarding with ordered mu
   assert.equal(result.transitionMatrix.every((edge) => edge.result === "PASS"), true);
 });
 
+test("bootstrap ARNs replace stale overlap bindings on the real control-plane path", async () => {
+  const input = fixtureInput();
+  const pair = generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
+  const runtimeBindings = Object.fromEntries(["ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"].map((name, index) => [name, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:generated-runtime-${index}-Unique` ]));
+  const values = {
+    [runtimeBindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT]: pair.privateKey,
+    [runtimeBindings.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT]: pair.publicKey,
+    [runtimeBindings.ARTIFACT_SIGN_ACTIVE_KEY_VERSION]: "v1",
+    [runtimeBindings.ARTIFACT_SIGN_PUBLIC_KEYS_JSON]: JSON.stringify({ v1: pair.publicKey }),
+  };
+  const artifact = {
+    bindings: runtimeBindings,
+    bootstrap: async () => ({ valid: true, bindings: runtimeBindings, created: [], createSecretCount: 0 }),
+    provision: async () => ({ mutationCount: 0 }),
+    readSecret: async (ref) => values[ref],
+    evidenceRef: "artifact:runtime-bootstrap",
+  };
+  input.artifactSigning = artifact;
+  let registeredPayload;
+  const originalRegister = input.overlapTask.register;
+  input.overlapTask.register = async (payload) => {
+    registeredPayload = payload;
+    return originalRegister(payload);
+  };
+  const result = await runProductionCutoverControlPlane(input);
+  const registeredSecrets = Object.fromEntries(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").secrets.map(({ name, valueFrom }) => [name, valueFrom]));
+  for (const name of Object.keys(runtimeBindings)) assert.equal(registeredSecrets[name], runtimeBindings[name]);
+  assert.equal(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").image, imageDigest);
+  assert.equal(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").environment.find(({ name }) => name === "RELEASE_GIT_SHA").value, sourceSha);
+  assert.equal(result.results.overlapTaskDefinition.valid, true);
+});
+
+test("a bootstrap result that disagrees with the artifact adapter fails before registration", async () => {
+  const input = fixtureInput();
+  const runtimeBindings = Object.fromEntries(["ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"].map((name, index) => [name, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:wrong-runtime-${index}-Unique` ]));
+  input.artifactSigning.bootstrap = async () => ({ valid: true, bindings: runtimeBindings, created: [], createSecretCount: 0 });
+  await assert.rejects(() => runProductionCutoverControlPlane(input), /Overlap task artifact binding diverges/);
+  assert.equal(input._mutations.some((name) => name === "M4_REGISTER_TASK_DEFINITION"), false);
+});
+
 test("rotation preparation hash is the only deployment authorization hash", async () => {
   let deployedHash;
   const input = fixtureInput({ deployOverlap: { run: async ({ taskDefinitionArn: arn, rotationStateSha256: hash }) => {
