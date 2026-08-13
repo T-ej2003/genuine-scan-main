@@ -35,9 +35,130 @@ export const STAGE_B_REFRESH_ACQUISITION_FAILURES = Object.freeze([
   "TERRAFORM_ERRORED_PLAN",
   "MALFORMED_RESULT",
 ]);
-const VARIABLES_SOURCE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b/variables.tf");
+const TERRAFORM_ROOT_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b");
+const VARIABLES_SOURCE_PATH = path.join(TERRAFORM_ROOT_PATH, "variables.tf");
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const checkAddressesFromSource = (source) => [...source.matchAll(/check\s+"([^"]+)"\s*\{/g)].map(([, name]) => `check.${name}`).sort();
+const identifier = /[A-Za-z0-9_-]/;
+
+function skipTerraformTrivia(source, index) {
+  let cursor = index;
+  while (cursor < source.length) {
+    if (/\s/.test(source[cursor])) { cursor += 1; continue; }
+    if (source[cursor] === "#") { const end = source.indexOf("\n", cursor); cursor = end < 0 ? source.length : end + 1; continue; }
+    if (source.startsWith("//", cursor)) { const end = source.indexOf("\n", cursor); cursor = end < 0 ? source.length : end + 1; continue; }
+    if (source.startsWith("/*", cursor)) {
+      const end = source.indexOf("*/", cursor + 2);
+      if (end < 0) throw new Error("Stage B Terraform source contains an unterminated block comment.");
+      cursor = end + 2;
+      continue;
+    }
+    break;
+  }
+  return cursor;
+}
+
+function skipTerraformTemplateExpression(source, index) {
+  let cursor = index;
+  let depth = 0;
+  while (cursor < source.length) {
+    const next = skipTerraformTrivia(source, cursor);
+    if (next !== cursor) { cursor = next; continue; }
+    if (source[cursor] === '"') { cursor = skipTerraformString(source, cursor); continue; }
+    if (source.startsWith("<<", cursor)) {
+      const heredocEnd = skipTerraformHeredoc(source, cursor);
+      if (heredocEnd !== cursor) { cursor = heredocEnd; continue; }
+    }
+    if (source[cursor] === "{") { depth += 1; cursor += 1; continue; }
+    if (source[cursor] === "}") {
+      if (depth === 0) return cursor + 1;
+      depth -= 1;
+      cursor += 1;
+      continue;
+    }
+    cursor += 1;
+  }
+  throw new Error("Stage B Terraform source contains an unterminated template expression.");
+}
+
+function skipTerraformString(source, index) {
+  let cursor = index + 1;
+  while (cursor < source.length) {
+    if (source[cursor] === "\\") { cursor += 2; continue; }
+    if (source.startsWith("$${", cursor) || source.startsWith("%%{", cursor)) { cursor += 3; continue; }
+    if (source.startsWith("${", cursor) || source.startsWith("%{", cursor)) {
+      cursor = skipTerraformTemplateExpression(source, cursor + 2);
+      continue;
+    }
+    if (source[cursor] === '"') return cursor + 1;
+    cursor += 1;
+  }
+  throw new Error("Stage B Terraform source contains an unterminated string.");
+}
+
+function skipTerraformHeredoc(source, index) {
+  const header = source.slice(index).match(/^<<-?([A-Za-z0-9_]+)[^\n]*\n/);
+  if (!header) return index;
+  const marker = header[1];
+  const bodyStart = index + header[0].length;
+  const end = source.slice(bodyStart).search(new RegExp(`^[\\t ]*${marker}[\\t ]*$`, "m"));
+  if (end < 0) throw new Error("Stage B Terraform source contains an unterminated heredoc.");
+  const lineEnd = source.indexOf("\n", bodyStart + end);
+  return lineEnd < 0 ? source.length : lineEnd + 1;
+}
+
+export function checkAddressesFromSource(source) {
+  if (typeof source !== "string") throw new Error("Stage B Terraform check source must be text.");
+  const addresses = [];
+  const seen = new Set();
+  let cursor = 0;
+  let depth = 0;
+  while (cursor < source.length) {
+    const next = skipTerraformTrivia(source, cursor);
+    if (next !== cursor) { cursor = next; continue; }
+    if (source[cursor] === '"') { cursor = skipTerraformString(source, cursor); continue; }
+    if (source.startsWith("<<", cursor)) {
+      const heredocEnd = skipTerraformHeredoc(source, cursor);
+      if (heredocEnd !== cursor) { cursor = heredocEnd; continue; }
+    }
+    if (source[cursor] === "{") { depth += 1; cursor += 1; continue; }
+    if (source[cursor] === "}") { if (depth === 0) throw new Error("Stage B Terraform source contains an unmatched closing brace."); depth -= 1; cursor += 1; continue; }
+    if (depth === 0 && source.startsWith("check", cursor) && !identifier.test(source[cursor - 1] || "") && !identifier.test(source[cursor + 5] || "")) {
+      let probe = skipTerraformTrivia(source, cursor + 5);
+      if (source[probe] !== '"') throw new Error("Stage B Terraform check block is malformed.");
+      const nameStart = probe + 1;
+      probe = skipTerraformString(source, probe);
+      const name = source.slice(nameStart, probe - 1);
+      if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error("Stage B Terraform check block name is malformed.");
+      probe = skipTerraformTrivia(source, probe);
+      if (source[probe] !== "{") throw new Error("Stage B Terraform check block is missing its body.");
+      const address = `check.${name}`;
+      if (seen.has(address)) throw new Error(`Duplicate Stage B Terraform check block: ${address}`);
+      seen.add(address);
+      addresses.push(address);
+      cursor = probe + 1;
+      depth = 1;
+      continue;
+    }
+    cursor += 1;
+  }
+  if (depth !== 0) throw new Error("Stage B Terraform source contains an unbalanced block.");
+  return addresses.sort();
+}
+
+export function collectStageBTerraformCheckAddresses(terraformRoot = TERRAFORM_ROOT_PATH) {
+  const root = path.resolve(terraformRoot);
+  if (root !== TERRAFORM_ROOT_PATH) throw new Error("Stage B check discovery must use the canonical protected Terraform root.");
+  const files = fs.readdirSync(root, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
+  const addresses = [];
+  for (const entry of files) {
+    if (!entry.name.endsWith(".tf")) continue;
+    if (entry.isSymbolicLink() || !entry.isFile()) throw new Error(`Stage B Terraform source file is not a regular file: ${entry.name}`);
+    addresses.push(...checkAddressesFromSource(fs.readFileSync(path.join(root, entry.name), "utf8")));
+  }
+  const duplicates = addresses.filter((address, index) => addresses.indexOf(address) !== index);
+  if (duplicates.length) throw new Error(`Duplicate Stage B Terraform check block: ${duplicates[0]}`);
+  return [...new Set(addresses)].sort();
+}
 const REVIEWED_VARIABLE_VALIDATION_NAMES = Object.freeze(["production_rotation_secret_value_from", "retained_candidate_task_definitions", "retained_executor_task_definitions", "stage_b_recovery_alias_target_version"]);
 const variableValidationNamesFromSource = (source) => [...source.matchAll(/variable\s+"([^"]+)"\s*\{/g)]
   .filter((match) => {
@@ -49,7 +170,7 @@ const variableValidationNamesFromSource = (source) => [...source.matchAll(/varia
 const variablesSource = fs.readFileSync(VARIABLES_SOURCE_PATH, "utf8");
 const sourceVariableValidationNames = variableValidationNamesFromSource(variablesSource);
 if (JSON.stringify(sourceVariableValidationNames) !== JSON.stringify([...REVIEWED_VARIABLE_VALIDATION_NAMES].sort())) throw new Error("Stage B Terraform variable-validation inventory requires review.");
-export const STAGE_B_EXPECTED_CHECK_ADDRESSES = Object.freeze(checkAddressesFromSource(variablesSource));
+export const STAGE_B_EXPECTED_CHECK_ADDRESSES = Object.freeze(collectStageBTerraformCheckAddresses());
 export const STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES = Object.freeze(REVIEWED_VARIABLE_VALIDATION_NAMES.map((name) => `var.${name}`).sort());
 export const STAGE_B_EXPECTED_CHECK_INVENTORY = Object.freeze([...STAGE_B_EXPECTED_CHECK_ADDRESSES, ...STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES].sort());
 
