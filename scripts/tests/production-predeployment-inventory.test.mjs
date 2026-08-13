@@ -116,6 +116,42 @@ test("production predeployment adapter registers then invokes only the reviewed 
   assert.doesNotMatch(invoke.join(" "), /ExecuteCommand|--overrides|MSCQRExecTarget/);
 });
 
+test("cutover predeployment adapter uses the authorized full image and rejects the bare digest", async () => {
+  const bareDigest = "sha256:" + "b".repeat(64);
+  const runtimeConfig = { ...config, backendImageDigest: bareDigest, overlapTaskInput: { ...config.overlapTaskInput, backendImage: image } };
+  const registration = async (imageDigest) => {
+    let registeredDefinition;
+    const adapter = createProductionPreDeploymentInventoryAdapter({
+      run: (args) => {
+        if (args[0] === "ecs" && args[1] === "register-task-definition") {
+          const payload = JSON.parse(args[3]);
+          registeredDefinition = payload;
+          return JSON.stringify({ taskDefinition: { ...payload, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:23" } });
+        }
+        if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: { ...registeredDefinition, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:23", status: "ACTIVE" } });
+        if (args[0] === "lambda" && args[1] === "invoke") {
+          writeFileSync(args.at(-4), JSON.stringify({ status: "completed", sourceSha, rotationId: "rotation-1", taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:23", taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/inventory-23", inventory }));
+          return JSON.stringify({ StatusCode: 200 });
+        }
+        throw new Error(`unexpected command: ${args.join(" ")}`);
+      },
+      sourceSha,
+      imageDigest,
+      config: runtimeConfig,
+    });
+    const result = await adapter.run({ rotationId: "rotation-1" });
+    return { result, registeredDefinition };
+  };
+
+  await assert.rejects(() => registration(runtimeConfig.backendImageDigest), /Pre-deployment inventory task bindings are invalid/);
+  await assert.rejects(() => registration(undefined), /Pre-deployment inventory task bindings are invalid/);
+  const { result, registeredDefinition } = await registration(runtimeConfig.overlapTaskInput.backendImage);
+  assert.equal(result.valid, true);
+  assert.equal(result.taskDefinitionArn.endsWith(":23"), true);
+  assert.equal(registeredDefinition.containerDefinitions[0].image, image);
+  assert.doesNotMatch(registeredDefinition.containerDefinitions[0].image, /:latest$/);
+});
+
 test("real broker handler runs one bounded task and reads only its exact log stream", async () => {
   const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:19";
   const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/inventory-19";

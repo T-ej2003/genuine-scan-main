@@ -438,6 +438,34 @@ test("missing rotation infrastructure convergence fails before task registration
   assert.equal(input._mutations.includes("M6_ECS_UPDATE_SERVICE"), false);
 });
 
+test("unauthorized overlap image variants fail before pre-deployment task registration", async () => {
+  const authorizedImage = imageDigest;
+  const unauthorizedImages = [
+    `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"a".repeat(64)}`,
+    authorizedImage.replace("mscqr-backend", "unreviewed-backend"),
+    authorizedImage.replace("368992683803", "111111111111"),
+    authorizedImage.replace("eu-west-2", "us-east-1"),
+    authorizedImage.replace(/@sha256:[a-f0-9]{64}$/, ":latest"),
+    authorizedImage.slice(authorizedImage.indexOf("@") + 1),
+    undefined,
+  ];
+  for (const backendImage of unauthorizedImages) {
+    const input = fixtureInput();
+    const registrationCalls = [];
+    input.overlapTask.input.backendImage = backendImage;
+    input.preDeploymentInventory = {
+      taskDefinitionArn: input.inventory.taskDefinitionArn,
+      execute: async () => {
+        registrationCalls.push("register-task-definition");
+        return input.inventory.execute();
+      },
+    };
+    await assert.rejects(() => runProductionCutoverControlPlane(input), /authorized backend image/);
+    assert.equal(registrationCalls.length, 0);
+    assert.equal(input._mutations.includes("M4_REGISTER_TASK_DEFINITION"), false);
+  }
+});
+
 test("drifted Role-A trust fails before Stage-A or target-role convergence", async () => {
   const input = fixtureInput({ checkerChain: {
     verifySourceTrust: async () => ({ exact: false, mfaRequired: false }),
