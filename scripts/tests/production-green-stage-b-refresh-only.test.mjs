@@ -40,6 +40,38 @@ test("check parser discovers valid root blocks and ignores comments/strings", ()
     'check "from_other_tf" {}',
   ].join("\n")), ["check.from_main", "check.from_other_tf", "check.from_variables"]);
 });
+test("check parser handles nested Terraform template expressions without brace corruption", () => {
+  const interpolation = "${";
+  const sources = [
+    `locals { x = "${interpolation}format(\"}\", var.x)}" }\ncheck "real_contract" {}`,
+    `locals { x = "${interpolation}format(\"{\", var.x)}" }\ncheck "real_contract" {}`,
+    `locals { x = "${interpolation}jsonencode({ value = \"}\" })}" }\ncheck "real_contract" {}`,
+    `locals { x = "${interpolation}var.x ? \"{\" : \"}\"}" }\ncheck "real_contract" {}`,
+    `locals { x = "${interpolation}join(\",\", [\"a\", \"b\"])}" }\ncheck "real_contract" {}`,
+    `locals { x = "${interpolation}replace(var.x, \"\\\"\", \"\")}" }\ncheck "real_contract" {}`,
+    `locals { x = "${interpolation}foo(\"${interpolation}bar}\")}" }\ncheck "real_contract" {}`,
+    `locals { x = "${interpolation}one}${interpolation}two}" }\ncheck "real_contract" {}`,
+  ];
+  for (const source of sources) assert.deepEqual(checkAddressesFromSource(source), ["check.real_contract"]);
+});
+test("check parser skips escaped interpolation, template directives, and nested strings", () => {
+  const source = [
+    'locals {',
+    '  escaped = "$${not_an_interpolation}"',
+    '  directive = "%{ if var.enabled }check \\"fake\\" {}%{ endif }"',
+    '  nested = "${format(\"check \\\"fake\\\" { }\", var.x)}"',
+    '}',
+    'check "real_contract" {}',
+  ].join("\n");
+  assert.deepEqual(checkAddressesFromSource(source), ["check.real_contract"]);
+});
+test("check parser rejects malformed template strings", () => {
+  for (const source of [
+    'locals { x = "${format(\"}\", var.x)" }',
+    'locals { x = "${format(\"}\", var.x)} }',
+    'locals { x = "${format(\"}\", var.x)} }\ncheck "real_contract" {}',
+  ]) assert.throws(() => checkAddressesFromSource(source), /unterminated|unmatched|unbalanced/);
+});
 test("duplicate root check declarations fail closed", () => assert.throws(() => checkAddressesFromSource('check "duplicate" {}\ncheck "duplicate" {}'), /Duplicate Stage B Terraform check block/));
 test("unknown emitted checks remain rejected after full-source discovery", () => {
   const checks = [...passingChecks(), { address: "check.this_does_not_exist", status: "pass", instances: [{ address: "check.this_does_not_exist", status: "pass" }] }];

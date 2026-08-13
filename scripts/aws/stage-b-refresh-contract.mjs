@@ -57,10 +57,38 @@ function skipTerraformTrivia(source, index) {
   return cursor;
 }
 
+function skipTerraformTemplateExpression(source, index) {
+  let cursor = index;
+  let depth = 0;
+  while (cursor < source.length) {
+    const next = skipTerraformTrivia(source, cursor);
+    if (next !== cursor) { cursor = next; continue; }
+    if (source[cursor] === '"') { cursor = skipTerraformString(source, cursor); continue; }
+    if (source.startsWith("<<", cursor)) {
+      const heredocEnd = skipTerraformHeredoc(source, cursor);
+      if (heredocEnd !== cursor) { cursor = heredocEnd; continue; }
+    }
+    if (source[cursor] === "{") { depth += 1; cursor += 1; continue; }
+    if (source[cursor] === "}") {
+      if (depth === 0) return cursor + 1;
+      depth -= 1;
+      cursor += 1;
+      continue;
+    }
+    cursor += 1;
+  }
+  throw new Error("Stage B Terraform source contains an unterminated template expression.");
+}
+
 function skipTerraformString(source, index) {
   let cursor = index + 1;
   while (cursor < source.length) {
     if (source[cursor] === "\\") { cursor += 2; continue; }
+    if (source.startsWith("$${", cursor) || source.startsWith("%%{", cursor)) { cursor += 3; continue; }
+    if (source.startsWith("${", cursor) || source.startsWith("%{", cursor)) {
+      cursor = skipTerraformTemplateExpression(source, cursor + 2);
+      continue;
+    }
     if (source[cursor] === '"') return cursor + 1;
     cursor += 1;
   }
