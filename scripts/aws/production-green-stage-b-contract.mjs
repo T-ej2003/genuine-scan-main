@@ -98,6 +98,8 @@ export const STAGE_B_MODES = Object.freeze([
 export const STAGE_B_TASK_TEMPLATE_KEYS = Object.freeze(["executor", "canary", "backend", "worker"]);
 export const STAGE_B_APPROVAL_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const STAGE_B_APPROVAL_SCHEMA_VERSION = 2;
+export const STAGE_B_APPROVAL_ID = "APR-STAGE-B-0001";
+export const STAGE_B_APPROVAL_PUBLICATION_VALIDATION_OPERATION = "validate-approval";
 const imagePattern = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-(?:backend|worker|web)@sha256:[a-f0-9]{64}$/;
 const imagePatterns = Object.freeze({
   backendImageDigest: /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/,
@@ -162,7 +164,7 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
       || artifact.environment !== "production" || artifact.account !== STAGE_B.account || artifact.region !== STAGE_B.region
       || artifact.signatureAlgorithm !== STAGE_B_APPROVAL_ALGORITHM || !/^[a-f0-9]{40}$/.test(artifact.releaseSha)
       || !isDigest(artifact.sourceContractSha256) || !isDigest(artifact.migrationSetDigest) || !isDigest(artifact.packageChecksumSha256)
-      || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(artifact.approvalId || "")
+      || artifact.approvalId !== STAGE_B_APPROVAL_ID
       || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(artifact.ticketId || "") || !/^[a-f0-9-]{16,64}$/.test(artifact.nonce || "")
       || artifact.greenDatabaseIdentifier !== STAGE_B.greenDatabaseIdentifier
       || artifact.greenDatabaseName !== "mscqr_production_rls_green_phase2" || artifact.administratorIdentity !== "mscqr_prod_admin"
@@ -207,6 +209,18 @@ export const assertBrokerRequest = (event) => {
   if (!event || typeof event !== "object" || Array.isArray(event) || !strictKeys(event, ["approvalId", "mode"])
       || !STAGE_B_MODES.includes(event.mode) || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "")) {
     throw new Error("Stage B broker request is outside the reviewed contract.");
+  }
+  return event;
+};
+
+export const assertBrokerApprovalValidationRequest = (event) => {
+  if (!event || typeof event !== "object" || Array.isArray(event)
+      || !strictKeys(event, ["approvalId", "approvalSha256", "operation", "sourceSha"])
+      || event.operation !== STAGE_B_APPROVAL_PUBLICATION_VALIDATION_OPERATION
+      || event.approvalId !== STAGE_B_APPROVAL_ID
+      || !/^[a-f0-9]{40}$/.test(event.sourceSha || "")
+      || !/^[a-f0-9]{64}$/.test(event.approvalSha256 || "")) {
+    throw new Error("Stage B approval validation request is outside the reviewed contract.");
   }
   return event;
 };

@@ -151,7 +151,18 @@ node scripts/aws/create-production-green-stage-b-approval.mjs --sign \
   --output /secure/operator/production-rls-approval.json
 ```
 
-6. The checker reviews the artifact fields, stores it as the current value of the Terraform-created approval secret, and records only its approval ID and contract SHA256 in the ticket. Do not expose the signature.
+6. The checker reviews the artifact fields and runs the repository-owned
+`scripts/aws/publish-production-green-stage-b-approval.mjs` command. The
+publisher uses only the exact Stage B approval secret and exact checker
+session, validates before writing, uses the contract-defined deterministic
+`ClientRequestToken`, and lets Secrets Manager move `AWSCURRENT` while
+retaining the prior version as `AWSPREVIOUS`. Run
+`scripts/aws/check-production-green-stage-b-approval-publication.mjs` through
+the reviewed broker alias before treating the approval as published. Record
+only its approval ID, contract SHA256, payload SHA256, and version ID in the
+ticket. Do not expose the signature. The complete publication, idempotency,
+rollback, and redaction contract is
+`PRODUCTION_GREEN_STAGE_B_APPROVAL_PUBLICATION_CONTRACT-v1.md`.
 7. Generate the production package using the KMS-backed artifact:
 
 ```sh

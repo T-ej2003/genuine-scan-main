@@ -254,6 +254,16 @@ test("permission manifest declares the exact normal and recovery mutation matrix
   for (const entry of manifest.required.filter((candidate) => !candidate.plan)) assert.equal(entry.profiles, undefined);
 });
 
+test("checker approval publication is an exact separate capability and never a release preflight evaluation", () => {
+  assert.deepEqual(manifest.checkerRequired, [{
+    id: "publish-stage-b-approval", phase: "approval-publication", action: "secretsmanager:PutSecretValue",
+    resources: [STAGE_B.approvalSecretArn], context: [{ key: "aws:RequestedRegion", type: "string", values: [STAGE_B.region] }],
+    principal: STAGE_B.checkerRoleArn, evidence: manifest.checkerRequired[0].evidence,
+  }]);
+  assert.equal(deriveRequiredEvaluations(productionPlan, manifest).required.some(({ manifestId }) => manifestId === "publish-stage-b-approval"), false);
+  assert.throws(() => validateManifest({ ...manifest, checkerRequired: [{ ...manifest.checkerRequired[0], resources: ["*"] }] }), /Checker approval publication capability is not exact/);
+});
+
 test("IAM census executes every independent evaluation after multiple simulator failures", () => {
   let calls = 0;
   const report = runPermissionPreflight({

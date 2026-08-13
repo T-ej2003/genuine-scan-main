@@ -165,6 +165,7 @@
     "ADMINISTRATOR",
     "BOOTSTRAP_OPERATOR",
     "RELEASE_DEPLOYER",
+    "INDEPENDENT_CHECKER",
     "ECS_EXEC_VERIFIER_OPERATOR",
     "SERVICE_RUNTIME"
   ],
@@ -546,6 +547,39 @@
       },
       "required": true,
       "mutation": false
+    },
+    {
+      "id": "checker-publish-stage-b-approval",
+      "phase": "approval-publication",
+      "identity": "INDEPENDENT_CHECKER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "publish-stage-b-approval",
+      "action": "secretsmanager:PutSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "CHECKER_APPROVAL_PUBLICATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "PublishExactStageBApproval",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "0807e9224119a70753e0a4ca8b5ca9883668fe99edc04ca30ac61a8ab4f0336d"
+      },
+      "required": true,
+      "mutation": true
     },
     {
       "id": "manifest-activate-exact-ecs-service",
@@ -6484,6 +6518,14 @@
       "action": "sts:GetCallerIdentity"
     },
     {
+      "sourceFile": "scripts/aws/check-production-green-stage-b-approval-publication.mjs",
+      "action": "lambda:InvokeFunction"
+    },
+    {
+      "sourceFile": "scripts/aws/check-production-green-stage-b-approval-publication.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs",
       "action": "kms:Sign"
     },
@@ -6665,6 +6707,18 @@
     },
     {
       "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",
+      "action": "kms:Verify"
+    },
+    {
+      "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",
+      "action": "secretsmanager:PutSecretValue"
+    },
+    {
+      "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",
       "action": "sts:GetCallerIdentity"
     },
     {
