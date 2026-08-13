@@ -219,9 +219,10 @@ resource "aws_kms_alias" "approval" {
 resource "aws_iam_role_policy" "checker" {
   name = "mscqr-production-rls-independent-checker"
   role = aws_iam_role.checker.id
-  policy = jsonencode({ Version = "2012-10-17", Statement = [{
-    Effect = "Allow", Action = ["kms:GetPublicKey", "kms:Sign", "kms:Verify"], Resource = aws_kms_key.approval.arn
-  }] })
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Sid = "SignExactStageBApproval", Effect = "Allow", Action = ["kms:GetPublicKey", "kms:Sign", "kms:Verify"], Resource = aws_kms_key.approval.arn },
+    { Sid = "PublishExactStageBApproval", Effect = "Allow", Action = "secretsmanager:PutSecretValue", Resource = aws_secretsmanager_secret.approval.arn }
+  ] })
 }
 
 resource "aws_iam_role_policy" "checker_assume_target" {

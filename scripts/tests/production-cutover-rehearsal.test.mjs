@@ -13,6 +13,7 @@ import { ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-ro
 import { createProductionPreDeploymentInventoryAdapter } from "../aws/production-predeployment-inventory-adapter.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_TARGET_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
+import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
@@ -393,7 +394,7 @@ test("the real predeployment adapter feeds the same cutover spine before deploym
   const preAdapter = createProductionPreDeploymentInventoryAdapter({
     sourceSha,
     imageDigest: imageDigest,
-    config: { inventoryApprovalId: "APR-STAGE-B-0001", rotationInventoryRlsRole: "mscqr_prod_rls_read", inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend", overlapTaskInput: { backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings: { ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } } },
+    config: { inventoryApprovalId: stageBApprovalIdForReleaseSha(sourceSha), rotationInventoryRlsRole: "mscqr_prod_rls_read", inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend", overlapTaskInput: { backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings: { ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } } },
     run: (args) => {
       if (args[0] === "ecs" && args[1] === "register-task-definition") {
         const payload = JSON.parse(args[3]);

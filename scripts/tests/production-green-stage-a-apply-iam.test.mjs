@@ -16,6 +16,7 @@ const production = Object.freeze({
   endpointSecurityGroupArn: "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412",
   storageKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
   approvalKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",
+  approvalSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho",
   subnetGroupArn: "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
   parameterGroupArn: "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18",
   checkerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
@@ -130,11 +131,21 @@ test("Stage A apply identity permits only the exact checker role-chain inline po
   }
 });
 
+test("independent checker permits only exact Stage B approval publication", () => {
+  assert.equal(statements.some((statement) => statement.Effect === "Allow" && asArray(statement.Action).includes("secretsmanager:PutSecretValue") && asArray(statement.Resource).includes(production.approvalSecretArn)), false, "release policy must not publish approval");
+  const checkerPolicy = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
+  assert.match(checkerPolicy, /Sid = "PublishExactStageBApproval"/);
+  assert.match(checkerPolicy, /Action = "secretsmanager:PutSecretValue"/);
+  assert.match(checkerPolicy, /Resource = aws_secretsmanager_secret\.approval\.arn/);
+  assert.doesNotMatch(checkerPolicy, /secretsmanager:GetSecretValue/);
+  assert.doesNotMatch(checkerPolicy, /secretsmanager:\*/);
+});
+
 test("Stage A policy has no unrelated mutation or secret/value authority", () => {
   const actions = statements.flatMap(({ Action }) => asArray(Action));
   for (const forbidden of [
     "ec2:RevokeSecurityGroupIngress", "ec2:ModifySecurityGroupRules", "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup",
-    "rds:ModifyDBInstance", "rds:ModifyDBCluster", "rds:DeleteDBInstance", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecret",
+    "rds:ModifyDBInstance", "rds:ModifyDBCluster", "rds:DeleteDBInstance", "secretsmanager:GetSecretValue", "secretsmanager:UpdateSecret",
     "secretsmanager:ListSecretVersionIds", "kms:PutKeyPolicy", "kms:ScheduleKeyDeletion", "iam:AttachRolePolicy", "iam:PassRole",
     "logs:DeleteLogGroup", "ec2:RevokeSecurityGroupIngress", "ec2:ModifySecurityGroupRules", "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup", "ecs:UpdateService", "ecs:RegisterTaskDefinition",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);

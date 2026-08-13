@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 import { createHandler } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
-import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalStageBApproval } from "../aws/production-green-stage-b-contract.mjs";
+import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalStageBApproval, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
 import { prepareStageBApproval, signStageBApproval } from "../aws/create-production-green-stage-b-approval.mjs";
 
@@ -19,7 +19,7 @@ const input = (overrides = {}) => ({
   databaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, executorSecurityGroupId: STAGE_B.executorSecurityGroupId,
   backendImageDigest: image("mscqr-backend", "1"), workerImageDigest: image("mscqr-worker", "2"), executorImageDigest: image("mscqr-backend", "3"), canaryImageDigest: image("mscqr-backend", "4"),
   taskDefinitionArns, taskDefinitionTemplateHashes: stageBTemplateHashes(), brokerAliasArn: STAGE_B.brokerAliasArn, brokerVersion: "1",
-  checkerIdentity, deployerIdentity, executorIdentity: STAGE_B.executorRoleArn, approvalId: "APR-STAGE-B-0001", ticketId: "CHG-STAGE-B-0001",
+  checkerIdentity, deployerIdentity, executorIdentity: STAGE_B.executorRoleArn, approvalId: stageBApprovalIdForReleaseSha("a".repeat(40)), ticketId: "CHG-STAGE-B-0001",
   issuedAt: "2026-07-30T11:55:00.000Z", expiresAt: "2026-07-30T13:00:00.000Z", nonce: "12345678-1234-1234-1234-123456789abc", signatureAlgorithm: STAGE_B_APPROVAL_ALGORITHM,
   ...overrides,
 });

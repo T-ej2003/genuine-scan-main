@@ -540,7 +540,7 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) throw new Error("Permission manifest is required.");
   if (manifest?.schemaVersion !== PERMISSION_PREFLIGHT_SCHEMA_VERSION) throw new Error("Permission manifest schema version is unsupported.");
   if (manifest.accountId !== account || manifest.region !== region) throw new Error("Permission manifest account or region is wrong.");
-  if (!Array.isArray(manifest.required) || !Array.isArray(manifest.forbidden)) throw new Error("Permission manifest sections are malformed.");
+  if (!Array.isArray(manifest.required) || !Array.isArray(manifest.forbidden) || !Array.isArray(manifest.checkerRequired)) throw new Error("Permission manifest sections are malformed.");
   const reviewedContextRegistry = assertReviewedSimulationContextRegistry({ conditionKeyOrigins, registry: contextRegistry });
   assertStageBTerraformBackendManifest(manifest);
   for (const [id, action] of STAGE_A_LIVE_EVIDENCE_EVALUATIONS) {
@@ -600,6 +600,19 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
         || entry.plan.coverageRequired !== true) {
         throw new Error("Broker managed-policy permission mapping is not exact.");
       }
+    }
+  }
+  const checkerApprovalArn = STAGE_B.approvalSecretArn;
+  if (manifest.checkerRequired.length !== 1) throw new Error("Permission manifest checker publication section is not exact.");
+  for (const entry of manifest.checkerRequired) {
+    if (!entry.id || ids.has(entry.id)) throw new Error(`Permission manifest checker entry id is duplicated: ${entry.id || "missing"}.`);
+    ids.add(entry.id);
+    if (entry.id !== "publish-stage-b-approval" || entry.phase !== "approval-publication"
+        || entry.action !== "secretsmanager:PutSecretValue" || entry.principal !== STAGE_B.checkerRoleArn
+        || JSON.stringify(entry.resources) !== JSON.stringify([checkerApprovalArn])
+        || JSON.stringify(entry.context) !== JSON.stringify([{ key: "aws:RequestedRegion", type: "string", values: [region] }])
+        || entry.resources.some((resource) => resource === "*" || resource.includes("*"))) {
+      throw new Error("Checker approval publication capability is not exact.");
     }
   }
   if (!Array.isArray(manifest.taskDefinitionMappings) || manifest.taskDefinitionMappings.length !== TASK_DEFINITION_MAPPINGS.length) throw new Error("Permission manifest must contain exactly twelve task-definition mappings.");

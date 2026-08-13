@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-const { assertBrokerRequest, hasCompleteStageBTaskMaps, STAGE_B, STAGE_B_MODES, validateStageBApproval } = await import(
+const { assertBrokerApprovalValidationRequest, assertBrokerRequest, hasCompleteStageBTaskMaps, STAGE_B, STAGE_B_MODES, validateStageBApproval } = await import(
   process.env.AWS_LAMBDA_FUNCTION_NAME ? "./stage-b-contract.mjs" : "../../../../../scripts/aws/production-green-stage-b-contract.mjs"
 );
 
@@ -35,6 +35,16 @@ export function validateBrokerConfiguration(config) {
 export function createHandler({ config, readApproval, verifySignature, claimApproval, releaseApproval = async () => {}, markLaunchUncertain = async () => {}, recordTaskStarted = async () => {}, runTask, writeReceipt = async () => {}, now = () => new Date() }) {
   validateBrokerConfiguration(config);
   return async (event, context = {}) => {
+    if (event?.operation === "validate-approval") {
+      const request = assertBrokerApprovalValidationRequest(event);
+      const rawApproval = await readApproval(STAGE_B.approvalSecretArn);
+      const approval = await validateStageBApproval(rawApproval, { ...config.approvalExpected, images: config.images }, { now: now(), verifySignature });
+      const approvalSha256 = crypto.createHash("sha256").update(Buffer.from(rawApproval, "utf8")).digest("hex");
+      if (approval.approval.approvalId !== request.approvalId || approval.approval.releaseSha !== request.sourceSha || approvalSha256 !== request.approvalSha256) {
+        throw new Error("Stage B approval publication proof is not bound to the current broker approval.");
+      }
+      return { status: "validated", approvalId: approval.approval.approvalId, sourceSha: approval.approval.releaseSha, approvalContractSha256: approval.approvalContractSha256, approvalSha256 };
+    }
     const request = assertBrokerRequest(event);
     const approval = await validateStageBApproval(await readApproval(STAGE_B.approvalSecretArn), {
       ...config.approvalExpected,
