@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertStageAPlan, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "../aws/production-stage-a-control-plane.mjs";
+import { assertStageAPlan, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
@@ -34,6 +34,17 @@ const checkerPolicyChange = (actions = ["create"], after = {}) => ({
     after: { role: STAGE_A_CHECKER_POLICY.role, name: STAGE_A_CHECKER_POLICY.name, policy: checkerPolicyDocument(), ...after },
   },
 });
+const checkerPublicationPolicy = ({ predecessor = false, extraStatement = false, kmsAction = STAGE_A_CHECKER_PUBLICATION_POLICY.kmsAction, publishResource = STAGE_A_CHECKER_PUBLICATION_POLICY.publishResource, publishAction = STAGE_A_CHECKER_PUBLICATION_POLICY.publishAction, condition = undefined } = {}) => {
+  if (predecessor) return { Version: "2012-10-17", Statement: [{ Action: [...STAGE_A_CHECKER_PUBLICATION_POLICY.kmsAction], Effect: "Allow", Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsResource }] };
+  const statements = [{ Sid: "SignExactStageBApproval", Effect: "Allow", Action: [...kmsAction], Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsResource }, { Sid: "PublishExactStageBApproval", Effect: "Allow", Action: publishAction, Resource: publishResource, ...(condition ? { Condition: condition } : {}) }];
+  if (extraStatement) statements.push({ Sid: "Unexpected", Effect: "Allow", Action: "secretsmanager:DeleteSecret", Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.publishResource });
+  return { Version: "2012-10-17", Statement: statements };
+};
+const checkerPublicationChange = ({ actions = ["no-op"], beforePolicy = checkerPublicationPolicy(), beforePolicyBytes, afterPolicy = checkerPublicationPolicy(), before = {}, after = {}, replacePaths } = {}) => ({
+  address: STAGE_A_CHECKER_PUBLICATION_POLICY.address,
+  type: STAGE_A_CHECKER_PUBLICATION_POLICY.type,
+  change: { actions, before: { role: STAGE_A_CHECKER_PUBLICATION_POLICY.role, name: STAGE_A_CHECKER_PUBLICATION_POLICY.name, policy: beforePolicyBytes ?? JSON.stringify(beforePolicy), ...before }, after: { role: STAGE_A_CHECKER_PUBLICATION_POLICY.role, name: STAGE_A_CHECKER_PUBLICATION_POLICY.name, policy: JSON.stringify(afterPolicy), ...after }, ...(replacePaths ? { replace_paths: replacePaths } : {}) },
+});
 const checkerRoleTrustDocument = ({ condition } = {}) => JSON.stringify({
   Version: "2012-10-17",
   Statement: [{ Effect: "Allow", Principal: { AWS: STAGE_A_CHECKER_ROLE_TRUST.principal }, Action: STAGE_A_CHECKER_ROLE_TRUST.action, ...(condition ? { Condition: condition } : {}) }],
@@ -52,6 +63,7 @@ function iamFixture() {
   const required = [
     { manifestId: "apply-stage-a-endpoint-security-group-ingress", action: "ec2:AuthorizeSecurityGroupIngress", resource: "arn:aws:ec2:eu-west-2:368992683803:security-group/endpoint", decision: "allowed" },
     { manifestId: "apply-stage-a-checker-role-chain-policy", action: "iam:PutRolePolicy", resource: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker", decision: "allowed" },
+    { manifestId: "apply-stage-a-checker-publication-policy", action: "iam:PutRolePolicy", resource: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", decision: "allowed" },
     { manifestId: "activate-exact-ecs-service", action: "ecs:UpdateService", resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2", decision: "allowed" },
     { manifestId: "rollback-exact-ecs-service", action: "ecs:UpdateService", resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2", decision: "allowed" },
     { manifestId: "rollback-exact-backend-task-passrole", action: "iam:PassRole", resource: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task", decision: "allowed" },
@@ -104,7 +116,7 @@ function fixtureInput(overrides = {}) {
     endpointSecurityGroupId: "sg-endpoint",
     runtimeSecurityGroupId: "sg-runtime",
     adapter: {
-      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }, checkerPolicyChange(), checkerRoleChange()] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
+      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }, checkerPolicyChange(), checkerRoleChange(), checkerPublicationChange()] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
       applySavedPlan: async () => { mutations.push("M2_STAGE_A_APPLY"); },
       describeIngress: async () => ({ present: true }),
     },
@@ -139,8 +151,8 @@ function fixtureInput(overrides = {}) {
   };
 }
 
-const stageAPlan = ({ address = 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', actions = ["create"], checkerActions = actions, after = {}, checkerAfter = {}, checkerRole = checkerRoleChange(), extra = [] } = {}) => ({
-  resource_changes: [{ address, change: { actions, after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null, ...after } } }, checkerPolicyChange(checkerActions, checkerAfter), checkerRole, ...extra],
+const stageAPlan = ({ address = 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', actions = ["create"], checkerActions = actions, after = {}, checkerAfter = {}, checkerRole = checkerRoleChange(), checkerPublication = checkerPublicationChange(), extra = [] } = {}) => ({
+  resource_changes: [{ address, change: { actions, after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null, ...after } } }, checkerPolicyChange(checkerActions, checkerAfter), checkerRole, checkerPublication, ...extra],
 });
 
 test("Stage A accepts only the reviewed indexed for_each instance", () => {
@@ -177,6 +189,35 @@ test("Stage A admits only the exact checker role-chain policy semantics", () => 
   ]) assert.throws(() => assertStageAPlan(stageAPlan({ checkerAfter }), inputs));
   assert.throws(() => assertStageAPlan(stageAPlan({ checkerActions: ["update"] }), inputs));
   assert.throws(() => assertStageAPlan(stageAPlan({ extra: [{ address: "aws_iam_role_policy.unrelated", type: "aws_iam_role_policy", change: { actions: ["create"], after: {} } }] }), inputs));
+});
+
+test("Stage A admits only the exact checker publication policy transition", () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  const exact = stageAPlan({ actions: ["no-op"], checkerActions: ["no-op"], checkerPublication: checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }) }) });
+  assert.equal(assertStageAPlan(exact, inputs).changes, 1);
+  const reordered = checkerPublicationPolicy();
+  reordered.Statement.reverse();
+  reordered.Statement[1].Action.reverse();
+  assert.doesNotThrow(() => assertStageAPlan(stageAPlan({ actions: ["no-op"], checkerActions: ["no-op"], checkerPublication: checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: reordered }) }), inputs));
+  for (const checkerPublication of [
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: checkerPublicationPolicy({ publishResource: "*" }) }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: checkerPublicationPolicy({ publishResource: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:unrelated" }) }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: checkerPublicationPolicy({ publishAction: "secretsmanager:*" }) }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: checkerPublicationPolicy({ publishAction: "secretsmanager:GetSecretValue" }) }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: checkerPublicationPolicy({ publishAction: "secretsmanager:UpdateSecretVersionStage" }) }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: checkerPublicationPolicy({ publishAction: ["secretsmanager:PutSecretValue", "secretsmanager:DeleteSecret"] }) }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: checkerPublicationPolicy({ kmsAction: [...STAGE_A_CHECKER_PUBLICATION_POLICY.kmsAction, "kms:Decrypt"] }) }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: checkerPublicationPolicy({ extraStatement: true }) }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: { Version: "2012-10-17", Statement: [{ Sid: "PublishExactStageBApproval", Effect: "Allow", Action: "secretsmanager:PutSecretValue", Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.publishResource }] } }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: checkerPublicationPolicy({ condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }) }),
+    checkerPublicationChange({ actions: ["update"], beforePolicyBytes: "not-json", beforePolicy: checkerPublicationPolicy({ predecessor: true }) }),
+    checkerPublicationChange({ actions: ["create"], beforePolicy: checkerPublicationPolicy({ predecessor: true }) }),
+    checkerPublicationChange({ actions: ["delete"], beforePolicy: checkerPublicationPolicy({ predecessor: true }) }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy(), afterPolicy: checkerPublicationPolicy() }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: checkerPublicationPolicy(), after: { role: "mscqr-production-release-deployer" } }),
+    checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), replacePaths: [["policy"]] }),
+  ]) assert.throws(() => assertStageAPlan(stageAPlan({ actions: ["no-op"], checkerActions: ["no-op"], checkerPublication }), inputs));
+  assert.throws(() => assertStageAPlan(stageAPlan({ actions: ["no-op"], checkerActions: ["no-op"], checkerPublication: checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }) }), extra: [{ address: "aws_iam_role_policy.unrelated", type: "aws_iam_role_policy", change: { actions: ["update"], before: {}, after: {} } }] }), inputs));
 });
 
 test("Stage A admits only the exact Role-B trust transition", () => {

@@ -192,7 +192,7 @@ The allowed inline-policy set is empty.
 
 | Live authority | Disposition | Reason |
 |---|---|---|
-| Same-named inline `MSCQRProductionGreenStageARelease` | Remove after managed replacement is attached and simulated | Legacy Stage A create/write authority conflicts with managed ownership. The managed source now permits only the exact Stage A S3 state/lockfile lifecycle, the complete pinned AWS-provider refresh matrix, and reviewed endpoint-security-group ingress recovery. The independent refresh contract is recorded in `MSCQRProductionGreenStageAProviderRefreshContract-v1.json`; it must remain synchronized with the Stage A resource-type graph. |
+| Same-named inline `MSCQRProductionGreenStageARelease` | Remove after managed replacement is attached and simulated | Legacy Stage A create/write authority conflicts with managed ownership. The managed source permits only the exact Stage A S3 state/lockfile lifecycle, the complete pinned AWS-provider refresh matrix, and the explicitly reviewed Stage A mutations: endpoint-security-group ingress, exact checker source-role policy, exact checker publication policy on the RLS checker role, and exact Role-B trust transition. The independent refresh contract is recorded in `MSCQRProductionGreenStageAProviderRefreshContract-v1.json`; it must remain synchronized with the Stage A resource-type graph. |
 | `MSCQRProductionGreenStageAReadOnlyCanarySecretCreate` | Detach as legacy recovery | Stage A secret creation is not in the Stage B plan. |
 | `MSCQRProductionGreenStageBBrokerCodeSigningRead` | Retain canonical | Exact provider read required for broker refresh; source and live document already match. |
 | `MSCQRProductionGreenStageBBrokerLambdaTag` | Detach as legacy recovery | The current plan has no Lambda tag mutation. |
@@ -207,7 +207,7 @@ The allowed inline-policy set is empty.
 The candidate source policy union was evaluated with AWS IAM custom-policy
 simulation against the production-shaped plan:
 
-- required evaluations: 153/153 allowed
+- required evaluations: 154/154 allowed
 - required failures: 0
 - forbidden evaluations: 29/29 denied
 - forbidden allowed: 0

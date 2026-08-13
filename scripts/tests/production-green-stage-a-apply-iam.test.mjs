@@ -116,17 +116,18 @@ test("Stage A apply permits only the exact endpoint security-group ingress", () 
   assert.equal(allows({ action: "ec2:AuthorizeSecurityGroupIngress", resource: production.endpointSecurityGroupArn, values: context("us-east-1") }), false);
 });
 
-test("Stage A apply identity permits only the exact checker role-chain inline policy", () => {
+test("Stage A apply identity permits only the exact checker inline policies", () => {
   assert.equal(allows({ action: "iam:GetRolePolicy", resource: production.checkerSourceRoleArn, values: context() }), true);
   assert.equal(allows({ action: "iam:GetRolePolicy", resource: production.checkerRoleArn, values: context() }), true);
   assert.equal(allows({ action: "iam:GetRolePolicy", resource: "arn:aws:iam::368992683803:role/unrelated", values: context() }), false);
   assert.equal(allows({ action: "iam:PutRolePolicy", resource: production.checkerSourceRoleArn, values: context() }), true);
-  assert.equal(allows({ action: "iam:PutRolePolicy", resource: production.checkerRoleArn, values: context() }), false);
+  assert.equal(allows({ action: "iam:PutRolePolicy", resource: production.checkerRoleArn, values: context() }), true);
+  assert.equal(allows({ action: "iam:PutRolePolicy", resource: "arn:aws:iam::368992683803:role/unrelated", values: context() }), false);
   assert.equal(allows({ action: "iam:UpdateAssumeRolePolicy", resource: production.checkerRoleArn, values: context() }), true);
   for (const resource of [production.checkerSourceRoleArn, "arn:aws:iam::368992683803:role/unrelated", "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"]) {
     assert.equal(allows({ action: "iam:UpdateAssumeRolePolicy", resource, values: context() }), false, resource);
   }
-  for (const action of ["iam:AttachRolePolicy", "iam:PassRole", "iam:CreateRole", "iam:DeleteRole", "iam:*"]) {
+  for (const action of ["iam:AttachRolePolicy", "iam:PassRole", "iam:CreateRole", "iam:DeleteRole", "iam:DeleteRolePolicy", "iam:*"]) {
     assert.equal(allows({ action, resource: production.checkerRoleArn, values: context() }), false, action);
   }
 });

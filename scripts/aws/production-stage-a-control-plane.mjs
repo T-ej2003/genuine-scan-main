@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 const REQUIRED_LOGICAL_ADDRESS = "aws_vpc_security_group_ingress_rule.runtime_endpoints_https";
 const SHA256 = /^[a-f0-9]{64}$/;
 const exact = (value, expected, message) => { if (value !== expected) throw new Error(message); };
@@ -20,11 +21,57 @@ export const STAGE_A_CHECKER_ROLE_TRUST = Object.freeze({
   principal: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
   action: "sts:AssumeRole",
 });
+export const STAGE_A_CHECKER_PUBLICATION_POLICY = Object.freeze({
+  address: "aws_iam_role_policy.checker",
+  type: "aws_iam_role_policy",
+  role: "mscqr-production-rls-independent-checker",
+  name: "mscqr-production-rls-independent-checker",
+  kmsAction: ["kms:GetPublicKey", "kms:Sign", "kms:Verify"],
+  kmsResource: STAGE_B.approvalKmsKeyArn,
+  publishAction: "secretsmanager:PutSecretValue",
+  publishResource: STAGE_B.approvalSecretArn,
+});
+const STAGE_A_CHECKER_PUBLICATION_PREDECESSOR = Object.freeze({
+  Version: "2012-10-17",
+  Statement: [{
+    Action: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsAction,
+    Effect: "Allow",
+    Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsResource,
+  }],
+});
+const STAGE_A_CHECKER_PUBLICATION_DESIRED = Object.freeze({
+  Version: "2012-10-17",
+  Statement: [
+    {
+      Sid: "SignExactStageBApproval",
+      Effect: "Allow",
+      Action: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsAction,
+      Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsResource,
+    },
+    {
+      Sid: "PublishExactStageBApproval",
+      Effect: "Allow",
+      Action: STAGE_A_CHECKER_PUBLICATION_POLICY.publishAction,
+      Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.publishResource,
+    },
+  ],
+});
 const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 const stable = (value) => value && typeof value === "object" && !Array.isArray(value)
   ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]))
   : Array.isArray(value) ? value.map(stable) : value;
 const stableJson = (value) => JSON.stringify(stable(value));
+const stablePolicy = (value, key) => {
+  if (Array.isArray(value)) {
+    const entries = value.map((entry) => stablePolicy(entry));
+    return ["Action", "NotAction", "NotResource", "Resource", "Statement"].includes(key)
+      ? entries.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+      : entries;
+  }
+  if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((entry) => [entry, stablePolicy(value[entry], entry)]));
+  return value;
+};
+const stablePolicyJson = (value) => JSON.stringify(stablePolicy(value));
 const exactPrincipal = (value, expected) => value === expected || (Array.isArray(value) && value.length === 1 && value[0] === expected);
 const decodePolicy = (value, label) => {
   if (typeof value !== "string") throw new Error(`${label} is missing.`);
@@ -69,6 +116,38 @@ function assertStageACheckerRoleTrustChange(entry) {
   return { valid: true, alreadyConverged: true, mutationCount: 0 };
 }
 
+function decodePolicyDocument(value, label) {
+  if (typeof value !== "string") throw new Error(`${label} is missing.`);
+  try { return JSON.parse(value); } catch { throw new Error(`${label} is malformed.`); }
+}
+
+function assertStageACheckerPublicationPolicyChange(entry) {
+  if (entry.type !== STAGE_A_CHECKER_PUBLICATION_POLICY.type) throw new Error("Stage A checker publication policy resource type is wrong.");
+  const change = entry.change;
+  if (!exactActions(change?.actions, ["update"]) && !exactActions(change?.actions, ["no-op"])) throw new Error("Stage A checker publication policy must be an update-only or converged no-op change.");
+  if (change.replace_paths?.length) throw new Error("Stage A checker publication policy must not be replaced.");
+  const before = change?.before;
+  const after = change?.after;
+  if (!before || typeof before !== "object" || Array.isArray(before) || !after || typeof after !== "object" || Array.isArray(after)) throw new Error("Stage A checker publication policy before/after values are missing.");
+  for (const value of [before, after]) {
+    if (value.name !== STAGE_A_CHECKER_PUBLICATION_POLICY.name || value.role !== STAGE_A_CHECKER_PUBLICATION_POLICY.role) throw new Error("Stage A checker publication policy identity is wrong.");
+  }
+  const beforeWithoutPolicy = { ...before }; delete beforeWithoutPolicy.policy;
+  const afterWithoutPolicy = { ...after }; delete afterWithoutPolicy.policy;
+  if (stableJson(beforeWithoutPolicy) !== stableJson(afterWithoutPolicy)) throw new Error("Stage A checker publication policy contains unrelated mutations.");
+  const beforePolicy = decodePolicyDocument(before.policy, "Stage A checker publication predecessor policy");
+  const afterPolicy = decodePolicyDocument(after.policy, "Stage A checker publication desired policy");
+  const expectedAfter = stablePolicyJson(afterPolicy) === stablePolicyJson(STAGE_A_CHECKER_PUBLICATION_DESIRED);
+  if (!expectedAfter) throw new Error("Stage A checker publication policy desired semantics are not exact.");
+  if (exactActions(change.actions, ["update"]) && stablePolicyJson(beforePolicy) !== stablePolicyJson(STAGE_A_CHECKER_PUBLICATION_PREDECESSOR)) {
+    throw new Error("Stage A checker publication policy predecessor semantics are not the reviewed state.");
+  }
+  if (exactActions(change.actions, ["no-op"]) && stablePolicyJson(beforePolicy) !== stablePolicyJson(STAGE_A_CHECKER_PUBLICATION_DESIRED)) {
+    throw new Error("Stage A checker publication policy converged predecessor semantics are not exact.");
+  }
+  return { valid: true, alreadyConverged: exactActions(change.actions, ["no-op"]), mutationCount: exactActions(change.actions, ["update"]) ? 1 : 0 };
+}
+
 function readAndVerifyPlanSha256(planPath, expectedSha256) {
   if (!SHA256.test(expectedSha256 || "")) throw new Error("Stage A preserved plan SHA-256 is missing or malformed.");
   let bytes;
@@ -93,8 +172,12 @@ export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurit
   const checkerRole = changes.filter(({ entry }) => entry.address === STAGE_A_CHECKER_ROLE_TRUST.address);
   if (checkerRole.length !== 1) throw new Error("Stage A plan must contain exactly one reviewed checker role trust resource.");
   const checkerRoleValidation = assertStageACheckerRoleTrustChange(checkerRole[0].entry);
+  const checkerPublication = changes.filter(({ entry }) => entry.address === STAGE_A_CHECKER_PUBLICATION_POLICY.address);
+  if (checkerPublication.length !== 1) throw new Error("Stage A plan must contain exactly one reviewed checker publication policy resource.");
+  const checkerPublicationValidation = assertStageACheckerPublicationPolicyChange(checkerPublication[0].entry);
   const unexpected = changes.filter(({ entry, actions }) => entry.address !== expectedAddress && entry.address !== STAGE_A_CHECKER_POLICY.address
     && entry.address !== STAGE_A_CHECKER_ROLE_TRUST.address
+    && entry.address !== STAGE_A_CHECKER_PUBLICATION_POLICY.address
     && !exactActions(actions, ["no-op"]) && !exactActions(actions, ["read"]));
   if (unexpected.length) throw new Error("Stage A plan contains an unreviewed mutation.");
   const reviewed = changes.filter(({ entry }) => entry.address === expectedAddress);
@@ -128,8 +211,8 @@ export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurit
   exact(String(after.to_port), "443", "Stage A plan ingress port is wrong.");
   exact(after.ip_protocol, "tcp", "Stage A plan ingress protocol is wrong.");
   if (after.cidr_ipv4 !== null || after.cidr_ipv6 !== null || after.prefix_list_id !== null) throw new Error("Stage A plan ingress source is not the reviewed security group.");
-  const mutationCount = [actions, checkerActions].filter((value) => exactActions(value, ["create"])).length + checkerRoleValidation.mutationCount;
-  return { valid: true, changes: mutationCount, address: change.address, actions, checkerActions, checkerRoleActions: checkerRole[0].actions, alreadyConverged: exactActions(actions, ["no-op"]) && exactActions(checkerActions, ["no-op"]) && checkerRoleValidation.alreadyConverged };
+  const mutationCount = [actions, checkerActions].filter((value) => exactActions(value, ["create"])).length + checkerRoleValidation.mutationCount + checkerPublicationValidation.mutationCount;
+  return { valid: true, changes: mutationCount, address: change.address, actions, checkerActions, checkerRoleActions: checkerRole[0].actions, checkerPublicationActions: checkerPublication[0].actions, alreadyConverged: exactActions(actions, ["no-op"]) && exactActions(checkerActions, ["no-op"]) && checkerRoleValidation.alreadyConverged && checkerPublicationValidation.alreadyConverged };
 }
 
 export async function runStageAControlPlane({ adapter, endpointSecurityGroupId, runtimeSecurityGroupId, sourceSha } = {}) {

@@ -62,11 +62,12 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   });
   assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredAllowedCount, 153);
+  assert.equal(report.requiredAllowedCount, 154);
   assert.equal(report.forbiddenDeniedCount, 28);
   assert.equal(report.principalEvaluations.ecsExecVerifier.status, "valid");
   assert.equal(report.cutoverCritical.stageAIngress, "allowed");
   assert.equal(report.cutoverCritical.stageACheckerRoleChain, "allowed");
+  assert.equal(report.cutoverCritical.stageACheckerPublication, "allowed");
   assert.equal(report.cutoverCritical.releaseEcsExec, "implicitDeny");
   assert.equal(report.cutoverCritical.verifierEcsExec, "allowed");
   for (const id of ["stage-a-ingress-unrelated-security-group", "stage-a-ingress-wrong-region"]) assert.equal(report.forbiddenEvaluations.find((item) => item.manifestId === id).decision, "implicitDeny");
