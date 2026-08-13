@@ -215,7 +215,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     getVerifierSession: requireVerifierSession,
     expected: { expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: config.inventoryTaskDefinitionArn || config.expectedCurrentTaskDefinitionArn, expectedImageDigest: config.backendImageDigest, serviceName: SERVICE, containerName: CONTAINER },
   });
-  const preDeploymentInventory = createProductionPreDeploymentInventoryAdapter({ run: async (args) => releaseRun(args), sourceSha, imageDigest: config.backendImageDigest, config });
+  const preDeploymentInventory = createProductionPreDeploymentInventoryAdapter({ run: async (args) => releaseRun(args), sourceSha, imageDigest: config.overlapTaskInput?.backendImage, config });
   return {
     iam: { report: readIamEvidence(), reconcile: async () => ({ mutationCount: 0 }) },
     checkerChain,
