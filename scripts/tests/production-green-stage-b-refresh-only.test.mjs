@@ -495,13 +495,66 @@ for (const terraformExitCode of [0, 2]) test(`failed JSON check blocks Terraform
 test("bound_images update matching signed evidence passes", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: outputChange("bound_images", expectedImages) }, bindingReport: bindingReport(), state, outputsSource }).status, "REVIEWED_OUTPUT_RECONCILIATION"));
 test("wrong, missing, or extra image bindings fail", () => { const wrong = { ...expectedImages, backend: "wrong" }; assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: outputChange("bound_images", wrong) }, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"); const missing = { ...expectedImages }; delete missing.worker; assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: outputChange("bound_images", missing) }, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"); const extra = { ...expectedImages, extra: "unexpected" }; assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: outputChange("bound_images", extra) }, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"); });
 test("unexpected output name fails", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: outputChange("unknown", {}) }, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"));
-test("task_definition_arns is reviewed only when empty state proves empty output", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["create"], before: null, after: {}, after_unknown: false, after_sensitive: false } } }, bindingReport: bindingReport(), state, outputsSource }).status, "REVIEWED_OUTPUT_RECONCILIATION"));
+test("task_definition_arns is reviewed when an empty state has an exact planned mapping", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["create"], before: null, after: {}, after_unknown: false, after_sensitive: false } } }, bindingReport: bindingReport(), state, outputsSource }).status, "REVIEWED_OUTPUT_RECONCILIATION"));
 test("unknown task-definition state fails closed", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["create"], after: {}, after_unknown: false } } }, bindingReport: bindingReport(), state: { ...state, resources: [{ type: "aws_ecs_task_definition", name: "candidate", instances: [{}] }] }, outputsSource }).status, "MALFORMED_RESULT"));
 test("canonical current task-definition state reconciles to the exact Terraform output mapping", () => {
   const current = currentTaskDefinitionStateFixture();
   const result = classifyStageBRefreshResult({ plan: noChangePlan(), bindingReport: bindingReport(), state: current, outputsSource });
   assert.equal(result.status, "NO_CHANGES");
+  assert.equal(result.taskDefinitionOutputClassification, "STATE_OUTPUT_ALREADY_CONVERGED");
   assert.deepEqual(result.taskDefinitionArns, current.outputs.task_definition_arns.value);
+});
+test("valid current resources authorize a planned output correction when state output is absent", () => {
+  const current = currentTaskDefinitionStateFixture();
+  delete current.outputs;
+  const mapping = currentTaskDefinitionStateFixture().outputs.task_definition_arns.value;
+  const result = classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["create"], before: null, after: mapping, after_unknown: false, after_sensitive: false } } }, bindingReport: bindingReport(), state: current, outputsSource });
+  assert.equal(result.status, "REVIEWED_OUTPUT_RECONCILIATION");
+  assert.equal(result.taskDefinitionOutputClassification, "REVIEWED_OUTPUT_RECONCILIATION");
+  assert.deepEqual(result.taskDefinitionArns, mapping);
+});
+test("valid current resources authorize stale or empty predecessor output correction", () => {
+  const canonical = currentTaskDefinitionStateFixture();
+  const mapping = canonical.outputs.task_definition_arns.value;
+  for (const before of [{}, { backend: mapping.backend.replace(":5", ":4") }]) {
+    const current = { ...canonical, outputs: { task_definition_arns: { value: before } } };
+    const result = classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["update"], before, after: mapping, after_unknown: false, after_sensitive: false } } }, bindingReport: bindingReport(), state: current, outputsSource });
+    assert.equal(result.status, "REVIEWED_OUTPUT_RECONCILIATION");
+  }
+});
+test("planned task_definition_arns output must match the resource-derived mapping", () => {
+  const canonical = currentTaskDefinitionStateFixture();
+  const mapping = canonical.outputs.task_definition_arns.value;
+  for (const after of [
+    { ...mapping, extra: mapping.backend },
+    Object.fromEntries(Object.entries(mapping).filter(([key]) => key !== "worker")),
+    { ...mapping, worker: mapping.backend },
+    { ...mapping, backend: mapping.backend.replace("368992683803", "000000000000") },
+    { ...mapping, backend: mapping.backend.replace("eu-west-2", "us-east-1") },
+    { ...mapping, backend: mapping.backend.replace("mscqr-production-rls-green-backend-candidate", "wrong-family") },
+  ]) {
+    const result = classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["update"], before: {}, after, after_unknown: false, after_sensitive: false } } }, bindingReport: bindingReport(), state: { ...canonical, outputs: {} }, outputsSource });
+    assert.equal(result.status, "OUTPUT_DRIFT");
+    assert.equal(result.taskDefinitionOutputClassification, "OUTPUT_RECONCILIATION_INVALID");
+  }
+});
+test("malicious predecessor keys and non-reviewed output actions fail closed", () => {
+  const canonical = currentTaskDefinitionStateFixture();
+  const mapping = canonical.outputs.task_definition_arns.value;
+  const malicious = classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["update"], before: { fake: mapping.backend }, after: mapping, after_unknown: false, after_sensitive: false } } }, bindingReport: bindingReport(), state: { ...canonical, outputs: {} }, outputsSource });
+  assert.equal(malicious.status, "OUTPUT_DRIFT");
+  const preserved = { ...mapping, fake: mapping.backend };
+  const maliciousState = { ...canonical, outputs: { task_definition_arns: { value: preserved } } };
+  const preservedResult = classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["update"], before: preserved, after: preserved, after_unknown: false, after_sensitive: false } } }, bindingReport: bindingReport(), state: maliciousState, outputsSource });
+  assert.equal(preservedResult.status, "OUTPUT_DRIFT");
+  const actions = classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["create", "update"], before: {}, after: mapping, after_unknown: false, after_sensitive: false } } }, bindingReport: bindingReport(), state: { ...canonical, outputs: {} }, outputsSource });
+  assert.equal(actions.status, "OUTPUT_DRIFT");
+});
+test("task-definition output correction cannot accompany resource drift", () => {
+  const canonical = currentTaskDefinitionStateFixture();
+  const mapping = canonical.outputs.task_definition_arns.value;
+  const result = classifyStageBRefreshResult({ plan: { ...noChangePlan(), resource_changes: [{ address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: ["update"] } }], output_changes: { task_definition_arns: { actions: ["update"], before: {}, after: mapping, after_unknown: false, after_sensitive: false } } }, bindingReport: bindingReport(), state: { ...canonical, outputs: {} }, outputsSource });
+  assert.equal(result.status, "RESOURCE_DRIFT");
 });
 test("current task-definition reconciliation rejects malformed or non-canonical state", () => {
   const cases = [
@@ -525,7 +578,9 @@ test("current task-definition reconciliation rejects malformed or non-canonical 
   for (const [label, mutate] of cases) {
     const candidate = structuredClone(currentTaskDefinitionStateFixture());
     mutate(candidate);
-    assert.equal(classifyStageBRefreshResult({ plan: noChangePlan(), bindingReport: bindingReport(), state: candidate, outputsSource }).status, "MALFORMED_RESULT", label);
+    const result = classifyStageBRefreshResult({ plan: noChangePlan(), bindingReport: bindingReport(), state: candidate, outputsSource });
+    assert.notEqual(result.status, "NO_CHANGES", label);
+    assert.notEqual(result.status, "REVIEWED_OUTPUT_RECONCILIATION", label);
   }
 });
 test("current task-definition reconciliation is order independent and serial independent after binding validation", () => {

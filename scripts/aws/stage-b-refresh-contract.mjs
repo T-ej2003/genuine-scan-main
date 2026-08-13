@@ -373,6 +373,22 @@ function currentTaskDefinitionOutputKey(address) {
   return match[2];
 }
 
+const taskDefinitionOutputArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):([1-9][0-9]*)$/;
+
+function validateTaskDefinitionOutputPredecessor(value, expectedMapping) {
+  if (value === undefined || value === null) return;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Stage B task_definition_arns predecessor output is malformed.");
+  const expectedKeys = new Set(Object.keys(expectedMapping));
+  const seenArns = new Set();
+  for (const [key, arn] of Object.entries(value)) {
+    if (!expectedKeys.has(key)) throw new Error(`Stage B task_definition_arns predecessor contains an unknown key: ${key}.`);
+    const identity = taskDefinitionOutputArnPattern.exec(arn || "");
+    const expectedIdentity = taskDefinitionOutputArnPattern.exec(expectedMapping[key] || "");
+    if (!identity || !expectedIdentity || identity[1] !== expectedIdentity[1] || seenArns.has(arn)) throw new Error(`Stage B task_definition_arns predecessor is invalid for ${key}.`);
+    seenArns.add(arn);
+  }
+}
+
 function expectedTaskDefinitionArns(state, outputsSource) {
   if (!/output\s+"task_definition_arns"\s*\{/.test(outputsSource)) throw new Error("Stage B task_definition_arns output is not defined in protected main.");
   const resources = Array.isArray(state.resources) ? state.resources : [];
@@ -402,8 +418,6 @@ function expectedTaskDefinitionArns(state, outputsSource) {
     mapping[key] = arn;
   }
   if (JSON.stringify(Object.keys(mapping).sort()) !== JSON.stringify([...new Set(["backend", "worker", ...STAGE_B_MODES])].sort())) throw new Error("Stage B current task-definition output mapping is incomplete.");
-  const stateOutput = stateTaskDefinitionOutput(state);
-  if (stateOutput === undefined || !exactJson(stateOutput, mapping)) throw new Error("Stage B task_definition_arns state output does not match the validated current task-definition state.");
   return Object.fromEntries(Object.entries(mapping).sort(([left], [right]) => left.localeCompare(right)));
 }
 
@@ -422,6 +436,7 @@ export function assertStageBRefreshStateBinding({ stateBackupPath, bindingReport
 
 function outputChange(change, name, expected) {
   if (!change || !Array.isArray(change.actions) || change.actions.some((action) => !["create", "update", "no-op"].includes(action))) return { classification: "OUTPUT_DRIFT", reason: `${name} has unsupported output actions.` };
+  if (name === "task_definition_arns" && ![["create"], ["update"]].some((actions) => exactJson(change.actions, actions))) return { classification: "OUTPUT_DRIFT", reason: `${name} has an unsupported reconciliation action shape.` };
   if (hasUnknown(change.after_unknown) || change.after_sensitive === true) return { classification: "OUTPUT_DRIFT", reason: `${name} contains unknown or sensitive output values.` };
   if (!exactJson(change.after, expected)) return { classification: "OUTPUT_DRIFT", reason: `${name} does not match authoritative evidence.` };
   return { classification: "reviewed", matchesEvidence: name === "bound_images", actions: change.actions, before: change.before, after: change.after };
@@ -436,17 +451,33 @@ export function classifyStageBRefreshResult({ plan, terraformExitCode = 0, terra
     const resourceChanges = [...plan.resource_changes, ...plan.resource_drift].filter((change) => !Array.isArray(change.change?.actions) || change.change.actions.some((action) => action !== "no-op"));
     if (resourceChanges.length) return { status: "RESOURCE_DRIFT", reason: "Terraform reported managed-resource actions.", ...checkResult, resourceChanges: { nonNoOp: resourceChanges.length, changes: resourceChanges.map(({ address, type, change }) => ({ address, type, actions: change?.actions || [] })) }, outputChanges: [] };
     const taskDefinitionArns = expectedTaskDefinitionArns(state, outputsSource);
+    const stateOutput = stateTaskDefinitionOutput(state);
+    try {
+      validateTaskDefinitionOutputPredecessor(stateOutput, taskDefinitionArns);
+    } catch (error) {
+      return { status: "OUTPUT_DRIFT", reason: error.message, taskDefinitionOutputClassification: "OUTPUT_RECONCILIATION_INVALID", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
+    }
     const expected = { bound_images: expectedImages(bindingReport), task_definition_arns: taskDefinitionArns };
     const outputChanges = Object.entries(plan.output_changes).filter(([, change]) => change?.actions?.some((action) => action !== "no-op"));
+    const taskDefinitionOutputChange = outputChanges.find(([name]) => name === "task_definition_arns")?.[1];
+    if (taskDefinitionOutputChange) {
+      try {
+        validateTaskDefinitionOutputPredecessor(taskDefinitionOutputChange.before, taskDefinitionArns);
+      } catch (error) {
+        return { status: "OUTPUT_DRIFT", reason: error.message, taskDefinitionOutputClassification: "OUTPUT_RECONCILIATION_INVALID", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
+      }
+    } else if (!exactJson(stateOutput ?? {}, taskDefinitionArns)) {
+      return { status: "OUTPUT_DRIFT", reason: "Stage B task_definition_arns state output is not converged and Terraform emitted no reviewed correction.", taskDefinitionOutputClassification: "OUTPUT_RECONCILIATION_INVALID", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
+    }
     const classifiedOutputs = [];
     for (const [name, change] of outputChanges) {
       if (!Object.hasOwn(expected, name)) return { status: "OUTPUT_DRIFT", reason: `Unexpected Terraform output changed: ${name}.`, ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: classifiedOutputs };
       const result = outputChange(change, name, expected[name]);
-      if (result.classification !== "reviewed") return { status: result.classification, reason: result.reason, ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [...classifiedOutputs, { name, ...result }] };
+      if (result.classification !== "reviewed") return { status: result.classification, reason: result.reason, taskDefinitionOutputClassification: name === "task_definition_arns" ? "OUTPUT_RECONCILIATION_INVALID" : undefined, ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [...classifiedOutputs, { name, ...result }] };
       classifiedOutputs.push({ name, ...result });
     }
     if (terraformExitCode === 2 && !outputChanges.length) return { status: "OUTPUT_DRIFT", reason: "Terraform reported changes without a reviewed output change.", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
-    return { status: outputChanges.length ? "REVIEWED_OUTPUT_RECONCILIATION" : "NO_CHANGES", reason: outputChanges.length ? "Only reviewed output reconciliation was detected." : "No resource or output changes were detected.", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: classifiedOutputs, taskDefinitionArns };
+    return { status: outputChanges.length ? "REVIEWED_OUTPUT_RECONCILIATION" : "NO_CHANGES", reason: outputChanges.length ? "Only reviewed output reconciliation was detected." : "No resource or output changes were detected.", taskDefinitionOutputClassification: taskDefinitionOutputChange ? "REVIEWED_OUTPUT_RECONCILIATION" : "STATE_OUTPUT_ALREADY_CONVERGED", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: classifiedOutputs, taskDefinitionArns };
   } catch (error) {
     return { status: "MALFORMED_RESULT", reason: error.message, checkCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 0, failedChecks: [], checks: [], resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
   }
