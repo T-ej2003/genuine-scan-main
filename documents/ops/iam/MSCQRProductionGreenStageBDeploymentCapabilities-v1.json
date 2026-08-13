@@ -629,6 +629,31 @@
       "mutation": true
     },
     {
+      "id": "manifest-apply-stage-a-checker-publication-policy",
+      "phase": "wrapper-apply",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "apply-stage-a-checker-publication-policy",
+      "action": "iam:PutRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ApplyExactStageACheckerPublicationPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "manifest-apply-stage-a-checker-role-chain-policy",
       "phase": "wrapper-apply",
       "identity": "RELEASE_DEPLOYER",
@@ -648,7 +673,7 @@
         "sid": "ApplyExactStageACheckerRoleChainPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": true
@@ -673,7 +698,7 @@
         "sid": "ApplyExactStageACheckerRoleTrust",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": true
@@ -706,7 +731,7 @@
         "sid": "ApplyExactStageAEndpointSecurityGroupIngress",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": true
@@ -1042,7 +1067,7 @@
         "sid": "ReadExactStageASecretMetadata",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": false
@@ -1612,7 +1637,7 @@
         "sid": "ReadExactStageAGreenRdsInstance",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": false
@@ -1682,7 +1707,7 @@
         "sid": "ReadExactStageAProviderEndpointMetadata",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": false
@@ -1745,7 +1770,7 @@
         "sid": "ReadExactStageAStateForHandoff",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": false
@@ -2290,7 +2315,7 @@
         "sid": "ReadExactStageASecretMetadata",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": false
@@ -3187,7 +3212,7 @@
         "sid": "ReadExactStageACheckerRolePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": false
@@ -3216,7 +3241,7 @@
         "sid": "ReadExactStageACheckerRole",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": false
@@ -3250,7 +3275,7 @@
         "sid": "ReadExactStageAGreenRdsTags",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": false
@@ -3277,7 +3302,7 @@
         "sid": "ReadExactStageABackendBucketLocation",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": false
@@ -3413,7 +3438,7 @@
         "sid": "ReadExactStageACheckerRole",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580"
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
       },
       "required": true,
       "mutation": false

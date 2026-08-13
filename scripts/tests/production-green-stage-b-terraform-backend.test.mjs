@@ -222,6 +222,7 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
     "ReadExactStageALogTags",
     "ApplyExactStageAEndpointSecurityGroupIngress",
     "ApplyExactStageACheckerRoleChainPolicy",
+    "ApplyExactStageACheckerPublicationPolicy",
     "ApplyExactStageACheckerRoleTrust",
   ]);
   const stageAStatement = (sid) => stageA.Statement.find((statement) => statement.Sid === sid);
@@ -256,6 +257,9 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
   const checkerApply = stageAStatement("ApplyExactStageACheckerRoleChainPolicy");
   assert.equal(checkerApply.Action, "iam:PutRolePolicy");
   assert.equal(checkerApply.Resource, "arn:aws:iam::368992683803:role/mscqr-production-independent-checker");
+  const checkerPublicationApply = stageAStatement("ApplyExactStageACheckerPublicationPolicy");
+  assert.equal(checkerPublicationApply.Action, "iam:PutRolePolicy");
+  assert.equal(checkerPublicationApply.Resource, "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker");
   const checkerTrustApply = stageAStatement("ApplyExactStageACheckerRoleTrust");
   assert.equal(checkerTrustApply.Action, "iam:UpdateAssumeRolePolicy");
   assert.equal(checkerTrustApply.Resource, "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker");
