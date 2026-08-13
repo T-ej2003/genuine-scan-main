@@ -9,7 +9,7 @@ import { produceRuntimeRotationInventory } from "../security/production-runtime-
 import { produceOnboardingEvidence } from "../security/produce-production-onboarding-evidence.mjs";
 import { validateOnboardingContract } from "../security/production-onboarding-contract.mjs";
 import { assertImageEvidence, imageEvidenceSha256 } from "./production-green-stage-b-image-evidence.mjs";
-import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
+import { STAGE_B, canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { assertCanonicalImageReuseEvidence, imageAuthorizationSha256 } from "./production-image-authorization.mjs";
 import { assertCheckerChainStructuralEvidence } from "./production-checker-chain-contract.mjs";
 
@@ -210,8 +210,9 @@ export const authorizedBackendDigest = (value) => value?.backendDigest || value?
 function assertOverlapInputBinding(overlapTask, imageAuthorization, artifact, sourceSha) {
   const input = overlapTask?.input;
   if (!input || input.releaseSha !== sourceSha) throw new Error("Overlap task input is not bound to the protected-main source SHA.");
-  const expectedDigest = authorizedBackendDigest(imageAuthorization);
-  if (expectedDigest && !String(input.backendImage || "").endsWith(`@${expectedDigest}`)) throw new Error("Overlap task input is not bound to the authorized backend digest.");
+  const authorizedBackend = imageAuthorization?.imageEvidence?.images?.find(({ service }) => service === "backend");
+  const expectedImage = authorizedBackend && `${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/${authorizedBackend.repository}@${authorizedBackend.digest}`;
+  if (!expectedImage || input.backendImage !== expectedImage) throw new Error("Overlap task input is not bound to the authorized backend image.");
   const artifactBindings = artifact?.bindings || {};
   for (const name of ["ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"]) {
     if (input.secretBindings?.[name] !== artifactBindings[name]) throw new Error(`Overlap task artifact binding diverges at ${name}.`);
@@ -284,6 +285,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
   if (/secret|password|token|private/i.test(results.artifactSigning.evidenceRef)) throw new Error("Artifact signing evidence reference is unsafe.");
 
   const verifierSession = identities.verifier?.session;
+  assertOverlapInputBinding(runtimeOverlapTask, imageAuthorization, results.artifactSigning, sourceSha);
   const preDeploymentExecute = preDeploymentInventory?.execute || inventory?.execute;
   const inventoryResult = await produceRuntimeRotationInventory({ execute: preDeploymentExecute, sourceSha, rotationId, taskDefinitionArn: preDeploymentInventory?.taskDefinitionArn || inventory?.taskDefinitionArn, verifierSession });
   if (inventoryResult.mutationCount) recordMutation(mutations, "M4_REGISTER_PREDEPLOYMENT_INVENTORY_TASK_DEFINITION", inventoryResult);
