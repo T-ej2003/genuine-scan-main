@@ -124,8 +124,8 @@ function configuration() {
       memory: ref(["each.value.memory", "each.value"]),
       network_mode: ref(["each.value.networkMode", "each.value"]),
       requires_compatibilities: ref(["each.value.requiresCompatibilities", "each.value"]),
-      runtime_platform: {},
-      skip_destroy: {},
+      runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }],
+      skip_destroy: { constant_value: true },
       tags: ref(["each.key", "local.backend_exec_tags", "local.tags"]),
       task_role_arn: ref(["aws_iam_role.task", "each.key"]),
     },
@@ -140,7 +140,7 @@ function configuration() {
     root_module: { resources: [
       candidate,
       executor,
-      { address: "aws_iam_policy.broker", type: "aws_iam_policy", expressions: { name: {}, path: {}, policy: ref(["local.broker_runtime_policy"]), tags: ref(["local.tags"]) } },
+      { address: "aws_iam_policy.broker", type: "aws_iam_policy", expressions: { name: { constant_value: "mscqr-production-rls-approval-broker-runtime" }, path: { constant_value: "/" }, policy: ref(["local.broker_runtime_policy"]), tags: ref(["local.tags"]) } },
       { address: "aws_lambda_function.broker", type: "aws_lambda_function", expressions: {
         environment: [{ variables: ref([
           "aws_dynamodb_table.replay", "aws_dynamodb_table.replay.name", "local.active_broker_task_definition_arns",
@@ -151,10 +151,10 @@ function configuration() {
           "aws_iam_role.task", "aws_iam_role.task[\"backend\"]", "aws_iam_role.task[\"backend\"].arn",
           "local.logs.backend", "var.account_id", "var.aws_region", "var.backend_image",
         ]) }],
-        filename: ref(["var.broker_package_path"]), function_name: {}, handler: {}, role: ref(["var.stage_a_broker_role_arn"]), publish: { constant_value: true }, runtime: {}, source_code_hash: ref(["var.broker_package_path"]), tags: ref(["local.tags"]), timeout: {},
+        filename: ref(["var.broker_package_path"]), function_name: { constant_value: "mscqr-production-rls-approval-broker" }, handler: { constant_value: "index.handler" }, role: ref(["var.stage_a_broker_role_arn"]), publish: { constant_value: true }, runtime: { constant_value: "nodejs24.x" }, source_code_hash: ref(["var.broker_package_path"]), tags: ref(["local.tags"]), timeout: { constant_value: 180 },
       } },
       { address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", expressions: {
-        name: {},
+        name: { constant_value: "reviewed" },
         function_name: ref(["aws_lambda_function.broker.function_name", "aws_lambda_function.broker"]),
         function_version: ref([
           "aws_lambda_function.broker",
@@ -163,6 +163,18 @@ function configuration() {
           "var.stage_b_recovery_only",
         ]),
       } },
+      { address: "aws_cloudwatch_log_group.stage_b", type: "aws_cloudwatch_log_group", for_each_expression: ref(["local.stage_b_logs"]), expressions: { name: ref(["each.value"]), retention_in_days: ref(["var.log_retention_days"]), tags: ref(["local.tags"]) } },
+      { address: "aws_dynamodb_table.replay", type: "aws_dynamodb_table", expressions: { attribute: [{ name: { constant_value: "approvalMode" }, type: { constant_value: "S" } }], billing_mode: { constant_value: "PAY_PER_REQUEST" }, hash_key: { constant_value: "approvalMode" }, name: { constant_value: "mscqr-production-rls-stage-b-replay" }, tags: ref(["local.tags"]), ttl: [{ attribute_name: { constant_value: "expiresAt" }, enabled: { constant_value: true } }] } },
+      { address: "aws_ecs_task_definition.candidate_retained", type: "aws_ecs_task_definition", for_each_expression: ref(["local.retained_candidate_definitions"]), expressions: { container_definitions: ref(["each.value.definition.containerDefinitions", "each.value.definition", "each.value"]), cpu: ref(["each.value.definition.cpu", "each.value.definition", "each.value"]), execution_role_arn: ref(["aws_iam_role.execution", "each.value.kind", "each.value"]), family: ref(["each.value.definition.family", "each.value.definition", "each.value"]), memory: ref(["each.value.definition.memory", "each.value.definition", "each.value"]), network_mode: ref(["each.value.definition.networkMode", "each.value.definition", "each.value"]), requires_compatibilities: ref(["each.value.definition.requiresCompatibilities", "each.value.definition", "each.value"]), runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: { constant_value: true }, tags: ref(["local.tags"]), task_role_arn: ref(["aws_iam_role.task", "each.value.kind", "each.value"]) } },
+      { address: "aws_ecs_task_definition.executor_retained", type: "aws_ecs_task_definition", for_each_expression: ref(["local.retained_executor_definitions"]), expressions: { container_definitions: ref(["each.value.definition.containerDefinitions", "each.value.definition", "each.value"]), cpu: ref(["each.value.definition.cpu", "each.value.definition", "each.value"]), execution_role_arn: ref(["aws_iam_role.execution[\"executor\"].arn", "aws_iam_role.execution[\"executor\"]", "aws_iam_role.execution"]), family: ref(["each.value.definition.family", "each.value.definition", "each.value"]), memory: ref(["each.value.definition.memory", "each.value.definition", "each.value"]), network_mode: ref(["each.value.definition.networkMode", "each.value.definition", "each.value"]), requires_compatibilities: ref(["each.value.definition.requiresCompatibilities", "each.value.definition", "each.value"]), runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: { constant_value: true }, tags: ref(["local.tags"]), task_role_arn: ref(["var.stage_a_executor_task_role_arn"]) } },
+      { address: "aws_iam_role.execution", type: "aws_iam_role", for_each_expression: ref(["local.execution_role_names"]), expressions: { assume_role_policy: {}, name: ref(["each.value"]), tags: ref(["local.tags"]) } },
+      { address: "aws_iam_role.task", type: "aws_iam_role", for_each_expression: ref(["local.task_role_names"]), expressions: { assume_role_policy: {}, name: ref(["each.value"]), tags: ref(["local.tags"]) } },
+      { address: "aws_iam_role_policy.backend_ecs_exec", type: "aws_iam_role_policy", expressions: { name: { constant_value: "stage-b-backend-ecs-exec-ssm-channels" }, policy: {}, role: ref(["aws_iam_role.task[\"backend\"].id", "aws_iam_role.task[\"backend\"]", "aws_iam_role.task"]) } },
+      { address: "aws_iam_role_policy.candidate_object_storage", type: "aws_iam_role_policy", for_each_expression: ref(["aws_iam_role.task"]), expressions: { name: { constant_value: "stage-b-object-storage" }, policy: ref(["var.receipt_bucket_arn"]), role: ref(["each.value.id", "each.value"]) } },
+      { address: "aws_iam_role_policy.execution", type: "aws_iam_role_policy", for_each_expression: ref(["aws_iam_role.execution"]), expressions: { name: { constant_value: "stage-b-exact-image-logs-and-secrets" }, policy: ref(["local.ecr_repository_arns", "each.key", "local.execution_log_group_arns", "each.key", "each.key", "var.stage_b_recovery_only", "local.backend_execution_secret_arns", "local.active_execution_secret_arns", "each.key"]), role: ref(["each.value.id", "each.value"]) } },
+      { address: "aws_iam_role_policy.executor_runtime", type: "aws_iam_role_policy", expressions: { name: { constant_value: "stage-b-executor-runtime" }, policy: ref(["var.stage_a_runtime_secret_arns", "var.approval_kms_key_arn", "var.receipt_bucket_arn"]), role: ref(["var.stage_a_executor_task_role_arn"]) } },
+      { address: "aws_iam_role_policy_attachment.broker", type: "aws_iam_role_policy_attachment", expressions: { policy_arn: ref(["aws_iam_policy.broker.arn", "aws_iam_policy.broker"]), role: ref(["var.stage_a_broker_role_arn"]) } },
+      { address: "aws_lambda_permission.release_deployer", type: "aws_lambda_permission", expressions: { action: { constant_value: "lambda:InvokeFunction" }, function_name: ref(["aws_lambda_function.broker.function_name", "aws_lambda_function.broker"]), principal: { constant_value: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" }, qualifier: ref(["aws_lambda_alias.reviewed.name", "aws_lambda_alias.reviewed"]), statement_id: { constant_value: "OnlyProtectedReleaseRoleMayInvokeReviewedAlias" } } },
     ] },
   };
 }
@@ -584,9 +596,13 @@ test("real-plan-shaped semantic census has zero unclassified semantics", () => {
     unmodeledAfterUnknownMarkers: 0,
     unmodeledEmptyStructures: 0,
     resourceProfiles: 17,
-    configuredResourceProfiles: 5,
+    configuredResourceProfiles: 17,
     configurationAttributes: 95,
     unclassifiedConfigurationAttributes: 0,
+    missingExpectedStaticProfiles: 0,
+    unexpectedStaticResources: 0,
+    unboundConstantExpressions: 0,
+    unboundConfigurationReferences: 0,
     missingTypedRepresentationClassifications: 0,
   });
   assert.equal(new Set(census.resources.map((item) => item.classification)).size, 4);
@@ -613,9 +629,13 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
     unmodeledAfterUnknownMarkers: 0,
     unmodeledEmptyStructures: 0,
     resourceProfiles: 17,
-    configuredResourceProfiles: 5,
+    configuredResourceProfiles: 17,
     configurationAttributes: 95,
     unclassifiedConfigurationAttributes: 0,
+    missingExpectedStaticProfiles: 0,
+    unexpectedStaticResources: 0,
+    unboundConstantExpressions: 0,
+    unboundConfigurationReferences: 0,
     missingTypedRepresentationClassifications: 0,
   });
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_INITIAL_CREATE).length, 12);
@@ -653,6 +673,36 @@ test("static configuration profiles reject unknown fields and references without
   const reference = structuredClone(value);
   reference.configuration.root_module.resources.find((item) => item.address === "aws_iam_policy.broker").expressions.policy = ref(["local.unreviewed_policy"]);
   assert.throws(() => assertStageBStaticConfigurationCoverage(reference), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+
+  for (const mutate of [
+    (candidate) => { candidate.configuration.root_module.resources.pop(); },
+    (candidate) => { candidate.configuration.root_module.resources.splice(-2); },
+  ]) {
+    const missing = structuredClone(value);
+    mutate(missing);
+    assert.throws(() => assertStageBStaticConfigurationCoverage(missing), /UNCLASSIFIED_STATIC_CONFIGURATION_RESOURCE_SET/);
+  }
+  const unexpected = structuredClone(value);
+  unexpected.configuration.root_module.resources.push({ address: "aws_lambda_function.unreviewed", type: "aws_lambda_function", expressions: {} });
+  assert.throws(() => assertStageBStaticConfigurationCoverage(unexpected), /UNCLASSIFIED_STATIC_CONFIGURATION_RESOURCE/);
+  const wrongType = structuredClone(value);
+  wrongType.configuration.root_module.resources.find((item) => item.address === "aws_iam_policy.broker").type = "aws_lambda_function";
+  assert.throws(() => assertStageBStaticConfigurationCoverage(wrongType), /UNCLASSIFIED_STATIC_CONFIGURATION_RESOURCE/);
+  const duplicate = structuredClone(value);
+  duplicate.configuration.root_module.resources.push(structuredClone(duplicate.configuration.root_module.resources[0]));
+  assert.throws(() => assertStageBStaticConfigurationCoverage(duplicate), /UNCLASSIFIED_STATIC_CONFIGURATION_RESOURCE/);
+  for (const mutateConstant of [
+    (candidate) => { candidate.configuration.root_module.resources.find((item) => item.address === "aws_iam_policy.broker").expressions.name.constant_value = "unreviewed"; },
+    (candidate) => { candidate.configuration.root_module.resources.find((item) => item.address === "aws_iam_policy.broker").expressions.path.constant_value = "/unreviewed"; },
+    (candidate) => { candidate.configuration.root_module.resources.find((item) => item.address === "aws_dynamodb_table.replay").expressions.attribute[0].type.constant_value = "N"; },
+  ]) {
+    const mutated = structuredClone(value);
+    mutateConstant(mutated);
+    assert.throws(() => assertStageBStaticConfigurationCoverage(mutated), /UNCLASSIFIED_STATIC_CONFIGURATION_EXPRESSION/);
+  }
+  const missingField = structuredClone(value);
+  delete missingField.configuration.root_module.resources.find((item) => item.address === "aws_iam_policy.broker").expressions.name;
+  assert.throws(() => assertStageBStaticConfigurationCoverage(missingField), /UNCLASSIFIED_STATIC_CONFIGURATION_FIELDS/);
 });
 
 test("baseline ECS runtime platform uses the provider list shape and indexed semantic paths", () => {
@@ -737,7 +787,7 @@ test("dependency-resolved partial initial apply retry permits only exact concret
   const policyDocument = canonicalBrokerPolicy();
   policyDocument.Statement[0].Action = ["iam:DeleteRole"];
   policy.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after.policy = JSON.stringify(policyDocument);
-  assert.throws(() => assertStageBPlanSemanticCompleteness(policy), /UNCLASSIFIED_CHANGED_PATH/);
+  assert.throws(() => assertStageBPlanSemanticCompleteness(policy), /UNCLASSIFIED_(?:CHANGED_PATH|STATIC_CONFIGURATION_EXPRESSION)/);
   for (const mutatePolicy of [
     (document) => { document.Statement[0].Resource[0] = "arn:aws:ecs:eu-west-2:368992683803:task-definition/unrelated:1"; },
     (document) => { document.Statement[0].Resource = "*"; },
@@ -747,7 +797,7 @@ test("dependency-resolved partial initial apply retry permits only exact concret
     const document = canonicalBrokerPolicy();
     mutatePolicy(document);
     invalidPolicy.resource_changes.find((change) => change.address === "aws_iam_policy.broker").change.after.policy = JSON.stringify(document);
-    assert.throws(() => assertStageBPlanSemanticCompleteness(invalidPolicy), /UNCLASSIFIED_CHANGED_PATH/);
+    assert.throws(() => assertStageBPlanSemanticCompleteness(invalidPolicy), /UNCLASSIFIED_(?:CHANGED_PATH|STATIC_CONFIGURATION_EXPRESSION)/);
   }
   const environment = structuredClone(retry);
   const variables = environment.resource_changes.find((change) => change.address === "aws_lambda_function.broker").change.after.environment[0].variables;
@@ -1165,7 +1215,7 @@ test("broker timeout admits only the reviewed 30-to-180 transition", () => {
 
 test("computed alias requires same-plan published broker and exact configuration identity", () => {
   mutate((value) => { value.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change.actions = ["no-op"]; }, /UNCLASSIFIED_(?:COMPUTED_CHANGE|RESOURCE_ACTION)/);
-  mutate((value) => { value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_function.broker").expressions.publish.constant_value = false; }, /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+  mutate((value) => { value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_function.broker").expressions.publish.constant_value = false; }, /UNCLASSIFIED_STATIC_CONFIGURATION_EXPRESSION/);
   mutateRecovery((value) => { const alias = value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed"); alias.change.after.function_version = "wrong"; delete alias.change.after_unknown.function_version; });
 });
 

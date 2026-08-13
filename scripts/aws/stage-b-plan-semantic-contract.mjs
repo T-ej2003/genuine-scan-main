@@ -16,6 +16,7 @@ import {
   assertStageBBackendEcsExecPolicyChange,
   assertStageBBrokerPublishProviderMetadataRepresentation,
   assertReviewedBrokerTimeoutTransition,
+  assertStageBTerraformBrokerPolicySource,
   STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
   STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS,
 } from "./stage-b-deployment-contract.mjs";
@@ -310,6 +311,30 @@ const STATIC_CONFIGURATION_PROFILES = Object.freeze({
   "aws_lambda_permission.release_deployer": { fields: ["action", "function_name", "principal", "qualifier", "statement_id"] },
 });
 
+const STATIC_CONFIGURATION_CONSTANTS = Object.freeze({
+  "aws_dynamodb_table.replay": {
+    attribute: [{ name: { constant_value: "approvalMode" }, type: { constant_value: "S" } }],
+    billing_mode: "PAY_PER_REQUEST",
+    hash_key: "approvalMode",
+    name: "mscqr-production-rls-stage-b-replay",
+    ttl: [{ attribute_name: { constant_value: "expiresAt" }, enabled: { constant_value: true } }],
+  },
+  "aws_ecs_task_definition.candidate": { runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: true },
+  "aws_ecs_task_definition.executor": { runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: true },
+  "aws_ecs_task_definition.candidate_retained": { runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: true },
+  "aws_ecs_task_definition.executor_retained": { runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: true },
+  "aws_iam_policy.broker": { name: "mscqr-production-rls-approval-broker-runtime", path: "/" },
+  "aws_iam_role.execution": { assume_role_policy: {} },
+  "aws_iam_role.task": { assume_role_policy: {} },
+  "aws_iam_role_policy.backend_ecs_exec": { name: "stage-b-backend-ecs-exec-ssm-channels", policy: {} },
+  "aws_iam_role_policy.candidate_object_storage": { name: "stage-b-object-storage" },
+  "aws_iam_role_policy.execution": { name: "stage-b-exact-image-logs-and-secrets" },
+  "aws_iam_role_policy.executor_runtime": { name: "stage-b-executor-runtime" },
+  "aws_lambda_alias.reviewed": { name: "reviewed" },
+  "aws_lambda_function.broker": { function_name: "mscqr-production-rls-approval-broker", handler: "index.handler", publish: true, runtime: "nodejs24.x", timeout: 180 },
+  "aws_lambda_permission.release_deployer": { action: "lambda:InvokeFunction", principal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", statement_id: "OnlyProtectedReleaseRoleMayInvokeReviewedAlias" },
+});
+
 export function getStageBConfigurationReferenceRules() {
   return Object.fromEntries(Object.entries(CONFIGURATION_REFERENCE_RULES).map(([address, fields]) => [
     address,
@@ -320,6 +345,22 @@ export function getStageBConfigurationReferenceRules() {
 const exactJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const isObject = (value) => value !== null && typeof value === "object";
 const pathFor = (base, key) => typeof key === "number" ? `${base}[${key}]` : (base ? `${base}.${key}` : key);
+
+function canonicalExpression(value) {
+  if (Array.isArray(value)) return value.map((item) => canonicalExpression(item));
+  if (!isObject(value)) return { type: value === null ? "null" : typeof value, value };
+  const keys = Object.keys(value).sort();
+  if (keys.length === 1 && keys[0] === "references" && Array.isArray(value.references)) {
+    return { references: canonicalReferenceSet(value.references) };
+  }
+  return Object.fromEntries(keys.map((key) => [key, canonicalExpression(value[key])]));
+}
+
+function expressionHasNonReferenceContent(value) {
+  if (Array.isArray(value)) return value.some(expressionHasNonReferenceContent);
+  if (!isObject(value)) return value !== undefined;
+  return Object.entries(value).some(([key, nested]) => key !== "references" && expressionHasNonReferenceContent(nested));
+}
 
 function diffPaths(before, after, base = "") {
   if (exactJson(before, after)) return [];
@@ -489,18 +530,38 @@ function rootConfigurationResources(plan) {
   return plan?.configuration?.root_module?.resources || [];
 }
 
-export function assertStageBStaticConfigurationCoverage(plan) {
+function expectedStaticExpression(plan, address, field) {
+  const constants = STATIC_CONFIGURATION_CONSTANTS[address]?.[field];
+  if (constants !== undefined) return isObject(constants) || Array.isArray(constants) ? constants : { constant_value: constants };
+  const references = allowedConfigurationReferences(plan, address, field === "environment" ? "environment[0].variables" : field);
+  if (references === undefined) return {};
+  if (field === "environment") return [{ variables: { references: canonicalReferenceSet(references) } }];
+  return { references: canonicalReferenceSet(references) };
+}
+
+export function assertStageBStaticConfigurationCoverage(plan, { terraformConfiguration } = {}) {
   const resources = rootConfigurationResources(plan);
   const profiles = Object.entries(STATIC_CONFIGURATION_PROFILES);
   const expectedAddresses = new Set(profiles.map(([address]) => address));
   const configured = new Set();
+  const configuredTypes = new Map();
   for (const resource of resources) {
     const profile = STATIC_CONFIGURATION_PROFILES[resource?.address];
     if (!profile || !expectedAddresses.has(resource.address)) throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_RESOURCE: ${resource?.address || "<missing>"}`);
     if (configured.has(resource.address)) throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_RESOURCE: ${resource.address}`);
+    if (resource.type !== resource.address.split(".")[0]) throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_RESOURCE: ${resource.address}`);
     configured.add(resource.address);
+    configuredTypes.set(resource.address, resource.type);
     const fields = Object.keys(resource.expressions || {}).sort();
     if (!exactJson(fields, [...profile.fields].sort())) throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_FIELDS: ${resource.address}`);
+    for (const field of profile.fields) {
+      const actual = resource.expressions?.[field];
+      const expected = expectedStaticExpression(plan, resource.address, field);
+      if ((expressionHasNonReferenceContent(actual) || expressionHasNonReferenceContent(expected))
+        && !exactJson(canonicalExpression(actual), canonicalExpression(expected))) {
+        throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_EXPRESSION: ${resource.address}.${field}`);
+      }
+    }
     const actualForEach = canonicalReferenceSet(referenceExpressions(resource.for_each_expression || {}).flatMap((item) => item.references));
     const expectedForEach = canonicalReferenceSet(profile.forEach || []);
     if (!exactJson(actualForEach, expectedForEach)) throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_FOR_EACH: ${resource.address}`);
@@ -514,12 +575,27 @@ export function assertStageBStaticConfigurationCoverage(plan) {
       }
     }
   }
+  const missing = [...expectedAddresses].filter((address) => !configured.has(address)).sort();
+  const unexpected = [...configured].filter((address) => !expectedAddresses.has(address)).sort();
+  if (missing.length || unexpected.length || configured.size !== expectedAddresses.size || configuredTypes.size !== expectedAddresses.size) {
+    throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_RESOURCE_SET: missing=${missing.join(",") || "<none>"};unexpected=${unexpected.join(",") || "<none>"}`);
+  }
+  if (typeof terraformConfiguration === "string") assertStageBTerraformBrokerPolicySource(terraformConfiguration, true);
+  const brokerChange = plan?.resource_changes?.find((change) => change.address === "aws_iam_policy.broker");
+  const brokerPolicy = brokerChange?.change?.after?.policy;
+  if (typeof brokerPolicy === "string") {
+    try { assertStageBBrokerPolicyDocument(JSON.parse(brokerPolicy)); } catch { throw new Error("UNCLASSIFIED_STATIC_CONFIGURATION_EXPRESSION: aws_iam_policy.broker.policy"); }
+  }
   const attributes = profiles.flatMap(([address, profile]) => profile.fields.map((field) => ({ address, field, classification: staticConfigurationClass(address, field) })));
   return {
     resourceProfiles: profiles.length,
     configuredResourceProfiles: configured.size,
     configurationAttributes: attributes.length,
     unclassifiedConfigurationAttributes: 0,
+    missingExpectedStaticProfiles: missing.length,
+    unexpectedStaticResources: unexpected.length,
+    unboundConstantExpressions: 0,
+    unboundConfigurationReferences: 0,
     attributes,
   };
 }
@@ -1016,12 +1092,12 @@ function assertComputedAliasBinding(plan) {
   }
 }
 
-export function censusStageBPlanSemantics(plan) {
+export function censusStageBPlanSemantics(plan, options = {}) {
   if (!plan || !Array.isArray(plan.resource_changes)) throw new Error("Stage B semantic census requires Terraform plan resource_changes.");
   const manifest = assertStageBTypedRepresentationManifestComplete();
   assertStageBProviderResourceShapeUniverse();
   assertStageBProviderSemanticSnapshot();
-  const staticConfiguration = assertStageBStaticConfigurationCoverage(plan);
+  const staticConfiguration = assertStageBStaticConfigurationCoverage(plan, options);
   const { attributes: staticConfigurationAttributes, ...staticConfigurationCounts } = staticConfiguration;
   assertBrokerActionProfile(plan);
   const resources = [];
@@ -1088,8 +1164,8 @@ export function censusStageBPlanSemantics(plan) {
   return { schemaVersion: 1, resources, staticConfigurationAttributes, counts };
 }
 
-export function assertStageBPlanSemanticCompleteness(plan) {
-  const census = censusStageBPlanSemantics(plan);
+export function assertStageBPlanSemanticCompleteness(plan, options = {}) {
+  const census = censusStageBPlanSemantics(plan, options);
   if (Object.entries(census.counts).some(([key, value]) => (key.startsWith("unclassified") || key.startsWith("unfaithful") || key.startsWith("unmodeled")) && value !== 0)) {
     throw new Error("Stage B plan semantic completeness contains unclassified semantics.");
   }
