@@ -4,6 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
+import { STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
+import { validateCurrentTaskDefinitionState } from "./generate-production-green-stage-b-tfvars.mjs";
+import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 
 export const STAGE_B_REFRESH_SCHEMA_VERSION = 1;
 export const STAGE_B_REFRESH_STATUSES = Object.freeze([
@@ -352,12 +355,56 @@ function expectedImages(bindingReport) {
     .sort(([left], [right]) => left.localeCompare(right)));
 }
 
+function stateTaskDefinitionOutput(state) {
+  const output = state.outputs?.task_definition_arns;
+  if (output === undefined) return undefined;
+  if (!output || typeof output !== "object" || Array.isArray(output) || !Object.hasOwn(output, "value")) throw new Error("Stage B task_definition_arns state output is malformed.");
+  return output.value;
+}
+
+function currentTaskDefinitionOutputKey(address) {
+  const match = /^aws_ecs_task_definition\.(candidate|executor)\["([^\"]+)"\]$/.exec(address);
+  if (!match) throw new Error(`Stage B current task-definition address is malformed: ${address}`);
+  if (match[1] === "candidate") {
+    if (["backend", "worker"].includes(match[2])) return match[2];
+    if (match[2] === "canary") return "full-rls-application-canary";
+    return undefined;
+  }
+  return match[2];
+}
+
 function expectedTaskDefinitionArns(state, outputsSource) {
   if (!/output\s+"task_definition_arns"\s*\{/.test(outputsSource)) throw new Error("Stage B task_definition_arns output is not defined in protected main.");
   const resources = Array.isArray(state.resources) ? state.resources : [];
+  validateCurrentTaskDefinitionState(resources);
   const current = resources.filter((resource) => resource.type === "aws_ecs_task_definition" && ["candidate", "executor"].includes(resource.name));
-  if (current.length) throw new Error("Stage B state contains current task-definition addresses; output reconciliation is not approved.");
-  return {};
+  if (!current.length) {
+    const output = stateTaskDefinitionOutput(state);
+    if (output !== undefined && !exactJson(output, {})) throw new Error("Stage B empty task-definition state has a non-empty task_definition_arns output.");
+    return {};
+  }
+  const expectedAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).sort();
+  const entries = current.flatMap((resource) => (resource.instances || []).map((instance) => ({
+    address: `aws_ecs_task_definition.${resource.name}["${instance.index_key}"]`,
+    arn: instance.attributes?.arn,
+  })));
+  if (entries.length !== expectedAddresses.length || new Set(entries.map(({ address }) => address)).size !== entries.length
+    || new Set(entries.map(({ arn }) => arn)).size !== entries.length
+    || JSON.stringify(entries.map(({ address }) => address).sort()) !== JSON.stringify(expectedAddresses)) {
+    throw new Error("Stage B current task-definition state does not contain the exact reviewed address set.");
+  }
+  const mapping = {};
+  for (const { address, arn } of entries) {
+    const key = currentTaskDefinitionOutputKey(address);
+    if (key === undefined) continue;
+    if (!STAGE_B_MODES.includes(key) && !["backend", "worker"].includes(key)) throw new Error(`Stage B task-definition output key is not canonical: ${key}`);
+    if (Object.hasOwn(mapping, key)) throw new Error(`Stage B task-definition output key is duplicated: ${key}`);
+    mapping[key] = arn;
+  }
+  if (JSON.stringify(Object.keys(mapping).sort()) !== JSON.stringify([...new Set(["backend", "worker", ...STAGE_B_MODES])].sort())) throw new Error("Stage B current task-definition output mapping is incomplete.");
+  const stateOutput = stateTaskDefinitionOutput(state);
+  if (stateOutput === undefined || !exactJson(stateOutput, mapping)) throw new Error("Stage B task_definition_arns state output does not match the validated current task-definition state.");
+  return Object.fromEntries(Object.entries(mapping).sort(([left], [right]) => left.localeCompare(right)));
 }
 
 export function assertStageBRefreshStateBinding({ stateBackupPath, bindingReport } = {}) {
@@ -388,7 +435,8 @@ export function classifyStageBRefreshResult({ plan, terraformExitCode = 0, terra
     if (!checkResult.valid) return { status: "FAILED_CHECK", reason: "Terraform refresh-only contains failed or malformed production checks.", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
     const resourceChanges = [...plan.resource_changes, ...plan.resource_drift].filter((change) => !Array.isArray(change.change?.actions) || change.change.actions.some((action) => action !== "no-op"));
     if (resourceChanges.length) return { status: "RESOURCE_DRIFT", reason: "Terraform reported managed-resource actions.", ...checkResult, resourceChanges: { nonNoOp: resourceChanges.length, changes: resourceChanges.map(({ address, type, change }) => ({ address, type, actions: change?.actions || [] })) }, outputChanges: [] };
-    const expected = { bound_images: expectedImages(bindingReport), task_definition_arns: expectedTaskDefinitionArns(state, outputsSource) };
+    const taskDefinitionArns = expectedTaskDefinitionArns(state, outputsSource);
+    const expected = { bound_images: expectedImages(bindingReport), task_definition_arns: taskDefinitionArns };
     const outputChanges = Object.entries(plan.output_changes).filter(([, change]) => change?.actions?.some((action) => action !== "no-op"));
     const classifiedOutputs = [];
     for (const [name, change] of outputChanges) {
@@ -398,7 +446,7 @@ export function classifyStageBRefreshResult({ plan, terraformExitCode = 0, terra
       classifiedOutputs.push({ name, ...result });
     }
     if (terraformExitCode === 2 && !outputChanges.length) return { status: "OUTPUT_DRIFT", reason: "Terraform reported changes without a reviewed output change.", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
-    return { status: outputChanges.length ? "REVIEWED_OUTPUT_RECONCILIATION" : "NO_CHANGES", reason: outputChanges.length ? "Only reviewed output reconciliation was detected." : "No resource or output changes were detected.", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: classifiedOutputs };
+    return { status: outputChanges.length ? "REVIEWED_OUTPUT_RECONCILIATION" : "NO_CHANGES", reason: outputChanges.length ? "Only reviewed output reconciliation was detected." : "No resource or output changes were detected.", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: classifiedOutputs, taskDefinitionArns };
   } catch (error) {
     return { status: "MALFORMED_RESULT", reason: error.message, checkCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 0, failedChecks: [], checks: [], resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
   }
@@ -418,7 +466,7 @@ export function assertStageBRefreshEvidence({ refreshReportPath, refreshReportSh
   for (const output of report.outputChanges) {
     if (!output || !["bound_images", "task_definition_arns"].includes(output.name) || output.classification !== "reviewed" || hasUnknown(output.after)) throw new Error("Stage B refresh evidence contains an unreviewed output change.");
     if (output.name === "bound_images" && !exactJson(output.after, expectedImages(bindingReport))) throw new Error("Stage B bound_images refresh evidence does not match the tfvars image bindings.");
-    if (output.name === "task_definition_arns" && !exactJson(output.after, {})) throw new Error("Stage B task_definition_arns refresh evidence is not the proven empty mapping.");
+    if (output.name === "task_definition_arns" && (!report.taskDefinitionArns || !exactJson(output.after, report.taskDefinitionArns))) throw new Error("Stage B task_definition_arns refresh evidence does not match the validated state mapping.");
   }
   const expected = { toolingSha: expectedToolingSha, toolingTreeSha256: expectedToolingTreeSha256, tfvarsSha256: expectedTfvarsSha256 || bindingReport?.tfvarsSha256, imageEvidenceSha256: expectedImageEvidenceSha256 || bindingReport?.imageEvidenceCanonicalSha256, stageAStateSha256: bindingReport?.stageAStateBackupSha256, stageAStateLineage: bindingReport?.stageAStateLineage, stageAStateSerial: bindingReport?.stageAStateSerial, stageBStateSha256: expectedStateSha256 || bindingReport?.stateBackupSha256, stageBStateLineage: bindingReport?.stateLineage, stageBStateSerial: bindingReport?.stateSerial, backendMetadataSha256: expectedBackendMetadataSha256, terraformDataDir: expectedTerraformDataDir, workspace: expectedWorkspace };
   for (const [key, value] of Object.entries(expected)) if (value !== undefined && report[key] !== value) throw new Error(`Stage B refresh evidence ${key} binding differs from the selected deployment.`);

@@ -454,6 +454,7 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
     unknownCheckCount: classification.unknownCheckCount || 0,
     duplicateCheckCount: classification.duplicateCheckCount || 0,
     checkInventoryHash: classification.checkInventoryHash || null,
+    taskDefinitionArns: classification.taskDefinitionArns || null,
     emittedInstanceCount: classification.emittedInstanceCount || 0,
     passedInstanceCount: classification.passedInstanceCount || 0,
     failedInstanceCount: classification.failedInstanceCount || 0,

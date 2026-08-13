@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { acquireStageBRefreshPlan, createStageBRefreshDiagnostic, parseCli, redactStageBRefreshDiagnostic, runRefreshOnly, stageBRefreshRuntimeSensitiveValues } from "../refresh-production-green-stage-b.mjs";
 import { assertStageBRefreshEvidence, assertStageBRefreshStateBinding, checkAddressesFromSource, classifyStageBRefreshResult, collectStageBTerraformCheckAddresses, inspectStageBRefreshChecks, isSupportedStageBTerraformVersion, normalizeStageBRefreshPlan, STAGE_B_EXPECTED_CHECK_ADDRESSES, STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
+import { STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
+import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 
 const toolingSha = "8d9b8d820afa161d410490678661266d7c9e1345";
 const toolingTreeSha256 = "a".repeat(64);
@@ -23,6 +25,23 @@ const passingChecks = () => [...STAGE_B_EXPECTED_CHECK_ADDRESSES, ...STAGE_B_EXP
 const noChangePlan = (terraform_version = "1.15.7") => ({ format_version: "1.2", terraform_version, planned_values: { root_module: {} }, configuration: { root_module: {} }, prior_state: {}, errored: false, diagnostics: [], resource_changes: [{ address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: ["no-op"] } }], resource_drift: [], output_changes: {}, checks: passingChecks() });
 const outputChange = (name, after) => ({ [name]: { actions: ["update"], before: {}, after, after_unknown: false, after_sensitive: false } });
 const expectedImages = Object.fromEntries(Object.values(bindingReport().images).map((entry) => [entry.terraformVariable.replace(/_image$/, ""), entry.imageReference]));
+
+function currentTaskDefinitionStateFixture() {
+  const output = {};
+  const resources = new Map();
+  for (const [address, family] of Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES)) {
+    const match = /aws_ecs_task_definition\.(candidate|executor)\["([^"]+)"\]/.exec(address);
+    const [, collection, key] = match;
+    const arn = `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${family}:5`;
+    const resource = resources.get(collection) || { mode: "managed", type: "aws_ecs_task_definition", name: collection, instances: [] };
+    resource.instances.push({ index_key: key, attributes: { arn, family, revision: 5, network_mode: "awsvpc", requires_compatibilities: ["FARGATE"], cpu: 1024, memory: 2048, container_definitions: JSON.stringify([{ name: "main", image: "example", essential: true }]), volume: [] } });
+    resources.set(collection, resource);
+    if (collection === "candidate" && ["backend", "worker"].includes(key)) output[key] = arn;
+    if (collection === "candidate" && key === "canary") output["full-rls-application-canary"] = arn;
+    if (collection === "executor") output[key] = arn;
+  }
+  return { ...state, resources: [...resources.values()], outputs: { task_definition_arns: { value: output } } };
+}
 
 test("root-module check discovery covers all protected Terraform files", () => {
   const discovered = collectStageBTerraformCheckAddresses();
@@ -478,6 +497,45 @@ test("wrong, missing, or extra image bindings fail", () => { const wrong = { ...
 test("unexpected output name fails", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: outputChange("unknown", {}) }, bindingReport: bindingReport(), state, outputsSource }).status, "OUTPUT_DRIFT"));
 test("task_definition_arns is reviewed only when empty state proves empty output", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["create"], before: null, after: {}, after_unknown: false, after_sensitive: false } } }, bindingReport: bindingReport(), state, outputsSource }).status, "REVIEWED_OUTPUT_RECONCILIATION"));
 test("unknown task-definition state fails closed", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), output_changes: { task_definition_arns: { actions: ["create"], after: {}, after_unknown: false } } }, bindingReport: bindingReport(), state: { ...state, resources: [{ type: "aws_ecs_task_definition", name: "candidate", instances: [{}] }] }, outputsSource }).status, "MALFORMED_RESULT"));
+test("canonical current task-definition state reconciles to the exact Terraform output mapping", () => {
+  const current = currentTaskDefinitionStateFixture();
+  const result = classifyStageBRefreshResult({ plan: noChangePlan(), bindingReport: bindingReport(), state: current, outputsSource });
+  assert.equal(result.status, "NO_CHANGES");
+  assert.deepEqual(result.taskDefinitionArns, current.outputs.task_definition_arns.value);
+});
+test("current task-definition reconciliation rejects malformed or non-canonical state", () => {
+  const cases = [
+    ["unknown collection", (candidate) => candidate.resources.push({ mode: "managed", type: "aws_ecs_task_definition", name: "fake", instances: [] })],
+    ["wrong account", (candidate) => { candidate.resources[0].instances[0].attributes.arn = candidate.resources[0].instances[0].attributes.arn.replace(STAGE_B.account, "000000000000"); }],
+    ["wrong region", (candidate) => { candidate.resources[0].instances[0].attributes.arn = candidate.resources[0].instances[0].attributes.arn.replace(STAGE_B.region, "us-east-1"); }],
+    ["wrong candidate family", (candidate) => { candidate.resources[0].instances[0].attributes.family = "wrong-family"; }],
+    ["wrong executor family", (candidate) => { candidate.resources[1].instances[0].attributes.family = "wrong-family"; }],
+    ["candidate output mismatch", (candidate) => { candidate.outputs.task_definition_arns.value.backend = candidate.outputs.task_definition_arns.value.worker; }],
+    ["executor output mismatch", (candidate) => { candidate.outputs.task_definition_arns.value[STAGE_B_MODES[0]] = candidate.outputs.task_definition_arns.value[STAGE_B_MODES[1]]; }],
+    ["missing candidate", (candidate) => { candidate.resources = candidate.resources.filter(({ name }) => name !== "candidate"); }],
+    ["missing executor", (candidate) => { candidate.resources = candidate.resources.filter(({ name }) => name !== "executor"); }],
+    ["malformed ARN", (candidate) => { candidate.resources[0].instances[0].attributes.arn = "not-an-arn"; }],
+    ["duplicate ARN", (candidate) => { candidate.resources[0].instances[1].attributes.arn = candidate.resources[0].instances[0].attributes.arn; }],
+    ["duplicate ARN with matching output", (candidate) => { const arn = candidate.resources[0].instances[0].attributes.arn; candidate.resources[0].instances[1].attributes.arn = arn; candidate.outputs.task_definition_arns.value.worker = arn; }],
+    ["extra output", (candidate) => { candidate.outputs.task_definition_arns.value.extra = candidate.outputs.task_definition_arns.value.backend; }],
+    ["arbitrary output key", (candidate) => { candidate.outputs.task_definition_arns.value.arbitrary = candidate.outputs.task_definition_arns.value.backend; }],
+    ["stale revision", (candidate) => { candidate.outputs.task_definition_arns.value.backend = candidate.outputs.task_definition_arns.value.backend.replace(":5", ":4"); }],
+    ["empty output", (candidate) => { candidate.outputs.task_definition_arns.value = {}; }],
+  ];
+  for (const [label, mutate] of cases) {
+    const candidate = structuredClone(currentTaskDefinitionStateFixture());
+    mutate(candidate);
+    assert.equal(classifyStageBRefreshResult({ plan: noChangePlan(), bindingReport: bindingReport(), state: candidate, outputsSource }).status, "MALFORMED_RESULT", label);
+  }
+});
+test("current task-definition reconciliation is order independent and serial independent after binding validation", () => {
+  const current = currentTaskDefinitionStateFixture();
+  current.resources.reverse();
+  current.resources.forEach((resource) => resource.instances.reverse());
+  current.serial = 94;
+  const result = classifyStageBRefreshResult({ plan: noChangePlan(), bindingReport: bindingReport(), state: current, outputsSource });
+  assert.equal(result.status, "NO_CHANGES");
+});
 for (const action of ["update", "create", "delete", "replace", "create-delete"]) test(`resource ${action} fails closed`, () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), resource_changes: [{ address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: [action] } }] }, bindingReport: bindingReport(), state, outputsSource }).status, "RESOURCE_DRIFT"));
 test("failed checks and provider failures remain distinct", () => { assert.equal(classifyStageBRefreshResult({ plan: undefined, terraformExitCode: 1, bindingReport: bindingReport(), state, outputsSource }).status, "FAILED_CHECK"); assert.equal(classifyStageBRefreshResult({ plan: undefined, terraformExitCode: 3, bindingReport: bindingReport(), state, outputsSource }).status, "PROVIDER_OR_BACKEND_FAILURE"); });
 test("human No changes text cannot override structural resource drift", () => assert.equal(classifyStageBRefreshResult({ plan: { ...noChangePlan(), resource_changes: [{ address: "aws_lambda_function.broker", change: { actions: ["update"] } }] }, terraformOutput: "No changes.", bindingReport: bindingReport(), state, outputsSource }).status, "RESOURCE_DRIFT"));

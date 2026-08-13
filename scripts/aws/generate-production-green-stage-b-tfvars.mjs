@@ -173,7 +173,7 @@ function isRootManagedTaskDefinition(resource) {
   return resource.mode === "managed" && (!Object.hasOwn(resource, "module") || resource.module === null);
 }
 
-function validateCurrentTaskDefinitionState(resources) {
+export function validateCurrentTaskDefinitionState(resources) {
   const seen = new Set();
   for (const resource of resources.filter(({ type }) => type === "aws_ecs_task_definition")) {
     if (!isRootManagedTaskDefinition(resource)) throw new Error(`Terraform state task-definition resource is not a root managed resource: ${resource.name}.`);
