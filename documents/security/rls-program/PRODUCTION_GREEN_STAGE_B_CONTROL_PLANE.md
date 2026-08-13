@@ -136,9 +136,11 @@ to contain exactly one `inventory` container, the approved immutable backend dig
 The broker requests `DescribeTaskDefinition` with `TAGS` and validates tags from the AWS
 response's top-level `tags` field; nested mock-only tags are rejected.
 
-The broker polls at most 30 times at 2 seconds, with a 100-second operation deadline and a
-20-second log-retrieval budget. Its Lambda timeout is 180 seconds, leaving a 30-second
-cleanup margin so timeout and `StopTask` handling execute before the platform deadline.
+The broker starts a monotonic request clock at handler entry. It permits at most 100 seconds
+for authorization, claim, launch, polling, and evidence retrieval, followed by cleanup using
+only the remaining bounded 30-second reserve. Thus the total broker request budget is 130
+seconds, including cleanup; cleanup does not extend that total. Its Lambda timeout is 180
+seconds, leaving platform margin after the bounded broker request.
 `RunTask` is fixed to one Fargate task in the reviewed private subnets/security group with
 public IP assignment disabled and no overrides. Any sidecar, extra environment/secret,
 mount, port, capability, privilege, image, command, entrypoint, role, or log target fails
@@ -146,8 +148,8 @@ before launch. The post-deployment governed ECS Exec selector remains a separate
 
 The release-deployer invokes this synchronous broker operation with the explicit finite AWS
 CLI `--cli-read-timeout 150` setting. This provides 20 seconds of response headroom beyond
-the 100-second broker deadline plus the 30-second cleanup margin; an infinite client timeout
-is forbidden. Before `RunTask`, the broker verifies the signed approval, source/image binding,
+the 130-second total broker request budget; an infinite client timeout is forbidden. Before
+`RunTask`, the broker verifies the signed approval, source/image binding,
 and exact task definition, then conditionally claims the replay row. The pre-deployment replay
 key is a deterministic SHA-256 identity of approval ID, release SHA, rotation ID, operation,
 and authorized image; the exact task-definition ARN is also stored in the claimed row. A

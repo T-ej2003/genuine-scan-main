@@ -17,7 +17,11 @@
     "callerReadTimeoutSeconds": 150,
     "operationDeadlineSeconds": 100,
     "cleanupMarginSeconds": 30,
-    "callerTimeoutHeadroomSeconds": 20
+    "totalRequestBudgetSeconds": 130,
+    "callerTimeoutHeadroomSeconds": 20,
+    "deadlineStart": "handler entry",
+    "deadlineClock": "monotonic elapsed time",
+    "cleanupBudgetSemantics": "cleanup consumes only the remaining request budget, capped at 30 seconds; it does not extend the 130-second total"
   },
   "taskOverridesAllowed": false,
   "replayStore": { "required": true, "partitionKey": { "name": "approvalMode", "type": "S" }, "ttlAttribute": "expiresAt", "conditionalWrite": "attribute_not_exists(approvalMode)", "preDeploymentOperationIdentity": ["approvalId", "releaseSha", "rotationId", "operation", "imageDigest", "taskDefinitionArn"], "preDeploymentLogicalKey": "SHA256(canonical JSON of approvalId, releaseSha, rotationId, operation, and imageDigest); taskDefinitionArn is retained in the row and key collisions fail closed", "preDeploymentStates": ["launching", "launched", "succeeded", "launch-uncertain"], "launchFailureRecovery": "known pre-launch failures release the claim; any launch-attempt uncertainty remains claimed with task identity for reviewed reconciliation" },

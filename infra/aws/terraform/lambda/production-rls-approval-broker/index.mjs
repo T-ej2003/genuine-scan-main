@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { performance } from "node:perf_hooks";
 const { assertBrokerApprovalValidationRequest, assertBrokerRequest, hasCompleteStageBTaskMaps, STAGE_B, STAGE_B_MODES, validateStageBApproval } = await import(
   process.env.AWS_LAMBDA_FUNCTION_NAME ? "./stage-b-contract.mjs" : "../../../../../scripts/aws/production-green-stage-b-contract.mjs"
 );
@@ -10,6 +11,7 @@ export const PREDEPLOYMENT_INVENTORY_POLL_INTERVAL_MS = 2_000;
 export const PREDEPLOYMENT_INVENTORY_LOG_RETRIEVAL_BUDGET_MS = 20_000;
 export const PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS = 30_000;
 export const PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS = 100_000;
+export const PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS = PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS + PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS;
 export const PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS = 180;
 export const PREDEPLOYMENT_INVENTORY_REPLAY_MODE = "production-predeployment-rotation-inventory";
 const inventoryTaskArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-predeployment-inventory:[1-9][0-9]*$/;
@@ -178,22 +180,48 @@ function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, sou
   return true;
 }
 
-export function createPreDeploymentInventoryHandler({ config, readApproval, verifySignature, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, runTask, describeTaskDefinition, describeTasks, describeLogStreams, getLogEvents, stopTask, now = () => new Date(), sleep = async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) }) {
+export function createPreDeploymentInventoryHandler({ config, readApproval, verifySignature, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, runTask, describeTaskDefinition, describeTasks, describeLogStreams, getLogEvents, stopTask, now = () => new Date(), monotonicNow = () => performance.now(), sleep = async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) }) {
   validatePreDeploymentInventoryConfiguration(config);
   return async (event, context = {}) => {
+    const requestStartMs = monotonicNow();
+    const lambdaDeadlineMs = typeof context.getRemainingTimeInMillis === "function"
+      ? requestStartMs + Math.max(0, context.getRemainingTimeInMillis())
+      : Number.POSITIVE_INFINITY;
+    const requestDeadlineMs = Math.min(requestStartMs + PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS, lambdaDeadlineMs);
+    const operationDeadlineMs = Math.min(requestStartMs + PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, requestDeadlineMs - PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS);
+    const timeoutError = (label) => new Error(`PREDEPLOYMENT_INVENTORY_TIMEOUT=true (${label}).`);
+    const assertBeforeDeadline = (deadline, label, requiredMs = 0) => {
+      if (monotonicNow() + requiredMs > deadline) throw timeoutError(label);
+    };
+    const runWithinDeadline = async (label, operation, deadline) => {
+      assertBeforeDeadline(deadline, label);
+      const remainingMs = Math.max(0, deadline - monotonicNow());
+      let timer;
+      try {
+        const result = await Promise.race([
+          Promise.resolve().then(operation),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(timeoutError(label)), remainingMs); }),
+        ]);
+        assertBeforeDeadline(deadline, label);
+        return result;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
     if (!event || typeof event !== "object" || Object.keys(event).sort().join(",") !== "approvalId,operation,rotationId,sourceSha,taskDefinitionArn" || event.operation !== PREDEPLOYMENT_INVENTORY_OPERATION || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(event.rotationId || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "") || !inventoryTaskArnPattern.test(event.taskDefinitionArn || "")) throw new Error("Pre-deployment inventory broker request is outside the reviewed contract.");
-    const approval = await validateStageBApproval(await readApproval(config.approvalSecretArn), { ...config.approvalExpected, approvalId: event.approvalId }, { now: now(), verifySignature });
+    const approval = await runWithinDeadline("approval authorization", async () => validateStageBApproval(await readApproval(config.approvalSecretArn), { ...config.approvalExpected, approvalId: event.approvalId }, { now: now(), verifySignature }), operationDeadlineMs);
     if (approval.approval.releaseSha !== event.sourceSha || approval.approval.backendImageDigest !== config.inventoryImageDigest) throw new Error("Pre-deployment inventory request is not bound to the signed release/image.");
-    const definitionResponse = await describeTaskDefinition(event.taskDefinitionArn);
+    const definitionResponse = await runWithinDeadline("task-definition authorization", () => describeTaskDefinition(event.taskDefinitionArn), operationDeadlineMs);
     const definition = definitionResponse?.taskDefinition;
     if (!definition || !exactTags(definitionResponse.tags, inventoryTaskDefinitionTags)) throw new Error("Pre-deployment inventory task definition response is missing the reviewed top-level tags.");
     assertExactInventoryTaskDefinition({ definition, taskDefinitionArn: event.taskDefinitionArn, sourceSha: event.sourceSha, config });
     const operationIdentity = createPreDeploymentOperationIdentity({ approvalId: event.approvalId, releaseSha: event.sourceSha, rotationId: event.rotationId, operation: event.operation, taskDefinitionArn: event.taskDefinitionArn, imageDigest: config.inventoryImageDigest });
     const operationKey = preDeploymentOperationKey(operationIdentity);
     const replay = { ...operationIdentity, operationKey, nonce: approval.approval.nonce, expiresAt: approval.approval.expiresAt };
-    await claimPreDeploymentOperation(replay);
+    await runWithinDeadline("replay claim", () => claimPreDeploymentOperation(replay), operationDeadlineMs);
     const networkConfiguration = { awsvpcConfiguration: { subnets: [...config.inventoryPrivateSubnetIds].sort(), securityGroups: [...config.inventorySecurityGroupIds].sort(), assignPublicIp: "DISABLED" } };
     let launchMayHaveOccurred = false;
+    let launchAttempted = false;
     let uncertaintyRecorded = false;
     let taskArn;
     let cleanupAttempted = false;
@@ -201,73 +229,79 @@ export function createPreDeploymentInventoryHandler({ config, readApproval, veri
       if (typeof stopTask !== "function") throw new Error("Pre-deployment inventory cleanup authority is missing.");
       let cleanupSettled = false;
       let cleanupError;
-      let timer;
       cleanupAttempted = true;
-      const cleanup = Promise.resolve().then(() => stopTask({ cluster: config.clusterArn, task: taskArn, reason: "pre-deployment inventory complete" }))
-        .then(() => { cleanupSettled = true; }, (error) => { cleanupSettled = true; cleanupError = error; });
-      await Promise.race([cleanup, new Promise((resolve) => { timer = setTimeout(resolve, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS); })]);
-      clearTimeout(timer);
+      const cleanupDeadlineMs = Math.min(requestDeadlineMs, monotonicNow() + PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS);
+      try {
+        await runWithinDeadline("cleanup", () => stopTask({ cluster: config.clusterArn, task: taskArn, reason: "pre-deployment inventory complete" }), cleanupDeadlineMs);
+        cleanupSettled = true;
+      } catch (error) {
+        cleanupSettled = true;
+        cleanupError = error;
+      }
       if (!cleanupSettled) throw new Error("Pre-deployment inventory cleanup exceeded its bounded margin.");
       if (cleanupError) throw new Error("Pre-deployment inventory cleanup failed; the launched task remains bound for reconciliation.");
     };
     try {
       let launched;
       try {
+        assertBeforeDeadline(operationDeadlineMs, "RunTask");
+        launchAttempted = true;
         launchMayHaveOccurred = true;
-        launched = await runTask({ cluster: config.clusterArn, taskDefinition: event.taskDefinitionArn, launchType: "FARGATE", count: 1, networkConfiguration, tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: event.sourceSha }, { key: "RotationId", value: event.rotationId }] });
-      } catch {
-        await markPreDeploymentLaunchUncertain({ ...replay });
+        launched = await runWithinDeadline("RunTask", () => runTask({ cluster: config.clusterArn, taskDefinition: event.taskDefinitionArn, launchType: "FARGATE", count: 1, networkConfiguration, tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: event.sourceSha }, { key: "RotationId", value: event.rotationId }] }), operationDeadlineMs);
+      } catch (error) {
+        if (!launchAttempted) {
+          await runWithinDeadline("pre-launch claim release", () => releasePreDeploymentOperation(replay), requestDeadlineMs).catch(() => {});
+          launchMayHaveOccurred = false;
+          throw error;
+        }
+        await runWithinDeadline("launch uncertainty record", () => markPreDeploymentLaunchUncertain({ ...replay }), requestDeadlineMs).catch(() => {});
         uncertaintyRecorded = true;
         throw new Error("Pre-deployment inventory launch outcome is uncertain; the operation remains blocked pending reviewed ECS reconciliation.");
       }
       if ((launched.failures || []).length || launched.tasks?.length !== 1 || !launched.tasks[0]?.taskArn) {
         if (launched.tasks?.length) {
-          await markPreDeploymentLaunchUncertain({ ...replay, taskArns: launched.tasks.map(({ taskArn: arn }) => arn).filter(Boolean) });
+          await runWithinDeadline("launch uncertainty record", () => markPreDeploymentLaunchUncertain({ ...replay, taskArns: launched.tasks.map(({ taskArn: arn }) => arn).filter(Boolean) }), requestDeadlineMs);
           uncertaintyRecorded = true;
         } else {
-          await releasePreDeploymentOperation(replay);
+          await runWithinDeadline("pre-launch claim release", () => releasePreDeploymentOperation(replay), requestDeadlineMs);
           launchMayHaveOccurred = false;
         }
         throw new Error("Pre-deployment inventory task did not start exactly once.");
       }
       taskArn = launched.tasks[0].taskArn;
-      await recordPreDeploymentTaskStarted({ ...replay, taskArn });
+      await runWithinDeadline("task-start recording", () => recordPreDeploymentTaskStarted({ ...replay, taskArn }), requestDeadlineMs);
       let task;
-      const nowMs = () => now().getTime();
-      const lambdaRemainingMs = typeof context.getRemainingTimeInMillis === "function" ? Math.max(0, context.getRemainingTimeInMillis() - PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS) : Number.POSITIVE_INFINITY;
-      const deadline = Math.min(nowMs() + PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, nowMs() + lambdaRemainingMs);
-      const assertBeforeDeadline = (label, requiredMs = 0) => { if (nowMs() + requiredMs > deadline) throw new Error(`PREDEPLOYMENT_INVENTORY_TIMEOUT=true (${label}).`); };
       for (let attempt = 0; attempt < PREDEPLOYMENT_INVENTORY_POLL_ATTEMPTS; attempt += 1) {
-        assertBeforeDeadline("task polling");
-        const described = await describeTasks({ cluster: config.clusterArn, tasks: [taskArn], include: ["TAGS"] });
+        assertBeforeDeadline(operationDeadlineMs, "task polling");
+        const described = await runWithinDeadline("task polling", () => describeTasks({ cluster: config.clusterArn, tasks: [taskArn], include: ["TAGS"] }), operationDeadlineMs);
         task = described.tasks?.[0];
         if (!task || task.taskArn !== taskArn || task.taskDefinitionArn !== event.taskDefinitionArn || !exactTags(task.tags, { MSCQRPreDeploymentInventory: "rotation-inventory", ReleaseSha: event.sourceSha, RotationId: event.rotationId })) throw new Error("Pre-deployment inventory task identity or tags changed.");
         if (task.lastStatus === "STOPPED") break;
-        assertBeforeDeadline("task polling wait", PREDEPLOYMENT_INVENTORY_POLL_INTERVAL_MS);
-        await sleep(PREDEPLOYMENT_INVENTORY_POLL_INTERVAL_MS);
+        assertBeforeDeadline(operationDeadlineMs, "task polling wait", PREDEPLOYMENT_INVENTORY_POLL_INTERVAL_MS);
+        await runWithinDeadline("task polling wait", () => sleep(PREDEPLOYMENT_INVENTORY_POLL_INTERVAL_MS), operationDeadlineMs);
       }
       const exitCode = task?.containers?.find(({ name }) => name === "inventory")?.exitCode;
       if (task?.lastStatus !== "STOPPED") throw new Error("PREDEPLOYMENT_INVENTORY_TIMEOUT=true (task did not stop within the broker deadline).");
       if (exitCode !== 0) throw new Error("Pre-deployment inventory task did not exit successfully.");
-      assertBeforeDeadline("log retrieval", PREDEPLOYMENT_INVENTORY_LOG_RETRIEVAL_BUDGET_MS);
-      const streams = await describeLogStreams({ logGroupName: config.inventoryLogGroupName, logStreamNamePrefix: "predeployment-inventory/inventory/" });
+      assertBeforeDeadline(operationDeadlineMs, "log retrieval", PREDEPLOYMENT_INVENTORY_LOG_RETRIEVAL_BUDGET_MS);
+      const streams = await runWithinDeadline("log stream discovery", () => describeLogStreams({ logGroupName: config.inventoryLogGroupName, logStreamNamePrefix: "predeployment-inventory/inventory/" }), operationDeadlineMs);
       const taskId = taskArn.split("/").at(-1);
       const matchingStreams = (streams.logStreams || []).filter(({ logStreamName }) => logStreamName?.endsWith(`/${taskId}`));
       if (matchingStreams.length !== 1) throw new Error("Pre-deployment inventory result stream is missing or ambiguous.");
       const stream = matchingStreams[0];
-      assertBeforeDeadline("inventory result retrieval");
-      const logs = await getLogEvents({ logGroupName: config.inventoryLogGroupName, logStreamName: stream.logStreamName, startFromHead: true });
+      assertBeforeDeadline(operationDeadlineMs, "inventory result retrieval");
+      const logs = await runWithinDeadline("inventory result retrieval", () => getLogEvents({ logGroupName: config.inventoryLogGroupName, logStreamName: stream.logStreamName, startFromHead: true }), operationDeadlineMs);
       if (!Array.isArray(logs.events) || logs.events.length > 100) throw new Error("Pre-deployment inventory result is oversized.");
       const lines = (logs.events || []).map(({ message }) => String(message || "")).filter((line) => line.trim().startsWith("{"));
       if (lines.length !== 1 || Buffer.byteLength(lines[0], "utf8") > 128 * 1024) throw new Error("Pre-deployment inventory result is not exactly one bounded structured record.");
       const inventory = assertPreDeploymentInventoryResult(JSON.parse(lines[0]));
       await stopTaskBounded();
-      await recordPreDeploymentCompleted({ ...replay, taskArn });
+      await runWithinDeadline("completion recording", () => recordPreDeploymentCompleted({ ...replay, taskArn }), requestDeadlineMs);
       return { status: "completed", operation: PREDEPLOYMENT_INVENTORY_OPERATION, taskArn, taskDefinitionArn: event.taskDefinitionArn, sourceSha: event.sourceSha, rotationId: event.rotationId, inventory };
     } catch (error) {
       if (taskArn && !cleanupAttempted) await stopTaskBounded().catch(() => {});
       if (launchMayHaveOccurred && !uncertaintyRecorded) {
-        await markPreDeploymentLaunchUncertain({ ...replay, ...(taskArn ? { taskArn } : {}) }).catch(() => {});
+        await runWithinDeadline("launch uncertainty record", () => markPreDeploymentLaunchUncertain({ ...replay, ...(taskArn ? { taskArn } : {}) }), requestDeadlineMs).catch(() => {});
       }
       throw error;
     }

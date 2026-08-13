@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { createProductionPreDeploymentInventoryAdapter, PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS, PREDEPLOYMENT_BROKER_CALLER_TIMEOUT_HEADROOM_SECONDS } from "../aws/production-predeployment-inventory-adapter.mjs";
-import { assertPreDeploymentInventoryResult, createPreDeploymentInventoryHandler, createPreDeploymentOperationIdentity, preDeploymentOperationKey, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
+import { assertPreDeploymentInventoryResult, createPreDeploymentInventoryHandler, createPreDeploymentOperationIdentity, preDeploymentOperationKey, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS, PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
 import { buildPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAG } from "../aws/production-predeployment-inventory-task.mjs";
 import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
@@ -63,18 +63,18 @@ const brokerApproval = {
   taskDefinitionTemplateHashes: Object.fromEntries(STAGE_B_TASK_TEMPLATE_KEYS.map((key) => [key, "f".repeat(64)])),
 };
 const brokerDefinition = () => ({ ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn: brokerTaskDefinitionArn, status: "ACTIVE" });
-function makeBrokerHandler({ definition = brokerDefinition(), tags = brokerTags, describeTasks = async () => ({ tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: "STOPPED", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: "rotation-1" }], containers: [{ name: "inventory", exitCode: 0 }] }] }), runTask = async () => ({ failures: [], tasks: [{ taskArn: brokerTaskArn }] }), verifySignature = async () => true, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, stopTask, now = () => new Date("2026-07-29T12:00:00.000Z"), sleep = async () => {} } = {}) {
+function makeBrokerHandler({ definition = brokerDefinition(), tags = brokerTags, readApproval = async () => brokerApproval, describeTaskDefinition = async () => ({ taskDefinition: definition, tags }), describeTasks = async () => ({ tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: "STOPPED", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: "rotation-1" }], containers: [{ name: "inventory", exitCode: 0 }] }] }), runTask = async () => ({ failures: [], tasks: [{ taskArn: brokerTaskArn }] }), verifySignature = async () => true, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, stopTask, now = () => new Date("2026-07-29T12:00:00.000Z"), monotonicNow = () => 0, sleep = async () => {} } = {}) {
   const calls = [];
   const cleanup = stopTask || (async (request) => { calls.push(["stopTask", request]); });
   const handler = createPreDeploymentInventoryHandler({
-    config: brokerConfig, readApproval: async () => brokerApproval, verifySignature,
+    config: brokerConfig, readApproval, verifySignature,
     claimPreDeploymentOperation, releasePreDeploymentOperation, markPreDeploymentLaunchUncertain, recordPreDeploymentTaskStarted, recordPreDeploymentCompleted,
-    describeTaskDefinition: async () => ({ taskDefinition: definition, tags }),
+    describeTaskDefinition,
     runTask: async (request) => { calls.push(["runTask", request]); return runTask(request); },
     describeTasks: async (request) => { calls.push(["describeTasks", request]); return describeTasks(request); },
     describeLogStreams: async (request) => { calls.push(["describeLogStreams", request]); return { logStreams: [{ logStreamName: "predeployment-inventory/inventory/inventory-19" }] }; },
     getLogEvents: async (request) => { calls.push(["getLogEvents", request]); return { events: [{ message: JSON.stringify(inventory) }] }; },
-    stopTask: cleanup, now, sleep,
+    stopTask: cleanup, now, monotonicNow, sleep,
   });
   return { handler, calls };
 }
@@ -256,6 +256,56 @@ test("predeployment replay claim is after authorization and prevents concurrent 
   assert.equal(calls.filter(([kind]) => kind === "runTask").length, 1);
 });
 
+test("predeployment deadline starts at request entry and blocks slow authorization, inspection, and claims", async () => {
+  let clock = 0;
+  let launches = 0;
+  const event = { approvalId, operation: "production-predeployment-rotation-inventory", rotationId: "rotation-1", sourceSha, taskDefinitionArn: brokerTaskDefinitionArn };
+  const slowAuthorization = makeBrokerHandler({
+    monotonicNow: () => clock,
+    verifySignature: async () => { clock = PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS + 1; return true; },
+    runTask: async () => { launches += 1; return { failures: [], tasks: [{ taskArn: brokerTaskArn }] }; },
+  });
+  await assert.rejects(() => slowAuthorization.handler(event), /PREDEPLOYMENT_INVENTORY_TIMEOUT=true/);
+  assert.equal(slowAuthorization.calls.filter(([kind]) => kind === "runTask").length, 0);
+
+  clock = 0;
+  const slowInspection = makeBrokerHandler({
+    monotonicNow: () => clock,
+    describeTaskDefinition: async () => { clock = PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS + 1; return { taskDefinition: brokerDefinition(), tags: brokerTags }; },
+    runTask: async () => { launches += 1; return { failures: [], tasks: [{ taskArn: brokerTaskArn }] }; },
+  });
+  await assert.rejects(() => slowInspection.handler(event), /PREDEPLOYMENT_INVENTORY_TIMEOUT=true/);
+  assert.equal(slowInspection.calls.filter(([kind]) => kind === "runTask").length, 0);
+
+  clock = 0;
+  const slowClaim = makeBrokerHandler({
+    monotonicNow: () => clock,
+    claimPreDeploymentOperation: async () => { clock = PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS + 1; },
+    runTask: async () => { launches += 1; return { failures: [], tasks: [{ taskArn: brokerTaskArn }] }; },
+  });
+  await assert.rejects(() => slowClaim.handler(event), /PREDEPLOYMENT_INVENTORY_TIMEOUT=true/);
+  assert.equal(slowClaim.calls.filter(([kind]) => kind === "runTask").length, 0);
+  assert.equal(launches, 0);
+});
+
+test("maximum bounded execution leaves caller response headroom and cleanup inside the total budget", async () => {
+  let clock = 0;
+  let polls = 0;
+  const handler = makeBrokerHandler({
+    monotonicNow: () => clock,
+    describeTasks: async () => {
+      polls += 1;
+      return { tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: polls === 2 ? "STOPPED" : "RUNNING", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: "rotation-1" }], containers: [{ name: "inventory", exitCode: polls === 2 ? 0 : undefined }] }] };
+    },
+    sleep: async () => { clock += 79_000; },
+    stopTask: async () => { clock += PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS; },
+  });
+  await assert.doesNotReject(() => handler.handler({ approvalId, operation: "production-predeployment-rotation-inventory", rotationId: "rotation-1", sourceSha, taskDefinitionArn: brokerTaskDefinitionArn }));
+  assert.equal(handler.calls.filter(([kind]) => kind === "runTask").length, 1);
+  assert.ok(clock < 150_000);
+  assert.equal(PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS + PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS);
+});
+
 test("known pre-launch failure releases only the unlaunched claim", async () => {
   let released = 0;
   let uncertain = 0;
@@ -419,6 +469,9 @@ test("broker source policy contains only the bounded inventory capability", () =
   assert.match(readFileSync("infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs", "utf8"), /DescribeTaskDefinitionCommand\(\{ taskDefinition, include: \["TAGS"\] \}\)/);
   assert.match(readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8"), /timeout\s+=\s+180/);
   assert.ok(PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS * 1000 > PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS + PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS);
+  assert.equal(PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS, 150);
+  assert.ok(PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS > (PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS + PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS) / 1000);
+  assert.notEqual(PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS, 0);
 });
 
 test("broker SDK clients are fixed to the reviewed production region and endpoint", () => {
