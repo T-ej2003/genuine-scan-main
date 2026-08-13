@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import { createHandler } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
-import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalStageBApproval, validateStageBApproval } from "../aws/production-green-stage-b-contract.mjs";
+import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalStageBApproval, stageBApprovalIdForReleaseSha, validateStageBApproval } from "../aws/production-green-stage-b-contract.mjs";
 import { approvedNetworkConfiguration, assertFixedTaskDefinition, renderStageBTaskDefinition, stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
 import { validateProductionRlsApproval } from "../../backend/scripts/production-rls-approval.mjs";
 
@@ -14,12 +14,12 @@ const images = { backendImageDigest: image("mscqr-backend", "1"), workerImageDig
 const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
 const sign = (approval) => crypto.sign("sha256", Buffer.from(canonicalStageBApproval(approval)), { key: privateKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }).toString("base64");
 const artifact = (overrides = {}) => {
-  const value = { schemaVersion: 2, environment: "production", account: STAGE_B.account, region: STAGE_B.region, releaseSha, ...images, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, deploymentId: "phase2", greenDatabaseIdentifier: STAGE_B.greenDatabaseIdentifier, greenDatabaseName: "mscqr_production_rls_green_phase2", administratorIdentity: "mscqr_prod_admin", databaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, taskDefinitionArns: taskDefinitions, taskDefinitionTemplateHashes: stageBTemplateHashes(), brokerAliasArn: STAGE_B.brokerAliasArn, brokerVersion: "1", checkerIdentity: "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/checker", deployerIdentity: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/deployer", executorIdentity: STAGE_B.executorRoleArn, approvalId: "APR-STAGE-B-0001", ticketId: "CHG-STAGE-B-0001", issuedAt: "2026-07-29T11:55:00.000Z", expiresAt: "2026-07-29T13:00:00.000Z", nonce: "12345678-1234-1234-1234-123456789abc", signatureAlgorithm: STAGE_B_APPROVAL_ALGORITHM, ...overrides };
+  const value = { schemaVersion: 2, environment: "production", account: STAGE_B.account, region: STAGE_B.region, releaseSha, ...images, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, deploymentId: "phase2", greenDatabaseIdentifier: STAGE_B.greenDatabaseIdentifier, greenDatabaseName: "mscqr_production_rls_green_phase2", administratorIdentity: "mscqr_prod_admin", databaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, taskDefinitionArns: taskDefinitions, taskDefinitionTemplateHashes: stageBTemplateHashes(), brokerAliasArn: STAGE_B.brokerAliasArn, brokerVersion: "1", checkerIdentity: "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/checker", deployerIdentity: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/deployer", executorIdentity: STAGE_B.executorRoleArn, approvalId: stageBApprovalIdForReleaseSha(releaseSha), ticketId: "CHG-STAGE-B-0001", issuedAt: "2026-07-29T11:55:00.000Z", expiresAt: "2026-07-29T13:00:00.000Z", nonce: "12345678-1234-1234-1234-123456789abc", signatureAlgorithm: STAGE_B_APPROVAL_ALGORITHM, ...overrides };
   return { ...value, signatureBase64: sign(value) };
 };
 const verifySignature = async ({ message, signature }) => crypto.verify("sha256", message, { key: publicKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, signature);
 const taskDefinitions = Object.fromEntries(["full-rls-capability-preflight", "full-rls-admin-bootstrap", "full-rls-role-provision", "full-rls-role-verify", "full-rls-admin-ownership", "full-rls-runtime-policy", "full-rls-verification", "full-rls-application-canary", "full-rls-rollback"].map((mode) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-${mode.replace("full-rls-", "")}:1`]));
-const expected = { releaseSha, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, deploymentId: "phase2", approvalId: "APR-STAGE-B-0001", ticketId: "CHG-STAGE-B-0001", images, taskDefinitionArns: taskDefinitions };
+const expected = { releaseSha, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, deploymentId: "phase2", approvalId: stageBApprovalIdForReleaseSha(releaseSha), ticketId: "CHG-STAGE-B-0001", images, taskDefinitionArns: taskDefinitions };
 const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: ["subnet-068d949017bd2ce45", "subnet-07e0a76e3a5241138"], taskDefinitionArns: taskDefinitions, templateHashes: stageBTemplateHashes(), approvalExpected: expected, images };
 
 test("Stage B approval rejects wrong signer, bindings, expiry, and mutable image input", async () => {
@@ -105,7 +105,7 @@ test("broker rejects replay, task substitution, image substitution, and every ca
     claimApproval: async ({ approvalId, mode }) => { const key = `${approvalId}:${mode}`; if (claimed.has(key)) throw new Error("approval replay"); claimed.add(key); },
     runTask: async (value) => { request = value; return { failures: [], tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fixed" }] }; },
   });
-  const event = { approvalId: "APR-STAGE-B-0001", mode: "full-rls-verification" };
+  const event = { approvalId: stageBApprovalIdForReleaseSha(releaseSha), mode: "full-rls-verification" };
   await handler(event); assert.equal("overrides" in request, false); assert.equal(request.taskDefinition, taskDefinitions[event.mode]);
   await assert.rejects(() => handler(event), /replay/);
   for (const key of ["command", "environment", "role", "networkConfiguration", "taskDefinition", "image"]) {
@@ -124,12 +124,12 @@ test("broker releases only an explicit ECS rejection and blocks uncertain launch
     markLaunchUncertain: async () => events.push("uncertain"),
     runTask: async () => ({ failures: [{ reason: "capacity" }], tasks: [] }),
   });
-  await assert.rejects(() => handler({ approvalId: "APR-STAGE-B-0001", mode: "full-rls-verification" }), /claim was released/);
+  await assert.rejects(() => handler({ approvalId: stageBApprovalIdForReleaseSha(releaseSha), mode: "full-rls-verification" }), /claim was released/);
   assert.deepEqual(events, ["claim", "release"]);
   const uncertain = createHandler({ config, readApproval: async () => JSON.stringify(artifact()), verifySignature, now: () => now,
     claimApproval: async () => events.push("claim-uncertain"), markLaunchUncertain: async () => events.push("uncertain"), runTask: async () => { throw new Error("timeout"); },
   });
-  await assert.rejects(() => uncertain({ approvalId: "APR-STAGE-B-0001", mode: "full-rls-verification" }), /outcome is uncertain/);
+  await assert.rejects(() => uncertain({ approvalId: stageBApprovalIdForReleaseSha(releaseSha), mode: "full-rls-verification" }), /outcome is uncertain/);
   assert.deepEqual(events, ["claim", "release", "claim-uncertain", "uncertain"]);
 });
 

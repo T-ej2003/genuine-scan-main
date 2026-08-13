@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import {
   STAGE_B,
   STAGE_B_APPROVAL_ALGORITHM,
-  STAGE_B_APPROVAL_ID,
+  stageBApprovalIdForReleaseSha,
   validateStageBApproval,
 } from "./production-green-stage-b-contract.mjs";
 
@@ -32,9 +32,9 @@ export async function prepareStageBApprovalPublication({ approvalBytes, expected
   try { approval = JSON.parse(approvalBytes.toString("utf8")); } catch { throw new Error("Approval artifact is not valid JSON."); }
   const sourceSha = assertSourceSha(expectedSourceSha);
   if (!CHECKER_CALLER.test(callerArn) || approval.checkerIdentity !== callerArn) throw new Error("Only the exact independent checker session may publish the approval.");
-  if (approval.approvalId !== STAGE_B_APPROVAL_ID || approval.releaseSha !== sourceSha) throw new Error("Approval identity is not bound to the current release.");
+  if (approval.approvalId !== stageBApprovalIdForReleaseSha(sourceSha) || approval.releaseSha !== sourceSha) throw new Error("Approval identity is not bound to the current release.");
   if (!verifySignature) throw new Error("Approval signature verifier is required.");
-  const validated = await validateStageBApproval(approval, { releaseSha: sourceSha, approvalId: STAGE_B_APPROVAL_ID }, { now, verifySignature });
+  const validated = await validateStageBApproval(approval, { releaseSha: sourceSha, approvalId: stageBApprovalIdForReleaseSha(sourceSha) }, { now, verifySignature });
   return {
     approval,
     approvalBytes,

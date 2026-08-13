@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { STAGE_B, STAGE_B_APPROVAL_ID, STAGE_B_APPROVAL_PUBLICATION_VALIDATION_OPERATION } from "./production-green-stage-b-contract.mjs";
+import { STAGE_B, STAGE_B_APPROVAL_PUBLICATION_VALIDATION_OPERATION, stageBApprovalIdForReleaseSha } from "./production-green-stage-b-contract.mjs";
 
 const RELEASE_CALLER = new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-release-deployer/[A-Za-z0-9+=,.@_-]{2,64}$`);
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -25,7 +25,7 @@ const privateFiles = (files, callback) => {
 export function buildApprovalPublicationValidationRequest({ approvalBytes, expectedSourceSha = sourceSha() }) {
   let approval;
   try { approval = JSON.parse(approvalBytes.toString("utf8")); } catch { throw new Error("Approval artifact is not valid JSON."); }
-  if (approval.approvalId !== STAGE_B_APPROVAL_ID || approval.releaseSha !== expectedSourceSha) throw new Error("Local approval is not bound to the current release.");
+  if (approval.approvalId !== stageBApprovalIdForReleaseSha(expectedSourceSha) || approval.releaseSha !== expectedSourceSha) throw new Error("Local approval is not bound to the current release.");
   return { approvalId: approval.approvalId, operation: STAGE_B_APPROVAL_PUBLICATION_VALIDATION_OPERATION, sourceSha: expectedSourceSha, approvalSha256: sha256(approvalBytes) };
 }
 

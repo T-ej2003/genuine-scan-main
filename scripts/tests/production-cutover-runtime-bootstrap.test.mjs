@@ -11,6 +11,7 @@ import { parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsTo
 import { assertUniqueSecretBindingNames, buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
+import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
@@ -94,7 +95,7 @@ function fullInput(directory, repositoryRoot) {
     stageBTfvarsBindingReportSha256: evidence.stageBTfvarsBindingReportSha256,
     stageBTerraformDataDir: evidence.stageBTerraformDataDir,
     currentTaskDefinition: taskDefinition(),
-    inventoryApprovalId: "APR-STAGE-B-0001",
+    inventoryApprovalId: stageBApprovalIdForReleaseSha(sourceSha),
     onboardingPaths: paths,
     constructAdapters: ({ config, sourceSha: actualSha, rotationId }) => createProductionCutoverAdapters({ config, sourceSha: actualSha, rotationId }),
     imageAuthorizationValidation: { now: evidence.imageAuthorizationFixture.now, verifyImageEvidence: evidence.imageAuthorizationFixture.verifyImageEvidence },

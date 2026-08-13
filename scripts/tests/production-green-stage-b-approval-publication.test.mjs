@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 import { createHandler } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
-import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_APPROVAL_ID, canonicalStageBApproval } from "../aws/production-green-stage-b-contract.mjs";
+import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalStageBApproval, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
 import { approvalPublicationClientRequestToken, prepareStageBApprovalPublication, publishStageBApproval } from "../aws/publish-production-green-stage-b-approval.mjs";
 import { buildApprovalPublicationValidationRequest, validateApprovalPublicationProof } from "../aws/check-production-green-stage-b-approval-publication.mjs";
@@ -21,7 +21,7 @@ const approval = (overrides = {}) => ({
   databaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, executorSecurityGroupId: STAGE_B.executorSecurityGroupId,
   backendImageDigest: image("mscqr-backend", "1"), workerImageDigest: image("mscqr-worker", "2"), executorImageDigest: image("mscqr-backend", "3"), canaryImageDigest: image("mscqr-backend", "4"),
   taskDefinitionArns, taskDefinitionTemplateHashes: stageBTemplateHashes(), brokerAliasArn: STAGE_B.brokerAliasArn, brokerVersion: "1",
-  checkerIdentity: checker, deployerIdentity: release, executorIdentity: STAGE_B.executorRoleArn, approvalId: STAGE_B_APPROVAL_ID, ticketId: "CHG-STAGE-B-0001",
+  checkerIdentity: checker, deployerIdentity: release, executorIdentity: STAGE_B.executorRoleArn, approvalId: stageBApprovalIdForReleaseSha(sourceSha), ticketId: "CHG-STAGE-B-0001",
   issuedAt: "2026-07-30T11:55:00.000Z", expiresAt: "2026-07-30T13:00:00.000Z", nonce: "12345678-1234-1234-1234-123456789abc", signatureAlgorithm: STAGE_B_APPROVAL_ALGORITHM,
   ...overrides,
 });
@@ -32,7 +32,7 @@ const verifySignature = async ({ message, signature }) => crypto.verify("sha256"
 
 test("publisher validates before write, targets only the canonical secret, and publishes exact bytes", async () => {
   const bytes = signedBytes(); let writes = 0; let request;
-  const result = await publishStageBApproval({ approvalPath: "/private/tmp/approval.json", expectedSourceSha: sourceSha, callerArn: checker, now, readFile: () => bytes, verifySignature, assertSource: () => {}, putSecretValue: async (value) => { writes += 1; request = value; return { ARN: STAGE_B.approvalSecretArn, VersionId: approvalPublicationClientRequestToken({ approvalId: STAGE_B_APPROVAL_ID, releaseSha: sourceSha }), VersionStages: ["AWSCURRENT"] }; } });
+  const result = await publishStageBApproval({ approvalPath: "/private/tmp/approval.json", expectedSourceSha: sourceSha, callerArn: checker, now, readFile: () => bytes, verifySignature, assertSource: () => {}, putSecretValue: async (value) => { writes += 1; request = value; return { ARN: STAGE_B.approvalSecretArn, VersionId: approvalPublicationClientRequestToken({ approvalId: stageBApprovalIdForReleaseSha(sourceSha), releaseSha: sourceSha }), VersionStages: ["AWSCURRENT"] }; } });
   assert.equal(writes, 1); assert.equal(request.SecretId, STAGE_B.approvalSecretArn); assert.equal(request.SecretString, bytes.toString("utf8")); assert.equal(result.status, "published");
 });
 
@@ -51,10 +51,27 @@ test("publisher rejects malformed, unsigned, expired, wrong-source, and wrong-ca
 });
 
 test("deterministic client token rejects mutated logical approval identity and preserves safe retry semantics", () => {
-  const first = approvalPublicationClientRequestToken({ approvalId: STAGE_B_APPROVAL_ID, releaseSha: sourceSha });
-  const retry = approvalPublicationClientRequestToken({ approvalId: STAGE_B_APPROVAL_ID, releaseSha: sourceSha });
-  const changed = approvalPublicationClientRequestToken({ approvalId: STAGE_B_APPROVAL_ID, releaseSha: "b".repeat(40) });
+  const first = approvalPublicationClientRequestToken({ approvalId: stageBApprovalIdForReleaseSha(sourceSha), releaseSha: sourceSha });
+  const retry = approvalPublicationClientRequestToken({ approvalId: stageBApprovalIdForReleaseSha(sourceSha), releaseSha: sourceSha });
+  const changed = approvalPublicationClientRequestToken({ approvalId: stageBApprovalIdForReleaseSha("b".repeat(40)), releaseSha: "b".repeat(40) });
   assert.equal(first, retry); assert.notEqual(first, changed); assert.match(first, /^[a-f0-9]{64}$/);
+});
+
+test("release-unique approval IDs prevent cross-release same-mode collisions while preserving replay protection", async () => {
+  const releaseA = "a".repeat(40); const releaseB = "b".repeat(40); const claimed = new Set();
+  const run = async (releaseSha, mode) => {
+    const value = approval({ releaseSha, approvalId: stageBApprovalIdForReleaseSha(releaseSha) });
+    const raw = JSON.stringify({ ...value, signatureBase64: sign(value) });
+    const expected = { releaseSha, sourceContractSha256: value.sourceContractSha256, migrationSetDigest: value.migrationSetDigest, packageChecksumSha256: value.packageChecksumSha256, deploymentId: value.deploymentId, approvalId: value.approvalId, ticketId: value.ticketId, images: { backendImageDigest: value.backendImageDigest, workerImageDigest: value.workerImageDigest, executorImageDigest: value.executorImageDigest, canaryImageDigest: value.canaryImageDigest }, taskDefinitionArns };
+    const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: STAGE_B.privateSubnetIds, taskDefinitionArns, templateHashes: stageBTemplateHashes(), approvalExpected: expected, images: expected.images };
+    return createHandler({ config, readApproval: async () => raw, verifySignature, claimApproval: async ({ approvalId, mode: requestedMode }) => { const key = `${approvalId}#${requestedMode}`; if (claimed.has(key)) throw new Error("approval replay"); claimed.add(key); }, runTask: async () => ({ failures: [], tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fixed" }] }), now: () => now })({ approvalId: value.approvalId, mode });
+  };
+  await run(releaseA, "full-rls-verification");
+  await run(releaseB, "full-rls-verification");
+  await run(releaseA, "full-rls-admin-bootstrap");
+  await assert.rejects(() => run(releaseA, "full-rls-verification"), /replay/);
+  assert.notEqual(stageBApprovalIdForReleaseSha(releaseA), stageBApprovalIdForReleaseSha(releaseB));
+  await assert.rejects(() => prepareStageBApprovalPublication({ approvalBytes: Buffer.from(JSON.stringify(approval({ approvalId: "APR-STAGE-B-0001" }))), expectedSourceSha: releaseA, callerArn: checker, now, verifySignature }), /identity/);
 });
 
 test("broker validation proves AWSCURRENT without claiming or launching work", async () => {

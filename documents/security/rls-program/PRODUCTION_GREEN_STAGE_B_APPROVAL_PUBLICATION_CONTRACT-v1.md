@@ -25,9 +25,11 @@ The publisher loads the exact signed approval file bytes, validates the
 schema-v2 contract and KMS signature, and submits those same UTF-8 bytes as
 `SecretString`. It never parses and reserializes the payload for publication.
 
-The artifact must have approval ID `APR-STAGE-B-0001`, its `releaseSha` must
-equal the clean checkout `HEAD`, and its `checkerIdentity` must equal the
-current exact assumed Role-B caller. The signature, account, region, expiry,
+The artifact must have approval ID `APR-STAGE-B-<releaseSha>`, where the
+suffix is the complete lowercase 40-character release SHA. This ID is
+deterministically derived from `releaseSha` and is not caller-selected. Its
+`releaseSha` must equal the clean checkout `HEAD`, and its `checkerIdentity`
+must equal the current exact assumed Role-B caller. The signature, account, region, expiry,
 not-before, images, task maps, broker identity, and all other schema-v2
 bindings are validated before the write.
 
@@ -45,11 +47,14 @@ source release. The request omits `VersionStages`. Secrets Manager therefore
 assigns `AWSCURRENT` to the new version and moves the previous current version
 to `AWSPREVIOUS`.
 
+The broker replay key remains `approvalId#mode`; because the approval ID
+contains the complete release SHA, the same mode is independent across
+releases while duplicate execution within one release remains blocked.
 Retrying the same approval ID/source with identical bytes is idempotent.
 Reusing that identity with different bytes fails because Secrets Manager does
-not permit changing an existing version. A different source SHA or approval ID
-must be a separately validated approval and receives a different publication
-identity. Malformed, unsigned, expired, future-dated, wrong-source, or
+not permit changing an existing version. A different source SHA necessarily
+produces a different approval ID and publication identity. Malformed, unsigned,
+expired, future-dated, wrong-source, or
 wrong-caller artifacts fail before `PutSecretValue`.
 
 The publisher reports only the secret ARN, version ID/stages, approval ID,

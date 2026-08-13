@@ -5,9 +5,10 @@ import { createProductionPreDeploymentInventoryAdapter } from "../aws/production
 import { assertPreDeploymentInventoryResult, createPreDeploymentInventoryHandler, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
 import { buildPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAG } from "../aws/production-predeployment-inventory-task.mjs";
 import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
-import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS } from "../aws/production-green-stage-b-contract.mjs";
+import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "a".repeat(40);
+const approvalId = stageBApprovalIdForReleaseSha(sourceSha);
 const image = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"b".repeat(64)}`;
 const inventory = Object.fromEntries(ROTATION_INVENTORY_CATEGORIES.map((name) => [name,
   ["printerTestQrArtifacts", "legacyImmutableAuditArtifacts"].includes(name) ? { status: "NOT_APPLICABLE", reason: "not persisted" }
@@ -21,7 +22,7 @@ const inventory = Object.fromEntries(ROTATION_INVENTORY_CATEGORIES.map((name) =>
                   : { count: 0 }]));
 
 const config = {
-  inventoryApprovalId: "APR-STAGE-B-0001",
+  inventoryApprovalId: stageBApprovalIdForReleaseSha(sourceSha),
   rotationInventoryRlsRole: "mscqr_prod_rls_read",
   inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend",
   inventoryPrivateSubnetIds: ["subnet-068d949017bd2ce45", "subnet-07e0a76e3a5241138"],
@@ -46,7 +47,7 @@ const brokerConfig = {
   inventorySecurityGroupIds: config.inventorySecurityGroupIds,
   inventoryAssignPublicIp: "DISABLED",
   inventoryLogGroupName: config.inventoryLogGroupName,
-  approvalExpected: { releaseSha: sourceSha, approvalId: "APR-STAGE-B-0001" },
+  approvalExpected: { releaseSha: sourceSha, approvalId: stageBApprovalIdForReleaseSha(sourceSha) },
 };
 const brokerApproval = {
   schemaVersion: 2, environment: "production", account: STAGE_B.account, region: STAGE_B.region, releaseSha: sourceSha,
@@ -56,7 +57,7 @@ const brokerApproval = {
   databaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, executorSecurityGroupId: STAGE_B.executorSecurityGroupId,
   checkerIdentity: "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/checker",
   deployerIdentity: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/deployer", executorIdentity: STAGE_B.executorRoleArn,
-  approvalId: "APR-STAGE-B-0001", ticketId: "CHG-STAGE-B-0001", issuedAt: "2026-07-29T11:55:00.000Z", expiresAt: "2026-07-29T13:00:00.000Z",
+  approvalId: stageBApprovalIdForReleaseSha(sourceSha), ticketId: "CHG-STAGE-B-0001", issuedAt: "2026-07-29T11:55:00.000Z", expiresAt: "2026-07-29T13:00:00.000Z",
   nonce: "12345678-1234-1234-1234-123456789abc", signatureAlgorithm: STAGE_B_APPROVAL_ALGORITHM, brokerAliasArn: STAGE_B.brokerAliasArn, brokerVersion: "1", signatureBase64: "AA==",
   taskDefinitionArns: Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${mode}:1`])),
   taskDefinitionTemplateHashes: Object.fromEntries(STAGE_B_TASK_TEMPLATE_KEYS.map((key) => [key, "f".repeat(64)])),
@@ -155,7 +156,6 @@ test("cutover predeployment adapter uses the authorized full image and rejects t
 test("real broker handler runs one bounded task and reads only its exact log stream", async () => {
   const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:19";
   const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/inventory-19";
-  const approvalId = "APR-STAGE-B-0001";
   const taskDefinitions = Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${mode}:1`]));
   const approval = {
     schemaVersion: 2, environment: "production", account: STAGE_B.account, region: STAGE_B.region, releaseSha: sourceSha,
@@ -239,7 +239,7 @@ test("complete task-definition validation rejects sidecars and execution-capabil
   ];
   for (const [name, mutate] of mutations) {
     const { handler, calls } = makeBrokerHandler({ definition: mutate(brokerDefinition()) });
-    await assert.rejects(() => handler({ approvalId: "APR-STAGE-B-0001", operation: "production-predeployment-rotation-inventory", rotationId: "rotation-1", sourceSha, taskDefinitionArn: brokerTaskDefinitionArn }), /exact approved execution contract|task definition/);
+    await assert.rejects(() => handler({ approvalId, operation: "production-predeployment-rotation-inventory", rotationId: "rotation-1", sourceSha, taskDefinitionArn: brokerTaskDefinitionArn }), /exact approved execution contract|task definition/);
     assert.equal(calls.filter(([kind]) => kind === "runTask").length, 0, `${name} reached RunTask`);
   }
 });
@@ -256,7 +256,7 @@ test("bounded Fargate polling allows slow startup and cleans up at the broker de
       return { tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: stopped ? "STOPPED" : "RUNNING", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: "rotation-1" }], containers: [{ name: "inventory", exitCode: stopped ? 0 : undefined }] }] };
     },
   });
-  await assert.doesNotReject(() => slow.handler({ approvalId: "APR-STAGE-B-0001", operation: "production-predeployment-rotation-inventory", rotationId: "rotation-1", sourceSha, taskDefinitionArn: brokerTaskDefinitionArn }));
+  await assert.doesNotReject(() => slow.handler({ approvalId, operation: "production-predeployment-rotation-inventory", rotationId: "rotation-1", sourceSha, taskDefinitionArn: brokerTaskDefinitionArn }));
   assert.ok(clock > 30_000);
   assert.equal(slow.calls.filter(([kind]) => kind === "runTask").length, 1);
 
@@ -270,7 +270,7 @@ test("bounded Fargate polling allows slow startup and cleans up at the broker de
       return { tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: "RUNNING", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: "rotation-1" }], containers: [{ name: "inventory" }] }] };
     },
   });
-  await assert.rejects(() => timeout.handler({ approvalId: "APR-STAGE-B-0001", operation: "production-predeployment-rotation-inventory", rotationId: "rotation-1", sourceSha, taskDefinitionArn: brokerTaskDefinitionArn }), /PREDEPLOYMENT_INVENTORY_TIMEOUT=true/);
+  await assert.rejects(() => timeout.handler({ approvalId, operation: "production-predeployment-rotation-inventory", rotationId: "rotation-1", sourceSha, taskDefinitionArn: brokerTaskDefinitionArn }), /PREDEPLOYMENT_INVENTORY_TIMEOUT=true/);
   assert.ok(polls <= 30);
   assert.equal(timeout.calls.filter(([kind]) => kind === "stopTask").length, 1);
 });
