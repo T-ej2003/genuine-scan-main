@@ -7,6 +7,7 @@ import {
 } from "../aws/stage-b-deployment-contract.mjs";
 import { assertStageBPlan } from "../plan-production-green-stage-b.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { STAGE_B_BACKEND_PORT_MAPPING } from "../aws/production-green-stage-b-task-definitions.mjs";
 import { STAGE_B_EXECUTOR_FOR_EACH_REFERENCES, STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import {
   createStageBPlanCaptureReport,
@@ -239,6 +240,65 @@ test("exact twelve ECS task-definition rotations form the explicit normal rotati
   assert.equal(result.taskDefinitionRotations.length, 12);
   assert.deepEqual(result.actionCounts, { replacement: 12 });
   assert.deepEqual(result.unclassifiedResources, []);
+});
+
+test("only the reviewed backend ECS Exec tag convergence is admitted", () => {
+  const canonical = rotationPlan();
+  const backend = canonical.resource_changes.find(({ address }) => address === 'aws_ecs_task_definition.candidate["backend"]');
+  backend.change.after.tags.MSCQRExecTarget = "production-backend";
+  assert.equal(classifyStageBPlan(canonical, { strict: true }).taskDefinitionRotations.length, 12);
+
+  const mutations = [
+    (change) => { change.change.after.tags.MSCQRExecTarget = "wrong"; },
+    (change) => { change.change.after.tags.Unknown = "value"; },
+    (change) => { delete change.change.after.tags.ManagedBy; },
+    (change) => { change.change.after.tags.Environment = "staging"; },
+    (change) => { change.address = 'aws_ecs_task_definition.candidate["worker"]'; change.change.before.family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address]; change.change.after.family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address]; change.change.before.arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${change.change.before.family}:1`; change.change.after.arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${change.change.after.family}:2`; },
+  ];
+  for (const mutate of mutations) {
+    const rejected = structuredClone(backend);
+    mutate(rejected);
+    assert.throws(() => classifyStageBPlan({ variables, resource_changes: [rejected] }, { strict: true }), /immutable field|family or prior identity/);
+  }
+
+  const unrelated = structuredClone(backend);
+  unrelated.change.after.cpu = "2048";
+  assert.throws(() => classifyStageBPlan({ variables, resource_changes: [unrelated] }, { strict: true }), /immutable field/);
+});
+
+test("only the reviewed backend port mapping convergence is admitted", () => {
+  const backendChange = () => taskChange('aws_ecs_task_definition.candidate["backend"]', 1);
+  const canonical = backendChange();
+  const canonicalAfter = JSON.parse(canonical.change.after.container_definitions);
+  canonicalAfter[0].portMappings = [STAGE_B_BACKEND_PORT_MAPPING];
+  canonical.change.after.container_definitions = JSON.stringify(canonicalAfter);
+  assert.equal(classifyStageBPlan({ variables, resource_changes: [canonical] }, { strict: true }).taskDefinitionRotations.length, 1);
+
+  const mutateMapping = (mutate, pattern = /unreviewed container field change/) => {
+    const rejected = structuredClone(canonical);
+    const containers = JSON.parse(rejected.change.after.container_definitions);
+    mutate(containers[0].portMappings, rejected, containers[0]);
+    rejected.change.after.container_definitions = JSON.stringify(containers);
+    assert.throws(() => classifyStageBPlan({ variables, resource_changes: [rejected] }, { strict: true }), pattern);
+  };
+  for (const [field, value] of [["containerPort", 4001], ["hostPort", 4001], ["protocol", "udp"], ["appProtocol", "http2"], ["name", "other"]]) {
+    mutateMapping((mappings) => { mappings[0][field] = value; });
+  }
+  mutateMapping((mappings) => { mappings.push({ ...mappings[0] }); });
+  mutateMapping((mappings) => { mappings[0].containerPortRange = "4000-4001"; });
+  mutateMapping((_mappings, change, container) => { change.address = 'aws_ecs_task_definition.candidate["worker"]'; change.change.before.family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address]; change.change.after.family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address]; change.change.before.arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${change.change.before.family}:1`; change.change.after.arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${change.change.after.family}:2`; container.image = variables.worker_image.value; });
+
+  const unexpectedBefore = structuredClone(canonical);
+  const beforeContainers = JSON.parse(unexpectedBefore.change.before.container_definitions);
+  beforeContainers[0].portMappings = [{ ...STAGE_B_BACKEND_PORT_MAPPING, containerPort: 3999 }];
+  unexpectedBefore.change.before.container_definitions = JSON.stringify(beforeContainers);
+  assert.throws(() => classifyStageBPlan({ variables, resource_changes: [unexpectedBefore] }, { strict: true }), /unreviewed container field change/);
+
+  const deletion = structuredClone(canonical);
+  [deletion.change.before.container_definitions, deletion.change.after.container_definitions] = [deletion.change.after.container_definitions, deletion.change.before.container_definitions];
+  assert.throws(() => classifyStageBPlan({ variables, resource_changes: [deletion] }, { strict: true }), /unreviewed container field change|provenance|image is not bound/);
+
+  mutateMapping((_mappings, _change, container) => { container.user = "root"; });
 });
 
 test("rotation metadata is carried into plan capture evidence", () => {
