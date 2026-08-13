@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import {
   assertStageBPlanSemanticCompleteness,
+  assertStageBStaticConfigurationCoverage,
   assertStageBTypedRepresentationManifestComplete,
   censusStageBPlanSemantics,
   initialRepresentationOnlyPaths,
@@ -34,6 +35,7 @@ const envNames = [
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
   "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
+  "INVENTORY_DATABASE_URL_ARN", "INVENTORY_RLS_ROLE",
 ];
 const SCOPED_REFERENCE_CENSUS_FIELDS = [
   ["aws_ecs_task_definition.candidate", "for_each_expression"],
@@ -122,6 +124,8 @@ function configuration() {
       memory: ref(["each.value.memory", "each.value"]),
       network_mode: ref(["each.value.networkMode", "each.value"]),
       requires_compatibilities: ref(["each.value.requiresCompatibilities", "each.value"]),
+      runtime_platform: {},
+      skip_destroy: {},
       tags: ref(["each.key", "local.backend_exec_tags", "local.tags"]),
       task_role_arn: ref(["aws_iam_role.task", "each.key"]),
     },
@@ -136,7 +140,7 @@ function configuration() {
     root_module: { resources: [
       candidate,
       executor,
-      { address: "aws_iam_policy.broker", type: "aws_iam_policy", expressions: { policy: ref(["local.broker_runtime_policy"]), tags: ref(["local.tags"]) } },
+      { address: "aws_iam_policy.broker", type: "aws_iam_policy", expressions: { name: {}, path: {}, policy: ref(["local.broker_runtime_policy"]), tags: ref(["local.tags"]) } },
       { address: "aws_lambda_function.broker", type: "aws_lambda_function", expressions: {
         environment: [{ variables: ref([
           "aws_dynamodb_table.replay", "aws_dynamodb_table.replay.name", "local.active_broker_task_definition_arns",
@@ -147,9 +151,10 @@ function configuration() {
           "aws_iam_role.task", "aws_iam_role.task[\"backend\"]", "aws_iam_role.task[\"backend\"].arn",
           "local.logs.backend", "var.account_id", "var.aws_region", "var.backend_image",
         ]) }],
-        filename: ref(["var.broker_package_path"]), role: ref(["var.stage_a_broker_role_arn"]), publish: { constant_value: true }, source_code_hash: ref(["var.broker_package_path"]), tags: ref(["local.tags"]),
+        filename: ref(["var.broker_package_path"]), function_name: {}, handler: {}, role: ref(["var.stage_a_broker_role_arn"]), publish: { constant_value: true }, runtime: {}, source_code_hash: ref(["var.broker_package_path"]), tags: ref(["local.tags"]), timeout: {},
       } },
       { address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", expressions: {
+        name: {},
         function_name: ref(["aws_lambda_function.broker.function_name", "aws_lambda_function.broker"]),
         function_version: ref([
           "aws_lambda_function.broker",
@@ -502,6 +507,8 @@ function resolvedBrokerEnvironment() {
     INVENTORY_SECURITY_GROUPS_JSON: JSON.stringify([STAGE_B.executorSecurityGroupId]),
     INVENTORY_TASK_DEFINITION_FAMILY_ARN: `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:1`,
     INVENTORY_TASK_ROLE_ARN: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+    INVENTORY_DATABASE_URL_ARN: STAGE_B.inventoryDatabaseSecretArn,
+    INVENTORY_RLS_ROLE: STAGE_B.inventoryRlsRole,
   };
 }
 
@@ -576,6 +583,10 @@ test("real-plan-shaped semantic census has zero unclassified semantics", () => {
     unmodeledTypedAfterFields: 0,
     unmodeledAfterUnknownMarkers: 0,
     unmodeledEmptyStructures: 0,
+    resourceProfiles: 17,
+    configuredResourceProfiles: 5,
+    configurationAttributes: 95,
+    unclassifiedConfigurationAttributes: 0,
     missingTypedRepresentationClassifications: 0,
   });
   assert.equal(new Set(census.resources.map((item) => item.classification)).size, 4);
@@ -601,6 +612,10 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
     unmodeledTypedAfterFields: 0,
     unmodeledAfterUnknownMarkers: 0,
     unmodeledEmptyStructures: 0,
+    resourceProfiles: 17,
+    configuredResourceProfiles: 5,
+    configurationAttributes: 95,
+    unclassifiedConfigurationAttributes: 0,
     missingTypedRepresentationClassifications: 0,
   });
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_INITIAL_CREATE).length, 12);
@@ -627,6 +642,17 @@ test("baseline initial-create semantics fail closed on action, identity, path, a
   mutateBaseline((value) => { baselineEcsChange(value).change.after_unknown = { unreviewed: true }; }, /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_AFTER_UNKNOWN/);
   mutateBaseline((value) => { value.configuration.root_module.resources.find((item) => item.address === "aws_ecs_task_definition.candidate").expressions.family.references = ["var.unreviewed"]; }, /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
   mutateBaseline((value) => { baselineEcsChange(value).change.replace_paths = [["cpu"]]; }, /UNCLASSIFIED_REPLACE_PATH/);
+});
+
+test("static configuration profiles reject unknown fields and references without widening active plan profiles", () => {
+  const value = { configuration: configuration(), resource_changes: [] };
+  assert.deepEqual(assertStageBStaticConfigurationCoverage(value).resourceProfiles, 17);
+  const field = structuredClone(value);
+  field.configuration.root_module.resources.find((item) => item.address === "aws_lambda_function.broker").expressions.unreviewed = {};
+  assert.throws(() => assertStageBStaticConfigurationCoverage(field), /UNCLASSIFIED_STATIC_CONFIGURATION_FIELDS/);
+  const reference = structuredClone(value);
+  reference.configuration.root_module.resources.find((item) => item.address === "aws_iam_policy.broker").expressions.policy = ref(["local.unreviewed_policy"]);
+  assert.throws(() => assertStageBStaticConfigurationCoverage(reference), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
 });
 
 test("baseline ECS runtime platform uses the provider list shape and indexed semantic paths", () => {

@@ -23,7 +23,7 @@ required.
 The canonical FinalApplyWrite SHA-256 changes from
 `04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`
 to
-`1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf`.
+`1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799`.
 
 The policy also contains the narrowly bounded initial legacy-to-dual-slot
 rotation bootstrap. It permits only the seven exact `mscqr/prod/rotation/*`
@@ -53,8 +53,8 @@ by this document.
 The exact pre-deployment inventory `ecs:TagResource` permission is owned by
 TaskDefinitionRegistration alongside inventory registration and readback. The
 rotation coordinator's legacy-current secret access remains in FinalApplyWrite.
-The resulting AWS-relevant policy sizes are FinalApplyWrite 6,076 characters
-and TaskDefinitionRegistration 5,326 characters, both below the
+The resulting AWS-relevant policy sizes are FinalApplyWrite 6,063 characters,
+ProviderRecovery 6,075 characters, and TaskDefinitionRegistration 5,326 characters, all below the
 6,144-character limit without widening any resource scope.
 
 Primary references:

@@ -13,6 +13,7 @@ import {
 } from "./stage-b-provider-semantic-snapshot.mjs";
 import {
   assertStageBBrokerPolicyDocument,
+  assertStageBBackendEcsExecPolicyChange,
   assertStageBBrokerPublishProviderMetadataRepresentation,
   assertReviewedBrokerTimeoutTransition,
   STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
@@ -40,6 +41,7 @@ export const STAGE_B_PLAN_SEMANTIC_PROFILES = Object.freeze({
   BROKER_POLICY_UPDATE: "BROKER_POLICY_UPDATE",
   BROKER_FUNCTION_PUBLISH_UPDATE: "BROKER_FUNCTION_PUBLISH_UPDATE",
   REVIEWED_RECOVERY_ALIAS_UPDATE: "REVIEWED_RECOVERY_ALIAS_UPDATE",
+  BACKEND_ECS_EXEC_POLICY_CREATE: "BACKEND_ECS_EXEC_POLICY_CREATE",
 });
 
 export const STAGE_B_SUPPORTED_PLAN_PROFILES = Object.freeze([
@@ -79,6 +81,9 @@ const BROKER_PROFILES = new Map([
   ["aws_iam_policy.broker", { type: "aws_iam_policy", profiles: [{ actions: ["create"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_POLICY_INITIAL_CREATE }, { actions: ["update"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_POLICY_UPDATE }] }],
   ["aws_lambda_function.broker", { type: "aws_lambda_function", profiles: [{ actions: ["create"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_FUNCTION_INITIAL_CREATE }, { actions: ["update"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_FUNCTION_PUBLISH_UPDATE }] }],
   ["aws_lambda_alias.reviewed", { type: "aws_lambda_alias", profiles: [{ actions: ["create"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_ALIAS_INITIAL_CREATE }, { actions: ["update"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.REVIEWED_RECOVERY_ALIAS_UPDATE }] }],
+]);
+const STATIC_PROFILES = new Map([
+  ["aws_iam_role_policy.backend_ecs_exec", { type: "aws_iam_role_policy", actions: ["create"], classification: STAGE_B_PLAN_SEMANTIC_PROFILES.BACKEND_ECS_EXEC_POLICY_CREATE }],
 ]);
 const BROKER_ADDRESSES = new Set(BROKER_PROFILES.keys());
 const BROKER_INITIAL_TAG_PATHS = new Set(["tags.Component", "tags.Environment", "tags.ManagedBy"]);
@@ -167,6 +172,14 @@ const BROKER_FUNCTION_INITIAL_DEPENDENCY_COMPUTED_PATHS = new Set(["environment[
 const ECS_INITIAL_PROVIDER_UNKNOWN_PATHS = new Set([...providerComputedOnlyPaths("aws_ecs_task_definition"), "enable_fault_injection", "id"]);
 
 const CONFIGURATION_REFERENCE_RULES = Object.freeze({
+  "aws_cloudwatch_log_group.stage_b": {
+    name: ["each.value"],
+    retention_in_days: ["var.log_retention_days"],
+    tags: ["local.tags"],
+  },
+  "aws_dynamodb_table.replay": {
+    tags: ["local.tags"],
+  },
   "aws_ecs_task_definition.candidate": {
     container_definitions: ["each.value.containerDefinitions", "each.value"],
     cpu: ["each.value.cpu", "each.value"],
@@ -189,9 +202,58 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
     tags: ["local.tags"],
     task_role_arn: ["var.stage_a_executor_task_role_arn"],
   },
+  "aws_ecs_task_definition.candidate_retained": {
+    container_definitions: ["each.value", "each.value.definition", "each.value.definition.containerDefinitions"],
+    cpu: ["each.value", "each.value.definition", "each.value.definition.cpu"],
+    execution_role_arn: ["aws_iam_role.execution", "each.value", "each.value.kind"],
+    family: ["each.value", "each.value.definition", "each.value.definition.family"],
+    memory: ["each.value", "each.value.definition", "each.value.definition.memory"],
+    network_mode: ["each.value", "each.value.definition", "each.value.definition.networkMode"],
+    requires_compatibilities: ["each.value", "each.value.definition", "each.value.definition.requiresCompatibilities"],
+    tags: ["local.tags"],
+    task_role_arn: ["aws_iam_role.task", "each.value", "each.value.kind"],
+  },
+  "aws_ecs_task_definition.executor_retained": {
+    container_definitions: ["each.value", "each.value.definition", "each.value.definition.containerDefinitions"],
+    cpu: ["each.value", "each.value.definition", "each.value.definition.cpu"],
+    execution_role_arn: ["aws_iam_role.execution", "aws_iam_role.execution[\"executor\"]", "aws_iam_role.execution[\"executor\"].arn"],
+    family: ["each.value", "each.value.definition", "each.value.definition.family"],
+    memory: ["each.value", "each.value.definition", "each.value.definition.memory"],
+    network_mode: ["each.value", "each.value.definition", "each.value.definition.networkMode"],
+    requires_compatibilities: ["each.value", "each.value.definition", "each.value.definition.requiresCompatibilities"],
+    tags: ["local.tags"],
+    task_role_arn: ["var.stage_a_executor_task_role_arn"],
+  },
   "aws_iam_policy.broker": {
     policy: ["local.broker_runtime_policy"],
     tags: ["local.tags"],
+  },
+  "aws_iam_role_policy.backend_ecs_exec": {
+    role: ["aws_iam_role.task", "aws_iam_role.task[\"backend\"]", "aws_iam_role.task[\"backend\"].id"],
+  },
+  "aws_iam_role.execution": {
+    name: ["each.value"],
+    tags: ["local.tags"],
+  },
+  "aws_iam_role.task": {
+    name: ["each.value"],
+    tags: ["local.tags"],
+  },
+  "aws_iam_role_policy.candidate_object_storage": {
+    policy: ["var.receipt_bucket_arn"],
+    role: ["each.value", "each.value.id"],
+  },
+  "aws_iam_role_policy.execution": {
+    policy: ["each.key", "local.active_execution_secret_arns", "local.backend_execution_secret_arns", "local.ecr_repository_arns", "local.execution_log_group_arns", "var.stage_b_recovery_only"],
+    role: ["each.value", "each.value.id"],
+  },
+  "aws_iam_role_policy.executor_runtime": {
+    policy: ["var.approval_kms_key_arn", "var.receipt_bucket_arn", "var.stage_a_runtime_secret_arns"],
+    role: ["var.stage_a_executor_task_role_arn"],
+  },
+  "aws_iam_role_policy_attachment.broker": {
+    policy_arn: ["aws_iam_policy.broker", "aws_iam_policy.broker.arn"],
+    role: ["var.stage_a_broker_role_arn"],
   },
   "aws_lambda_function.broker": {
     "environment[0].variables": [
@@ -217,6 +279,35 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
       "var.stage_b_recovery_only",
     ],
   },
+  "aws_lambda_permission.release_deployer": {
+    function_name: ["aws_lambda_function.broker", "aws_lambda_function.broker.function_name"],
+    qualifier: ["aws_lambda_alias.reviewed", "aws_lambda_alias.reviewed.name"],
+  },
+});
+
+export const STAGE_B_STATIC_CONFIGURATION_CLASSES = Object.freeze([
+  "EXACT_IMMUTABLE", "EXACT_SOURCE_BOUND", "REVIEWED_TRANSITION", "PROVIDER_NORMALIZATION",
+  "COMPUTED_ONLY", "SENSITIVE_HASH_BOUND", "REJECTED",
+]);
+
+const STATIC_CONFIGURATION_PROFILES = Object.freeze({
+  "aws_cloudwatch_log_group.stage_b": { fields: ["name", "retention_in_days", "tags"], forEach: ["local.stage_b_logs"] },
+  "aws_dynamodb_table.replay": { fields: ["attribute", "billing_mode", "hash_key", "name", "tags", "ttl"] },
+  "aws_ecs_task_definition.candidate": { fields: ["container_definitions", "cpu", "execution_role_arn", "family", "memory", "network_mode", "requires_compatibilities", "runtime_platform", "skip_destroy", "tags", "task_role_arn"], forEach: ["local.candidate_definitions_for_resources"] },
+  "aws_ecs_task_definition.candidate_retained": { fields: ["container_definitions", "cpu", "execution_role_arn", "family", "memory", "network_mode", "requires_compatibilities", "runtime_platform", "skip_destroy", "tags", "task_role_arn"], forEach: ["local.retained_candidate_definitions"] },
+  "aws_ecs_task_definition.executor": { fields: ["container_definitions", "cpu", "execution_role_arn", "family", "memory", "network_mode", "requires_compatibilities", "runtime_platform", "skip_destroy", "tags", "task_role_arn"], forEach: ["local.executor_definitions_for_resources"] },
+  "aws_ecs_task_definition.executor_retained": { fields: ["container_definitions", "cpu", "execution_role_arn", "family", "memory", "network_mode", "requires_compatibilities", "runtime_platform", "skip_destroy", "tags", "task_role_arn"], forEach: ["local.retained_executor_definitions"] },
+  "aws_iam_policy.broker": { fields: ["name", "path", "policy", "tags"] },
+  "aws_iam_role.execution": { fields: ["assume_role_policy", "name", "tags"], forEach: ["local.execution_role_names"] },
+  "aws_iam_role.task": { fields: ["assume_role_policy", "name", "tags"], forEach: ["local.task_role_names"] },
+  "aws_iam_role_policy.backend_ecs_exec": { fields: ["name", "policy", "role"] },
+  "aws_iam_role_policy.candidate_object_storage": { fields: ["name", "policy", "role"], forEach: ["aws_iam_role.task"] },
+  "aws_iam_role_policy.execution": { fields: ["name", "policy", "role"], forEach: ["aws_iam_role.execution"] },
+  "aws_iam_role_policy.executor_runtime": { fields: ["name", "policy", "role"] },
+  "aws_iam_role_policy_attachment.broker": { fields: ["policy_arn", "role"] },
+  "aws_lambda_alias.reviewed": { fields: ["function_name", "function_version", "name"] },
+  "aws_lambda_function.broker": { fields: ["environment", "filename", "function_name", "handler", "publish", "role", "runtime", "source_code_hash", "tags", "timeout"] },
+  "aws_lambda_permission.release_deployer": { fields: ["action", "function_name", "principal", "qualifier", "statement_id"] },
 });
 
 export function getStageBConfigurationReferenceRules() {
@@ -346,6 +437,7 @@ function assertTypedRepresentationEnvelope(change) {
   const type = change.type;
   const after = change.change?.after;
   const unknown = change.change?.after_unknown;
+  if (STATIC_PROFILES.has(change.address)) return;
   if (!BROKER_ADDRESSES.has(change.address) && !ECS_ADDRESSES.has(change.address)) return;
   if (after !== null && after !== undefined && (typeof after !== "object" || Array.isArray(after))) throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES (UNMODELED_TYPED_AFTER_FIELDS): ${change.address}`);
   const allowed = providerTopLevelPaths(type);
@@ -381,8 +473,55 @@ function referenceExpressions(value, base = "") {
   return results;
 }
 
+function canonicalReferenceSet(references) {
+  const unique = new Set(references || []);
+  if (unique.has("local.logs.backend")) unique.delete("local.logs");
+  return [...unique].sort();
+}
+
+function staticConfigurationClass(address, field) {
+  if (["policy", "container_definitions", "environment", "source_code_hash"].includes(field)) return "SENSITIVE_HASH_BOUND";
+  if (["runtime_platform", "skip_destroy", "billing_mode", "hash_key", "ttl"].includes(field)) return "EXACT_IMMUTABLE";
+  return "EXACT_SOURCE_BOUND";
+}
+
 function rootConfigurationResources(plan) {
   return plan?.configuration?.root_module?.resources || [];
+}
+
+export function assertStageBStaticConfigurationCoverage(plan) {
+  const resources = rootConfigurationResources(plan);
+  const profiles = Object.entries(STATIC_CONFIGURATION_PROFILES);
+  const expectedAddresses = new Set(profiles.map(([address]) => address));
+  const configured = new Set();
+  for (const resource of resources) {
+    const profile = STATIC_CONFIGURATION_PROFILES[resource?.address];
+    if (!profile || !expectedAddresses.has(resource.address)) throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_RESOURCE: ${resource?.address || "<missing>"}`);
+    if (configured.has(resource.address)) throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_RESOURCE: ${resource.address}`);
+    configured.add(resource.address);
+    const fields = Object.keys(resource.expressions || {}).sort();
+    if (!exactJson(fields, [...profile.fields].sort())) throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_FIELDS: ${resource.address}`);
+    const actualForEach = canonicalReferenceSet(referenceExpressions(resource.for_each_expression || {}).flatMap((item) => item.references));
+    const expectedForEach = canonicalReferenceSet(profile.forEach || []);
+    if (!exactJson(actualForEach, expectedForEach)) throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_FOR_EACH: ${resource.address}`);
+    const references = referenceExpressions(resource.expressions || {});
+    const expectedReferences = CONFIGURATION_REFERENCE_RULES[resource.address] || {};
+    const actualReferenceFields = references.map(({ field }) => field).sort();
+    if (!exactJson(actualReferenceFields, Object.keys(expectedReferences).sort())) throw new Error(`UNCLASSIFIED_CONFIGURATION_REFERENCES: ${resource.address}`);
+    for (const { field, references: values } of references) {
+      if (!exactJson(canonicalReferenceSet(values), canonicalReferenceSet(allowedConfigurationReferences(plan, resource.address, field)))) {
+        throw new Error(`UNCLASSIFIED_CONFIGURATION_REFERENCES: ${resource.address}.${field}`);
+      }
+    }
+  }
+  const attributes = profiles.flatMap(([address, profile]) => profile.fields.map((field) => ({ address, field, classification: staticConfigurationClass(address, field) })));
+  return {
+    resourceProfiles: profiles.length,
+    configuredResourceProfiles: configured.size,
+    configurationAttributes: attributes.length,
+    unclassifiedConfigurationAttributes: 0,
+    attributes,
+  };
 }
 
 function configurationBase(address) {
@@ -414,8 +553,8 @@ function collectConfigurationReferences(plan, address) {
   const actualKeys = actual.map(({ field }) => field).sort();
   if (!exactJson(expectedKeys, actualKeys)) throw new Error(`UNCLASSIFIED_CONFIGURATION_REFERENCES: ${address}`);
   return actual.sort((left, right) => left.field.localeCompare(right.field)).map((item) => {
-    const allowed = [...allowedConfigurationReferences(plan, base, item.field)].sort();
-    const references = [...item.references].sort();
+    const allowed = canonicalReferenceSet(allowedConfigurationReferences(plan, base, item.field));
+    const references = canonicalReferenceSet(item.references);
     if (!exactJson(references, allowed)) throw new Error(`UNCLASSIFIED_CONFIGURATION_REFERENCES: ${address}.${item.field}`);
     return {
       ...item,
@@ -542,13 +681,13 @@ function assertBrokerPublishProviderMetadataRepresentation(change) {
   assertStageBBrokerPublishProviderMetadataRepresentation(change);
 }
 
-const BROKER_ENVIRONMENT_VARIABLES = Object.freeze([
+export const STAGE_B_BROKER_ENVIRONMENT_VARIABLES = Object.freeze([
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
   "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
   "INVENTORY_ASSIGN_PUBLIC_IP", "INVENTORY_EXECUTION_ROLE_ARN", "INVENTORY_IMAGE_DIGEST",
   "INVENTORY_LOG_GROUP_NAME", "INVENTORY_PRIVATE_SUBNETS_JSON", "INVENTORY_SECURITY_GROUPS_JSON",
-  "INVENTORY_TASK_DEFINITION_FAMILY_ARN", "INVENTORY_TASK_ROLE_ARN",
+  "INVENTORY_TASK_DEFINITION_FAMILY_ARN", "INVENTORY_TASK_ROLE_ARN", "INVENTORY_DATABASE_URL_ARN", "INVENTORY_RLS_ROLE",
 ]);
 const brokerTaskDefinitionModes = Object.freeze(Object.fromEntries([
   ["full-rls-application-canary", STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']],
@@ -563,7 +702,7 @@ const parseEnvironmentJson = (value, label) => {
 };
 
 function assertConcreteBrokerEnvironment(variables) {
-  if (!variables || typeof variables !== "object" || Array.isArray(variables) || !exactObjectKeys(variables, BROKER_ENVIRONMENT_VARIABLES)) {
+  if (!variables || typeof variables !== "object" || Array.isArray(variables) || !exactObjectKeys(variables, STAGE_B_BROKER_ENVIRONMENT_VARIABLES)) {
     throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables");
   }
   if (variables.BROKER_REPLAY_TABLE !== "mscqr-production-rls-stage-b-replay"
@@ -579,6 +718,8 @@ function assertConcreteBrokerEnvironment(variables) {
     || !/^\d{12}\.dkr\.ecr\.[^@]+@sha256:[a-f0-9]{64}$/.test(variables.INVENTORY_IMAGE_DIGEST)
     || variables.INVENTORY_TASK_ROLE_ARN !== `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-task`
     || variables.INVENTORY_EXECUTION_ROLE_ARN !== `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-execution`
+    || variables.INVENTORY_DATABASE_URL_ARN !== STAGE_B.inventoryDatabaseSecretArn
+    || variables.INVENTORY_RLS_ROLE !== STAGE_B.inventoryRlsRole
     || JSON.stringify(parseEnvironmentJson(variables.INVENTORY_PRIVATE_SUBNETS_JSON, "INVENTORY_PRIVATE_SUBNETS_JSON")) !== JSON.stringify(STAGE_B.privateSubnetIds)
     || JSON.stringify(parseEnvironmentJson(variables.INVENTORY_SECURITY_GROUPS_JSON, "INVENTORY_SECURITY_GROUPS_JSON")) !== JSON.stringify([STAGE_B.executorSecurityGroupId])) {
     throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables");
@@ -729,6 +870,10 @@ function assertEcsSemanticDomain(change) {
 }
 
 function classifyChangedPath(change, path) {
+  if (change.address === "aws_iam_role_policy.backend_ecs_exec" && ["<root>", "name", "policy", "role"].includes(path)) {
+    assertStageBBackendEcsExecPolicyChange(change);
+    return "REVIEWED_CONCRETE_CHANGE";
+  }
   if (ECS_ADDRESSES.has(change.address)) return classifyEcsChangedPath(change, path);
   if (change.address === "aws_iam_policy.broker" && isBrokerInitialCreate(change)) {
     if (assertInitialRepresentationPath(change, path)) return "REVIEWED_PROVIDER_NORMALIZATION";
@@ -774,6 +919,7 @@ function classifyChangedPath(change, path) {
 }
 
 function classifyUnknownPath(change, path) {
+  if (change.address === "aws_iam_role_policy.backend_ecs_exec" && ["id", "name_prefix"].includes(path)) return "DIAGNOSTIC_ONLY";
   if (ECS_ADDRESSES.has(change.address) && ECS_UNKNOWN_PATHS.has(path)) {
     return path === "volume[0].configure_at_launch" ? "REVIEWED_PROVIDER_NORMALIZATION" : "DIAGNOSTIC_ONLY";
   }
@@ -800,7 +946,8 @@ function classifyUnknownPath(change, path) {
 function assertSensitivePaths(change, kind, paths) {
   const allowed = ECS_ADDRESSES.has(change.address) ? ECS_SENSITIVE_PATHS
     : change.address === "aws_iam_policy.broker" ? new Set()
-      : change.address === "aws_lambda_function.broker" ? BROKER_FUNCTION_SENSITIVE_PATHS : ALIAS_SENSITIVE_PATHS;
+      : change.address === "aws_lambda_function.broker" ? BROKER_FUNCTION_SENSITIVE_PATHS
+        : STATIC_PROFILES.has(change.address) ? new Set() : ALIAS_SENSITIVE_PATHS;
   for (const path of paths) if (!allowed.has(path)) throw new Error(`UNCLASSIFIED_${kind}_SENSITIVE_PATH: ${change.address}.${path}`);
   return paths;
 }
@@ -816,6 +963,12 @@ function classifyResource(change) {
   const brokerProfile = profile?.profiles.find((candidate) => exactJson(actions, candidate.actions));
   if (profile && change.type === profile.type && change.mode === "managed"
     && (change.module === undefined || change.module === null) && brokerProfile) return brokerProfile.classification;
+  const staticProfile = STATIC_PROFILES.get(change?.address);
+  if (staticProfile && change.type === staticProfile.type && change.mode === "managed"
+    && (change.module === undefined || change.module === null) && exactJson(actions, staticProfile.actions)) {
+    assertStageBBackendEcsExecPolicyChange(change);
+    return staticProfile.classification;
+  }
   throw new Error(`UNCLASSIFIED_RESOURCE_ACTION: ${change?.address}`);
 }
 
@@ -839,6 +992,7 @@ function classifyReplacePaths(change) {
     return paths.map((path) => ({ path: path.join("."), classification: "REVIEWED_REPLACEMENT_TRIGGER" }));
   }
   if (paths.length === 0 && BROKER_PROFILES.has(change.address)) return [];
+  if (paths.length === 0 && STATIC_PROFILES.has(change.address)) return [];
   throw new Error(`UNCLASSIFIED_REPLACE_PATH: ${change.address}.${JSON.stringify(paths)}`);
 }
 
@@ -867,6 +1021,8 @@ export function censusStageBPlanSemantics(plan) {
   const manifest = assertStageBTypedRepresentationManifestComplete();
   assertStageBProviderResourceShapeUniverse();
   assertStageBProviderSemanticSnapshot();
+  const staticConfiguration = assertStageBStaticConfigurationCoverage(plan);
+  const { attributes: staticConfigurationAttributes, ...staticConfigurationCounts } = staticConfiguration;
   assertBrokerActionProfile(plan);
   const resources = [];
   const seenAddresses = new Set();
@@ -926,9 +1082,10 @@ export function censusStageBPlanSemantics(plan) {
     unmodeledTypedAfterFields: 0,
     unmodeledAfterUnknownMarkers: 0,
     unmodeledEmptyStructures: 0,
+    ...staticConfigurationCounts,
     ...manifest,
   };
-  return { schemaVersion: 1, resources, counts };
+  return { schemaVersion: 1, resources, staticConfigurationAttributes, counts };
 }
 
 export function assertStageBPlanSemanticCompleteness(plan) {

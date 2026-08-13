@@ -10,6 +10,8 @@ export const STAGE_B = Object.freeze({
   privateSubnetIds: Object.freeze(["subnet-068d949017bd2ce45", "subnet-07e0a76e3a5241138"]),
   inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend",
   inventoryTaskDefinitionFamily: "mscqr-production-rls-green-predeployment-inventory",
+  inventoryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
+  inventoryRlsRole: "mscqr_prod_rls_read",
   receiptBucket: "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
   approvalSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho",
   approvalKmsKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",

@@ -60,7 +60,7 @@ test("broker alias update is authorized on the exact broker function resource", 
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: STAGE_B.brokerAliasArn, context }), false);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: `${functionArn}:other`, context }), false);
   assert.equal(finalWrite.Statement.some((statement) => list(statement.Action).some((action) => ["lambda:CreateAlias", "lambda:DeleteAlias"].includes(action))), false);
-  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "1e5ff71b1459db4bc67ef923fc103c3b4dfa69d488c814be865aa91438a65daf");
+  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799");
 });
 
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
@@ -68,7 +68,7 @@ test("production-shaped required and forbidden resources reconcile to the source
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
   assert.equal(evaluations.required.length, 154);
-  assert.equal(evaluations.forbidden.length, 28);
+  assert.equal(evaluations.forbidden.length, 34);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
   const registrations = evaluations.required.filter(({ action }) => action === "ecs:RegisterTaskDefinition");
