@@ -13,10 +13,14 @@
     "resultChannel": "exact task awslogs stream, one structured aggregate JSON record",
     "command": ["node", "/app/scripts/production-rotation-state-inventory.mjs"],
     "publicIp": "DISABLED",
-    "governedPostDeploymentSelector": false
+    "governedPostDeploymentSelector": false,
+    "callerReadTimeoutSeconds": 150,
+    "operationDeadlineSeconds": 100,
+    "cleanupMarginSeconds": 30,
+    "callerTimeoutHeadroomSeconds": 20
   },
   "taskOverridesAllowed": false,
-  "replayStore": { "required": true, "partitionKey": { "name": "approvalMode", "type": "S" }, "ttlAttribute": "expiresAt", "conditionalWrite": "attribute_not_exists(approvalMode)", "launchFailureRecovery": "explicit ECS failures release the claim; transport-uncertain launches remain blocked for reviewed reconciliation" },
+  "replayStore": { "required": true, "partitionKey": { "name": "approvalMode", "type": "S" }, "ttlAttribute": "expiresAt", "conditionalWrite": "attribute_not_exists(approvalMode)", "preDeploymentOperationIdentity": ["approvalId", "releaseSha", "rotationId", "operation", "imageDigest", "taskDefinitionArn"], "preDeploymentLogicalKey": "SHA256(canonical JSON of approvalId, releaseSha, rotationId, operation, and imageDigest); taskDefinitionArn is retained in the row and key collisions fail closed", "preDeploymentStates": ["launching", "launched", "succeeded", "launch-uncertain"], "launchFailureRecovery": "known pre-launch failures release the claim; any launch-attempt uncertainty remains claimed with task identity for reviewed reconciliation" },
   "receiptStore": { "required": true, "writeOnce": true, "prefix": "rls-broker-receipts/" },
   "resourcePolicy": { "contract": "invocation-policy.json", "representation": "design contract, not an AddPermission payload", "nextDeploymentPackage": "aws_lambda_permission with function_name, qualifier=reviewed, action=lambda:InvokeFunction, and principal=mscqr-production-release-deployer" },
   "forbiddenActions": ["ecs:UpdateService", "ecs:RegisterTaskDefinition", "elasticloadbalancing:*", "route53:*", "rds:*", "secretsmanager:GetSecretValue:runtime", "sql"],

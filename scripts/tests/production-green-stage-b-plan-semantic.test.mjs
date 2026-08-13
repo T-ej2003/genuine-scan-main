@@ -294,8 +294,8 @@ function assertScopedReferenceCensus(census) {
 
 function brokerChanges() {
   const policy = { address: "aws_iam_policy.broker", mode: "managed", type: "aws_iam_policy", change: { actions: ["update"], before: { policy: "old" }, after: {}, after_unknown: { policy: true }, before_sensitive: {}, after_sensitive: {} } };
-  const before = { architectures: ["x86_64"], environment: [{ variables: Object.fromEntries(envNames.map((name) => [name, `old-${name}`])) }], filename: "old.zip", source_code_hash: "old-source-code-hash", code_sha256: "old-code-sha", source_code_size: 100, last_modified: "old", qualified_arn: "old", qualified_invoke_arn: "old", version: 2 };
-  const after = { architectures: ["x86_64"], environment: [{}], filename: "new.zip", source_code_hash: "new-source-code-hash" };
+  const before = { architectures: ["x86_64"], environment: [{ variables: Object.fromEntries(envNames.map((name) => [name, `old-${name}`])) }], filename: "old.zip", source_code_hash: "old-source-code-hash", code_sha256: "old-code-sha", source_code_size: 100, last_modified: "old", qualified_arn: "old", qualified_invoke_arn: "old", version: 2, timeout: 30 };
+  const after = { architectures: ["x86_64"], environment: [{}], filename: "new.zip", source_code_hash: "new-source-code-hash", timeout: 180 };
   const lambda = { address: "aws_lambda_function.broker", mode: "managed", type: "aws_lambda_function", change: { actions: ["update"], before, after, after_unknown: { architectures: [false], code_sha256: true, environment: [{ variables: true }], last_modified: true, qualified_arn: true, qualified_invoke_arn: true, source_code_size: true, version: true }, before_sensitive: { architectures: [false] }, after_sensitive: { architectures: [false] } } };
   const alias = { address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "2", routing_config: [] }, after: { routing_config: [] }, after_unknown: { function_version: true, routing_config: [] }, before_sensitive: { routing_config: [] }, after_sensitive: { routing_config: [] } } };
   return [policy, lambda, alias];
@@ -563,7 +563,7 @@ test("real-plan-shaped semantic census has zero unclassified semantics", () => {
   assert.deepEqual(census.counts, {
     nonNoopResources: 15,
     resourceActions: 15,
-    changedPaths: 117,
+    changedPaths: 118,
     afterUnknownPaths: 79,
     replacePaths: 12,
     configurationReferences: 117,
@@ -1088,6 +1088,53 @@ test("stable ECS security domains are validated before equality", () => {
   mutate((value) => { value.resource_changes[0].change.after.execution_role_arn = "bad"; }, /UNCLASSIFIED_CHANGED_PATH/);
   mutate((value) => { value.resource_changes[0].change.after.network_mode = "bridge"; }, /UNCLASSIFIED_CHANGED_PATH/);
   mutate((value) => { value.resource_changes[0].change.after_sensitive.cpu = true; }, /UNCLASSIFIED_(?:BEFORE|AFTER)_SENSITIVE_PATH/);
+});
+
+test("rotation semantic census admits only the reviewed backend tag projection", () => {
+  const value = plan();
+  const change = value.resource_changes.find((item) => item.address === 'aws_ecs_task_definition.candidate["backend"]');
+  const beforeTags = { Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" };
+  const afterTags = { ...beforeTags, MSCQRExecTarget: "production-backend" };
+  change.change.before.tags = beforeTags;
+  change.change.before.tags_all = beforeTags;
+  change.change.after.tags = afterTags;
+  change.change.after.tags_all = afterTags;
+  assert.deepEqual(assertStageBPlanSemanticCompleteness(value).resources.find(({ address }) => address === change.address).changedPaths.filter(({ path }) => path.startsWith("tags")), [
+    { path: "tags.MSCQRExecTarget", classification: "REVIEWED_CONCRETE_CHANGE" },
+    { path: "tags_all.MSCQRExecTarget", classification: "REVIEWED_CONCRETE_CHANGE" },
+  ]);
+  for (const mutate of [
+    (candidate) => { candidate.change.after.tags.MSCQRExecTarget = "wrong"; candidate.change.after.tags_all.MSCQRExecTarget = "wrong"; },
+    (candidate) => { candidate.change.after.tags.RandomTag = "unexpected"; candidate.change.after.tags_all.RandomTag = "unexpected"; },
+    (candidate) => { candidate.address = 'aws_ecs_task_definition.executor["full-rls-verification"]'; },
+    (candidate) => { candidate.change.after.tags_all.MSCQRExecTarget = "wrong"; },
+  ]) {
+    const rejected = structuredClone(value);
+    mutate(rejected.resource_changes.find((item) => item.address === change.address) || rejected.resource_changes.find((item) => item.address.includes("executor")));
+    assert.throws(() => assertStageBPlanSemanticCompleteness(rejected), /UNCLASSIFIED_CHANGED_PATH/);
+  }
+  const deletion = structuredClone(value);
+  const deletionChange = deletion.resource_changes.find((item) => item.address === change.address).change;
+  deletionChange.before.tags = afterTags;
+  deletionChange.before.tags_all = afterTags;
+  deletionChange.after.tags = beforeTags;
+  deletionChange.after.tags_all = beforeTags;
+  assert.throws(() => assertStageBPlanSemanticCompleteness(deletion), /UNCLASSIFIED_CHANGED_PATH/);
+});
+
+test("broker timeout admits only the reviewed 30-to-180 transition", () => {
+  const value = plan();
+  const broker = value.resource_changes.find((item) => item.address === "aws_lambda_function.broker");
+  assert.equal(broker.change.before.timeout, 30);
+  assert.equal(broker.change.after.timeout, 180);
+  assert.equal(assertStageBPlanSemanticCompleteness(value).resources.find(({ address }) => address === broker.address).changedPaths.find(({ path }) => path === "timeout").classification, "REVIEWED_CONCRETE_CHANGE");
+  for (const [before, after] of [[30, 60], [30, 120], [30, 179], [30, 181], [30, 900], [180, 30], [60, 180], [undefined, 180]]) {
+    const rejected = structuredClone(value);
+    const change = rejected.resource_changes.find((item) => item.address === broker.address).change;
+    if (before === undefined) delete change.before.timeout; else change.before.timeout = before;
+    change.after.timeout = after;
+    assert.throws(() => assertStageBPlanSemanticCompleteness(rejected), /30-to-180|UNCLASSIFIED/);
+  }
 });
 
 test("computed alias requires same-plan published broker and exact configuration identity", () => {

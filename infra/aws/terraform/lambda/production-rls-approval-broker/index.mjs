@@ -11,6 +11,7 @@ export const PREDEPLOYMENT_INVENTORY_LOG_RETRIEVAL_BUDGET_MS = 20_000;
 export const PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS = 30_000;
 export const PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS = 100_000;
 export const PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS = 180;
+export const PREDEPLOYMENT_INVENTORY_REPLAY_MODE = "production-predeployment-rotation-inventory";
 const inventoryTaskArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-predeployment-inventory:[1-9][0-9]*$/;
 const inventoryTaskDefinitionTags = Object.freeze({ Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform", MSCQRPreDeploymentInventory: "rotation-inventory" });
 const inventoryTaskDefinitionFamily = "mscqr-production-rls-green-predeployment-inventory";
@@ -20,6 +21,21 @@ const exact = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const canonicalize = (value) => Array.isArray(value) ? value.map(canonicalize) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => [key, canonicalize(child)])) : value;
 const exactJson = (left, right) => JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
 const brokerReceipt = (value) => ({ ...value, receiptSha256: crypto.createHash("sha256").update(`${JSON.stringify(value)}\n`).digest("hex") });
+
+export function createPreDeploymentOperationIdentity({ approvalId, releaseSha, rotationId, operation = PREDEPLOYMENT_INVENTORY_OPERATION, taskDefinitionArn, imageDigest } = {}) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(approvalId || "") || !/^[a-f0-9]{40}$/.test(releaseSha || "")
+    || !/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || operation !== PREDEPLOYMENT_INVENTORY_OPERATION
+    || !inventoryTaskArnPattern.test(taskDefinitionArn || "") || !/^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/.test(imageDigest || "")) {
+    throw new Error("Pre-deployment inventory operation identity is outside the reviewed contract.");
+  }
+  return Object.freeze({ approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest });
+}
+
+export function preDeploymentOperationKey(identity) {
+  const { approvalId, releaseSha, rotationId, operation, imageDigest } = createPreDeploymentOperationIdentity(identity);
+  const logicalIdentity = JSON.stringify({ approvalId, releaseSha, rotationId, operation, imageDigest });
+  return `${PREDEPLOYMENT_INVENTORY_REPLAY_MODE}#${crypto.createHash("sha256").update(logicalIdentity).digest("hex")}`;
+}
 
 export function validateBrokerConfiguration(config) {
   if (!config || config.clusterArn !== STAGE_B.clusterArn || config.approvalSecretArn !== STAGE_B.approvalSecretArn
@@ -162,7 +178,7 @@ function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, sou
   return true;
 }
 
-export function createPreDeploymentInventoryHandler({ config, readApproval, verifySignature, runTask, describeTaskDefinition, describeTasks, describeLogStreams, getLogEvents, stopTask, now = () => new Date(), sleep = async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) }) {
+export function createPreDeploymentInventoryHandler({ config, readApproval, verifySignature, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, runTask, describeTaskDefinition, describeTasks, describeLogStreams, getLogEvents, stopTask, now = () => new Date(), sleep = async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) }) {
   validatePreDeploymentInventoryConfiguration(config);
   return async (event, context = {}) => {
     if (!event || typeof event !== "object" || Object.keys(event).sort().join(",") !== "approvalId,operation,rotationId,sourceSha,taskDefinitionArn" || event.operation !== PREDEPLOYMENT_INVENTORY_OPERATION || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(event.rotationId || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "") || !inventoryTaskArnPattern.test(event.taskDefinitionArn || "")) throw new Error("Pre-deployment inventory broker request is outside the reviewed contract.");
@@ -172,11 +188,50 @@ export function createPreDeploymentInventoryHandler({ config, readApproval, veri
     const definition = definitionResponse?.taskDefinition;
     if (!definition || !exactTags(definitionResponse.tags, inventoryTaskDefinitionTags)) throw new Error("Pre-deployment inventory task definition response is missing the reviewed top-level tags.");
     assertExactInventoryTaskDefinition({ definition, taskDefinitionArn: event.taskDefinitionArn, sourceSha: event.sourceSha, config });
+    const operationIdentity = createPreDeploymentOperationIdentity({ approvalId: event.approvalId, releaseSha: event.sourceSha, rotationId: event.rotationId, operation: event.operation, taskDefinitionArn: event.taskDefinitionArn, imageDigest: config.inventoryImageDigest });
+    const operationKey = preDeploymentOperationKey(operationIdentity);
+    const replay = { ...operationIdentity, operationKey, nonce: approval.approval.nonce, expiresAt: approval.approval.expiresAt };
+    await claimPreDeploymentOperation(replay);
     const networkConfiguration = { awsvpcConfiguration: { subnets: [...config.inventoryPrivateSubnetIds].sort(), securityGroups: [...config.inventorySecurityGroupIds].sort(), assignPublicIp: "DISABLED" } };
-    const launched = await runTask({ cluster: config.clusterArn, taskDefinition: event.taskDefinitionArn, launchType: "FARGATE", count: 1, networkConfiguration, tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: event.sourceSha }, { key: "RotationId", value: event.rotationId }] });
-    if ((launched.failures || []).length || launched.tasks?.length !== 1 || !launched.tasks[0]?.taskArn) throw new Error("Pre-deployment inventory task did not start exactly once.");
-    const taskArn = launched.tasks[0].taskArn;
+    let launchMayHaveOccurred = false;
+    let uncertaintyRecorded = false;
+    let taskArn;
+    let cleanupAttempted = false;
+    const stopTaskBounded = async () => {
+      if (typeof stopTask !== "function") throw new Error("Pre-deployment inventory cleanup authority is missing.");
+      let cleanupSettled = false;
+      let cleanupError;
+      let timer;
+      cleanupAttempted = true;
+      const cleanup = Promise.resolve().then(() => stopTask({ cluster: config.clusterArn, task: taskArn, reason: "pre-deployment inventory complete" }))
+        .then(() => { cleanupSettled = true; }, (error) => { cleanupSettled = true; cleanupError = error; });
+      await Promise.race([cleanup, new Promise((resolve) => { timer = setTimeout(resolve, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS); })]);
+      clearTimeout(timer);
+      if (!cleanupSettled) throw new Error("Pre-deployment inventory cleanup exceeded its bounded margin.");
+      if (cleanupError) throw new Error("Pre-deployment inventory cleanup failed; the launched task remains bound for reconciliation.");
+    };
     try {
+      let launched;
+      try {
+        launchMayHaveOccurred = true;
+        launched = await runTask({ cluster: config.clusterArn, taskDefinition: event.taskDefinitionArn, launchType: "FARGATE", count: 1, networkConfiguration, tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: event.sourceSha }, { key: "RotationId", value: event.rotationId }] });
+      } catch {
+        await markPreDeploymentLaunchUncertain({ ...replay });
+        uncertaintyRecorded = true;
+        throw new Error("Pre-deployment inventory launch outcome is uncertain; the operation remains blocked pending reviewed ECS reconciliation.");
+      }
+      if ((launched.failures || []).length || launched.tasks?.length !== 1 || !launched.tasks[0]?.taskArn) {
+        if (launched.tasks?.length) {
+          await markPreDeploymentLaunchUncertain({ ...replay, taskArns: launched.tasks.map(({ taskArn: arn }) => arn).filter(Boolean) });
+          uncertaintyRecorded = true;
+        } else {
+          await releasePreDeploymentOperation(replay);
+          launchMayHaveOccurred = false;
+        }
+        throw new Error("Pre-deployment inventory task did not start exactly once.");
+      }
+      taskArn = launched.tasks[0].taskArn;
+      await recordPreDeploymentTaskStarted({ ...replay, taskArn });
       let task;
       const nowMs = () => now().getTime();
       const lambdaRemainingMs = typeof context.getRemainingTimeInMillis === "function" ? Math.max(0, context.getRemainingTimeInMillis() - PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS) : Number.POSITIVE_INFINITY;
@@ -206,15 +261,15 @@ export function createPreDeploymentInventoryHandler({ config, readApproval, veri
       const lines = (logs.events || []).map(({ message }) => String(message || "")).filter((line) => line.trim().startsWith("{"));
       if (lines.length !== 1 || Buffer.byteLength(lines[0], "utf8") > 128 * 1024) throw new Error("Pre-deployment inventory result is not exactly one bounded structured record.");
       const inventory = assertPreDeploymentInventoryResult(JSON.parse(lines[0]));
+      await stopTaskBounded();
+      await recordPreDeploymentCompleted({ ...replay, taskArn });
       return { status: "completed", operation: PREDEPLOYMENT_INVENTORY_OPERATION, taskArn, taskDefinitionArn: event.taskDefinitionArn, sourceSha: event.sourceSha, rotationId: event.rotationId, inventory };
-    } finally {
-      if (typeof stopTask === "function") {
-        let timer;
-        await Promise.race([
-          Promise.resolve().then(() => stopTask({ cluster: config.clusterArn, task: taskArn, reason: "pre-deployment inventory complete" })),
-          new Promise((resolve) => { timer = setTimeout(resolve, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS); }),
-        ]).catch(() => {}).finally(() => clearTimeout(timer));
+    } catch (error) {
+      if (taskArn && !cleanupAttempted) await stopTaskBounded().catch(() => {});
+      if (launchMayHaveOccurred && !uncertaintyRecorded) {
+        await markPreDeploymentLaunchUncertain({ ...replay, ...(taskArn ? { taskArn } : {}) }).catch(() => {});
       }
+      throw error;
     }
   };
 }
@@ -274,12 +329,37 @@ export async function handler(event, context) {
     recordTaskStarted: ({ approvalId, nonce, mode, taskArn }) => dynamo.send(new UpdateItemCommand({
       TableName: config.replayTable, Key: { approvalMode: { S: `${approvalId}#${mode}` } }, UpdateExpression: "SET launchState = :state, taskArn = :taskArn", ConditionExpression: "approvalNonce = :nonce AND launchState = :claimed", ExpressionAttributeValues: { ":nonce": { S: nonce }, ":claimed": { S: "claimed" }, ":state": { S: "started" }, ":taskArn": { S: taskArn } },
     })),
+    claimPreDeploymentOperation: ({ operationKey, approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest, nonce, expiresAt }) => dynamo.send(new PutItemCommand({
+      TableName: config.replayTable,
+      Item: {
+        approvalMode: { S: operationKey }, approvalId: { S: approvalId }, releaseSha: { S: releaseSha }, rotationId: { S: rotationId }, operation: { S: operation },
+        taskDefinitionArn: { S: taskDefinitionArn }, imageDigest: { S: imageDigest }, operationIdentitySha256: { S: crypto.createHash("sha256").update(JSON.stringify({ approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest })).digest("hex") },
+        approvalNonce: { S: nonce }, launchState: { S: "launching" }, expiresAt: { N: String(Math.floor(Date.parse(expiresAt) / 1000)) },
+      },
+      ConditionExpression: "attribute_not_exists(approvalMode)",
+    })),
+    releasePreDeploymentOperation: ({ operationKey, nonce }) => dynamo.send(new DeleteItemCommand({
+      TableName: config.replayTable, Key: { approvalMode: { S: operationKey } }, ConditionExpression: "approvalNonce = :nonce AND launchState = :launching", ExpressionAttributeValues: { ":nonce": { S: nonce }, ":launching": { S: "launching" } },
+    })),
+    markPreDeploymentLaunchUncertain: ({ operationKey, nonce, taskArn, taskArns }) => {
+      const attributes = { ":nonce": { S: nonce }, ":launching": { S: "launching" }, ":launched": { S: "launched" }, ":state": { S: "launch-uncertain" } };
+      const updates = ["launchState = :state"];
+      if (taskArn) { updates.push("taskArn = :taskArn"); attributes[":taskArn"] = { S: taskArn }; }
+      if (taskArns?.length) { updates.push("taskArns = :taskArns"); attributes[":taskArns"] = { SS: taskArns }; }
+      return dynamo.send(new UpdateItemCommand({ TableName: config.replayTable, Key: { approvalMode: { S: operationKey } }, UpdateExpression: `SET ${updates.join(", ")}`, ConditionExpression: "approvalNonce = :nonce AND launchState IN (:launching, :launched)", ExpressionAttributeValues: attributes }));
+    },
+    recordPreDeploymentTaskStarted: ({ operationKey, nonce, taskArn }) => dynamo.send(new UpdateItemCommand({
+      TableName: config.replayTable, Key: { approvalMode: { S: operationKey } }, UpdateExpression: "SET launchState = :state, taskArn = :taskArn", ConditionExpression: "approvalNonce = :nonce AND launchState = :launching", ExpressionAttributeValues: { ":nonce": { S: nonce }, ":launching": { S: "launching" }, ":state": { S: "launched" }, ":taskArn": { S: taskArn } },
+    })),
+    recordPreDeploymentCompleted: ({ operationKey, nonce, taskArn }) => dynamo.send(new UpdateItemCommand({
+      TableName: config.replayTable, Key: { approvalMode: { S: operationKey } }, UpdateExpression: "SET launchState = :state, taskArn = :taskArn", ConditionExpression: "approvalNonce = :nonce AND launchState = :launched", ExpressionAttributeValues: { ":nonce": { S: nonce }, ":launched": { S: "launched" }, ":state": { S: "succeeded" }, ":taskArn": { S: taskArn } },
+    })),
     runTask: (request) => ecs.send(new RunTaskCommand(request)),
     writeReceipt: (receipt) => s3.send(new PutObjectCommand({ Bucket: config.receiptBucket, Key: `rls-broker-receipts/${receipt.approvalId}/${receipt.mode}/${receipt.nonce}.json`, Body: `${JSON.stringify(receipt)}\n`, ContentType: "application/json", ServerSideEncryption: "AES256", IfNoneMatch: "*" })),
   };
   if (event?.operation === PREDEPLOYMENT_INVENTORY_OPERATION) {
     const logs = new CloudWatchLogsClient({ region: STAGE_B.region });
-    return createPreDeploymentInventoryHandler({ config, readApproval, verifySignature, runTask: (request) => ecs.send(new RunTaskCommand(request)), describeTaskDefinition: (taskDefinition) => ecs.send(new DescribeTaskDefinitionCommand({ taskDefinition, include: ["TAGS"] })), describeTasks: (request) => ecs.send(new DescribeTasksCommand(request)), describeLogStreams: (request) => logs.send(new DescribeLogStreamsCommand(request)), getLogEvents: (request) => logs.send(new GetLogEventsCommand(request)), stopTask: (request) => ecs.send(new StopTaskCommand(request)) })(event, context);
+    return createPreDeploymentInventoryHandler({ ...clients, runTask: (request) => ecs.send(new RunTaskCommand(request)), describeTaskDefinition: (taskDefinition) => ecs.send(new DescribeTaskDefinitionCommand({ taskDefinition, include: ["TAGS"] })), describeTasks: (request) => ecs.send(new DescribeTasksCommand(request)), describeLogStreams: (request) => logs.send(new DescribeLogStreamsCommand(request)), getLogEvents: (request) => logs.send(new GetLogEventsCommand(request)), stopTask: (request) => ecs.send(new StopTaskCommand(request)) })(event, context);
   }
   return createHandler({ ...clients })(event, context);
 }

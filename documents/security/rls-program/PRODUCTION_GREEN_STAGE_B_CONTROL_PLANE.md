@@ -144,6 +144,18 @@ public IP assignment disabled and no overrides. Any sidecar, extra environment/s
 mount, port, capability, privilege, image, command, entrypoint, role, or log target fails
 before launch. The post-deployment governed ECS Exec selector remains a separate later gate.
 
+The release-deployer invokes this synchronous broker operation with the explicit finite AWS
+CLI `--cli-read-timeout 150` setting. This provides 20 seconds of response headroom beyond
+the 100-second broker deadline plus the 30-second cleanup margin; an infinite client timeout
+is forbidden. Before `RunTask`, the broker verifies the signed approval, source/image binding,
+and exact task definition, then conditionally claims the replay row. The pre-deployment replay
+key is a deterministic SHA-256 identity of approval ID, release SHA, rotation ID, operation,
+and authorized image; the exact task-definition ARN is also stored in the claimed row. A
+conditional claim collision fails closed, including retries after caller disconnect or Lambda
+termination, so no second task can launch. Known pre-launch failures may delete the claim;
+any outcome after a launch attempt retains `launch-uncertain` state and task identity for
+reconciliation. Claims are never released after a launch may have occurred.
+
 ## Next AWS deployment package
 
 Create the endpoint/endpoint-SG policy, Lambda function/version/`reviewed` alias and

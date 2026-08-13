@@ -117,7 +117,7 @@ const canonicalTaskDefinitionStableField = (field, value) => {
   if (field === "ipc_mode" || field === "pid_mode") return canonicalizeEcsTaskDefinitionNullableMode(value, field);
   return stableTaskDefinitionValue(parsedTaskDefinitionValue(value));
 };
-const exactReviewedTaskDefinitionTags = (address, before, after) => {
+export const exactReviewedTaskDefinitionTags = (address, before, after) => {
   const canonical = (value) => JSON.stringify(stableTaskDefinitionValue(value));
   return canonical(before) === canonical(after)
     || (address === backendTaskDefinitionAddress && canonical(before) === canonical(baseTaskDefinitionTags) && canonical(after) === canonical(backendTaskDefinitionTags));
