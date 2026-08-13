@@ -34,6 +34,51 @@ const executionRoleNames = Object.freeze({
 const executionPolicyKeys = new Set(Object.keys(executionRoleNames));
 const candidateStoragePolicyKeys = new Set(["backend", "worker", "canary"]);
 
+export const STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY = Object.freeze({
+  address: "aws_iam_role_policy.backend_ecs_exec",
+  role: "mscqr-production-rls-green-backend-task",
+  name: "stage-b-backend-ecs-exec-ssm-channels",
+  document: Object.freeze({
+    Version: "2012-10-17",
+    Statement: Object.freeze([Object.freeze({
+      Sid: "AllowEcsExecMessageChannels",
+      Effect: "Allow",
+      Action: Object.freeze([
+        "ssmmessages:CreateControlChannel",
+        "ssmmessages:CreateDataChannel",
+        "ssmmessages:OpenControlChannel",
+        "ssmmessages:OpenDataChannel",
+      ]),
+      Resource: "*",
+    })]),
+  }),
+});
+
+export function assertStageBBackendEcsExecPolicyChange(change, { strict = true } = {}) {
+  if (change?.address !== STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY.address || change?.type !== "aws_iam_role_policy"
+    || !["create", "no-op"].some((action) => exactActions(change.change?.actions, [action]))) {
+    throw new Error("Stage B backend ECS Exec inline policy is outside the exact contract.");
+  }
+  const before = change.change?.before;
+  const after = change.change?.after;
+  if (exactActions(change.change?.actions, ["create"]) && before !== null && before !== undefined) {
+    throw new Error("Stage B backend ECS Exec inline policy create has an unexpected predecessor.");
+  }
+  if (exactActions(change.change?.actions, ["no-op"]) && (!after || Object.keys(after).length === 0)) return true;
+  if (!after || after.name !== STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY.name || after.role !== STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY.role) {
+    throw new Error("Stage B backend ECS Exec inline policy identity is outside the exact contract.");
+  }
+  let document;
+  try { document = JSON.parse(after.policy); } catch { throw new Error("Stage B backend ECS Exec inline policy document is malformed."); }
+  if (canonicalJson(document) !== canonicalJson(STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY.document)) {
+    throw new Error("Stage B backend ECS Exec inline policy document is outside the exact SSM-channel contract.");
+  }
+  if (strict && (document.Statement.length !== 1 || document.Statement[0].Condition !== undefined || document.Statement[0].NotAction !== undefined || document.Statement[0].NotResource !== undefined)) {
+    throw new Error("Stage B backend ECS Exec inline policy contains an unsupported privilege form.");
+  }
+  return true;
+}
+
 export const STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES = Object.freeze([
   ...Object.keys(stageBLogNames).map((key) => `aws_cloudwatch_log_group.stage_b["${key}"]`),
   ...Object.keys(executionRoleNames).map((key) => `aws_iam_role.execution["${key}"]`),
@@ -473,6 +518,7 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
   if (!Array.isArray(change.change?.actions) || change.change.actions.length === 0) throw new Error(`Stage B resource rejected at address ${address} ${type}; actions are missing or malformed.`);
   if (validateActions && !actionContract.some((expected) => exactActions(actions, expected))) throw new Error(`Stage B resource rejected at address ${address} ${type} ${JSON.stringify(actions)}; unsupported lifecycle action.`);
   assertStageBResourceIdentity(change, kind, key, strict);
+  if (kind === "backend-ecs-exec-policy") assertStageBBackendEcsExecPolicyChange(change, { strict });
   return { address, type, actions, classification: kind === "broker-function" ? "broker-function-mutation" : kind === "broker-alias" ? "broker-alias-mutation" : kind === "release-permission" ? "broker-release-permission" : `${kind}-${exactActions(actions, ["create"]) ? "create" : "no-op"}` };
 }
 

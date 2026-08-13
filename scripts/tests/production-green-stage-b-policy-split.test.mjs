@@ -40,6 +40,7 @@ const movedSids = [
 const auditAdditionSids = ["ReadStageBBrokerReviewedAlias", "VerifyExactStageBPermissionReportSignature"];
 const stageALiveEvidenceSids = ["ReadStageALivePrerequisites"];
 const controlSids = [
+  "PruneExactStageBBrokerManagedPolicyVersions",
   "TagExactStageBLogs",
   "CreateExactStageBLogs",
   "SetExactStageBLogRetention",
@@ -59,7 +60,7 @@ const finalWriteSids = [
   "UpdateExactStageBBrokerFunctionRelease",
   "UpdateExactStageBBrokerReviewedAlias",
   "UpdateExactStageBBrokerManagedPolicy",
-  "PruneExactStageBBrokerManagedPolicyVersions",
+  "CreateExactStageBBackendEcsExecInlinePolicy",
 ];
 const readOnlyCanaryRoles = [
   "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
@@ -135,7 +136,7 @@ test("v4 plus the companion policy preserves v3 recovery permissions without der
   correctedV3.Statement = correctedV3.Statement.map((statement) => statement.Sid === "DescribeStageBTasksReadOnly" ? statementOf(policies.audit, "DescribeStageBTasksReadOnly") : statement);
   assert.deepEqual(canonical(correctedV3), canonical({
     Version: policies.v3.Version,
-    Statement: [...policies.v4.Statement, ...policies.audit.Statement],
+    Statement: [...policies.v4.Statement.filter(({ Sid }) => Sid !== "PruneExactStageBBrokerManagedPolicyVersions"), ...policies.audit.Statement],
   }));
 });
 
@@ -145,12 +146,12 @@ test("the split keeps the reviewed policy boundaries and adds two exact initial-
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids, "BootstrapExactProductionSecretContainers", "TagExactInitialRotationSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets"]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactProductionSecretContainers", "TagExactInitialRotationSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets", "InvokeExactPreDeploymentInventoryBrokerAlias", "TagExactPreDeploymentInventoryTaskDefinition"]).size, 35);
+  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactProductionSecretContainers", "TagExactInitialRotationSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets", "InvokeExactPreDeploymentInventoryBrokerAlias", "TagExactPreDeploymentInventoryTaskDefinition"]).size, 36);
   for (const sid of movedSids) {
     if (sid === "DescribeStageBTasksReadOnly") continue;
     assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
   }
-  for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "ReadExactStageBBrokerManagedPolicy"].includes(sid))) {
+  for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "ReadExactStageBBrokerManagedPolicy", "PruneExactStageBBrokerManagedPolicyVersions"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
   }
 });
@@ -281,13 +282,19 @@ test("retry write companion is exact and tag-constrained", () => {
     Action: "iam:CreatePolicyVersion",
     Resource: brokerPolicyArn,
   });
-  assert.deepEqual(statementOf(policies.finalWrite, "PruneExactStageBBrokerManagedPolicyVersions"), {
+  assert.deepEqual(statementOf(policies.v4, "PruneExactStageBBrokerManagedPolicyVersions"), {
     Sid: "PruneExactStageBBrokerManagedPolicyVersions",
     Effect: "Allow",
     Action: "iam:DeletePolicyVersion",
     Resource: brokerPolicyArn,
   });
-  assert.equal(statementsForAction(policies.finalWrite, "iam:PutRolePolicy").length, 0);
+  assert.deepEqual(statementOf(policies.finalWrite, "CreateExactStageBBackendEcsExecInlinePolicy"), {
+    Sid: "CreateExactStageBBackendEcsExecInlinePolicy",
+    Effect: "Allow",
+    Action: "iam:PutRolePolicy",
+    Resource: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+  });
+  assert.equal(statementsForAction(policies.finalWrite, "iam:PutRolePolicy").some(({ Resource }) => Resource !== "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"), false);
   assert.equal(statementsForAction(policies.finalWrite, "iam:SetDefaultPolicyVersion").length, 0);
 });
 
@@ -497,7 +504,7 @@ test("the source-controlled policies carry only the reviewed read, recovery, ret
   for (const forbidden of [
     "ecs:RunTask", "ecs:StopTask", "ecs:DeleteService",
     "iam:CreateRole", "iam:UpdateAssumeRolePolicy",
-    "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "sts:AssumeRole",
+    "iam:AttachRolePolicy", "iam:DeleteRolePolicy", "sts:AssumeRole",
     "kms:Decrypt", "rds:Connect", "route53:ChangeResourceRecordSets",
     "elasticloadbalancing:ModifyListener",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
@@ -520,7 +527,7 @@ test("the source-controlled policies carry only the reviewed read, recovery, ret
   assert.equal(actions.includes("secretsmanager:PutSecretValue"), true);
   assert.equal(actions.includes("iam:CreatePolicyVersion"), true);
   assert.equal(actions.includes("iam:DeletePolicyVersion"), true);
-  assert.equal(actions.includes("iam:PutRolePolicy"), false);
+  assert.equal(actions.includes("iam:PutRolePolicy"), true);
   assert.equal(actions.includes("kms:Verify"), true);
   assert.equal(actions.includes("kms:Sign"), false);
 });

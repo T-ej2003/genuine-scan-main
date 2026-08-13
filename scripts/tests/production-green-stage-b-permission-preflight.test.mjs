@@ -498,6 +498,19 @@ test("Stage A checker publication policy update is an exact target-role prefligh
   assert.equal(evaluations.some(({ resource }) => resource === sourceRole), false);
 });
 
+test("backend ECS Exec inline policy creation is an exact target-role preflight capability", () => {
+  const targetRole = "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task";
+  const entry = manifest.required.find(({ id }) => id === "create-stage-b-backend-ecs-exec-inline-policy");
+  assert.equal(entry.action, "iam:PutRolePolicy");
+  assert.deepEqual(entry.resources, [targetRole]);
+  const exactPlan = structuredClone(plan);
+  exactPlan.resource_changes.push({ address: "aws_iam_role_policy.backend_ecs_exec", type: "aws_iam_role_policy", change: { actions: ["create"], before: null, after: {} } });
+  assert.deepEqual(deriveRequiredEvaluations(exactPlan, manifest).required.filter(({ manifestId }) => manifestId === entry.id).map(({ action, resource }) => [action, resource]), [["iam:PutRolePolicy", targetRole]]);
+  for (const id of ["backend-ecs-exec-put-role-policy-unrelated-role", "backend-ecs-exec-put-role-policy-wildcard", "backend-ecs-exec-delete-role-policy", "backend-ecs-exec-attach-role-policy", "backend-ecs-exec-update-trust", "backend-ecs-exec-permissions-boundary"]) {
+    assert.equal(manifest.forbidden.find((item) => item.id === id)?.expectedDecision, "implicitDeny", id);
+  }
+});
+
 test("Stage A live-evidence policy source contains no mutation permission", () => {
   const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));
   const statement = policy.Statement.find((item) => item.Sid === "ReadStageALivePrerequisites");
@@ -708,7 +721,7 @@ test("production-shaped plan requires and binds the exact account and region var
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
   assert.equal(report.requiredEvaluations.length, 154);
-  assert.equal(report.forbiddenEvaluations.length, 28);
+  assert.equal(report.forbiddenEvaluations.length, 34);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
     if (evaluation.resource.startsWith("arn:aws:") && !evaluation.resource.startsWith("arn:aws:s3:::")) assert.ok(evaluation.resource === "*" || evaluation.resource.includes(":368992683803:"), evaluation.resource);

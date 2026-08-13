@@ -107,10 +107,10 @@
       "Resource": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
     },
     {
-      "Sid": "PruneExactStageBBrokerManagedPolicyVersions",
+      "Sid": "CreateExactStageBBackendEcsExecInlinePolicy",
       "Effect": "Allow",
-      "Action": "iam:DeletePolicyVersion",
-      "Resource": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      "Action": "iam:PutRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"
     },
     {
       "Sid": "BootstrapExactProductionSecretContainers",

@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "a93c27f7d9d0a9fed8ae9b2e3e54bbd5253e8863e5f5d6e79a28bd82db16000b",
+  "sourceContractSha256": "dddfd7310710910b232d43af18913984ea4757911df1a3f0e5437387393c86af",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -200,7 +200,7 @@
     },
     {
       "path": "scripts/aws/production-green-stage-b-contract.mjs",
-      "sha256": "1485769ccc899db5fda5b050b460533499959f1e0aebd4489f9ea38546e7ae04"
+      "sha256": "83325bf0a6cc4be3ec46bd5523e5ccb83cf894a8f129a57da804f11795ee79b5"
     },
     {
       "path": "scripts/aws/create-production-green-stage-b-approval.mjs",
@@ -324,7 +324,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:a93c27f7d9d0a9fed8ae9b2e3e54bbd5253e8863e5f5d6e79a28bd82db16000b",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:dddfd7310710910b232d43af18913984ea4757911df1a3f0e5437387393c86af",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

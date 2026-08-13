@@ -342,6 +342,16 @@
       "evidence": "source-controlled SetExactStageBLogRetention statement and Terraform retention contract"
     },
     {
+      "id": "create-stage-b-backend-ecs-exec-inline-policy",
+      "phase": "apply",
+      "action": "iam:PutRolePolicy",
+      "plan": {"type": "aws_iam_role_policy", "actions": ["create"], "address": "aws_iam_role_policy.backend_ecs_exec"},
+      "profiles": ["NORMAL_STAGE_B_RELEASE"],
+      "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"],
+      "context": [],
+      "evidence": "Exact Terraform-created backend ECS Exec inline policy; the deployment contract proves the fixed policy name and four SSM message-channel actions."
+    },
+    {
       "id": "update-broker-function-code-and-configuration",
       "phase": "apply",
       "action": "lambda:UpdateFunctionConfiguration",
@@ -571,6 +581,12 @@
     {"id": "delete-ecs-service", "action": "ecs:DeleteService", "resources": ["arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"], "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},{"key": "ecs:cluster", "type": "string", "values": ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"]}], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Release role must not delete the production service"},
     {"id": "create-ecs-service", "action": "ecs:CreateService", "resources": ["arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"], "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},{"key": "ecs:cluster", "type": "string", "values": ["arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"]}], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Release role must not create the production service"},
     {"id": "create-iam-role", "action": "iam:CreateRole", "resources": ["*"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Release role must not mutate IAM"},
+    {"id": "backend-ecs-exec-put-role-policy-unrelated-role", "action": "iam:PutRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-unrelated-role"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "The inline-policy write is limited to the reviewed backend task role"},
+    {"id": "backend-ecs-exec-put-role-policy-wildcard", "action": "iam:PutRolePolicy", "resources": ["*"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "The inline-policy write must never apply to an arbitrary role"},
+    {"id": "backend-ecs-exec-delete-role-policy", "action": "iam:DeleteRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "The reviewed convergence creates or updates one inline policy and never deletes it"},
+    {"id": "backend-ecs-exec-attach-role-policy", "action": "iam:AttachRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "The reviewed convergence is inline-only"},
+    {"id": "backend-ecs-exec-update-trust", "action": "iam:UpdateAssumeRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "The task-role trust policy is immutable in this Stage B convergence"},
+    {"id": "backend-ecs-exec-permissions-boundary", "action": "iam:PutRolePermissionsBoundary", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "The reviewed convergence does not mutate permissions boundaries"},
     {"id": "deregister-task-definition", "action": "ecs:DeregisterTaskDefinition", "resources": ["*"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Append-only release must not deregister revisions"},
     {"id": "artifact-signing-bootstrap-create-unapproved-secret", "action": "secretsmanager:CreateSecret", "resources": ["*"], "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}, {"key": "secretsmanager:Name", "type": "string", "values": ["mscqr/production/unrelated"]}], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Artifact-signing bootstrap may create only the four canonical names"},
     {"id": "artifact-signing-bootstrap-read-unrelated-secret", "action": "secretsmanager:GetSecretValue", "resources": ["arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/other-secret-AbCd12"], "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Artifact-signing reads are namespace-bound"},

@@ -2,6 +2,12 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "PruneExactStageBBrokerManagedPolicyVersions",
+      "Effect": "Allow",
+      "Action": "iam:DeletePolicyVersion",
+      "Resource": "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+    },
+    {
       "Sid": "TagExactStageBLogs",
       "Effect": "Allow",
       "Action": "logs:TagResource",
