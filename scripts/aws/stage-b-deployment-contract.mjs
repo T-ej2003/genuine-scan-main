@@ -367,8 +367,20 @@ export const STAGE_B_BROKER_PUBLISH_PROVIDER_STABLE_METADATA_FIELDS = Object.fre
     .map(([field]) => field),
 );
 const brokerFunctionAllowedChangedFields = new Set([
-  "environment", "filename", "source_code_hash", ...STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
+  "environment", "filename", "source_code_hash", "timeout", ...STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
 ]);
+
+export const STAGE_B_REVIEWED_BROKER_TIMEOUT_SECONDS = Object.freeze({ before: 30, after: 180 });
+
+export function assertReviewedBrokerTimeoutTransition(change) {
+  if (change?.address !== "aws_lambda_function.broker" || change?.type !== "aws_lambda_function"
+    || !exactActions(change.change?.actions, ["update"])
+    || change.change?.before?.timeout !== STAGE_B_REVIEWED_BROKER_TIMEOUT_SECONDS.before
+    || change.change?.after?.timeout !== STAGE_B_REVIEWED_BROKER_TIMEOUT_SECONDS.after) {
+    throw new Error("Stage B broker timeout is outside the exact reviewed 30-to-180-second transition.");
+  }
+  return true;
+}
 
 function validProviderMetadataValue(value, type) {
   if (type === "number") return typeof value === "number" && Number.isFinite(value);
@@ -412,6 +424,7 @@ export function assertStageBBrokerFunctionUpdate(change) {
     .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
   const unsupported = changed.find((key) => !brokerFunctionAllowedChangedFields.has(key));
   if (unsupported) throw new Error(`Stage B broker function update contains an unsupported mutable field: ${unsupported}.`);
+  if (changed.includes("timeout")) assertReviewedBrokerTimeoutTransition(change);
   assertStageBBrokerPublishProviderMetadataRepresentation(change);
   return true;
 }

@@ -3,6 +3,7 @@ import {
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS,
   STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS,
+  exactReviewedTaskDefinitionTags,
 } from "./stage-b-reference-audit-contract.mjs";
 import {
   assertStageBProviderResourceShapeUniverse,
@@ -13,6 +14,7 @@ import {
 import {
   assertStageBBrokerPolicyDocument,
   assertStageBBrokerPublishProviderMetadataRepresentation,
+  assertReviewedBrokerTimeoutTransition,
   STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
   STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS,
 } from "./stage-b-deployment-contract.mjs";
@@ -677,6 +679,17 @@ function classifyEcsInitialChangedPath(change, path) {
 function classifyEcsChangedPath(change, path) {
   if (isEcsInitialCreate(change)) return classifyEcsInitialChangedPath(change, path);
   if (path === "container_definitions") return "REVIEWED_CONCRETE_CHANGE";
+  if (path === "tags.MSCQRExecTarget" || path === "tags_all.MSCQRExecTarget") {
+    if (change.address !== 'aws_ecs_task_definition.candidate["backend"]'
+      || !exactReviewedTaskDefinitionTags(change.address, change.change.before.tags, change.change.after.tags)
+      || !exactReviewedTaskDefinitionTags(change.address, change.change.before.tags_all, change.change.after.tags_all)
+      || !exactJson(change.change.before.tags, change.change.before.tags_all)
+      || !exactJson(change.change.after.tags, change.change.after.tags_all)
+      || exactJson(change.change.before.tags, change.change.after.tags)) {
+      throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
+    }
+    return "REVIEWED_CONCRETE_CHANGE";
+  }
   if (ECS_METADATA_PATHS.has(path)) return "DIAGNOSTIC_ONLY";
   if (path === "ipc_mode" || path === "pid_mode") {
     const before = change.change.before[path]; const after = change.change.after[path];
@@ -731,6 +744,10 @@ function classifyChangedPath(change, path) {
     }
     if (BROKER_FUNCTION_INITIAL_CHANGED_PATHS.has(path)) return "REVIEWED_CONCRETE_CHANGE";
     throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
+  }
+  if (change.address === "aws_lambda_function.broker" && path === "timeout") {
+    assertReviewedBrokerTimeoutTransition(change);
+    return "REVIEWED_CONCRETE_CHANGE";
   }
   if (change.address === "aws_lambda_function.broker" && BROKER_FUNCTION_CHANGED_PATHS.has(path)) {
     if (path === "source_code_hash") return "CONFIGURATION_BOUND_PACKAGE_DIGEST";
@@ -861,6 +878,11 @@ export function censusStageBPlanSemantics(plan) {
     const classification = classifyResource(change);
     assertTypedRepresentationEnvelope(change);
     assertBrokerPublishProviderMetadataRepresentation(change);
+    if (change.address === "aws_lambda_function.broker" && exactJson(change.change?.actions, ["update"])) {
+      const changedFields = [...new Set([...Object.keys(change.change?.before || {}), ...Object.keys(change.change?.after || {})])]
+        .filter((key) => !exactJson(change.change?.before?.[key], change.change?.after?.[key]));
+      if (changedFields.includes("timeout")) assertReviewedBrokerTimeoutTransition(change);
+    }
     if (ECS_ADDRESSES.has(change.address)) assertEcsSemanticDomain(change);
     assertInitialBrokerEnvironment(change);
     if (isBrokerInitialCreate(change) || isEcsInitialCreate(change)) assertInitialProviderComputedShape(change);
