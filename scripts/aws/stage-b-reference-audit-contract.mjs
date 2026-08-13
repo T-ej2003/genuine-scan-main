@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { assertStageBDeploymentEvidenceFreshness, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
+import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
+import { STAGE_B_BACKEND_PORT_MAPPING } from "./production-green-stage-b-task-definitions.mjs";
 
 export const STAGE_B_TASK_DEFINITION_FAMILIES = Object.freeze({
   'aws_ecs_task_definition.candidate["backend"]': "mscqr-production-rls-green-backend-candidate",
@@ -56,6 +58,9 @@ export const STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS = Object.freeze([
   "execution_role_arn", "task_role_arn", "runtime_platform", "volume", "ipc_mode", "pid_mode", "tags",
 ]);
 const rotationStableFields = STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS;
+const backendTaskDefinitionAddress = 'aws_ecs_task_definition.candidate["backend"]';
+const baseTaskDefinitionTags = Object.freeze({ Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" });
+const backendTaskDefinitionTags = Object.freeze({ ...baseTaskDefinitionTags, [ECS_EXEC_OPERATOR_TASK_TAG_KEY]: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
 
 const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 const isRotationActions = (actions) => STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS.some((expected) => exactActions(actions, expected));
@@ -112,6 +117,11 @@ const canonicalTaskDefinitionStableField = (field, value) => {
   if (field === "ipc_mode" || field === "pid_mode") return canonicalizeEcsTaskDefinitionNullableMode(value, field);
   return stableTaskDefinitionValue(parsedTaskDefinitionValue(value));
 };
+const exactReviewedTaskDefinitionTags = (address, before, after) => {
+  const canonical = (value) => JSON.stringify(stableTaskDefinitionValue(value));
+  return canonical(before) === canonical(after)
+    || (address === backendTaskDefinitionAddress && canonical(before) === canonical(baseTaskDefinitionTags) && canonical(after) === canonical(backendTaskDefinitionTags));
+};
 const rotationContainerEmptyArrayDefaults = Object.freeze(["environment", "mountPoints", "portMappings", "systemControls", "volumesFrom"]);
 const imageVariableForAddress = (address) => {
   const key = /\["([^\"]+)"\]$/.exec(address)?.[1];
@@ -154,6 +164,9 @@ function assertRotationContainers(beforeValue, afterValue, plan, address, strict
       delete copy.image;
       for (const field of rotationContainerEmptyArrayDefaults) if (copy[field] === undefined || copy[field] === null) copy[field] = [];
       if (Array.isArray(copy.environment)) copy.environment = copy.environment.map((item) => rotationMutableEnvironment.has(item?.name) ? { ...item, value: "<reviewed-provenance>" } : item);
+      if (address === backendTaskDefinitionAddress
+        && JSON.stringify(beforeContainer.portMappings) === "[]"
+        && JSON.stringify(stableTaskDefinitionValue(afterContainer.portMappings)) === JSON.stringify(stableTaskDefinitionValue([STAGE_B_BACKEND_PORT_MAPPING]))) copy.portMappings = "<reviewed-backend-port-mapping>";
       return stableTaskDefinitionValue(copy);
     };
     if (JSON.stringify(normalize(beforeContainer)) !== JSON.stringify(normalize(afterContainer))) throw new Error(`Stage B task-definition rotation contains an unreviewed container field change: ${address}`);
@@ -176,7 +189,9 @@ export function assertStageBTaskDefinitionRotation(change, plan, { strict = true
   const afterIdentity = after.arn === undefined || after.arn === null ? undefined : currentTaskDefinitionArnPattern.exec(after.arn);
   if (after.arn !== undefined && after.arn !== null && (!afterIdentity || afterIdentity[1] !== expectedFamily)) throw new Error(`Stage B task-definition rotation new identity is invalid: ${address}`);
   for (const field of rotationStableFields) {
-    if ((field !== "volume" && before[field] === undefined) || (field !== "volume" && after[field] === undefined) || JSON.stringify(canonicalTaskDefinitionStableField(field, before[field])) !== JSON.stringify(canonicalTaskDefinitionStableField(field, after[field]))) {
+    if ((field !== "volume" && before[field] === undefined) || (field !== "volume" && after[field] === undefined) || (field === "tags"
+      ? !exactReviewedTaskDefinitionTags(address, before[field], after[field])
+      : JSON.stringify(canonicalTaskDefinitionStableField(field, before[field])) !== JSON.stringify(canonicalTaskDefinitionStableField(field, after[field])))) {
       throw new Error(`Stage B task-definition rotation changes an immutable field: ${address}.${field}`);
     }
   }

@@ -194,7 +194,33 @@ export function assertStageBBrokerPolicyDocument(document) {
   return true;
 }
 
-function assertTerraformPolicySource(terraformConfiguration, strict) {
+function hclStringAssignments(source, name) {
+  const assignments = [];
+  let blockComment = false;
+  let offset = 0;
+  for (const rawLine of source.split("\n")) {
+    let line = "";
+    let quoted = false;
+    for (let index = 0; index < rawLine.length; index += 1) {
+      if (blockComment) {
+        if (rawLine.startsWith("*/", index)) { blockComment = false; index += 1; }
+        continue;
+      }
+      if (!quoted && rawLine.startsWith("/*", index)) { blockComment = true; index += 1; continue; }
+      if (!quoted && (rawLine[index] === "#" || rawLine.startsWith("//", index))) break;
+      line += rawLine[index];
+      if (rawLine[index] === "\\" && quoted) { index += 1; line += rawLine[index] || ""; continue; }
+      if (rawLine[index] === '"') quoted = !quoted;
+    }
+    const match = line.match(new RegExp(`^\\s*${name}\\s*=\\s*"([^"\\\\]*)"\\s*,?\\s*$`));
+    if (match) assignments.push({ value: match[1], index: offset + line.search(/\S/) });
+    offset += rawLine.length + 1;
+  }
+  if (blockComment) throw new Error("Broker managed-policy Terraform source contains an unterminated block comment.");
+  return assignments;
+}
+
+export function assertStageBTerraformBrokerPolicySource(terraformConfiguration, strict = true) {
   if (!strict) return;
   if (typeof terraformConfiguration !== "string") throw new Error("Broker managed-policy source contract is missing.");
   if (!/resource "aws_iam_policy" "broker"[\s\S]*?name\s*=\s*"mscqr-production-rls-approval-broker-runtime"[\s\S]*?path\s*=\s*"\/"[\s\S]*?policy\s*=\s*jsonencode\(local\.broker_runtime_policy\)/.test(terraformConfiguration)) {
@@ -203,15 +229,17 @@ function assertTerraformPolicySource(terraformConfiguration, strict) {
   const start = terraformConfiguration.indexOf("broker_runtime_policy = {");
   const end = terraformConfiguration.indexOf("\n  broker_template_hashes =", start);
   const source = start >= 0 && end > start ? terraformConfiguration.slice(start, end) : "";
+  const statements = hclStringAssignments(source, "Sid");
+  const expectedSids = STAGE_B_BROKER_POLICY_STATEMENTS.map(([sid]) => sid);
+  if (JSON.stringify(statements.map(({ value }) => value)) !== JSON.stringify(expectedSids)) throw new Error("Broker managed-policy source Sid assignments are missing, duplicated, or out of contract.");
   for (let index = 0; index < STAGE_B_BROKER_POLICY_STATEMENTS.length; index += 1) {
     const [sid, actions] = STAGE_B_BROKER_POLICY_STATEMENTS[index];
-    const statementStart = source.indexOf(`Sid      = "${sid}"`);
-    const nextStatement = index + 1 < STAGE_B_BROKER_POLICY_STATEMENTS.length
-      ? source.indexOf(`Sid      = "${STAGE_B_BROKER_POLICY_STATEMENTS[index + 1][0]}"`, statementStart)
-      : source.length;
-    const statement = statementStart >= 0 ? source.slice(statementStart, nextStatement >= 0 ? nextStatement : source.length) : "";
+    const statementStart = statements[index].index;
+    const nextStatement = statements[index + 1]?.index ?? source.length;
+    const statement = source.slice(statementStart, nextStatement);
     const actionValues = statement.match(/Action\s*=\s*\[([^\]]+)\]/)?.[1].match(/"([^"]+)"/g)?.map((value) => value.slice(1, -1)).sort();
-    if (!statement.includes('Effect   = "Allow"') || JSON.stringify(actionValues) !== JSON.stringify([...actions].sort())) throw new Error(`Broker managed-policy source statement is not canonical: ${sid}`);
+    const effects = hclStringAssignments(statement, "Effect").map(({ value }) => value);
+    if (JSON.stringify(effects) !== JSON.stringify(["Allow"]) || JSON.stringify(actionValues) !== JSON.stringify([...actions].sort())) throw new Error(`Broker managed-policy source statement is not canonical: ${sid}`);
   }
   const sourceResourceExpressions = {
     RunOnlyApprovedExecutorAndCanaryRevisions: "Resource = values(local.active_broker_task_definition_arns)",
@@ -228,9 +256,9 @@ function assertTerraformPolicySource(terraformConfiguration, strict) {
     ReadOnlyPreDeploymentInventoryLogs: "Resource = \"${trimsuffix(local.execution_log_group_arns[\"backend\"], \":*\")}:log-stream:*\"",
   };
   for (const [sid, expression] of Object.entries(sourceResourceExpressions)) {
-    const statementStart = source.indexOf(`Sid      = "${sid}"`);
-    const nextSid = STAGE_B_BROKER_POLICY_STATEMENTS[STAGE_B_BROKER_POLICY_STATEMENTS.findIndex(([candidate]) => candidate === sid) + 1]?.[0];
-    const nextStatement = nextSid ? source.indexOf(`Sid      = "${nextSid}"`, statementStart) : source.length;
+    const statementIndex = STAGE_B_BROKER_POLICY_STATEMENTS.findIndex(([candidate]) => candidate === sid);
+    const statementStart = statements[statementIndex].index;
+    const nextStatement = statements[statementIndex + 1]?.index ?? source.length;
     const statement = source.slice(statementStart, nextStatement >= 0 ? nextStatement : source.length).replace(/\s+/g, " ");
     if (!statement.includes(expression.replace(/\s+/g, " "))) throw new Error(`Broker managed-policy source resource is not canonical: ${sid}`);
     const expectedCondition = brokerPolicyConditions[sid];
@@ -260,7 +288,7 @@ function assertBrokerPolicyChange(change, { strict, terraformConfiguration, vali
   }
   if (typeof after.policy === "string") normalizedPolicyShape(JSON.parse(after.policy));
   else if (after_unknown_policy(change) !== true) throw new Error("Broker managed-policy document is missing or unprovable.");
-  assertTerraformPolicySource(terraformConfiguration, strict);
+  assertStageBTerraformBrokerPolicySource(terraformConfiguration, strict);
   return exactActions(actions, ["update"]) ? "broker-managed-policy-update" : exactActions(actions, ["create"]) ? "broker-managed-policy-create" : "broker-managed-policy-no-op";
 }
 

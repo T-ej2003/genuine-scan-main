@@ -1,12 +1,32 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { assertStageBClosureMatrixCoverage, classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "../aws/stage-b-deployment-contract.mjs";
+import { assertStageBClosureMatrixCoverage, assertStageBTerraformBrokerPolicySource, classifyStageBPlan, STAGE_B_RESOURCE_ACTION_MATRIX } from "../aws/stage-b-deployment-contract.mjs";
 import { assertStageBNormalPlanCompleteness } from "../aws/stage-b-plan-approval-contract.mjs";
 
 const fixturePath = "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json";
 const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 const closureMatrix = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.json", "utf8"));
+const terraformConfiguration = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+
+test("broker policy source recognizes exact Sid assignments independent of HCL alignment", () => {
+  for (const spacing of [" ", "    ", "      "]) {
+    const source = terraformConfiguration.replace('Sid    = "ReadAndStopOnlyPreDeploymentInventory"', `Sid${spacing}= "ReadAndStopOnlyPreDeploymentInventory"`);
+    assert.doesNotThrow(() => assertStageBTerraformBrokerPolicySource(source));
+  }
+});
+
+test("broker policy source rejects wrong, fabricated, malformed, and duplicate Sid assignments", () => {
+  const sid = 'Sid    = "ReadAndStopOnlyPreDeploymentInventory"';
+  for (const replacement of [
+    'Sid = "WrongReadAndStop"',
+    `# ${sid}`,
+    `/* ${sid} */`,
+    `label = "${sid}"`,
+    'Sid : "ReadAndStopOnlyPreDeploymentInventory"',
+    `${sid}\n        ${sid}`,
+  ]) assert.throws(() => assertStageBTerraformBrokerPolicySource(terraformConfiguration.replace(sid, replacement)), /Sid assignments/);
+});
 
 test("backend ECS Exec policy has one exact closure entry and only the four channel actions", () => {
   const entries = closureMatrix.resources.filter(({ addressPattern }) => addressPattern === "aws_iam_role_policy.backend_ecs_exec");

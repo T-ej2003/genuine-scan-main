@@ -19,6 +19,7 @@ const confirmations = Object.freeze({
   "full-rls-runtime-policy": "MSCQR_PRODUCTION_GREEN_INSTALL_RUNTIME_POLICIES",
   "full-rls-rollback": "MSCQR_PRODUCTION_GREEN_ROLLBACK_EXACT_PACKAGE",
 });
+export const STAGE_B_BACKEND_PORT_MAPPING = Object.freeze({ containerPort: 4000, hostPort: 4000, protocol: "tcp", name: "backend-4000-tcp", appProtocol: "http" });
 const readTemplate = (kind) => {
   if (!files[kind]) throw new Error("Unknown Stage B task template.");
   return JSON.parse(fs.readFileSync(path.join(root, files[kind]), "utf8"));
@@ -52,7 +53,6 @@ export function assertFixedTaskDefinition(definition) {
   const backendUploads = definition?.family === "mscqr-production-rls-green-backend-candidate";
   const uploadMount = container?.mountPoints?.find((mount) => mount.sourceVolume === "backend-uploads");
   const scratchMount = container?.mountPoints?.find((mount) => /^(executor|canary)-tmp$/.test(mount.sourceVolume));
-  const backendPortMapping = { containerPort: 4000, hostPort: 4000, protocol: "tcp", name: "backend-4000-tcp", appProtocol: "http" };
   const fargateSizes = new Set(["256/512", "256/1024", "512/1024", "512/2048", "1024/2048", "1024/3072", "1024/4096", "2048/4096", "2048/5120", "2048/6144", "2048/7168", "2048/8192", "4096/8192", "4096/16384", "4096/30720"]);
   if (!container || definition.networkMode !== "awsvpc" || !definition.requiresCompatibilities?.includes("FARGATE")
       || container.privileged || container.interactive || container.pseudoTerminal || !Array.isArray(container.entryPoint)
@@ -62,7 +62,7 @@ export function assertFixedTaskDefinition(definition) {
       || new Set(secretNames).size !== secretNames.length || environmentNames.some((name) => secretNames.includes(name))
       || (backendUploads && (!definition.volumes?.some((volume) => volume.name === "backend-uploads" && !Object.hasOwn(volume, "host"))
         || uploadMount?.containerPath !== "/app/uploads" || uploadMount.readOnly !== false))
-      || (backendUploads && JSON.stringify(container.portMappings || []) !== JSON.stringify([backendPortMapping]))
+      || (backendUploads && JSON.stringify(container.portMappings || []) !== JSON.stringify([STAGE_B_BACKEND_PORT_MAPPING]))
       || (!backendUploads && (definition.volumes?.length || container.mountPoints?.length) && (!scratchMount || scratchMount.containerPath !== "/tmp" || scratchMount.readOnly !== false
         || definition.volumes?.length !== 1 || container.mountPoints?.length !== 1))
       || JSON.stringify(definition).includes("rds!db-70d459ec-4f6f-45da-aafc-618e83d660a1-Dy9GLo")
