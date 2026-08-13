@@ -23,7 +23,7 @@ The only accepted statuses are:
 
 - `NO_CHANGES`: no non-no-op resource changes and no output changes;
 - `REVIEWED_OUTPUT_RECONCILIATION`: no resource changes and only the reviewed
-  `bound_images` and proven-empty `task_definition_arns` outputs changed.
+  `bound_images` or validated `task_definition_arns` output changed.
 
 Any managed-resource action, unknown output, unexpected output value, unknown or
 sensitive value, failed check, provider/backend error, malformed JSON, stale state,
@@ -32,8 +32,11 @@ is deleted and is never a deployable saved plan.
 
 `bound_images` must equal the five immutable image references in the canonical tfvars
 binding report. `task_definition_arns` is accepted only when protected-main defines
-the output and the bound Stage B state contains no current task-definition addresses,
-which proves the proposed value is `{}` before apply.
+the output and the bound Stage B state either has no current task-definition addresses
+with a proven `{}` output, or contains the exact reviewed candidate/executor address
+set whose account, region, family, ARN, and output mapping match exactly. Historical
+retained task-definition collections remain separately validated state and are not part
+of this output mapping.
 
 Production callers must provide the Stage B state backup explicitly:
 
