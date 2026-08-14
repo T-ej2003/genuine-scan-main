@@ -417,6 +417,10 @@ function privateBackendDirectory(overrides) {
 test("forward CLI backend gate rejects stale TF_DATA_DIR, copied backend, wrong key, and workspace", () => {
   const dataDir = privateBackendDirectory();
   const otherDir = privateBackendDirectory();
+  assert.doesNotThrow(() => buildForwardRecoveryTerraformEnvironment(dataDir, { PATH: "/usr/bin" }));
+  for (const [key, value] of [["TF_CLI_ARGS", "-lock=false"], ["TF_CLI_ARGS_import", "-lock=false"], ["TF_CLI_ARGS_import", "-lock-timeout=0s"], ["TF_CLI_ARGS_plan", "-destroy"], ["TF_CLI_ARGS_custom", "-input=false"], ["TF_CLI_CONFIG_FILE", "/tmp/unreviewed.tfrc"], ["TF_PLUGIN_CACHE_DIR", "/tmp/unreviewed-cache"], ["TF_INPUT", "1"], ["TF_IN_AUTOMATION", "0"], ["TF_LOG", "TRACE"], ["TF_LOG_PATH", "/tmp/terraform.log"], ["TF_VAR_region", "wrong"]]) {
+    assert.throws(() => buildForwardRecoveryTerraformEnvironment(dataDir, { [key]: value }), /Terraform override variables/);
+  }
   assert.throws(() => buildForwardRecoveryTerraformEnvironment(dataDir, { TF_DATA_DIR: otherDir, TF_WORKSPACE: "default" }), /stale/);
   assert.doesNotThrow(() => assertForwardRecoveryTerraformBackend({ env: buildForwardRecoveryTerraformEnvironment(dataDir, {}), repositoryRoot: process.cwd(), runTerraform: () => "default\n" }));
   for (const overrides of [{ bucket: "local-copy" }, { key: "wrong.tfstate" }]) {

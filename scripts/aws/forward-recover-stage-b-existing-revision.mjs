@@ -11,6 +11,7 @@ import { deriveStageBImageImpactReport } from "./validate-stage-b-image-reuse.mj
 import { deriveCanonicalRecoveryProvenance, collectCanonicalBackendRecoveryCensus, preflightCanonicalRecoveryOutputs } from "./recover-stage-b-backend-task-definition.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { runExistingRevisionForwardRecovery, STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY } from "./stage-b-existing-revision-forward-recovery-contract.mjs";
+import { findTerraformCliArgEnvKeys } from "../plan-staging-terraform.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -28,6 +29,8 @@ export function buildForwardRecoveryTerraformEnvironment(terraformDataDir, baseE
   if (!terraformDataDir || resolved === path.resolve(root)) throw new Error("Forward recovery requires the dedicated private Terraform data directory.");
   if (baseEnv.TF_DATA_DIR && path.resolve(baseEnv.TF_DATA_DIR) !== resolved) throw new Error("Forward recovery refuses a stale ambient TF_DATA_DIR.");
   if (baseEnv.TF_WORKSPACE && baseEnv.TF_WORKSPACE !== STAGE_B_TERRAFORM_WORKSPACE) throw new Error("Forward recovery refuses a non-default ambient Terraform workspace.");
+  const forbiddenTerraformEnvKeys = [...findTerraformCliArgEnvKeys(baseEnv), ...Object.keys(baseEnv).filter((key) => ["TF_CLI_CONFIG_FILE", "TF_PLUGIN_CACHE_DIR", "TF_INPUT", "TF_IN_AUTOMATION", "TF_LOG", "TF_LOG_PATH"].includes(key) || key.startsWith("TF_VAR_"))].sort();
+  if (forbiddenTerraformEnvKeys.length > 0) throw new Error(`Forward recovery refuses ambient Terraform override variables: ${forbiddenTerraformEnvKeys.join(", ")}.`);
   return { ...baseEnv, TF_DATA_DIR: resolved, TF_WORKSPACE: STAGE_B_TERRAFORM_WORKSPACE };
 }
 
