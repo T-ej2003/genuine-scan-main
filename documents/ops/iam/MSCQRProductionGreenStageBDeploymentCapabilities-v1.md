@@ -3,9 +3,9 @@
 Generated from the permission manifest, reviewed source policies, release probes, canonical recovery, publisher policy, Terraform runtime policy actions, and the 32-phase production path. Do not edit generated capability rows manually.
 
 - Phases: 32
-- Capability nodes: 210
+- Capability nodes: 299
 - Unique AWS actions: 102
-- Identities: GITHUB_IMAGE_PUBLISHER, ADMINISTRATOR, BOOTSTRAP_OPERATOR, RELEASE_DEPLOYER, INDEPENDENT_CHECKER, ECS_EXEC_VERIFIER_OPERATOR, SERVICE_RUNTIME
+- Identities: GITHUB_IMAGE_PUBLISHER, GITHUB_PRODUCTION_MUTATION, ADMINISTRATOR, BOOTSTRAP_OPERATOR, RELEASE_DEPLOYER, INDEPENDENT_CHECKER, ECS_EXEC_VERIFIER_OPERATOR, SERVICE_RUNTIME
 
 | Order | Phase | Source |
 |---:|---|---|

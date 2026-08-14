@@ -31,7 +31,7 @@ const IMAGE_INPUTS = [
 ];
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/workflows\//;
-const TERRAFORM = /^infra\/aws\/terraform\/production-green-stage-(?:a|b)\//;
+const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b)|production-github-actions-identity)\//;
 const CONTROL_PLANE = /^infra\/aws\/terraform\/lambda\/production-rls-approval-broker\/(?:index\.mjs|package\.json|package-lock\.json)$/;
 const TEST = /(?:^|\/)(?:tests?|fixtures)(?:\/|\.)|\.test\.[^.]+$/;
 const TOOLING_ONLY = new Set([".gitleaks-baseline.json", ".gitleaksignore", ".security/rotation-evidence.schema.json"]);

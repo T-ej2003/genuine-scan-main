@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 
 export const STAGE_B_IMAGE_PUBLICATION_IDENTITY_SCHEMA_VERSION = 1;
 export const STAGE_B_IMAGE_WORKFLOW_FILE = ".github/workflows/production-green-stage-b-images.yml";
@@ -14,6 +15,7 @@ const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex"
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const SHA = /^[a-f0-9]{40}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
+const IMAGE_DIGEST = /^sha256:[a-f0-9]{64}$/;
 const INTEGER = /^\d+$/;
 
 const requireExact = (actual, expected, label) => {
@@ -46,6 +48,30 @@ function parseServices(artifactBytes) {
   const services = records.map((record) => record?.service);
   if (records.length !== STAGE_B_IMAGE_SERVICES.length || new Set(services).size !== records.length || [...services].sort().join("\n") !== [...STAGE_B_IMAGE_SERVICES].sort().join("\n")) throw new Error("Stage B publication artifact must contain exactly the four reviewed services.");
   return Object.freeze([...services].sort());
+}
+
+const publicationRecordKeys = Object.freeze(["service", "repository", "image_uri", "image_tag", "image_digest", "image_ref"]);
+
+export function parseStageBImagePublicationRecords(artifactBytes, { expectedReleaseSha } = {}) {
+  if (!Buffer.isBuffer(artifactBytes)) throw new Error("Stage B publication artifact bytes are required.");
+  if (!SHA.test(String(expectedReleaseSha || ""))) throw new Error("Stage B publication release SHA is required.");
+  let records;
+  try { records = artifactBytes.toString("utf8").trim().split(/\n/).filter(Boolean).map(JSON.parse); } catch { throw new Error("Stage B publication artifact JSONL is malformed."); }
+  if (records.length !== STAGE_B_IMAGE_SERVICES.length || new Set(records.map((record) => record?.service)).size !== records.length || [...records.map((record) => record?.service)].sort().join("\n") !== [...STAGE_B_IMAGE_SERVICES].sort().join("\n")) throw new Error("Stage B publication artifact must contain exactly the four reviewed services.");
+
+  const expected = {
+    backend: { repository: "mscqr-backend", tag: expectedReleaseSha },
+    worker: { repository: "mscqr-worker", tag: expectedReleaseSha },
+    "rls-executor": { repository: "mscqr-backend", tag: `${expectedReleaseSha}-rls-executor` },
+    "rls-canary": { repository: "mscqr-backend", tag: `${expectedReleaseSha}-rls-canary` },
+  };
+  return Object.freeze(records.map((record) => {
+    if (!record || typeof record !== "object" || Array.isArray(record) || Object.keys(record).sort().join(",") !== [...publicationRecordKeys].sort().join(",")) throw new Error("Stage B publication artifact record fields are not exact.");
+    const contract = expected[record.service];
+    const imageUri = `${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/${contract.repository}:${contract.tag}`;
+    if (record.repository !== contract.repository || record.image_tag !== contract.tag || record.image_uri !== imageUri || !IMAGE_DIGEST.test(String(record.image_digest || "")) || record.image_ref !== imageUri.replace(/:[^:@]+$/, `@${record.image_digest}`)) throw new Error(`Stage B publication artifact binding is invalid for ${record.service}.`);
+    return Object.freeze({ ...record });
+  }).sort((left, right) => left.service.localeCompare(right.service)));
 }
 
 export function buildStageBImagePublicationIdentity({ observed, artifactBytes, expectedReleaseSha, observedAt = new Date().toISOString() } = {}) {

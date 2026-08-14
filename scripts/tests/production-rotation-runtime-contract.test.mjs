@@ -214,7 +214,8 @@ test("release gate keeps normal strictness and admits only governed transition m
   assert.match(releaseGate, /TARGET_EVENTS: \$\{\{ inputs\.release_mode == 'normal' && 'push,workflow_dispatch' \|\| 'push' \}\}/);
   assert.match(releaseGate, /inputs\.release_mode != 'normal'[\s\S]*run-production-cutover\.mjs/);
   assert.match(releaseGate, /ENABLE_EXECUTE_COMMAND: "true"/);
-  assert.match(releaseGate, /inputs\.release_mode == 'normal'[\s\S]*Publish immutable ECS images/);
+  assert.match(releaseGate, /inputs\.release_mode == 'normal'[\s\S]*Consume preauthorized immutable Stage-B image publication/);
+  assert.doesNotMatch(releaseGate, /amazon-ecr-login|apply-ecr-repository-controls|publish-ecs-images\.sh/);
   assert.match(releaseGate, /deploy-production-ecs:[\s\S]*needs: resolve-deploy-target/);
   const packageJson = JSON.parse(read("package.json"));
   assert.match(packageJson.scripts["check:rotation-evidence-freshness"], /check-rotation-evidence-freshness/);

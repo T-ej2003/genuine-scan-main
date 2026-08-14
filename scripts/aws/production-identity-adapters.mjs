@@ -2,10 +2,10 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { establishEcsExecVerifierSession } from "./establish-production-ecs-exec-verifier-session.mjs";
 import { ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
+import { assertGitHubApprovedMutationContext, assertProductionCaller, PRODUCTION_CALLER_MODES, RELEASE_ROLE_ARN } from "./production-caller-identity-contract.mjs";
 
-const ACCOUNT = "368992683803";
-export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
-const RELEASE_CALLER = new RegExp(`^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`);
+export { RELEASE_ROLE_ARN };
+
 export const VERIFIER_SESSION_MIN_REMAINING_MS = 60_000;
 
 const parse = (output) => JSON.parse(String(output || "{}"));
@@ -80,8 +80,15 @@ export function createAwsStsRunner({ profile, region = "eu-west-2", run = execFi
 export async function establishReleaseDeployerIdentity({ adapter } = {}) {
   if (!adapter || typeof adapter.getCallerIdentity !== "function") throw new Error("Release-deployer identity adapter is incomplete.");
   const callerArn = await adapter.getCallerIdentity();
-  if (!RELEASE_CALLER.test(callerArn || "")) throw new Error(`Caller is not the reviewed assumed role ${RELEASE_ROLE_ARN}.`);
-  return { valid: true, roleArn: RELEASE_ROLE_ARN, callerArn, evidenceRef: `sts:${RELEASE_ROLE_ARN}`, evidenceSha256: cryptoSha(`${RELEASE_ROLE_ARN}\n${callerArn}`) };
+  assertProductionCaller({ callerArn, mode: PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER });
+  return { valid: true, mode: PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER, roleArn: RELEASE_ROLE_ARN, callerArn, evidenceRef: `sts:${RELEASE_ROLE_ARN}`, evidenceSha256: cryptoSha(`${RELEASE_ROLE_ARN}\n${callerArn}`) };
+}
+
+export async function establishGitHubMutationIdentity({ adapter, context } = {}) {
+  if (!adapter || typeof adapter.getCallerIdentity !== "function") throw new Error("GitHub mutation identity adapter is incomplete.");
+  const callerArn = await adapter.getCallerIdentity();
+  const identity = assertGitHubApprovedMutationContext({ ...context, callerArn, mode: PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION });
+  return { valid: true, ...identity, evidenceRef: `sts:${identity.roleArn}`, evidenceSha256: cryptoSha(`${identity.roleArn}\n${callerArn}\n${identity.sourceSha}\n${identity.workflowRef}`) };
 }
 
 export async function establishVerifierIdentity({ adapter, mfaSerial, mfaCode } = {}) {

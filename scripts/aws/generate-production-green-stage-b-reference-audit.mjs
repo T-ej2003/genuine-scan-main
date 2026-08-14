@@ -19,13 +19,13 @@ import {
 import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
 import { classifyStageBPlan } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
+import { assertGitHubApprovedMutationContext, assertProductionCaller, PRODUCTION_CALLER_MODES } from "./production-caller-identity-contract.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
 export { batch, createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const taskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([A-Za-z0-9_-]+):([1-9][0-9]*)$/;
-const assumedReleaseRolePattern = /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[A-Za-z0-9+=,.@_-]{2,64}$/;
 const sorted = (items, key) => [...items].sort((left, right) => String(key(left)).localeCompare(String(key(right))));
 const stageBTerraformConfigurationPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b/main.tf");
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -182,8 +182,10 @@ function ensurePlanHash(planBytes, expectedPlanSha256) {
   return actual;
 }
 
-function validateCaller(callerArn) {
-  if (!assumedReleaseRolePattern.test(callerArn || "")) throw new Error("Caller is not the MFA-backed production release-deployer role.");
+function validateCaller(callerArn, sourceSha) {
+  const mode = process.env.MSCQR_PRODUCTION_CALLER_MODE || PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER;
+  assertProductionCaller({ callerArn, mode });
+  if (mode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION) assertGitHubApprovedMutationContext({ callerArn, mode, repository: process.env.GITHUB_REPOSITORY, environment: process.env.GITHUB_ENVIRONMENT, ref: process.env.GITHUB_REF, workflowRef: process.env.GITHUB_WORKFLOW_REF, eventName: process.env.GITHUB_EVENT_NAME, sourceSha, trustedMainSha: process.env.TRUSTED_MAIN_SHA || sourceSha, environmentApproved: process.env.PRODUCTION_ENVIRONMENT_APPROVED === "true" });
   return callerArn;
 }
 
@@ -394,7 +396,7 @@ function generateRecoveryOnlyReferenceAudit({ plan, planBytes, planJsonSha256, r
   const planSha = ensurePlanHash(planBytes, planJsonSha256);
   const deploymentIdentity = assertStageBDeploymentIdentity({ plan });
   const observedCallerArn = callerArn || reader.getCallerIdentity()?.Arn;
-  if (!assumedReleaseRolePattern.test(observedCallerArn || "")) throw new Error("Recovery-only reference audit caller is not the production release-deployer.");
+  validateCaller(observedCallerArn, deploymentIdentity.toolingSha);
   const noOpResources = changes.filter((change) => change !== alias).map((change) => ({ address: change.address, type: change.type, actions: change.change?.actions || [] }));
   return {
     schemaVersion: STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
@@ -492,7 +494,7 @@ export function generateReferenceAudit({
       ...(currentArnSetByFamily.get(family) || []),
     ]));
   }
-  const observedCallerArn = validateCaller(callerArn || reader.getCallerIdentity()?.Arn);
+  const observedCallerArn = validateCaller(callerArn || reader.getCallerIdentity()?.Arn, deploymentIdentity.toolingSha);
 
   const oldDefinitions = [];
   for (const rollover of [...rolloverByAddress.values()].sort((left, right) => left.address.localeCompare(right.address))) {

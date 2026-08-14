@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "repository": "T-ej2003/genuine-scan-main",
+  "productionEnvironment": "production",
+  "readOnlyEnvironment": "production-read-only",
+  "deploymentBranches": ["main"],
+  "requiredReviewers": true,
+  "preventSelfReview": false,
+  "oidcAudience": "sts.amazonaws.com",
+  "mutationWorkflowRef": "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main",
+  "remoteConfiguration": "operator-configured-and-read-verified; not Terraform-managed"
+}

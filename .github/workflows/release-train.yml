@@ -12,6 +12,10 @@ on:
         description: "Optional exact main-branch commit SHA. Defaults to git_ref HEAD."
         required: false
         type: string
+      stage_b_image_workflow_run_id:
+        description: "Successful protected-main Stage-B image publication workflow run ID"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -94,6 +98,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_REF: ${{ steps.resolve.outputs.target_ref }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
+          STAGE_B_IMAGE_WORKFLOW_RUN_ID: ${{ inputs.stage_b_image_workflow_run_id }}
         run: |
           set -euo pipefail
 
@@ -103,6 +108,7 @@ jobs:
             --ref "${GIT_REF:-main}" \
             -f git_ref="$TARGET_REF" \
             -f target_sha="$TARGET_SHA" \
-            -f release_train_run_id="$GITHUB_RUN_ID"
+            -f release_train_run_id="$GITHUB_RUN_ID" \
+            -f stage_b_image_workflow_run_id="$STAGE_B_IMAGE_WORKFLOW_RUN_ID"
 
           echo "Final action: release-gate.yml dispatched for ${TARGET_SHA}. Release Train does not deploy directly."

@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { STAGE_B, STAGE_B_APPROVAL_PUBLICATION_VALIDATION_OPERATION, stageBApprovalIdForReleaseSha } from "./production-green-stage-b-contract.mjs";
+import { assertGitHubApprovedMutationContext, assertProductionCaller, PRODUCTION_CALLER_MODES } from "./production-caller-identity-contract.mjs";
 
-const RELEASE_CALLER = new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-release-deployer/[A-Za-z0-9+=,.@_-]{2,64}$`);
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const sourceSha = () => String(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" })).trim();
 const runAwsJson = (args) => JSON.parse(execFileSync("aws", [...args, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], { encoding: "utf8" }));
@@ -38,7 +38,9 @@ export function validateApprovalPublicationProof(response, expected) {
 export function checkApprovalPublication({ approvalPath, expectedSourceSha = sourceSha(), callerArn, invoke }) {
   const approvalBytes = fs.readFileSync(approvalPath);
   const request = buildApprovalPublicationValidationRequest({ approvalBytes, expectedSourceSha });
-  if (!RELEASE_CALLER.test(callerArn)) throw new Error("Only the release-deployer may request broker publication proof.");
+  const mode = process.env.MSCQR_PRODUCTION_CALLER_MODE || PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER;
+  assertProductionCaller({ callerArn, mode });
+  if (mode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION) assertGitHubApprovedMutationContext({ callerArn, mode, repository: process.env.GITHUB_REPOSITORY, environment: process.env.GITHUB_ENVIRONMENT, ref: process.env.GITHUB_REF, workflowRef: process.env.GITHUB_WORKFLOW_REF, eventName: process.env.GITHUB_EVENT_NAME, sourceSha: expectedSourceSha, trustedMainSha: process.env.TRUSTED_MAIN_SHA || expectedSourceSha, environmentApproved: process.env.PRODUCTION_ENVIRONMENT_APPROVED === "true" });
   return invoke(request, (response) => validateApprovalPublicationProof(response, request));
 }
 

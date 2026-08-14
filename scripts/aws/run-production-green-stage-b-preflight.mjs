@@ -28,6 +28,7 @@ import {
   verifyPermissionReportSignature,
 } from "./validate-production-green-stage-b-permissions.mjs";
 import { collectLiveEcsExecOperatorEvidence } from "./production-ecs-exec-operator-contract.mjs";
+import { assertGitHubApprovedMutationContext, PRODUCTION_CALLER_MODES } from "./production-caller-identity-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -113,8 +114,22 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     const signature = sign(report, { now: generatedAt, reportBytes }); const files = writePair(output, value(argv, "--signature-output"), report, signature);
     return { identity, status: report.status, administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: 0, report: files.report, signature: files.signature, capabilityGraph };
   }
-  if (identity === "release-deployer") {
-    if (!new RegExp(`^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`).test(observedCaller)) throw new Error("Release production preflight requires the exact release-deployer identity.");
+  if (identity === "release-deployer" || identity === "github-actions-mutation") {
+    const callerMode = identity === "github-actions-mutation" ? PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION : PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER;
+    if (callerMode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION) {
+      assertGitHubApprovedMutationContext({
+        callerArn: observedCaller,
+        mode: callerMode,
+        repository: process.env.GITHUB_REPOSITORY,
+        environment: process.env.GITHUB_ENVIRONMENT,
+        ref: process.env.GITHUB_REF,
+        workflowRef: process.env.GITHUB_WORKFLOW_REF,
+        eventName: process.env.GITHUB_EVENT_NAME,
+        sourceSha: process.env.SOURCE_SHA,
+        trustedMainSha: process.env.TRUSTED_MAIN_SHA,
+        environmentApproved: process.env.PRODUCTION_ENVIRONMENT_APPROVED === "true",
+      });
+    } else if (!new RegExp(`^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`).test(observedCaller)) throw new Error("Release production preflight requires the exact release-deployer identity.");
     const adminReportBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report"))); const adminReport = JSON.parse(adminReportBytes);
     const administratorSignatureBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report-signature")));
     const signature = JSON.parse(administratorSignatureBytes);
@@ -124,7 +139,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     assertCutoverCriticalEvidence(adminReport);
     if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
     assertReleasePolicyEvidence(adminReport.policyEvidence);
-    const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)) });
+    const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)), callerMode });
     report.requiredReads["kms:Verify"] = "allowed";
     report.administratorReportSha256 = sha256(adminReportBytes);
     report.policyVersions = adminReport.policyEvidence.policies.map(({ arn, defaultVersionId, liveSha256 }) => ({ arn, defaultVersionId, liveSha256 }));
@@ -136,7 +151,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     const readiness = continueReadiness(argv); const finalReport = { ...report, ...readiness, capabilityGraph, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, releaseReadFailures: 0, configurationFailures: 0, status: "ready-for-plan" }; const reportFile = write(output, finalReport);
     return { identity, status: "ready-for-plan", releaseReadCapabilities: { failed: 0, skipped: 0 }, report: reportFile, ...readiness, capabilityGraph };
   }
-  throw new Error("--identity must be administrator or release-deployer.");
+  throw new Error("--identity must be administrator, release-deployer, or github-actions-mutation.");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -16,6 +16,17 @@ on:
         description: "Release Train run ID that dispatched this gate"
         required: false
         type: string
+      stage_b_image_workflow_run_id:
+        description: "Successful protected-main Stage-B image publication workflow run ID"
+        required: false
+        type: string
+      caller_mode:
+        description: "Explicit production caller mode. Human mode is break-glass only."
+        required: false
+        type: choice
+        options:
+          - GITHUB_OIDC_APPROVED_MUTATION
+        default: GITHUB_OIDC_APPROVED_MUTATION
       preserve_current_frontend:
         description: "Keep the currently deployed frontend task definition during a backend/RLS activation."
         required: false
@@ -109,8 +120,9 @@ jobs:
             deploy_sha="$(git rev-parse "${deploy_ref}^{commit}")"
           fi
 
-          if ! git merge-base --is-ancestor "$deploy_sha" origin/main; then
-            echo "::error::Production deploy target must resolve to a commit on main."
+          trusted_main_sha="$(git rev-parse origin/main^{commit})"
+          if [ "$deploy_sha" != "$trusted_main_sha" ]; then
+            echo "::error::Production deploy target must equal the current protected origin/main commit."
             exit 1
           fi
 
@@ -226,6 +238,8 @@ jobs:
           --health-retries 10
     env:
       AWS_ACCOUNT_ID_EXPECTED: "368992683803"
+      MUTATION_ROLE_ARN: arn:aws:iam::368992683803:role/mscqr-production-github-actions-mutation
+      MSCQR_PRODUCTION_CALLER_MODE: ${{ inputs.caller_mode }}
       AWS_REGION: eu-west-2
       BACKEND_ECR_REPO: mscqr-backend
       FRONTEND_ECR_REPO: mscqr-web
@@ -244,6 +258,9 @@ jobs:
       PLATFORMS: linux/amd64
       PUBLIC_BASE_URL: https://www.mscqr.com
       DEPLOY_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+      TRUSTED_MAIN_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+      GITHUB_ENVIRONMENT: production
+      PRODUCTION_ENVIRONMENT_APPROVED: "true"
       RELEASE_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
       P2_TEST_DATABASE_REQUIRED: "true"
       P2_TEST_DB_PROTOCOL: postgresql
@@ -271,8 +288,9 @@ jobs:
           fi
 
           git fetch --prune origin main
-          if ! git merge-base --is-ancestor "$DEPLOY_SHA" origin/main; then
-            echo "::error::Production deploy target must remain reachable from origin/main."
+          trusted_main_sha="$(git rev-parse origin/main^{commit})"
+          if [ "$DEPLOY_SHA" != "$trusted_main_sha" ]; then
+            echo "::error::Production deploy target must equal the current protected origin/main commit."
             exit 1
           fi
 
@@ -333,46 +351,36 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          node --input-type=module <<'NODE'
-          const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
-          const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/environments/production`, {
-            headers: {
-              Accept: "application/vnd.github+json",
-              Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-              "X-GitHub-Api-Version": "2022-11-28",
-            },
-          });
+          node scripts/ci/verify-production-environment.mjs
 
-          if (!response.ok) {
-            const body = await response.text();
-            throw new Error(`Unable to read production environment protection rules (${response.status}): ${body.slice(0, 300)}`);
-          }
-
-          const environment = await response.json();
-          const requiredReviewersRule = (environment.protection_rules || []).find((rule) => rule.type === "required_reviewers");
-          const reviewers = requiredReviewersRule?.reviewers || [];
-          if (reviewers.length === 0) {
-            throw new Error("The production GitHub Environment must require at least one reviewer before production deployment can run.");
-          }
-
-          console.log("Production environment required reviewers are configured. Reviewer identities were not printed.");
-          NODE
+      - name: Verify approved GitHub mutation context
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_ENVIRONMENT: production
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          SOURCE_SHA: ${{ env.DEPLOY_SHA }}
+          TRUSTED_MAIN_SHA: ${{ env.DEPLOY_SHA }}
+          EXPECTED_ROLE_ARN: ${{ env.MUTATION_ROLE_ARN }}
+          PRODUCTION_ENVIRONMENT_APPROVED: "true"
+        if: ${{ inputs.caller_mode == 'GITHUB_OIDC_APPROVED_MUTATION' }}
+        run: |
+          node scripts/ci/assert-production-github-mutation-context.mjs
+          echo "MSCQR_GITHUB_MUTATION_CONTEXT_VERIFIED=true" >> "$GITHUB_ENV"
 
       - name: Validate AWS authentication inputs
         id: auth-mode
         env:
-          AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          MUTATION_ROLE_ARN: ${{ env.MUTATION_ROLE_ARN }}
+          CALLER_MODE: ${{ inputs.caller_mode }}
         run: |
           set -euo pipefail
 
-          if [ -n "$AWS_ROLE_TO_ASSUME" ]; then
+          if [ "$CALLER_MODE" = "GITHUB_OIDC_APPROVED_MUTATION" ] && [ -n "$MUTATION_ROLE_ARN" ]; then
             echo "mode=oidc" >> "$GITHUB_OUTPUT"
-          elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
-            echo "mode=keys" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::Configure repository/environment variable AWS_ROLE_TO_ASSUME for OIDC, or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY as fallback secrets."
+            echo "::error::Release Gate accepts only the dedicated GitHub OIDC mutation mode. Human MFA remains outside GitHub Actions."
             exit 1
           fi
 
@@ -381,16 +389,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
-
-      - name: Configure AWS credentials via access keys
-        if: steps.auth-mode.outputs.mode == 'keys'
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          aws-region: ${{ env.AWS_REGION }}
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          role-to-assume: ${{ env.MUTATION_ROLE_ARN }}
 
       - name: Verify AWS account
         run: |
@@ -403,13 +402,22 @@ jobs:
           fi
           echo "AWS account verified for production deployment."
 
-      - name: Login to Amazon ECR
-        if: ${{ inputs.release_mode == 'normal' }}
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Set up Docker Buildx
-        if: ${{ inputs.release_mode == 'normal' }}
-        uses: docker/setup-buildx-action@v4
+      - name: Verify exact production caller identity
+        env:
+          AWS_CALLER_ARN: ${{ '' }}
+          MSCQR_PRODUCTION_CALLER_MODE: ${{ inputs.caller_mode }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_ENVIRONMENT: production
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          SOURCE_SHA: ${{ env.DEPLOY_SHA }}
+          TRUSTED_MAIN_SHA: ${{ env.DEPLOY_SHA }}
+          PRODUCTION_ENVIRONMENT_APPROVED: "true"
+        run: |
+          set -euo pipefail
+          caller_arn="$(aws sts get-caller-identity --query Arn --output text)"
+          AWS_CALLER_ARN="$caller_arn" node scripts/ci/verify-production-caller.mjs
 
       - name: Generate and verify checksum-bound production RLS package
         id: rls-package
@@ -447,97 +455,100 @@ jobs:
           set -euo pipefail
 
           account_id="$(aws sts get-caller-identity --query Account --output text)"
-          images_file="$RUNNER_TEMP/published-images.jsonl"
-          : > "$images_file"
-
           echo "account_id=$account_id" >> "$GITHUB_OUTPUT"
-          echo "images_file=$images_file" >> "$GITHUB_OUTPUT"
           echo "image_tag=$DEPLOY_SHA" >> "$GITHUB_OUTPUT"
           echo "backend_metadata_file=$RUNNER_TEMP/backend-deployment.json" >> "$GITHUB_OUTPUT"
           echo "frontend_metadata_file=$RUNNER_TEMP/frontend-deployment.json" >> "$GITHUB_OUTPUT"
           echo "worker_metadata_file=$RUNNER_TEMP/worker-deployment.json" >> "$GITHUB_OUTPUT"
 
-      - name: Enforce ECR repository controls
-        if: ${{ inputs.release_mode == 'normal' }}
-        run: |
-          set -euo pipefail
-          ./scripts/aws/apply-ecr-repository-controls.sh all
-
-      - name: Publish immutable ECS images
+      - name: Consume preauthorized immutable Stage-B image publication
+        id: image-publication
         if: ${{ inputs.release_mode == 'normal' }}
         env:
-          AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
-          IMAGE_TAG: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
-          OUTPUT_FILE: ${{ steps.image-meta.outputs.images_file }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STAGE_B_IMAGE_WORKFLOW_RUN_ID: ${{ inputs.stage_b_image_workflow_run_id }}
           PRESERVE_CURRENT_FRONTEND: ${{ inputs.preserve_current_frontend }}
         run: |
           set -euo pipefail
-          if [ "$PRESERVE_CURRENT_FRONTEND" = "true" ]; then
-            ./scripts/aws/publish-ecs-images.sh backend
-            ./scripts/aws/publish-ecs-images.sh worker
-            ./scripts/aws/publish-ecs-images.sh rls-executor
-            frontend_task="$(
-              aws ecs describe-services \
-                --cluster "$CLUSTER_NAME" \
-                --services "$FRONTEND_SERVICE_NAME" \
-                --query 'services[0].taskDefinition' \
-                --output text
-            )"
-            if [ "$frontend_task" != "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20" ]; then
-              echo "::error::Frontend preservation requires the reviewed mscqr-frontend:20 task definition."
-              exit 1
-            fi
-            frontend_image="$(
-              aws ecs describe-task-definition \
-                --task-definition "$frontend_task" \
-                --query "taskDefinition.containerDefinitions[?name=='${FRONTEND_CONTAINER_NAME}'].image | [0]" \
-                --output text
-            )"
-            if ! [[ "$frontend_image" =~ ^[0-9]{12}\.dkr\.ecr\.eu-west-2\.amazonaws\.com/mscqr-web@sha256:[a-f0-9]{64}$ ]]; then
-              echo "::error::Current frontend task definition is not bound to an immutable production image digest."
-              exit 1
-            fi
-            node --input-type=module - "$OUTPUT_FILE" "$frontend_image" <<'NODE'
-            import fs from "node:fs";
-            const [outputPath, imageRef] = process.argv.slice(2);
-            const [imageUri, imageDigest] = imageRef.split("@");
-            fs.appendFileSync(outputPath, `${JSON.stringify({
-              service: "frontend", repository: "mscqr-web", image_uri: imageUri,
-              image_tag: "preserved-current-task-definition", image_digest: imageDigest, image_ref: imageRef,
-            })}\n`);
-            NODE
-          else
-            ./scripts/aws/publish-ecs-images.sh all
+          if [ -z "${STAGE_B_IMAGE_WORKFLOW_RUN_ID:-}" ]; then
+            echo "::error::A successful canonical Stage-B image workflow run ID is required; release-gate does not publish images."
+            exit 1
           fi
+          if [ "$PRESERVE_CURRENT_FRONTEND" != "true" ]; then
+            echo "::error::The canonical Stage-B publication artifact does not contain a frontend image. Set preserve_current_frontend=true until the reviewed frontend publication contract exists."
+            exit 1
+          fi
+          node scripts/ci/consume-stage-b-image-publication.mjs \
+            "$STAGE_B_IMAGE_WORKFLOW_RUN_ID" \
+            "$DEPLOY_SHA" \
+            "$RUNNER_TEMP/stage-b-image-publication-download" \
+            "$RUNNER_TEMP/preauthorized-stage-b-image-evidence.json" \
+            "$GITHUB_OUTPUT"
+
+      - name: Resolve preserved frontend immutable digest
+        id: frontend-image
+        if: ${{ inputs.release_mode == 'normal' }}
+        run: |
+          set -euo pipefail
+          frontend_task="$(
+            aws ecs describe-services \
+              --cluster "$CLUSTER_NAME" \
+              --services "$FRONTEND_SERVICE_NAME" \
+              --query 'services[0].taskDefinition' \
+              --output text
+          )"
+          if [ "$frontend_task" != "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20" ]; then
+            echo "::error::Frontend preservation requires the reviewed mscqr-frontend:20 task definition."
+            exit 1
+          fi
+          frontend_image="$(
+            aws ecs describe-task-definition \
+              --task-definition "$frontend_task" \
+              --query "taskDefinition.containerDefinitions[?name=='${FRONTEND_CONTAINER_NAME}'].image | [0]" \
+              --output text
+          )"
+          if ! [[ "$frontend_image" =~ ^[0-9]{12}\.dkr\.ecr\.eu-west-2\.amazonaws\.com/mscqr-web@sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::Current frontend task definition is not bound to an immutable production image digest."
+            exit 1
+          fi
+          echo "frontend_image_ref=$frontend_image" >> "$GITHUB_OUTPUT"
 
       - name: Resolve backend, frontend, and worker digest refs
         id: images
         if: ${{ inputs.release_mode == 'normal' }}
         env:
-          IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
+          BACKEND_IMAGE_REF: ${{ steps.image-publication.outputs.backend_image_ref }}
+          WORKER_IMAGE_REF: ${{ steps.image-publication.outputs.worker_image_ref }}
+          RLS_EXECUTOR_IMAGE_REF: ${{ steps.image-publication.outputs.rls_executor_image_ref }}
+          FRONTEND_IMAGE_REF: ${{ steps.frontend-image.outputs.frontend_image_ref }}
         run: |
           set -euo pipefail
+          for name in BACKEND WORKER RLS_EXECUTOR FRONTEND; do
+            variable="${name}_IMAGE_REF"
+            value="${!variable:-}"
+            if [ -z "$value" ]; then
+              echo "::error::Preauthorized image evidence did not provide ${name}."
+              exit 1
+            fi
+            output_name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+            output_name="${output_name//_/-}"
+            output_name="${output_name//-/_}"
+            image_uri="${value%@*}"
+            image_digest="${value##*@}"
+            echo "${output_name}_image_ref=$value" >> "$GITHUB_OUTPUT"
+            echo "${output_name}_image_uri=$image_uri" >> "$GITHUB_OUTPUT"
+            echo "${output_name}_image_digest=$image_digest" >> "$GITHUB_OUTPUT"
+          done
 
-          node --input-type=module - "$IMAGES_FILE" "$GITHUB_OUTPUT" <<'NODE'
-          import fs from "node:fs";
-
-          const [imagesPath, outputPath] = process.argv.slice(2);
-          const records = fs.readFileSync(imagesPath, "utf8")
-            .split(/\n+/)
-            .filter(Boolean)
-            .map((line) => JSON.parse(line));
-
-          for (const service of ["backend", "frontend", "worker", "rls-executor"]) {
-            const record = records.find((item) => item.service === service);
-            if (!record?.image_ref) {
-              throw new Error(`Missing published image record for ${service}.`);
-            }
-            const outputName = service.replaceAll("-", "_");
-            fs.appendFileSync(outputPath, `${outputName}_image_ref=${record.image_ref}\n`);
-            fs.appendFileSync(outputPath, `${outputName}_image_uri=${record.image_uri}\n`);
-            fs.appendFileSync(outputPath, `${outputName}_image_digest=${record.image_digest}\n`);
-          }
-          NODE
+      - name: Preserve preauthorized image evidence
+        if: ${{ inputs.release_mode == 'normal' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: preauthorized-stage-b-image-evidence
+          path: ${{ runner.temp }}/preauthorized-stage-b-image-evidence.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Require complete production worker deployment configuration
         if: ${{ inputs.release_mode == 'normal' }}
