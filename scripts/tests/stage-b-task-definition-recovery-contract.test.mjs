@@ -18,6 +18,8 @@ import {
   reconcileCanonicalBackendState,
   recoveryEvidence,
   runCanonicalBackendRecovery,
+  normalizeTerraformRecoveryCheckpointState,
+  stateSnapshotSha256,
   taskDefinitionFingerprint,
 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
@@ -54,6 +56,37 @@ const state = (arn = STAGE_B_BACKEND_RECOVERY.predecessorArn, serial = STAGE_B_B
   lineage: STAGE_B_BACKEND_RECOVERY.lineage,
   resources: [{ mode: "managed", type: "aws_ecs_task_definition", name: "candidate", instances: [{ index_key: "backend", schema_version: 1, attributes: { id: arn, arn, family: STAGE_B_BACKEND_RECOVERY.family } }] }],
 });
+
+const checkpointBeforeState = () => ({
+  ...state(),
+  terraform_version: "1.15.7",
+  check_results: [
+    { object_kind: "check", config_addr: "check.release_bindings", status: "pass", objects: [{ object_addr: "check.release_bindings", status: "pass" }] },
+    { object_kind: "var", config_addr: "var.retained_candidate_task_definitions", status: "pass", objects: [{ object_addr: "var.retained_candidate_task_definitions", status: "pass" }] },
+    { object_kind: "check", config_addr: "check.production_only", status: "pass", objects: [{ object_addr: "check.production_only", status: "pass" }] },
+  ],
+  resources: [
+    ...state().resources,
+    { mode: "managed", type: "aws_cloudwatch_log_group", name: "stage_b", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: { id: "/ecs/mscqr-production/rls-green-backend", name: "/ecs/mscqr-production/rls-green-backend" } }] },
+    { mode: "managed", type: "aws_dynamodb_table", name: "replay", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: { id: "mscqr-production-rls-stage-b-replay", name: "mscqr-production-rls-stage-b-replay" } }] },
+  ],
+});
+
+const checkpointAfterState = () => {
+  const value = structuredClone(checkpointBeforeState());
+  value.serial = 94;
+  value.terraform_version = "1.15.8";
+  value.check_results.reverse();
+  value.resources = value.resources.filter((resource) => !(resource.type === "aws_ecs_task_definition" && resource.name === "candidate"));
+  return value;
+};
+
+const checkpointImportedState = (arn) => {
+  const value = checkpointAfterState();
+  value.serial = 95;
+  value.resources.unshift({ mode: "managed", type: "aws_ecs_task_definition", name: "candidate", instances: [{ index_key: "backend", schema_version: 1, attributes: { id: arn, arn, family: STAGE_B_BACKEND_RECOVERY.family } }] });
+  return value;
+};
 
 const journalArgs = (current, payload, newestHistoricalArn = STAGE_B_BACKEND_RECOVERY.historicalRevisionArns.at(-1)) => ({
   sourceSha, toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256, imageReleaseSha, imageAuthorizationSha256: imageAuthorization.evidenceSha256,
@@ -123,6 +156,38 @@ test("recovery derives the two source identities through the authoritative imple
   const derived = deriveCanonicalRecoveryProvenance({ sourceSha: currentSha });
   assert.match(derived.toolingTreeSha256, /^[a-f0-9]{64}$/);
   assert.match(derived.sourceContractSha256, /^[a-f0-9]{64}$/);
+});
+
+test("Terraform 1.15.7 to 1.15.8 state-rm checkpoint normalizes only reviewed metadata", () => {
+  const before = checkpointBeforeState();
+  const after = checkpointAfterState();
+  const expectedAfter = { ...structuredClone(before), serial: 94, resources: before.resources.filter((resource) => !(resource.type === "aws_ecs_task_definition" && resource.name === "candidate")) };
+  assert.equal(stateSnapshotSha256(expectedAfter), stateSnapshotSha256(after));
+  assert.equal(normalizeTerraformRecoveryCheckpointState(before).terraform_version, "<terraform-generated-version>");
+  assert.deepEqual(normalizeTerraformRecoveryCheckpointState(before).check_results, normalizeTerraformRecoveryCheckpointState(after).check_results);
+
+  const rejected = [
+    (value) => { value.lineage = "0".repeat(36); },
+    (value) => { value.resources[0].instances[0].attributes.name = "/ecs/changed"; },
+    (value) => { value.resources = value.resources.slice(0, 1); },
+    (value) => { value.resources[0].provider = 'provider["registry.terraform.io/hashicorp/random"]'; },
+    (value) => { value.resources.unshift({ mode: "managed", type: "aws_ecs_task_definition", name: "candidate", instances: [{ index_key: "backend", schema_version: 1, attributes: { id: STAGE_B_BACKEND_RECOVERY.predecessorArn, arn: STAGE_B_BACKEND_RECOVERY.predecessorArn, family: STAGE_B_BACKEND_RECOVERY.family } }] }); },
+    (value) => { value.unreviewed_checkpoint_field = true; },
+  ];
+  for (const mutate of rejected) {
+    const changed = structuredClone(after);
+    mutate(changed);
+    assert.notEqual(stateSnapshotSha256(expectedAfter), stateSnapshotSha256(changed));
+  }
+  const malformedVersion = structuredClone(after);
+  malformedVersion.terraform_version = "not-a-version";
+  assert.throws(() => stateSnapshotSha256(malformedVersion), /version is malformed/);
+  const unreviewedVersion = structuredClone(after);
+  unreviewedVersion.terraform_version = "1.15.9";
+  assert.notEqual(stateSnapshotSha256(expectedAfter), stateSnapshotSha256(unreviewedVersion));
+  const malformedChecks = structuredClone(after);
+  malformedChecks.check_results = { status: "pass" };
+  assert.throws(() => stateSnapshotSha256(malformedChecks), /check results are malformed/);
 });
 
 test("AWS ECS readback projections preserve the exact protected semantic fingerprint", () => {
@@ -451,6 +516,99 @@ test("persisted pre-remove journal resumes when the process dies before state re
   assert.equal(resumed.reconciliation.stateBackendCandidate, replacementArn);
 });
 
+test("legacy schema-v4 journal resumes the existing :9 after state rm using the exact pre-removal snapshot", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
+  const payload = replacementPayload(replacementArn);
+  const preRemoval = checkpointBeforeState();
+  const postRemoval = checkpointAfterState();
+  const imported = checkpointImportedState(replacementArn);
+  const initial = buildCanonicalRecoveryJournal(preRemoval, journalArgs(preRemoval, payload));
+  const journal = journalAdapter({ ...initial, phase: "STATE_RECONCILING_PRE_REMOVE", replacementArn, replacementFingerprint: payload.fingerprint, registrationCalls: 1, registrationMayHaveOccurred: true });
+  const legacy = journal.read();
+  delete legacy.checkpointHashDomain;
+  legacy.stateBeforeSha256 = canonicalSha256(preRemoval);
+  legacy.stateAfterRemoveSha256 = canonicalSha256({ ...preRemoval, serial: 94, resources: preRemoval.resources.filter((resource) => !(resource.type === "aws_ecs_task_definition" && resource.name === "candidate")) });
+  journal.write(legacy);
+  let current = postRemoval;
+  let registrations = 0;
+  let imports = 0;
+  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+    stateBefore: preRemoval, readState: async () => structuredClone(current), census: async () => censusFor(payload), describe: async () => payload,
+    register: async () => { registrations += 1; throw new Error("must not register existing :9"); },
+    removeState: async () => { throw new Error("must not remove after state rm checkpoint"); },
+    importState: async () => { imports += 1; current = imported; },
+  });
+  assert.equal(registrations, 0);
+  assert.equal(imports, 1);
+  assert.equal(result.reconciliation.stateSerialAfter, 95);
+
+  const wrongSnapshot = structuredClone(preRemoval);
+  wrongSnapshot.resources[1].instances[0].attributes.name = "/ecs/changed";
+  await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal: journalAdapter(legacy), stateBefore: wrongSnapshot,
+    readState: async () => structuredClone(postRemoval), census: async () => censusFor(payload), describe: async () => payload,
+    register: async () => { throw new Error("must not register"); }, removeState: async () => { throw new Error("must not remove"); }, importState: async () => { throw new Error("must not import"); },
+  }), /pre-removal state snapshot/);
+});
+
+test("legacy DISCOVERY and PREPARED journals resume with raw state hashes and reject state drift", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
+  const payload = replacementPayload(replacementArn);
+  const preRemoval = checkpointBeforeState();
+  for (const phase of ["DISCOVERY", "PREPARED"]) {
+    const initial = buildCanonicalRecoveryJournal(preRemoval, journalArgs(preRemoval, payload));
+    const legacy = { ...initial, phase, stateBeforeSha256: canonicalSha256(preRemoval) };
+    delete legacy.checkpointHashDomain;
+    const legacyRemoved = { ...preRemoval, serial: 94, resources: preRemoval.resources.filter((resource) => !(resource.type === "aws_ecs_task_definition" && resource.name === "candidate")) };
+    legacy.stateAfterRemoveSha256 = canonicalSha256(legacyRemoved);
+    let current = structuredClone(preRemoval);
+    let registrations = 0;
+    const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal: journalAdapter(legacy),
+      readState: async () => structuredClone(current), census: async () => censusFor(payload), describe: async () => payload,
+      register: async () => { registrations += 1; throw new Error("must not register"); },
+      removeState: async () => { current = legacyRemoved; }, importState: async () => { current = checkpointImportedState(replacementArn); },
+    });
+    assert.equal(registrations, 0);
+    assert.equal(result.registration.resumed, true);
+
+    for (const mutate of [
+      (value) => { value.resources[1].instances[0].attributes.name = "/ecs/changed"; },
+      (value) => { value.lineage = "0".repeat(36); },
+      (value) => { value.resources[1].provider = 'provider["registry.terraform.io/hashicorp/random"]'; },
+    ]) {
+      const changed = structuredClone(preRemoval);
+      mutate(changed);
+      let changedRegistrations = 0;
+      await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal: journalAdapter(legacy),
+        readState: async () => changed, census: async () => censusFor(payload), describe: async () => payload,
+        register: async () => { changedRegistrations += 1; }, removeState: async () => {}, importState: async () => {},
+      }), /state changed before|lineage changed/);
+      assert.equal(changedRegistrations, 0);
+    }
+  }
+});
+
+test("new checkpoint hash domain uses normalized hashes without a legacy fallback", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
+  const payload = replacementPayload(replacementArn);
+  const preRemoval = checkpointBeforeState();
+  const normalizedState = structuredClone(preRemoval);
+  normalizedState.terraform_version = "1.15.8";
+  normalizedState.check_results.reverse();
+  const initial = buildCanonicalRecoveryJournal(preRemoval, journalArgs(preRemoval, payload));
+  const valid = { ...initial, phase: "PREPARED" };
+  let current = normalizedState;
+  await assert.doesNotReject(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal: journalAdapter(valid),
+    readState: async () => structuredClone(current), census: async () => censusFor(payload), describe: async () => payload,
+    register: async () => { throw new Error("must not register"); }, removeState: async () => { current = checkpointAfterState(); }, importState: async () => { current = checkpointImportedState(replacementArn); },
+  }));
+
+  const rawHashTrap = { ...initial, phase: "PREPARED", stateBeforeSha256: canonicalSha256(normalizedState) };
+  await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal: journalAdapter(rawHashTrap),
+    readState: async () => structuredClone(normalizedState), census: async () => censusFor(payload), describe: async () => payload,
+    register: async () => { throw new Error("must not register"); }, removeState: async () => {}, importState: async () => {},
+  }), /state changed before/);
+});
+
 test("post-remove readback resumes import when process dies before the post-remove journal write", async () => {
   const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
   const payload = replacementPayload(replacementArn);
@@ -581,6 +739,7 @@ test("fresh incident identity is complete and every journal binding mismatch blo
     predecessorSerial: 94,
     predecessorArn: STAGE_B_BACKEND_RECOVERY.historicalRevisionArns[0],
     newestHistoricalArn: STAGE_B_BACKEND_RECOVERY.historicalRevisionArns[1],
+    checkpointHashDomain: "unreviewed-checkpoint-domain",
     incidentIdentity: "f".repeat(64),
   };
   for (const [field, value] of Object.entries(mismatches)) {
@@ -703,5 +862,6 @@ test("recovery CLI requires explicit execution and hard-codes only the reviewed 
   assert.match(script, /--profile/);
   assert.match(script, /state\", \"rm/);
   assert.match(script, /import\", \"-lock-timeout=60s/);
+  assert.match(script, /--state-before/);
   assert.match(script, /No ACTIVE backend candidate revisions/);
 });
