@@ -5,7 +5,7 @@ import { createImageAuthorization } from "../../aws/production-image-authorizati
 import { STAGE_B } from "../../aws/production-green-stage-b-contract.mjs";
 import { deriveStageBImageImpactReport } from "../../aws/validate-stage-b-image-reuse.mjs";
 
-const imageReleaseSha = "594bab55f23ff8b2438c12b85b149ba0aebeed1e";
+const defaultImageReleaseSha = "594bab55f23ff8b2438c12b85b149ba0aebeed1e";
 const workflowRunId = "31582010244";
 const digests = {
   backend: "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad",
@@ -14,7 +14,7 @@ const digests = {
   "rls-canary": "sha256:f26b3c87ef6b7d1545936e50a41a049e5d02b3f11ef81bd41946ca1c967b05ab",
 };
 
-export function makeCanonicalImageAuthorization({ sourceSha } = {}) {
+export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = defaultImageReleaseSha } = {}) {
   const observedAt = new Date().toISOString();
   const records = [
     ["backend", "mscqr-backend", imageReleaseSha],

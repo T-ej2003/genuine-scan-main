@@ -53,3 +53,13 @@ the checked-in report. The production checkout still independently requires
 default branch `main`, and a clean worktree. Therefore a report is not transferable to a
 different tooling content tree, while CI review mode can validate a proposed tree without
 pretending it is already protected main.
+
+## Recovery binding
+
+The canonical backend recovery consumes both identities and the existing image
+authorization artifact. `tooling_sha` authenticates the clean protected checkout and
+recovery machinery; `image_release_sha` authenticates the immutable image and is the
+only SHA rendered into task-definition `RELEASE_GIT_SHA`. Recovery requires the
+bindings, authorized backend digest, image-release SHA, and authorization envelope to
+match exactly. A legacy task definition whose `RELEASE_GIT_SHA` was populated from the
+tooling SHA is not relabeled or adopted; its complete semantic fingerprint fails closed.
