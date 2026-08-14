@@ -259,14 +259,14 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
     if (["COMPLETED", "RECONCILED"].includes(existing.phase)) {
       validateForwardRecoveryEvidence(evidence.read(), existing, expected);
       if (stateSnapshotSha256(observedState) !== existing.stateAfterImportSha256 || observedState.lineage !== existing.stateLineage || observedState.serial !== existing.stateSerial + 1 || (backendInstance(observedState)?.attributes?.arn || backendInstance(observedState)?.attributes?.id) !== existing.existingRevisionArn) throw new Error("Forward recovery replay observed state drift after reconciliation.");
-      return { incidentIdentity, imported: false, registrationCalls: 0, importCalls: 0, state: observedState, readback, census: censusEvidence };
+      return { incidentIdentity, imported: false, phase: existing.phase, registrationCalls: 0, importCalls: 0, state: observedState, readback, census: censusEvidence };
     }
     if (existing.phase === "IMPORTING") {
       const afterBinding = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, after: observedState });
       if (existing.stateAfterImportSha256 !== undefined && existing.stateAfterImportSha256 !== afterBinding.stateSha256) throw new Error("Forward recovery importing checkpoint hash does not match the authenticated imported state.");
       const recoveredEvidence = persistForwardRecoveryEvidence(buildForwardRecoveryEvidence(expected, afterBinding.stateSha256), evidence);
       journal.write({ ...existing, ...recoveredEvidence, stateAfterImportSha256: afterBinding.stateSha256, phase: "COMPLETED" });
-      return { incidentIdentity, imported: false, registrationCalls: 0, importCalls: 0, state: observedState, readback, census: censusEvidence, evidence: recoveredEvidence };
+      return { incidentIdentity, imported: false, phase: "COMPLETED", recoveredFromPhase: "IMPORTING", registrationCalls: 0, importCalls: 0, state: observedState, readback, census: censusEvidence, evidence: recoveredEvidence };
     }
   }
   const beforeState = observedState;
@@ -274,7 +274,7 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   if (existing?.stateBeforeSha256 !== undefined && existing.stateBeforeSha256 !== before.stateSha256) throw new Error("Forward recovery current state no longer matches the prepared incident.");
   if (preparedDescendantRestart) journal.write({ schemaVersion: 1, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, phase: "PREPARED", ...expected, stateBeforeSha256: before.stateSha256, registrationCalls: 0, registrationCapability: "NONE", importCalls: 0 });
   else if (!existing) journal.write({ schemaVersion: 1, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, phase: "PREPARED", ...expected, stateBeforeSha256: before.stateSha256, registrationCalls: 0, registrationCapability: "NONE", importCalls: 0 });
-  if (preparedDescendantRestart) return { incidentIdentity, imported: false, reauthorized: true, registrationCalls: 0, importCalls: 0, state: beforeState, readback, census: censusEvidence };
+  if (preparedDescendantRestart) return { incidentIdentity, imported: false, reauthorized: true, phase: "PREPARED", registrationCalls: 0, importCalls: 0, state: beforeState, readback, census: censusEvidence };
   const latestBeforeImportState = await readState();
   const latestBeforeImport = assertForwardStateBeforeImport(latestBeforeImportState);
   if (latestBeforeImport.stateSha256 !== before.stateSha256) throw new Error("Forward recovery state changed before the governed import boundary.");
@@ -293,5 +293,5 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   interruptAt?.("AFTER_EVIDENCE_PERSISTED");
   journal.write({ ...journal.read(), ...completedEvidence, phase: "COMPLETED" });
   interruptAt?.("AFTER_COMPLETED");
-  return { incidentIdentity, imported: true, registrationCalls: 0, importCalls: 1, state: after, readback, census: censusEvidence, evidence: completedEvidence };
+  return { incidentIdentity, imported: true, phase: "COMPLETED", registrationCalls: 0, importCalls: 1, state: after, readback, census: censusEvidence, evidence: completedEvidence };
 }

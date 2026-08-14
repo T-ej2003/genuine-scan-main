@@ -15,7 +15,7 @@ import {
   canonicalForwardRecoveryIncidentIdentity,
   runExistingRevisionForwardRecovery,
 } from "../aws/stage-b-existing-revision-forward-recovery-contract.mjs";
-import { assertForwardRecoveryTerraformBackend, buildForwardRecoveryTerraformEnvironment, preflightForwardRecoveryOutputs } from "../aws/forward-recover-stage-b-existing-revision.mjs";
+import { assertForwardRecoveryTerraformBackend, buildForwardRecoveryTerraformEnvironment, classifyForwardRecoveryResult, preflightForwardRecoveryOutputs } from "../aws/forward-recover-stage-b-existing-revision.mjs";
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { buildCanonicalBackendRecoveryTaskDefinition, canonicalSha256, stateSnapshotSha256, taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
@@ -99,6 +99,7 @@ test("adopts exact :9 with one import and zero registration capability", async (
   assert.equal(result.imported, true);
   assert.deepEqual(run.counts, { imports: 1, registrations: 0 });
   assert.equal(result.state.serial, 95);
+  assert.equal(classifyForwardRecoveryResult(result).status, "imported");
 });
 
 test("completed forward incident replays idempotently without import or registration", async () => {
@@ -109,6 +110,7 @@ test("completed forward incident replays idempotently without import or registra
   const result = await runExistingRevisionForwardRecovery(replay);
   assert.equal(result.imported, false);
   assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+  assert.equal(classifyForwardRecoveryResult(result).status, "already-reconciled");
   assert.equal(JSON.stringify(run.journal.read()), journalBytes);
 });
 
@@ -254,6 +256,10 @@ test("descendant PREPARED resume reauthorizes without mutation", async () => {
   const result = await runExistingRevisionForwardRecovery(replay);
   assert.equal(result.reauthorized, true);
   assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+  const cliResult = classifyForwardRecoveryResult(result);
+  assert.equal(cliResult.status, "reauthorized-pending");
+  assert.notEqual(cliResult.status, "already-reconciled");
+  assert.equal(cliResult.phase, "PREPARED");
   assert.equal(replay.journal.read().sourceSha, executorSha);
   assert.equal(replay.journal.read().phase, "PREPARED");
 });

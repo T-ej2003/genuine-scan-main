@@ -35,6 +35,16 @@ export function preflightForwardRecoveryOutputs({ evidencePath, journalPath, bin
   return preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath, allowInProgressEvidence: true });
 }
 
+export function classifyForwardRecoveryResult(result = {}) {
+  const imported = result.imported === true;
+  const reauthorized = result.reauthorized === true;
+  if (imported && reauthorized) throw new Error("Forward recovery result cannot be both imported and reauthorized.");
+  if (reauthorized) return { status: "reauthorized-pending", phase: "PREPARED", reauthorized: true, imported: false, importCalls: result.importCalls, registrationCalls: result.registrationCalls, replacementArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn };
+  if (imported) return { status: "imported", phase: result.phase || "COMPLETED", reauthorized: false, imported: true, importCalls: result.importCalls, registrationCalls: result.registrationCalls, replacementArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn };
+  if (!["COMPLETED", "RECONCILED"].includes(result.phase)) throw new Error("Forward recovery result without import or reauthorization must be terminal.");
+  return { status: "already-reconciled", phase: result.phase, recoveredFromPhase: result.recoveredFromPhase || null, reauthorized: false, imported: false, importCalls: result.importCalls, registrationCalls: result.registrationCalls, replacementArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn };
+}
+
 export function assertForwardRecoveryTerraformBackend({ env, repositoryRoot = root, runTerraform } = {}) {
   assertStageBTerraformBackendConfig(STAGE_B_TERRAFORM_BACKEND_CONFIG);
   if (typeof runTerraform !== "function") throw new Error("Forward recovery requires a Terraform workspace probe.");
@@ -114,7 +124,7 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
     evidence: evidenceAdapter(outputs.evidence),
     journal: journalAdapter(outputs.journal, root),
   });
-  process.stdout.write(`${JSON.stringify({ status: result.imported ? "imported" : "already-reconciled", mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, replacementArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn, registrationCalls: 0, importCalls: result.importCalls })}\n`);
+  process.stdout.write(`${JSON.stringify({ ...classifyForwardRecoveryResult(result), mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode })}\n`);
   return result;
 }
 

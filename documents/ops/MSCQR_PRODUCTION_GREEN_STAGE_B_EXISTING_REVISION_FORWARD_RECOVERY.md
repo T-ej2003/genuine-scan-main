@@ -32,6 +32,11 @@ An unconsumed `PREPARED` journal is different: a valid protected descendant may 
 executor-bound `PREPARED` incident only after proving ancestry, fresh image authorization, exact `:9`,
 and unchanged pre-import state; that re-authorization writes no import or registration and the next
 execution performs the normal fresh import gate.
+The CLI status contract is explicit: `imported` means this execution completed the governed import,
+`reauthorized-pending` means a descendant PREPARED incident was rewritten safely and requires a later
+execution, and `already-reconciled` is reserved for `COMPLETED` or `RECONCILED` terminal results.
+Machine-readable output also includes `phase`, `reauthorized`, `imported`, `importCalls`,
+`registrationCalls`, and `replacementArn`.
 
 ## Durable phase transition matrix
 
