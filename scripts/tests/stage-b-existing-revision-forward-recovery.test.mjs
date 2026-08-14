@@ -223,6 +223,7 @@ async function importingRun() {
 test("same-source importing replay does not require fresh image authorization", async () => {
   const first = await importingRun();
   const replay = common({
+    bindings: { ...bindings, imageAuthorization: undefined },
     journal: first.journal,
     evidence: first.evidence,
     readState: async () => importedState(),
