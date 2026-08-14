@@ -1,6 +1,6 @@
 # Production GitHub Actions identities
 
-This isolated root source-manages two distinct GitHub OIDC roles:
+This isolated Terraform root source-manages two distinct GitHub OIDC roles:
 
 - `mscqr-production-github-actions-readonly` for read-only production preflight.
 - `mscqr-production-github-actions-mutation` for the canonical `release-gate.yml`
