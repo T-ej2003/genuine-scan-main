@@ -11,7 +11,9 @@ export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-r
 export const GITHUB_MUTATION_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-github-actions-mutation`;
 export const HUMAN_CALLER_PATTERN = new RegExp(`^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[A-Za-z0-9+=,.@_-]{2,64}$`);
 export const GITHUB_MUTATION_CALLER_PATTERN = new RegExp(`^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-github-actions-mutation/[A-Za-z0-9+=,.@_-]{2,64}$`);
-export const RELEASE_CALLER_PATTERN = HUMAN_CALLER_PATTERN.source;
+// Evidence schema compatibility: retain the historical serialized human pattern;
+// the stricter HUMAN_CALLER_PATTERN remains the executable validator.
+export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
 
 const requireText = (value, label) => {
   if (typeof value !== "string" || value.trim() === "") throw new Error(`${label} is required.`);

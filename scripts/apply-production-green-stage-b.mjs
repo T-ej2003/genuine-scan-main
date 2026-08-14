@@ -12,6 +12,8 @@ import {
   assertPermissionEvaluationBindings,
   verifyPermissionReportSignature,
   RELEASE_CALLER_PATTERN,
+  GITHUB_MUTATION_CALLER_PATTERN,
+  GITHUB_MUTATION_ROLE_ARN,
   RELEASE_ROLE_ARN,
   canonicalizeJson,
   assertPermissionReportPlanBinding,
@@ -23,7 +25,7 @@ import {
 import { assertStageBDeploymentEvidenceFreshness } from "./aws/stage-b-evidence-freshness.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendPolicy } from "./aws/stage-b-terraform-backend-contract.mjs";
-import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
+import { assertProductionCaller, PRODUCTION_CALLER_MODES } from "./aws/production-caller-identity-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenceSha256 as canonicalImageEvidenceSha256, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
@@ -99,7 +101,7 @@ export function parseCli(argv) {
   };
 }
 
-export function assertPermissionReport(report, { signatureArtifact, verifySignature = verifyPermissionReportSignature, plan, planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, toolingSha, imageReleaseSha, canonicalImageEvidenceSha256, now = new Date().toISOString() } = {}) {
+export function assertPermissionReport(report, { signatureArtifact, verifySignature = verifyPermissionReportSignature, plan, planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, callerMode = PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER, toolingSha, imageReleaseSha, canonicalImageEvidenceSha256, now = new Date().toISOString() } = {}) {
   if (!verifySignature({ report, signatureArtifact, now })) throw new Error("Permission report signature verification failed.");
   assertStageBPermissionEvidenceKind(report, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, "plan-bound");
   if (report?.schemaVersion !== 1 || report.status !== "valid") throw new Error("A valid permission-preflight report is required.");
@@ -108,9 +110,11 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   if (report.permissionProfile !== permissionProfileBinding.permissionProfile) throw new Error("Permission report permission profile is not bound to the approved plan.");
   assertPermissionEvaluationBindings(report, readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"), { plan, permissionProfile: report.permissionProfile });
   if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(report.reportGeneratorCallerArn)) throw new Error("Permission-preflight report generator is not approved.");
-  if (report.simulatedRoleArn !== RELEASE_ROLE_ARN || report.applyRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission-preflight report role contract is wrong.");
+  const expectedRoleArn = callerMode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION ? GITHUB_MUTATION_ROLE_ARN : RELEASE_ROLE_ARN;
+  const expectedCallerPattern = callerMode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION ? GITHUB_MUTATION_CALLER_PATTERN.source : RELEASE_CALLER_PATTERN;
+  if (report.simulatedRoleArn !== expectedRoleArn || report.applyRoleArn !== expectedRoleArn) throw new Error("Permission-preflight report role contract is wrong.");
   if (report.applyCallerArn !== null && report.applyCallerArn !== callerArn) throw new Error("Permission-preflight report apply caller is wrong.");
-  if (report.applyCallerArnPattern !== RELEASE_CALLER_PATTERN) throw new Error("Permission-preflight report caller pattern is wrong.");
+  if (report.applyCallerArnPattern !== expectedCallerPattern) throw new Error("Permission-preflight report caller pattern is wrong.");
   assertReleasePolicyEvidence(report.policyEvidence);
   if (!/^[a-f0-9]{64}$/.test(report.manifestSha256)) throw new Error("Permission-preflight report manifest hash is missing or malformed.");
   if (manifestSha256 && report.manifestSha256 !== manifestSha256) throw new Error("Permission-preflight report is bound to a different permission manifest.");
@@ -127,7 +131,7 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   return true;
 }
 
-export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJsonPath, planApprovalReportPath, planApprovalReportSha256, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, permissionReportSignatureSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, toolingTreeSha256, imageReleaseSha, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256, refreshBindingReportPath, refreshBindingReportSha256, recoveryAttestationPath, recoveryAttestationSha256, recoverySignaturePath, recoverySignatureSha256, recoveryClassificationPath, recoveryClassificationSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
+export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJsonPath, planApprovalReportPath, planApprovalReportSha256, auditPath, permissionReportPath, permissionReportSignaturePath, permissionReportSha256, permissionReportSignatureSha256, imageEvidencePath, imageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId, imageEvidenceArtifactSha256, toolingSha, toolingTreeSha256, imageReleaseSha, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256, refreshBindingReportPath, refreshBindingReportSha256, recoveryAttestationPath, recoveryAttestationSha256, recoverySignaturePath, recoverySignatureSha256, recoveryClassificationPath, recoveryClassificationSha256, planSha256, auditSha256, savedPlanSha256, canonicalPlanJsonSha256, currentHead, protectedMainCheckout, now = new Date().toISOString(), callerArn, callerMode = PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER, githubMutationContextVerified = false, showPlan, validatePlan = assertStageBPlan, verifyPermissionSignature = verifyPermissionReportSignature, verifyImageEvidence = verifyImageEvidenceSignature }) {
   assertStageBDeploymentCapabilityGraph();
   assertStageBTerraformBackendPolicy(readJson("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json"));
   if (!tfvarsPath || !tfvarsBindingReportPath || !tfvarsBindingReportSha256 || !refreshReportPath || !refreshReportSha256 || !toolingTreeSha256) throw new Error("Canonical Stage B tfvars, binding report, refresh report, binding-report SHA256, refresh-report SHA256, and tooling-tree SHA256 are required.");
@@ -174,7 +178,8 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   if (!/^[a-f0-9]{64}$/.test(permissionReportSha256) || sha256(permissionReportBytes) !== permissionReportSha256) throw new Error("Permission-preflight report SHA256 does not match the approved digest.");
   if (!/^[a-f0-9]{64}$/.test(permissionReportSignatureSha256) || sha256(permissionReportSignatureBytes) !== permissionReportSignatureSha256) throw new Error("Permission-preflight report signature SHA256 does not match the approved digest.");
   if (!/^[a-f0-9]{64}$/.test(imageEvidenceSha256) || canonicalImageEvidenceSha256(imageEvidence) !== imageEvidenceSha256) throw new Error("Image evidence canonical SHA256 does not match the approved digest.");
-  try { assertStageBReleaseCallerArn(callerArn); } catch { throw new Error("Current caller is not the production release-deployer STS assumed-role."); }
+  if (callerMode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION && githubMutationContextVerified !== true) throw new Error("GitHub mutation context was not verified before Stage B apply.");
+  try { assertProductionCaller({ callerArn, mode: callerMode }); } catch { throw new Error("Current caller is not a reviewed STS assumed-role production caller."); }
   const plan = JSON.parse(planBytes); const audit = JSON.parse(auditBytes);
   if (bindingReport.recoveryOnly !== (approvalReport.planProfile === "RECOVERY_ALIAS_ONLY")) throw new Error("Stage B recovery-only tfvars and approved plan profile disagree.");
   if (bindingReport.recoveryOnly) {
@@ -214,7 +219,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   const derivedCanonical = canonicalizeJson(derivedPlan);
   const derivedCanonicalPlanJsonSha256 = sha256(Buffer.from(derivedCanonical));
   if (derivedCanonical !== approvedCanonical || derivedCanonicalPlanJsonSha256 !== canonicalPlanJsonSha256) throw new Error("Saved binary Terraform plan does not match the approved plan JSON.");
-  assertPermissionReport(permissionReport, { signatureArtifact, verifySignature: ({ report, signatureArtifact: artifact }) => verifyPermissionSignature({ report, signatureArtifact: artifact, reportBytes: permissionReportBytes, signatureBytes: permissionReportSignatureBytes, expectedReportFileSha256: permissionReportSha256, expectedSignatureFileSha256: permissionReportSignatureSha256, now }), plan, planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, toolingSha: boundToolingSha, imageReleaseSha: boundImageReleaseSha, canonicalImageEvidenceSha256: deploymentIdentity.canonicalImageEvidenceSha256, now });
+  assertPermissionReport(permissionReport, { signatureArtifact, verifySignature: ({ report, signatureArtifact: artifact }) => verifyPermissionSignature({ report, signatureArtifact: artifact, reportBytes: permissionReportBytes, signatureBytes: permissionReportSignatureBytes, expectedReportFileSha256: permissionReportSha256, expectedSignatureFileSha256: permissionReportSignatureSha256, now }), plan, planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, callerMode, toolingSha: boundToolingSha, imageReleaseSha: boundImageReleaseSha, canonicalImageEvidenceSha256: deploymentIdentity.canonicalImageEvidenceSha256, now });
   const resourceClassification = validatePlan(plan, {
     referenceAudit: audit,
     referenceAuditBytes: auditBytes,
@@ -266,7 +271,8 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
     : effectiveDeps.currentHead
       ? buildStageBProtectedMainCheckoutEvidence({ toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "production" })
       : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
-  const verified = assertApplyArtifacts({ ...artifacts, callerArn, protectedMainCheckout, currentHead: protectedMainCheckout.currentHead, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature, verifyImageEvidence: effectiveDeps.verifyImageEvidence });
+  const callerMode = env.MSCQR_PRODUCTION_CALLER_MODE || PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER;
+  const verified = assertApplyArtifacts({ ...artifacts, callerArn, callerMode, githubMutationContextVerified: env.MSCQR_GITHUB_MUTATION_CONTEXT_VERIFIED === "true", protectedMainCheckout, currentHead: protectedMainCheckout.currentHead, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature, verifyImageEvidence: effectiveDeps.verifyImageEvidence });
   assertStageBTerraformInitializedBackendMetadata(effectiveDeps.getBackendMetadata(env));
   if (artifacts.verifyOnly) return { status: "ready-to-apply", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
   const applyCheckout = effectiveDeps.getProtectedMainCheckout
