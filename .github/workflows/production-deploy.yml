@@ -1,0 +1,74 @@
+name: Production Deployment Readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact 40-character commit SHA from protected main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Shares the existing production-deploy lock with the canonical release gate.
+# Phase 1 has no mutation job; cancel-in-progress remains false for the future
+# single-writer production path.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  read-only-readiness:
+    name: Read-only production readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Require protected-main workflow invocation
+        env:
+          EXPECTED_REF: refs/heads/main
+        run: test "$GITHUB_REF" = "$EXPECTED_REF"
+
+      - name: Checkout exact requested source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Terraform validation binary
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+          npm --prefix backend ci
+
+      - name: Run canonical read-only readiness orchestrator
+        env:
+          MSCQR_DEPLOYMENT_MODE: read-only
+          READINESS_OUTPUT: ${{ runner.temp }}/mscqr-production-readiness/readiness.json
+        run: |
+          set -euo pipefail
+          node scripts/ci/production-readiness-orchestrator.mjs \
+            --mode read-only \
+            --source-sha "${{ inputs.source_sha }}" \
+            --output "$READINESS_OUTPUT"
+
+      - name: Upload bounded readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mscqr-production-readiness-${{ github.run_id }}
+          path: ${{ runner.temp }}/mscqr-production-readiness/readiness.json
+          if-no-files-found: error
+          retention-days: 30
