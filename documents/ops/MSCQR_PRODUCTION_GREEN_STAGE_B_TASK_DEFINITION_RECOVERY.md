@@ -10,11 +10,23 @@ must never be adopted.
 After a reviewed merge, the operator must use
 `scripts/aws/recover-stage-b-backend-task-definition.mjs --execute` with the
 fresh protected source, current authorized image bindings, Terraform root,
-explicit AWS profile, and the exact `:5`/`:7` predecessor evidence. The
-producer renders the backend task
+explicit AWS profile, and the exact `:5`/`:7` predecessor evidence. Before
+any AWS or Terraform mutation the command verifies the clean protected-main
+checkout, exact HEAD/source SHA, source-bound image/release bindings, and a
+private unoccupied evidence destination. The producer renders the backend task
 definition through the existing Stage-B renderer, registers exactly one
 revision, and verifies the returned ACTIVE ARN is newer than `:7` and has the
 same semantic fingerprint as the protected source.
+
+The recovery journal is stored beside the evidence output (or at the explicit
+`--recovery-state` path). It is written before registration and records the
+source, predecessor, fingerprint, registration count, and exact state
+checkpoints. If registration succeeds but its response, describe, or newest
+readback is lost, a retry describes only the newest ACTIVE revision. It may
+resume only when that revision is the exact canonical fingerprint; a newer
+noncanonical revision fails closed and no second registration is attempted.
+The journal also resumes an interruption after `state rm` or `import` without
+repeating either completed operation.
 
 Only after that readback passes may the reviewed state adapter perform the
 exact two-step Terraform state reconciliation for

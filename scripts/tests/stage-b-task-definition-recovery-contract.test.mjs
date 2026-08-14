@@ -6,6 +6,7 @@ import {
   STAGE_B_BACKEND_RECOVERY,
   assertBackendRecoveryPreconditions,
   assertCanonicalBackendRecoveryReadback,
+  buildCanonicalRecoveryJournal,
   buildCanonicalBackendRecoveryTaskDefinition,
   canonicalSha256,
   reconcileCanonicalBackendState,
@@ -18,6 +19,8 @@ import {
 const sourceSha = "084fc6eff5cfcc78d0ff2e037477f824090cb4f3";
 const image = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"a".repeat(64)}`;
 const bindings = {
+  toolingSha: sourceSha,
+  sourceSha,
   backendImage: image,
   imageReleaseSha: sourceSha,
   sourceContractSha256: "b".repeat(64),
@@ -29,6 +32,8 @@ const bindings = {
   backendLogGroup: "/ecs/mscqr-production/rls-green-backend",
   workerLogGroup: "/ecs/mscqr-production/rls-green-worker",
 };
+const protectedCheckout = { mode: "production", toolingSha: sourceSha, currentHead: sourceSha, originMainHead: sourceSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false } };
+const journalAdapter = (initial) => { let value = initial ? structuredClone(initial) : null; return { read: () => value && structuredClone(value), write: (next) => { value = structuredClone(next); } }; };
 const state = (arn = STAGE_B_BACKEND_RECOVERY.predecessorArn, serial = STAGE_B_BACKEND_RECOVERY.serial) => ({
   version: 4,
   terraform_version: "1.9.8",
@@ -80,6 +85,7 @@ test("registration performs one dynamic canonical registration and verifies newe
     bindings,
     state: state(),
     sourceSha,
+    protectedCheckout,
     expectedFingerprint: payload.fingerprint,
     register: async (value) => { registrations += 1; assert.deepEqual(value, buildCanonicalBackendRecoveryTaskDefinition(bindings)); return { taskDefinition: { taskDefinitionArn: payload.taskDefinition.taskDefinitionArn } }; },
     describe: async () => payload,
@@ -113,10 +119,15 @@ test("state reconciliation is exact, minimal, and rejects historical adoption", 
   let current = state();
   let removes = 0;
   let imports = 0;
+  const payload = replacementPayload(replacementArn);
+  const journal = buildCanonicalRecoveryJournal(current, { sourceSha, fingerprint: payload.fingerprint, imageDigest: image });
+  journal.replacementArn = replacementArn;
+  journal.phase = "REGISTERED";
   const result = await reconcileCanonicalBackendState({
     sourceSha,
     replacementArn,
     readState: async () => structuredClone(current),
+    journal: journalAdapter(journal),
     removeState: async ({ address, expectedArn }) => { removes += 1; assert.equal(address, STAGE_B_BACKEND_RECOVERY.address); assert.equal(expectedArn, STAGE_B_BACKEND_RECOVERY.predecessorArn); current = { ...current, serial: 94, resources: [] }; },
     importState: async ({ address, arn }) => { imports += 1; assert.equal(address, STAGE_B_BACKEND_RECOVERY.address); assert.equal(arn, replacementArn); current = state(replacementArn, 95); },
   });
@@ -131,10 +142,13 @@ test("end-to-end recovery orchestration registers once, then reconciles only Ter
   const payload = replacementPayload(replacementArn);
   let current = state();
   const calls = [];
+  const journal = journalAdapter();
   const result = await runCanonicalBackendRecovery({
     bindings,
     sourceSha,
+    protectedCheckout,
     readState: async () => structuredClone(current),
+    journal,
     newest: async () => calls.includes("register") ? replacementArn : STAGE_B_BACKEND_RECOVERY.newestHistoricalArn,
     register: async () => { calls.push("register"); return { taskDefinition: { taskDefinitionArn: replacementArn } }; },
     describe: async () => payload,
@@ -145,6 +159,117 @@ test("end-to-end recovery orchestration registers once, then reconciles only Ter
   assert.equal(result.registration.registrationCalls, 1);
   assert.equal(result.reconciliation.stateBackendCandidate, replacementArn);
   assert.equal(result.evidence.replacementArn, replacementArn);
+});
+
+test("source identity and evidence destination failures happen before mutation adapters", async () => {
+  const directory = `/tmp/mscqr-recovery-test-${process.pid}`;
+  const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+  rmSync(directory, { recursive: true, force: true });
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const bindingsPath = `${directory}/bindings.json`;
+  const evidencePath = `${directory}/evidence.json`;
+  writeFileSync(bindingsPath, JSON.stringify(bindings), { mode: 0o600 });
+  writeFileSync(evidencePath, "occupied\n", { mode: 0o600 });
+  const calls = [];
+  const exec = (command) => { calls.push(command); throw new Error("mutation adapter must not run"); };
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", evidencePath, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /occupied/);
+  assert.deepEqual(calls, []);
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", "0".repeat(40), "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", `${directory}/other.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /does not match/);
+  assert.deepEqual(calls, []);
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", `${directory}/dirty.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => ({ ...protectedCheckout, porcelainStatus: " M scripts/aws/example.mjs" }) }), /clean protected-main/);
+  assert.deepEqual(calls, []);
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", `${directory}/different-head.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => ({ ...protectedCheckout, currentHead: "f".repeat(40) }) }), /HEAD/);
+  assert.deepEqual(calls, []);
+  writeFileSync(bindingsPath, JSON.stringify({ ...bindings, imageReleaseSha: "0".repeat(40) }), { mode: 0o600 });
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", `${directory}/binding-mismatch.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /source-bound/);
+  assert.deepEqual(calls, []);
+  writeFileSync(`${directory}/not-a-directory`, "x\n", { mode: 0o600 });
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", `${directory}/not-a-directory/evidence.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /directory/);
+  assert.deepEqual(calls, []);
+  rmSync(directory, { recursive: true, force: true });
+});
+
+test("retry after remote registration resumes the exact newest canonical revision without registering", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const payload = replacementPayload(replacementArn);
+  let current = state();
+  let newestValue = STAGE_B_BACKEND_RECOVERY.newestHistoricalArn;
+  let registrationCalls = 0;
+  const journal = journalAdapter();
+  const common = { bindings, sourceSha, protectedCheckout, readState: async () => structuredClone(current), journal,
+    newest: async () => newestValue, describe: async () => payload,
+    removeState: async () => { current = { ...current, serial: 94, resources: [] }; },
+    importState: async () => { current = state(replacementArn, 95); } };
+  await assert.rejects(() => runCanonicalBackendRecovery({ ...common, register: async () => { registrationCalls += 1; newestValue = replacementArn; throw new Error("response lost"); } }), /response lost/);
+  const result = await runCanonicalBackendRecovery({ ...common, register: async () => { registrationCalls += 1; throw new Error("must not register on retry"); } });
+  assert.equal(registrationCalls, 1);
+  assert.equal(result.registration.registrationCalls, 0);
+  assert.equal(result.reconciliation.stateBackendCandidate, replacementArn);
+});
+
+test("interrupted state removal resumes with import only", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const payload = replacementPayload(replacementArn);
+  let current = state();
+  let removes = 0;
+  let imports = 0;
+  const journal = journalAdapter();
+  const common = { bindings, sourceSha, protectedCheckout, readState: async () => structuredClone(current), journal,
+    newest: async () => replacementArn, describe: async () => payload,
+    register: async () => { throw new Error("must not register while resuming"); },
+    removeState: async () => { removes += 1; current = { ...current, serial: 94, resources: [] }; },
+    importState: async () => { imports += 1; current = state(replacementArn, 95); } };
+  let firstImport = true;
+  await assert.rejects(() => runCanonicalBackendRecovery({ ...common, removeState: async () => { removes += 1; current = { ...current, serial: 94, resources: [] }; }, importState: async () => { imports += 1; if (firstImport) { firstImport = false; throw new Error("interrupted after state rm"); } current = state(replacementArn, 95); } }), /interrupted/);
+  const result = await runCanonicalBackendRecovery(common);
+  assert.equal(removes, 1);
+  assert.equal(imports, 2);
+  assert.equal(result.reconciliation.removeCalls, 0);
+  assert.equal(result.reconciliation.importCalls, 1);
+});
+
+test("interrupted import resumes without registration or second state mutation", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const payload = replacementPayload(replacementArn);
+  let current = state();
+  let removes = 0;
+  let imports = 0;
+  let readCount = 0;
+  const journal = journalAdapter();
+  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+    readState: async () => { readCount += 1; if (readCount === 4) throw new Error("interrupted after import"); return structuredClone(current); },
+    newest: async () => replacementArn, describe: async () => payload,
+    register: async () => ({ taskDefinition: { taskDefinitionArn: replacementArn } }),
+    removeState: async () => { removes += 1; current = { ...current, serial: 94, resources: [] }; },
+    importState: async () => { imports += 1; current = state(replacementArn, 95); },
+  }).catch((error) => { assert.match(error.message, /interrupted/); return null; });
+  assert.equal(result, null);
+  const resumed = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+    readState: async () => structuredClone(current), newest: async () => replacementArn, describe: async () => payload,
+    register: async () => { throw new Error("must not register on imported resume"); },
+    removeState: async () => { removes += 1; }, importState: async () => { imports += 1; } });
+  assert.equal(removes, 1);
+  assert.equal(imports, 1);
+  assert.equal(resumed.reconciliation.removeCalls, 0);
+  assert.equal(resumed.reconciliation.importCalls, 0);
+});
+
+test("newer noncanonical or non-newest revisions fail closed without registration or state mutation", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  for (const newestArn of [
+    "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8",
+    "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9",
+  ]) {
+    let registrations = 0;
+    let removes = 0;
+    const current = state();
+    const journal = journalAdapter();
+    await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, readState: async () => structuredClone(current), journal,
+      newest: async () => newestArn, describe: async () => replacementPayload(newestArn, { mutate: (value) => { value.containerDefinitions[0].image = `${image.slice(0, -64)}${"e".repeat(64)}`; } }),
+      register: async () => { registrations += 1; return { taskDefinition: { taskDefinitionArn: replacementArn } }; }, removeState: async () => { removes += 1; }, importState: async () => {} }), /newest|fingerprint/);
+    assert.equal(registrations, 0);
+    assert.equal(removes, 0);
+  }
 });
 
 test("recovery evidence is deterministic and binds source, image, predecessor, replacement, and state", () => {
