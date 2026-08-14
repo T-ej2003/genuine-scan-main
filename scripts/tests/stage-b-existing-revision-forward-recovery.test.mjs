@@ -23,6 +23,9 @@ const sourceSha = "45c5a38c7e3594793fafe1f051f1f381937ba0d4";
 const imageReleaseSha = "25394d30c189583384c9bba62604bf968dc9e0b2";
 const imageFixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha });
 const imageAuthorization = imageFixture.authorization;
+const authorizationSourceSha = imageReleaseSha;
+const twoShaImageFixture = makeCanonicalImageAuthorization({ sourceSha: authorizationSourceSha, imageReleaseSha });
+const twoShaImageAuthorization = twoShaImageFixture.authorization;
 const backendImage = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageAuthorization.backendDigest}`;
 const bindings = {
   toolingSha: sourceSha,
@@ -61,7 +64,7 @@ const census = { complete: true, revisions: [{ arn, readback }] };
 const journalAdapter = (initial) => { let value = initial && structuredClone(initial); return { read: () => value && structuredClone(value), write: (next) => { value = structuredClone(next); } }; };
 const expectedIdentity = () => canonicalForwardRecoveryIncidentIdentity({
   sourceSha, toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256,
-  imageReleaseSha, authorizedBackendDigest: imageAuthorization.backendDigest, imageAuthorizationSha256: imageAuthorization.evidenceSha256,
+  imageReleaseSha, authorizedBackendDigest: imageAuthorization.backendDigest, imageAuthorizationSha256: imageAuthorization.evidenceSha256, imageAuthorizationSourceSha: imageAuthorization.sourceSha,
   stateLineage: CONTRACT.lineage, stateSerial: CONTRACT.startSerial, stateBeforeSha256: stateSnapshotSha256(emptyState()), existingRevisionArn: arn,
   censusSha256: canonicalSha256([{ arn, revision: 9, readback }]), fingerprint,
 });
@@ -222,6 +225,19 @@ async function importingRun() {
   return run;
 }
 
+async function twoShaImportingRun() {
+  const run = common({
+    imageAuthorization: twoShaImageAuthorization,
+    bindings: { ...bindings, imageAuthorization: twoShaImageAuthorization },
+    imageAuthorizationValidation: { now: twoShaImageFixture.now, verifyImageEvidence: twoShaImageFixture.verifyImageEvidence },
+    proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === authorizationSourceSha && descendantSha === sourceSha,
+    interruptAt: (phase) => { if (phase === "AFTER_IMPORT") throw new Error("interrupted after import"); },
+  });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(run), /interrupted/);
+  assert.equal(run.journal.read().phase, "IMPORTING");
+  return run;
+}
+
 async function preparedRun() {
   const run = common();
   const write = run.journal.write;
@@ -297,6 +313,55 @@ test("same-source importing replay does not require fresh image authorization", 
   assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
 });
 
+test("two-SHA importing replay preserves the original ancestor authorization source", async () => {
+  const first = await twoShaImportingRun();
+  assert.equal(first.journal.read().imageAuthorizationSourceSha, authorizationSourceSha);
+  const executorSha = "e".repeat(40);
+  const replay = common({
+    sourceSha: executorSha,
+    protectedCheckout: { currentHead: executorSha, originMainHead: executorSha, toolingSha: executorSha, porcelainStatus: "" },
+    bindings: { ...bindings, imageAuthorization: twoShaImageAuthorization },
+    imageAuthorization: twoShaImageAuthorization,
+    imageAuthorizationValidation: { now: new Date(Date.parse(twoShaImageFixture.now) + 2 * 24 * 60 * 60 * 1000).toISOString(), verifyImageEvidence: () => { throw new Error("expired authorization must not be revalidated"); } },
+    journal: first.journal,
+    evidence: first.evidence,
+    readState: async () => importedState(),
+    proveDescendant: ({ ancestorSha: ancestor, descendantSha }) => (ancestor === authorizationSourceSha && descendantSha === sourceSha) || (ancestor === sourceSha && descendantSha === executorSha),
+  });
+  const result = await runExistingRevisionForwardRecovery(replay);
+  assert.equal(result.imported, false);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+  assert.equal(replay.journal.read().phase, "COMPLETED");
+});
+
+test("two-SHA importing replay rejects changed authorization identity", async () => {
+  const first = await twoShaImportingRun();
+  const executorSha = "e".repeat(40);
+  const replayBase = {
+    sourceSha: executorSha,
+    protectedCheckout: { currentHead: executorSha, originMainHead: executorSha, toolingSha: executorSha, porcelainStatus: "" },
+    bindings: { ...bindings, imageAuthorization: twoShaImageAuthorization },
+    journal: first.journal,
+    evidence: first.evidence,
+    readState: async () => importedState(),
+    proveDescendant: ({ ancestorSha: ancestor, descendantSha }) => (ancestor === authorizationSourceSha && descendantSha === sourceSha) || (ancestor === sourceSha && descendantSha === executorSha),
+  };
+  for (const authorization of [
+    { ...twoShaImageAuthorization, sourceSha: "f".repeat(40) },
+    { ...twoShaImageAuthorization, evidenceSha256: "f".repeat(64) },
+    { ...twoShaImageAuthorization, imageReleaseSha: "8".repeat(40) },
+    { ...twoShaImageAuthorization, backendDigest: "sha256:" + "f".repeat(64) },
+  ]) {
+    const replay = common({ ...replayBase, imageAuthorization: authorization });
+    await assert.rejects(() => runExistingRevisionForwardRecovery(replay), /authorization|digest|identity/);
+    assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+  }
+  const changedJournal = { ...first.journal.read(), incidentIdentity: "f".repeat(64) };
+  const replay = common({ ...replayBase, journal: journalAdapter(changedJournal), imageAuthorization: twoShaImageAuthorization });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(replay), /identity|incomplete/);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
 test("descendant importing replay does not require fresh image authorization", async () => {
   const first = await importingRun();
   const executorSha = "e".repeat(40);
@@ -365,7 +430,7 @@ test("ambiguous import journal blocks retry and cannot reach registration", asyn
 
 test("incident identity is bound to the exact current state and :9", () => {
   assert.equal(typeof expectedIdentity(), "string");
-  assert.throws(() => canonicalForwardRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256, imageReleaseSha, authorizedBackendDigest: imageAuthorization.backendDigest, imageAuthorizationSha256: imageAuthorization.evidenceSha256, stateLineage: CONTRACT.lineage, stateSerial: 93, stateBeforeSha256: canonicalSha256(emptyState()), existingRevisionArn: arn, censusSha256: "c".repeat(64), fingerprint }), /incomplete/);
+  assert.throws(() => canonicalForwardRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256, imageReleaseSha, authorizedBackendDigest: imageAuthorization.backendDigest, imageAuthorizationSha256: imageAuthorization.evidenceSha256, imageAuthorizationSourceSha: imageAuthorization.sourceSha, stateLineage: CONTRACT.lineage, stateSerial: 93, stateBeforeSha256: canonicalSha256(emptyState()), existingRevisionArn: arn, censusSha256: "c".repeat(64), fingerprint }), /incomplete/);
 });
 
 test("forward CLI source contains only the reviewed import mutation", () => {

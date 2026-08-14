@@ -4,7 +4,7 @@ This runbook covers the narrow recovery state where the historical registration 
 resumable, but the authoritative remote Terraform state and live ECS state prove that the
 already-validated canonical revision `:9` exists and is the only eligible replacement.
 
-The mode is `EXISTING_REVISION_ZERO_REGISTRATION_ADOPTION`. It starts from the current remote
+The mode is `EXISTING_REVISION_ZERO_REGISTRATION_ADOPTION` (journal schema 2). It starts from the current remote
 Terraform state (lineage and reviewed serial), a complete ACTIVE ECS census, the exact `:9` ARN,
 fresh task-definition readback, and current protected-main/image-reuse provenance. It is a new
 incident and does not claim continuity of the legacy recovery journal.
@@ -23,8 +23,9 @@ deterministic evidence is durably written and read back. A completed forward jou
 and performs no second import: its evidence is parsed, canonicalized, hash-checked against the
 journal, and then treated as immutable. If the executor checkout advances after an import has
 reserved the `IMPORTING` phase, replay is allowed only through the protected descendant path: the
-original journal identity and image authorization remain unchanged, the original source is proven
-an ancestor, and the new executor proves image-safe reuse; no new import capability is granted.
+original journal identity and image authorization remain unchanged, including the original
+authorization source SHA, the original source is proven an ancestor, and the new executor proves
+image-safe reuse; no new import capability is granted.
 Once the journal is `COMPLETED` or `RECONCILED`, replay is terminal: a clean protected descendant
 may validate the recorded incident and immutable evidence without re-running current-HEAD image
 freshness checks or writing any journal/evidence bytes.
