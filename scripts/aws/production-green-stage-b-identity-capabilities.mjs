@@ -35,6 +35,7 @@ export const RELEASE_READ_PROBES = Object.freeze([
   ["audit-services", "ecs:ListServices", ["ecs", "list-services", "--cluster", STAGE_B.clusterArn]],
   ["audit-tasks", "ecs:ListTasks", ["ecs", "list-tasks", "--cluster", STAGE_B.clusterArn]],
   ["audit-task-definition", "ecs:DescribeTaskDefinition", ["ecs", "describe-task-definition", "--task-definition", STAGE_B.frontendTaskDefinition]],
+  ["recovery-backend-revisions", "ecs:ListTaskDefinitions", ["ecs", "list-task-definitions", "--family-prefix", "mscqr-production-rls-green-backend-candidate", "--status", "ACTIVE", "--sort", "DESC"]],
   ["audit-broker", "lambda:GetFunctionConfiguration", ["lambda", "get-function-configuration", "--function-name", STAGE_B.brokerFunctionArn]],
   ["audit-broker-alias", "lambda:GetAlias", ["lambda", "get-alias", "--function-name", STAGE_B.brokerFunctionArn, "--name", STAGE_B.brokerAliasQualifier]],
   ["refresh-broker-policy", "iam:GetPolicy", ["iam", "get-policy", "--policy-arn", policyArn]],
@@ -51,7 +52,7 @@ export const RELEASE_READ_PROBES = Object.freeze([
 
 export function readIdentityCapabilityMatrix() {
   const matrix = JSON.parse(fs.readFileSync(path.join(root, IDENTITY_CAPABILITY_MATRIX_PATH), "utf8"));
-  if (matrix.schemaVersion !== 1 || matrix.account !== STAGE_B.account || matrix.region !== STAGE_B.region || matrix.phases?.length !== 31) throw new Error("Stage B identity capability matrix identity is wrong.");
+  if (matrix.schemaVersion !== 1 || matrix.account !== STAGE_B.account || matrix.region !== STAGE_B.region || matrix.phases?.length !== 32) throw new Error("Stage B identity capability matrix identity is wrong.");
   const releaseActions = new Set(matrix.capabilities.filter(({ identity }) => identity === "RELEASE_DEPLOYER").map(({ action }) => action));
   for (const probe of RELEASE_READ_PROBES) if (!releaseActions.has(probe.action)) throw new Error(`Stage B identity capability matrix omits release action ${probe.action}.`);
   if (matrix.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && ["iam:SimulatePrincipalPolicy", "cloudtrail:LookupEvents"].includes(action))) throw new Error("Stage B release identity must not own administrator audit actions.");

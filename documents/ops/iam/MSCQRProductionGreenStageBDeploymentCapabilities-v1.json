@@ -86,76 +86,81 @@
     },
     {
       "order": 17,
+      "id": "canonical-backend-recovery",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs"
+    },
+    {
+      "order": 18,
       "id": "stage-b-state-pull",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 18,
+      "order": 19,
       "id": "stage-a-state-read",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 19,
+      "order": 20,
       "id": "stage-a-handoff-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"
     },
     {
-      "order": 20,
+      "order": 21,
       "id": "tfvars-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-tfvars.mjs"
     },
     {
-      "order": 21,
+      "order": 22,
       "id": "refresh-only",
       "sourceFile": "scripts/refresh-production-green-stage-b.mjs"
     },
     {
-      "order": 22,
+      "order": 23,
       "id": "saved-plan-generation",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 23,
+      "order": 24,
       "id": "plan-json-canonicalization",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 24,
+      "order": 25,
       "id": "reference-audit",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs"
     },
     {
-      "order": 25,
+      "order": 26,
       "id": "plan-bound-permission-report",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 26,
+      "order": 27,
       "id": "production-closure",
       "sourceFile": "scripts/aws/validate-stage-b-deployment-closure.mjs"
     },
     {
-      "order": 27,
+      "order": 28,
       "id": "validator",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 28,
+      "order": 29,
       "id": "wrapper-verify-only",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 29,
+      "order": 30,
       "id": "wrapper-apply",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 30,
+      "order": 31,
       "id": "post-apply-verification",
       "sourceFile": "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"
     },
     {
-      "order": 31,
+      "order": 32,
       "id": "runtime-activation-boundary",
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs"
     }
@@ -2046,7 +2051,7 @@
         "sid": "CreateExactStageBLogs",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": true
@@ -2832,7 +2837,7 @@
         "sid": "InvokeExactPreDeploymentInventoryBrokerAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "d2a04fcd973bf29f1266fdfa740a515c36b1ce5e31535f897de2303ad79d31ee"
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
       },
       "required": true,
       "mutation": true
@@ -2923,7 +2928,7 @@
         "sid": "PruneExactStageBBrokerManagedPolicyVersions",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": true
@@ -3277,7 +3282,7 @@
         "sid": "ListAttachedExactStageBReadOnlyCanaryRolePolicies",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": false
@@ -3302,7 +3307,7 @@
         "sid": "ReadExactStageBReadOnlyCanaryExecutionRolePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": false
@@ -3331,7 +3336,7 @@
         "sid": "ListExactStageBReadOnlyCanaryRolePolicies",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": false
@@ -3361,7 +3366,7 @@
         "sid": "ReadExactStageBReadOnlyCanaryRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": false
@@ -3532,7 +3537,7 @@
         "sid": "ReadExactStageBBrokerManagedPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": false
@@ -3557,7 +3562,7 @@
         "sid": "ReadExactStageBBrokerManagedPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": false
@@ -3584,7 +3589,7 @@
         "sid": "ReadExactStageBBrokerManagedPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": false
@@ -3654,7 +3659,7 @@
         "sid": "ListExactStageBLogTagsReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": false
@@ -3753,7 +3758,7 @@
         "sid": "RegisterExactPreDeploymentInventoryTaskDefinition",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "d2a04fcd973bf29f1266fdfa740a515c36b1ce5e31535f897de2303ad79d31ee"
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
       },
       "required": true,
       "mutation": true
@@ -4005,7 +4010,7 @@
         "sid": "SetExactStageBLogRetention",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": true
@@ -4104,7 +4109,7 @@
         "sid": "TagExactPreDeploymentInventoryTaskDefinition",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "d2a04fcd973bf29f1266fdfa740a515c36b1ce5e31535f897de2303ad79d31ee"
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
       },
       "required": true,
       "mutation": true
@@ -4170,7 +4175,7 @@
         "sid": "TagExactStageBLogs",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8d21ffbd7c3dee8517c11ddcde4b816e9d3f1f96ebf2d272bf2effb1d6ff5b80"
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
       },
       "required": true,
       "mutation": true
@@ -5896,6 +5901,286 @@
       "mutation": true
     },
     {
+      "id": "recovery-describe-backend-revision",
+      "phase": "canonical-backend-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli-or-terraform",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-describe-backend-revision",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeStageBTaskDefinitionsReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "recovery-list-backend-revisions",
+      "phase": "canonical-backend-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli-or-terraform",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-list-backend-revisions",
+      "action": "ecs:ListTaskDefinitions",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "ListExactStageBBackendRecoveryRevisions",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "recovery-lock-state",
+      "phase": "canonical-backend-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli-or-terraform",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-lock-state",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ManageStageBProductionLockOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "recovery-pass-backend-execution-role",
+      "phase": "canonical-backend-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli-or-terraform",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-pass-backend-execution-role",
+      "action": "iam:PassRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "PassOnlyExactStageBTaskRolesToEcsTasks",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "recovery-pass-backend-task-role",
+      "phase": "canonical-backend-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli-or-terraform",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-pass-backend-task-role",
+      "action": "iam:PassRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "PassOnlyExactStageBTaskRolesToEcsTasks",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "recovery-read-state",
+      "phase": "canonical-backend-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli-or-terraform",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-read-state",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "recovery-register-backend-revision",
+      "phase": "canonical-backend-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli-or-terraform",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-register-backend-revision",
+      "action": "ecs:RegisterTaskDefinition",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "RegisterExactStageBBackendTaskDefinition1024",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "recovery-tag-backend-revision",
+      "phase": "canonical-backend-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli-or-terraform",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-tag-backend-revision",
+      "action": "ecs:TagResource",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "TagExactStageBBackendRecoveryTaskDefinition",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "recovery-unlock-state",
+      "phase": "canonical-backend-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli-or-terraform",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-unlock-state",
+      "action": "s3:DeleteObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ManageStageBProductionLockOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "recovery-write-state",
+      "phase": "canonical-backend-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli-or-terraform",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-write-state",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "release-identify",
       "phase": "release-direct-read-preflight",
       "identity": "RELEASE_DEPLOYER",
@@ -6648,6 +6933,10 @@
       "action": "ecs:DescribeTaskDefinition"
     },
     {
+      "id": "recovery-backend-revisions",
+      "action": "ecs:ListTaskDefinitions"
+    },
+    {
       "id": "audit-broker",
       "action": "lambda:GetFunctionConfiguration"
     },
@@ -6831,6 +7120,10 @@
     },
     {
       "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
+      "action": "ecs:ListTaskDefinitions"
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
       "action": "ecs:ListTasks"
     },
     {
@@ -6920,6 +7213,18 @@
     {
       "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",
       "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "action": "ecs:DescribeTaskDefinition"
+    },
+    {
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "action": "ecs:ListTaskDefinitions"
+    },
+    {
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "action": "ecs:RegisterTaskDefinition"
     },
     {
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs",

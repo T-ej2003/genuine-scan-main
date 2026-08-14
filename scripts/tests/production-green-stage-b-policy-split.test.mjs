@@ -118,40 +118,28 @@ test("v4 and the companion policy fit the AWS managed-policy document limit", ()
   assert.ok(awsCharacterCount(policies.audit) < 6144);
 });
 
-test("v4 plus the companion policy preserves v3 recovery permissions without deregistration authority", () => {
-  const correctedV3 = {
-    Version: policies.v3.Version,
-    Statement: policies.v3.Statement.filter((statement) => statement.Action !== "ecs:DeregisterTaskDefinition"),
-  };
-  correctedV3.Statement.push(statementOf(policies.v4, "SetExactStageBLogRetention"));
-  correctedV3.Statement.push(statementOf(policies.v4, "ListExactStageBLogTagsReadOnly"));
-  correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBReadOnlyCanaryRoles"));
-  correctedV3.Statement.push(statementOf(policies.v4, "ListExactStageBReadOnlyCanaryRolePolicies"));
-  correctedV3.Statement.push(statementOf(policies.v4, "ListAttachedExactStageBReadOnlyCanaryRolePolicies"));
-  correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBReadOnlyCanaryExecutionRolePolicy"));
-  correctedV3.Statement.push(statementOf(policies.v4, "ReadExactStageBBrokerManagedPolicy"));
-  correctedV3.Statement.push(statementOf(policies.audit, "ReadStageBBrokerReviewedAlias"));
-  correctedV3.Statement.push(statementOf(policies.audit, "VerifyExactStageBPermissionReportSignature"));
-  correctedV3.Statement.push(statementOf(policies.audit, "ReadStageALivePrerequisites"));
-  correctedV3.Statement = correctedV3.Statement.map((statement) => statement.Sid === "DescribeStageBTasksReadOnly" ? statementOf(policies.audit, "DescribeStageBTasksReadOnly") : statement);
-  assert.deepEqual(canonical(correctedV3), canonical({
-    Version: policies.v3.Version,
-    Statement: [...policies.v4.Statement.filter(({ Sid }) => Sid !== "PruneExactStageBBrokerManagedPolicyVersions"), ...policies.audit.Statement],
-  }));
+test("backend recovery tagging is split from the broad provider tag authority", () => {
+  const broad = statementOf(policies.v4, "TagExactStageBTaskDefinitions");
+  const exact = statementOf(policies.taskDefinitionRegistration, "TagExactStageBBackendRecoveryTaskDefinition");
+  assert.deepEqual([...broad.Resource, exact.Resource].sort(), stageBTaskFamilies.map(arn).sort());
+  assert.deepEqual(exact.Condition.StringEquals["aws:RequestTag/MSCQRExecTarget"], "production-backend");
+  assert.deepEqual(exact.Condition["ForAllValues:StringEquals"]["aws:TagKeys"], ["Component", "Environment", "ManagedBy", "MSCQRExecTarget"]);
+  assert.equal(statementsForAction(policies.v4, "ecs:DeregisterTaskDefinition").length, 0);
 });
 
-test("the split keeps the reviewed policy boundaries and adds two exact initial-rotation statements", () => {
+test("the split keeps the reviewed policy boundaries and adds exact backend recovery authority", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids, "BootstrapExactProductionSecretContainers", "TagExactInitialRotationSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets"]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.equal(new Set(["UpdateExactStageBBackendService", ...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids, ...controlSids, ...finalWriteSids, "BootstrapExactProductionSecretContainers", "TagExactInitialRotationSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets", "InvokeExactPreDeploymentInventoryBrokerAlias", "TagExactPreDeploymentInventoryTaskDefinition"]).size, 36);
+  assert.ok(statementOf(policies.taskDefinitionRegistration, "ListExactStageBBackendRecoveryRevisions"));
+  assert.ok(statementOf(policies.taskDefinitionRegistration, "TagExactStageBBackendRecoveryTaskDefinition"));
   for (const sid of movedSids) {
     if (sid === "DescribeStageBTasksReadOnly") continue;
     assert.deepEqual(statementOf(policies.audit, sid), statementOf(policies.v3, sid));
   }
-  for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "ReadExactStageBBrokerManagedPolicy", "PruneExactStageBBrokerManagedPolicyVersions"].includes(sid))) {
+  for (const sid of controlSids.filter((sid) => !["SetExactStageBLogRetention", "ListExactStageBLogTagsReadOnly", "ReadExactStageBReadOnlyCanaryRoles", "ListExactStageBReadOnlyCanaryRolePolicies", "ListAttachedExactStageBReadOnlyCanaryRolePolicies", "ReadExactStageBBrokerManagedPolicy", "ReadExactStageBReadOnlyCanaryExecutionRolePolicy", "PruneExactStageBBrokerManagedPolicyVersions", "TagExactStageBTaskDefinitions"].includes(sid))) {
     assert.deepEqual(statementOf(policies.v4, sid), statementOf(policies.v3, sid));
   }
 });
@@ -204,6 +192,13 @@ test("release task-definition registration uses AWS-required wildcard read scope
     Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
   });
   assert.equal(matches.some((statement) => actionsOf(statement).some((action) => action !== "ecs:DescribeTaskDefinition")), false);
+  assert.deepEqual(statementOf(policies.taskDefinitionRegistration, "ListExactStageBBackendRecoveryRevisions"), {
+    Sid: "ListExactStageBBackendRecoveryRevisions",
+    Effect: "Allow",
+    Action: "ecs:ListTaskDefinitions",
+    Resource: "*",
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
 });
 
 test("deregistration authority is absent and retention remains resource-scoped", () => {
@@ -376,7 +371,7 @@ test("cluster, broker, and exact twelve-family restrictions remain unchanged", (
     Resource: STAGE_B.brokerAliasArn,
     Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
   });
-  assert.deepEqual(statementOf(policies.v4, "TagExactStageBTaskDefinitions").Resource, stageBTaskFamilies.map(arn));
+  assert.deepEqual([...statementOf(policies.v4, "TagExactStageBTaskDefinitions").Resource, statementOf(policies.taskDefinitionRegistration, "TagExactStageBBackendRecoveryTaskDefinition").Resource].sort(), stageBTaskFamilies.map(arn).sort());
   assert.deepEqual(statementOf(policies.v4, "SetExactStageBLogRetention").Resource, stageBLogGroups.map(logArn));
   assert.equal(stageBTaskFamilies.length, 12);
 });

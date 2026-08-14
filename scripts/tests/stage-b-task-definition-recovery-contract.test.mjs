@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import { runCanonicalRecoveryCli } from "../aws/recover-stage-b-backend-task-definition.mjs";
 import {
@@ -172,19 +173,20 @@ test("source identity and evidence destination failures happen before mutation a
   writeFileSync(evidencePath, "occupied\n", { mode: 0o600 });
   const calls = [];
   const exec = (command) => { calls.push(command); throw new Error("mutation adapter must not run"); };
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", evidencePath, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /occupied/);
+  const terraformRoot = path.resolve("infra/aws/terraform/production-green-stage-b");
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", evidencePath, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /occupied/);
   assert.deepEqual(calls, []);
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", "0".repeat(40), "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", `${directory}/other.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /does not match/);
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", "0".repeat(40), "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", `${directory}/other.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /exact clean protected-main/);
   assert.deepEqual(calls, []);
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", `${directory}/dirty.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => ({ ...protectedCheckout, porcelainStatus: " M scripts/aws/example.mjs" }) }), /clean protected-main/);
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", `${directory}/dirty.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => ({ ...protectedCheckout, porcelainStatus: " M scripts/aws/example.mjs" }) }), /clean protected-main/);
   assert.deepEqual(calls, []);
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", `${directory}/different-head.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => ({ ...protectedCheckout, currentHead: "f".repeat(40) }) }), /HEAD/);
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", `${directory}/different-head.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => ({ ...protectedCheckout, currentHead: "f".repeat(40) }) }), /exact clean protected-main/);
   assert.deepEqual(calls, []);
   writeFileSync(bindingsPath, JSON.stringify({ ...bindings, imageReleaseSha: "0".repeat(40) }), { mode: 0o600 });
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", `${directory}/binding-mismatch.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /source-bound/);
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", `${directory}/binding-mismatch.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /source-bound/);
   assert.deepEqual(calls, []);
   writeFileSync(`${directory}/not-a-directory`, "x\n", { mode: 0o600 });
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", "/tmp", "--evidence-out", `${directory}/not-a-directory/evidence.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /directory/);
+  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", `${directory}/not-a-directory/evidence.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /directory/);
   assert.deepEqual(calls, []);
   rmSync(directory, { recursive: true, force: true });
 });
@@ -207,6 +209,42 @@ test("retry after remote registration resumes the exact newest canonical revisio
   assert.equal(result.reconciliation.stateBackendCandidate, replacementArn);
 });
 
+test("discovery failure records no registration attempt and legacy false registration journals fail closed", async () => {
+  let current = state();
+  const journal = journalAdapter();
+  let registrations = 0;
+  await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+    readState: async () => structuredClone(current), newest: async () => { throw new Error("ListTaskDefinitions denied"); },
+    register: async () => { registrations += 1; }, describe: async () => {}, removeState: async () => {}, importState: async () => {},
+  }), /ListTaskDefinitions denied/);
+  assert.equal(journal.read().phase, "DISCOVERY");
+  assert.equal(journal.read().registrationCalls, 0);
+  assert.equal(journal.read().registrationMayHaveOccurred, false);
+  assert.equal(registrations, 0);
+  journal.write({ ...journal.read(), schemaVersion: 1, phase: "REGISTERING", registrationCalls: 1 });
+  await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+    readState: async () => structuredClone(current), newest: async () => STAGE_B_BACKEND_RECOVERY.newestHistoricalArn,
+    register: async () => { registrations += 1; }, describe: async () => {}, removeState: async () => {}, importState: async () => {},
+  }), /Legacy recovery journal/);
+  assert.equal(registrations, 0);
+});
+
+test("a sent registration that loses its response is marked ambiguous and never retried against historical newest", async () => {
+  const journal = journalAdapter();
+  let registrations = 0;
+  await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+    readState: async () => state(), newest: async () => STAGE_B_BACKEND_RECOVERY.newestHistoricalArn,
+    register: async () => { registrations += 1; throw new Error("response lost"); }, describe: async () => {}, removeState: async () => {}, importState: async () => {},
+  }), /response lost/);
+  assert.equal(journal.read().registrationCalls, 1);
+  assert.equal(journal.read().registrationMayHaveOccurred, true);
+  await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+    readState: async () => state(), newest: async () => STAGE_B_BACKEND_RECOVERY.newestHistoricalArn,
+    register: async () => { registrations += 1; }, describe: async () => {}, removeState: async () => {}, importState: async () => {},
+  }), /cannot prove a prior registration/);
+  assert.equal(registrations, 1);
+});
+
 test("interrupted state removal resumes with import only", async () => {
   const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
   const payload = replacementPayload(replacementArn);
@@ -226,6 +264,58 @@ test("interrupted state removal resumes with import only", async () => {
   assert.equal(imports, 2);
   assert.equal(result.reconciliation.removeCalls, 0);
   assert.equal(result.reconciliation.importCalls, 1);
+});
+
+test("pre-remove checkpoint resumes when state removal never mutates state", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const payload = replacementPayload(replacementArn);
+  let current = state(); let registrations = 0; let removes = 0; let imports = 0;
+  const journal = journalAdapter();
+  const common = { bindings, sourceSha, protectedCheckout, journal, readState: async () => structuredClone(current), newest: async () => replacementArn, describe: async () => payload,
+    register: async () => { registrations += 1; return { taskDefinition: { taskDefinitionArn: replacementArn } }; },
+    importState: async () => { imports += 1; current = state(replacementArn, 95); } };
+  await assert.rejects(() => runCanonicalBackendRecovery({ ...common, newest: async () => registrations ? replacementArn : STAGE_B_BACKEND_RECOVERY.newestHistoricalArn,
+    removeState: async () => { removes += 1; throw new Error("lock timeout"); } }), /lock timeout/);
+  assert.equal(journal.read().phase, "STATE_RECONCILING_PRE_REMOVE");
+  assert.equal(current.serial, 93);
+  const resumed = await runCanonicalBackendRecovery({ ...common, register: async () => { throw new Error("must not register again"); }, removeState: async () => { removes += 1; current = { ...current, serial: 94, resources: [] }; } });
+  assert.equal(registrations, 1);
+  assert.equal(removes, 2);
+  assert.equal(imports, 1);
+  assert.equal(resumed.reconciliation.stateBackendCandidate, replacementArn);
+});
+
+test("persisted pre-remove journal resumes when the process dies before state removal starts", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const payload = replacementPayload(replacementArn);
+  let current = state(); let removes = 0; let imports = 0;
+  const initial = buildCanonicalRecoveryJournal(current, { sourceSha, fingerprint: payload.fingerprint, imageDigest: image });
+  const journal = journalAdapter({ ...initial, phase: "STATE_RECONCILING_PRE_REMOVE", replacementArn, replacementFingerprint: payload.fingerprint, registrationCalls: 1, registrationMayHaveOccurred: true });
+  const resumed = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+    readState: async () => structuredClone(current), newest: async () => replacementArn, describe: async () => payload,
+    register: async () => { throw new Error("must not register again"); },
+    removeState: async () => { removes += 1; current = { ...current, serial: 94, resources: [] }; },
+    importState: async () => { imports += 1; current = state(replacementArn, 95); },
+  });
+  assert.equal(removes, 1);
+  assert.equal(imports, 1);
+  assert.equal(resumed.reconciliation.stateBackendCandidate, replacementArn);
+});
+
+test("post-remove readback resumes import when process dies before the post-remove journal write", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const payload = replacementPayload(replacementArn);
+  let current = state(); let reads = 0; let imports = 0;
+  const journal = journalAdapter();
+  const common = { bindings, sourceSha, protectedCheckout, journal, newest: async () => replacementArn, describe: async () => payload,
+    register: async () => ({ taskDefinition: { taskDefinitionArn: replacementArn } }),
+    removeState: async () => { current = { ...current, serial: 94, resources: [] }; },
+    importState: async () => { imports += 1; current = state(replacementArn, 95); } };
+  await assert.rejects(() => runCanonicalBackendRecovery({ ...common, readState: async () => { reads += 1; if (reads === 3) throw new Error("process died after rm"); return structuredClone(current); } }), /process died/);
+  assert.equal(journal.read().phase, "STATE_RECONCILING_PRE_REMOVE");
+  const resumed = await runCanonicalBackendRecovery({ ...common, readState: async () => structuredClone(current), register: async () => { throw new Error("must not register again"); } });
+  assert.equal(imports, 1);
+  assert.equal(resumed.reconciliation.removeCalls, 0);
 });
 
 test("interrupted import resumes without registration or second state mutation", async () => {

@@ -2,6 +2,17 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "ListExactStageBBackendRecoveryRevisions",
+      "Effect": "Allow",
+      "Action": "ecs:ListTaskDefinitions",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
       "Sid": "RegisterExactStageBBackendTaskDefinition1024",
       "Effect": "Allow",
       "Action": "ecs:RegisterTaskDefinition",
@@ -159,6 +170,29 @@
       "Condition": {
         "StringEquals": {
           "iam:PassedToService": "ecs-tasks.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "TagExactStageBBackendRecoveryTaskDefinition",
+      "Effect": "Allow",
+      "Action": "ecs:TagResource",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Component": "full-rls-green-stage-b",
+          "aws:RequestTag/MSCQRExecTarget": "production-backend"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "Component",
+            "Environment",
+            "ManagedBy",
+            "MSCQRExecTarget"
+          ]
         }
       }
     },
