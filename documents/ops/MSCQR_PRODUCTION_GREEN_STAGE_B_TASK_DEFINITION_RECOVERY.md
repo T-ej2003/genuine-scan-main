@@ -79,11 +79,17 @@ For a schema-v4 journal created before checkpoint normalization, resume must
 also provide `--state-before` pointing to the preserved pre-removal state
 backup. Exact legacy raw hashes remain accepted. If Terraform 1.15.7/1.15.8
 metadata prevents those raw hashes from being reproduced, the versioned legacy
-compatibility validator requires the snapshot's exact lineage, serial, and
-`:5` candidate, then proves that the post-removal state differs only by removal
-of that candidate plus the allowlisted `terraform_version` and `check_results`
-representation changes. Unknown or semantic differences fail closed; the
-journal and evidence are never rewritten.
+compatibility validator additionally requires
+`--state-before-binding-report` for the canonical Stage-B tfvars binding report.
+The report's exact byte SHA256 must also have been recorded in the recovery
+journal's incident identity before the destructive transition; a supplied or
+edited report cannot establish that anchor retroactively. That report is
+validated by the existing tfvars binding contract and must bind
+the supplied snapshot bytes, original source/tooling/image identities, lineage,
+and serial. Only then does the validator prove that post-removal state differs
+only by removal of that candidate plus the allowlisted `terraform_version` and
+`check_results` representation changes. Unknown or semantic differences fail
+closed; the journal and evidence are never rewritten.
 
 `STATE_RECONCILING_PRE_REMOVE` is an intent checkpoint, not proof that
 `state rm` succeeded. On retry, authoritative Terraform readback must be the

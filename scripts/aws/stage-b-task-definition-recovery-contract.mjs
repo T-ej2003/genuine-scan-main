@@ -51,12 +51,13 @@ function imageDigest(value) {
   return digest;
 }
 
-export function canonicalRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: backendImageDigest, imageAuthorizationSha256, stateLineage, stateSerial, predecessorArn, newestHistoricalArn, fingerprint } = {}) {
+export function canonicalRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: backendImageDigest, imageAuthorizationSha256, stateLineage, stateSerial, predecessorArn, newestHistoricalArn, fingerprint, stateBeforeBindingReportSha256 } = {}) {
   if (!SHA.test(sourceSha || "") || !SHA256.test(toolingTreeSha256 || "") || !SHA256.test(sourceContractSha256 || "")
     || !SHA.test(imageReleaseSha || "") || !IMAGE_DIGEST.test(backendImageDigest || "") || !SHA256.test(imageAuthorizationSha256 || "")
     || !LINEAGE.test(stateLineage || "") || !Number.isInteger(stateSerial) || predecessorArn !== STAGE_B_BACKEND_RECOVERY.predecessorArn
-    || !ARN.test(newestHistoricalArn || "") || !SHA256.test(fingerprint || "")) throw new Error("Canonical recovery incident identity inputs are incomplete.");
-  return canonicalSha256({ schemaVersion: RECOVERY_SCHEMA_VERSION, kind: RECOVERY_KIND, sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: backendImageDigest, imageAuthorizationSha256, stateLineage, stateSerial, predecessorArn, newestHistoricalArn, fingerprint });
+    || !ARN.test(newestHistoricalArn || "") || !SHA256.test(fingerprint || "")
+    || stateBeforeBindingReportSha256 !== undefined && !SHA256.test(stateBeforeBindingReportSha256)) throw new Error("Canonical recovery incident identity inputs are incomplete.");
+  return canonicalSha256({ schemaVersion: RECOVERY_SCHEMA_VERSION, kind: RECOVERY_KIND, sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: backendImageDigest, imageAuthorizationSha256, stateLineage, stateSerial, predecessorArn, newestHistoricalArn, fingerprint, ...(stateBeforeBindingReportSha256 === undefined ? {} : { stateBeforeBindingReportSha256 }) });
 }
 
 export function assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance } = {}) {
@@ -101,7 +102,7 @@ export function assertCanonicalRecoveryDescendantResume({ sourceSha, bindings, p
     || bindings.imageAuthorizationSha256 !== undefined && bindings.imageAuthorizationSha256 !== journalState.imageAuthorizationSha256) {
     throw new Error("Cross-descendant recovery bindings do not preserve the original incident identity.");
   }
-  const expectedIncidentIdentity = canonicalRecoveryIncidentIdentity({ sourceSha: journalState.sourceSha, toolingTreeSha256: journalState.toolingTreeSha256, sourceContractSha256: journalState.sourceContractSha256, imageReleaseSha: journalState.imageReleaseSha, imageDigest: imageDigest(journalState.imageDigest), imageAuthorizationSha256: journalState.imageAuthorizationSha256, stateLineage: journalState.stateLineage, stateSerial: journalState.stateSerial, predecessorArn: journalState.predecessorArn, newestHistoricalArn: journalState.newestHistoricalArn, fingerprint: journalState.protectedSourceFingerprint });
+  const expectedIncidentIdentity = canonicalRecoveryIncidentIdentity({ sourceSha: journalState.sourceSha, toolingTreeSha256: journalState.toolingTreeSha256, sourceContractSha256: journalState.sourceContractSha256, imageReleaseSha: journalState.imageReleaseSha, imageDigest: imageDigest(journalState.imageDigest), imageAuthorizationSha256: journalState.imageAuthorizationSha256, stateLineage: journalState.stateLineage, stateSerial: journalState.stateSerial, predecessorArn: journalState.predecessorArn, newestHistoricalArn: journalState.newestHistoricalArn, fingerprint: journalState.protectedSourceFingerprint, stateBeforeBindingReportSha256: journalState.stateBeforeBindingReportSha256 });
   if (journalState.incidentIdentity !== expectedIncidentIdentity) throw new Error("Cross-descendant recovery journal incident identity is not deterministic for its original bindings.");
   const incidentProvenance = typeof deriveProvenance === "function" ? deriveProvenance({ sourceSha: journalState.sourceSha, protectedCheckout }) : null;
   if (!incidentProvenance || incidentProvenance.toolingTreeSha256 !== journalState.toolingTreeSha256 || incidentProvenance.sourceContractSha256 !== journalState.sourceContractSha256) throw new Error("Original recovery incident provenance cannot be re-derived from the protected checkout history.");
@@ -296,7 +297,7 @@ function requireJournal(journal) {
   return journal;
 }
 
-function validateJournal(journalState, { sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest: backendImageDigest, newestHistoricalArn, incidentIdentity } = {}) {
+function validateJournal(journalState, { sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest: backendImageDigest, newestHistoricalArn, incidentIdentity, stateBeforeBindingReportSha256 } = {}) {
   if (!journalState || journalState.schemaVersion !== RECOVERY_SCHEMA_VERSION || journalState.kind !== RECOVERY_KIND
     || journalState.incidentIdentity !== incidentIdentity || journalState.sourceSha !== sourceSha || journalState.toolingSha !== sourceSha
     || journalState.toolingTreeSha256 !== toolingTreeSha256 || journalState.sourceContractSha256 !== sourceContractSha256 || journalState.address !== STAGE_B_BACKEND_RECOVERY.address
@@ -306,6 +307,8 @@ function validateJournal(journalState, { sourceSha, toolingTreeSha256, sourceCon
     || journalState.predecessorSerial !== STAGE_B_BACKEND_RECOVERY.serial || journalState.protectedSourceFingerprint !== fingerprint || journalState.imageDigest !== backendImageDigest
     || journalState.authorizedBackendImageDigest !== imageDigest(backendImageDigest)
     || journalState.imageReleaseSha !== imageReleaseSha || journalState.imageAuthorizationSha256 !== imageAuthorizationSha256
+    || (journalState.stateBeforeBindingReportSha256 !== undefined && !SHA256.test(journalState.stateBeforeBindingReportSha256))
+    || journalState.stateBeforeBindingReportSha256 !== stateBeforeBindingReportSha256
     || (journalState.checkpointHashDomain !== undefined && journalState.checkpointHashDomain !== CHECKPOINT_HASH_DOMAIN)
     || !["DISCOVERY", "PREPARED", "REGISTERING", "REGISTERED", "READBACK_VERIFIED", "STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)
     || !Number.isInteger(journalState.registrationCalls) || journalState.registrationCalls < 0 || journalState.registrationCalls > 1
@@ -319,8 +322,8 @@ function validateJournal(journalState, { sourceSha, toolingTreeSha256, sourceCon
   return journalState;
 }
 
-export function buildCanonicalRecoveryJournal(state, { sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest: backendImageDigest, newestHistoricalArn, incidentIdentity } = {}) {
-  const expectedIncidentIdentity = canonicalRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: imageDigest(backendImageDigest), imageAuthorizationSha256, stateLineage: state.lineage, stateSerial: state.serial, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, newestHistoricalArn, fingerprint });
+export function buildCanonicalRecoveryJournal(state, { sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest: backendImageDigest, newestHistoricalArn, incidentIdentity, stateBeforeBindingReportSha256 } = {}) {
+  const expectedIncidentIdentity = canonicalRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: imageDigest(backendImageDigest), imageAuthorizationSha256, stateLineage: state.lineage, stateSerial: state.serial, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, newestHistoricalArn, fingerprint, stateBeforeBindingReportSha256 });
   if (incidentIdentity !== expectedIncidentIdentity) throw new Error("Canonical recovery incident identity is not deterministic for the reviewed bindings.");
   return {
     schemaVersion: RECOVERY_SCHEMA_VERSION,
@@ -343,6 +346,7 @@ export function buildCanonicalRecoveryJournal(state, { sourceSha, toolingTreeSha
     predecessorSerial: state.serial,
     stateBeforeSha256: stateSnapshotSha256(state),
     stateAfterRemoveSha256: stateSnapshotSha256(expectedStateAfterRemove(state)),
+    ...(stateBeforeBindingReportSha256 === undefined ? {} : { stateBeforeBindingReportSha256 }),
     expectedStateAfterRemoveSerial: state.serial + 1,
     expectedStateAfterImportSerial: state.serial + 2,
     checkpointHashDomain: CHECKPOINT_HASH_DOMAIN,
@@ -353,7 +357,23 @@ export function buildCanonicalRecoveryJournal(state, { sourceSha, toolingTreeSha
   };
 }
 
-export function assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore) {
+function assertLegacyPreRemovalStateAnchor(journalState, stateBefore, stateBeforeAnchor) {
+  if (!stateBeforeAnchor || stateBeforeAnchor.schemaVersion !== 2 || stateBeforeAnchor.tfvarsSchemaVersion !== 1
+    || stateBeforeAnchor.tfvarsFormat !== "hcl" || stateBeforeAnchor.tfvarsExtension !== ".tfvars"
+    || stateBeforeAnchor.generator !== "scripts/aws/generate-production-green-stage-b-tfvars.mjs"
+    || stateBeforeAnchor.recoveryOnly !== false || !SHA256.test(stateBeforeAnchor.bindingReportSha256 || "")
+    || !SHA256.test(stateBeforeAnchor.stateBackupSha256 || "") || !SHA256.test(stateBeforeAnchor.stateBeforeBytesSha256 || "")
+    || stateBeforeAnchor.stateBackupSha256 !== stateBeforeAnchor.stateBeforeBytesSha256
+    || stateBeforeAnchor.bindingReportSha256 !== journalState.stateBeforeBindingReportSha256
+    || stateBeforeAnchor.toolingSha !== journalState.toolingSha || stateBeforeAnchor.toolingTreeSha256 !== journalState.toolingTreeSha256
+    || stateBeforeAnchor.sourceContractSha256 !== journalState.sourceContractSha256 || stateBeforeAnchor.imageReleaseSha !== journalState.imageReleaseSha
+    || stateBeforeAnchor.stateLineage !== journalState.stateLineage || stateBeforeAnchor.stateSerial !== journalState.stateSerial) {
+    throw new Error("Legacy recovery pre-removal state is not cryptographically bound to the canonical Stage-B binding artifact.");
+  }
+  return stateBeforeAnchor;
+}
+
+export function assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore, stateBeforeAnchor) {
   if (journalState?.checkpointHashDomain !== undefined) return false;
   if (!SHA256.test(journalState?.stateBeforeSha256 || "") || !SHA256.test(journalState?.stateAfterRemoveSha256 || "")) {
     throw new Error("Legacy recovery checkpoint hashes are malformed.");
@@ -376,20 +396,23 @@ export function assertLegacyPostRemoveCheckpointCompatibility(journalState, stat
   }
   const beforeHashMatches = legacyStateSnapshotSha256(stateBefore) === journalState.stateBeforeSha256;
   const afterHashMatches = legacyStateSnapshotSha256(expected) === journalState.stateAfterRemoveSha256;
-  if (!beforeHashMatches && afterHashMatches) throw new Error("Legacy recovery checkpoint hash evidence is inconsistent.");
-  return Object.freeze({ domain: LEGACY_CHECKPOINT_COMPATIBILITY.domain, normalizedFields: LEGACY_CHECKPOINT_COMPATIBILITY.normalizedFields, exactLegacyHashes: beforeHashMatches && afterHashMatches });
+  if (!beforeHashMatches) assertLegacyPreRemovalStateAnchor(journalState, stateBefore, stateBeforeAnchor);
+  return Object.freeze({ domain: LEGACY_CHECKPOINT_COMPATIBILITY.domain, normalizedFields: LEGACY_CHECKPOINT_COMPATIBILITY.normalizedFields, exactLegacyHashes: beforeHashMatches && afterHashMatches, anchored: !beforeHashMatches });
 }
 
-function assertJournalState(journalState, state, expectedArn, stateBefore) {
+function assertJournalState(journalState, state, expectedArn, stateBefore, stateBeforeAnchor) {
   if (state.lineage !== journalState.stateLineage) throw new Error("Terraform state lineage changed during backend recovery.");
   const candidate = stateBackendCandidateFromOptional(state);
   const checkpointHash = checkpointStateSha256(journalState, state);
   const normalizedCheckpointHash = stateSnapshotSha256(state);
   const expectedPostRemoveHash = stateBefore ? stateSnapshotSha256(expectedStateAfterRemove(stateBefore)) : null;
   if (journalState.phase === "STATE_RECONCILING_POST_REMOVE") {
+    const postRemoveCheckpointValid = checkpointHash === journalState.stateAfterRemoveSha256
+      || (journalState.checkpointHashDomain === undefined
+        ? assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore, stateBeforeAnchor)
+        : normalizedCheckpointHash === expectedPostRemoveHash);
     if (state.serial !== journalState.expectedStateAfterRemoveSerial || candidate !== null
-      || (checkpointHash !== journalState.stateAfterRemoveSha256 && normalizedCheckpointHash !== expectedPostRemoveHash
-        && !assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore))) {
+      || !postRemoveCheckpointValid) {
       throw new Error("Terraform state is not the exact reviewed post-removal recovery state.");
     }
   } else if (["STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)) {
@@ -397,17 +420,17 @@ function assertJournalState(journalState, state, expectedArn, stateBefore) {
   }
 }
 
-function recoveryStateCheckpoint(journalState, state, expectedArn, stateBefore) {
+function recoveryStateCheckpoint(journalState, state, expectedArn, stateBefore, stateBeforeAnchor) {
   if (state.lineage !== journalState.stateLineage) throw new Error("Terraform state lineage changed during backend recovery.");
   if (stateBefore) {
     const validSnapshot = stateBefore.lineage === journalState.stateLineage && stateBefore.serial === journalState.stateSerial
       && stateBackendCandidateFromOptional(stateBefore) === STAGE_B_BACKEND_RECOVERY.predecessorArn;
     const exactSnapshot = validSnapshot && checkpointStateSha256(journalState, stateBefore) === journalState.stateBeforeSha256;
     const legacyPostRemoveSnapshot = journalState.checkpointHashDomain === undefined && state.serial === journalState.expectedStateAfterRemoveSerial
-      && stateBackendCandidateFromOptional(state) === null && (() => {
-        try { return assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore); }
+      && stateBackendCandidateFromOptional(state) === null && (checkpointStateSha256(journalState, state) === journalState.stateAfterRemoveSha256 || (() => {
+        try { return assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore, stateBeforeAnchor); }
         catch (error) { throw new Error("Recovery pre-removal state snapshot does not match the durable journal.", { cause: error }); }
-      })();
+      })());
     if (!exactSnapshot && !legacyPostRemoveSnapshot) {
       throw new Error("Recovery pre-removal state snapshot does not match the durable journal.");
     }
@@ -419,8 +442,10 @@ function recoveryStateCheckpoint(journalState, state, expectedArn, stateBefore) 
   const expectedPostRemoveHash = stateBefore ? stateSnapshotSha256(expectedStateAfterRemove(stateBefore)) : null;
   const original = state.serial === journalState.stateSerial && candidate === STAGE_B_BACKEND_RECOVERY.predecessorArn && checkpointHash === expectedBeforeHash;
   const removed = state.serial === journalState.expectedStateAfterRemoveSerial && candidate === null
-    && (checkpointHash === journalState.stateAfterRemoveSha256 || normalizedCheckpointHash === expectedPostRemoveHash
-      || assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore));
+    && (checkpointHash === journalState.stateAfterRemoveSha256
+      || (journalState.checkpointHashDomain === undefined
+        ? assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore, stateBeforeAnchor)
+        : normalizedCheckpointHash === expectedPostRemoveHash));
   const imported = state.serial === journalState.expectedStateAfterImportSerial && candidate === expectedArn;
   if (journalState.phase === "STATE_RECONCILING_PRE_REMOVE" && (original || removed || imported)) return original ? "PRE_REMOVE" : removed ? "POST_REMOVE" : "IMPORTED";
   if (journalState.phase === "STATE_RECONCILING_POST_REMOVE" && (removed || imported)) return removed ? "POST_REMOVE" : "IMPORTED";
@@ -439,7 +464,7 @@ function recoveryCensusDecision(entries, fingerprint) {
   return { newest, matching: matches[0] || null, newestHistoricalArn: historical.arn };
 }
 
-export async function runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance = ({ protectedCheckout: checkout }) => checkout?.derivedProvenance, proveDescendant, deriveImageReuse, readState, register, describe, census, removeState, importState, journal, stateBefore } = {}) {
+export async function runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance = ({ protectedCheckout: checkout }) => checkout?.derivedProvenance, proveDescendant, deriveImageReuse, readState, register, describe, census, removeState, importState, journal, stateBefore, stateBeforeAnchor } = {}) {
   if (typeof readState !== "function") throw new Error("Canonical backend recovery requires a Terraform state reader.");
   if (typeof census !== "function") throw new Error("Canonical backend recovery requires a complete live revision census adapter.");
   const recoveryJournal = requireJournal(journal);
@@ -464,14 +489,15 @@ export async function runCanonicalBackendRecovery({ bindings, sourceSha, protect
   const incidentSourceContractSha256 = existingJournal?.sourceContractSha256 || bindings.sourceContractSha256;
   const incidentImageReleaseSha = existingJournal?.imageReleaseSha || bindings.imageReleaseSha;
   const incidentImageAuthorizationSha256 = existingJournal?.imageAuthorizationSha256 || imageAuthorizationSha256;
-  const incidentIdentity = canonicalRecoveryIncidentIdentity({ sourceSha: incidentSourceSha, toolingTreeSha256: incidentToolingTreeSha256, sourceContractSha256: incidentSourceContractSha256, imageReleaseSha: incidentImageReleaseSha, imageDigest: backendImageDigest, imageAuthorizationSha256: incidentImageAuthorizationSha256, stateLineage: existingJournal?.stateLineage || before.lineage, stateSerial: existingJournal?.stateSerial ?? before.serial, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, newestHistoricalArn: decision.newestHistoricalArn, fingerprint });
-  const prepared = existingJournal ? validateJournal(existingJournal, { sourceSha: incidentSourceSha, toolingTreeSha256: incidentToolingTreeSha256, sourceContractSha256: incidentSourceContractSha256, imageReleaseSha: incidentImageReleaseSha, imageAuthorizationSha256: incidentImageAuthorizationSha256, fingerprint, imageDigest: bindings.backendImage, newestHistoricalArn: decision.newestHistoricalArn, incidentIdentity }) : buildCanonicalRecoveryJournal(before, { sourceSha: incidentSourceSha, toolingTreeSha256: incidentToolingTreeSha256, sourceContractSha256: incidentSourceContractSha256, imageReleaseSha: incidentImageReleaseSha, imageAuthorizationSha256: incidentImageAuthorizationSha256, fingerprint, imageDigest: bindings.backendImage, newestHistoricalArn: decision.newestHistoricalArn, incidentIdentity });
+  const stateBeforeBindingReportSha256 = existingJournal ? existingJournal.stateBeforeBindingReportSha256 : stateBeforeAnchor?.bindingReportSha256;
+  const incidentIdentity = canonicalRecoveryIncidentIdentity({ sourceSha: incidentSourceSha, toolingTreeSha256: incidentToolingTreeSha256, sourceContractSha256: incidentSourceContractSha256, imageReleaseSha: incidentImageReleaseSha, imageDigest: backendImageDigest, imageAuthorizationSha256: incidentImageAuthorizationSha256, stateLineage: existingJournal?.stateLineage || before.lineage, stateSerial: existingJournal?.stateSerial ?? before.serial, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, newestHistoricalArn: decision.newestHistoricalArn, fingerprint, stateBeforeBindingReportSha256 });
+  const prepared = existingJournal ? validateJournal(existingJournal, { sourceSha: incidentSourceSha, toolingTreeSha256: incidentToolingTreeSha256, sourceContractSha256: incidentSourceContractSha256, imageReleaseSha: incidentImageReleaseSha, imageAuthorizationSha256: incidentImageAuthorizationSha256, fingerprint, imageDigest: bindings.backendImage, newestHistoricalArn: decision.newestHistoricalArn, incidentIdentity, stateBeforeBindingReportSha256 }) : buildCanonicalRecoveryJournal(before, { sourceSha: incidentSourceSha, toolingTreeSha256: incidentToolingTreeSha256, sourceContractSha256: incidentSourceContractSha256, imageReleaseSha: incidentImageReleaseSha, imageAuthorizationSha256: incidentImageAuthorizationSha256, fingerprint, imageDigest: bindings.backendImage, newestHistoricalArn: decision.newestHistoricalArn, incidentIdentity, stateBeforeBindingReportSha256 });
   if (existingJournal?.replacementArn && decision.matching?.arn !== existingJournal.replacementArn && ["REGISTERED", "READBACK_VERIFIED", "STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(existingJournal.phase)) {
     throw new Error("Canonical recovery journal replacement does not match the current-source revision.");
   }
   if (!existingJournal) journal.write(prepared);
   else if (prepared.stateBeforeSha256 !== checkpointStateSha256(prepared, before) && ["DISCOVERY", "PREPARED"].includes(prepared.phase)) throw new Error("Terraform state changed before canonical recovery resumed.");
-  if (["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(prepared.phase)) recoveryStateCheckpoint(prepared, before, prepared.replacementArn, stateBefore);
+  if (["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(prepared.phase)) recoveryStateCheckpoint(prepared, before, prepared.replacementArn, stateBefore, stateBeforeAnchor);
   let registration;
   if (prepared.replacementArn && ["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(prepared.phase)) {
     if (decision.newest.arn !== prepared.replacementArn) throw new Error("Canonical recovery resume requires its exact replacement to remain newest.");
@@ -512,8 +538,8 @@ export async function runCanonicalBackendRecovery({ bindings, sourceSha, protect
   const reconciliationResume = ["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(prepared.phase);
   const registered = { ...prepared, phase: reconciliationResume ? prepared.phase : "READBACK_VERIFIED", replacementArn: registration.arn, replacementFingerprint: registration.fingerprint, registrationCalls: Math.max(prepared.registrationCalls, registration.registrationCalls), registrationMayHaveOccurred: prepared.registrationMayHaveOccurred || registration.registrationCalls === 1 };
   journal.write(registered);
-  const reconciliation = await reconcileCanonicalBackendState({ readState, removeState, importState, replacementArn: registration.arn, sourceSha: incidentSourceSha, journal, stateBefore });
-  const evidence = recoveryEvidence({ sourceSha: incidentSourceSha, toolingTreeSha256: incidentToolingTreeSha256, sourceContractSha256: incidentSourceContractSha256, imageReleaseSha: incidentImageReleaseSha, imageAuthorizationSha256: incidentImageAuthorizationSha256, state: before, stateBinding: prepared, imageDigest: bindings.backendImage, newestHistoricalArn: prepared.newestHistoricalArn, incidentIdentity: prepared.incidentIdentity, replacement: { arn: registration.arn, fingerprint: registration.fingerprint, protectedSourceFingerprint: fingerprint }, ...(descendantResume ? { resumeExecutorToolingSha: descendantResume.executorToolingSha, resumeExecutorToolingTreeSha256: descendantResume.executorProvenance.toolingTreeSha256 } : {}) });
+  const reconciliation = await reconcileCanonicalBackendState({ readState, removeState, importState, replacementArn: registration.arn, sourceSha: incidentSourceSha, journal, stateBefore, stateBeforeAnchor });
+  const evidence = recoveryEvidence({ sourceSha: incidentSourceSha, toolingTreeSha256: incidentToolingTreeSha256, sourceContractSha256: incidentSourceContractSha256, imageReleaseSha: incidentImageReleaseSha, imageAuthorizationSha256: incidentImageAuthorizationSha256, state: before, stateBinding: prepared, imageDigest: bindings.backendImage, newestHistoricalArn: prepared.newestHistoricalArn, incidentIdentity: prepared.incidentIdentity, stateBeforeBindingReportSha256: prepared.stateBeforeBindingReportSha256, replacement: { arn: registration.arn, fingerprint: registration.fingerprint, protectedSourceFingerprint: fingerprint }, ...(descendantResume ? { resumeExecutorToolingSha: descendantResume.executorToolingSha, resumeExecutorToolingTreeSha256: descendantResume.executorProvenance.toolingTreeSha256 } : {}) });
   journal.write({ ...registered, phase: "COMPLETED", evidenceSha256: evidence.evidenceSha256 });
   return { registration, evidence, reconciliation };
 }
@@ -533,7 +559,7 @@ function assertOnlyBackendStateChange(before, after, expectedArn) {
   if (current.arn !== expectedArn) throw new Error("Terraform state backend candidate does not point to the canonical replacement.");
 }
 
-export async function reconcileCanonicalBackendState({ readState, removeState, importState, replacementArn: targetArn, sourceSha, journal, stateBefore } = {}) {
+export async function reconcileCanonicalBackendState({ readState, removeState, importState, replacementArn: targetArn, sourceSha, journal, stateBefore, stateBeforeAnchor } = {}) {
   if (typeof readState !== "function" || typeof removeState !== "function" || typeof importState !== "function") throw new Error("Canonical backend state reconciliation adapters are required.");
   const recoveryJournal = requireJournal(journal);
   const journalState = recoveryJournal.read();
@@ -543,14 +569,14 @@ export async function reconcileCanonicalBackendState({ readState, removeState, i
   if (journalState.replacementArn !== target.arn) throw new Error("Recovery replacement does not match the persistent recovery journal.");
   if (before.lineage !== journalState.stateLineage) throw new Error("Terraform state lineage changed during backend recovery.");
   const checkpoint = ["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)
-    ? recoveryStateCheckpoint(journalState, before, target.arn, stateBefore)
+    ? recoveryStateCheckpoint(journalState, before, target.arn, stateBefore, stateBeforeAnchor)
     : (assertBackendRecoveryPreconditions({ state: before, sourceSha }), "PRE_REMOVE");
   if (checkpoint === "IMPORTED") {
     recoveryJournal.write({ ...journalState, phase: "STATE_RECONCILED" });
     return { stateLineageBefore: journalState.stateLineage, stateLineageAfter: before.lineage, stateSerialBefore: journalState.stateSerial, stateSerialAfter: before.serial, stateBackendCandidate: target.arn, liveBackendCandidate: target.arn, stateLivePredecessorMatch: true, removeCalls: 0, importCalls: 0 };
   }
   if (checkpoint === "POST_REMOVE") {
-    assertJournalState({ ...journalState, phase: "STATE_RECONCILING_POST_REMOVE" }, before, target.arn, stateBefore);
+    assertJournalState({ ...journalState, phase: "STATE_RECONCILING_POST_REMOVE" }, before, target.arn, stateBefore, stateBeforeAnchor);
     await importState({ address: STAGE_B_BACKEND_RECOVERY.address, arn: target.arn });
     const imported = await readState();
     if (imported.lineage !== journalState.stateLineage || imported.serial !== journalState.expectedStateAfterImportSerial || stateBackendCandidateFromOptional(imported) !== target.arn) throw new Error("Terraform state import did not produce the exact canonical recovery state.");
@@ -561,7 +587,7 @@ export async function reconcileCanonicalBackendState({ readState, removeState, i
   recoveryJournal.write({ ...journalState, phase: "STATE_RECONCILING_PRE_REMOVE" });
   await removeState({ address: STAGE_B_BACKEND_RECOVERY.address, expectedArn: STAGE_B_BACKEND_RECOVERY.predecessorArn });
   const removed = await readState();
-  assertJournalState({ ...journalState, phase: "STATE_RECONCILING_POST_REMOVE" }, removed, target.arn, stateBefore);
+  assertJournalState({ ...journalState, phase: "STATE_RECONCILING_POST_REMOVE" }, removed, target.arn, stateBefore, stateBeforeAnchor);
   recoveryJournal.write({ ...journalState, phase: "STATE_RECONCILING_POST_REMOVE" });
   await importState({ address: STAGE_B_BACKEND_RECOVERY.address, arn: target.arn });
   const after = await readState();
@@ -575,7 +601,7 @@ function stateBackendCandidateFromOptional(state) {
   try { return stateBackendCandidate(state).arn; } catch { return null; }
 }
 
-export function recoveryEvidence({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, state, stateBinding, replacement, imageDigest: backendImageDigest, newestHistoricalArn, incidentIdentity, registrationEvent = null, resumeExecutorToolingSha, resumeExecutorToolingTreeSha256 } = {}) {
+export function recoveryEvidence({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, state, stateBinding, replacement, imageDigest: backendImageDigest, newestHistoricalArn, incidentIdentity, registrationEvent = null, resumeExecutorToolingSha, resumeExecutorToolingTreeSha256, stateBeforeBindingReportSha256 } = {}) {
   if (stateBinding) {
     if (stateBinding.stateLineage !== STAGE_B_BACKEND_RECOVERY.lineage || stateBinding.stateSerial !== STAGE_B_BACKEND_RECOVERY.serial
       || stateBinding.predecessorArn !== STAGE_B_BACKEND_RECOVERY.predecessorArn) throw new Error("Recovery evidence state binding is not the reviewed predecessor.");
@@ -585,8 +611,8 @@ export function recoveryEvidence({ sourceSha, toolingTreeSha256, sourceContractS
   if (!DIGEST.test(backendImageDigest || "") || !SHA256.test(toolingTreeSha256 || "") || !SHA256.test(sourceContractSha256 || "") || !SHA.test(imageReleaseSha || "") || !SHA256.test(imageAuthorizationSha256 || "") || !ARN.test(newestHistoricalArn || "") || !SHA256.test(incidentIdentity || "")) throw new Error("Recovery evidence provenance binding is invalid.");
   if ((resumeExecutorToolingSha === undefined) !== (resumeExecutorToolingTreeSha256 === undefined)
     || (resumeExecutorToolingSha !== undefined && (!SHA.test(resumeExecutorToolingSha) || !SHA256.test(resumeExecutorToolingTreeSha256)))) throw new Error("Recovery evidence resume-executor provenance is incomplete.");
-  const expectedIncidentIdentity = canonicalRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: imageDigest(backendImageDigest), imageAuthorizationSha256, stateLineage: stateBinding?.stateLineage || state.lineage, stateSerial: stateBinding?.stateSerial || state.serial, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, newestHistoricalArn, fingerprint: replacement.protectedSourceFingerprint });
+  const expectedIncidentIdentity = canonicalRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: imageDigest(backendImageDigest), imageAuthorizationSha256, stateLineage: stateBinding?.stateLineage || state.lineage, stateSerial: stateBinding?.stateSerial || state.serial, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, newestHistoricalArn, fingerprint: replacement.protectedSourceFingerprint, stateBeforeBindingReportSha256 });
   if (incidentIdentity !== expectedIncidentIdentity) throw new Error("Recovery evidence incident identity is not deterministic for its bindings.");
-  const evidence = { schemaVersion: 2, kind: RECOVERY_KIND, incidentIdentity, sourceSha, toolingSha: sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, ...(resumeExecutorToolingSha ? { resumeExecutorToolingSha, resumeExecutorToolingTreeSha256 } : {}), address: STAGE_B_BACKEND_RECOVERY.address, family: STAGE_B_BACKEND_RECOVERY.family, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, predecessorSerial: STAGE_B_BACKEND_RECOVERY.serial, newestHistoricalArn, historicalRevisionArns: STAGE_B_BACKEND_RECOVERY.historicalRevisionArns, replacementArn: replacement.arn, protectedSourceFingerprint: replacement.protectedSourceFingerprint, replacementFingerprint: replacement.fingerprint, imageDigest: backendImageDigest, authorizedBackendImageDigest: imageDigest(backendImageDigest), stateLineage: stateBinding?.stateLineage || state.lineage, stateSerial: stateBinding?.stateSerial || state.serial, registrationEvent };
+  const evidence = { schemaVersion: 2, kind: RECOVERY_KIND, incidentIdentity, sourceSha, toolingSha: sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, ...(resumeExecutorToolingSha ? { resumeExecutorToolingSha, resumeExecutorToolingTreeSha256 } : {}), ...(stateBeforeBindingReportSha256 === undefined ? {} : { stateBeforeBindingReportSha256 }), address: STAGE_B_BACKEND_RECOVERY.address, family: STAGE_B_BACKEND_RECOVERY.family, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, predecessorSerial: STAGE_B_BACKEND_RECOVERY.serial, newestHistoricalArn, historicalRevisionArns: STAGE_B_BACKEND_RECOVERY.historicalRevisionArns, replacementArn: replacement.arn, protectedSourceFingerprint: replacement.protectedSourceFingerprint, replacementFingerprint: replacement.fingerprint, imageDigest: backendImageDigest, authorizedBackendImageDigest: imageDigest(backendImageDigest), stateLineage: stateBinding?.stateLineage || state.lineage, stateSerial: stateBinding?.stateSerial || state.serial, registrationEvent };
   return { ...evidence, evidenceSha256: canonicalSha256(evidence) };
 }
