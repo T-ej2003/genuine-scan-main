@@ -43,7 +43,6 @@ const brokerCaptureAddresses = ["aws_iam_policy.broker", "aws_lambda_alias.revie
 const brokerCaptureAllowedChangedFields = new Map([
   ["aws_iam_policy.broker", new Set(["policy"])],
   ["aws_lambda_alias.reviewed", new Set(["function_version"])],
-  ["aws_lambda_function.broker", new Set(["environment", "filename", "source_code_hash", ...STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS])],
 ]);
 const brokerCaptureKnownAddresses = new Set([...brokerCaptureAddresses, "aws_iam_role_policy_attachment.broker"]);
 export const STAGE_B_RELEASE_CALLER_ARN_PATTERN = /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/\r\n]+$/;
@@ -382,7 +381,10 @@ export function assertStageBBrokerCaptureUpdateContract(plan) {
   const changes = new Map((plan.resource_changes || []).filter((change) => brokerCaptureAddresses.includes(change.address)).map((change) => [change.address, change]));
   const active = brokerCaptureAddresses.map((address) => changes.get(address)).filter((change) => change && !exactActions(change.change?.actions || [], ["no-op"]));
   for (const change of active) {
-    if (change.address === "aws_lambda_function.broker") assertStageBBrokerFunctionUpdate(change);
+    if (change.address === "aws_lambda_function.broker") {
+      assertStageBBrokerFunctionUpdate(change);
+      continue;
+    }
     const before = change.change?.before || {};
     const after = change.change?.after || {};
     const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])]
