@@ -29,12 +29,44 @@ jobs:
           EXPECTED_REF: refs/heads/main
         run: test "$GITHUB_REF" = "$EXPECTED_REF"
 
-      - name: Checkout exact requested source
+      - name: Checkout trusted protected-main bootstrap
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: main
           fetch-depth: 0
           persist-credentials: true
+
+      - name: Authorize requested source before checkout or code execution
+        id: authorize-source
+        env:
+          REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+
+          if ! printf '%s' "$REQUESTED_SOURCE_SHA" | grep -Eq '^[a-f0-9]{40}$'; then
+            echo "::error::source_sha must be a full lowercase 40-character SHA."
+            exit 1
+          fi
+          git fetch --no-tags --prune origin main
+          trusted_main_sha="$(git rev-parse refs/remotes/origin/main)"
+          git cat-file -e "${REQUESTED_SOURCE_SHA}^{commit}"
+          if [ "$REQUESTED_SOURCE_SHA" != "$trusted_main_sha" ]; then
+            echo "::error::Requested source is not the current protected origin/main commit."
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all)" ]; then
+            echo "::error::Trusted bootstrap checkout is dirty."
+            exit 1
+          fi
+          printf 'verified_sha=%s\n' "$REQUESTED_SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          printf 'trusted_main_sha=%s\n' "$trusted_main_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact authorized source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.authorize-source.outputs.verified_sha }}
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -56,6 +88,9 @@ jobs:
       - name: Run canonical read-only readiness orchestrator
         env:
           MSCQR_DEPLOYMENT_MODE: read-only
+          MSCQR_TRUSTED_MAIN_SHA: ${{ steps.authorize-source.outputs.trusted_main_sha }}
+          ENFORCE_LINT_CHANGED: "true"
+          LINT_CHANGED_BASE_REF: HEAD^
           READINESS_OUTPUT: ${{ runner.temp }}/mscqr-production-readiness/readiness.json
         run: |
           set -euo pipefail

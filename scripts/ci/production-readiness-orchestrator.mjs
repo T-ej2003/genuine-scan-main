@@ -26,6 +26,14 @@ export const READ_ONLY_CHECKS = Object.freeze([
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const text = (value) => Buffer.isBuffer(value) ? value.toString("utf8") : String(value || "");
 const git = (cwd, args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const gitBytes = (cwd, args) => execFileSync("git", args, { cwd, encoding: null, stdio: ["ignore", "pipe", "pipe"] });
+
+export function canonicalSourceTreeSha256(entries = []) {
+  const normalized = entries
+    .map(({ mode, path: filePath, blobSha256 }) => ({ mode: String(mode), path: String(filePath), blobSha256: String(blobSha256) }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  return sha256(Buffer.from(JSON.stringify(normalized)));
+}
 
 export function assertReadOnlyMode({ mode, environment = process.env } = {}) {
   if (mode !== "read-only" || environment.MSCQR_DEPLOYMENT_MODE !== "read-only") {
@@ -95,7 +103,7 @@ function writeReport(outputPath, repositoryRoot, report) {
   return writeStageBPrivateFileAtomic({ filePath: resolved, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), repositoryRoot, label: "Production readiness evidence" });
 }
 
-export function runReadOnlyReadiness({ cwd = ROOT, sourceSha, outputPath, environment = process.env, runGit = (args) => git(cwd, args), run = runCheck, checks = READ_ONLY_CHECKS } = {}) {
+export function runReadOnlyReadiness({ cwd = ROOT, sourceSha, outputPath, environment = process.env, runGit = (args) => git(cwd, args), readGitBytes = (args) => gitBytes(cwd, args), run = runCheck, checks = READ_ONLY_CHECKS } = {}) {
   assertReadOnlyMode({ mode: "read-only", environment });
   assertReadOnlyCheckPlan(checks);
   if (!path.isAbsolute(outputPath || "")) throw new Error("Production readiness evidence requires an absolute output path.");
@@ -103,15 +111,25 @@ export function runReadOnlyReadiness({ cwd = ROOT, sourceSha, outputPath, enviro
   const checkResults = [];
   let blockedReason = null;
   try {
-    const fresh = readFreshProtectedMainIdentity({ cwd, expectedSourceSha: sourceSha, run: runGit });
+    const fresh = environment.MSCQR_TRUSTED_MAIN_SHA ? null : readFreshProtectedMainIdentity({ cwd, expectedSourceSha: sourceSha, run: runGit });
     const checkout = readStageBProtectedMainCheckout({ cwd, fetchOriginMain: false, run: runGit });
-    assertReadOnlySourceIdentity({ sourceSha, currentHead: fresh.headSha, originMainHead: fresh.freshRemoteMainSha, isAncestor: checkout.isAncestor, porcelainStatus: checkout.porcelainStatus, repositoryState: checkout.repositoryState });
-    identity.currentHead = fresh.headSha;
-    identity.originMainHead = fresh.freshRemoteMainSha;
+    const trustedMainSha = environment.MSCQR_TRUSTED_MAIN_SHA || fresh?.freshRemoteMainSha || checkout.originMainHead;
+    assertReadOnlySourceIdentity({ sourceSha, currentHead: checkout.currentHead, originMainHead: trustedMainSha, isAncestor: checkout.isAncestor, porcelainStatus: checkout.porcelainStatus, repositoryState: checkout.repositoryState });
+    if (checkout.originMainHead !== trustedMainSha) throw new Error("Local origin/main does not match the trusted bootstrap SHA.");
+    identity.currentHead = checkout.currentHead;
+    identity.originMainHead = trustedMainSha;
     identity.isAncestor = checkout.isAncestor;
     identity.porcelainStatus = checkout.porcelainStatus;
     identity.repositoryState = checkout.repositoryState;
-    identity.sourceTreeSha256 = runGit(["rev-parse", `${sourceSha}^{tree}`]);
+    const treeEntries = runGit(["ls-tree", "-r", "--full-tree", "HEAD"])
+      .split("\n")
+      .filter(Boolean)
+      .map((entry) => {
+        const match = /^(\d+)\s+blob\s+([a-f0-9]+)\t(.+)$/.exec(entry);
+        if (!match) throw new Error("Protected source tree contains an unsupported entry.");
+        return { mode: match[1], path: match[3], blobSha256: sha256(readGitBytes(["cat-file", "blob", match[2]])) };
+      });
+    identity.sourceTreeSha256 = canonicalSourceTreeSha256(treeEntries);
   } catch (error) {
     blockedReason = `SOURCE_IDENTITY_FAILED:${error.message}`;
   }
@@ -119,17 +137,18 @@ export function runReadOnlyReadiness({ cwd = ROOT, sourceSha, outputPath, enviro
   const { imageReleaseSha, backendImageDigest } = optionalIdentity(environment);
   if (!blockedReason) {
     for (const check of checks) {
-      const result = run(check.command, check.args, { cwd, environment: { ...environment, MSCQR_DEPLOYMENT_MODE: "read-only", CI: "1" } });
+      const result = run(check.command, check.args, { cwd, environment: { ...environment, MSCQR_DEPLOYMENT_MODE: "read-only", ENFORCE_LINT_CHANGED: "true", LINT_CHANGED_BASE_REF: environment.LINT_CHANGED_BASE_REF || "HEAD^", CI: "1" } });
       const summarized = checkResult(check.id, check.command, check.args, result);
       checkResults.push(summarized);
       if (summarized.status !== "PASS" && !blockedReason) blockedReason = `${summarized.id}:${summarized.failureClass}`;
     }
   }
   const report = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     mode: "read-only",
     sourceSha,
     sourceTreeSha256: identity.sourceTreeSha256 || null,
+    sourceTreeIdentity: { algorithm: "SHA-256", type: "canonical-tracked-content", encoding: "hex" },
     toolingSha: sourceSha,
     originMainSha: identity.originMainHead,
     imageReleaseSha,
