@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "ea7ba7f643ad22754c8f586f7e85c9abdef93eaf2139a2e1077cd040bb3bdb7d",
+  "sourceContractSha256": "483f37f28ad2c4a760bafaba5446fcb681fe95536ec6b2a494a8527726951c90",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -214,11 +214,11 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "d9360d627f7ad78b2c1b0dac1848dfab792702a7a222c48303cb767dd801f886"
+      "sha256": "3355de4c982df93b82ba81b4cd2f7e639146d6921e3f4bab84019003cae61b62"
     },
     {
       "path": ".github/workflows/release-train.yml",
-      "sha256": "0a65a0d8268d918b5326b6c56fa5399246437a644e3ddd75f22ec28c6835b2d3"
+      "sha256": "fa46913ca54c2c0ec574b7aeac02e9cf36e3a778717c01482f5992a03de90d20"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -11367,55 +11367,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:ea7ba7f643ad22754c8f586f7e85c9abdef93eaf2139a2e1077cd040bb3bdb7d"
+      "marker": "mscqr-full-rls-clean-room:certification:483f37f28ad2c4a760bafaba5446fcb681fe95536ec6b2a494a8527726951c90"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:ea7ba7f643ad22754c8f586f7e85c9abdef93eaf2139a2e1077cd040bb3bdb7d"
+      "marker": "mscqr-full-rls-clean-room:certification:483f37f28ad2c4a760bafaba5446fcb681fe95536ec6b2a494a8527726951c90"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ea7ba7f643ad22754c8f586f7e85c9abdef93eaf2139a2e1077cd040bb3bdb7d"
+      "marker": "mscqr-full-rls-clean-room:certification:483f37f28ad2c4a760bafaba5446fcb681fe95536ec6b2a494a8527726951c90"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ea7ba7f643ad22754c8f586f7e85c9abdef93eaf2139a2e1077cd040bb3bdb7d"
+      "marker": "mscqr-full-rls-clean-room:certification:483f37f28ad2c4a760bafaba5446fcb681fe95536ec6b2a494a8527726951c90"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ea7ba7f643ad22754c8f586f7e85c9abdef93eaf2139a2e1077cd040bb3bdb7d"
+      "marker": "mscqr-full-rls-clean-room:certification:483f37f28ad2c4a760bafaba5446fcb681fe95536ec6b2a494a8527726951c90"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ea7ba7f643ad22754c8f586f7e85c9abdef93eaf2139a2e1077cd040bb3bdb7d"
+      "marker": "mscqr-full-rls-clean-room:certification:483f37f28ad2c4a760bafaba5446fcb681fe95536ec6b2a494a8527726951c90"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ea7ba7f643ad22754c8f586f7e85c9abdef93eaf2139a2e1077cd040bb3bdb7d"
+      "marker": "mscqr-full-rls-clean-room:certification:483f37f28ad2c4a760bafaba5446fcb681fe95536ec6b2a494a8527726951c90"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ea7ba7f643ad22754c8f586f7e85c9abdef93eaf2139a2e1077cd040bb3bdb7d"
+      "marker": "mscqr-full-rls-clean-room:certification:483f37f28ad2c4a760bafaba5446fcb681fe95536ec6b2a494a8527726951c90"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ea7ba7f643ad22754c8f586f7e85c9abdef93eaf2139a2e1077cd040bb3bdb7d"
+      "marker": "mscqr-full-rls-clean-room:certification:483f37f28ad2c4a760bafaba5446fcb681fe95536ec6b2a494a8527726951c90"
     }
   ]
 }

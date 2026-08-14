@@ -40,6 +40,23 @@ work until its source-managed retirement/import plan is independently reviewed.
 It is not referenced by the release gate and cannot satisfy the canonical caller
 contract.
 
+## Image publication boundary
+
+Image publication is a separate capability. Run the protected-main
+`Production Green Stage B Images` workflow first and pass its successful run ID
+as `stage_b_image_workflow_run_id` to `release-gate.yml` (or Release Train).
+That workflow uses the dedicated Stage-B image-publisher identity, signs and
+attests the immutable images, verifies the release artifacts, and publishes the
+canonical `stage-b-images.jsonl` artifact. The release-gate mutation role has no
+ECR publication permissions and only downloads and validates that preauthorized
+artifact against the exact protected release SHA and workflow metadata.
+
+The current canonical Stage-B artifact contains backend, worker, RLS executor,
+and RLS canary images. It does not contain a frontend image. Until a separately
+reviewed frontend publication contract exists, a normal release must set
+`preserve_current_frontend=true`; any attempt to deploy a new frontend or omit
+the image workflow run ID fails closed before deployment work begins.
+
 ## Operator boundary
 
 Run the release gate only after source/image evidence and the read-only

@@ -16,6 +16,10 @@ on:
         description: "Release Train run ID that dispatched this gate"
         required: false
         type: string
+      stage_b_image_workflow_run_id:
+        description: "Successful protected-main Stage-B image publication workflow run ID"
+        required: false
+        type: string
       caller_mode:
         description: "Explicit production caller mode. Human mode is break-glass only."
         required: false
@@ -415,14 +419,6 @@ jobs:
           caller_arn="$(aws sts get-caller-identity --query Arn --output text)"
           AWS_CALLER_ARN="$caller_arn" node scripts/ci/verify-production-caller.mjs
 
-      - name: Login to Amazon ECR
-        if: ${{ inputs.release_mode == 'normal' }}
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Set up Docker Buildx
-        if: ${{ inputs.release_mode == 'normal' }}
-        uses: docker/setup-buildx-action@v4
-
       - name: Generate and verify checksum-bound production RLS package
         id: rls-package
         if: ${{ inputs.release_mode == 'normal' }}
@@ -459,97 +455,100 @@ jobs:
           set -euo pipefail
 
           account_id="$(aws sts get-caller-identity --query Account --output text)"
-          images_file="$RUNNER_TEMP/published-images.jsonl"
-          : > "$images_file"
-
           echo "account_id=$account_id" >> "$GITHUB_OUTPUT"
-          echo "images_file=$images_file" >> "$GITHUB_OUTPUT"
           echo "image_tag=$DEPLOY_SHA" >> "$GITHUB_OUTPUT"
           echo "backend_metadata_file=$RUNNER_TEMP/backend-deployment.json" >> "$GITHUB_OUTPUT"
           echo "frontend_metadata_file=$RUNNER_TEMP/frontend-deployment.json" >> "$GITHUB_OUTPUT"
           echo "worker_metadata_file=$RUNNER_TEMP/worker-deployment.json" >> "$GITHUB_OUTPUT"
 
-      - name: Enforce ECR repository controls
-        if: ${{ inputs.release_mode == 'normal' }}
-        run: |
-          set -euo pipefail
-          ./scripts/aws/apply-ecr-repository-controls.sh all
-
-      - name: Publish immutable ECS images
+      - name: Consume preauthorized immutable Stage-B image publication
+        id: image-publication
         if: ${{ inputs.release_mode == 'normal' }}
         env:
-          AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
-          IMAGE_TAG: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
-          OUTPUT_FILE: ${{ steps.image-meta.outputs.images_file }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STAGE_B_IMAGE_WORKFLOW_RUN_ID: ${{ inputs.stage_b_image_workflow_run_id }}
           PRESERVE_CURRENT_FRONTEND: ${{ inputs.preserve_current_frontend }}
         run: |
           set -euo pipefail
-          if [ "$PRESERVE_CURRENT_FRONTEND" = "true" ]; then
-            ./scripts/aws/publish-ecs-images.sh backend
-            ./scripts/aws/publish-ecs-images.sh worker
-            ./scripts/aws/publish-ecs-images.sh rls-executor
-            frontend_task="$(
-              aws ecs describe-services \
-                --cluster "$CLUSTER_NAME" \
-                --services "$FRONTEND_SERVICE_NAME" \
-                --query 'services[0].taskDefinition' \
-                --output text
-            )"
-            if [ "$frontend_task" != "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20" ]; then
-              echo "::error::Frontend preservation requires the reviewed mscqr-frontend:20 task definition."
-              exit 1
-            fi
-            frontend_image="$(
-              aws ecs describe-task-definition \
-                --task-definition "$frontend_task" \
-                --query "taskDefinition.containerDefinitions[?name=='${FRONTEND_CONTAINER_NAME}'].image | [0]" \
-                --output text
-            )"
-            if ! [[ "$frontend_image" =~ ^[0-9]{12}\.dkr\.ecr\.eu-west-2\.amazonaws\.com/mscqr-web@sha256:[a-f0-9]{64}$ ]]; then
-              echo "::error::Current frontend task definition is not bound to an immutable production image digest."
-              exit 1
-            fi
-            node --input-type=module - "$OUTPUT_FILE" "$frontend_image" <<'NODE'
-            import fs from "node:fs";
-            const [outputPath, imageRef] = process.argv.slice(2);
-            const [imageUri, imageDigest] = imageRef.split("@");
-            fs.appendFileSync(outputPath, `${JSON.stringify({
-              service: "frontend", repository: "mscqr-web", image_uri: imageUri,
-              image_tag: "preserved-current-task-definition", image_digest: imageDigest, image_ref: imageRef,
-            })}\n`);
-            NODE
-          else
-            ./scripts/aws/publish-ecs-images.sh all
+          if [ -z "${STAGE_B_IMAGE_WORKFLOW_RUN_ID:-}" ]; then
+            echo "::error::A successful canonical Stage-B image workflow run ID is required; release-gate does not publish images."
+            exit 1
           fi
+          if [ "$PRESERVE_CURRENT_FRONTEND" != "true" ]; then
+            echo "::error::The canonical Stage-B publication artifact does not contain a frontend image. Set preserve_current_frontend=true until the reviewed frontend publication contract exists."
+            exit 1
+          fi
+          node scripts/ci/consume-stage-b-image-publication.mjs \
+            "$STAGE_B_IMAGE_WORKFLOW_RUN_ID" \
+            "$DEPLOY_SHA" \
+            "$RUNNER_TEMP/stage-b-image-publication-download" \
+            "$RUNNER_TEMP/preauthorized-stage-b-image-evidence.json" \
+            "$GITHUB_OUTPUT"
+
+      - name: Resolve preserved frontend immutable digest
+        id: frontend-image
+        if: ${{ inputs.release_mode == 'normal' }}
+        run: |
+          set -euo pipefail
+          frontend_task="$(
+            aws ecs describe-services \
+              --cluster "$CLUSTER_NAME" \
+              --services "$FRONTEND_SERVICE_NAME" \
+              --query 'services[0].taskDefinition' \
+              --output text
+          )"
+          if [ "$frontend_task" != "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20" ]; then
+            echo "::error::Frontend preservation requires the reviewed mscqr-frontend:20 task definition."
+            exit 1
+          fi
+          frontend_image="$(
+            aws ecs describe-task-definition \
+              --task-definition "$frontend_task" \
+              --query "taskDefinition.containerDefinitions[?name=='${FRONTEND_CONTAINER_NAME}'].image | [0]" \
+              --output text
+          )"
+          if ! [[ "$frontend_image" =~ ^[0-9]{12}\.dkr\.ecr\.eu-west-2\.amazonaws\.com/mscqr-web@sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::Current frontend task definition is not bound to an immutable production image digest."
+            exit 1
+          fi
+          echo "frontend_image_ref=$frontend_image" >> "$GITHUB_OUTPUT"
 
       - name: Resolve backend, frontend, and worker digest refs
         id: images
         if: ${{ inputs.release_mode == 'normal' }}
         env:
-          IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
+          BACKEND_IMAGE_REF: ${{ steps.image-publication.outputs.backend_image_ref }}
+          WORKER_IMAGE_REF: ${{ steps.image-publication.outputs.worker_image_ref }}
+          RLS_EXECUTOR_IMAGE_REF: ${{ steps.image-publication.outputs.rls_executor_image_ref }}
+          FRONTEND_IMAGE_REF: ${{ steps.frontend-image.outputs.frontend_image_ref }}
         run: |
           set -euo pipefail
+          for name in BACKEND WORKER RLS_EXECUTOR FRONTEND; do
+            variable="${name}_IMAGE_REF"
+            value="${!variable:-}"
+            if [ -z "$value" ]; then
+              echo "::error::Preauthorized image evidence did not provide ${name}."
+              exit 1
+            fi
+            output_name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+            output_name="${output_name//_/-}"
+            output_name="${output_name//-/_}"
+            image_uri="${value%@*}"
+            image_digest="${value##*@}"
+            echo "${output_name}_image_ref=$value" >> "$GITHUB_OUTPUT"
+            echo "${output_name}_image_uri=$image_uri" >> "$GITHUB_OUTPUT"
+            echo "${output_name}_image_digest=$image_digest" >> "$GITHUB_OUTPUT"
+          done
 
-          node --input-type=module - "$IMAGES_FILE" "$GITHUB_OUTPUT" <<'NODE'
-          import fs from "node:fs";
-
-          const [imagesPath, outputPath] = process.argv.slice(2);
-          const records = fs.readFileSync(imagesPath, "utf8")
-            .split(/\n+/)
-            .filter(Boolean)
-            .map((line) => JSON.parse(line));
-
-          for (const service of ["backend", "frontend", "worker", "rls-executor"]) {
-            const record = records.find((item) => item.service === service);
-            if (!record?.image_ref) {
-              throw new Error(`Missing published image record for ${service}.`);
-            }
-            const outputName = service.replaceAll("-", "_");
-            fs.appendFileSync(outputPath, `${outputName}_image_ref=${record.image_ref}\n`);
-            fs.appendFileSync(outputPath, `${outputName}_image_uri=${record.image_uri}\n`);
-            fs.appendFileSync(outputPath, `${outputName}_image_digest=${record.image_digest}\n`);
-          }
-          NODE
+      - name: Preserve preauthorized image evidence
+        if: ${{ inputs.release_mode == 'normal' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: preauthorized-stage-b-image-evidence
+          path: ${{ runner.temp }}/preauthorized-stage-b-image-evidence.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Require complete production worker deployment configuration
         if: ${{ inputs.release_mode == 'normal' }}
