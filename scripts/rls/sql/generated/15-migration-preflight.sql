@@ -10,8 +10,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='00804cfe1e830bc13fa7c0ca84653a7d14d4dd6bd1dfef0d92b0e0f8e4c08c7b'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:00804cfe1e830bc13fa7c0ca84653a7d14d4dd6bd1dfef0d92b0e0f8e4c08c7b'
+    AND source_contract_sha256='c4a0b8f12c34770f6a8eb5dd61aeeca41a377d4a0c99379c6dc5f27d9eab8c6a'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:c4a0b8f12c34770f6a8eb5dd61aeeca41a377d4a0c99379c6dc5f27d9eab8c6a'
     AND administrator_role='certification-administrator'
 
     AND phase='roles-created'
@@ -26,7 +26,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:00804cfe1e830bc13fa7c0ca84653a7d14d4dd6bd1dfef0d92b0e0f8e4c08c7b')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:c4a0b8f12c34770f6a8eb5dd61aeeca41a377d4a0c99379c6dc5f27d9eab8c6a')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
