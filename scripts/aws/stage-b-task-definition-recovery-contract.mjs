@@ -182,13 +182,15 @@ function requireJournal(journal) {
 }
 
 function validateJournal(journalState, { sourceSha, fingerprint, imageDigest } = {}) {
-  if (!journalState || journalState.schemaVersion !== 1 || journalState.kind !== "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY"
+  if (!journalState || journalState.schemaVersion !== 2 || journalState.kind !== "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY"
     || journalState.sourceSha !== sourceSha || journalState.address !== STAGE_B_BACKEND_RECOVERY.address
     || journalState.family !== STAGE_B_BACKEND_RECOVERY.family || journalState.predecessorArn !== STAGE_B_BACKEND_RECOVERY.predecessorArn
     || journalState.newestHistoricalArn !== STAGE_B_BACKEND_RECOVERY.newestHistoricalArn
     || journalState.stateLineage !== STAGE_B_BACKEND_RECOVERY.lineage || journalState.stateSerial !== STAGE_B_BACKEND_RECOVERY.serial
     || journalState.protectedSourceFingerprint !== fingerprint || journalState.imageDigest !== imageDigest
-    || !["PREPARED", "REGISTERING", "REGISTERED", "STATE_REMOVED", "STATE_IMPORTED", "COMPLETED"].includes(journalState.phase)) {
+    || !["DISCOVERY", "PREPARED", "REGISTERING", "REGISTERED", "READBACK_VERIFIED", "STATE_RECONCILING", "STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)
+    || !Number.isInteger(journalState.registrationCalls) || journalState.registrationCalls < 0 || journalState.registrationCalls > 1
+    || typeof journalState.registrationMayHaveOccurred !== "boolean") {
     throw new Error("Canonical recovery journal does not match the reviewed incident and protected source.");
   }
   return journalState;
@@ -196,9 +198,9 @@ function validateJournal(journalState, { sourceSha, fingerprint, imageDigest } =
 
 export function buildCanonicalRecoveryJournal(state, { sourceSha, fingerprint, imageDigest } = {}) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY",
-    phase: "PREPARED",
+    phase: "DISCOVERY",
     sourceSha,
     address: STAGE_B_BACKEND_RECOVERY.address,
     family: STAGE_B_BACKEND_RECOVERY.family,
@@ -213,17 +215,18 @@ export function buildCanonicalRecoveryJournal(state, { sourceSha, fingerprint, i
     protectedSourceFingerprint: fingerprint,
     imageDigest,
     registrationCalls: 0,
+    registrationMayHaveOccurred: false,
   };
 }
 
 function assertJournalState(journalState, state, expectedArn) {
   if (state.lineage !== journalState.stateLineage) throw new Error("Terraform state lineage changed during backend recovery.");
   const candidate = stateBackendCandidateFromOptional(state);
-  if (journalState.phase === "STATE_REMOVED") {
+  if (journalState.phase === "STATE_RECONCILING") {
     if (state.serial !== journalState.expectedStateAfterRemoveSerial || candidate !== null || stateSnapshotSha256(state) !== journalState.stateAfterRemoveSha256) {
       throw new Error("Terraform state is not the exact reviewed post-removal recovery state.");
     }
-  } else if (["STATE_IMPORTED", "COMPLETED"].includes(journalState.phase)) {
+  } else if (["STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)) {
     if (state.serial !== journalState.expectedStateAfterImportSerial || candidate !== expectedArn) throw new Error("Terraform state is not the exact reviewed imported recovery state.");
   }
 }
@@ -236,29 +239,52 @@ export async function runCanonicalBackendRecovery({ bindings, sourceSha, protect
   const existingJournal = journal.read();
   const payload = buildCanonicalBackendRecoveryTaskDefinition(bindings);
   const fingerprint = taskDefinitionFingerprint(payload.taskDefinition, payload.tags);
+  if (existingJournal?.schemaVersion === 1 && existingJournal.phase === "REGISTERING" && existingJournal.registrationCalls === 1 && !existingJournal.replacementArn) {
+    throw new Error("Legacy recovery journal records a pre-discovery registration count; preserve it as failed evidence and start a new reviewed recovery incident after live revalidation.");
+  }
   const prepared = existingJournal ? validateJournal(existingJournal, { sourceSha, fingerprint, imageDigest: bindings.backendImage }) : buildCanonicalRecoveryJournal(before, { sourceSha, fingerprint, imageDigest: bindings.backendImage });
   if (!existingJournal) journal.write(prepared);
-  else if (prepared.stateBeforeSha256 !== stateSnapshotSha256(before) && prepared.phase === "PREPARED") throw new Error("Terraform state changed before canonical recovery resumed.");
-  if (prepared.phase === "STATE_REMOVED" && !((before.serial === prepared.expectedStateAfterRemoveSerial && stateBackendCandidateFromOptional(before) === null)
+  else if (prepared.stateBeforeSha256 !== stateSnapshotSha256(before) && ["DISCOVERY", "PREPARED"].includes(prepared.phase)) throw new Error("Terraform state changed before canonical recovery resumed.");
+  if (prepared.phase === "STATE_RECONCILING" && !((before.serial === prepared.expectedStateAfterRemoveSerial && stateBackendCandidateFromOptional(before) === null)
     || (before.serial === prepared.expectedStateAfterImportSerial && stateBackendCandidateFromOptional(before) === prepared.replacementArn))) throw new Error("Recovery journal requires the interrupted state-removal checkpoint.");
-  if (["STATE_IMPORTED", "COMPLETED"].includes(prepared.phase)
+  if (["STATE_RECONCILED", "COMPLETED"].includes(prepared.phase)
     && (before.serial !== prepared.expectedStateAfterImportSerial || stateBackendCandidateFromOptional(before) !== prepared.replacementArn)) throw new Error("Recovery journal requires the exact imported recovery state.");
-  if (prepared.registrationCalls > 1) throw new Error("Canonical recovery registration count exceeds one for this incident.");
-  if (!prepared.replacementArn && prepared.registrationCalls === 0) journal.write({ ...prepared, phase: "REGISTERING", registrationCalls: 1 });
   let registration;
-  if (prepared.replacementArn && ["STATE_REMOVED", "STATE_IMPORTED", "COMPLETED"].includes(prepared.phase)) {
+  if (prepared.replacementArn && ["STATE_RECONCILING", "STATE_RECONCILED", "COMPLETED"].includes(prepared.phase)) {
     const newestArn = await newest();
     if (newestArn !== prepared.replacementArn) throw new Error("Canonical recovery resume requires its exact replacement to remain newest.");
     const readback = await describe(newestArn);
     const verified = assertCanonicalBackendRecoveryReadback({ readback, expectedArn: newestArn, expectedFingerprint: fingerprint });
     registration = { ...verified, payload, registrationCalls: 0, resumed: true };
   } else {
-    registration = await registerCanonicalBackendRecovery({ bindings, state: before, sourceSha, protectedCheckout, expectedFingerprint: fingerprint, register: async (value) => {
-      if (prepared.registrationCalls !== 0) throw new Error("Canonical recovery refuses a second task-definition registration.");
-      return register(value);
-    }, describe, newest });
+    assertBackendRecoveryPreconditions({ state: before, sourceSha });
+    const newestArn = await newest();
+    const ready = prepared.phase === "DISCOVERY" ? { ...prepared, phase: "PREPARED" } : prepared;
+    if (ready !== prepared) journal.write(ready);
+    if (newestArn !== STAGE_B_BACKEND_RECOVERY.newestHistoricalArn) {
+      const readback = await describe(newestArn);
+      const verified = assertCanonicalBackendRecoveryReadback({ readback, expectedArn: newestArn, expectedFingerprint: fingerprint });
+      registration = { ...verified, payload, registrationCalls: 0, resumed: true };
+    } else {
+      if (ready.registrationMayHaveOccurred || ready.registrationCalls !== 0) throw new Error("Canonical recovery cannot prove a prior registration was not sent; newest revision must be read back before any retry.");
+      const registering = { ...ready, phase: "REGISTERING", registrationMayHaveOccurred: true };
+      journal.write(registering);
+      let response;
+      try {
+        response = await register(payload);
+      } catch (error) {
+        journal.write({ ...registering, registrationCalls: 1 });
+        throw error;
+      }
+      const arn = response?.taskDefinition?.taskDefinitionArn || response?.taskDefinitionArn;
+      journal.write({ ...registering, phase: "REGISTERED", registrationCalls: 1, replacementArn: arn });
+      const readback = await describe(arn);
+      if (await newest() !== arn) throw new Error("Canonical recovery replacement is not the newest retained backend revision.");
+      const verified = assertCanonicalBackendRecoveryReadback({ readback, expectedArn: arn, expectedFingerprint: fingerprint });
+      registration = { ...verified, payload, registrationCalls: 1, resumed: false };
+    }
   }
-  const registered = { ...prepared, phase: "REGISTERED", replacementArn: registration.arn, replacementFingerprint: registration.fingerprint, registrationCalls: Math.max(prepared.registrationCalls + registration.registrationCalls, registration.resumed ? 1 : 0) };
+  const registered = { ...prepared, phase: "READBACK_VERIFIED", replacementArn: registration.arn, replacementFingerprint: registration.fingerprint, registrationCalls: Math.max(prepared.registrationCalls, registration.registrationCalls), registrationMayHaveOccurred: prepared.registrationMayHaveOccurred || registration.registrationCalls === 1 };
   journal.write(registered);
   const reconciliation = await reconcileCanonicalBackendState({ readState, removeState, importState, replacementArn: registration.arn, sourceSha, journal });
   const evidence = recoveryEvidence({ sourceSha, state: before, stateBinding: prepared, imageDigest: bindings.backendImage, replacement: { arn: registration.arn, fingerprint: registration.fingerprint, protectedSourceFingerprint: fingerprint } });
@@ -292,27 +318,27 @@ export async function reconcileCanonicalBackendState({ readState, removeState, i
   if (before.lineage !== journalState.stateLineage) throw new Error("Terraform state lineage changed during backend recovery.");
   const candidate = stateBackendCandidateFromOptional(before);
   if (candidate === target.arn && before.serial === journalState.expectedStateAfterImportSerial) {
-    recoveryJournal.write({ ...journalState, phase: "STATE_IMPORTED" });
+    recoveryJournal.write({ ...journalState, phase: "STATE_RECONCILED" });
     return { stateLineageBefore: journalState.stateLineage, stateLineageAfter: before.lineage, stateSerialBefore: journalState.stateSerial, stateSerialAfter: before.serial, stateBackendCandidate: target.arn, liveBackendCandidate: target.arn, stateLivePredecessorMatch: true, removeCalls: 0, importCalls: 0 };
   }
   if (candidate === null && before.serial === journalState.expectedStateAfterRemoveSerial) {
-    assertJournalState({ ...journalState, phase: "STATE_REMOVED" }, before, target.arn);
+    assertJournalState({ ...journalState, phase: "STATE_RECONCILING" }, before, target.arn);
     await importState({ address: STAGE_B_BACKEND_RECOVERY.address, arn: target.arn });
     const imported = await readState();
     if (imported.lineage !== journalState.stateLineage || imported.serial !== journalState.expectedStateAfterImportSerial || stateBackendCandidateFromOptional(imported) !== target.arn) throw new Error("Terraform state import did not produce the exact canonical recovery state.");
-    recoveryJournal.write({ ...journalState, phase: "STATE_IMPORTED" });
+    recoveryJournal.write({ ...journalState, phase: "STATE_RECONCILED" });
     return { stateLineageBefore: journalState.stateLineage, stateLineageAfter: imported.lineage, stateSerialBefore: journalState.stateSerial, stateSerialAfter: imported.serial, stateBackendCandidate: target.arn, liveBackendCandidate: target.arn, stateLivePredecessorMatch: true, removeCalls: 0, importCalls: 1 };
   }
   assertBackendRecoveryPreconditions({ state: before, sourceSha });
+  recoveryJournal.write({ ...journalState, phase: "STATE_RECONCILING" });
   await removeState({ address: STAGE_B_BACKEND_RECOVERY.address, expectedArn: STAGE_B_BACKEND_RECOVERY.predecessorArn });
   const removed = await readState();
-  assertJournalState({ ...journalState, phase: "STATE_REMOVED" }, removed, target.arn);
-  recoveryJournal.write({ ...journalState, phase: "STATE_REMOVED" });
+  assertJournalState({ ...journalState, phase: "STATE_RECONCILING" }, removed, target.arn);
   await importState({ address: STAGE_B_BACKEND_RECOVERY.address, arn: target.arn });
   const after = await readState();
   if (after.lineage !== journalState.stateLineage || after.serial !== journalState.expectedStateAfterImportSerial || stateBackendCandidateFromOptional(after) !== target.arn) throw new Error("Terraform state import did not produce the exact canonical recovery state.");
   assertOnlyBackendStateChange(before, after, target.arn);
-  recoveryJournal.write({ ...journalState, phase: "STATE_IMPORTED" });
+  recoveryJournal.write({ ...journalState, phase: "STATE_RECONCILED" });
   return { stateLineageBefore: journalState.stateLineage, stateLineageAfter: after.lineage, stateSerialBefore: journalState.stateSerial, stateSerialAfter: after.serial, stateBackendCandidate: target.arn, liveBackendCandidate: target.arn, stateLivePredecessorMatch: true, removeCalls: 1, importCalls: 1 };
 }
 

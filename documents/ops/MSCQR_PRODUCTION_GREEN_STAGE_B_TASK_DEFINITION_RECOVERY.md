@@ -19,14 +19,28 @@ revision, and verifies the returned ACTIVE ARN is newer than `:7` and has the
 same semantic fingerprint as the protected source.
 
 The recovery journal is stored beside the evidence output (or at the explicit
-`--recovery-state` path). It is written before registration and records the
-source, predecessor, fingerprint, registration count, and exact state
-checkpoints. If registration succeeds but its response, describe, or newest
-readback is lost, a retry describes only the newest ACTIVE revision. It may
-resume only when that revision is the exact canonical fingerprint; a newer
-noncanonical revision fails closed and no second registration is attempted.
-The journal also resumes an interruption after `state rm` or `import` without
-repeating either completed operation.
+`--recovery-state` path). Its state machine is `DISCOVERY`, `PREPARED`,
+`REGISTERING`, `REGISTERED`, `READBACK_VERIFIED`, `STATE_RECONCILING`,
+`STATE_RECONCILED`, then `COMPLETED`. `registrationCalls` records completed
+remote invocation attempts; `registrationMayHaveOccurred` records the
+separate crash-safe ambiguity immediately before an outbound request. A failed
+revision discovery therefore remains `DISCOVERY` with zero registration calls.
+
+If a request response, describe, or newest readback is lost, a retry describes
+only the newest ACTIVE revision. It may resume only when that revision has the
+exact canonical fingerprint; a newer noncanonical revision fails closed and no
+second registration is attempted. A legacy journal that recorded
+`REGISTERING`/`registrationCalls=1` before discovery is immutable failed
+evidence: the operator must preserve it and start a new incident only after a
+fresh live/state revalidation. The journal also resumes an interruption after
+`state rm` or `import` without repeating either completed operation.
+
+Before any adapter runs, the command verifies the exact protected checkout,
+source-bound bindings, exact Terraform root, initialized private Stage-B S3
+backend metadata, and `TF_WORKSPACE=default`. Recovery discovery requires
+`ecs:ListTaskDefinitions` only in `eu-west-2`; AWS requires `Resource: "*"`
+for this read API, while the command itself accepts only the fixed backend
+family. Registration, tagging, roles, state key, and lock key remain exact.
 
 Only after that readback passes may the reviewed state adapter perform the
 exact two-step Terraform state reconciliation for

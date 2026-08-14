@@ -151,7 +151,6 @@
       "Effect": "Allow",
       "Action": "ecs:TagResource",
       "Resource": [
-        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*",
         "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-worker-candidate:*",
         "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-application-canary:*",
         "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-admin-bootstrap:*",

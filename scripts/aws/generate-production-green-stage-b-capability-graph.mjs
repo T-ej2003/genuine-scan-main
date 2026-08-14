@@ -24,6 +24,7 @@ const awsCliSourceFiles = [
   "scripts/aws/production-green-stage-b-identity-capabilities.mjs", "scripts/aws/run-production-green-stage-b-preflight.mjs",
   "scripts/aws/validate-production-green-stage-b-permissions.mjs", "scripts/aws/production-checker-chain-contract.mjs",
   "scripts/aws/publish-production-green-stage-b-approval.mjs", "scripts/aws/check-production-green-stage-b-approval-publication.mjs",
+  "scripts/aws/recover-stage-b-backend-task-definition.mjs",
 ];
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const readJson = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
@@ -47,6 +48,7 @@ const PHASES = Object.freeze([
   ["terraform-initialization", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["backend-metadata-validation", "scripts/aws/stage-b-terraform-backend-contract.mjs"],
   ["workspace-validation", "scripts/aws/stage-b-terraform-workspace.mjs"],
+  ["canonical-backend-recovery", "scripts/aws/recover-stage-b-backend-task-definition.mjs"],
   ["stage-b-state-pull", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["stage-a-state-read", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["stage-a-handoff-generation", "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"],
@@ -82,6 +84,19 @@ const FIXED = Object.freeze([
   ["publisher-oidc", "image-workflow-dispatch", "GITHUB_IMAGE_PUBLISHER", "sts:AssumeRoleWithWebIdentity", "GITHUB_IMAGE_MUTATION", ".github/workflows/production-green-stage-b-image-build.yml"],
   ["release-verify-signature", "release-direct-read-preflight", "RELEASE_DEPLOYER", "kms:Verify", "RELEASE_DIRECT_READ", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["release-identify", "release-direct-read-preflight", "RELEASE_DEPLOYER", "sts:GetCallerIdentity", "RELEASE_DIRECT_READ", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
+]);
+
+const RECOVERY_CAPABILITIES = Object.freeze([
+  ["recovery-list-backend-revisions", "ecs:ListTaskDefinitions", ["*"]],
+  ["recovery-describe-backend-revision", "ecs:DescribeTaskDefinition", ["*"]],
+  ["recovery-register-backend-revision", "ecs:RegisterTaskDefinition", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"]],
+  ["recovery-tag-backend-revision", "ecs:TagResource", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"]],
+  ["recovery-pass-backend-task-role", "iam:PassRole", ["arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"]],
+  ["recovery-pass-backend-execution-role", "iam:PassRole", ["arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution"]],
+  ["recovery-read-state", "s3:GetObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"]],
+  ["recovery-write-state", "s3:PutObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"]],
+  ["recovery-lock-state", "s3:PutObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"]],
+  ["recovery-unlock-state", "s3:DeleteObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"]],
 ]);
 
 const classification = (entry, forbidden) => forbidden ? "FORBIDDEN"
@@ -180,8 +195,12 @@ export function buildStageBDeploymentCapabilityGraph() {
     probe: "structural", policy: { sourceFile: publisherPolicyPath, sid: statement.Sid, livePolicyArn: "github-oidc-role-policy", expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(readJson(publisherPolicyPath)))) }, required: true, mutation: statement.Effect !== "Deny",
   })));
   const fixed = FIXED.map(([id, phase, identity, action, actionClass, sourceFile]) => ({ id, phase, identity, executor: sourceFile.endsWith(".yml") ? "github-actions" : "aws-cli", sourceFile, sourceFunction: id, action, resources: ["reviewed-exact-resource"], context: { account: "368992683803", region: "eu-west-2" }, classification: actionClass, probe: actionClass === "RELEASE_DIRECT_READ" ? "direct" : actionClass === "ADMIN_SIMULATION" ? "administrator-simulation" : "structural", policy: { sourceFile: identity === "RELEASE_DEPLOYER" ? manifestPath : sourceFile, sid: "identity-boundary", livePolicyArn: identity === "RELEASE_DEPLOYER" ? "signed-administrator-evidence" : null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: ["ADMIN_SIGN", "GITHUB_IMAGE_MUTATION"].includes(actionClass) }));
+  const recovery = RECOVERY_CAPABILITIES.map(([id, action, resources]) => {
+    const entry = { id, action, resources };
+    return { id, phase: "canonical-backend-recovery", identity: "RELEASE_DEPLOYER", executor: "aws-cli-or-terraform", sourceFile: "scripts/aws/recover-stage-b-backend-task-definition.mjs", sourceFunction: id, action, resources, context: { account: "368992683803", region: "eu-west-2" }, classification: /^(?:ecs:RegisterTaskDefinition|ecs:TagResource|s3:PutObject|s3:DeleteObject)$/.test(action) ? "CANONICAL_RECOVERY_MUTATION" : "CANONICAL_RECOVERY_READ", probe: "administrator-simulation", probeIds: [], policy: authority(entry, false, policies), required: true, mutation: /^(?:ecs:RegisterTaskDefinition|ecs:TagResource|s3:PutObject|s3:DeleteObject)$/.test(action) };
+  });
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:Get)/.test(action) }));
-  const capabilities = [...fixed, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ...recovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
@@ -197,7 +216,7 @@ export function buildStageBDeploymentCapabilityGraph() {
 export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILITY_GRAPH_PATH)) {
   const expected = buildStageBDeploymentCapabilityGraph();
   if (canonicalizeJson(graph) !== canonicalizeJson(expected)) throw new Error("Stage B deployment capability graph is stale or incomplete.");
-  if (graph.phases.length !== 31 || new Set(graph.phases.map(({ id }) => id)).size !== 31) throw new Error("Stage B capability graph phase coverage is incomplete.");
+  if (graph.phases.length !== 32 || new Set(graph.phases.map(({ id }) => id)).size !== 32) throw new Error("Stage B capability graph phase coverage is incomplete.");
   if (new Set(graph.capabilities.map(({ id }) => id)).size !== graph.capabilities.length) throw new Error("Stage B capability IDs are not unique.");
   if (graph.capabilities.some(({ identity, action }) => !identity || !action)) throw new Error("Stage B capability identity is ambiguous.");
   if (graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy")) throw new Error("Release-deployer cannot own IAM simulation.");
@@ -219,7 +238,7 @@ export function assertStageBAwsCallCoverage(graph, calls) {
   return true;
 }
 
-const markdown = (graph) => `# Stage B production deployment capability graph\n\nGenerated from the permission manifest, reviewed source policies, release probes, publisher policy, Terraform runtime policy actions, and the 31-phase production path. Do not edit generated capability rows manually.\n\n- Phases: ${graph.phases.length}\n- Capability nodes: ${graph.capabilities.length}\n- Unique AWS actions: ${new Set(graph.capabilities.map(({ action }) => action)).size}\n- Identities: ${graph.identities.join(", ")}\n\n| Order | Phase | Source |\n|---:|---|---|\n${graph.phases.map(({ order, id, sourceFile }) => `| ${order} | ${id} | \`${sourceFile}\` |`).join("\n")}\n`;
+const markdown = (graph) => `# Stage B production deployment capability graph\n\nGenerated from the permission manifest, reviewed source policies, release probes, canonical recovery, publisher policy, Terraform runtime policy actions, and the 32-phase production path. Do not edit generated capability rows manually.\n\n- Phases: ${graph.phases.length}\n- Capability nodes: ${graph.capabilities.length}\n- Unique AWS actions: ${new Set(graph.capabilities.map(({ action }) => action)).size}\n- Identities: ${graph.identities.join(", ")}\n\n| Order | Phase | Source |\n|---:|---|---|\n${graph.phases.map(({ order, id, sourceFile }) => `| ${order} | ${id} | \`${sourceFile}\` |`).join("\n")}\n`;
 
 export function writeStageBDeploymentCapabilityGraph() {
   const graph = buildStageBDeploymentCapabilityGraph();
