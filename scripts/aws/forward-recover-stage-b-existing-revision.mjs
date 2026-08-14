@@ -3,12 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { assertStageBArtifactPath, assertStageBPrivateFile, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertStageBPrivateFile, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBTerraformBackendConfig, assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, STAGE_B_TERRAFORM_BACKEND_CONFIG } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace, STAGE_B_TERRAFORM_WORKSPACE } from "./stage-b-terraform-workspace.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { deriveStageBImageImpactReport } from "./validate-stage-b-image-reuse.mjs";
-import { deriveCanonicalRecoveryProvenance, collectCanonicalBackendRecoveryCensus } from "./recover-stage-b-backend-task-definition.mjs";
+import { deriveCanonicalRecoveryProvenance, collectCanonicalBackendRecoveryCensus, preflightCanonicalRecoveryOutputs } from "./recover-stage-b-backend-task-definition.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { runExistingRevisionForwardRecovery, STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY } from "./stage-b-existing-revision-forward-recovery-contract.mjs";
 
@@ -29,6 +29,10 @@ export function buildForwardRecoveryTerraformEnvironment(terraformDataDir, baseE
   if (baseEnv.TF_DATA_DIR && path.resolve(baseEnv.TF_DATA_DIR) !== resolved) throw new Error("Forward recovery refuses a stale ambient TF_DATA_DIR.");
   if (baseEnv.TF_WORKSPACE && baseEnv.TF_WORKSPACE !== STAGE_B_TERRAFORM_WORKSPACE) throw new Error("Forward recovery refuses a non-default ambient Terraform workspace.");
   return { ...baseEnv, TF_DATA_DIR: resolved, TF_WORKSPACE: STAGE_B_TERRAFORM_WORKSPACE };
+}
+
+export function preflightForwardRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath } = {}) {
+  return preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath, allowInProgressEvidence: true });
 }
 
 export function assertForwardRecoveryTerraformBackend({ env, repositoryRoot = root, runTerraform } = {}) {
@@ -67,9 +71,9 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const imageAuthorizationPath = path.resolve(required(argv, "--image-authorization"));
   const profile = required(argv, "--aws-profile");
   const terraformDataDir = required(argv, "--terraform-data-dir");
-  const evidencePath = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--evidence-out")), repositoryRoot: root, label: "Forward recovery evidence" });
-  const journalPath = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--forward-recovery-state")), repositoryRoot: root, label: "Forward recovery journal" });
-  if (evidencePath === journalPath) throw new Error("Forward recovery evidence and journal must be distinct.");
+  const evidencePath = path.resolve(required(argv, "--evidence-out"));
+  const journalPath = path.resolve(required(argv, "--forward-recovery-state"));
+  const outputs = preflightForwardRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath });
   const bindings = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: bindingsPath, repositoryRoot: root, label: "Stage-B bindings" }).path, "utf8"));
   const imageAuthorization = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: root, label: "Image authorization" }).path, "utf8"));
   const protectedCheckout = readProtectedCheckout();
@@ -107,8 +111,8 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
     census,
     describe,
     importState,
-    evidence: evidenceAdapter(evidencePath),
-    journal: journalAdapter(journalPath, root),
+    evidence: evidenceAdapter(outputs.evidence),
+    journal: journalAdapter(outputs.journal, root),
   });
   process.stdout.write(`${JSON.stringify({ status: result.imported ? "imported" : "already-reconciled", mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, replacementArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn, registrationCalls: 0, importCalls: result.importCalls })}\n`);
   return result;

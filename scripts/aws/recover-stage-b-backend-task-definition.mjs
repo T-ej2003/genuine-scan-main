@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertCanonicalRecoverySourceBinding, canonicalSha256, runCanonicalBackendRecovery, STAGE_B_BACKEND_RECOVERY } from "./stage-b-task-definition-recovery-contract.mjs";
 import { deriveStageBImageImpactReport, deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
@@ -47,24 +47,27 @@ export async function collectCanonicalBackendRecoveryCensus({ list, describe } =
   return { complete: true, revisions: await Promise.all(arns.map(async (arn) => ({ arn, readback: await describe(arn) }))) };
 }
 
-export function preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath, repositoryRoot = root, fsOps = fs } = {}) {
+export function preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath, repositoryRoot = root, fsOps = fs, allowInProgressEvidence = false } = {}) {
   const evidence = assertStageBArtifactPath({ artifactPath: evidencePath, repositoryRoot, label: "Recovery evidence", allowExisting: true });
   const journal = assertStageBArtifactPath({ artifactPath: journalPath, repositoryRoot, label: "Recovery journal", allowExisting: true });
   const bindings = path.resolve(bindingsPath);
   const imageAuthorization = path.resolve(imageAuthorizationPath);
   if (new Set([evidence, journal, bindings, imageAuthorization]).size !== 4) throw new Error("Recovery evidence, journal, bindings, and image authorization must be distinct files.");
   ensureStageBPrivateDirectory({ directory: path.dirname(evidence), repositoryRoot, create: false, fsOps, label: "Recovery evidence directory" });
+  try { fsOps.accessSync(path.dirname(evidence), fs.constants.W_OK); } catch { throw new Error("Recovery evidence directory must be writable by the current operator."); }
   if (path.dirname(journal) !== path.dirname(evidence)) throw new Error("Recovery journal must share the private evidence directory.");
   const evidenceStat = fsOps.lstatSync(evidence, { throwIfNoEntry: false });
   const journalStat = fsOps.lstatSync(journal, { throwIfNoEntry: false });
   if (evidenceStat && (!evidenceStat.isFile() || evidenceStat.isSymbolicLink())) throw new Error("Recovery evidence destination is not a regular file.");
   if (journalStat && (!journalStat.isFile() || journalStat.isSymbolicLink())) throw new Error("Recovery journal is not a regular file.");
+  if (evidenceStat) ensureStageBPrivateFile({ filePath: evidence, repositoryRoot, fsOps, label: "Recovery evidence" });
+  if (journalStat) ensureStageBPrivateFile({ filePath: journal, repositoryRoot, fsOps, label: "Recovery journal" });
   if (evidenceStat && !journalStat) throw new Error("Recovery evidence destination is occupied without a recovery journal.");
   if (evidenceStat && journalStat) {
     const journalValue = JSON.parse(fsOps.readFileSync(journal, "utf8"));
     const evidenceValue = JSON.parse(fsOps.readFileSync(evidence, "utf8"));
     const { evidenceSha256, ...evidenceBody } = evidenceValue;
-    if (journalValue.phase !== "COMPLETED" || journalValue.evidenceSha256 !== evidenceSha256 || canonicalSha256(evidenceBody) !== evidenceSha256) {
+    if ((!allowInProgressEvidence && journalValue.phase !== "COMPLETED") || (journalValue.phase === "COMPLETED" && (journalValue.evidenceSha256 !== evidenceSha256 || canonicalSha256(evidenceBody) !== evidenceSha256))) {
       throw new Error("Existing recovery evidence is not the completed deterministic artifact for its recovery journal.");
     }
   }

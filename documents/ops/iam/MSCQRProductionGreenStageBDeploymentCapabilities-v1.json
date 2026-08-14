@@ -620,6 +620,62 @@
       "mutation": true
     },
     {
+      "id": "forward-recovery-describe-backend-revision",
+      "phase": "existing-revision-forward-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "sourceFunction": "forward-recovery-describe-backend-revision",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "FORWARD_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeStageBTaskDefinitionsReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "forward-recovery-list-backend-revisions",
+      "phase": "existing-revision-forward-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "sourceFunction": "forward-recovery-list-backend-revisions",
+      "action": "ecs:ListTaskDefinitions",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "FORWARD_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "ListExactStageBBackendRecoveryRevisions",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "forward-recovery-lock-state",
       "phase": "existing-revision-forward-recovery",
       "identity": "RELEASE_DEPLOYER",

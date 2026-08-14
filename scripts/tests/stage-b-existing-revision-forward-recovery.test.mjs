@@ -15,7 +15,7 @@ import {
   canonicalForwardRecoveryIncidentIdentity,
   runExistingRevisionForwardRecovery,
 } from "../aws/stage-b-existing-revision-forward-recovery-contract.mjs";
-import { assertForwardRecoveryTerraformBackend, buildForwardRecoveryTerraformEnvironment } from "../aws/forward-recover-stage-b-existing-revision.mjs";
+import { assertForwardRecoveryTerraformBackend, buildForwardRecoveryTerraformEnvironment, preflightForwardRecoveryOutputs } from "../aws/forward-recover-stage-b-existing-revision.mjs";
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { buildCanonicalBackendRecoveryTaskDefinition, canonicalSha256, stateSnapshotSha256, taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
@@ -280,4 +280,15 @@ test("forward recovery revalidates the remote state immediately before import", 
   const run = common({ readState: async () => { reads += 1; return reads === 1 ? emptyState() : { ...emptyState(), resources: [...emptyState().resources, { mode: "managed", type: "aws_s3_bucket", name: "drift", instances: [] }] }; } });
   await assert.rejects(() => runExistingRevisionForwardRecovery(run), /changed before/);
   assert.equal(run.counts.imports, 0);
+});
+
+test("forward CLI preflights all artifact paths before any import boundary", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-forward-artifacts-"));
+  fs.chmodSync(directory, 0o700);
+  const paths = { evidencePath: path.join(directory, "evidence.json"), journalPath: path.join(directory, "journal.json"), bindingsPath: path.join(directory, "bindings.json"), imageAuthorizationPath: path.join(directory, "authorization.json") };
+  for (const filePath of [paths.bindingsPath, paths.imageAuthorizationPath]) fs.writeFileSync(filePath, "{}", { mode: 0o600 });
+  assert.doesNotThrow(() => preflightForwardRecoveryOutputs(paths));
+  assert.throws(() => preflightForwardRecoveryOutputs({ ...paths, evidencePath: paths.bindingsPath }), /distinct/);
+  fs.chmodSync(directory, 0o755);
+  assert.throws(() => preflightForwardRecoveryOutputs(paths), /private/);
 });

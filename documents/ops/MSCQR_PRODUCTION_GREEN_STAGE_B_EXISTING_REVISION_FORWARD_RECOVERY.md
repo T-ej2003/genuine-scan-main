@@ -29,7 +29,10 @@ image-release-to-current-tooling transition through the reviewed image-reuse rep
 two-SHA reuse is explicit; an unrelated or image-affecting transition fails closed.
 
 Use the existing Stage-B preflight and artifact contracts to create fresh bindings and image
-authorization inputs. Store the forward journal and evidence in the private release-artifact
+authorization inputs. Before the import boundary, the evidence, journal, bindings, and image
+authorization paths must be distinct, private, regular files in the reviewed private directory;
+an in-progress evidence file is accepted only for authenticated replay finalization. Store the
+forward journal and evidence in the private release-artifact
 directory; never edit or reuse the legacy journal/evidence. Run with `--execute` only after the
 reviewed production gates authorize the import. Stage-B refresh, plan, apply, approval, cutover,
 and onboarding remain separate canonical phases after reconciliation.

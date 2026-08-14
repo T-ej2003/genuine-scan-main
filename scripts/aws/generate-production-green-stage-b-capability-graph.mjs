@@ -102,6 +102,8 @@ const RECOVERY_CAPABILITIES = Object.freeze([
 ]);
 
 const FORWARD_RECOVERY_CAPABILITIES = Object.freeze([
+  ["forward-recovery-list-backend-revisions", "ecs:ListTaskDefinitions", ["*"]],
+  ["forward-recovery-describe-backend-revision", "ecs:DescribeTaskDefinition", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"]],
   ["forward-recovery-read-state", "s3:GetObject", [STAGE_B_TERRAFORM_BACKEND.stateArn]],
   ["forward-recovery-write-state", "s3:PutObject", [STAGE_B_TERRAFORM_BACKEND.stateArn]],
   ["forward-recovery-lock-state", "s3:GetObject", [STAGE_B_TERRAFORM_BACKEND.lockArn]],
