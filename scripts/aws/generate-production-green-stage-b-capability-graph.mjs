@@ -9,6 +9,7 @@ import { RELEASE_POLICY_SOURCES, canonicalizeJson } from "./validate-production-
 import { STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS } from "./stage-b-evidence-freshness.mjs";
 import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
+import { IMAGE_EVIDENCE_SIGNING_KEY_ARN } from "./production-green-stage-b-image-evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -104,6 +105,8 @@ const RECOVERY_CAPABILITIES = Object.freeze([
 const FORWARD_RECOVERY_CAPABILITIES = Object.freeze([
   ["forward-recovery-list-backend-revisions", "ecs:ListTaskDefinitions", ["*"]],
   ["forward-recovery-describe-backend-revision", "ecs:DescribeTaskDefinition", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"]],
+  ["forward-recovery-verify-image-evidence", "kms:Verify", [IMAGE_EVIDENCE_SIGNING_KEY_ARN]],
+  ["forward-recovery-read-backend-bucket-location", "s3:GetBucketLocation", [STAGE_B_TERRAFORM_BACKEND.bucketArn]],
   ["forward-recovery-read-state", "s3:GetObject", [STAGE_B_TERRAFORM_BACKEND.stateArn]],
   ["forward-recovery-write-state", "s3:PutObject", [STAGE_B_TERRAFORM_BACKEND.stateArn]],
   ["forward-recovery-lock-state", "s3:GetObject", [STAGE_B_TERRAFORM_BACKEND.lockArn]],

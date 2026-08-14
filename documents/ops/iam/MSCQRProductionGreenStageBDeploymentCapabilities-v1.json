@@ -704,6 +704,34 @@
       "mutation": false
     },
     {
+      "id": "forward-recovery-read-backend-bucket-location",
+      "phase": "existing-revision-forward-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "sourceFunction": "forward-recovery-read-backend-bucket-location",
+      "action": "s3:GetBucketLocation",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "FORWARD_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageABackendBucketLocation",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "forward-recovery-read-state",
       "phase": "existing-revision-forward-recovery",
       "identity": "RELEASE_DEPLOYER",
@@ -758,6 +786,34 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "forward-recovery-verify-image-evidence",
+      "phase": "existing-revision-forward-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "sourceFunction": "forward-recovery-verify-image-evidence",
+      "action": "kms:Verify",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "FORWARD_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "VerifyExactStageBPermissionReportSignature",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
     },
     {
       "id": "forward-recovery-write-state",
