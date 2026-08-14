@@ -266,6 +266,58 @@ test("interrupted state removal resumes with import only", async () => {
   assert.equal(result.reconciliation.importCalls, 1);
 });
 
+test("pre-remove checkpoint resumes when state removal never mutates state", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const payload = replacementPayload(replacementArn);
+  let current = state(); let registrations = 0; let removes = 0; let imports = 0;
+  const journal = journalAdapter();
+  const common = { bindings, sourceSha, protectedCheckout, journal, readState: async () => structuredClone(current), newest: async () => replacementArn, describe: async () => payload,
+    register: async () => { registrations += 1; return { taskDefinition: { taskDefinitionArn: replacementArn } }; },
+    importState: async () => { imports += 1; current = state(replacementArn, 95); } };
+  await assert.rejects(() => runCanonicalBackendRecovery({ ...common, newest: async () => registrations ? replacementArn : STAGE_B_BACKEND_RECOVERY.newestHistoricalArn,
+    removeState: async () => { removes += 1; throw new Error("lock timeout"); } }), /lock timeout/);
+  assert.equal(journal.read().phase, "STATE_RECONCILING_PRE_REMOVE");
+  assert.equal(current.serial, 93);
+  const resumed = await runCanonicalBackendRecovery({ ...common, register: async () => { throw new Error("must not register again"); }, removeState: async () => { removes += 1; current = { ...current, serial: 94, resources: [] }; } });
+  assert.equal(registrations, 1);
+  assert.equal(removes, 2);
+  assert.equal(imports, 1);
+  assert.equal(resumed.reconciliation.stateBackendCandidate, replacementArn);
+});
+
+test("persisted pre-remove journal resumes when the process dies before state removal starts", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const payload = replacementPayload(replacementArn);
+  let current = state(); let removes = 0; let imports = 0;
+  const initial = buildCanonicalRecoveryJournal(current, { sourceSha, fingerprint: payload.fingerprint, imageDigest: image });
+  const journal = journalAdapter({ ...initial, phase: "STATE_RECONCILING_PRE_REMOVE", replacementArn, replacementFingerprint: payload.fingerprint, registrationCalls: 1, registrationMayHaveOccurred: true });
+  const resumed = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+    readState: async () => structuredClone(current), newest: async () => replacementArn, describe: async () => payload,
+    register: async () => { throw new Error("must not register again"); },
+    removeState: async () => { removes += 1; current = { ...current, serial: 94, resources: [] }; },
+    importState: async () => { imports += 1; current = state(replacementArn, 95); },
+  });
+  assert.equal(removes, 1);
+  assert.equal(imports, 1);
+  assert.equal(resumed.reconciliation.stateBackendCandidate, replacementArn);
+});
+
+test("post-remove readback resumes import when process dies before the post-remove journal write", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const payload = replacementPayload(replacementArn);
+  let current = state(); let reads = 0; let imports = 0;
+  const journal = journalAdapter();
+  const common = { bindings, sourceSha, protectedCheckout, journal, newest: async () => replacementArn, describe: async () => payload,
+    register: async () => ({ taskDefinition: { taskDefinitionArn: replacementArn } }),
+    removeState: async () => { current = { ...current, serial: 94, resources: [] }; },
+    importState: async () => { imports += 1; current = state(replacementArn, 95); } };
+  await assert.rejects(() => runCanonicalBackendRecovery({ ...common, readState: async () => { reads += 1; if (reads === 3) throw new Error("process died after rm"); return structuredClone(current); } }), /process died/);
+  assert.equal(journal.read().phase, "STATE_RECONCILING_PRE_REMOVE");
+  const resumed = await runCanonicalBackendRecovery({ ...common, readState: async () => structuredClone(current), register: async () => { throw new Error("must not register again"); } });
+  assert.equal(imports, 1);
+  assert.equal(resumed.reconciliation.removeCalls, 0);
+});
+
 test("interrupted import resumes without registration or second state mutation", async () => {
   const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
   const payload = replacementPayload(replacementArn);

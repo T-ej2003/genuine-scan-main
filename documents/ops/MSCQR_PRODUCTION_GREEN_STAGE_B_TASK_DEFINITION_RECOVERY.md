@@ -20,10 +20,12 @@ same semantic fingerprint as the protected source.
 
 The recovery journal is stored beside the evidence output (or at the explicit
 `--recovery-state` path). Its state machine is `DISCOVERY`, `PREPARED`,
-`REGISTERING`, `REGISTERED`, `READBACK_VERIFIED`, `STATE_RECONCILING`,
-`STATE_RECONCILED`, then `COMPLETED`. `registrationCalls` records completed
-remote invocation attempts; `registrationMayHaveOccurred` records the
-separate crash-safe ambiguity immediately before an outbound request. A failed
+`REGISTERING`, `REGISTERED`, `READBACK_VERIFIED`,
+`STATE_RECONCILING_PRE_REMOVE`, `STATE_RECONCILING_POST_REMOVE`,
+`STATE_RECONCILED`, then `COMPLETED`. `registrationCalls` records remote
+invocation attempts known to have been sent; `registrationMayHaveOccurred`
+records the separate crash-safe ambiguity immediately before an outbound
+request. A failed
 revision discovery therefore remains `DISCOVERY` with zero registration calls.
 
 If a request response, describe, or newest readback is lost, a retry describes
@@ -34,6 +36,12 @@ second registration is attempted. A legacy journal that recorded
 evidence: the operator must preserve it and start a new incident only after a
 fresh live/state revalidation. The journal also resumes an interruption after
 `state rm` or `import` without repeating either completed operation.
+
+`STATE_RECONCILING_PRE_REMOVE` is an intent checkpoint, not proof that
+`state rm` succeeded. On retry, authoritative Terraform readback must be the
+exact original predecessor, exact post-removal state, or exact imported state;
+only then may the command remove, import, or finalize respectively. Any other
+lineage, serial, resource set, or backend ARN fails closed.
 
 Before any adapter runs, the command verifies the exact protected checkout,
 source-bound bindings, exact Terraform root, initialized private Stage-B S3

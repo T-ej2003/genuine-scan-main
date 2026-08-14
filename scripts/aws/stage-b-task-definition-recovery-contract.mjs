@@ -182,13 +182,13 @@ function requireJournal(journal) {
 }
 
 function validateJournal(journalState, { sourceSha, fingerprint, imageDigest } = {}) {
-  if (!journalState || journalState.schemaVersion !== 2 || journalState.kind !== "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY"
+  if (!journalState || journalState.schemaVersion !== 3 || journalState.kind !== "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY"
     || journalState.sourceSha !== sourceSha || journalState.address !== STAGE_B_BACKEND_RECOVERY.address
     || journalState.family !== STAGE_B_BACKEND_RECOVERY.family || journalState.predecessorArn !== STAGE_B_BACKEND_RECOVERY.predecessorArn
     || journalState.newestHistoricalArn !== STAGE_B_BACKEND_RECOVERY.newestHistoricalArn
     || journalState.stateLineage !== STAGE_B_BACKEND_RECOVERY.lineage || journalState.stateSerial !== STAGE_B_BACKEND_RECOVERY.serial
     || journalState.protectedSourceFingerprint !== fingerprint || journalState.imageDigest !== imageDigest
-    || !["DISCOVERY", "PREPARED", "REGISTERING", "REGISTERED", "READBACK_VERIFIED", "STATE_RECONCILING", "STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)
+    || !["DISCOVERY", "PREPARED", "REGISTERING", "REGISTERED", "READBACK_VERIFIED", "STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)
     || !Number.isInteger(journalState.registrationCalls) || journalState.registrationCalls < 0 || journalState.registrationCalls > 1
     || typeof journalState.registrationMayHaveOccurred !== "boolean") {
     throw new Error("Canonical recovery journal does not match the reviewed incident and protected source.");
@@ -198,7 +198,7 @@ function validateJournal(journalState, { sourceSha, fingerprint, imageDigest } =
 
 export function buildCanonicalRecoveryJournal(state, { sourceSha, fingerprint, imageDigest } = {}) {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     kind: "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY",
     phase: "DISCOVERY",
     sourceSha,
@@ -222,13 +222,25 @@ export function buildCanonicalRecoveryJournal(state, { sourceSha, fingerprint, i
 function assertJournalState(journalState, state, expectedArn) {
   if (state.lineage !== journalState.stateLineage) throw new Error("Terraform state lineage changed during backend recovery.");
   const candidate = stateBackendCandidateFromOptional(state);
-  if (journalState.phase === "STATE_RECONCILING") {
+  if (journalState.phase === "STATE_RECONCILING_POST_REMOVE") {
     if (state.serial !== journalState.expectedStateAfterRemoveSerial || candidate !== null || stateSnapshotSha256(state) !== journalState.stateAfterRemoveSha256) {
       throw new Error("Terraform state is not the exact reviewed post-removal recovery state.");
     }
   } else if (["STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)) {
     if (state.serial !== journalState.expectedStateAfterImportSerial || candidate !== expectedArn) throw new Error("Terraform state is not the exact reviewed imported recovery state.");
   }
+}
+
+function recoveryStateCheckpoint(journalState, state, expectedArn) {
+  if (state.lineage !== journalState.stateLineage) throw new Error("Terraform state lineage changed during backend recovery.");
+  const candidate = stateBackendCandidateFromOptional(state);
+  const original = state.serial === journalState.stateSerial && candidate === STAGE_B_BACKEND_RECOVERY.predecessorArn && stateSnapshotSha256(state) === journalState.stateBeforeSha256;
+  const removed = state.serial === journalState.expectedStateAfterRemoveSerial && candidate === null && stateSnapshotSha256(state) === journalState.stateAfterRemoveSha256;
+  const imported = state.serial === journalState.expectedStateAfterImportSerial && candidate === expectedArn;
+  if (journalState.phase === "STATE_RECONCILING_PRE_REMOVE" && (original || removed || imported)) return original ? "PRE_REMOVE" : removed ? "POST_REMOVE" : "IMPORTED";
+  if (journalState.phase === "STATE_RECONCILING_POST_REMOVE" && (removed || imported)) return removed ? "POST_REMOVE" : "IMPORTED";
+  if (["STATE_RECONCILED", "COMPLETED"].includes(journalState.phase) && imported) return "IMPORTED";
+  throw new Error("Recovery journal and Terraform state do not form an exact resumable checkpoint.");
 }
 
 export async function runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, readState, register, describe, newest, removeState, importState, journal } = {}) {
@@ -245,12 +257,9 @@ export async function runCanonicalBackendRecovery({ bindings, sourceSha, protect
   const prepared = existingJournal ? validateJournal(existingJournal, { sourceSha, fingerprint, imageDigest: bindings.backendImage }) : buildCanonicalRecoveryJournal(before, { sourceSha, fingerprint, imageDigest: bindings.backendImage });
   if (!existingJournal) journal.write(prepared);
   else if (prepared.stateBeforeSha256 !== stateSnapshotSha256(before) && ["DISCOVERY", "PREPARED"].includes(prepared.phase)) throw new Error("Terraform state changed before canonical recovery resumed.");
-  if (prepared.phase === "STATE_RECONCILING" && !((before.serial === prepared.expectedStateAfterRemoveSerial && stateBackendCandidateFromOptional(before) === null)
-    || (before.serial === prepared.expectedStateAfterImportSerial && stateBackendCandidateFromOptional(before) === prepared.replacementArn))) throw new Error("Recovery journal requires the interrupted state-removal checkpoint.");
-  if (["STATE_RECONCILED", "COMPLETED"].includes(prepared.phase)
-    && (before.serial !== prepared.expectedStateAfterImportSerial || stateBackendCandidateFromOptional(before) !== prepared.replacementArn)) throw new Error("Recovery journal requires the exact imported recovery state.");
+  if (["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(prepared.phase)) recoveryStateCheckpoint(prepared, before, prepared.replacementArn);
   let registration;
-  if (prepared.replacementArn && ["STATE_RECONCILING", "STATE_RECONCILED", "COMPLETED"].includes(prepared.phase)) {
+  if (prepared.replacementArn && ["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(prepared.phase)) {
     const newestArn = await newest();
     if (newestArn !== prepared.replacementArn) throw new Error("Canonical recovery resume requires its exact replacement to remain newest.");
     const readback = await describe(newestArn);
@@ -284,7 +293,8 @@ export async function runCanonicalBackendRecovery({ bindings, sourceSha, protect
       registration = { ...verified, payload, registrationCalls: 1, resumed: false };
     }
   }
-  const registered = { ...prepared, phase: "READBACK_VERIFIED", replacementArn: registration.arn, replacementFingerprint: registration.fingerprint, registrationCalls: Math.max(prepared.registrationCalls, registration.registrationCalls), registrationMayHaveOccurred: prepared.registrationMayHaveOccurred || registration.registrationCalls === 1 };
+  const reconciliationResume = ["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(prepared.phase);
+  const registered = { ...prepared, phase: reconciliationResume ? prepared.phase : "READBACK_VERIFIED", replacementArn: registration.arn, replacementFingerprint: registration.fingerprint, registrationCalls: Math.max(prepared.registrationCalls, registration.registrationCalls), registrationMayHaveOccurred: prepared.registrationMayHaveOccurred || registration.registrationCalls === 1 };
   journal.write(registered);
   const reconciliation = await reconcileCanonicalBackendState({ readState, removeState, importState, replacementArn: registration.arn, sourceSha, journal });
   const evidence = recoveryEvidence({ sourceSha, state: before, stateBinding: prepared, imageDigest: bindings.backendImage, replacement: { arn: registration.arn, fingerprint: registration.fingerprint, protectedSourceFingerprint: fingerprint } });
@@ -316,13 +326,15 @@ export async function reconcileCanonicalBackendState({ readState, removeState, i
   if (STAGE_B_BACKEND_RECOVERY.historicalRevisionArns.includes(target.arn)) throw new Error("Historical backend revisions cannot be adopted.");
   if (journalState.replacementArn !== target.arn) throw new Error("Recovery replacement does not match the persistent recovery journal.");
   if (before.lineage !== journalState.stateLineage) throw new Error("Terraform state lineage changed during backend recovery.");
-  const candidate = stateBackendCandidateFromOptional(before);
-  if (candidate === target.arn && before.serial === journalState.expectedStateAfterImportSerial) {
+  const checkpoint = ["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)
+    ? recoveryStateCheckpoint(journalState, before, target.arn)
+    : (assertBackendRecoveryPreconditions({ state: before, sourceSha }), "PRE_REMOVE");
+  if (checkpoint === "IMPORTED") {
     recoveryJournal.write({ ...journalState, phase: "STATE_RECONCILED" });
     return { stateLineageBefore: journalState.stateLineage, stateLineageAfter: before.lineage, stateSerialBefore: journalState.stateSerial, stateSerialAfter: before.serial, stateBackendCandidate: target.arn, liveBackendCandidate: target.arn, stateLivePredecessorMatch: true, removeCalls: 0, importCalls: 0 };
   }
-  if (candidate === null && before.serial === journalState.expectedStateAfterRemoveSerial) {
-    assertJournalState({ ...journalState, phase: "STATE_RECONCILING" }, before, target.arn);
+  if (checkpoint === "POST_REMOVE") {
+    assertJournalState({ ...journalState, phase: "STATE_RECONCILING_POST_REMOVE" }, before, target.arn);
     await importState({ address: STAGE_B_BACKEND_RECOVERY.address, arn: target.arn });
     const imported = await readState();
     if (imported.lineage !== journalState.stateLineage || imported.serial !== journalState.expectedStateAfterImportSerial || stateBackendCandidateFromOptional(imported) !== target.arn) throw new Error("Terraform state import did not produce the exact canonical recovery state.");
@@ -330,10 +342,11 @@ export async function reconcileCanonicalBackendState({ readState, removeState, i
     return { stateLineageBefore: journalState.stateLineage, stateLineageAfter: imported.lineage, stateSerialBefore: journalState.stateSerial, stateSerialAfter: imported.serial, stateBackendCandidate: target.arn, liveBackendCandidate: target.arn, stateLivePredecessorMatch: true, removeCalls: 0, importCalls: 1 };
   }
   assertBackendRecoveryPreconditions({ state: before, sourceSha });
-  recoveryJournal.write({ ...journalState, phase: "STATE_RECONCILING" });
+  recoveryJournal.write({ ...journalState, phase: "STATE_RECONCILING_PRE_REMOVE" });
   await removeState({ address: STAGE_B_BACKEND_RECOVERY.address, expectedArn: STAGE_B_BACKEND_RECOVERY.predecessorArn });
   const removed = await readState();
-  assertJournalState({ ...journalState, phase: "STATE_RECONCILING" }, removed, target.arn);
+  assertJournalState({ ...journalState, phase: "STATE_RECONCILING_POST_REMOVE" }, removed, target.arn);
+  recoveryJournal.write({ ...journalState, phase: "STATE_RECONCILING_POST_REMOVE" });
   await importState({ address: STAGE_B_BACKEND_RECOVERY.address, arn: target.arn });
   const after = await readState();
   if (after.lineage !== journalState.stateLineage || after.serial !== journalState.expectedStateAfterImportSerial || stateBackendCandidateFromOptional(after) !== target.arn) throw new Error("Terraform state import did not produce the exact canonical recovery state.");
