@@ -70,16 +70,22 @@ function semanticDefinition(value, tags = value?.tags) {
       return { name: volume.name };
     });
   }
-  definition.containerDefinitions = sortBy(definition.containerDefinitions, "name")?.map((container) => ({
-    ...container,
-    environment: sortBy(container.environment, "name"),
-    secrets: sortBy(container.secrets, "name"),
-    portMappings: sortBy(container.portMappings, "name"),
-    mountPoints: sortBy(container.mountPoints, "containerPath"),
-    ulimits: sortBy(container.ulimits, "name"),
-    systemControls: sortBy(container.systemControls, "namespace"),
-    dependsOn: sortBy(container.dependsOn, "containerName"),
-  }));
+  definition.containerDefinitions = sortBy(definition.containerDefinitions, "name")?.map((container) => {
+    const normalized = {
+      ...container,
+      environment: sortBy(container.environment, "name"),
+      secrets: sortBy(container.secrets, "name"),
+      portMappings: sortBy(container.portMappings, "name"),
+      mountPoints: sortBy(container.mountPoints, "containerPath"),
+      ulimits: sortBy(container.ulimits, "name"),
+      systemControls: sortBy(container.systemControls, "namespace"),
+      dependsOn: sortBy(container.dependsOn, "containerName"),
+    };
+    if (normalized.cpu === 0) delete normalized.cpu;
+    if (Array.isArray(normalized.volumesFrom) && normalized.volumesFrom.length === 0) delete normalized.volumesFrom;
+    if (Array.isArray(normalized.systemControls) && normalized.systemControls.length === 0) normalized.systemControls = undefined;
+    return normalized;
+  });
   definition.volumes = sortBy(definition.volumes, "name");
   const normalizedTags = sortBy(tags, "key");
   if (!Array.isArray(normalizedTags)) throw new Error("Task-definition tags are required for recovery fingerprinting.");

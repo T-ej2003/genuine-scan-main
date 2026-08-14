@@ -18,6 +18,12 @@ definition through the existing Stage-B renderer, registers exactly one
 revision, and verifies the returned ACTIVE ARN is newer than `:7` and has the
 same semantic fingerprint as the protected source.
 
+Fingerprinting accepts only four reviewed ECS readback projections: omitted
+container `cpu` versus `0`, omitted `volumesFrom` or `systemControls` versus
+empty arrays, and an absent volume `host` versus an empty object. Non-zero
+CPU, non-empty collections, meaningful host fields, and every other
+task-definition or tag difference remain fail-closed.
+
 The recovery journal is stored beside the evidence output (or at the explicit
 `--recovery-state` path). Its state machine is `DISCOVERY`, `PREPARED`,
 `REGISTERING`, `REGISTERED`, `READBACK_VERIFIED`,

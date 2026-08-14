@@ -50,6 +50,18 @@ function replacementPayload(arn = "arn:aws:ecs:eu-west-2:368992683803:task-defin
   return { taskDefinition, tags: options.tags || structuredClone(payload.tags), fingerprint: taskDefinitionFingerprint(payload.taskDefinition, payload.tags) };
 }
 
+function awsNormalizedReadback(arn) {
+  const payload = replacementPayload(arn);
+  const container = payload.taskDefinition.containerDefinitions[0];
+  payload.taskDefinition.placementConstraints = [];
+  payload.taskDefinition.volumes[0].host = {};
+  container.cpu = 0;
+  container.volumesFrom = [];
+  container.systemControls = [];
+  payload.tags.reverse();
+  return payload;
+}
+
 test("recovery preconditions are exact and source-bound", () => {
   assert.deepEqual(assertBackendRecoveryPreconditions({ state: state(), sourceSha }), {
     address: STAGE_B_BACKEND_RECOVERY.address,
@@ -76,6 +88,41 @@ test("canonical source rendering produces the exact immutable replacement finger
   assert.equal(payload.taskDefinition.containerDefinitions[0].environment.find(({ name }) => name === "RELEASE_GIT_SHA").value, sourceSha);
   assert.equal(payload.tags.find(({ key }) => key === "MSCQRExecTarget").value, "production-backend");
   assert.match(taskDefinitionFingerprint(payload.taskDefinition, payload.tags), /^[a-f0-9]{64}$/);
+});
+
+test("AWS ECS readback projections preserve the exact protected semantic fingerprint", () => {
+  const source = replacementPayload();
+  const readback = awsNormalizedReadback(source.taskDefinition.taskDefinitionArn);
+  assert.equal(taskDefinitionFingerprint(readback.taskDefinition, readback.tags), source.fingerprint);
+  assert.doesNotThrow(() => assertCanonicalBackendRecoveryReadback({ readback, expectedArn: source.taskDefinition.taskDefinitionArn, expectedFingerprint: source.fingerprint }));
+});
+
+test("task-definition fingerprint normalization remains field-specific and fail-closed", () => {
+  const source = replacementPayload();
+  const mutations = [
+    (value) => { value.containerDefinitions[0].cpu = 1; },
+    (value) => { value.containerDefinitions[0].volumesFrom = [{ sourceContainer: "other", readOnly: true }]; },
+    (value) => { value.containerDefinitions[0].systemControls = [{ namespace: "net.ipv4.ip_forward", value: "1" }]; },
+    (value) => { value.containerDefinitions[0].image = `${image.slice(0, -64)}${"e".repeat(64)}`; },
+    (value) => { value.containerDefinitions[0].secrets[0].valueFrom += "-other"; },
+    (value) => { value.containerDefinitions[0].environment[0].value = "other"; },
+    (value) => { value.containerDefinitions[0].mountPoints[0].containerPath = "/other"; },
+    (value) => { value.containerDefinitions[0].logConfiguration.options["awslogs-group"] = "/ecs/other"; },
+    (value) => { value.executionRoleArn = "arn:aws:iam::368992683803:role/other"; },
+    (value) => { value.taskRoleArn = "arn:aws:iam::368992683803:role/other"; },
+    (value) => { value.firelensConfiguration = {}; },
+  ];
+  for (const mutate of mutations) {
+    const changed = structuredClone(source.taskDefinition);
+    mutate(changed);
+    assert.notEqual(taskDefinitionFingerprint(changed, source.tags), source.fingerprint);
+  }
+  const changedTag = structuredClone(source.tags);
+  changedTag[0].value = "other";
+  assert.notEqual(taskDefinitionFingerprint(source.taskDefinition, changedTag), source.fingerprint);
+  const hostVolume = structuredClone(source.taskDefinition);
+  hostVolume.volumes[0].host = { sourcePath: "/host" };
+  assert.throws(() => taskDefinitionFingerprint(hostVolume, source.tags), /unreviewed provider field/);
 });
 
 test("registration performs one dynamic canonical registration and verifies newest readback", async () => {
@@ -205,6 +252,23 @@ test("retry after remote registration resumes the exact newest canonical revisio
   await assert.rejects(() => runCanonicalBackendRecovery({ ...common, register: async () => { registrationCalls += 1; newestValue = replacementArn; throw new Error("response lost"); } }), /response lost/);
   const result = await runCanonicalBackendRecovery({ ...common, register: async () => { registrationCalls += 1; throw new Error("must not register on retry"); } });
   assert.equal(registrationCalls, 1);
+  assert.equal(result.registration.registrationCalls, 0);
+  assert.equal(result.reconciliation.stateBackendCandidate, replacementArn);
+});
+
+test("REGISTERED fingerprint-blocked journal resumes existing AWS-normalized revision without registering", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const readback = awsNormalizedReadback(replacementArn);
+  let current = state(); let registrations = 0;
+  const initial = buildCanonicalRecoveryJournal(current, { sourceSha, fingerprint: readback.fingerprint, imageDigest: image });
+  const journal = journalAdapter({ ...initial, phase: "REGISTERED", replacementArn, registrationCalls: 1, registrationMayHaveOccurred: true });
+  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+    readState: async () => structuredClone(current), newest: async () => replacementArn, describe: async () => readback,
+    register: async () => { registrations += 1; throw new Error("must not register on resume"); },
+    removeState: async () => { current = { ...current, serial: 94, resources: [] }; },
+    importState: async () => { current = state(replacementArn, 95); },
+  });
+  assert.equal(registrations, 0);
   assert.equal(result.registration.registrationCalls, 0);
   assert.equal(result.reconciliation.stateBackendCandidate, replacementArn);
 });
