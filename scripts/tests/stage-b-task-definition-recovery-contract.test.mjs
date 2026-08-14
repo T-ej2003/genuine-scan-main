@@ -143,6 +143,8 @@ function crossResumeJournal() {
 function cliPostRemoveState() {
   const value = structuredClone(state());
   value.serial = 94;
+  value.terraform_version = "1.15.8";
+  value.check_results = [];
   value.resources = [];
   return value;
 }
@@ -154,7 +156,7 @@ function createCliCrossDescendantFixture({ journalMutate, bindingsMutate, author
   const authorization = structuredClone(crossImageAuthorization);
   authorizationMutate?.(authorization);
   incidentBindings.imageAuthorization = authorization;
-  const predecessor = state();
+  const predecessor = { ...state(), terraform_version: "1.15.7", check_results: [] };
   const payload = buildCanonicalBackendRecoveryTaskDefinition(incidentBindings);
   const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
   const replacement = { taskDefinition: { ...structuredClone(payload.taskDefinition), taskDefinitionArn: replacementArn, family: payload.taskDefinition.family, status: "ACTIVE", revision: 9 }, tags: structuredClone(payload.tags), fingerprint: taskDefinitionFingerprint(payload.taskDefinition, payload.tags) };
@@ -852,6 +854,49 @@ test("legacy schema-v4 journal resumes the existing :9 after state rm using the 
     readState: async () => structuredClone(postRemoval), census: async () => censusFor(payload), describe: async () => payload,
     register: async () => { throw new Error("must not register"); }, removeState: async () => { throw new Error("must not remove"); }, importState: async () => { throw new Error("must not import"); },
   }), /pre-removal state snapshot/);
+});
+
+test("legacy post-remove checkpoint accepts only the reviewed semantic metadata transition", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
+  const payload = replacementPayload(replacementArn);
+  const journalState = checkpointBeforeState();
+  const executorSnapshot = structuredClone(journalState);
+  executorSnapshot.terraform_version = "1.15.8";
+  executorSnapshot.check_results.reverse();
+  const expectedRemoved = { ...journalState, serial: 94, resources: journalState.resources.filter((resource) => !(resource.type === "aws_ecs_task_definition" && resource.name === "candidate")) };
+  let current = { ...executorSnapshot, serial: 94, resources: executorSnapshot.resources.filter((resource) => !(resource.type === "aws_ecs_task_definition" && resource.name === "candidate")) };
+  const initial = buildCanonicalRecoveryJournal(journalState, journalArgs(journalState, payload));
+  const legacy = { ...initial, phase: "STATE_RECONCILING_PRE_REMOVE", replacementArn, replacementFingerprint: payload.fingerprint, registrationCalls: 1, registrationMayHaveOccurred: true,
+    stateBeforeSha256: canonicalSha256(journalState), stateAfterRemoveSha256: canonicalSha256(expectedRemoved) };
+  delete legacy.checkpointHashDomain;
+  let imports = 0;
+  await assert.doesNotReject(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal: journalAdapter(legacy), stateBefore: executorSnapshot,
+    readState: async () => structuredClone(current), census: async () => censusFor(payload), describe: async () => payload,
+    register: async () => { throw new Error("must not register"); }, removeState: async () => { throw new Error("must not remove"); },
+    importState: async ({ arn }) => { imports += 1; current = checkpointImportedState(arn); },
+  }));
+  assert.equal(imports, 1);
+
+  for (const mutate of [
+    (value) => { value.resources[1].instances[0].attributes.name = "/ecs/changed"; },
+    (value) => { value.resources.push({ mode: "managed", type: "aws_s3_bucket", name: "unexpected", instances: [] }); },
+    (value) => { value.lineage = "0".repeat(36); },
+    (value) => { value.resources[0].provider = 'provider["registry.terraform.io/hashicorp/random"]'; },
+    (value) => { value.terraform_version = "1.15.9"; },
+  ]) {
+    const changed = structuredClone(current);
+    mutate(changed);
+    await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal: journalAdapter(legacy), stateBefore: executorSnapshot,
+      readState: async () => changed, census: async () => censusFor(payload), describe: async () => payload,
+      register: async () => { throw new Error("must not register"); }, removeState: async () => {}, importState: async () => {},
+    }), /checkpoint|lineage|pre-removal/);
+  }
+
+  const forged = { ...legacy, stateBeforeSha256: "f".repeat(64), stateAfterRemoveSha256: canonicalSha256({ ...executorSnapshot, serial: 94, resources: executorSnapshot.resources.filter((resource) => !(resource.type === "aws_ecs_task_definition" && resource.name === "candidate")) }) };
+  await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal: journalAdapter(forged), stateBefore: executorSnapshot,
+    readState: async () => structuredClone(current), census: async () => censusFor(payload), describe: async () => payload,
+    register: async () => { throw new Error("must not register"); }, removeState: async () => {}, importState: async () => {},
+  }), /hash evidence is inconsistent|pre-removal/);
 });
 
 test("legacy DISCOVERY and PREPARED journals resume with raw state hashes and reject state drift", async () => {

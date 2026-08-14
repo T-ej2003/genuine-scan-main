@@ -281,6 +281,12 @@ function checkpointStateSha256(journalState, state) {
   return stateSnapshotSha256(state);
 }
 
+const LEGACY_CHECKPOINT_COMPATIBILITY = Object.freeze({
+  domain: "stage-b-recovery-legacy-semantic-v1",
+  terraformVersions: Object.freeze(["1.15.7", "1.15.8"]),
+  normalizedFields: Object.freeze(["terraform_version", "check_results"]),
+});
+
 function expectedStateAfterRemove(state) {
   return { ...stateWithoutBackend(state), serial: state.serial + 1 };
 }
@@ -347,6 +353,33 @@ export function buildCanonicalRecoveryJournal(state, { sourceSha, toolingTreeSha
   };
 }
 
+export function assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore) {
+  if (journalState?.checkpointHashDomain !== undefined) return false;
+  if (!SHA256.test(journalState?.stateBeforeSha256 || "") || !SHA256.test(journalState?.stateAfterRemoveSha256 || "")) {
+    throw new Error("Legacy recovery checkpoint hashes are malformed.");
+  }
+  if (!stateBefore || stateBefore.lineage !== journalState.stateLineage || stateBefore.serial !== journalState.stateSerial
+    || stateBackendCandidateFromOptional(stateBefore) !== STAGE_B_BACKEND_RECOVERY.predecessorArn) {
+    throw new Error("Legacy recovery requires the reviewed pre-removal state snapshot.");
+  }
+  if (state.lineage !== journalState.stateLineage || state.serial !== journalState.expectedStateAfterRemoveSerial
+    || stateBackendCandidateFromOptional(state) !== null) {
+    throw new Error("Legacy recovery post-removal state has unexpected lineage, serial, or candidate state.");
+  }
+  if (!LEGACY_CHECKPOINT_COMPATIBILITY.terraformVersions.includes(stateBefore.terraform_version)
+    || !LEGACY_CHECKPOINT_COMPATIBILITY.terraformVersions.includes(state.terraform_version)) {
+    throw new Error("Legacy recovery checkpoint uses an unreviewed Terraform version.");
+  }
+  const expected = expectedStateAfterRemove(stateBefore);
+  if (stateSnapshotSha256(expected) !== stateSnapshotSha256(state)) {
+    throw new Error(`Legacy recovery checkpoint is outside ${LEGACY_CHECKPOINT_COMPATIBILITY.domain}.`);
+  }
+  const beforeHashMatches = legacyStateSnapshotSha256(stateBefore) === journalState.stateBeforeSha256;
+  const afterHashMatches = legacyStateSnapshotSha256(expected) === journalState.stateAfterRemoveSha256;
+  if (!beforeHashMatches && afterHashMatches) throw new Error("Legacy recovery checkpoint hash evidence is inconsistent.");
+  return Object.freeze({ domain: LEGACY_CHECKPOINT_COMPATIBILITY.domain, normalizedFields: LEGACY_CHECKPOINT_COMPATIBILITY.normalizedFields, exactLegacyHashes: beforeHashMatches && afterHashMatches });
+}
+
 function assertJournalState(journalState, state, expectedArn, stateBefore) {
   if (state.lineage !== journalState.stateLineage) throw new Error("Terraform state lineage changed during backend recovery.");
   const candidate = stateBackendCandidateFromOptional(state);
@@ -355,7 +388,8 @@ function assertJournalState(journalState, state, expectedArn, stateBefore) {
   const expectedPostRemoveHash = stateBefore ? stateSnapshotSha256(expectedStateAfterRemove(stateBefore)) : null;
   if (journalState.phase === "STATE_RECONCILING_POST_REMOVE") {
     if (state.serial !== journalState.expectedStateAfterRemoveSerial || candidate !== null
-      || (checkpointHash !== journalState.stateAfterRemoveSha256 && normalizedCheckpointHash !== expectedPostRemoveHash)) {
+      || (checkpointHash !== journalState.stateAfterRemoveSha256 && normalizedCheckpointHash !== expectedPostRemoveHash
+        && !assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore))) {
       throw new Error("Terraform state is not the exact reviewed post-removal recovery state.");
     }
   } else if (["STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)) {
@@ -366,9 +400,15 @@ function assertJournalState(journalState, state, expectedArn, stateBefore) {
 function recoveryStateCheckpoint(journalState, state, expectedArn, stateBefore) {
   if (state.lineage !== journalState.stateLineage) throw new Error("Terraform state lineage changed during backend recovery.");
   if (stateBefore) {
-    if (legacyStateSnapshotSha256(stateBefore) !== journalState.stateBeforeSha256
-      || stateBefore.lineage !== journalState.stateLineage || stateBefore.serial !== journalState.stateSerial
-      || stateBackendCandidateFromOptional(stateBefore) !== STAGE_B_BACKEND_RECOVERY.predecessorArn) {
+    const validSnapshot = stateBefore.lineage === journalState.stateLineage && stateBefore.serial === journalState.stateSerial
+      && stateBackendCandidateFromOptional(stateBefore) === STAGE_B_BACKEND_RECOVERY.predecessorArn;
+    const exactSnapshot = validSnapshot && checkpointStateSha256(journalState, stateBefore) === journalState.stateBeforeSha256;
+    const legacyPostRemoveSnapshot = journalState.checkpointHashDomain === undefined && state.serial === journalState.expectedStateAfterRemoveSerial
+      && stateBackendCandidateFromOptional(state) === null && (() => {
+        try { return assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore); }
+        catch (error) { throw new Error("Recovery pre-removal state snapshot does not match the durable journal.", { cause: error }); }
+      })();
+    if (!exactSnapshot && !legacyPostRemoveSnapshot) {
       throw new Error("Recovery pre-removal state snapshot does not match the durable journal.");
     }
   }
@@ -379,7 +419,8 @@ function recoveryStateCheckpoint(journalState, state, expectedArn, stateBefore) 
   const expectedPostRemoveHash = stateBefore ? stateSnapshotSha256(expectedStateAfterRemove(stateBefore)) : null;
   const original = state.serial === journalState.stateSerial && candidate === STAGE_B_BACKEND_RECOVERY.predecessorArn && checkpointHash === expectedBeforeHash;
   const removed = state.serial === journalState.expectedStateAfterRemoveSerial && candidate === null
-    && (checkpointHash === journalState.stateAfterRemoveSha256 || normalizedCheckpointHash === expectedPostRemoveHash);
+    && (checkpointHash === journalState.stateAfterRemoveSha256 || normalizedCheckpointHash === expectedPostRemoveHash
+      || assertLegacyPostRemoveCheckpointCompatibility(journalState, state, stateBefore));
   const imported = state.serial === journalState.expectedStateAfterImportSerial && candidate === expectedArn;
   if (journalState.phase === "STATE_RECONCILING_PRE_REMOVE" && (original || removed || imported)) return original ? "PRE_REMOVE" : removed ? "POST_REMOVE" : "IMPORTED";
   if (journalState.phase === "STATE_RECONCILING_POST_REMOVE" && (removed || imported)) return removed ? "POST_REMOVE" : "IMPORTED";
