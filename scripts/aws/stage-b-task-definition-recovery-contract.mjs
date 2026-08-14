@@ -32,7 +32,7 @@ const IMAGE_DIGEST = /^sha256:[a-f0-9]{64}$/;
 const RECOVERY_SCHEMA_VERSION = 4;
 const RECOVERY_KIND = "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY";
 const CHECKPOINT_HASH_DOMAIN = "stage-b-recovery-checkpoint-v2";
-const REGISTERED_RESUME_PHASES = new Set(["REGISTERED", "READBACK_VERIFIED", "STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"]);
+const REGISTERED_RESUME_PHASES = new Set(["REGISTERED", "READBACK_VERIFIED", "STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED"]);
 const CROSS_DESCENDANT_REUSE_CATEGORIES = new Set(["toolingOnly", "testOnly", "documentationOnly", "ciOnly"]);
 
 export function canonicalJson(value) {
@@ -85,10 +85,11 @@ function assertCanonicalRecoveryExecutorCheckout({ sourceSha, protectedCheckout 
   return protectedCheckout;
 }
 
-export function assertCanonicalRecoveryDescendantResume({ sourceSha, bindings, protectedCheckout, journalState, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse = ({ imageReleaseSha, toolingSha }) => deriveStageBImageImpactReport({ imageReleaseSha, toolingSha }) } = {}) {
+export function assertCanonicalRecoveryDescendantResume({ sourceSha, bindings, protectedCheckout, journalState, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse = ({ imageReleaseSha, toolingSha }) => { const report = deriveStageBImageImpactReport({ imageReleaseSha, toolingSha }); return { ...report, imageBuildInputsChanged: report.newImagesRequired }; } } = {}) {
   if (!journalState || journalState.schemaVersion !== RECOVERY_SCHEMA_VERSION || journalState.kind !== RECOVERY_KIND) throw new Error("Cross-descendant recovery resume requires a schema-v4 incident journal.");
   if (journalState.checkpointHashDomain !== undefined && journalState.checkpointHashDomain !== CHECKPOINT_HASH_DOMAIN) throw new Error("Canonical recovery journal has an unreviewed checkpoint hash domain.");
-  if (!REGISTERED_RESUME_PHASES.has(journalState.phase) || journalState.registrationCalls !== 1 || journalState.registrationMayHaveOccurred !== true
+  const completed = journalState.phase === "COMPLETED";
+  if ((!REGISTERED_RESUME_PHASES.has(journalState.phase) && !completed) || journalState.registrationCalls !== 1 || journalState.registrationMayHaveOccurred !== true
     || !ARN.test(journalState.replacementArn || "") || STAGE_B_BACKEND_RECOVERY.historicalRevisionArns.includes(journalState.replacementArn)) {
     throw new Error("Cross-descendant recovery resume requires an already-registered canonical replacement and consumed registration budget.");
   }
@@ -121,6 +122,7 @@ export function assertCanonicalRecoveryDescendantResume({ sourceSha, bindings, p
     || reuse.comparisonHeadIdentity !== "tooling-input-tree-sha256" || reuse.comparisonHeadSha256 !== reuse.toolingInputTreeSha256 || reuse.classificationRulesVersion !== "stage-b-image-reuse-v2"
     || !SHA256.test(reuse.toolingInputTreeSha256 || "") || !Array.isArray(reuse.classifiedChangedFiles) || !Array.isArray(reuse.imageAffectingFiles)
     || reuse.imageAffectingFiles.length !== 0 || reuse.classifiedChangedFiles.some(({ category }) => !CROSS_DESCENDANT_REUSE_CATEGORIES.has(category))) throw new Error("Cross-descendant image reuse proof contains a runtime, image-affecting, or unreviewed change.");
+  if (completed) throw new Error("Completed cross-descendant recovery incidents are terminal and cannot be resumed.");
   return Object.freeze({ incidentSourceSha: journalState.sourceSha, incidentProvenance, executorToolingSha: sourceSha, executorProvenance, imageReuse: reuse });
 }
 

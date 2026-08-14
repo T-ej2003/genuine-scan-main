@@ -70,6 +70,11 @@ only for the reviewed non-runtime recovery/tooling, test, documentation, and wor
 image-affecting, unknown, unrelated, dirty, or non-origin changes fail closed. Exact-source resumes retain
 the ordinary source-bound path.
 
+The CLI reads an existing journal only to select this validation path; it never treats journal fields as
+authority before the cross-descendant identity, provenance, census, image-reuse, and checkpoint checks pass.
+`COMPLETED` is terminal for descendant execution: it is validated as immutable evidence and then rejected
+without journal or evidence rewrites, registration, or Terraform mutation.
+
 For a schema-v4 journal created before checkpoint normalization, resume must
 also provide `--state-before` pointing to the preserved exact pre-removal state
 backup; the command validates its legacy hash and uses it only to prove that
