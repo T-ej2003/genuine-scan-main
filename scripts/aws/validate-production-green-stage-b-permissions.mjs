@@ -14,6 +14,7 @@ import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidence
 import { assertStageBPlanApprovedBinding, STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
 import { assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertEcsExecOperatorEvidence, assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorSourceContract, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
+import { GITHUB_MUTATION_ROLE_ARN, GITHUB_MUTATION_CALLER_PATTERN, RELEASE_ROLE_ARN, RELEASE_CALLER_PATTERN, PRODUCTION_CALLER_MODES } from "./production-caller-identity-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION = 3;
@@ -27,7 +28,6 @@ export const PERMISSION_PREFLIGHT_CLOCK_SKEW_MS = STAGE_B_DEPLOYMENT_EVIDENCE_CL
 export const PERMISSION_EVIDENCE_VALIDITY_MODEL = STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL;
 export const ACCOUNT = "368992683803";
 export const REGION = "eu-west-2";
-export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
 export const CUTOVER_CRITICAL_CAPABILITIES = Object.freeze([
   Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "apply-stage-a-endpoint-security-group-ingress", action: "ec2:AuthorizeSecurityGroupIngress" }),
   Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "apply-stage-a-checker-role-chain-policy", action: "iam:PutRolePolicy" }),
@@ -46,7 +46,7 @@ const STAGE_A_LIVE_EVIDENCE_EVALUATIONS = Object.freeze([
   ["collect-stage-a-live-database", "rds:DescribeDBInstances"],
 ]);
 export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${ACCOUNT}:root`]);
-export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
+export { GITHUB_MUTATION_ROLE_ARN, GITHUB_MUTATION_CALLER_PATTERN, RELEASE_ROLE_ARN, RELEASE_CALLER_PATTERN };
 export const STAGE_B_PERMISSION_PROFILES = Object.freeze(["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY"]);
 export const STAGE_B_PERMISSION_PROFILE_CAPABILITIES = Object.freeze({
   NORMAL_STAGE_B_RELEASE: Object.freeze({ requiresTaskDefinitionRegistrationContexts: true }),
@@ -968,6 +968,7 @@ function validateFreshness(timestamp, now) {
 export function runPermissionPreflight({
   reportGeneratorCallerArn,
   simulatedRoleArn = RELEASE_ROLE_ARN,
+  callerMode = PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER,
   manifest,
   plan,
   planBytes,
@@ -1002,7 +1003,8 @@ export function runPermissionPreflight({
   if (planBound) assertStageBPlanApprovedBinding(planApprovalReport, { approvalReportBytes: planApprovalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, referenceAudit, referenceAuditBytes, now: new Date(now) });
   const permissionProfileBinding = resolveStageBPermissionProfile({ plan, approvedPlanProfile: planApprovalReport?.planProfile, phase });
   if (!reportGeneratorCallerArn || !APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(reportGeneratorCallerArn)) throw new Error("Permission preflight generator is not an approved audit/admin principal.");
-  if (simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission preflight simulated role ARN is not the production release role.");
+  const expectedRoleArn = callerMode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION ? GITHUB_MUTATION_ROLE_ARN : RELEASE_ROLE_ARN;
+  if (simulatedRoleArn !== expectedRoleArn) throw new Error("Permission preflight simulated role ARN is not the reviewed production caller role.");
   const conditionKeyOrigins = sourcePolicyConditionKeyOrigins();
   const reviewedContextRegistry = assertReviewedSimulationContextRegistry({ conditionKeyOrigins, registry: contextRegistry });
   validateManifest(manifest, { account: expectedAccount, region: expectedRegion, conditionKeyOrigins, contextRegistry: reviewedContextRegistry });
@@ -1045,9 +1047,9 @@ export function runPermissionPreflight({
     canonicalImageEvidenceSha256: deploymentIdentity.canonicalImageEvidenceSha256,
     reportGeneratorCallerArn,
     simulatedRoleArn,
-    applyRoleArn: RELEASE_ROLE_ARN,
+    applyRoleArn: simulatedRoleArn,
     applyCallerArn: null,
-    applyCallerArnPattern: RELEASE_CALLER_PATTERN,
+    applyCallerArnPattern: callerMode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION ? GITHUB_MUTATION_CALLER_PATTERN : RELEASE_CALLER_PATTERN,
     manifestSha256: sha256(Buffer.from(canonicalizeJson(manifest))),
     ...(planBound ? {
       planSha256: sha256(planBytes),
@@ -1061,7 +1063,7 @@ export function runPermissionPreflight({
     requiredEvaluations: requiredResults,
     forbiddenEvaluations: forbiddenResults,
     principalEvaluations: {
-      releaseDeployer: { principalArn: RELEASE_ROLE_ARN, requiredEvaluations: requiredResults, forbiddenEvaluations: forbiddenResults, status: deniedRequired.length === 0 && allowedForbidden.length === 0 ? "valid" : "invalid" },
+      releaseDeployer: { principalArn: simulatedRoleArn, callerMode, requiredEvaluations: requiredResults, forbiddenEvaluations: forbiddenResults, status: deniedRequired.length === 0 && allowedForbidden.length === 0 ? "valid" : "invalid" },
       ecsExecVerifier: { principalArn: ECS_EXEC_OPERATOR_ROLE_ARN, requiredEvaluations: operatorRequiredResults, forbiddenEvaluations: operatorForbiddenResults, status: operatorStatus },
     },
     ecsExecVerifierTrust: ecsExecVerifierEvidence || null,

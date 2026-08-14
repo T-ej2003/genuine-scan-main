@@ -509,7 +509,10 @@ if (!currentMatch) fail("Expected current task definition must be a full ARN wit
 if (targetMatch[1] !== region || currentMatch[1] !== region) fail("Task-definition ARN region does not match AWS_REGION.");
 if (targetMatch[2] !== accountId || currentMatch[2] !== accountId) fail("Task-definition ARN account is outside the production contract.");
 if (!digestPattern.test(expectedDigest)) fail("Expected image digest must be sha256 followed by 64 lowercase hex characters.");
-if (!/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/.test(callerArn)) fail("Existing task-definition mode requires the production release-deployer identity.");
+const { assertProductionCaller } = await import("./scripts/aws/production-caller-identity-contract.mjs");
+const callerMode = process.env.MSCQR_PRODUCTION_CALLER_MODE || "HUMAN_MFA_RELEASE_DEPLOYER";
+try { assertProductionCaller({ callerArn, mode: callerMode }); } catch (error) { fail(error.message); }
+if (callerMode === "GITHUB_OIDC_APPROVED_MUTATION" && process.env.MSCQR_GITHUB_MUTATION_CONTEXT_VERIFIED !== "true") fail("GitHub mutation context must be verified before existing task-definition mode.");
 
 const target = targetResponse.taskDefinition;
 if (!target || target.taskDefinitionArn !== targetArn) fail("Described task definition did not match the exact requested ARN.");

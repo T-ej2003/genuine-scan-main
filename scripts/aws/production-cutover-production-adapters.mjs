@@ -10,7 +10,8 @@ import { createProductionRuntimeInventoryAdapter } from "./production-runtime-in
 import { createProductionPreDeploymentInventoryAdapter } from "./production-predeployment-inventory-adapter.mjs";
 import { createProductionRotationPrepareAdapter } from "./production-rotation-prepare-adapter.mjs";
 import { createProductionInteractiveEcsExecRunner, extractMarkedJson } from "./production-ecs-exec-command.mjs";
-import { establishReleaseDeployerIdentity, establishVerifierIdentity, createAwsStsRunner } from "./production-identity-adapters.mjs";
+import { establishGitHubMutationIdentity, establishReleaseDeployerIdentity, establishVerifierIdentity, createAwsStsRunner } from "./production-identity-adapters.mjs";
+import { PRODUCTION_CALLER_MODES } from "./production-caller-identity-contract.mjs";
 import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 import { assertSelectedTargetTask, selectTargetTask } from "./ecs-exec-target-selection.mjs";
 import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
@@ -169,10 +170,11 @@ export function createProductionRotationInfrastructureAdapter({ run = execFileSy
   };
 }
 
-export function createProductionCutoverAdapters({ config, sourceSha, rotationId, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier" } = {}) {
+export function createProductionCutoverAdapters({ config, sourceSha, rotationId, callerMode = PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier" } = {}) {
   if (!config || typeof config !== "object") throw new Error("Production cutover adapter configuration is required.");
-  const releaseRun = createProductionCommandRunner({ profile: releaseProfile });
-  const releaseSts = createAwsStsRunner({ profile: releaseProfile });
+  const effectiveReleaseProfile = callerMode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION ? undefined : releaseProfile;
+  const releaseRun = createProductionCommandRunner({ profile: effectiveReleaseProfile });
+  const releaseSts = createAwsStsRunner({ profile: effectiveReleaseProfile });
   const verifierSts = createAwsStsRunner({ profile: config.bootstrapProfile || verifierProfile });
   let verifierSession = null;
   const requireVerifierSession = () => {
@@ -209,7 +211,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   });
   const checkerChain = createLiveCheckerChainAssertionAdapter({ run: releaseRun });
   const overlapRegistration = createAwsOverlapTaskRegistrationAdapter({ run: async (args) => releaseRun(args) });
-  const rotationInfrastructure = createProductionRotationInfrastructureAdapter({ run: execFileSync, releaseProfile, config });
+  const rotationInfrastructure = createProductionRotationInfrastructureAdapter({ run: execFileSync, releaseProfile: effectiveReleaseProfile, config });
   const inventoryExecute = createProductionRuntimeInventoryAdapter({
     ecs: verifierEcs,
     getVerifierSession: requireVerifierSession,
@@ -221,7 +223,9 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     checkerChain,
     identities: {
       establish: async () => {
-        const releaseDeployer = await establishReleaseDeployerIdentity({ adapter: releaseSts });
+        const releaseDeployer = callerMode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION
+          ? await establishGitHubMutationIdentity({ adapter: releaseSts, context: { repository: process.env.GITHUB_REPOSITORY, environment: process.env.GITHUB_ENVIRONMENT, ref: process.env.GITHUB_REF, workflowRef: process.env.GITHUB_WORKFLOW_REF, eventName: process.env.GITHUB_EVENT_NAME, sourceSha, trustedMainSha: sourceSha, environmentApproved: process.env.PRODUCTION_ENVIRONMENT_APPROVED === "true" } })
+          : await establishReleaseDeployerIdentity({ adapter: releaseSts });
         const verifier = await establishVerifierIdentity({ adapter: verifierSts, mfaSerial: process.env.MSCQR_VERIFIER_MFA_SERIAL, mfaCode: process.env.MSCQR_VERIFIER_MFA_CODE });
         verifierSession = verifier.session || verifierSts.getVerifierSession();
         return {

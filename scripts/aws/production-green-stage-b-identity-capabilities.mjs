@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
-import { RELEASE_CALLER_PATTERN } from "./validate-production-green-stage-b-permissions.mjs";
+import { RELEASE_CALLER_PATTERN, GITHUB_MUTATION_CALLER_PATTERN } from "./validate-production-green-stage-b-permissions.mjs";
+import { PRODUCTION_CALLER_MODES } from "./production-caller-identity-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 import { CHECKER_SOURCE_ROLE_NAME, assertRoleATrustResponse } from "./production-checker-chain-contract.mjs";
@@ -67,6 +68,7 @@ function safeError(error) {
 export function runReleaseReadPreflight({
   region = STAGE_B.region,
   outputDirectory,
+  callerMode = PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER,
   run = (args) => execFileSync("aws", [...args, "--region", region, "--output", "json", "--no-cli-pager"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
 } = {}) {
   if (region !== STAGE_B.region) throw new Error("Stage B release preflight region is wrong.");
@@ -87,7 +89,8 @@ export function runReleaseReadPreflight({
       responses.set(probe.id, response);
       if (probe.id === "caller") {
         caller = JSON.parse(response).Arn;
-        if (!new RegExp(RELEASE_CALLER_PATTERN).test(caller || "")) throw new Error("WrongCaller");
+        const pattern = callerMode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION ? GITHUB_MUTATION_CALLER_PATTERN : RELEASE_CALLER_PATTERN;
+        if (!new RegExp(pattern).test(caller || "")) throw new Error("WrongCaller");
       }
       if (probe.id === "checker-role-a-trust") checkerTrust = assertRoleATrustResponse(JSON.parse(response));
       if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed";
@@ -116,5 +119,5 @@ export function runReleaseReadPreflight({
     try { run(probe.args, probe); if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed"; }
     catch (error) { requiredReads[probe.action] = "denied"; failed.push({ id: probe.id, action: probe.action, classification: safeError(error) }); }
   }
-  return { schemaVersion: RELEASE_PREFLIGHT_SCHEMA_VERSION, caller: caller || null, account: STAGE_B.account, region, total, allowed: total - failed.length, requiredReads, checkerTrust, failed, skipped: [], status: failed.length === 0 && checkerTrust?.exact === true && checkerTrust?.mfaRequired === true ? "valid" : "blocked" };
+  return { schemaVersion: RELEASE_PREFLIGHT_SCHEMA_VERSION, caller: caller || null, callerMode, account: STAGE_B.account, region, total, allowed: total - failed.length, requiredReads, checkerTrust, failed, skipped: [], status: failed.length === 0 && checkerTrust?.exact === true && checkerTrust?.mfaRequired === true ? "valid" : "blocked" };
 }

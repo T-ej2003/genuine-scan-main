@@ -167,6 +167,7 @@
   ],
   "identities": [
     "GITHUB_IMAGE_PUBLISHER",
+    "GITHUB_PRODUCTION_MUTATION",
     "ADMINISTRATOR",
     "BOOTSTRAP_OPERATOR",
     "RELEASE_DEPLOYER",
@@ -582,6 +583,3123 @@
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
         "expectedPolicySha256": "0807e9224119a70753e0a4ca8b5ca9883668fe99edc04ca30ac61a8ab4f0336d"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-activate-exact-ecs-service",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "activate-exact-ecs-service",
+      "action": "ecs:UpdateService",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        },
+        {
+          "key": "ecs:task-definition",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "UpdateExactStageBBackendService",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-apply-stage-a-checker-publication-policy",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "apply-stage-a-checker-publication-policy",
+      "action": "iam:PutRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ApplyExactStageACheckerPublicationPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-apply-stage-a-checker-role-chain-policy",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "apply-stage-a-checker-role-chain-policy",
+      "action": "iam:PutRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-independent-checker"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ApplyExactStageACheckerRoleChainPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-apply-stage-a-checker-role-trust",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "apply-stage-a-checker-role-trust",
+      "action": "iam:UpdateAssumeRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ApplyExactStageACheckerRoleTrust",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-apply-stage-a-endpoint-security-group-ingress",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "apply-stage-a-endpoint-security-group-ingress",
+      "action": "ec2:AuthorizeSecurityGroupIngress",
+      "resources": [
+        "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ApplyExactStageAEndpointSecurityGroupIngress",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-apply-stage-b-backend-lock-delete",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "apply-stage-b-backend-lock-delete",
+      "action": "s3:DeleteObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ManageStageBProductionLockOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-apply-stage-b-backend-lock-read",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "apply-stage-b-backend-lock-read",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-state",
+        "stage-b-state"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ManageStageBProductionLockOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-apply-stage-b-backend-lock-write",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "apply-stage-b-backend-lock-write",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ManageStageBProductionLockOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-apply-stage-b-backend-state-write",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "apply-stage-b-backend-state-write",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-artifact-signing-bootstrap-create-active-version",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-create-active-version",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/production/rls-green/artifact-signing/active-key-version"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-artifact-signing-bootstrap-create-private-key",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-create-private-key",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/production/rls-green/artifact-signing/private-key-current"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-artifact-signing-bootstrap-create-public-key",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-create-public-key",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/production/rls-green/artifact-signing/public-key-current"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-artifact-signing-bootstrap-create-public-registry",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-create-public-registry",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/production/rls-green/artifact-signing/public-keys-json"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-artifact-signing-bootstrap-describe-secret",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-describe-secret",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageASecretMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-artifact-signing-bootstrap-get-secret-value",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-get-secret-value",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactProductionSecretValues",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-artifact-signing-bootstrap-put-secret-value",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "artifact-signing-bootstrap-put-secret-value",
+      "action": "secretsmanager:PutSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactProductionSecretValues",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-collect-stage-a-live-cluster",
+      "phase": "release-direct-read-preflight",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "collect-stage-a-live-cluster",
+      "action": "ecs:DescribeClusters",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-cluster"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadStageALivePrerequisites",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-collect-stage-a-live-database",
+      "phase": "release-direct-read-preflight",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "collect-stage-a-live-database",
+      "action": "rds:DescribeDBInstances",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-database"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAGreenRdsInstance",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-collect-stage-a-live-route-tables",
+      "phase": "release-direct-read-preflight",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "collect-stage-a-live-route-tables",
+      "action": "ec2:DescribeRouteTables",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-route-tables"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadStageALivePrerequisites",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-collect-stage-a-live-security-groups",
+      "phase": "release-direct-read-preflight",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "collect-stage-a-live-security-groups",
+      "action": "ec2:DescribeSecurityGroups",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-security-groups"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAProviderEndpointMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-collect-stage-a-live-subnets",
+      "phase": "release-direct-read-preflight",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "collect-stage-a-live-subnets",
+      "action": "ec2:DescribeSubnets",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-subnets"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadStageALivePrerequisites",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-collect-stage-a-prerequisite-state",
+      "phase": "release-direct-read-preflight",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "collect-stage-a-prerequisite-state",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-state",
+        "stage-b-state"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAStateForHandoff",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-create-stage-b-backend-ecs-exec-inline-policy",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "create-stage-b-backend-ecs-exec-inline-policy",
+      "action": "iam:PutRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "CreateExactStageBBackendEcsExecInlinePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-create-stage-b-log-groups",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "create-stage-b-log-groups",
+      "action": "logs:CreateLogGroup",
+      "resources": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "CreateExactStageBLogs",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-describe-predeployment-inventory-task-definition",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "describe-predeployment-inventory-task-definition",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "direct",
+      "probeIds": [
+        "audit-task-definition"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeStageBTaskDefinitionsReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-create-jwt-pending",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-jwt-pending",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/jwt-pending"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-create-jwt-previous",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-jwt-previous",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/jwt-previous"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-create-qr-current-version",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-qr-current-version",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/qr-current-version"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-create-qr-previous-version",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-qr-previous-version",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/qr-previous-version"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-create-qr-private-pending",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-qr-private-pending",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/qr-private-pending"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-create-qr-public-pending",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-qr-public-pending",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/qr-public-pending"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-create-qr-public-previous",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-create-qr-public-previous",
+      "action": "secretsmanager:CreateSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "secretsmanager:Name",
+          "type": "string",
+          "values": [
+            "mscqr/prod/rotation/qr-public-previous"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "BootstrapExactProductionSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-describe-secret",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-describe-secret",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageASecretMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-get-secret-value",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-get-secret-value",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactProductionSecretValues",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-put-secret-value",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-put-secret-value",
+      "action": "secretsmanager:PutSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactProductionSecretValues",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-tag-jwt-pending",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-jwt-pending",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-tag-jwt-previous",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-jwt-previous",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-tag-qr-current-version",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-qr-current-version",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-tag-qr-previous-version",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-qr-previous-version",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-tag-qr-private-pending",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-qr-private-pending",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-tag-qr-public-pending",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-qr-public-pending",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-initial-dual-slot-bootstrap-tag-qr-public-previous",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "initial-dual-slot-bootstrap-tag-qr-public-previous",
+      "action": "secretsmanager:TagResource",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "TagExactInitialRotationSecretContainers",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-invoke-predeployment-inventory-broker",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "invoke-predeployment-inventory-broker",
+      "action": "lambda:InvokeFunction",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "InvokeExactPreDeploymentInventoryBrokerAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-prune-broker-managed-policy-versions",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "prune-broker-managed-policy-versions",
+      "action": "iam:DeletePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "PruneExactStageBBrokerManagedPolicyVersions",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-publish-broker-version",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "publish-broker-version",
+      "action": "lambda:PublishVersion",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-b"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "UpdateExactStageBBrokerFunctionRelease",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-reference-audit-broker-configuration",
+      "phase": "reference-audit",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "reference-audit-broker-configuration",
+      "action": "lambda:GetFunctionConfiguration",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "POST_APPLY_READ",
+      "probe": "direct",
+      "probeIds": [
+        "audit-broker"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadStageBBrokerConfiguration",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-reference-audit-broker-reviewed-alias",
+      "phase": "reference-audit",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "reference-audit-broker-reviewed-alias",
+      "action": "lambda:GetAlias",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "POST_APPLY_READ",
+      "probe": "direct",
+      "probeIds": [
+        "audit-broker-alias"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a4e547a9882a2bd64c4f68db9643512a1e4eeea5bab9034b0b28c447ac496a95"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-reference-audit-ecs-service-details",
+      "phase": "reference-audit",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "reference-audit-ecs-service-details",
+      "action": "ecs:DescribeServices",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        }
+      ],
+      "classification": "POST_APPLY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeStageBServicesReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-reference-audit-ecs-services",
+      "phase": "reference-audit",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "reference-audit-ecs-services",
+      "action": "ecs:ListServices",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        }
+      ],
+      "classification": "POST_APPLY_READ",
+      "probe": "direct",
+      "probeIds": [
+        "audit-services"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ListStageBServicesReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-reference-audit-ecs-task-definitions",
+      "phase": "reference-audit",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "reference-audit-ecs-task-definitions",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "POST_APPLY_READ",
+      "probe": "direct",
+      "probeIds": [
+        "audit-task-definition"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeStageBTaskDefinitionsReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-reference-audit-ecs-task-details",
+      "phase": "reference-audit",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "reference-audit-ecs-task-details",
+      "action": "ecs:DescribeTasks",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        }
+      ],
+      "classification": "POST_APPLY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeStageBTasksReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-reference-audit-ecs-tasks",
+      "phase": "reference-audit",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "reference-audit-ecs-tasks",
+      "action": "ecs:ListTasks",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        }
+      ],
+      "classification": "POST_APPLY_READ",
+      "probe": "direct",
+      "probeIds": [
+        "audit-tasks"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ListStageBTasksReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-read-only-canary-attached-policy-lists",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-read-only-canary-attached-policy-lists",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-broker-attachments",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "ListAttachedExactStageBReadOnlyCanaryRolePolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-read-only-canary-execution-inline-policy",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-read-only-canary-execution-inline-policy",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "ReadExactStageBReadOnlyCanaryExecutionRolePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-read-only-canary-role-policy-lists",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-read-only-canary-role-policy-lists",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-inline-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-inline-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "ListExactStageBReadOnlyCanaryRolePolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-read-only-canary-roles",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-read-only-canary-roles",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "checker-role-a-trust",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "ReadExactStageBReadOnlyCanaryRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-stage-a-checker-inline-policy",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-checker-inline-policy",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRolePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-stage-a-checker-role-trust",
+      "phase": "release-direct-read-preflight",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-checker-role-trust",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-independent-checker"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "checker-role-a-trust",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-stage-a-rds-tags",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-rds-tags",
+      "action": "rds:ListTagsForResource",
+      "resources": [
+        "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+        "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAGreenRdsTags",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-stage-b-backend-bucket-location",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-backend-bucket-location",
+      "action": "s3:GetBucketLocation",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "backend-bucket"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageABackendBucketLocation",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-stage-b-backend-state-read",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-backend-state-read",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-state",
+        "stage-b-state"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-stage-b-broker-managed-policy",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-broker-managed-policy",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-broker-policy"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "ReadExactStageBBrokerManagedPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-stage-b-broker-managed-policy-version",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-broker-managed-policy-version",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "ReadExactStageBBrokerManagedPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-stage-b-broker-managed-policy-versions",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-broker-managed-policy-versions",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-broker-policy-versions"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "ReadExactStageBBrokerManagedPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-stage-b-broker-role-policy-attachments",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-broker-role-policy-attachments",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-broker-attachments",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-refresh-stage-b-log-tags",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-log-tags",
+      "action": "logs:ListTagsForResource",
+      "resources": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-log-tags-1",
+        "refresh-log-tags-2",
+        "refresh-log-tags-3",
+        "refresh-log-tags-4"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "ListExactStageBLogTagsReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-register-predeployment-inventory-task-definition",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "register-predeployment-inventory-task-definition",
+      "action": "ecs:RegisterTaskDefinition",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:RequestTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:RequestTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:RequestTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-b"
+          ]
+        },
+        {
+          "key": "aws:RequestTag/MSCQRPreDeploymentInventory",
+          "type": "string",
+          "values": [
+            "rotation-inventory"
+          ]
+        },
+        {
+          "key": "aws:TagKeys",
+          "type": "stringList",
+          "values": [
+            "Component",
+            "Environment",
+            "ManagedBy",
+            "MSCQRPreDeploymentInventory"
+          ]
+        },
+        {
+          "key": "ecs:compute-compatibility",
+          "type": "stringList",
+          "values": [
+            "FARGATE"
+          ]
+        },
+        {
+          "key": "ecs:privileged",
+          "type": "string",
+          "values": [
+            "false"
+          ]
+        },
+        {
+          "key": "ecs:task-cpu",
+          "type": "numeric",
+          "values": [
+            "256"
+          ]
+        },
+        {
+          "key": "ecs:task-memory",
+          "type": "numeric",
+          "values": [
+            "512"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "RegisterExactPreDeploymentInventoryTaskDefinition",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-rollback-exact-backend-execution-passrole",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "rollback-exact-backend-execution-passrole",
+      "action": "iam:PassRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "context": [
+        {
+          "key": "iam:PassedToService",
+          "type": "string",
+          "values": [
+            "ecs-tasks.amazonaws.com"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "PassExactLegacyBackendRolesForReviewedRollback",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-rollback-exact-backend-task-passrole",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "rollback-exact-backend-task-passrole",
+      "action": "iam:PassRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"
+      ],
+      "context": [
+        {
+          "key": "iam:PassedToService",
+          "type": "string",
+          "values": [
+            "ecs-tasks.amazonaws.com"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "PassExactLegacyBackendRolesForReviewedRollback",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-rollback-exact-ecs-service",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "rollback-exact-ecs-service",
+      "action": "ecs:UpdateService",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "ecs:cluster",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          ]
+        },
+        {
+          "key": "ecs:task-definition",
+          "type": "string",
+          "values": [
+            "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "UpdateExactStageBBackendService",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-rotation-coordinator-read-exact-legacy-current-secrets",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "rotation-coordinator-read-exact-legacy-current-secrets",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactLegacyCurrentRotationSecrets",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-rotation-coordinator-write-exact-legacy-current-secrets",
+      "phase": "refresh-only",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "rotation-coordinator-write-exact-legacy-current-secrets",
+      "action": "secretsmanager:PutSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "ManageExactLegacyCurrentRotationSecrets",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-mutation-set-stage-b-log-retention",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "set-stage-b-log-retention",
+      "action": "logs:PutRetentionPolicy",
+      "resources": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "SetExactStageBLogRetention",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-tag-predeployment-inventory-task-definition",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "tag-predeployment-inventory-task-definition",
+      "action": "ecs:TagResource",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "TagExactPreDeploymentInventoryTaskDefinition",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-tag-stage-b-log-groups",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "tag-stage-b-log-groups",
+      "action": "logs:TagResource",
+      "resources": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:RequestTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:RequestTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:RequestTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-b"
+          ]
+        },
+        {
+          "key": "aws:TagKeys",
+          "type": "stringList",
+          "values": [
+            "Environment",
+            "ManagedBy",
+            "Component"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "TagExactStageBLogs",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-update-broker-function-code",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "update-broker-function-code",
+      "action": "lambda:UpdateFunctionCode",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-b"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "UpdateExactStageBBrokerFunctionRelease",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-update-broker-function-code-and-configuration",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "update-broker-function-code-and-configuration",
+      "action": "lambda:UpdateFunctionConfiguration",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-b"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "UpdateExactStageBBrokerFunctionRelease",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-update-broker-managed-policy",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "update-broker-managed-policy",
+      "action": "iam:CreatePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "UpdateExactStageBBrokerManagedPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-mutation-update-reviewed-broker-alias",
+      "phase": "wrapper-apply",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "update-reviewed-broker-alias",
+      "action": "lambda:UpdateAlias",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-b"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "UpdateExactStageBBrokerReviewedAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-recovery-describe-backend-revision",
+      "phase": "canonical-backend-recovery",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-describe-backend-revision",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeStageBTaskDefinitionsReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "a0b99b6dbdd082e98feb101ceec6449654e732a348b5ed462403de907fcab89f"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-recovery-list-backend-revisions",
+      "phase": "canonical-backend-recovery",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-list-backend-revisions",
+      "action": "ecs:ListTaskDefinitions",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "ListExactStageBBackendRecoveryRevisions",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-recovery-lock-state",
+      "phase": "canonical-backend-recovery",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-lock-state",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ManageStageBProductionLockOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-recovery-pass-backend-execution-role",
+      "phase": "canonical-backend-recovery",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-pass-backend-execution-role",
+      "action": "iam:PassRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "PassOnlyExactStageBTaskRolesToEcsTasks",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-recovery-pass-backend-task-role",
+      "phase": "canonical-backend-recovery",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-pass-backend-task-role",
+      "action": "iam:PassRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "PassOnlyExactStageBTaskRolesToEcsTasks",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-recovery-read-state",
+      "phase": "canonical-backend-recovery",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-read-state",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "github-recovery-register-backend-revision",
+      "phase": "canonical-backend-recovery",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-register-backend-revision",
+      "action": "ecs:RegisterTaskDefinition",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "RegisterExactStageBBackendTaskDefinition1024",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-recovery-tag-backend-revision",
+      "phase": "canonical-backend-recovery",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-tag-backend-revision",
+      "action": "ecs:TagResource",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json",
+        "sid": "TagExactStageBBackendRecoveryTaskDefinition",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "765c4e3fc490d31f4f9cd89fc994bc95da28b658304e51f26fc20750ce19c3c8"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-recovery-unlock-state",
+      "phase": "canonical-backend-recovery",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-unlock-state",
+      "action": "s3:DeleteObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ManageStageBProductionLockOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "github-recovery-write-state",
+      "phase": "canonical-backend-recovery",
+      "identity": "GITHUB_PRODUCTION_MUTATION",
+      "executor": "github-actions-oidc",
+      "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "sourceFunction": "recovery-write-state",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CANONICAL_RECOVERY_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
       },
       "required": true,
       "mutation": true

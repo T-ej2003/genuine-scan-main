@@ -12,6 +12,7 @@ import { assertImageEvidence, imageEvidenceSha256 } from "./production-green-sta
 import { STAGE_B, canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { assertCanonicalImageReuseEvidence, imageAuthorizationSha256 } from "./production-image-authorization.mjs";
 import { assertCheckerChainStructuralEvidence } from "./production-checker-chain-contract.mjs";
+import { assertGitHubApprovedMutationContext, assertProductionCaller, PRODUCTION_CALLER_MODES } from "./production-caller-identity-contract.mjs";
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -107,10 +108,13 @@ export function assertRotationInfrastructureConverged(result, { sourceSha, rotat
   return { ...result, rotationInfraConverged: true, overlapSecretCount: expectedArns.size, authorizedOverlapSecretCount: authorizedArns.size };
 }
 
-function assertIdentityEvidence(identities) {
+function assertIdentityEvidence(identities, { callerMode = PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER, sourceSha } = {}) {
   if (identities?.releaseDeployer?.valid !== true || identities?.verifier?.valid !== true || identities?.rootDrop?.valid !== true) throw new Error("Required operational identities are invalid.");
   for (const name of ["releaseDeployer", "verifier", "rootDrop"]) requiredEvidence(name, identities[name]);
-  if (!/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/.test(identities.releaseDeployer.callerArn || "")) throw new Error("Release-deployer identity is not the reviewed assumed role.");
+  assertProductionCaller({ callerArn: identities.releaseDeployer.callerArn, mode: callerMode });
+  if (callerMode === PRODUCTION_CALLER_MODES.GITHUB_OIDC_APPROVED_MUTATION) {
+    assertGitHubApprovedMutationContext({ ...identities.releaseDeployer, sourceSha, trustedMainSha: sourceSha, callerArn: identities.releaseDeployer.callerArn, mode: callerMode });
+  }
   if (!/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-ecs-exec-verifier\/[^/]+$/.test(identities.verifier.callerArn || "")) throw new Error("Verifier identity is not the reviewed assumed role.");
   if (identities.rootDrop.callerArn !== "arn:aws:iam::368992683803:root") throw new Error("Administrator root-drop evidence is not the exact reviewed root identity.");
 }
@@ -232,7 +236,7 @@ function assertIamReport(report) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
-  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, identities: suppliedIdentities, checkerChain, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  const { sourceSha, callerMode = PRODUCTION_CALLER_MODES.HUMAN_MFA_RELEASE_DEPLOYER, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, identities: suppliedIdentities, checkerChain, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
   if (!SHA40.test(sourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
   const mutations = [];
   const results = { protectedMain: { valid: true, sourceSha, evidenceSha256: imageAuthorization?.evidenceSha256 } , imageAuthorization };
@@ -249,7 +253,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.checkerSourceTrust = { ...sourceTrust, sourceSha, evidenceSha256: sha(sourceTrust) };
 
   const identities = typeof suppliedIdentities?.establish === "function" ? await suppliedIdentities.establish() : suppliedIdentities;
-  assertIdentityEvidence(identities);
+  assertIdentityEvidence(identities, { callerMode, sourceSha });
   results.iamIdentities = iamReport;
   results.identities = { ...identities, status: "valid", iamEvaluationCensus: iamReport.iamEvaluationCensus, ecsExecVerifierTrust: iamReport.ecsExecVerifierTrust, sourceSha, evidenceSha256: sha(identities) };
   results.identitiesStageA = identities;
