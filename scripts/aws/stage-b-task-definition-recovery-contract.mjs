@@ -9,8 +9,9 @@ export const STAGE_B_BACKEND_RECOVERY = Object.freeze({
   historicalRevisionArns: Object.freeze([
     "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:6",
     "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7",
+    "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8",
   ]),
-  newestHistoricalArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7",
+  newestHistoricalArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8",
   lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a",
   serial: 93,
   tags: Object.freeze([
@@ -23,8 +24,12 @@ export const STAGE_B_BACKEND_RECOVERY = Object.freeze({
 
 const ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:([1-9][0-9]*)$/;
 const SHA = /^[a-f0-9]{40}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
+const LINEAGE = /^[a-f0-9-]{36}$/;
 const DIGEST = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/;
 const IMAGE_DIGEST = /^sha256:[a-f0-9]{64}$/;
+const RECOVERY_SCHEMA_VERSION = 4;
+const RECOVERY_KIND = "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY";
 const exact = (a, b) => canonicalJson(a) === canonicalJson(b);
 
 export function canonicalJson(value) {
@@ -37,13 +42,28 @@ export function canonicalSha256(value) {
   return crypto.createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
-export function assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation } = {}) {
+function imageDigest(value) {
+  const digest = String(value || "").split("@").at(-1);
+  if (!IMAGE_DIGEST.test(digest)) throw new Error("Canonical recovery backend image digest is invalid.");
+  return digest;
+}
+
+export function canonicalRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: backendImageDigest, imageAuthorizationSha256, stateLineage, stateSerial, predecessorArn, newestHistoricalArn, fingerprint } = {}) {
+  if (!SHA.test(sourceSha || "") || !SHA256.test(toolingTreeSha256 || "") || !SHA256.test(sourceContractSha256 || "")
+    || !SHA.test(imageReleaseSha || "") || !IMAGE_DIGEST.test(backendImageDigest || "") || !SHA256.test(imageAuthorizationSha256 || "")
+    || !LINEAGE.test(stateLineage || "") || !Number.isInteger(stateSerial) || predecessorArn !== STAGE_B_BACKEND_RECOVERY.predecessorArn
+    || !ARN.test(newestHistoricalArn || "") || !SHA256.test(fingerprint || "")) throw new Error("Canonical recovery incident identity inputs are incomplete.");
+  return canonicalSha256({ schemaVersion: RECOVERY_SCHEMA_VERSION, kind: RECOVERY_KIND, sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: backendImageDigest, imageAuthorizationSha256, stateLineage, stateSerial, predecessorArn, newestHistoricalArn, fingerprint });
+}
+
+export function assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance } = {}) {
   if (!SHA.test(sourceSha || "")) throw new Error("Protected source SHA is required for backend recovery.");
   if (!protectedCheckout || protectedCheckout.currentHead !== sourceSha || protectedCheckout.toolingSha !== sourceSha
     || protectedCheckout.originMainHead !== sourceSha || protectedCheckout.isAncestor !== true || protectedCheckout.porcelainStatus) {
     throw new Error("Canonical recovery requires the exact clean protected-main checkout.");
   }
-  if (!bindings || bindings.toolingSha !== sourceSha || bindings.sourceSha !== sourceSha || !SHA.test(bindings.imageReleaseSha || "")) throw new Error("Canonical recovery tooling and image-release identities are incomplete.");
+  if (!bindings || bindings.toolingSha !== sourceSha || bindings.sourceSha !== sourceSha || !SHA.test(bindings.imageReleaseSha || "")
+    || !SHA256.test(bindings.toolingTreeSha256 || "") || !SHA256.test(bindings.sourceContractSha256 || "")) throw new Error("Canonical recovery tooling, source-content, and image-release identities are incomplete.");
   const authorization = imageAuthorization || bindings.imageAuthorization;
   if (!authorization || bindings.imageReleaseSha !== authorization.imageReleaseSha) throw new Error("Canonical recovery image-release identity does not match image authorization.");
   const authorizationValidation = imageAuthorizationValidation || bindings.imageAuthorizationValidation;
@@ -51,6 +71,10 @@ export function assertCanonicalRecoverySourceBinding({ sourceSha, bindings, prot
   assertImageAuthorization(authorization, sourceSha, authorizationValidation);
   const authorizedDigest = authorizedBackendDigest(authorization);
   if (!IMAGE_DIGEST.test(authorizedDigest || "") || bindings.backendImage !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${authorizedDigest}`) throw new Error("Canonical recovery backend image does not match image authorization.");
+  const derived = typeof deriveProvenance === "function" ? deriveProvenance({ sourceSha, protectedCheckout }) : null;
+  if (!derived || derived.toolingTreeSha256 !== bindings.toolingTreeSha256 || derived.sourceContractSha256 !== bindings.sourceContractSha256
+    || !SHA256.test(derived.toolingTreeSha256 || "") || !SHA256.test(derived.sourceContractSha256 || "")) throw new Error("Canonical recovery source provenance was not derived from the protected source.");
+  return derived;
 }
 
 const sortBy = (items, key) => Array.isArray(items) ? [...items].sort((a, b) => String(a?.[key] ?? "").localeCompare(String(b?.[key] ?? ""))) : items;
@@ -138,6 +162,23 @@ function replacementArn(value) {
   return { arn: value, revision: Number(match[1]) };
 }
 
+export function assertCanonicalBackendRecoveryCensus({ census } = {}) {
+  const revisions = census?.complete === true && Array.isArray(census.revisions) ? census.revisions : null;
+  if (!Array.isArray(revisions) || revisions.length === 0) throw new Error("Canonical recovery requires a complete ACTIVE backend revision census.");
+  const entries = revisions.map((entry) => {
+    const readback = entry?.readback || entry;
+    const taskDefinition = readback?.taskDefinition || readback;
+    const arn = entry?.arn || taskDefinition?.taskDefinitionArn;
+    const parsed = replacementArn(arn);
+    if (taskDefinition?.taskDefinitionArn !== parsed.arn || taskDefinition.family !== STAGE_B_BACKEND_RECOVERY.family || taskDefinition.status !== "ACTIVE" || Number(taskDefinition.revision) !== parsed.revision) {
+      throw new Error("Canonical recovery census contains an unfaithful backend revision readback.");
+    }
+    return { arn: parsed.arn, revision: parsed.revision, readback };
+  }).sort((a, b) => b.revision - a.revision);
+  if (new Set(entries.map(({ arn }) => arn)).size !== entries.length) throw new Error("Canonical recovery census contains duplicate backend revisions.");
+  return entries;
+}
+
 export function assertCanonicalBackendRecoveryReadback({ readback, expectedArn, expectedFingerprint, expectedNewestArn = STAGE_B_BACKEND_RECOVERY.newestHistoricalArn } = {}) {
   const expected = replacementArn(expectedArn);
   const newest = replacementArn(expectedNewestArn);
@@ -147,26 +188,6 @@ export function assertCanonicalBackendRecoveryReadback({ readback, expectedArn, 
   if (Number(taskDefinition.revision) !== expected.revision) throw new Error("Recovery replacement revision metadata does not match its ARN.");
   if (taskDefinitionFingerprint(taskDefinition, readback?.tags) !== expectedFingerprint) throw new Error("Recovery replacement semantic fingerprint differs from protected source.");
   return { arn: expected.arn, revision: expected.revision, fingerprint: expectedFingerprint, active: true, newest: true };
-}
-
-export async function registerCanonicalBackendRecovery({ bindings, state, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, expectedFingerprint, register, describe, newest = null } = {}) {
-  assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation });
-  assertBackendRecoveryPreconditions({ state, sourceSha });
-  if (typeof register !== "function" || typeof describe !== "function") throw new Error("Canonical backend recovery requires registration and readback adapters.");
-  const newestBefore = typeof newest === "function" ? await newest() : STAGE_B_BACKEND_RECOVERY.newestHistoricalArn;
-  const payload = buildCanonicalBackendRecoveryTaskDefinition(bindings);
-  if (newestBefore !== STAGE_B_BACKEND_RECOVERY.newestHistoricalArn) {
-    const readback = await describe(newestBefore);
-    const verified = assertCanonicalBackendRecoveryReadback({ readback, expectedArn: newestBefore, expectedFingerprint });
-    return { ...verified, payload, registrationCalls: 0, resumed: true };
-  }
-  const response = await register(payload);
-  const arn = response?.taskDefinition?.taskDefinitionArn || response?.taskDefinitionArn;
-  const readback = await describe(arn);
-  const newestAfter = typeof newest === "function" ? await newest() : arn;
-  if (newestAfter !== arn) throw new Error("Canonical recovery replacement is not the newest retained backend revision.");
-  const verified = assertCanonicalBackendRecoveryReadback({ readback, expectedArn: arn, expectedFingerprint, expectedNewestArn: newestBefore });
-  return { ...verified, payload, registrationCalls: 1, resumed: false };
 }
 
 function stateWithoutBackend(state) {
@@ -193,43 +214,56 @@ function requireJournal(journal) {
   return journal;
 }
 
-function validateJournal(journalState, { sourceSha, imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest } = {}) {
-  if (!journalState || journalState.schemaVersion !== 4 || journalState.kind !== "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY"
-    || journalState.sourceSha !== sourceSha || journalState.toolingSha !== sourceSha || journalState.address !== STAGE_B_BACKEND_RECOVERY.address
+function validateJournal(journalState, { sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest: backendImageDigest, newestHistoricalArn, incidentIdentity } = {}) {
+  if (!journalState || journalState.schemaVersion !== RECOVERY_SCHEMA_VERSION || journalState.kind !== RECOVERY_KIND
+    || journalState.incidentIdentity !== incidentIdentity || journalState.sourceSha !== sourceSha || journalState.toolingSha !== sourceSha
+    || journalState.toolingTreeSha256 !== toolingTreeSha256 || journalState.sourceContractSha256 !== sourceContractSha256 || journalState.address !== STAGE_B_BACKEND_RECOVERY.address
     || journalState.family !== STAGE_B_BACKEND_RECOVERY.family || journalState.predecessorArn !== STAGE_B_BACKEND_RECOVERY.predecessorArn
-    || journalState.newestHistoricalArn !== STAGE_B_BACKEND_RECOVERY.newestHistoricalArn
+    || journalState.newestHistoricalArn !== newestHistoricalArn || !STAGE_B_BACKEND_RECOVERY.historicalRevisionArns.includes(journalState.newestHistoricalArn)
     || journalState.stateLineage !== STAGE_B_BACKEND_RECOVERY.lineage || journalState.stateSerial !== STAGE_B_BACKEND_RECOVERY.serial
-    || journalState.protectedSourceFingerprint !== fingerprint || journalState.imageDigest !== imageDigest
+    || journalState.predecessorSerial !== STAGE_B_BACKEND_RECOVERY.serial || journalState.protectedSourceFingerprint !== fingerprint || journalState.imageDigest !== backendImageDigest
+    || journalState.authorizedBackendImageDigest !== imageDigest(backendImageDigest)
     || journalState.imageReleaseSha !== imageReleaseSha || journalState.imageAuthorizationSha256 !== imageAuthorizationSha256
     || !["DISCOVERY", "PREPARED", "REGISTERING", "REGISTERED", "READBACK_VERIFIED", "STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)
     || !Number.isInteger(journalState.registrationCalls) || journalState.registrationCalls < 0 || journalState.registrationCalls > 1
     || typeof journalState.registrationMayHaveOccurred !== "boolean") {
     throw new Error("Canonical recovery journal does not match the reviewed incident and protected source.");
   }
+  if (journalState.registrationMayHaveOccurred === false && journalState.registrationCalls !== 0) throw new Error("Canonical recovery journal has an impossible registration budget state.");
+  if (["REGISTERED", "READBACK_VERIFIED", "STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(journalState.phase)
+    && !ARN.test(journalState.replacementArn || "")) throw new Error("Canonical recovery journal is missing its persisted replacement ARN.");
+  if (journalState.replacementArn && STAGE_B_BACKEND_RECOVERY.historicalRevisionArns.includes(journalState.replacementArn)) throw new Error("Canonical recovery journal cannot adopt a historical revision.");
   return journalState;
 }
 
-export function buildCanonicalRecoveryJournal(state, { sourceSha, imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest } = {}) {
+export function buildCanonicalRecoveryJournal(state, { sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest: backendImageDigest, newestHistoricalArn, incidentIdentity } = {}) {
+  const expectedIncidentIdentity = canonicalRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: imageDigest(backendImageDigest), imageAuthorizationSha256, stateLineage: state.lineage, stateSerial: state.serial, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, newestHistoricalArn, fingerprint });
+  if (incidentIdentity !== expectedIncidentIdentity) throw new Error("Canonical recovery incident identity is not deterministic for the reviewed bindings.");
   return {
-    schemaVersion: 4,
-    kind: "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY",
+    schemaVersion: RECOVERY_SCHEMA_VERSION,
+    kind: RECOVERY_KIND,
+    incidentIdentity,
     phase: "DISCOVERY",
     sourceSha,
     toolingSha: sourceSha,
+    toolingTreeSha256,
+    sourceContractSha256,
     imageReleaseSha,
     imageAuthorizationSha256,
+    authorizedBackendImageDigest: imageDigest(backendImageDigest),
     address: STAGE_B_BACKEND_RECOVERY.address,
     family: STAGE_B_BACKEND_RECOVERY.family,
     predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn,
-    newestHistoricalArn: STAGE_B_BACKEND_RECOVERY.newestHistoricalArn,
+    newestHistoricalArn,
     stateLineage: state.lineage,
     stateSerial: state.serial,
+    predecessorSerial: state.serial,
     stateBeforeSha256: stateSnapshotSha256(state),
     stateAfterRemoveSha256: stateSnapshotSha256(expectedStateAfterRemove(state)),
     expectedStateAfterRemoveSerial: state.serial + 1,
     expectedStateAfterImportSerial: state.serial + 2,
     protectedSourceFingerprint: fingerprint,
-    imageDigest,
+    imageDigest: backendImageDigest,
     registrationCalls: 0,
     registrationMayHaveOccurred: false,
   };
@@ -259,40 +293,57 @@ function recoveryStateCheckpoint(journalState, state, expectedArn) {
   throw new Error("Recovery journal and Terraform state do not form an exact resumable checkpoint.");
 }
 
-export async function runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, readState, register, describe, newest, removeState, importState, journal } = {}) {
+function recoveryCensusDecision(entries, fingerprint) {
+  const matches = entries.filter(({ readback }) => taskDefinitionFingerprint(readback.taskDefinition || readback, readback.tags) === fingerprint);
+  if (matches.length > 1) throw new Error("Canonical recovery census found multiple current-source matching revisions.");
+  const newest = entries[0];
+  if (matches[0] && matches[0].arn !== newest.arn) throw new Error("Canonical recovery census found an unexpected newer revision above the current-source match.");
+  const historical = entries.find(({ arn }) => arn === STAGE_B_BACKEND_RECOVERY.newestHistoricalArn);
+  if (!historical) throw new Error("Fresh canonical recovery requires the exact reviewed newest historical revision.");
+  if (!matches[0] && newest.arn !== STAGE_B_BACKEND_RECOVERY.newestHistoricalArn) throw new Error("Fresh canonical recovery refuses an unreviewed newer live revision.");
+  return { newest, matching: matches[0] || null, newestHistoricalArn: historical.arn };
+}
+
+export async function runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance = ({ protectedCheckout: checkout }) => checkout?.derivedProvenance, readState, register, describe, census, removeState, importState, journal } = {}) {
   if (typeof readState !== "function") throw new Error("Canonical backend recovery requires a Terraform state reader.");
+  if (typeof census !== "function") throw new Error("Canonical backend recovery requires a complete live revision census adapter.");
   requireJournal(journal);
-  assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation });
+  assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance });
   const before = await readState();
   const existingJournal = journal.read();
   const payload = buildCanonicalBackendRecoveryTaskDefinition(bindings);
   const fingerprint = taskDefinitionFingerprint(payload.taskDefinition, payload.tags);
-  if (existingJournal?.schemaVersion === 1 && existingJournal.phase === "REGISTERING" && existingJournal.registrationCalls === 1 && !existingJournal.replacementArn) {
-    throw new Error("Legacy recovery journal records a pre-discovery registration count; preserve it as failed evidence and start a new reviewed recovery incident after live revalidation.");
+  if (existingJournal && existingJournal.schemaVersion !== RECOVERY_SCHEMA_VERSION) throw new Error("Legacy recovery journal is historical evidence and cannot authorize the current source-bound incident.");
+  const authorization = imageAuthorization || bindings.imageAuthorization;
+  const imageAuthorizationSha256 = authorization.evidenceSha256;
+  const backendImageDigest = imageDigest(bindings.backendImage);
+  const censusResult = assertCanonicalBackendRecoveryCensus({ census: await census() });
+  const decision = recoveryCensusDecision(censusResult, fingerprint);
+  if (!existingJournal) assertBackendRecoveryPreconditions({ state: before, sourceSha });
+  else if (before.lineage !== existingJournal.stateLineage) throw new Error("Terraform state lineage changed during backend recovery.");
+  const incidentIdentity = canonicalRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, imageDigest: backendImageDigest, imageAuthorizationSha256, stateLineage: existingJournal?.stateLineage || before.lineage, stateSerial: existingJournal?.stateSerial ?? before.serial, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, newestHistoricalArn: decision.newestHistoricalArn, fingerprint });
+  const prepared = existingJournal ? validateJournal(existingJournal, { sourceSha, toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest: bindings.backendImage, newestHistoricalArn: decision.newestHistoricalArn, incidentIdentity }) : buildCanonicalRecoveryJournal(before, { sourceSha, toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest: bindings.backendImage, newestHistoricalArn: decision.newestHistoricalArn, incidentIdentity });
+  if (existingJournal?.replacementArn && decision.matching?.arn !== existingJournal.replacementArn && ["REGISTERED", "READBACK_VERIFIED", "STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(existingJournal.phase)) {
+    throw new Error("Canonical recovery journal replacement does not match the current-source revision.");
   }
-  const imageAuthorizationSha256 = (imageAuthorization || bindings.imageAuthorization).evidenceSha256;
-  const prepared = existingJournal ? validateJournal(existingJournal, { sourceSha, imageReleaseSha: bindings.imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest: bindings.backendImage }) : buildCanonicalRecoveryJournal(before, { sourceSha, imageReleaseSha: bindings.imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest: bindings.backendImage });
   if (!existingJournal) journal.write(prepared);
   else if (prepared.stateBeforeSha256 !== stateSnapshotSha256(before) && ["DISCOVERY", "PREPARED"].includes(prepared.phase)) throw new Error("Terraform state changed before canonical recovery resumed.");
   if (["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(prepared.phase)) recoveryStateCheckpoint(prepared, before, prepared.replacementArn);
   let registration;
   if (prepared.replacementArn && ["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED", "COMPLETED"].includes(prepared.phase)) {
-    const newestArn = await newest();
-    if (newestArn !== prepared.replacementArn) throw new Error("Canonical recovery resume requires its exact replacement to remain newest.");
-    const readback = await describe(newestArn);
-    const verified = assertCanonicalBackendRecoveryReadback({ readback, expectedArn: newestArn, expectedFingerprint: fingerprint });
+    if (decision.newest.arn !== prepared.replacementArn) throw new Error("Canonical recovery resume requires its exact replacement to remain newest.");
+    const readback = await describe(decision.newest.arn);
+    const verified = assertCanonicalBackendRecoveryReadback({ readback, expectedArn: decision.newest.arn, expectedFingerprint: fingerprint, expectedNewestArn: prepared.newestHistoricalArn });
     registration = { ...verified, payload, registrationCalls: 0, resumed: true };
   } else {
-    assertBackendRecoveryPreconditions({ state: before, sourceSha });
-    const newestArn = await newest();
     const ready = prepared.phase === "DISCOVERY" ? { ...prepared, phase: "PREPARED" } : prepared;
     if (ready !== prepared) journal.write(ready);
-    if (newestArn !== STAGE_B_BACKEND_RECOVERY.newestHistoricalArn) {
-      const readback = await describe(newestArn);
-      const verified = assertCanonicalBackendRecoveryReadback({ readback, expectedArn: newestArn, expectedFingerprint: fingerprint });
+    if (decision.matching) {
+      const verified = assertCanonicalBackendRecoveryReadback({ readback: decision.matching.readback, expectedArn: decision.matching.arn, expectedFingerprint: fingerprint, expectedNewestArn: ready.newestHistoricalArn });
       registration = { ...verified, payload, registrationCalls: 0, resumed: true };
     } else {
       if (ready.registrationMayHaveOccurred || ready.registrationCalls !== 0) throw new Error("Canonical recovery cannot prove a prior registration was not sent; newest revision must be read back before any retry.");
+      if (decision.newest.arn !== ready.newestHistoricalArn) throw new Error("Canonical recovery census changed after the incident was prepared; perform a fresh census before registration.");
       const registering = { ...ready, phase: "REGISTERING", registrationMayHaveOccurred: true };
       journal.write(registering);
       let response;
@@ -303,10 +354,15 @@ export async function runCanonicalBackendRecovery({ bindings, sourceSha, protect
         throw error;
       }
       const arn = response?.taskDefinition?.taskDefinitionArn || response?.taskDefinitionArn;
+      if (!ARN.test(arn || "")) {
+        journal.write({ ...registering, registrationCalls: 1 });
+        throw new Error("Canonical recovery registration returned no valid backend task-definition ARN.");
+      }
       journal.write({ ...registering, phase: "REGISTERED", registrationCalls: 1, replacementArn: arn });
       const readback = await describe(arn);
-      if (await newest() !== arn) throw new Error("Canonical recovery replacement is not the newest retained backend revision.");
-      const verified = assertCanonicalBackendRecoveryReadback({ readback, expectedArn: arn, expectedFingerprint: fingerprint });
+      const postRegistrationCensus = assertCanonicalBackendRecoveryCensus({ census: await census() });
+      if (postRegistrationCensus[0].arn !== arn) throw new Error("Canonical recovery replacement is not the newest retained backend revision.");
+      const verified = assertCanonicalBackendRecoveryReadback({ readback, expectedArn: arn, expectedFingerprint: fingerprint, expectedNewestArn: ready.newestHistoricalArn });
       registration = { ...verified, payload, registrationCalls: 1, resumed: false };
     }
   }
@@ -314,7 +370,7 @@ export async function runCanonicalBackendRecovery({ bindings, sourceSha, protect
   const registered = { ...prepared, phase: reconciliationResume ? prepared.phase : "READBACK_VERIFIED", replacementArn: registration.arn, replacementFingerprint: registration.fingerprint, registrationCalls: Math.max(prepared.registrationCalls, registration.registrationCalls), registrationMayHaveOccurred: prepared.registrationMayHaveOccurred || registration.registrationCalls === 1 };
   journal.write(registered);
   const reconciliation = await reconcileCanonicalBackendState({ readState, removeState, importState, replacementArn: registration.arn, sourceSha, journal });
-  const evidence = recoveryEvidence({ sourceSha, imageReleaseSha: bindings.imageReleaseSha, imageAuthorizationSha256, state: before, stateBinding: prepared, imageDigest: bindings.backendImage, replacement: { arn: registration.arn, fingerprint: registration.fingerprint, protectedSourceFingerprint: fingerprint } });
+  const evidence = recoveryEvidence({ sourceSha, toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, imageAuthorizationSha256, state: before, stateBinding: prepared, imageDigest: bindings.backendImage, newestHistoricalArn: prepared.newestHistoricalArn, incidentIdentity: prepared.incidentIdentity, replacement: { arn: registration.arn, fingerprint: registration.fingerprint, protectedSourceFingerprint: fingerprint } });
   journal.write({ ...registered, phase: "COMPLETED", evidenceSha256: evidence.evidenceSha256 });
   return { registration, evidence, reconciliation };
 }
@@ -376,15 +432,16 @@ function stateBackendCandidateFromOptional(state) {
   try { return stateBackendCandidate(state).arn; } catch { return null; }
 }
 
-export function recoveryEvidence({ sourceSha, imageReleaseSha, imageAuthorizationSha256, state, stateBinding, replacement, imageDigest, registrationEvent = null } = {}) {
+export function recoveryEvidence({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, state, stateBinding, replacement, imageDigest: backendImageDigest, newestHistoricalArn, incidentIdentity, registrationEvent = null } = {}) {
   if (stateBinding) {
     if (stateBinding.stateLineage !== STAGE_B_BACKEND_RECOVERY.lineage || stateBinding.stateSerial !== STAGE_B_BACKEND_RECOVERY.serial
       || stateBinding.predecessorArn !== STAGE_B_BACKEND_RECOVERY.predecessorArn) throw new Error("Recovery evidence state binding is not the reviewed predecessor.");
   } else assertBackendRecoveryPreconditions({ state, sourceSha });
   const verifiedReplacement = replacement && replacementArn(replacement.arn);
   if (!verifiedReplacement || STAGE_B_BACKEND_RECOVERY.historicalRevisionArns.includes(verifiedReplacement.arn) || replacement.fingerprint !== replacement.protectedSourceFingerprint) throw new Error("Recovery evidence does not bind the replacement to the protected fingerprint.");
-  if (!DIGEST.test(imageDigest || "")) throw new Error("Recovery evidence image binding is invalid.");
-  if (!SHA.test(imageReleaseSha || "") || !/^[a-f0-9]{64}$/.test(imageAuthorizationSha256 || "")) throw new Error("Recovery evidence image-release authorization binding is invalid.");
-  const evidence = { schemaVersion: 2, kind: "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY", sourceSha, toolingSha: sourceSha, imageReleaseSha, imageAuthorizationSha256, address: STAGE_B_BACKEND_RECOVERY.address, family: STAGE_B_BACKEND_RECOVERY.family, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, historicalRevisionArns: STAGE_B_BACKEND_RECOVERY.historicalRevisionArns, replacementArn: replacement.arn, protectedSourceFingerprint: replacement.protectedSourceFingerprint, replacementFingerprint: replacement.fingerprint, imageDigest, stateLineage: stateBinding?.stateLineage || state.lineage, stateSerial: stateBinding?.stateSerial || state.serial, registrationEvent };
+  if (!DIGEST.test(backendImageDigest || "") || !SHA256.test(toolingTreeSha256 || "") || !SHA256.test(sourceContractSha256 || "") || !SHA.test(imageReleaseSha || "") || !SHA256.test(imageAuthorizationSha256 || "") || !ARN.test(newestHistoricalArn || "") || !SHA256.test(incidentIdentity || "")) throw new Error("Recovery evidence provenance binding is invalid.");
+  const expectedIncidentIdentity = canonicalRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: imageDigest(backendImageDigest), imageAuthorizationSha256, stateLineage: stateBinding?.stateLineage || state.lineage, stateSerial: stateBinding?.stateSerial || state.serial, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, newestHistoricalArn, fingerprint: replacement.protectedSourceFingerprint });
+  if (incidentIdentity !== expectedIncidentIdentity) throw new Error("Recovery evidence incident identity is not deterministic for its bindings.");
+  const evidence = { schemaVersion: 2, kind: RECOVERY_KIND, incidentIdentity, sourceSha, toolingSha: sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageAuthorizationSha256, address: STAGE_B_BACKEND_RECOVERY.address, family: STAGE_B_BACKEND_RECOVERY.family, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, predecessorSerial: STAGE_B_BACKEND_RECOVERY.serial, newestHistoricalArn, historicalRevisionArns: STAGE_B_BACKEND_RECOVERY.historicalRevisionArns, replacementArn: replacement.arn, protectedSourceFingerprint: replacement.protectedSourceFingerprint, replacementFingerprint: replacement.fingerprint, imageDigest: backendImageDigest, authorizedBackendImageDigest: imageDigest(backendImageDigest), stateLineage: stateBinding?.stateLineage || state.lineage, stateSerial: stateBinding?.stateSerial || state.serial, registrationEvent };
   return { ...evidence, evidenceSha256: canonicalSha256(evidence) };
 }

@@ -1,9 +1,10 @@
 # Production Green Stage-B task-definition recovery
 
 This contract handles the one reviewed incident where Terraform state points
-the backend candidate at revision `:5`, while unmanaged revisions `:6` and
-`:7` exist in the same ECS family. Revision `:7` is not source-equivalent and
-must never be adopted.
+the backend candidate at revision `:5`, while unmanaged historical revisions
+`:6`, `:7`, and `:8` exist in the same ECS family. Revision `:8` is the newest
+historical evidence, is not source-equivalent to the current protected source,
+and must never be adopted or deregistered.
 
 ## Recovery sequence
 
@@ -11,23 +12,27 @@ After a reviewed merge, the operator must use
 `scripts/aws/recover-stage-b-backend-task-definition.mjs --execute` with the
 fresh protected source, current authorized image bindings, the canonical
 `--image-authorization` artifact, Terraform root,
-explicit AWS profile, and the exact `:5`/`:7` predecessor evidence. Before
+explicit AWS profile, and the exact `:5`/`:8` predecessor evidence. Before
 any AWS or Terraform mutation the command verifies the clean protected-main
 checkout, exact HEAD/tooling SHA, source-bound image-release identity, the
 authorized immutable backend digest, and a private unoccupied evidence destination.
-The producer renders the backend task
-definition through the existing Stage-B renderer, registers exactly one
-revision, and verifies the returned ACTIVE ARN is newer than `:7` and has the
-same semantic fingerprint as the protected source.
+The producer performs a complete ACTIVE-family census, renders the backend task
+definition through the existing Stage-B renderer, and creates a deterministic
+schema-v4 incident identity from the protected source, source-content,
+image-authorization, state predecessor, historical newest ARN, and expected
+semantic fingerprint. Only the explicit historical-to-new-lineage transition
+may register exactly one revision. The returned AWS ARN is used directly; no
+revision number is assumed.
 
 Recovery has two provenance domains. The protected checkout and recovery journal
-bind `toolingSha`; the image authorization and rendered task definition bind
-`imageReleaseSha`. The renderer writes only `imageReleaseSha` into
+bind `toolingSha` and `toolingTreeSha256`; the source contract also binds
+`sourceContractSha256`. The image authorization and rendered task definition
+bind `imageReleaseSha`. The renderer writes only `imageReleaseSha` into
 `RELEASE_GIT_SHA`. The recovery journal and evidence record both identities and
-the image-authorization hash. A legacy revision carrying a tooling SHA in
+the exact authorized image digest and image-authorization hash. A legacy revision carrying a tooling SHA in
 `RELEASE_GIT_SHA` is a fingerprint mismatch, not a reusable source-equivalent
-revision; recovery must fail closed and require a later reviewed canonical
-replacement.
+revision; it remains historical evidence while the new source/image lineage may
+start its own reviewed incident.
 
 Fingerprinting accepts only four reviewed ECS readback projections: omitted
 container `cpu` versus `0`, omitted `volumesFrom` or `systemControls` versus
@@ -42,16 +47,18 @@ The recovery journal is stored beside the evidence output (or at the explicit
 `STATE_RECONCILED`, then `COMPLETED`. `registrationCalls` records remote
 invocation attempts known to have been sent; `registrationMayHaveOccurred`
 records the separate crash-safe ambiguity immediately before an outbound
-request. A failed
-revision discovery therefore remains `DISCOVERY` with zero registration calls.
+request. A failed revision census produces no incomplete journal. Once
+registration is attempted, the journal is durable before the request and the
+returned ARN is persisted immediately.
 
-If a request response, describe, or newest readback is lost, a retry describes
-only the newest ACTIVE revision. It may resume only when that revision has the
-exact canonical fingerprint; a newer noncanonical revision fails closed and no
-second registration is attempted. A legacy journal that recorded
-`REGISTERING`/`registrationCalls=1` before discovery is immutable failed
-evidence: the operator must preserve it and start a new incident only after a
-fresh live/state revalidation. The journal also resumes an interruption after
+If a request response, describe, or newest readback is lost, a retry performs a
+complete ACTIVE-family census. It may resume only when the current-source
+revision and every incident provenance field match; an existing match uses zero
+registrations. Fresh registration is allowed only when no match exists and the
+newest live revision is explicitly historical. Any unexpected newer revision,
+duplicate match, ambiguous prior call, or semantic mismatch fails closed and no
+second registration is attempted. Schema-1 and schema-3 journals are immutable
+failed evidence and cannot authorize the schema-v4 incident. The journal also resumes an interruption after
 `state rm` or `import` without repeating either completed operation.
 
 `STATE_RECONCILING_PRE_REMOVE` is an intent checkpoint, not proof that
@@ -88,5 +95,5 @@ The generic `deploy-ecs-service.sh` registration path rejects all Stage-B
 managed families; its existing-task-definition mode remains available to the
 governed overlap deployment and performs no registration.
 
-The historical `:6` and `:7` revisions remain immutable evidence. They are not
-deregistered by this recovery contract.
+The historical `:6`, `:7`, and `:8` revisions remain immutable evidence. They
+are not adopted or deregistered by this recovery contract.

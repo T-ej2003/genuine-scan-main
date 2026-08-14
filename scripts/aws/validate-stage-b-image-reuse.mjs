@@ -243,6 +243,11 @@ function toolingInputTreeSha256(toolingSha) {
   return computeStageBToolingInputTreeSha256({ files: entries.map(({ file }) => file), blobSha256: (file) => blobByFile.get(file) });
 }
 
+export function deriveStageBToolingInputTreeSha256(toolingSha) {
+  assert(SHA.test(toolingSha || ""), "Tooling SHA must be a full commit SHA.");
+  return toolingInputTreeSha256(toolingSha);
+}
+
 export function deriveStageBImageImpactReport({ imageReleaseSha, toolingSha } = {}) {
   assert(SHA.test(imageReleaseSha || ""), "Image release SHA must be a full commit SHA.");
   assert(SHA.test(toolingSha || ""), "Tooling SHA must be a full commit SHA.");
