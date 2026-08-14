@@ -9,14 +9,25 @@ must never be adopted.
 
 After a reviewed merge, the operator must use
 `scripts/aws/recover-stage-b-backend-task-definition.mjs --execute` with the
-fresh protected source, current authorized image bindings, Terraform root,
+fresh protected source, current authorized image bindings, the canonical
+`--image-authorization` artifact, Terraform root,
 explicit AWS profile, and the exact `:5`/`:7` predecessor evidence. Before
 any AWS or Terraform mutation the command verifies the clean protected-main
-checkout, exact HEAD/source SHA, source-bound image/release bindings, and a
-private unoccupied evidence destination. The producer renders the backend task
+checkout, exact HEAD/tooling SHA, source-bound image-release identity, the
+authorized immutable backend digest, and a private unoccupied evidence destination.
+The producer renders the backend task
 definition through the existing Stage-B renderer, registers exactly one
 revision, and verifies the returned ACTIVE ARN is newer than `:7` and has the
 same semantic fingerprint as the protected source.
+
+Recovery has two provenance domains. The protected checkout and recovery journal
+bind `toolingSha`; the image authorization and rendered task definition bind
+`imageReleaseSha`. The renderer writes only `imageReleaseSha` into
+`RELEASE_GIT_SHA`. The recovery journal and evidence record both identities and
+the image-authorization hash. A legacy revision carrying a tooling SHA in
+`RELEASE_GIT_SHA` is a fingerprint mismatch, not a reusable source-equivalent
+revision; recovery must fail closed and require a later reviewed canonical
+replacement.
 
 Fingerprinting accepts only four reviewed ECS readback projections: omitted
 container `cpu` versus `0`, omitted `volumesFrom` or `systemControls` versus

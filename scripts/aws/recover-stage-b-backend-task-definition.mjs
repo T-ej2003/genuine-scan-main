@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertCanonicalRecoverySourceBinding, canonicalSha256, runCanonicalBackendRecovery, STAGE_B_BACKEND_RECOVERY } from "./stage-b-task-definition-recovery-contract.mjs";
+import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
 
@@ -13,11 +14,18 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const run = (command, args, env) => execFileSync(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+export function buildRecoveryAwsEnvironment(profile, baseEnv = process.env) {
+  const env = { ...baseEnv, AWS_PROFILE: profile, AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2" };
+  for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"]) delete env[key];
+  return env;
+}
 
-export function preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath, repositoryRoot = root, fsOps = fs } = {}) {
+export function preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath, repositoryRoot = root, fsOps = fs } = {}) {
   const evidence = assertStageBArtifactPath({ artifactPath: evidencePath, repositoryRoot, label: "Recovery evidence", allowExisting: true });
   const journal = assertStageBArtifactPath({ artifactPath: journalPath, repositoryRoot, label: "Recovery journal", allowExisting: true });
-  if (evidence === path.resolve(bindingsPath) || journal === path.resolve(bindingsPath) || evidence === journal) throw new Error("Recovery evidence, journal, and bindings must be distinct files.");
+  const bindings = path.resolve(bindingsPath);
+  const imageAuthorization = path.resolve(imageAuthorizationPath);
+  if (new Set([evidence, journal, bindings, imageAuthorization]).size !== 4) throw new Error("Recovery evidence, journal, bindings, and image authorization must be distinct files.");
   ensureStageBPrivateDirectory({ directory: path.dirname(evidence), repositoryRoot, create: false, fsOps, label: "Recovery evidence directory" });
   if (path.dirname(journal) !== path.dirname(evidence)) throw new Error("Recovery journal must share the private evidence directory.");
   const evidenceStat = fsOps.lstatSync(evidence, { throwIfNoEntry: false });
@@ -58,22 +66,25 @@ function finalizeEvidence({ evidencePath, evidence, repositoryRoot = root }) {
   writeStageBPrivateFilesAtomic({ repositoryRoot, overwrite: false, files: [{ filePath: evidencePath, bytes, label: "Recovery evidence" }] });
 }
 
-export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { exec = run, readProtectedCheckout = () => readStageBProtectedMainCheckout({ cwd: root }) } = {}) {
+export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { exec = run, readProtectedCheckout = () => readStageBProtectedMainCheckout({ cwd: root }), verifyImageEvidence = verifyImageEvidenceSignature, baseEnv = process.env } = {}) {
   if (!argv.includes("--execute")) throw new Error("Recovery is mutation-capable; --execute is required and must be explicitly reviewed after merge.");
   const sourceSha = required(argv, "--source-sha");
   const bindingsPath = required(argv, "--bindings");
+  const imageAuthorizationPath = path.resolve(required(argv, "--image-authorization"));
   const terraformRoot = path.resolve(required(argv, "--terraform-root"));
   const evidencePath = path.resolve(required(argv, "--evidence-out"));
   const journalPath = path.resolve(option(argv, "--recovery-state") || `${evidencePath}.recovery.json`);
   const profile = required(argv, "--aws-profile");
   if (!/^[a-f0-9]{40}$/.test(sourceSha)) throw new Error("--source-sha must be a full protected-main SHA.");
   if (terraformRoot !== path.join(root, "infra/aws/terraform/production-green-stage-b")) throw new Error("Recovery Terraform root is not the reviewed Stage-B root.");
-  const outputs = preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath });
+  const outputs = preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath });
   const bindings = JSON.parse(fs.readFileSync(bindingsPath, "utf8"));
+  const imageAuthorizationFile = assertStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: root, label: "Image authorization" });
+  const imageAuthorization = JSON.parse(fs.readFileSync(imageAuthorizationFile.path, "utf8"));
   const protectedCheckout = readProtectedCheckout();
-  assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout });
-  const env = { ...process.env, AWS_PROFILE: profile, AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2" };
-  for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"]) delete env[key];
+  const env = buildRecoveryAwsEnvironment(profile, baseEnv);
+  const imageAuthorizationValidation = { verifyImageEvidence: (input) => verifyImageEvidence({ ...input, env }) };
+  assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation });
   const terraformData = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: env.TF_DATA_DIR, repositoryRoot: root });
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(terraformData.backendMetadataPath, "utf8")).backend);
   const observedWorkspace = String(exec("terraform", [`-chdir=${terraformRoot}`, "workspace", "show"], env)).trim();
@@ -96,7 +107,7 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
     if (address !== STAGE_B_BACKEND_RECOVERY.address || !/^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:[1-9][0-9]*$/.test(arn || "")) throw new Error("Recovery attempted an unreviewed Terraform state import.");
     exec("terraform", [`-chdir=${terraformRoot}`, "import", "-lock-timeout=60s", address, arn], env);
   };
-  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, readState, register, describe, newest, removeState, importState, journal: createFileJournal({ filePath: outputs.journal }) });
+  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, readState, register, describe, newest, removeState, importState, journal: createFileJournal({ filePath: outputs.journal }) });
   finalizeEvidence({ evidencePath: outputs.evidence, evidence: result.evidence });
   process.stdout.write(`${JSON.stringify({ status: "reconciled", replacementArn: result.registration.arn, evidenceSha256: result.evidence.evidenceSha256, stateSerialAfter: result.reconciliation.stateSerialAfter })}\n`);
   return result;

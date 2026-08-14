@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { runCanonicalRecoveryCli } from "../aws/recover-stage-b-backend-task-definition.mjs";
+import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
+import { buildRecoveryAwsEnvironment, runCanonicalRecoveryCli } from "../aws/recover-stage-b-backend-task-definition.mjs";
 import {
   STAGE_B_BACKEND_RECOVERY,
   assertBackendRecoveryPreconditions,
+  assertCanonicalRecoverySourceBinding,
   assertCanonicalBackendRecoveryReadback,
   buildCanonicalRecoveryJournal,
   buildCanonicalBackendRecoveryTaskDefinition,
@@ -17,13 +19,18 @@ import {
   taskDefinitionFingerprint,
 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
-const sourceSha = "084fc6eff5cfcc78d0ff2e037477f824090cb4f3";
-const image = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"a".repeat(64)}`;
+const sourceSha = "45c5a38c7e3594793fafe1f051f1f381937ba0d4";
+const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: "25394d30c189583384c9bba62604bf968dc9e0b2" });
+const imageAuthorization = imageAuthorizationFixture.authorization;
+const imageReleaseSha = imageAuthorization.imageReleaseSha;
+const image = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageAuthorization.backendDigest}`;
 const bindings = {
   toolingSha: sourceSha,
   sourceSha,
   backendImage: image,
-  imageReleaseSha: sourceSha,
+  imageReleaseSha,
+  imageAuthorization,
+  imageAuthorizationValidation: { now: imageAuthorizationFixture.now, verifyImageEvidence: imageAuthorizationFixture.verifyImageEvidence },
   sourceContractSha256: "b".repeat(64),
   migrationSetDigest: "c".repeat(64),
   packageChecksumSha256: "d".repeat(64),
@@ -34,6 +41,7 @@ const bindings = {
   workerLogGroup: "/ecs/mscqr-production/rls-green-worker",
 };
 const protectedCheckout = { mode: "production", toolingSha: sourceSha, currentHead: sourceSha, originMainHead: sourceSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false } };
+const journalIdentity = { imageReleaseSha, imageAuthorizationSha256: imageAuthorization.evidenceSha256 };
 const journalAdapter = (initial) => { let value = initial ? structuredClone(initial) : null; return { read: () => value && structuredClone(value), write: (next) => { value = structuredClone(next); } }; };
 const state = (arn = STAGE_B_BACKEND_RECOVERY.predecessorArn, serial = STAGE_B_BACKEND_RECOVERY.serial) => ({
   version: 4,
@@ -85,9 +93,16 @@ test("canonical source rendering produces the exact immutable replacement finger
   const payload = buildCanonicalBackendRecoveryTaskDefinition(bindings);
   assert.equal(payload.taskDefinition.family, STAGE_B_BACKEND_RECOVERY.family);
   assert.equal(payload.taskDefinition.containerDefinitions[0].image, image);
-  assert.equal(payload.taskDefinition.containerDefinitions[0].environment.find(({ name }) => name === "RELEASE_GIT_SHA").value, sourceSha);
+  assert.equal(payload.taskDefinition.containerDefinitions[0].environment.find(({ name }) => name === "RELEASE_GIT_SHA").value, imageReleaseSha);
   assert.equal(payload.tags.find(({ key }) => key === "MSCQRExecTarget").value, "production-backend");
   assert.match(taskDefinitionFingerprint(payload.taskDefinition, payload.tags), /^[a-f0-9]{64}$/);
+});
+
+test("recovery separates tooling provenance from image/task-definition provenance", () => {
+  assert.doesNotThrow(() => assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout }));
+  assert.notEqual(bindings.toolingSha, bindings.imageReleaseSha);
+  assert.throws(() => assertCanonicalRecoverySourceBinding({ sourceSha, bindings: { ...bindings, imageReleaseSha: sourceSha }, protectedCheckout }), /image-release identity/);
+  assert.throws(() => assertCanonicalRecoverySourceBinding({ sourceSha, bindings: { ...bindings, backendImage: `${image.slice(0, -64)}${"e".repeat(64)}` }, protectedCheckout }), /backend image/);
 });
 
 test("AWS ECS readback projections preserve the exact protected semantic fingerprint", () => {
@@ -168,7 +183,7 @@ test("state reconciliation is exact, minimal, and rejects historical adoption", 
   let removes = 0;
   let imports = 0;
   const payload = replacementPayload(replacementArn);
-  const journal = buildCanonicalRecoveryJournal(current, { sourceSha, fingerprint: payload.fingerprint, imageDigest: image });
+  const journal = buildCanonicalRecoveryJournal(current, { sourceSha, ...journalIdentity, fingerprint: payload.fingerprint, imageDigest: image });
   journal.replacementArn = replacementArn;
   journal.phase = "REGISTERED";
   const result = await reconcileCanonicalBackendState({
@@ -215,25 +230,28 @@ test("source identity and evidence destination failures happen before mutation a
   rmSync(directory, { recursive: true, force: true });
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const bindingsPath = `${directory}/bindings.json`;
+  const imageAuthorizationPath = `${directory}/image-authorization.json`;
   const evidencePath = `${directory}/evidence.json`;
   writeFileSync(bindingsPath, JSON.stringify(bindings), { mode: 0o600 });
+  writeFileSync(imageAuthorizationPath, JSON.stringify(imageAuthorization), { mode: 0o600 });
   writeFileSync(evidencePath, "occupied\n", { mode: 0o600 });
   const calls = [];
   const exec = (command) => { calls.push(command); throw new Error("mutation adapter must not run"); };
   const terraformRoot = path.resolve("infra/aws/terraform/production-green-stage-b");
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", evidencePath, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /occupied/);
+  const cliArgs = (output) => ["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--image-authorization", imageAuthorizationPath, "--terraform-root", terraformRoot, "--evidence-out", output, "--aws-profile", "test"];
+  await assert.rejects(() => runCanonicalRecoveryCli(cliArgs(evidencePath), { exec, readProtectedCheckout: () => protectedCheckout }), /occupied/);
   assert.deepEqual(calls, []);
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", "0".repeat(40), "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", `${directory}/other.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /exact clean protected-main/);
+  await assert.rejects(() => runCanonicalRecoveryCli(cliArgs(`${directory}/other.json`).map((value, index) => index === 2 ? "0".repeat(40) : value), { exec, readProtectedCheckout: () => protectedCheckout }), /exact clean protected-main/);
   assert.deepEqual(calls, []);
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", `${directory}/dirty.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => ({ ...protectedCheckout, porcelainStatus: " M scripts/aws/example.mjs" }) }), /clean protected-main/);
+  await assert.rejects(() => runCanonicalRecoveryCli(cliArgs(`${directory}/dirty.json`), { exec, readProtectedCheckout: () => ({ ...protectedCheckout, porcelainStatus: " M scripts/aws/example.mjs" }) }), /clean protected-main/);
   assert.deepEqual(calls, []);
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", `${directory}/different-head.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => ({ ...protectedCheckout, currentHead: "f".repeat(40) }) }), /exact clean protected-main/);
+  await assert.rejects(() => runCanonicalRecoveryCli(cliArgs(`${directory}/different-head.json`), { exec, readProtectedCheckout: () => ({ ...protectedCheckout, currentHead: "f".repeat(40) }) }), /exact clean protected-main/);
   assert.deepEqual(calls, []);
   writeFileSync(bindingsPath, JSON.stringify({ ...bindings, imageReleaseSha: "0".repeat(40) }), { mode: 0o600 });
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", `${directory}/binding-mismatch.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /source-bound/);
+  await assert.rejects(() => runCanonicalRecoveryCli(cliArgs(`${directory}/binding-mismatch.json`), { exec, readProtectedCheckout: () => protectedCheckout }), /image-release identity/);
   assert.deepEqual(calls, []);
   writeFileSync(`${directory}/not-a-directory`, "x\n", { mode: 0o600 });
-  await assert.rejects(() => runCanonicalRecoveryCli(["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--terraform-root", terraformRoot, "--evidence-out", `${directory}/not-a-directory/evidence.json`, "--aws-profile", "test"], { exec, readProtectedCheckout: () => protectedCheckout }), /directory/);
+  await assert.rejects(() => runCanonicalRecoveryCli(cliArgs(`${directory}/not-a-directory/evidence.json`), { exec, readProtectedCheckout: () => protectedCheckout }), /directory/);
   assert.deepEqual(calls, []);
   rmSync(directory, { recursive: true, force: true });
 });
@@ -260,7 +278,7 @@ test("REGISTERED fingerprint-blocked journal resumes existing AWS-normalized rev
   const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
   const readback = awsNormalizedReadback(replacementArn);
   let current = state(); let registrations = 0;
-  const initial = buildCanonicalRecoveryJournal(current, { sourceSha, fingerprint: readback.fingerprint, imageDigest: image });
+  const initial = buildCanonicalRecoveryJournal(current, { sourceSha, ...journalIdentity, fingerprint: readback.fingerprint, imageDigest: image });
   const journal = journalAdapter({ ...initial, phase: "REGISTERED", replacementArn, registrationCalls: 1, registrationMayHaveOccurred: true });
   const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
     readState: async () => structuredClone(current), newest: async () => replacementArn, describe: async () => readback,
@@ -271,6 +289,72 @@ test("REGISTERED fingerprint-blocked journal resumes existing AWS-normalized rev
   assert.equal(registrations, 0);
   assert.equal(result.registration.registrationCalls, 0);
   assert.equal(result.reconciliation.stateBackendCandidate, replacementArn);
+});
+
+test("captured revision :8 with legacy RELEASE_GIT_SHA is rejected and never resumed", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const invalid = replacementPayload(replacementArn, { mutate: (value) => {
+    value.containerDefinitions[0].environment.find(({ name }) => name === "RELEASE_GIT_SHA").value = "f6bd6e45033fd9adde9f55889ffd00957b063d35";
+  } });
+  const expected = replacementPayload(replacementArn);
+  assert.notEqual(taskDefinitionFingerprint(invalid.taskDefinition, invalid.tags), expected.fingerprint);
+  assert.throws(() => assertCanonicalBackendRecoveryReadback({ readback: invalid, expectedArn: replacementArn, expectedFingerprint: expected.fingerprint }), /fingerprint/);
+  let registrations = 0; let removes = 0; let imports = 0;
+  await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal: journalAdapter(),
+    readState: async () => state(), newest: async () => replacementArn, describe: async () => invalid,
+    register: async () => { registrations += 1; }, removeState: async () => { removes += 1; }, importState: async () => { imports += 1; },
+  }), /fingerprint/);
+  assert.equal(registrations, 0);
+  assert.equal(removes, 0);
+  assert.equal(imports, 0);
+});
+
+test("recovery authorization uses the selected profile environment and rejects ambient credentials", async () => {
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const directory = mkdtempSync(path.join("/tmp", "mscqr-recovery-profile-"));
+  const bindingsPath = path.join(directory, "bindings.json");
+  const imageAuthorizationPath = path.join(directory, "image-authorization.json");
+  const evidencePath = path.join(directory, "evidence.json");
+  writeFileSync(bindingsPath, JSON.stringify(bindings), { mode: 0o600 });
+  writeFileSync(imageAuthorizationPath, JSON.stringify(imageAuthorization), { mode: 0o600 });
+  const cliArgs = ["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--image-authorization", imageAuthorizationPath,
+    "--terraform-root", path.resolve("infra/aws/terraform/production-green-stage-b"), "--evidence-out", evidencePath, "--aws-profile", "selected-recovery-profile"];
+  const observed = [];
+  const calls = [];
+  const ambient = { ...process.env, AWS_PROFILE: "ambient-profile", AWS_ACCESS_KEY_ID: "ambient-key", AWS_SECRET_ACCESS_KEY: "ambient-secret", AWS_SESSION_TOKEN: "ambient-token", AWS_SECURITY_TOKEN: "ambient-security-token" };
+  try {
+    await assert.rejects(() => runCanonicalRecoveryCli(cliArgs, {
+      baseEnv: ambient,
+      readProtectedCheckout: () => protectedCheckout,
+      verifyImageEvidence: ({ env }) => { observed.push(env); throw new Error("signature verification failed"); },
+      exec: (...args) => { calls.push(args); throw new Error("mutation adapter must not run"); },
+    }), /signature verification failed/);
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].AWS_PROFILE, "selected-recovery-profile");
+    assert.equal(observed[0].AWS_REGION, "eu-west-2");
+    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"]) assert.equal(observed[0][key], undefined);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(buildRecoveryAwsEnvironment("selected-recovery-profile", ambient), observed[0]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("schema-v4 journal tooling SHA is mandatory and source-bound on resume", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const payload = replacementPayload(replacementArn);
+  for (const toolingSha of [undefined, "f6bd6e45033fd9adde9f55889ffd00957b063d35", "0".repeat(40)]) {
+    const initial = buildCanonicalRecoveryJournal(state(), { sourceSha, ...journalIdentity, fingerprint: payload.fingerprint, imageDigest: image });
+    if (toolingSha === undefined) delete initial.toolingSha;
+    else initial.toolingSha = toolingSha;
+    const journal = journalAdapter({ ...initial, phase: "REGISTERED", replacementArn, registrationCalls: 1, registrationMayHaveOccurred: true });
+    let registrations = 0;
+    await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+      readState: async () => state(), newest: async () => replacementArn, describe: async () => payload,
+      register: async () => { registrations += 1; }, removeState: async () => {}, importState: async () => {},
+    }), /Canonical recovery journal does not match/);
+    assert.equal(registrations, 0);
+  }
 });
 
 test("discovery failure records no registration attempt and legacy false registration journals fail closed", async () => {
@@ -353,7 +437,7 @@ test("persisted pre-remove journal resumes when the process dies before state re
   const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
   const payload = replacementPayload(replacementArn);
   let current = state(); let removes = 0; let imports = 0;
-  const initial = buildCanonicalRecoveryJournal(current, { sourceSha, fingerprint: payload.fingerprint, imageDigest: image });
+  const initial = buildCanonicalRecoveryJournal(current, { sourceSha, ...journalIdentity, fingerprint: payload.fingerprint, imageDigest: image });
   const journal = journalAdapter({ ...initial, phase: "STATE_RECONCILING_PRE_REMOVE", replacementArn, replacementFingerprint: payload.fingerprint, registrationCalls: 1, registrationMayHaveOccurred: true });
   const resumed = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
     readState: async () => structuredClone(current), newest: async () => replacementArn, describe: async () => payload,
@@ -428,11 +512,11 @@ test("newer noncanonical or non-newest revisions fail closed without registratio
 
 test("recovery evidence is deterministic and binds source, image, predecessor, replacement, and state", () => {
   const payload = replacementPayload();
-  const evidence = recoveryEvidence({ sourceSha, state: state(), imageDigest: image, replacement: { arn: payload.taskDefinition.taskDefinitionArn, fingerprint: payload.fingerprint, protectedSourceFingerprint: payload.fingerprint }, registrationEvent: { eventId: "reviewed-test-event" } });
+  const evidence = recoveryEvidence({ sourceSha, ...journalIdentity, state: state(), imageDigest: image, replacement: { arn: payload.taskDefinition.taskDefinitionArn, fingerprint: payload.fingerprint, protectedSourceFingerprint: payload.fingerprint }, registrationEvent: { eventId: "reviewed-test-event" } });
   const { evidenceSha256, ...evidenceBody } = evidence;
   assert.equal(evidenceSha256, canonicalSha256(evidenceBody));
   assert.equal(evidence.predecessorArn, STAGE_B_BACKEND_RECOVERY.predecessorArn);
-  assert.throws(() => recoveryEvidence({ sourceSha, state: state(), imageDigest: image, replacement: { arn: STAGE_B_BACKEND_RECOVERY.historicalRevisionArns[1], fingerprint: payload.fingerprint, protectedSourceFingerprint: payload.fingerprint } }));
+  assert.throws(() => recoveryEvidence({ sourceSha, ...journalIdentity, state: state(), imageDigest: image, replacement: { arn: STAGE_B_BACKEND_RECOVERY.historicalRevisionArns[1], fingerprint: payload.fingerprint, protectedSourceFingerprint: payload.fingerprint } }));
 });
 
 test("generic deployment script cannot register Stage-B managed families", () => {
