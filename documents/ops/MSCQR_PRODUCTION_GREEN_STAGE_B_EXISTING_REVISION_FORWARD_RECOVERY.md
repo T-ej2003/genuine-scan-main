@@ -29,6 +29,27 @@ Once the journal is `COMPLETED` or `RECONCILED`, replay is terminal: a clean pro
 may validate the recorded incident and immutable evidence without re-running current-HEAD image
 freshness checks or writing any journal/evidence bytes.
 
+## Durable phase transition matrix
+
+| Durable phase | Same-SHA executor | Descendant executor | Expired image authorization | State/evidence rule |
+| --- | --- | --- | --- | --- |
+| `DISCOVERY` | New-mutation authorization required | Fail closed | Fail closed | No mutation is reserved; complete census and source bindings are required |
+| `PREPARED` | New-mutation authorization required | New-mutation authorization required | Fail closed | Candidate must be absent and the pre-import state must be unchanged |
+| `REGISTERED` | Fail closed in this mode | Fail closed in this mode | Fail closed | Canonical forward recovery has no registration phase |
+| `READBACK_VERIFIED` | Fail closed in this mode | Fail closed in this mode | Fail closed | A forward journal cannot claim this canonical-recovery phase |
+| `STATE_RECONCILING_PRE_REMOVE` | Fail closed in this mode | Fail closed in this mode | Fail closed | Legacy recovery evidence is never forward authorization |
+| `STATE_RECONCILING_POST_REMOVE` | Fail closed in this mode | Fail closed in this mode | Fail closed | Legacy recovery evidence is never forward authorization |
+| `IMPORTING` | Consumed-mutation recovery | Consumed-mutation recovery after descendant proof | Allowed only after authenticated state proves the exact `:9` import | No second import; exact state, census, journal, and readback checks remain mandatory |
+| `RECONCILED` | Immutable terminal replay | Immutable terminal replay after descendant proof | Not consulted for replay | Evidence and state are immutable and must match the journal exactly |
+| `COMPLETED` | Immutable terminal replay | Immutable terminal replay after descendant proof | Not consulted for replay | Evidence and state are immutable and must match the journal exactly |
+
+Process death before the `IMPORTING` journal write remains a new-mutation path and requires fresh
+authorization. Process death after that write is a consumed-mutation replay: it can only finalize
+after the authoritative state proves the exact single import. Any semantic state drift, census or
+historical-revision drift, missing/corrupt evidence where evidence is required, or unexpected
+candidate state is fail-closed. Terraform metadata-only normalization is limited to the shared
+reviewed checkpoint allowlist.
+
 Image authorization verifies its own signed source identity, then the forward contract separately
 proves the authenticated authorization-source-to-current-tooling transition and the
 image-release-to-current-tooling transition through the reviewed image-reuse report. A valid

@@ -8,7 +8,6 @@ import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-auth
 import {
   STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY as CONTRACT,
   assertForwardCensus,
-  assertForwardDescendantResume,
   assertForwardRevisionReadback,
   assertForwardSourceBinding,
   assertForwardStateAfterImport,
@@ -212,6 +211,58 @@ test("importing replay finalizes an already successful import without a second i
   assert.equal(JSON.stringify(completed.journal.read()), journalBytes);
   assert.equal(JSON.stringify(completed.evidence.read()), evidenceBytes);
   assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
+async function importingRun() {
+  const run = common({ interruptAt: (phase) => { if (phase === "AFTER_IMPORT") throw new Error("interrupted after import"); } });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(run), /interrupted/);
+  assert.equal(run.journal.read().phase, "IMPORTING");
+  return run;
+}
+
+test("same-source importing replay does not require fresh image authorization", async () => {
+  const first = await importingRun();
+  const replay = common({
+    journal: first.journal,
+    evidence: first.evidence,
+    readState: async () => importedState(),
+    imageAuthorizationValidation: { now: new Date(Date.parse(imageFixture.now) + 2 * 24 * 60 * 60 * 1000).toISOString(), verifyImageEvidence: () => { throw new Error("expired authorization must not be revalidated"); } },
+  });
+  const result = await runExistingRevisionForwardRecovery(replay);
+  assert.equal(result.imported, false);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
+test("descendant importing replay does not require fresh image authorization", async () => {
+  const first = await importingRun();
+  const executorSha = "e".repeat(40);
+  const replay = common({
+    sourceSha: executorSha,
+    protectedCheckout: { currentHead: executorSha, originMainHead: executorSha, toolingSha: executorSha, porcelainStatus: "" },
+    journal: first.journal,
+    evidence: first.evidence,
+    readState: async () => importedState(),
+    imageAuthorizationValidation: { now: new Date(Date.parse(imageFixture.now) + 2 * 24 * 60 * 60 * 1000).toISOString(), verifyImageEvidence: () => { throw new Error("expired authorization must not be revalidated"); } },
+    deriveProvenance: () => { throw new Error("consumed replay must not derive current provenance"); },
+    deriveImageReuse: () => { throw new Error("consumed replay must not re-prove image reuse"); },
+    proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === executorSha,
+  });
+  const result = await runExistingRevisionForwardRecovery(replay);
+  assert.equal(result.imported, false);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
+test("consumed importing replay fails closed when state does not prove the import", async () => {
+  const first = await importingRun();
+  const replay = common({ journal: first.journal, evidence: first.evidence, readState: async () => emptyState() });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(replay), /lineage|serial|candidate/);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
+test("prepared recovery still requires fresh image authorization", async () => {
+  const expired = common({ imageAuthorizationValidation: { now: new Date(Date.parse(imageFixture.now) + 2 * 24 * 60 * 60 * 1000).toISOString(), verifyImageEvidence: imageFixture.verifyImageEvidence } });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(expired), /stale|malformed|evidence|authorization/);
+  assert.deepEqual(expired.counts, { imports: 0, registrations: 0 });
 });
 
 test("forged or legacy evidence cannot authorize the forward mode", async () => {
