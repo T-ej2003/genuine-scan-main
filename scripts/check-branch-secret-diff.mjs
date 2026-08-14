@@ -88,6 +88,10 @@ const rules = [
   },
 ];
 
+const secretArnRule = rules.find(({ name }) => name === "Committed Secrets Manager ARN");
+const generatedCapabilityGraph = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
+const secretArns = (contents) => new Set(contents.match(secretArnRule.regex) || []);
+
 const baseRef = resolveBaseRef();
 if (!baseRef) {
   console.log("Branch secret-diff guard skipped: no suitable base ref found.");
@@ -118,7 +122,14 @@ for (const relativePath of changedFiles) {
   if (!existsSync(fullPath)) continue;
 
   const contents = readFileSync(fullPath, "utf8");
+  const previouslyApprovedGeneratedArns = relativePath === generatedCapabilityGraph
+    ? secretArns(tryGitOutput(["show", `${mergeBase}:${relativePath}`]))
+    : null;
   for (const rule of rules) {
+    if (rule === secretArnRule && previouslyApprovedGeneratedArns) {
+      const newlyIntroduced = [...secretArns(contents)].filter((arn) => !previouslyApprovedGeneratedArns.has(arn));
+      if (newlyIntroduced.length === 0) continue;
+    }
     rule.regex.lastIndex = 0;
     let match = rule.regex.exec(contents);
     while (match) {
