@@ -8,8 +8,9 @@ an AWS identity. The canonical local scripts remain authoritative.
 
 1. Open **Actions → Production Deployment Readiness**.
 2. Run it from protected `main` with the exact 40-character `origin/main` SHA.
-3. The workflow checks out that SHA, fetches protected `origin/main`, and proves
-   the checkout is complete and clean.
+3. A trusted `main` bootstrap checkout fetches `origin/main` and proves the
+   requested SHA is exactly that full SHA before the requested tree is checked
+   out or any repository code/dependency lifecycle runs.
 4. The fixed read-only orchestrator runs source guardrails, evidence and
    capability-contract verification, Stage-B pull-request closure, onboarding
    contract tests, typecheck, changed-file lint, and a diff check.
@@ -20,7 +21,12 @@ an AWS identity. The canonical local scripts remain authoritative.
 The workflow has `contents: read` only, does not configure AWS credentials,
 does not request GitHub OIDC, has no production environment, and contains no
 mutation job. `MSCQR_DEPLOYMENT_MODE=read-only` is enforced by the executable
-orchestrator; the fixed command set rejects mutation boundaries.
+orchestrator; the fixed command set rejects mutation boundaries. Changed-file
+lint is enforcing with `ENFORCE_LINT_CHANGED=true` and uses `HEAD^` as the
+exact-commit comparison base, which remains valid for merge commits because the
+repository computes a merge base before diffing. The evidence
+`sourceTreeSha256` is a SHA-256 digest of canonical tracked paths, modes, and
+blob content digests; it is not Git's SHA-1 tree object ID.
 
 ## Evidence and identity
 
@@ -37,15 +43,19 @@ source-bound contract and must be revalidated by the future production path.
 ## Existing writers and Phase 2 prerequisites
 
 The canonical existing production writer is `release-gate.yml`, serialized by
-the `production-deploy` concurrency group. `deploy-ecs-release.yml` is a
-legacy direct writer with broad inputs and must be retired or constrained before
-Phase 2 is enabled. `release-train.yml` dispatches gates but is not itself the
-deployment writer.
+the `production-deploy` concurrency group. `deploy-ecs-release.yml` is now a
+fail-closed disabled tombstone; it cannot configure AWS or mutate ECS.
+`release-train.yml` dispatches gates but is not itself the deployment writer.
 
-Before Phase 2 adds a mutation job, a separate reviewed change must:
+Phase 2 remains blocked until a separate reviewed identity migration completes:
 
 - define and apply a dedicated production read-only OIDC role, then separately
   verify a dedicated mutation role;
+- reconcile the existing canonical engine's required MFA-backed
+  `mscqr-production-release-deployer` identity with the proposed GitHub OIDC
+  identity. The current source contract explicitly rejects GitHub Actions as a
+  release-deployer caller, so this PR does not silently change that trust
+  boundary;
 - scope GitHub OIDC trust to this repository, the protected production
   environment, and `sts.amazonaws.com` (not `repo:*` or an unrestricted branch);
 - configure the `production` environment with main-only deployment restrictions,
