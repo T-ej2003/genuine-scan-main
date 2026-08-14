@@ -151,12 +151,25 @@ test("PLAN_CAPTURED accepts only the reviewed three-resource broker update", () 
     resource_changes: [
       { address: "aws_iam_policy.broker", type: "aws_iam_policy", change: { actions: ["update"], before: { policy: "old" }, after: {} } },
       { address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "1" }, after: { function_version: "2" } } },
-      { address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: ["update"], before: { filename: "old.zip", source_code_hash: "old", environment: {}, code_sha256: "old-code-sha", source_code_size: 100, last_modified: "old", qualified_arn: "arn:aws:lambda:eu-west-2:368992683803:function:broker:2", qualified_invoke_arn: "arn:aws:apigateway:eu-west-2:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-2:368992683803:function:broker:2/invocations", version: "2" }, after: { filename: "new.zip", source_code_hash: "new", environment: {} }, after_unknown: { code_sha256: true, source_code_size: true, last_modified: true, qualified_arn: true, qualified_invoke_arn: true, version: true } } },
+      { address: "aws_lambda_function.broker", type: "aws_lambda_function", change: { actions: ["update"], before: { filename: "old.zip", source_code_hash: "old", environment: {}, timeout: 30, code_sha256: "old-code-sha", source_code_size: 100, last_modified: "old", qualified_arn: "arn:aws:lambda:eu-west-2:368992683803:function:broker:2", qualified_invoke_arn: "arn:aws:apigateway:eu-west-2:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-2:368992683803:function:broker:2/invocations", version: "2" }, after: { filename: "new.zip", source_code_hash: "new", environment: {}, timeout: 180 }, after_unknown: { code_sha256: true, source_code_size: true, last_modified: true, qualified_arn: true, qualified_invoke_arn: true, version: true } } },
       { address: "aws_iam_role_policy_attachment.broker", type: "aws_iam_role_policy_attachment", change: { actions: ["no-op"], before: {}, after: {} } },
     ],
   };
   assert.equal(classifyStageBBrokerActionShape(plan), "update");
   assert.deepEqual(assertStageBBrokerCaptureUpdateContract(plan), { brokerOperation: "update", brokerUpdatePresent: true, brokerActions: ["update"], brokerResourceAddresses: ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"], brokerReferenceValidationPending: true });
+  for (const [before, after] of [[30, 179], [30, 181], [180, 30], [30, 60]]) {
+    const rejected = structuredClone(plan);
+    const timeout = rejected.resource_changes[2].change;
+    timeout.before.timeout = before;
+    timeout.after.timeout = after;
+    assert.throws(() => assertStageBBrokerCaptureUpdateContract(rejected), /30-to-180/);
+  }
+  const unchanged = structuredClone(plan);
+  unchanged.resource_changes[2].change.after.timeout = 30;
+  assert.doesNotThrow(() => assertStageBBrokerCaptureUpdateContract(unchanged));
+  const combined = structuredClone(plan);
+  combined.resource_changes[2].change.after.description = "unreviewed";
+  assert.throws(() => assertStageBBrokerCaptureUpdateContract(combined), /unsupported mutable field/);
 });
 
 test("PLAN_CAPTURED rejects broker create, delete, replacement, and unsupported fields", () => {
