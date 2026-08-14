@@ -33,7 +33,8 @@ const denies = (action) => policy.Statement.some((statement) => statement.Effect
 
 test("Stage B dispatcher exposes only a merged release SHA and calls the fixed reusable workflow", () => {
   assert.deepEqual(Object.keys(dispatcher.on.workflow_dispatch.inputs), ["release_sha"]);
-  assert.equal(dispatcher.permissions["id-token"], undefined);
+  assert.deepEqual(dispatcher.permissions, { contents: "read", "id-token": "write" });
+  assert.deepEqual(dispatcher.jobs["verify-release"].permissions, { contents: "read" });
   assert.match(dispatcher.jobs["verify-release"].steps.at(-1).run, /stage-b-release-gate\.mjs/);
   assert.equal(dispatcher.jobs["build-and-attest"].uses, "./.github/workflows/production-green-stage-b-image-build.yml");
   assert.deepEqual(Object.keys(dispatcher.jobs["build-and-attest"].with), ["release_sha"]);
