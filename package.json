@@ -20,6 +20,7 @@
     "check:budgets": "node scripts/check-code-size.mjs",
     "check:dependency-audit": "node scripts/check-dependency-audit.mjs",
     "test:production-onboarding-contract": "node --test scripts/tests/production-onboarding-contract.test.mjs",
+    "test:production-ci-control-plane": "node --test scripts/tests/production-deploy-read-only-workflow.test.mjs scripts/tests/production-single-writer-contract.test.mjs",
     "check:documents": "node scripts/check-documents-organization.mjs",
     "check:architecture-guardrails": "node scripts/check-architecture-guardrails.mjs",
     "check:staging-terraform": "node scripts/check-staging-terraform-validate.mjs",

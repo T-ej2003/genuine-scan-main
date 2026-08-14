@@ -71,7 +71,6 @@ permissions:
   contents: read
   actions: read
   deployments: read
-  id-token: write
 
 concurrency:
   group: production-deploy
@@ -197,6 +196,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     environment: production
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+      id-token: write
     services:
       postgres:
         image: postgres:18.4
