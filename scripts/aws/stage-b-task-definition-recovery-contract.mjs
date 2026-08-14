@@ -46,7 +46,9 @@ export function assertCanonicalRecoverySourceBinding({ sourceSha, bindings, prot
   if (!bindings || bindings.toolingSha !== sourceSha || bindings.sourceSha !== sourceSha || !SHA.test(bindings.imageReleaseSha || "")) throw new Error("Canonical recovery tooling and image-release identities are incomplete.");
   const authorization = imageAuthorization || bindings.imageAuthorization;
   if (!authorization || bindings.imageReleaseSha !== authorization.imageReleaseSha) throw new Error("Canonical recovery image-release identity does not match image authorization.");
-  assertImageAuthorization(authorization, sourceSha, imageAuthorizationValidation || bindings.imageAuthorizationValidation);
+  const authorizationValidation = imageAuthorizationValidation || bindings.imageAuthorizationValidation;
+  if (!authorizationValidation || typeof authorizationValidation.verifyImageEvidence !== "function") throw new Error("Canonical recovery image authorization verifier context is required.");
+  assertImageAuthorization(authorization, sourceSha, authorizationValidation);
   const authorizedDigest = authorizedBackendDigest(authorization);
   if (!IMAGE_DIGEST.test(authorizedDigest || "") || bindings.backendImage !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${authorizedDigest}`) throw new Error("Canonical recovery backend image does not match image authorization.");
 }
@@ -193,7 +195,7 @@ function requireJournal(journal) {
 
 function validateJournal(journalState, { sourceSha, imageReleaseSha, imageAuthorizationSha256, fingerprint, imageDigest } = {}) {
   if (!journalState || journalState.schemaVersion !== 4 || journalState.kind !== "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY"
-    || journalState.sourceSha !== sourceSha || journalState.address !== STAGE_B_BACKEND_RECOVERY.address
+    || journalState.sourceSha !== sourceSha || journalState.toolingSha !== sourceSha || journalState.address !== STAGE_B_BACKEND_RECOVERY.address
     || journalState.family !== STAGE_B_BACKEND_RECOVERY.family || journalState.predecessorArn !== STAGE_B_BACKEND_RECOVERY.predecessorArn
     || journalState.newestHistoricalArn !== STAGE_B_BACKEND_RECOVERY.newestHistoricalArn
     || journalState.stateLineage !== STAGE_B_BACKEND_RECOVERY.lineage || journalState.stateSerial !== STAGE_B_BACKEND_RECOVERY.serial

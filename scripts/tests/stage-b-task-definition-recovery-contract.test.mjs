@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
-import { runCanonicalRecoveryCli } from "../aws/recover-stage-b-backend-task-definition.mjs";
+import { buildRecoveryAwsEnvironment, runCanonicalRecoveryCli } from "../aws/recover-stage-b-backend-task-definition.mjs";
 import {
   STAGE_B_BACKEND_RECOVERY,
   assertBackendRecoveryPreconditions,
@@ -307,6 +307,54 @@ test("captured revision :8 with legacy RELEASE_GIT_SHA is rejected and never res
   assert.equal(registrations, 0);
   assert.equal(removes, 0);
   assert.equal(imports, 0);
+});
+
+test("recovery authorization uses the selected profile environment and rejects ambient credentials", async () => {
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const directory = mkdtempSync(path.join("/tmp", "mscqr-recovery-profile-"));
+  const bindingsPath = path.join(directory, "bindings.json");
+  const imageAuthorizationPath = path.join(directory, "image-authorization.json");
+  const evidencePath = path.join(directory, "evidence.json");
+  writeFileSync(bindingsPath, JSON.stringify(bindings), { mode: 0o600 });
+  writeFileSync(imageAuthorizationPath, JSON.stringify(imageAuthorization), { mode: 0o600 });
+  const cliArgs = ["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--image-authorization", imageAuthorizationPath,
+    "--terraform-root", path.resolve("infra/aws/terraform/production-green-stage-b"), "--evidence-out", evidencePath, "--aws-profile", "selected-recovery-profile"];
+  const observed = [];
+  const calls = [];
+  const ambient = { ...process.env, AWS_PROFILE: "ambient-profile", AWS_ACCESS_KEY_ID: "ambient-key", AWS_SECRET_ACCESS_KEY: "ambient-secret", AWS_SESSION_TOKEN: "ambient-token", AWS_SECURITY_TOKEN: "ambient-security-token" };
+  try {
+    await assert.rejects(() => runCanonicalRecoveryCli(cliArgs, {
+      baseEnv: ambient,
+      readProtectedCheckout: () => protectedCheckout,
+      verifyImageEvidence: ({ env }) => { observed.push(env); throw new Error("signature verification failed"); },
+      exec: (...args) => { calls.push(args); throw new Error("mutation adapter must not run"); },
+    }), /signature verification failed/);
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].AWS_PROFILE, "selected-recovery-profile");
+    assert.equal(observed[0].AWS_REGION, "eu-west-2");
+    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"]) assert.equal(observed[0][key], undefined);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(buildRecoveryAwsEnvironment("selected-recovery-profile", ambient), observed[0]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("schema-v4 journal tooling SHA is mandatory and source-bound on resume", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:8";
+  const payload = replacementPayload(replacementArn);
+  for (const toolingSha of [undefined, "f6bd6e45033fd9adde9f55889ffd00957b063d35", "0".repeat(40)]) {
+    const initial = buildCanonicalRecoveryJournal(state(), { sourceSha, ...journalIdentity, fingerprint: payload.fingerprint, imageDigest: image });
+    if (toolingSha === undefined) delete initial.toolingSha;
+    else initial.toolingSha = toolingSha;
+    const journal = journalAdapter({ ...initial, phase: "REGISTERED", replacementArn, registrationCalls: 1, registrationMayHaveOccurred: true });
+    let registrations = 0;
+    await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal,
+      readState: async () => state(), newest: async () => replacementArn, describe: async () => payload,
+      register: async () => { registrations += 1; }, removeState: async () => {}, importState: async () => {},
+    }), /Canonical recovery journal does not match/);
+    assert.equal(registrations, 0);
+  }
 });
 
 test("discovery failure records no registration attempt and legacy false registration journals fail closed", async () => {
