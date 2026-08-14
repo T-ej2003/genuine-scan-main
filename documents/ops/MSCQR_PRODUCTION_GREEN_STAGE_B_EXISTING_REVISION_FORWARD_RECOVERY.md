@@ -14,7 +14,15 @@ or Terraform apply capability. Its only mutation seam is one canonical Terraform
 exact `:9` ARN. Before import it binds the current state, census, image authorization, source
 provenance, semantic fingerprint, and incident identity. After import it verifies lineage, the
 expected serial transition, exact `:9` ownership at the governed address, and that no unrelated
-state changed. A completed forward journal is replay-safe and performs no second import.
+state changed. The CLI validates the reviewed S3 backend metadata and `default` workspace before
+the first remote state pull and again immediately before import; it also re-reads the remote state
+at that boundary. A completed forward journal is replay-safe and performs no second import: its
+evidence is parsed, canonicalized, hash-checked against the journal, and then treated as immutable.
+
+Image authorization verifies its own signed source identity, then the forward contract separately
+proves the authenticated authorization-source-to-current-tooling transition and the
+image-release-to-current-tooling transition through the reviewed image-reuse report. A valid
+two-SHA reuse is explicit; an unrelated or image-affecting transition fails closed.
 
 Use the existing Stage-B preflight and artifact contracts to create fresh bindings and image
 authorization inputs. Store the forward journal and evidence in the private release-artifact

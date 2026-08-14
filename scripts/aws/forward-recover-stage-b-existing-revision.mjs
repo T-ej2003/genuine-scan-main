@@ -4,6 +4,8 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assertStageBArtifactPath, assertStageBPrivateFile, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertStageBTerraformBackendConfig, assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, STAGE_B_TERRAFORM_BACKEND_CONFIG } from "./stage-b-terraform-backend-contract.mjs";
+import { assertStageBTerraformWorkspace, STAGE_B_TERRAFORM_WORKSPACE } from "./stage-b-terraform-workspace.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { deriveStageBImageImpactReport } from "./validate-stage-b-image-reuse.mjs";
 import { deriveCanonicalRecoveryProvenance, collectCanonicalBackendRecoveryCensus } from "./recover-stage-b-backend-task-definition.mjs";
@@ -20,6 +22,25 @@ export function buildForwardRecoveryAwsEnvironment(profile, baseEnv = process.en
   const env = { ...baseEnv, AWS_PROFILE: profile, AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2" };
   for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"]) delete env[key];
   return env;
+}
+
+export function buildForwardRecoveryTerraformEnvironment(terraformDataDir, baseEnv = process.env) {
+  const resolved = path.resolve(terraformDataDir || "");
+  if (!terraformDataDir || resolved === path.resolve(root)) throw new Error("Forward recovery requires the dedicated private Terraform data directory.");
+  if (baseEnv.TF_DATA_DIR && path.resolve(baseEnv.TF_DATA_DIR) !== resolved) throw new Error("Forward recovery refuses a stale ambient TF_DATA_DIR.");
+  if (baseEnv.TF_WORKSPACE && baseEnv.TF_WORKSPACE !== STAGE_B_TERRAFORM_WORKSPACE) throw new Error("Forward recovery refuses a non-default ambient Terraform workspace.");
+  return { ...baseEnv, TF_DATA_DIR: resolved, TF_WORKSPACE: STAGE_B_TERRAFORM_WORKSPACE };
+}
+
+export function assertForwardRecoveryTerraformBackend({ env, repositoryRoot = root, runTerraform } = {}) {
+  assertStageBTerraformBackendConfig(STAGE_B_TERRAFORM_BACKEND_CONFIG);
+  if (typeof runTerraform !== "function") throw new Error("Forward recovery requires a Terraform workspace probe.");
+  const metadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: env?.TF_DATA_DIR, repositoryRoot });
+  const initialized = JSON.parse(fs.readFileSync(metadata.backendMetadataPath, "utf8"));
+  assertStageBTerraformInitializedBackendMetadata(initialized.backend);
+  const observedWorkspace = String(runTerraform(["workspace", "show"], env)).trim();
+  assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE, observedWorkspace });
+  return metadata;
 }
 
 function journalAdapter(filePath, repositoryRoot) {
@@ -47,17 +68,19 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const bindingsPath = path.resolve(required(argv, "--bindings"));
   const imageAuthorizationPath = path.resolve(required(argv, "--image-authorization"));
   const profile = required(argv, "--aws-profile");
+  const terraformDataDir = required(argv, "--terraform-data-dir");
   const evidencePath = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--evidence-out")), repositoryRoot: root, label: "Forward recovery evidence" });
   const journalPath = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--forward-recovery-state")), repositoryRoot: root, label: "Forward recovery journal" });
   if (evidencePath === journalPath) throw new Error("Forward recovery evidence and journal must be distinct.");
   const bindings = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: bindingsPath, repositoryRoot: root, label: "Stage-B bindings" }).path, "utf8"));
   const imageAuthorization = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: root, label: "Image authorization" }).path, "utf8"));
   const protectedCheckout = readProtectedCheckout();
-  const env = buildForwardRecoveryAwsEnvironment(profile, baseEnv);
+  const env = buildForwardRecoveryTerraformEnvironment(terraformDataDir, buildForwardRecoveryAwsEnvironment(profile, baseEnv));
   const run = (command, args) => execFile(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const aws = (args) => JSON.parse(run("aws", [...args, "--region", "eu-west-2", "--profile", profile, "--output", "json"]));
-  const terraform = (args) => JSON.parse(run("terraform", [`-chdir=${terraformRoot}`, ...args],));
-  const readState = async () => terraform(["state", "pull"]);
+  const terraform = (args) => JSON.parse(run("terraform", [`-chdir=${terraformRoot}`, ...args]));
+  const validateBackend = () => assertForwardRecoveryTerraformBackend({ env, repositoryRoot: root, runTerraform: (args) => run("terraform", [`-chdir=${terraformRoot}`, ...args]) });
+  const readState = async () => { validateBackend(); return terraform(["state", "pull"]); };
   const describe = async (arn) => aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
   const census = () => collectCanonicalBackendRecoveryCensus({ list: (nextToken) => {
     const args = ["ecs", "list-task-definitions", "--family-prefix", STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC"];
@@ -66,7 +89,16 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   }, describe });
   const importState = async ({ address, arn }) => {
     if (address !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.address || arn !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn) throw new Error("Forward recovery attempted an unreviewed Terraform import.");
+    validateBackend();
     run("terraform", [`-chdir=${terraformRoot}`, "import", "-lock-timeout=60s", address, arn]);
+  };
+  const existingJournal = journalAdapter(journalPath, root).read();
+  const completedEvidence = existingJournal && ["COMPLETED", "RECONCILED"].includes(existingJournal.phase)
+    ? JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: evidencePath, repositoryRoot: root, label: "Forward recovery evidence" }).path, "utf8"))
+    : undefined;
+  const proveDescendant = ({ ancestorSha, descendantSha }) => {
+    if (ancestorSha === descendantSha) return true;
+    try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
   };
   const result = await runExistingRevisionForwardRecovery({
     bindings,
@@ -75,16 +107,17 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
     imageAuthorization,
     imageAuthorizationValidation: { verifyImageEvidence: (input) => verifyImageEvidence({ ...input, env }) },
     deriveProvenance: ({ sourceSha: value }) => deriveCanonicalRecoveryProvenance({ sourceSha: value, repositoryRoot: root }),
+    proveDescendant,
     deriveImageReuse: ({ imageReleaseSha, toolingSha }) => { const report = deriveStageBImageImpactReport({ imageReleaseSha, toolingSha }); return { ...report, imageBuildInputsChanged: report.newImagesRequired }; },
     readState,
     census,
     describe,
     importState,
+    completedEvidence,
     journal: journalAdapter(journalPath, root),
   });
   if (result.evidence) writeEvidence(evidencePath, result.evidence);
-  else if (!fs.existsSync(evidencePath)) throw new Error("Completed forward recovery is missing its immutable evidence artifact.");
-  else assertStageBPrivateFile({ filePath: evidencePath, repositoryRoot: root, label: "Forward recovery evidence" });
+  else if (!completedEvidence) throw new Error("Completed forward recovery is missing its immutable evidence artifact.");
   process.stdout.write(`${JSON.stringify({ status: result.imported ? "imported" : "already-reconciled", mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, replacementArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn, registrationCalls: 0, importCalls: result.importCalls })}\n`);
   return result;
 }

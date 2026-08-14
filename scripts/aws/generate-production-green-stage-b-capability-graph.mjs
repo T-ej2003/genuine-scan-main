@@ -8,6 +8,7 @@ import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { RELEASE_POLICY_SOURCES, canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS } from "./stage-b-evidence-freshness.mjs";
 import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
+import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -99,6 +100,19 @@ const RECOVERY_CAPABILITIES = Object.freeze([
   ["recovery-lock-state", "s3:PutObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"]],
   ["recovery-unlock-state", "s3:DeleteObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"]],
 ]);
+
+const FORWARD_RECOVERY_CAPABILITIES = Object.freeze([
+  ["forward-recovery-read-state", "s3:GetObject", [STAGE_B_TERRAFORM_BACKEND.stateArn]],
+  ["forward-recovery-write-state", "s3:PutObject", [STAGE_B_TERRAFORM_BACKEND.stateArn]],
+  ["forward-recovery-lock-state", "s3:GetObject", [STAGE_B_TERRAFORM_BACKEND.lockArn]],
+  ["forward-recovery-acquire-state-lock", "s3:PutObject", [STAGE_B_TERRAFORM_BACKEND.lockArn]],
+  ["forward-recovery-release-state-lock", "s3:DeleteObject", [STAGE_B_TERRAFORM_BACKEND.lockArn]],
+]);
+
+const PHASE_CAPABILITY_REQUIREMENTS = Object.freeze({
+  "canonical-backend-recovery": RECOVERY_CAPABILITIES.map(([id]) => id),
+  "existing-revision-forward-recovery": FORWARD_RECOVERY_CAPABILITIES.map(([id]) => id),
+});
 
 const classification = (entry, forbidden) => forbidden ? "FORBIDDEN"
   : entry.phase === "apply" ? "TERRAFORM_APPLY_MUTATION"
@@ -200,8 +214,12 @@ export function buildStageBDeploymentCapabilityGraph() {
     const entry = { id, action, resources };
     return { id, phase: "canonical-backend-recovery", identity: "RELEASE_DEPLOYER", executor: "aws-cli-or-terraform", sourceFile: "scripts/aws/recover-stage-b-backend-task-definition.mjs", sourceFunction: id, action, resources, context: { account: "368992683803", region: "eu-west-2" }, classification: /^(?:ecs:RegisterTaskDefinition|ecs:TagResource|s3:PutObject|s3:DeleteObject)$/.test(action) ? "CANONICAL_RECOVERY_MUTATION" : "CANONICAL_RECOVERY_READ", probe: "administrator-simulation", probeIds: [], policy: authority(entry, false, policies), required: true, mutation: /^(?:ecs:RegisterTaskDefinition|ecs:TagResource|s3:PutObject|s3:DeleteObject)$/.test(action) };
   });
+  const forwardRecovery = FORWARD_RECOVERY_CAPABILITIES.map(([id, action, resources]) => {
+    const entry = { id, action, resources };
+    return { id, phase: "existing-revision-forward-recovery", identity: "RELEASE_DEPLOYER", executor: "terraform", sourceFile: "scripts/aws/forward-recover-stage-b-existing-revision.mjs", sourceFunction: id, action, resources, context: { account: "368992683803", region: "eu-west-2" }, classification: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) ? "FORWARD_RECOVERY_IMPORT_MUTATION" : "FORWARD_RECOVERY_READ", probe: "administrator-simulation", probeIds: [], policy: authority(entry, false, policies), required: true, mutation: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) };
+  });
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:Get)/.test(action) }));
-  const capabilities = [...fixed, ...recovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
@@ -220,6 +238,12 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   if (graph.phases.length !== 33 || new Set(graph.phases.map(({ id }) => id)).size !== 33) throw new Error("Stage B capability graph phase coverage is incomplete.");
   if (new Set(graph.capabilities.map(({ id }) => id)).size !== graph.capabilities.length) throw new Error("Stage B capability IDs are not unique.");
   if (graph.capabilities.some(({ identity, action }) => !identity || !action)) throw new Error("Stage B capability identity is ambiguous.");
+  for (const [phase, ids] of Object.entries(PHASE_CAPABILITY_REQUIREMENTS)) {
+    const phaseCapabilities = graph.capabilities.filter((capability) => capability.phase === phase);
+    if (ids.some((id) => !phaseCapabilities.some((capability) => capability.id === id))) throw new Error(`Stage B phase capability coverage is incomplete: ${phase}.`);
+  }
+  const forwardCapabilities = graph.capabilities.filter(({ phase }) => phase === "existing-revision-forward-recovery");
+  if (forwardCapabilities.some(({ action, identity, sourceFile }) => identity !== "RELEASE_DEPLOYER" || sourceFile !== "scripts/aws/forward-recover-stage-b-existing-revision.mjs" || ["ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition", "ecs:UpdateService", "iam:PutRolePolicy", "iam:AttachRolePolicy"].includes(action))) throw new Error("Forward recovery capability boundary is broader than zero-registration Terraform import.");
   if (graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy")) throw new Error("Release-deployer cannot own IAM simulation.");
   const checkerPublication = graph.capabilities.filter(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:PutSecretValue" && resources.includes(STAGE_B.approvalSecretArn));
   if (checkerPublication.length !== 1) throw new Error("Exact checker approval publication capability is absent or duplicated.");

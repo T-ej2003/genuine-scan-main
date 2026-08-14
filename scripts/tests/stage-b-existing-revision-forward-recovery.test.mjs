@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import fs, { readFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import {
   STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY as CONTRACT,
   assertForwardCensus,
   assertForwardRevisionReadback,
+  assertForwardSourceBinding,
   assertForwardStateAfterImport,
   assertForwardStateBeforeImport,
   canonicalForwardRecoveryIncidentIdentity,
   runExistingRevisionForwardRecovery,
 } from "../aws/stage-b-existing-revision-forward-recovery-contract.mjs";
+import { assertForwardRecoveryTerraformBackend, buildForwardRecoveryTerraformEnvironment } from "../aws/forward-recover-stage-b-existing-revision.mjs";
+import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { buildCanonicalBackendRecoveryTaskDefinition, canonicalSha256, taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
 const sourceSha = "45c5a38c7e3594793fafe1f051f1f381937ba0d4";
@@ -95,13 +101,25 @@ test("adopts exact :9 with one import and zero registration capability", async (
 
 test("completed forward incident replays idempotently without import or registration", async () => {
   const run = common();
-  await runExistingRevisionForwardRecovery(run);
+  const first = await runExistingRevisionForwardRecovery(run);
   const journalBytes = JSON.stringify(run.journal.read());
-  const replay = common({ journal: run.journal, readState: async () => importedState() });
+  const replay = common({ journal: run.journal, readState: async () => importedState(), completedEvidence: first.evidence });
   const result = await runExistingRevisionForwardRecovery(replay);
   assert.equal(result.imported, false);
   assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
   assert.equal(JSON.stringify(run.journal.read()), journalBytes);
+});
+
+test("completed replay rejects corrupted or replaced evidence without mutation", async () => {
+  const run = common();
+  const first = await runExistingRevisionForwardRecovery(run);
+  const journalBytes = JSON.stringify(run.journal.read());
+  for (const completedEvidence of [{ ...first.evidence, evidenceSha256: "f".repeat(64) }, { foreign: true }]) {
+    const replay = common({ journal: run.journal, readState: async () => importedState(), completedEvidence });
+    await assert.rejects(() => runExistingRevisionForwardRecovery(replay), /evidence/);
+    assert.equal(JSON.stringify(run.journal.read()), journalBytes);
+    assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+  }
 });
 
 test("zero-registration mode rejects every newer or mismatched census", () => {
@@ -173,4 +191,50 @@ test("source, image, authorization, and provenance mismatches fail before import
     await assert.rejects(() => runExistingRevisionForwardRecovery(run));
     assert.deepEqual(run.counts, { imports: 0, registrations: 0 });
   }
+});
+
+test("two-SHA authorization requires an authenticated ancestor and image-safe reuse", () => {
+  const authorizationSourceSha = execFileSync("git", ["rev-parse", "HEAD~1"], { encoding: "utf8" }).trim();
+  const executorSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const fixture = makeCanonicalImageAuthorization({ sourceSha: authorizationSourceSha, imageReleaseSha: authorizationSourceSha });
+  const currentBindings = { ...bindings, sourceSha: executorSha, toolingSha: executorSha, imageAuthorization: fixture.authorization };
+  currentBindings.imageReleaseSha = authorizationSourceSha;
+  currentBindings.backendImage = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${fixture.authorization.backendDigest}`;
+  const currentCheckout = { currentHead: executorSha, originMainHead: executorSha, toolingSha: executorSha, porcelainStatus: "" };
+  const reuse = ({ imageReleaseSha: release, toolingSha }) => ({ ...deriveImageReuse({ imageReleaseSha: release, toolingSha }), imageReleaseSha: release, toolingSha });
+  assertForwardSourceBinding({ sourceSha: executorSha, bindings: currentBindings, protectedCheckout: currentCheckout, imageAuthorization: fixture.authorization, imageAuthorizationValidation: { now: fixture.now, verifyImageEvidence: fixture.verifyImageEvidence }, deriveProvenance: () => ({ toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256 }), deriveImageReuse: reuse, proveDescendant: () => true });
+  assert.throws(() => assertForwardSourceBinding({ sourceSha: executorSha, bindings: currentBindings, protectedCheckout: currentCheckout, imageAuthorization: fixture.authorization, imageAuthorizationValidation: { now: fixture.now, verifyImageEvidence: fixture.verifyImageEvidence }, deriveProvenance, deriveImageReuse: reuse, proveDescendant: () => false }), /ancestor/);
+  assert.throws(() => assertForwardSourceBinding({ sourceSha: executorSha, bindings: { ...currentBindings, imageReleaseSha: "8".repeat(40) }, protectedCheckout: currentCheckout, imageAuthorization: fixture.authorization, imageAuthorizationValidation: { now: fixture.now, verifyImageEvidence: fixture.verifyImageEvidence }, deriveProvenance, deriveImageReuse: reuse, proveDescendant: () => true }), /image authorization/);
+  assert.throws(() => assertForwardSourceBinding({ sourceSha: executorSha, bindings: currentBindings, protectedCheckout: currentCheckout, imageAuthorization: fixture.authorization, imageAuthorizationValidation: { now: fixture.now, verifyImageEvidence: fixture.verifyImageEvidence }, deriveProvenance, deriveImageReuse: () => ({ ...reuse({ imageReleaseSha: authorizationSourceSha, toolingSha: executorSha }), imageAffectingFiles: ["backend/src/app.ts"], imageReuseCompatible: false, imageBuildInputsChanged: true }), proveDescendant: () => true }), /reuse/);
+});
+
+function backendMetadata(overrides = {}) {
+  return { backend: { type: "s3", hash: 1, config: { ...STAGE_B_TERRAFORM_BACKEND_CONFIG, ...overrides } } };
+}
+
+function privateBackendDirectory(overrides) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-forward-backend-"));
+  fs.chmodSync(directory, 0o700);
+  fs.writeFileSync(path.join(directory, "terraform.tfstate"), JSON.stringify(backendMetadata(overrides)), { mode: 0o600 });
+  return directory;
+}
+
+test("forward CLI backend gate rejects stale TF_DATA_DIR, copied backend, wrong key, and workspace", () => {
+  const dataDir = privateBackendDirectory();
+  const otherDir = privateBackendDirectory();
+  assert.throws(() => buildForwardRecoveryTerraformEnvironment(dataDir, { TF_DATA_DIR: otherDir, TF_WORKSPACE: "default" }), /stale/);
+  assert.doesNotThrow(() => assertForwardRecoveryTerraformBackend({ env: buildForwardRecoveryTerraformEnvironment(dataDir, {}), repositoryRoot: process.cwd(), runTerraform: () => "default\n" }));
+  for (const overrides of [{ bucket: "local-copy" }, { key: "wrong.tfstate" }]) {
+    const wrong = privateBackendDirectory(overrides);
+    assert.throws(() => assertForwardRecoveryTerraformBackend({ env: buildForwardRecoveryTerraformEnvironment(wrong, {}), repositoryRoot: process.cwd(), runTerraform: () => "default\n" }), /outside/);
+  }
+  assert.throws(() => buildForwardRecoveryTerraformEnvironment(dataDir, { TF_WORKSPACE: "staging" }), /workspace/);
+  assert.throws(() => assertForwardRecoveryTerraformBackend({ env: buildForwardRecoveryTerraformEnvironment(dataDir, {}), repositoryRoot: process.cwd(), runTerraform: () => "staging\n" }), /workspace/);
+});
+
+test("forward recovery revalidates the remote state immediately before import", async () => {
+  let reads = 0;
+  const run = common({ readState: async () => { reads += 1; return reads === 1 ? emptyState() : { ...emptyState(), resources: [...emptyState().resources, { mode: "managed", type: "aws_s3_bucket", name: "drift", instances: [] }] }; } });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(run), /changed before/);
+  assert.equal(run.counts.imports, 0);
 });

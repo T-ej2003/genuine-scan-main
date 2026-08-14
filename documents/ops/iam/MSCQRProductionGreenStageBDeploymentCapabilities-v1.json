@@ -592,6 +592,146 @@
       "mutation": true
     },
     {
+      "id": "forward-recovery-acquire-state-lock",
+      "phase": "existing-revision-forward-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "sourceFunction": "forward-recovery-acquire-state-lock",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "FORWARD_RECOVERY_IMPORT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ManageStageBProductionLockOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "forward-recovery-lock-state",
+      "phase": "existing-revision-forward-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "sourceFunction": "forward-recovery-lock-state",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "FORWARD_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ManageStageBProductionLockOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "forward-recovery-read-state",
+      "phase": "existing-revision-forward-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "sourceFunction": "forward-recovery-read-state",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "FORWARD_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "forward-recovery-release-state-lock",
+      "phase": "existing-revision-forward-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "sourceFunction": "forward-recovery-release-state-lock",
+      "action": "s3:DeleteObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "FORWARD_RECOVERY_IMPORT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ManageStageBProductionLockOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "forward-recovery-write-state",
+      "phase": "existing-revision-forward-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "sourceFunction": "forward-recovery-write-state",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "FORWARD_RECOVERY_IMPORT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f609ca4c61602cdb22881b51f25ef3731ab35df6ffbaa5a97c5c9337f388ff76"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "manifest-activate-exact-ecs-service",
       "phase": "wrapper-apply",
       "identity": "RELEASE_DEPLOYER",
