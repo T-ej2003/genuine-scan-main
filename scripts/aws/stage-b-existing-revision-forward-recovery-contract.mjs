@@ -77,11 +77,15 @@ export function assertForwardStateAfterImport(before, after) {
 }
 
 export function assertForwardCensus({ census } = {}) {
+  const supplied = census?.complete === true && Array.isArray(census.revisions) ? census.revisions : null;
   const entries = assertCanonicalBackendRecoveryCensus({ census });
   const target = entries.find(({ arn }) => arn === STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn);
   if (!target || entries[0].arn !== target.arn) throw new Error("Forward recovery requires the exact canonical :9 revision to be newest.");
   if (entries.some(({ revision }) => revision > 9)) throw new Error("Forward recovery refuses an unexpected newer backend revision.");
-  return Object.freeze({ entries, newestArn: target.arn, censusSha256: canonicalSha256(entries) });
+  const byArn = new Map(entries.map((entry) => [entry.arn, entry]));
+  const orderedEntries = supplied.map((entry) => byArn.get(entry?.arn || entry?.readback?.taskDefinition?.taskDefinitionArn));
+  if (orderedEntries.some((entry) => !entry)) throw new Error("Forward recovery census ordering cannot be authenticated.");
+  return Object.freeze({ entries, newestArn: target.arn, censusSha256: canonicalSha256(orderedEntries) });
 }
 
 export function assertForwardRevisionReadback({ readback, expectedFingerprint, imageReleaseSha, backendImage } = {}) {
@@ -162,6 +166,19 @@ export function assertForwardCompletedResume({ sourceSha, protectedCheckout, jou
   return Object.freeze({ incidentSourceSha: journalState.sourceSha, authorizedBackendDigest: journalState.authorizedBackendDigest, fingerprint: journalState.fingerprint });
 }
 
+export function assertForwardPreparedResume({ sourceSha, protectedCheckout, journalState, proveDescendant } = {}) {
+  if (!journalState || journalState.phase !== "PREPARED" || journalState.importCalls !== 0 || journalState.importMayHaveOccurred === true) throw new Error("Forward prepared resume requires an unconsumed PREPARED journal.");
+  const expected = expectedFieldsFromJournal(journalState);
+  if (journalState.incidentIdentity !== canonicalForwardRecoveryIncidentIdentity(journalState)) throw new Error("Forward prepared resume journal identity is invalid.");
+  validateExistingRevisionForwardJournal(journalState, expected);
+  if (!SHA.test(sourceSha || "") || !SHA.test(journalState.sourceSha || "")
+    || !protectedCheckout || protectedCheckout.currentHead !== sourceSha || protectedCheckout.originMainHead !== sourceSha
+    || protectedCheckout.toolingSha !== sourceSha || protectedCheckout.porcelainStatus) throw new Error("Forward prepared resume requires the exact clean protected-main executor checkout.");
+  if (sourceSha !== journalState.sourceSha
+    && (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: journalState.sourceSha, descendantSha: sourceSha }) !== true)) throw new Error("Forward prepared resume requires the original source to be an ancestor of the executor.");
+  return Object.freeze({ incidentIdentity: journalState.incidentIdentity, sourceSha: journalState.sourceSha, stateBeforeSha256: journalState.stateBeforeSha256 });
+}
+
 export function canonicalForwardRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, authorizedBackendDigest, imageAuthorizationSha256, stateLineage, stateSerial, stateBeforeSha256, existingRevisionArn, censusSha256, fingerprint } = {}) {
   if (!SHA.test(sourceSha || "") || !SHA256.test(toolingTreeSha256 || "") || !SHA256.test(sourceContractSha256 || "") || !SHA.test(imageReleaseSha || "")
     || !/^sha256:[a-f0-9]{64}$/.test(authorizedBackendDigest || "") || !SHA256.test(imageAuthorizationSha256 || "") || stateLineage !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage
@@ -216,6 +233,9 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   const completedResume = existing && ["COMPLETED", "RECONCILED"].includes(existing.phase)
     ? assertForwardCompletedResume({ sourceSha, protectedCheckout, journalState: existing, proveDescendant })
     : null;
+  const preparedResume = existing?.phase === "PREPARED"
+    ? assertForwardPreparedResume({ sourceSha, protectedCheckout, journalState: existing, proveDescendant })
+    : null;
   const consumedImportResume = existing?.phase === "IMPORTING"
     ? assertForwardConsumedImportResume({ sourceSha, bindings, protectedCheckout, journalState: existing, imageAuthorization, deriveProvenance, deriveImageReuse, proveDescendant })
     : null;
@@ -233,8 +253,9 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   const stateBeforeSha256 = existing?.stateBeforeSha256 || stateSnapshotSha256(observedState);
   const incidentIdentity = completedResume || consumedImportResume ? existing.incidentIdentity : canonicalForwardRecoveryIncidentIdentity({ sourceSha: incidentSourceSha, toolingTreeSha256: authorization.derived.toolingTreeSha256, sourceContractSha256: authorization.derived.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, authorizedBackendDigest: authorization.authorizedBackendDigest, imageAuthorizationSha256: authorization.authorization.evidenceSha256, stateLineage, stateSerial, stateBeforeSha256, existingRevisionArn: readback.arn, censusSha256: censusEvidence.censusSha256, fingerprint });
   const expected = completedResume || consumedImportResume ? expectedFieldsFromJournal(existing) : expectedFields({ sourceSha: incidentSourceSha, authorization, bindings, censusEvidence, fingerprint, incidentIdentity, stateBeforeSha256 });
+  const preparedDescendantRestart = preparedResume && preparedResume.sourceSha !== sourceSha;
   if (existing) {
-    validateExistingRevisionForwardJournal(existing, expected);
+    if (!preparedDescendantRestart) validateExistingRevisionForwardJournal(existing, expected);
     if (["COMPLETED", "RECONCILED"].includes(existing.phase)) {
       validateForwardRecoveryEvidence(evidence.read(), existing, expected);
       if (stateSnapshotSha256(observedState) !== existing.stateAfterImportSha256 || observedState.lineage !== existing.stateLineage || observedState.serial !== existing.stateSerial + 1 || (backendInstance(observedState)?.attributes?.arn || backendInstance(observedState)?.attributes?.id) !== existing.existingRevisionArn) throw new Error("Forward recovery replay observed state drift after reconciliation.");
@@ -251,10 +272,16 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   const beforeState = observedState;
   const before = assertForwardStateBeforeImport(beforeState);
   if (existing?.stateBeforeSha256 !== undefined && existing.stateBeforeSha256 !== before.stateSha256) throw new Error("Forward recovery current state no longer matches the prepared incident.");
-  if (!existing) journal.write({ schemaVersion: 1, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, phase: "PREPARED", ...expected, stateBeforeSha256: before.stateSha256, registrationCalls: 0, registrationCapability: "NONE", importCalls: 0 });
+  if (preparedDescendantRestart) journal.write({ schemaVersion: 1, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, phase: "PREPARED", ...expected, stateBeforeSha256: before.stateSha256, registrationCalls: 0, registrationCapability: "NONE", importCalls: 0 });
+  else if (!existing) journal.write({ schemaVersion: 1, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, phase: "PREPARED", ...expected, stateBeforeSha256: before.stateSha256, registrationCalls: 0, registrationCapability: "NONE", importCalls: 0 });
+  if (preparedDescendantRestart) return { incidentIdentity, imported: false, reauthorized: true, registrationCalls: 0, importCalls: 0, state: beforeState, readback, census: censusEvidence };
   const latestBeforeImportState = await readState();
   const latestBeforeImport = assertForwardStateBeforeImport(latestBeforeImportState);
   if (latestBeforeImport.stateSha256 !== before.stateSha256) throw new Error("Forward recovery state changed before the governed import boundary.");
+  const latestCensusEvidence = assertForwardCensus({ census: await census() });
+  if (latestCensusEvidence.censusSha256 !== censusEvidence.censusSha256) throw new Error("Forward recovery ECS census changed before the governed import boundary.");
+  const latestReadback = assertForwardRevisionReadback({ readback: await describe(STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn), expectedFingerprint: fingerprint, imageReleaseSha: existing?.imageReleaseSha || bindings.imageReleaseSha, backendImage });
+  if (latestReadback.fingerprint !== readback.fingerprint) throw new Error("Forward recovery canonical :9 readback changed before the governed import boundary.");
   const prepared = journal.read();
   journal.write({ ...prepared, ...expected, phase: "IMPORTING", importCalls: 1, importMayHaveOccurred: true });
   await importState({ address: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.address, arn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn });

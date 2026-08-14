@@ -220,6 +220,63 @@ async function importingRun() {
   return run;
 }
 
+async function preparedRun() {
+  const run = common();
+  const write = run.journal.write;
+  run.journal.write = (value) => { write(value); if (value.phase === "PREPARED") throw new Error("interrupted after PREPARED"); };
+  await assert.rejects(() => runExistingRevisionForwardRecovery(run), /interrupted/);
+  assert.equal(run.journal.read().phase, "PREPARED");
+  run.journal.write = write;
+  return run;
+}
+
+test("same-source PREPARED resume remains fresh and imports exactly once", async () => {
+  const first = await preparedRun();
+  const replay = common({ journal: first.journal, evidence: first.evidence });
+  const result = await runExistingRevisionForwardRecovery(replay);
+  assert.equal(result.imported, true);
+  assert.deepEqual(replay.counts, { imports: 1, registrations: 0 });
+});
+
+test("descendant PREPARED resume reauthorizes without mutation", async () => {
+  const first = await preparedRun();
+  const executorSha = "e".repeat(40);
+  const executorTree = "f".repeat(64);
+  const replay = common({
+    sourceSha: executorSha,
+    bindings: { ...bindings, sourceSha: executorSha, toolingSha: executorSha, toolingTreeSha256: executorTree },
+    protectedCheckout: { currentHead: executorSha, originMainHead: executorSha, toolingSha: executorSha, porcelainStatus: "" },
+    journal: first.journal,
+    deriveProvenance: () => ({ toolingTreeSha256: executorTree, sourceContractSha256: bindings.sourceContractSha256 }),
+    deriveImageReuse: ({ imageReleaseSha: release, toolingSha }) => ({ ...deriveImageReuse({ imageReleaseSha: release, toolingSha }), toolingSha, imageReleaseSha: release, toolingInputTreeSha256: executorTree, comparisonHeadSha256: executorTree }),
+    proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === executorSha,
+  });
+  const result = await runExistingRevisionForwardRecovery(replay);
+  assert.equal(result.reauthorized, true);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+  assert.equal(replay.journal.read().sourceSha, executorSha);
+  assert.equal(replay.journal.read().phase, "PREPARED");
+});
+
+test("PREPARED resume rejects unrelated, dirty, drifted, stale, and mismatched inputs", async () => {
+  const unrelated = await preparedRun();
+  const unrelatedSha = "d".repeat(40);
+  await assert.rejects(() => runExistingRevisionForwardRecovery(common({ journal: unrelated.journal, sourceSha: unrelatedSha, protectedCheckout: { currentHead: unrelatedSha, originMainHead: unrelatedSha, toolingSha: unrelatedSha, porcelainStatus: "" }, proveDescendant: () => false })), /ancestor/);
+  const dirty = await preparedRun();
+  await assert.rejects(() => runExistingRevisionForwardRecovery(common({ journal: dirty.journal, protectedCheckout: { ...protectedCheckout, porcelainStatus: " M" } })), /clean/);
+  const stateDrift = await preparedRun();
+  const driftReplay = common({ journal: stateDrift.journal, readState: async () => emptyState(95) });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(driftReplay), /prepared|serial|state/);
+  const fingerprintDrift = await preparedRun();
+  const badReadback = structuredClone(readback);
+  badReadback.taskDefinition.containerDefinitions[0].image = `${backendImage.slice(0, -1)}0`;
+  const fingerprintReplay = common({ journal: fingerprintDrift.journal, describe: async () => badReadback });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(fingerprintReplay), /fingerprint|image/);
+  const stale = await preparedRun();
+  const staleReplay = common({ journal: stale.journal, imageAuthorizationValidation: { now: new Date(Date.parse(imageFixture.now) + 2 * 24 * 60 * 60 * 1000).toISOString(), verifyImageEvidence: () => { throw new Error("expired authorization"); } } });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(staleReplay), /expired|authorization/);
+});
+
 test("same-source importing replay does not require fresh image authorization", async () => {
   const first = await importingRun();
   const replay = common({
@@ -369,6 +426,32 @@ test("forward recovery revalidates the remote state immediately before import", 
   const run = common({ readState: async () => { reads += 1; return reads === 1 ? emptyState() : { ...emptyState(), resources: [...emptyState().resources, { mode: "managed", type: "aws_s3_bucket", name: "drift", instances: [] }] }; } });
   await assert.rejects(() => runExistingRevisionForwardRecovery(run), /changed before/);
   assert.equal(run.counts.imports, 0);
+});
+
+test("forward recovery revalidates the complete ECS census and :9 immediately before import", async () => {
+  const newer = structuredClone(readback);
+  newer.taskDefinition.taskDefinitionArn = `${arn.slice(0, -1)}10`;
+  newer.taskDefinition.revision = 10;
+  const historical = structuredClone(readback);
+  historical.taskDefinition.taskDefinitionArn = `${arn.slice(0, -1)}8`;
+  historical.taskDefinition.revision = 8;
+  const cases = [
+    ["newer revision", (calls) => calls === 2 ? { complete: true, revisions: [{ arn: newer.taskDefinition.taskDefinitionArn, readback: newer }, { arn, readback }] } : census],
+    ["incomplete census", (calls) => calls === 2 ? { complete: false, revisions: [] } : census],
+    ["ordering change", (calls) => calls === 1 ? { complete: true, revisions: [{ arn, readback }, { arn: historical.taskDefinition.taskDefinitionArn, readback: historical }] } : { complete: true, revisions: [{ arn: historical.taskDefinition.taskDefinitionArn, readback: historical }, { arn, readback }] }],
+  ];
+  for (const [label, makeCensus] of cases) {
+    let calls = 0;
+    const run = common({ census: async () => makeCensus(++calls) });
+    await assert.rejects(() => runExistingRevisionForwardRecovery(run), /census|newer|newest/, label);
+    assert.equal(run.counts.imports, 0, label);
+  }
+  let describeCalls = 0;
+  const changed = structuredClone(readback);
+  changed.taskDefinition.containerDefinitions[0].image = `${backendImage.slice(0, -1)}0`;
+  const readbackRace = common({ describe: async () => ++describeCalls === 1 ? readback : changed });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(readbackRace), /fingerprint|image|readback/);
+  assert.equal(readbackRace.counts.imports, 0);
 });
 
 test("importing forward recovery resumes through a protected descendant executor without a second import", async () => {

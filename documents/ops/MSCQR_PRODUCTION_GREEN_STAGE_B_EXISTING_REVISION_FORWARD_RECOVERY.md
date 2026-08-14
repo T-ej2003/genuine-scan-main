@@ -28,13 +28,17 @@ an ancestor, and the new executor proves image-safe reuse; no new import capabil
 Once the journal is `COMPLETED` or `RECONCILED`, replay is terminal: a clean protected descendant
 may validate the recorded incident and immutable evidence without re-running current-HEAD image
 freshness checks or writing any journal/evidence bytes.
+An unconsumed `PREPARED` journal is different: a valid protected descendant may re-authorize a new
+executor-bound `PREPARED` incident only after proving ancestry, fresh image authorization, exact `:9`,
+and unchanged pre-import state; that re-authorization writes no import or registration and the next
+execution performs the normal fresh import gate.
 
 ## Durable phase transition matrix
 
 | Durable phase | Same-SHA executor | Descendant executor | Expired image authorization | State/evidence rule |
 | --- | --- | --- | --- | --- |
 | `DISCOVERY` | New-mutation authorization required | Fail closed | Fail closed | No mutation is reserved; complete census and source bindings are required |
-| `PREPARED` | New-mutation authorization required | New-mutation authorization required | Fail closed | Candidate must be absent and the pre-import state must be unchanged |
+| `PREPARED` | New-mutation authorization required | New-mutation authorization required, then re-authorize under descendant identity | Fail closed | Candidate must be absent and the pre-import state must be unchanged; descendant re-authorization has zero mutation calls |
 | `REGISTERED` | Fail closed in this mode | Fail closed in this mode | Fail closed | Canonical forward recovery has no registration phase |
 | `READBACK_VERIFIED` | Fail closed in this mode | Fail closed in this mode | Fail closed | A forward journal cannot claim this canonical-recovery phase |
 | `STATE_RECONCILING_PRE_REMOVE` | Fail closed in this mode | Fail closed in this mode | Fail closed | Legacy recovery evidence is never forward authorization |
@@ -49,6 +53,9 @@ after the authoritative state proves the exact single import. Any semantic state
 historical-revision drift, missing/corrupt evidence where evidence is required, or unexpected
 candidate state is fail-closed. Terraform metadata-only normalization is limited to the shared
 reviewed checkpoint allowlist.
+Immediately before a new import, the adapter re-pulls state, performs a second complete ECS census,
+re-reads `:9`, and requires the census hash and semantic readback to match the initial authorization;
+any `:10`, ordering, incomplete-census, or `:9` drift fails closed.
 
 Image authorization verifies its own signed source identity, then the forward contract separately
 proves the authenticated authorization-source-to-current-tooling transition and the
