@@ -192,6 +192,22 @@ require_env CLUSTER_NAME
 require_env SERVICE_NAME
 require_env CONTAINER_NAME
 
+reject_generic_stage_b_registration() {
+  local family="${TASK_DEFINITION:-}"
+  family="${family##*/}"
+  family="${family%%:*}"
+  case "$family" in
+    mscqr-production-rls-green-backend-candidate|mscqr-production-rls-green-worker-candidate|mscqr-production-full-rls-green-application-canary|mscqr-production-full-rls-green-read-only-canary|mscqr-production-full-rls-green-*)
+      echo "Stage-B managed task-definition families must be registered by Terraform or the governed rotation producer, not deploy-ecs-service.sh." >&2
+      exit 1
+      ;;
+  esac
+}
+
+if [[ -z "$EXISTING_TASK_DEFINITION_ARN" ]]; then
+  reject_generic_stage_b_registration
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERSION_VERIFY_SCRIPT="$REPO_ROOT/scripts/aws/verify-version-endpoint.sh"
 
