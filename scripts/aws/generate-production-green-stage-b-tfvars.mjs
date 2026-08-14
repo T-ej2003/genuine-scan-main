@@ -485,7 +485,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   if (outputPath) assertStageBCanonicalTfvarsOutputPath(outputPath); if (bindingReportPath) assertOutputPath(bindingReportPath, "Binding-report output");
   if (!outputPath || !bindingReportPath) throw new Error("Tfvars and binding-report output paths are required.");
   const report = readJson(imageEvidence); const signature = readJson(imageEvidenceSignature);
-  assertImageEvidence(report, { signatureArtifact: signature, verifySignature, imageReleaseSha, workflowRunId, artifactSha256: canonicalArtifactSha256, now });
+  assertImageEvidence(report, { signatureArtifact: signature, verifySignature, toolingSha, imageReleaseSha, workflowRunId, artifactSha256: canonicalArtifactSha256, now });
   const evidenceSha256 = imageEvidenceSha256(report);
   const images = extractImages(report, imageReleaseSha);
   const state = readJson(stateBackup); const retained = deriveRetainedDefinitions(state);

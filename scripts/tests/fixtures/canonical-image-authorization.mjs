@@ -31,11 +31,12 @@ export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = d
   const artifactBytes = Buffer.from(`${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
   const artifactSha256 = crypto.createHash("sha256").update(artifactBytes).digest("hex");
   const publicationIdentity = buildStageBImagePublicationIdentity({
+    expectedToolingSha: sourceSha,
     expectedReleaseSha: imageReleaseSha,
     artifactBytes,
     observed: {
       workflowRunId, workflowDatabaseId: "401", workflowFile: ".github/workflows/production-green-stage-b-images.yml",
-      workflowName: "Production Green Stage B Images", event: "workflow_dispatch", headSha: imageReleaseSha,
+      workflowName: "Production Green Stage B Images", event: "workflow_dispatch", workflowDefinitionSha: sourceSha, imageReleaseSha,
       headBranch: "main", conclusion: "success", artifactId: "501", artifactName: "production-green-stage-b-images",
       artifactExpired: false, artifactArchiveFilename: null,
     },
@@ -49,7 +50,7 @@ export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = d
     imageTagMutability: "IMMUTABLE", encryptionConfiguration: { encryptionType: "AES256" }, createdAt: observedAt, observedAt,
   }));
   const imageEvidence = generateImageEvidence({
-    artifactBytes, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity,
+    artifactBytes, toolingSha: sourceSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity,
     verifierCallerArn: `arn:aws:iam::${STAGE_B.account}:root`, observedAt,
     describe: (repository, tag) => ({ digest: records.find((record) => record.repository === repository && record.image_tag === tag).image_digest, imagePushedAt: observedAt }),
     repositories,

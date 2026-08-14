@@ -81,6 +81,7 @@ export function createImageAuthorization({
 
   assertImageEvidence(imageEvidence, {
     signatureArtifact: imageEvidenceSignature,
+    toolingSha: sourceSha,
     imageReleaseSha: imageEvidence.imageReleaseSha,
     workflowRunId: imageEvidence.workflowRunId,
     artifactSha256: imageEvidence.canonicalArtifactSha256,
