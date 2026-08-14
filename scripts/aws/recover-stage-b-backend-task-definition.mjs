@@ -67,7 +67,8 @@ export function preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, b
     const journalValue = JSON.parse(fsOps.readFileSync(journal, "utf8"));
     const evidenceValue = JSON.parse(fsOps.readFileSync(evidence, "utf8"));
     const { evidenceSha256, ...evidenceBody } = evidenceValue;
-    if ((!allowInProgressEvidence && journalValue.phase !== "COMPLETED") || (journalValue.phase === "COMPLETED" && (journalValue.evidenceSha256 !== evidenceSha256 || canonicalSha256(evidenceBody) !== evidenceSha256))) {
+    const evidenceMayBeInProgress = allowInProgressEvidence && ["IMPORTING", "RECONCILED"].includes(journalValue.phase);
+    if ((!allowInProgressEvidence && journalValue.phase !== "COMPLETED") || (allowInProgressEvidence && journalValue.phase !== "COMPLETED" && !evidenceMayBeInProgress) || (journalValue.phase === "COMPLETED" && (journalValue.evidenceSha256 !== evidenceSha256 || canonicalSha256(evidenceBody) !== evidenceSha256))) {
       throw new Error("Existing recovery evidence is not the completed deterministic artifact for its recovery journal.");
     }
   }

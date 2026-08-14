@@ -289,6 +289,11 @@ test("forward CLI preflights all artifact paths before any import boundary", () 
   for (const filePath of [paths.bindingsPath, paths.imageAuthorizationPath]) fs.writeFileSync(filePath, "{}", { mode: 0o600 });
   assert.doesNotThrow(() => preflightForwardRecoveryOutputs(paths));
   assert.throws(() => preflightForwardRecoveryOutputs({ ...paths, evidencePath: paths.bindingsPath }), /distinct/);
+  fs.writeFileSync(paths.evidencePath, "{}", { mode: 0o600 });
+  fs.writeFileSync(paths.journalPath, JSON.stringify({ phase: "PREPARED" }), { mode: 0o600 });
+  assert.throws(() => preflightForwardRecoveryOutputs(paths), /completed deterministic/);
+  fs.writeFileSync(paths.journalPath, JSON.stringify({ phase: "IMPORTING" }), { mode: 0o600 });
+  assert.doesNotThrow(() => preflightForwardRecoveryOutputs(paths));
   fs.chmodSync(directory, 0o755);
   assert.throws(() => preflightForwardRecoveryOutputs(paths), /private/);
 });
