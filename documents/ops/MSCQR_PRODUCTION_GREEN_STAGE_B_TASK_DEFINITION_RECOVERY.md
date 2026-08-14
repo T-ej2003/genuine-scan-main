@@ -60,6 +60,10 @@ duplicate match, ambiguous prior call, or semantic mismatch fails closed and no
 second registration is attempted. Schema-1 and schema-3 journals are immutable
 failed evidence and cannot authorize the schema-v4 incident. The journal also resumes an interruption after
 `state rm` or `import` without repeating either completed operation.
+For a schema-v4 journal created before checkpoint normalization, resume must
+also provide `--state-before` pointing to the preserved exact pre-removal state
+backup; the command validates its legacy hash and uses it only to prove that
+the post-removal differences are the reviewed Terraform metadata changes.
 
 `STATE_RECONCILING_PRE_REMOVE` is an intent checkpoint, not proof that
 `state rm` succeeded. On retry, authoritative Terraform readback must be the

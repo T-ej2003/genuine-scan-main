@@ -99,10 +99,14 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const terraformRoot = path.resolve(required(argv, "--terraform-root"));
   const evidencePath = path.resolve(required(argv, "--evidence-out"));
   const journalPath = path.resolve(option(argv, "--recovery-state") || `${evidencePath}.recovery.json`);
+  const stateBeforePath = option(argv, "--state-before");
   const profile = required(argv, "--aws-profile");
   if (!/^[a-f0-9]{40}$/.test(sourceSha)) throw new Error("--source-sha must be a full protected-main SHA.");
   if (terraformRoot !== path.join(root, "infra/aws/terraform/production-green-stage-b")) throw new Error("Recovery Terraform root is not the reviewed Stage-B root.");
   const outputs = preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath });
+  const stateBefore = stateBeforePath
+    ? JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: path.resolve(stateBeforePath), repositoryRoot: root, label: "Recovery pre-removal state" }).path, "utf8"))
+    : undefined;
   const bindings = JSON.parse(fs.readFileSync(bindingsPath, "utf8"));
   const imageAuthorizationFile = assertStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: root, label: "Image authorization" });
   const imageAuthorization = JSON.parse(fs.readFileSync(imageAuthorizationFile.path, "utf8"));
@@ -133,7 +137,7 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
     if (address !== STAGE_B_BACKEND_RECOVERY.address || !/^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:[1-9][0-9]*$/.test(arn || "")) throw new Error("Recovery attempted an unreviewed Terraform state import.");
     exec("terraform", [`-chdir=${terraformRoot}`, "import", "-lock-timeout=60s", address, arn], env);
   };
-  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, readState, register, describe, census, removeState, importState, journal: createFileJournal({ filePath: outputs.journal }) });
+  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, readState, register, describe, census, removeState, importState, stateBefore, journal: createFileJournal({ filePath: outputs.journal }) });
   finalizeEvidence({ evidencePath: outputs.evidence, evidence: result.evidence });
   process.stdout.write(`${JSON.stringify({ status: "reconciled", replacementArn: result.registration.arn, evidenceSha256: result.evidence.evidenceSha256, stateSerialAfter: result.reconciliation.stateSerialAfter })}\n`);
   return result;
