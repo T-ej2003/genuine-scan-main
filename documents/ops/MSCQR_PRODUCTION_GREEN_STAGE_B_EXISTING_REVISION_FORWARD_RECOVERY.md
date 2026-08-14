@@ -21,7 +21,10 @@ the first remote state pull and again immediately before import; it also re-read
 at that boundary. The journal remains `IMPORTING` until post-import state is verified and
 deterministic evidence is durably written and read back. A completed forward journal is replay-safe
 and performs no second import: its evidence is parsed, canonicalized, hash-checked against the
-journal, and then treated as immutable.
+journal, and then treated as immutable. If the executor checkout advances after an import has
+reserved the `IMPORTING` phase, replay is allowed only through the protected descendant path: the
+original journal identity and image authorization remain unchanged, the original source is proven
+an ancestor, and the new executor proves image-safe reuse; no new import capability is granted.
 
 Image authorization verifies its own signed source identity, then the forward contract separately
 proves the authenticated authorization-source-to-current-tooling transition and the

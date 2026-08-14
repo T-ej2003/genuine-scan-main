@@ -8,6 +8,7 @@ import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-auth
 import {
   STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY as CONTRACT,
   assertForwardCensus,
+  assertForwardDescendantResume,
   assertForwardRevisionReadback,
   assertForwardSourceBinding,
   assertForwardStateAfterImport,
@@ -280,6 +281,32 @@ test("forward recovery revalidates the remote state immediately before import", 
   const run = common({ readState: async () => { reads += 1; return reads === 1 ? emptyState() : { ...emptyState(), resources: [...emptyState().resources, { mode: "managed", type: "aws_s3_bucket", name: "drift", instances: [] }] }; } });
   await assert.rejects(() => runExistingRevisionForwardRecovery(run), /changed before/);
   assert.equal(run.counts.imports, 0);
+});
+
+test("importing forward recovery resumes through a protected descendant executor without a second import", async () => {
+  const first = common();
+  await runExistingRevisionForwardRecovery(first);
+  const oldJournal = first.journal.read();
+  const importingJournal = { ...oldJournal, phase: "IMPORTING", stateAfterImportSha256: undefined, evidenceSha256: undefined, importMayHaveOccurred: true };
+  delete importingJournal.stateAfterImportSha256;
+  delete importingJournal.evidenceSha256;
+  const executorSha = "e".repeat(40);
+  const executorTree = "f".repeat(64);
+  const replay = common({
+    sourceSha: executorSha,
+    protectedCheckout: { currentHead: executorSha, originMainHead: executorSha, toolingSha: executorSha, porcelainStatus: "" },
+    journal: journalAdapter(importingJournal),
+    evidence: first.evidence,
+    readState: async () => importedState(),
+    deriveProvenance: ({ sourceSha: value }) => value === sourceSha ? deriveProvenance() : { toolingTreeSha256: executorTree, sourceContractSha256: bindings.sourceContractSha256 },
+    deriveImageReuse: ({ imageReleaseSha: release, toolingSha }) => ({ ...deriveImageReuse({ imageReleaseSha: release, toolingSha }), toolingSha, imageReleaseSha: release, toolingInputTreeSha256: executorTree, comparisonHeadSha256: executorTree }),
+    proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === executorSha,
+  });
+  const result = await runExistingRevisionForwardRecovery(replay);
+  assert.equal(result.imported, false);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+  assert.equal(replay.journal.read().sourceSha, sourceSha);
+  assert.equal(replay.journal.read().phase, "COMPLETED");
 });
 
 test("forward CLI preflights all artifact paths before any import boundary", () => {
