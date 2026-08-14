@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -7,6 +8,7 @@ import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateD
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertCanonicalRecoverySourceBinding, canonicalSha256, runCanonicalBackendRecovery, STAGE_B_BACKEND_RECOVERY } from "./stage-b-task-definition-recovery-contract.mjs";
 import { deriveStageBImageImpactReport, deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
+import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { calculateCleanRoomSourceContract } from "../rls/lib/clean-room-source-contract.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./stage-b-terraform-backend-contract.mjs";
@@ -100,13 +102,14 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const evidencePath = path.resolve(required(argv, "--evidence-out"));
   const journalPath = path.resolve(option(argv, "--recovery-state") || `${evidencePath}.recovery.json`);
   const stateBeforePath = option(argv, "--state-before");
+  const stateBeforeBindingPath = option(argv, "--state-before-binding-report");
   const profile = required(argv, "--aws-profile");
   if (!/^[a-f0-9]{40}$/.test(sourceSha)) throw new Error("--source-sha must be a full protected-main SHA.");
   if (terraformRoot !== path.join(root, "infra/aws/terraform/production-green-stage-b")) throw new Error("Recovery Terraform root is not the reviewed Stage-B root.");
   const outputs = preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath });
-  const stateBefore = stateBeforePath
-    ? JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: path.resolve(stateBeforePath), repositoryRoot: root, label: "Recovery pre-removal state" }).path, "utf8"))
-    : undefined;
+  const stateBeforeFile = stateBeforePath ? assertStageBPrivateFile({ filePath: path.resolve(stateBeforePath), repositoryRoot: root, label: "Recovery pre-removal state" }) : undefined;
+  const stateBeforeBytes = stateBeforeFile ? fs.readFileSync(stateBeforeFile.path) : undefined;
+  const stateBefore = stateBeforeBytes ? JSON.parse(stateBeforeBytes) : undefined;
   const bindings = JSON.parse(fs.readFileSync(bindingsPath, "utf8"));
   const imageAuthorizationFile = assertStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: root, label: "Image authorization" });
   const imageAuthorization = JSON.parse(fs.readFileSync(imageAuthorizationFile.path, "utf8"));
@@ -116,6 +119,21 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const deriveProvenance = ({ sourceSha: provenanceSha = sourceSha } = {}) => deriveCanonicalRecoveryProvenance({ sourceSha: provenanceSha, repositoryRoot: root });
   const journal = createFileJournal({ filePath: outputs.journal });
   const existingJournal = journal.read();
+  let stateBeforeAnchor;
+  if (stateBeforeBindingPath) {
+    if (!stateBeforeFile || existingJournal?.checkpointHashDomain !== undefined) throw new Error("Legacy checkpoint binding reports require a supplied pre-removal snapshot and legacy checkpoint domain.");
+    const bindingFile = assertStageBPrivateFile({ filePath: path.resolve(stateBeforeBindingPath), repositoryRoot: root, label: "Legacy checkpoint binding report" });
+    const bindingReport = JSON.parse(fs.readFileSync(bindingFile.path, "utf8"));
+    if (bindingReport.tfvarsFileName !== path.basename(bindingReport.tfvarsFileName || "")) throw new Error("Legacy checkpoint binding report names an invalid tfvars artifact.");
+    const validatedBindingReport = assertStageBTfvarsBinding({
+      tfvarsPath: path.join(path.dirname(bindingFile.path), bindingReport.tfvarsFileName),
+      bindingReportPath: bindingFile.path,
+      expectedToolingSha: existingJournal?.toolingSha || bindings.toolingSha,
+      expectedToolingTreeSha256: existingJournal?.toolingTreeSha256 || bindings.toolingTreeSha256,
+      expectedImageReleaseSha: existingJournal?.imageReleaseSha || bindings.imageReleaseSha,
+    });
+    stateBeforeAnchor = { ...validatedBindingReport, bindingReportSha256: bindingFile.sha256, stateBeforeBytesSha256: crypto.createHash("sha256").update(stateBeforeBytes).digest("hex") };
+  }
   if (!existingJournal || existingJournal.sourceSha === sourceSha) {
     assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance });
   }
@@ -146,7 +164,7 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
     try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
   });
   const deriveImageReuse = deriveImageReuseOverride || (({ imageReleaseSha, toolingSha }) => { const report = deriveStageBImageImpactReport({ imageReleaseSha, toolingSha }); return { ...report, imageBuildInputsChanged: report.newImagesRequired }; });
-  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, readState, register, describe, census, removeState, importState, stateBefore, journal });
+  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, readState, register, describe, census, removeState, importState, stateBefore, stateBeforeAnchor, journal });
   finalizeEvidence({ evidencePath: outputs.evidence, evidence: result.evidence });
   process.stdout.write(`${JSON.stringify({ status: "reconciled", replacementArn: result.registration.arn, evidenceSha256: result.evidence.evidenceSha256, stateSerialAfter: result.reconciliation.stateSerialAfter })}\n`);
   return result;
