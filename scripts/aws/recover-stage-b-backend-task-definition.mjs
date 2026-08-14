@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertCanonicalRecoverySourceBinding, canonicalSha256, runCanonicalBackendRecovery, STAGE_B_BACKEND_RECOVERY } from "./stage-b-task-definition-recovery-contract.mjs";
+import { deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
+import { calculateCleanRoomSourceContract } from "../rls/lib/clean-room-source-contract.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
@@ -18,6 +20,29 @@ export function buildRecoveryAwsEnvironment(profile, baseEnv = process.env) {
   const env = { ...baseEnv, AWS_PROFILE: profile, AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2" };
   for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"]) delete env[key];
   return env;
+}
+
+export function deriveCanonicalRecoveryProvenance({ sourceSha, repositoryRoot = root } = {}) {
+  const toolingTreeSha256 = deriveStageBToolingInputTreeSha256(sourceSha);
+  const { sourceContractSha256 } = calculateCleanRoomSourceContract(repositoryRoot);
+  return { toolingTreeSha256, sourceContractSha256 };
+}
+
+export async function collectCanonicalBackendRecoveryCensus({ list, describe } = {}) {
+  if (typeof list !== "function" || typeof describe !== "function") throw new Error("Canonical backend recovery census adapters are required.");
+  const arns = [];
+  const seenTokens = new Set();
+  let nextToken;
+  do {
+    const result = await list(nextToken);
+    if (!Array.isArray(result?.taskDefinitionArns)) throw new Error("ACTIVE backend candidate revision census was incomplete.");
+    arns.push(...result.taskDefinitionArns);
+    nextToken = result.nextToken;
+    if (nextToken && seenTokens.has(nextToken)) throw new Error("ACTIVE backend candidate revision census pagination repeated a token.");
+    if (nextToken) seenTokens.add(nextToken);
+  } while (nextToken);
+  if (!arns.length) throw new Error("No ACTIVE backend candidate revisions were returned.");
+  return { complete: true, revisions: await Promise.all(arns.map(async (arn) => ({ arn, readback: await describe(arn) }))) };
 }
 
 export function preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath, repositoryRoot = root, fsOps = fs } = {}) {
@@ -84,7 +109,8 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const protectedCheckout = readProtectedCheckout();
   const env = buildRecoveryAwsEnvironment(profile, baseEnv);
   const imageAuthorizationValidation = { verifyImageEvidence: (input) => verifyImageEvidence({ ...input, env }) };
-  assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation });
+  const deriveProvenance = () => deriveCanonicalRecoveryProvenance({ sourceSha, repositoryRoot: root });
+  assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance });
   const terraformData = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: env.TF_DATA_DIR, repositoryRoot: root });
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(terraformData.backendMetadataPath, "utf8")).backend);
   const observedWorkspace = String(exec("terraform", [`-chdir=${terraformRoot}`, "workspace", "show"], env)).trim();
@@ -92,25 +118,13 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const terraform = (args) => JSON.parse(exec("terraform", [`-chdir=${terraformRoot}`, ...args], env));
   const aws = (args) => JSON.parse(exec("aws", [...args, "--region", "eu-west-2", "--profile", profile, "--output", "json"], env));
   const readState = async () => terraform(["state", "pull"]);
-  const census = async () => {
-    const arns = [];
-    const seenTokens = new Set();
-    let nextToken;
-    do {
-      const args = ["ecs", "list-task-definitions", "--family-prefix", STAGE_B_BACKEND_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC"];
-      if (nextToken) args.push("--next-token", nextToken);
-      const result = aws(args);
-      if (!Array.isArray(result.taskDefinitionArns)) throw new Error("ACTIVE backend candidate revision census was incomplete.");
-      arns.push(...result.taskDefinitionArns);
-      nextToken = result.nextToken;
-      if (nextToken && seenTokens.has(nextToken)) throw new Error("ACTIVE backend candidate revision census pagination repeated a token.");
-      if (nextToken) seenTokens.add(nextToken);
-    } while (nextToken);
-    if (!arns.length) throw new Error("No ACTIVE backend candidate revisions were returned.");
-    return { complete: true, revisions: arns.map((arn) => ({ arn, readback: aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]) })) };
-  };
   const register = async ({ taskDefinition, tags }) => aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify({ ...taskDefinition, tags })]);
   const describe = async (arn) => aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
+  const census = () => collectCanonicalBackendRecoveryCensus({ list: (nextToken) => {
+    const args = ["ecs", "list-task-definitions", "--family-prefix", STAGE_B_BACKEND_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC"];
+    if (nextToken) args.push("--next-token", nextToken);
+    return aws(args);
+  }, describe });
   const removeState = async ({ address, expectedArn }) => {
     if (address !== STAGE_B_BACKEND_RECOVERY.address || expectedArn !== STAGE_B_BACKEND_RECOVERY.predecessorArn) throw new Error("Recovery attempted an unreviewed Terraform state removal.");
     exec("terraform", [`-chdir=${terraformRoot}`, "state", "rm", "-lock-timeout=60s", address], env);
@@ -119,7 +133,7 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
     if (address !== STAGE_B_BACKEND_RECOVERY.address || !/^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:[1-9][0-9]*$/.test(arn || "")) throw new Error("Recovery attempted an unreviewed Terraform state import.");
     exec("terraform", [`-chdir=${terraformRoot}`, "import", "-lock-timeout=60s", address, arn], env);
   };
-  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, readState, register, describe, census, removeState, importState, journal: createFileJournal({ filePath: outputs.journal }) });
+  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, readState, register, describe, census, removeState, importState, journal: createFileJournal({ filePath: outputs.journal }) });
   finalizeEvidence({ evidencePath: outputs.evidence, evidence: result.evidence });
   process.stdout.write(`${JSON.stringify({ status: "reconciled", replacementArn: result.registration.arn, evidenceSha256: result.evidence.evidenceSha256, stateSerialAfter: result.reconciliation.stateSerialAfter })}\n`);
   return result;

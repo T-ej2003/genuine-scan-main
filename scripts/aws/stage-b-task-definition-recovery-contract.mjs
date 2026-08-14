@@ -56,7 +56,7 @@ export function canonicalRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256
   return canonicalSha256({ schemaVersion: RECOVERY_SCHEMA_VERSION, kind: RECOVERY_KIND, sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, imageDigest: backendImageDigest, imageAuthorizationSha256, stateLineage, stateSerial, predecessorArn, newestHistoricalArn, fingerprint });
 }
 
-export function assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation } = {}) {
+export function assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance } = {}) {
   if (!SHA.test(sourceSha || "")) throw new Error("Protected source SHA is required for backend recovery.");
   if (!protectedCheckout || protectedCheckout.currentHead !== sourceSha || protectedCheckout.toolingSha !== sourceSha
     || protectedCheckout.originMainHead !== sourceSha || protectedCheckout.isAncestor !== true || protectedCheckout.porcelainStatus) {
@@ -71,6 +71,10 @@ export function assertCanonicalRecoverySourceBinding({ sourceSha, bindings, prot
   assertImageAuthorization(authorization, sourceSha, authorizationValidation);
   const authorizedDigest = authorizedBackendDigest(authorization);
   if (!IMAGE_DIGEST.test(authorizedDigest || "") || bindings.backendImage !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${authorizedDigest}`) throw new Error("Canonical recovery backend image does not match image authorization.");
+  const derived = typeof deriveProvenance === "function" ? deriveProvenance({ sourceSha, protectedCheckout }) : null;
+  if (!derived || derived.toolingTreeSha256 !== bindings.toolingTreeSha256 || derived.sourceContractSha256 !== bindings.sourceContractSha256
+    || !SHA256.test(derived.toolingTreeSha256 || "") || !SHA256.test(derived.sourceContractSha256 || "")) throw new Error("Canonical recovery source provenance was not derived from the protected source.");
+  return derived;
 }
 
 const sortBy = (items, key) => Array.isArray(items) ? [...items].sort((a, b) => String(a?.[key] ?? "").localeCompare(String(b?.[key] ?? ""))) : items;
@@ -159,7 +163,7 @@ function replacementArn(value) {
 }
 
 export function assertCanonicalBackendRecoveryCensus({ census } = {}) {
-  const revisions = Array.isArray(census) ? census : census?.complete === true ? census.revisions : null;
+  const revisions = census?.complete === true && Array.isArray(census.revisions) ? census.revisions : null;
   if (!Array.isArray(revisions) || revisions.length === 0) throw new Error("Canonical recovery requires a complete ACTIVE backend revision census.");
   const entries = revisions.map((entry) => {
     const readback = entry?.readback || entry;
@@ -294,17 +298,17 @@ function recoveryCensusDecision(entries, fingerprint) {
   if (matches.length > 1) throw new Error("Canonical recovery census found multiple current-source matching revisions.");
   const newest = entries[0];
   if (matches[0] && matches[0].arn !== newest.arn) throw new Error("Canonical recovery census found an unexpected newer revision above the current-source match.");
-  const historical = entries.find(({ arn }) => STAGE_B_BACKEND_RECOVERY.historicalRevisionArns.includes(arn));
-  if (!historical) throw new Error("Fresh canonical recovery requires a reviewed historical newest revision.");
-  if (!matches[0] && !STAGE_B_BACKEND_RECOVERY.historicalRevisionArns.includes(newest.arn)) throw new Error("Fresh canonical recovery refuses an unreviewed newer live revision.");
+  const historical = entries.find(({ arn }) => arn === STAGE_B_BACKEND_RECOVERY.newestHistoricalArn);
+  if (!historical) throw new Error("Fresh canonical recovery requires the exact reviewed newest historical revision.");
+  if (!matches[0] && newest.arn !== STAGE_B_BACKEND_RECOVERY.newestHistoricalArn) throw new Error("Fresh canonical recovery refuses an unreviewed newer live revision.");
   return { newest, matching: matches[0] || null, newestHistoricalArn: historical.arn };
 }
 
-export async function runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, readState, register, describe, census, removeState, importState, journal } = {}) {
+export async function runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance = ({ protectedCheckout: checkout }) => checkout?.derivedProvenance, readState, register, describe, census, removeState, importState, journal } = {}) {
   if (typeof readState !== "function") throw new Error("Canonical backend recovery requires a Terraform state reader.");
   if (typeof census !== "function") throw new Error("Canonical backend recovery requires a complete live revision census adapter.");
   requireJournal(journal);
-  assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation });
+  assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance });
   const before = await readState();
   const existingJournal = journal.read();
   const payload = buildCanonicalBackendRecoveryTaskDefinition(bindings);

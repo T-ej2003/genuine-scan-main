@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
-import { buildRecoveryAwsEnvironment, runCanonicalRecoveryCli } from "../aws/recover-stage-b-backend-task-definition.mjs";
+import { buildRecoveryAwsEnvironment, collectCanonicalBackendRecoveryCensus, deriveCanonicalRecoveryProvenance, runCanonicalRecoveryCli } from "../aws/recover-stage-b-backend-task-definition.mjs";
 import {
   STAGE_B_BACKEND_RECOVERY,
   assertBackendRecoveryPreconditions,
   assertCanonicalRecoverySourceBinding,
+  assertCanonicalBackendRecoveryCensus,
   assertCanonicalBackendRecoveryReadback,
   buildCanonicalRecoveryJournal,
   buildCanonicalBackendRecoveryTaskDefinition,
@@ -41,7 +43,8 @@ const bindings = {
   backendLogGroup: "/ecs/mscqr-production/rls-green-backend",
   workerLogGroup: "/ecs/mscqr-production/rls-green-worker",
 };
-const protectedCheckout = { mode: "production", toolingSha: sourceSha, currentHead: sourceSha, originMainHead: sourceSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false } };
+const protectedCheckout = { mode: "production", toolingSha: sourceSha, currentHead: sourceSha, originMainHead: sourceSha, isAncestor: true, porcelainStatus: "", derivedProvenance: { toolingTreeSha256: "a".repeat(64), sourceContractSha256: "b".repeat(64) }, repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false } };
+const deriveProvenance = ({ protectedCheckout: checkout }) => checkout.derivedProvenance;
 const journalIdentity = { imageReleaseSha, imageAuthorizationSha256: imageAuthorization.evidenceSha256 };
 const journalAdapter = (initial) => { let value = initial ? structuredClone(initial) : null; return { read: () => value && structuredClone(value), write: (next) => { value = structuredClone(next); } }; };
 const state = (arn = STAGE_B_BACKEND_RECOVERY.predecessorArn, serial = STAGE_B_BACKEND_RECOVERY.serial) => ({
@@ -109,10 +112,17 @@ test("canonical source rendering produces the exact immutable replacement finger
 });
 
 test("recovery separates tooling provenance from image/task-definition provenance", () => {
-  assert.doesNotThrow(() => assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout }));
+  assert.doesNotThrow(() => assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, deriveProvenance }));
   assert.notEqual(bindings.toolingSha, bindings.imageReleaseSha);
   assert.throws(() => assertCanonicalRecoverySourceBinding({ sourceSha, bindings: { ...bindings, imageReleaseSha: sourceSha }, protectedCheckout }), /image-release identity/);
   assert.throws(() => assertCanonicalRecoverySourceBinding({ sourceSha, bindings: { ...bindings, backendImage: `${image.slice(0, -64)}${"e".repeat(64)}` }, protectedCheckout }), /backend image/);
+});
+
+test("recovery derives the two source identities through the authoritative implementations", () => {
+  const currentSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const derived = deriveCanonicalRecoveryProvenance({ sourceSha: currentSha });
+  assert.match(derived.toolingTreeSha256, /^[a-f0-9]{64}$/);
+  assert.match(derived.sourceContractSha256, /^[a-f0-9]{64}$/);
 });
 
 test("AWS ECS readback projections preserve the exact protected semantic fingerprint", () => {
@@ -501,6 +511,58 @@ test("historical mismatch authorizes one fresh registration while an unexpected 
     register: async () => { blockedRegistrations += 1; }, describe: async () => newer, removeState: async () => { blockedRemoves += 1; }, importState: async () => {} }), /unreviewed newer/);
   assert.equal(blockedRegistrations, 0);
   assert.equal(blockedRemoves, 0);
+});
+
+test("fresh recovery requires the exact configured :8 historical anchor", async () => {
+  const payload = replacementPayload();
+  for (const activeHistorical of [
+    [STAGE_B_BACKEND_RECOVERY.historicalRevisionArns[1]],
+    [STAGE_B_BACKEND_RECOVERY.historicalRevisionArns[0]],
+    STAGE_B_BACKEND_RECOVERY.historicalRevisionArns.slice(0, 2),
+  ]) {
+    let registrations = 0;
+    await assert.rejects(() => runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal: journalAdapter(),
+      readState: async () => state(), census: async () => ({ complete: true, revisions: activeHistorical.map((arn) => ({ arn, readback: historicalPayload(arn) })) }), describe: async () => payload,
+      register: async () => { registrations += 1; }, removeState: async () => {}, importState: async () => {},
+    }), /exact reviewed newest historical/);
+    assert.equal(registrations, 0);
+  }
+});
+
+test("census decisions require the explicit completeness envelope", () => {
+  const payload = replacementPayload();
+  const valid = censusFor(payload);
+  assert.doesNotThrow(() => assertCanonicalBackendRecoveryCensus({ census: valid }));
+  for (const census of [valid.revisions, { complete: false, revisions: valid.revisions }, { revisions: valid.revisions }, { complete: true }, { complete: true, revisions: "invalid" }]) {
+    assert.throws(() => assertCanonicalBackendRecoveryCensus({ census }), /complete ACTIVE backend revision census/);
+  }
+});
+
+test("pagination must complete before the recovery census is authorized", async () => {
+  const payload = replacementPayload();
+  const pages = new Map([[undefined, { taskDefinitionArns: [payload.taskDefinition.taskDefinitionArn], nextToken: "page-2" }], ["page-2", { taskDefinitionArns: [STAGE_B_BACKEND_RECOVERY.newestHistoricalArn] }]]);
+  const census = await collectCanonicalBackendRecoveryCensus({ list: async (token) => pages.get(token), describe: async (arn) => arn === payload.taskDefinition.taskDefinitionArn ? payload : historicalPayload(arn) });
+  assert.equal(census.complete, true);
+  assert.equal(census.revisions.length, 2);
+  await assert.rejects(() => collectCanonicalBackendRecoveryCensus({ list: async () => ({ taskDefinitionArns: [], nextToken: "same" }), describe: async () => payload }), /repeated a token/);
+  await assert.rejects(() => collectCanonicalBackendRecoveryCensus({ list: async () => { throw new Error("ListTaskDefinitions denied"); }, describe: async () => payload }), /ListTaskDefinitions denied/);
+});
+
+test("unverified source provenance blocks before registration", async () => {
+  const payload = replacementPayload();
+  for (const changedBindings of [
+    { ...bindings, toolingTreeSha256: "c".repeat(64) },
+    { ...bindings, toolingTreeSha256: "d".repeat(64) },
+    { ...bindings, sourceContractSha256: "e".repeat(64) },
+    { ...bindings, sourceContractSha256: "f".repeat(64) },
+  ]) {
+    let registrations = 0;
+    await assert.rejects(() => runCanonicalBackendRecovery({ bindings: changedBindings, sourceSha, protectedCheckout, journal: journalAdapter(),
+      readState: async () => state(), census: async () => ({ complete: true, revisions: [{ arn: STAGE_B_BACKEND_RECOVERY.newestHistoricalArn, readback: historicalPayload() }] }), describe: async () => payload,
+      register: async () => { registrations += 1; }, removeState: async () => {}, importState: async () => {},
+    }), /source provenance/);
+    assert.equal(registrations, 0);
+  }
 });
 
 test("fresh incident identity is complete and every journal binding mismatch blocks before registration", async () => {
