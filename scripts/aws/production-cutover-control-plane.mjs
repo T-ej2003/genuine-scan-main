@@ -174,8 +174,9 @@ function recordMutation(mutations, name, result) {
   if (count > 0) mutations.push({ name, count, payloadSha256: result?.mutationPayload ? sha(result.mutationPayload) : null });
 }
 
-export function assertImageAuthorization(value, sourceSha, { now, verifyImageEvidence } = {}) {
-  if (!SHA40.test(sourceSha || "") || value?.schemaVersion !== 2 || value.valid !== true || value.sourceSha !== sourceSha || !SHA256.test(value.evidenceSha256 || "")
+export function assertImageAuthorizationEnvelope(value, { now, verifyImageEvidence } = {}) {
+  const sourceSha = value?.sourceSha;
+  if (!SHA40.test(sourceSha || "") || value?.schemaVersion !== 2 || value.valid !== true || !SHA256.test(value.evidenceSha256 || "")
     || !value.imageEvidence || !value.imageEvidenceSignature || !value.imageReuseEvidence
     || !SHA256.test(value.imageEvidenceSha256 || "") || !SHA256.test(value.imageReuseEvidenceSha256 || "")
     || !SHA256.test(value.authorizationSha256 || "")) throw new Error("Canonical image authorization is incomplete or invalid.");
@@ -204,6 +205,11 @@ export function assertImageAuthorization(value, sourceSha, { now, verifyImageEvi
     || value.imageReuseEvidence.newImagesRequired !== value.imageBuildInputsChanged) {
     throw new Error("Image authorization envelope diverges from its validated inputs.");
   }
+}
+
+export function assertImageAuthorization(value, sourceSha, validation = {}) {
+  if (!SHA40.test(sourceSha || "") || value?.sourceSha !== sourceSha) throw new Error("Canonical image authorization source SHA does not match the protected source.");
+  return assertImageAuthorizationEnvelope(value, validation);
 }
 
 export const authorizedBackendDigest = (value) => value?.backendDigest || value?.backend?.digest || value?.backend?.imageDigest || value?.backendImageDigest || value?.images?.find(({ service }) => service === "backend")?.digest;
