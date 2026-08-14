@@ -10,11 +10,14 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   verify-release:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Require the workflow definition to come from protected main
         env:
