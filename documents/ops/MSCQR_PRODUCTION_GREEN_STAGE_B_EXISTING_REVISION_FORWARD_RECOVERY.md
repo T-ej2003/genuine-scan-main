@@ -25,6 +25,9 @@ journal, and then treated as immutable. If the executor checkout advances after 
 reserved the `IMPORTING` phase, replay is allowed only through the protected descendant path: the
 original journal identity and image authorization remain unchanged, the original source is proven
 an ancestor, and the new executor proves image-safe reuse; no new import capability is granted.
+Once the journal is `COMPLETED` or `RECONCILED`, replay is terminal: a clean protected descendant
+may validate the recorded incident and immutable evidence without re-running current-HEAD image
+freshness checks or writing any journal/evidence bytes.
 
 Image authorization verifies its own signed source identity, then the forward contract separately
 proves the authenticated authorization-source-to-current-tooling transition and the

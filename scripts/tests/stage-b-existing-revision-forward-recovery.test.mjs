@@ -113,6 +113,28 @@ test("completed forward incident replays idempotently without import or registra
   assert.equal(JSON.stringify(run.journal.read()), journalBytes);
 });
 
+test("completed descendant replay is terminal without current-HEAD image freshness", async () => {
+  const first = common();
+  await runExistingRevisionForwardRecovery(first);
+  const journalBytes = JSON.stringify(first.journal.read());
+  const executorSha = "e".repeat(40);
+  const replay = common({
+    sourceSha: executorSha,
+    protectedCheckout: { currentHead: executorSha, originMainHead: executorSha, toolingSha: executorSha, porcelainStatus: "" },
+    journal: first.journal,
+    evidence: first.evidence,
+    readState: async () => importedState(),
+    imageAuthorizationValidation: { verifyImageEvidence: () => { throw new Error("completed replay must not revalidate expiring image evidence"); } },
+    deriveProvenance: () => { throw new Error("completed replay must not derive current executor provenance"); },
+    deriveImageReuse: () => { throw new Error("completed replay must not re-prove image reuse"); },
+    proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === executorSha,
+  });
+  const result = await runExistingRevisionForwardRecovery(replay);
+  assert.equal(result.imported, false);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+  assert.equal(JSON.stringify(first.journal.read()), journalBytes);
+});
+
 test("completed replay rejects corrupted or replaced evidence without mutation", async () => {
   const run = common();
   const first = await runExistingRevisionForwardRecovery(run);

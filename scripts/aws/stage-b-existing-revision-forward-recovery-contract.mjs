@@ -143,6 +143,22 @@ export function assertForwardDescendantResume({ sourceSha, bindings, protectedCh
   return Object.freeze({ incidentSourceSha: journalState.sourceSha, incidentProvenance, executorProvenance, authorization, authorizedBackendDigest: digest, derived: incidentProvenance, reuse, fingerprint: journalState.fingerprint });
 }
 
+export function assertForwardCompletedResume({ sourceSha, protectedCheckout, journalState, proveDescendant } = {}) {
+  if (!journalState || !["COMPLETED", "RECONCILED"].includes(journalState.phase)
+    || journalState.schemaVersion !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.schemaVersion
+    || journalState.kind !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind
+    || journalState.mode !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode) throw new Error("Forward completed replay requires a terminal zero-registration incident journal.");
+  const expectedIncidentIdentity = canonicalForwardRecoveryIncidentIdentity(journalState);
+  if (journalState.incidentIdentity !== expectedIncidentIdentity || journalState.registrationCalls !== 0 || journalState.registrationCapability !== "NONE"
+    || journalState.importCalls !== 1 || journalState.existingRevisionArn !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn) throw new Error("Forward completed replay journal identity or import budget is invalid.");
+  if (!SHA.test(sourceSha || "") || !SHA.test(journalState.sourceSha || "")
+    || !protectedCheckout || protectedCheckout.currentHead !== sourceSha || protectedCheckout.originMainHead !== sourceSha
+    || protectedCheckout.toolingSha !== sourceSha || protectedCheckout.porcelainStatus) throw new Error("Forward completed replay requires the exact clean protected-main executor checkout.");
+  if (sourceSha !== journalState.sourceSha
+    && (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: journalState.sourceSha, descendantSha: sourceSha }) !== true)) throw new Error("Forward completed replay requires the executor to descend from the original incident source.");
+  return Object.freeze({ incidentSourceSha: journalState.sourceSha, authorizedBackendDigest: journalState.authorizedBackendDigest, fingerprint: journalState.fingerprint });
+}
+
 export function canonicalForwardRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, authorizedBackendDigest, imageAuthorizationSha256, stateLineage, stateSerial, stateBeforeSha256, existingRevisionArn, censusSha256, fingerprint } = {}) {
   if (!SHA.test(sourceSha || "") || !SHA256.test(toolingTreeSha256 || "") || !SHA256.test(sourceContractSha256 || "") || !SHA.test(imageReleaseSha || "")
     || !/^sha256:[a-f0-9]{64}$/.test(authorizedBackendDigest || "") || !SHA256.test(imageAuthorizationSha256 || "") || stateLineage !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage
@@ -164,6 +180,10 @@ export function validateExistingRevisionForwardJournal(journal, expected) {
 export function buildForwardRecoveryEvidence(expected, stateAfterImportSha256) {
   const body = { schemaVersion: 1, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, ...expected, stateAfterImportSha256, registrationCalls: 0, importCalls: 1 };
   return { ...body, evidenceSha256: canonicalSha256(body) };
+}
+
+function expectedFieldsFromJournal(journal) {
+  return { incidentIdentity: journal.incidentIdentity, sourceSha: journal.sourceSha, toolingTreeSha256: journal.toolingTreeSha256, sourceContractSha256: journal.sourceContractSha256, imageReleaseSha: journal.imageReleaseSha, authorizedBackendDigest: journal.authorizedBackendDigest, imageAuthorizationSha256: journal.imageAuthorizationSha256, stateLineage: journal.stateLineage, stateSerial: journal.stateSerial, stateBeforeSha256: journal.stateBeforeSha256, existingRevisionArn: journal.existingRevisionArn, censusSha256: journal.censusSha256, fingerprint: journal.fingerprint };
 }
 
 export function validateForwardRecoveryEvidence(evidence, journal, expected) {
@@ -190,21 +210,26 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   if (typeof readState !== "function" || typeof census !== "function" || typeof describe !== "function" || typeof importState !== "function" || !journal?.read || !journal?.write || !evidence?.read || !evidence?.write) throw new Error("Forward recovery requires read, census, describe, import, journal, and durable evidence adapters.");
   const existing = journal.read();
   const observedState = await readState();
+  const completedResume = existing && ["COMPLETED", "RECONCILED"].includes(existing.phase)
+    ? assertForwardCompletedResume({ sourceSha, protectedCheckout, journalState: existing, proveDescendant })
+    : null;
   const descendantResume = existing?.phase === "IMPORTING" && existing.sourceSha !== sourceSha
     ? assertForwardDescendantResume({ sourceSha, bindings, protectedCheckout, journalState: existing, imageAuthorization, imageAuthorizationValidation, deriveProvenance, deriveImageReuse, proveDescendant })
     : null;
-  const authorization = descendantResume || assertForwardSourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse });
-  const payload = buildCanonicalBackendRecoveryTaskDefinition(bindings);
-  const fingerprint = descendantResume?.fingerprint || taskDefinitionFingerprint(payload.taskDefinition, payload.tags);
+  const authorization = completedResume ? null : descendantResume || assertForwardSourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse });
+  const payload = completedResume ? null : buildCanonicalBackendRecoveryTaskDefinition(bindings);
+  const fingerprint = completedResume?.fingerprint || descendantResume?.fingerprint || taskDefinitionFingerprint(payload.taskDefinition, payload.tags);
   const censusEvidence = assertForwardCensus({ census: await census() });
-  const incidentSourceSha = descendantResume?.incidentSourceSha || sourceSha;
-  const backendImage = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${authorization.authorizedBackendDigest}`;
+  if (completedResume && censusEvidence.censusSha256 !== existing.censusSha256) throw new Error("Forward completed replay census no longer matches the authenticated incident.");
+  const incidentSourceSha = completedResume?.incidentSourceSha || descendantResume?.incidentSourceSha || sourceSha;
+  const authorizedBackendDigestValue = completedResume?.authorizedBackendDigest || authorization.authorizedBackendDigest;
+  const backendImage = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${authorizedBackendDigestValue}`;
   const readback = assertForwardRevisionReadback({ readback: await describe(STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn), expectedFingerprint: fingerprint, imageReleaseSha: existing?.imageReleaseSha || bindings.imageReleaseSha, backendImage });
   const stateLineage = existing?.stateLineage || observedState.lineage;
   const stateSerial = existing?.stateSerial ?? observedState.serial;
   const stateBeforeSha256 = existing?.stateBeforeSha256 || stateSnapshotSha256(observedState);
-  const incidentIdentity = canonicalForwardRecoveryIncidentIdentity({ sourceSha: incidentSourceSha, toolingTreeSha256: authorization.derived.toolingTreeSha256, sourceContractSha256: authorization.derived.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, authorizedBackendDigest: authorization.authorizedBackendDigest, imageAuthorizationSha256: authorization.authorization.evidenceSha256, stateLineage, stateSerial, stateBeforeSha256, existingRevisionArn: readback.arn, censusSha256: censusEvidence.censusSha256, fingerprint });
-  const expected = expectedFields({ sourceSha: incidentSourceSha, authorization, bindings, censusEvidence, fingerprint, incidentIdentity, stateBeforeSha256 });
+  const incidentIdentity = completedResume ? existing.incidentIdentity : canonicalForwardRecoveryIncidentIdentity({ sourceSha: incidentSourceSha, toolingTreeSha256: authorization.derived.toolingTreeSha256, sourceContractSha256: authorization.derived.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, authorizedBackendDigest: authorization.authorizedBackendDigest, imageAuthorizationSha256: authorization.authorization.evidenceSha256, stateLineage, stateSerial, stateBeforeSha256, existingRevisionArn: readback.arn, censusSha256: censusEvidence.censusSha256, fingerprint });
+  const expected = completedResume ? expectedFieldsFromJournal(existing) : expectedFields({ sourceSha: incidentSourceSha, authorization, bindings, censusEvidence, fingerprint, incidentIdentity, stateBeforeSha256 });
   if (existing) {
     validateExistingRevisionForwardJournal(existing, expected);
     if (["COMPLETED", "RECONCILED"].includes(existing.phase)) {
