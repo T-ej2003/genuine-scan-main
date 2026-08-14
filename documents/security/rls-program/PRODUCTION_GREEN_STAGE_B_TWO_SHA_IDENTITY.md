@@ -24,6 +24,14 @@ does not claim `superseded: false`; immediate revocation is unavailable until th
 separate capability exists. Image evidence authenticates the immutable image publication
 chain, while plan-bound artifacts authenticate the joined deployment.
 
+The publication-identity report is schema version 2 and keeps the workflow definition
+SHA separate from the image release SHA. `workflowDefinitionSha` must equal the
+protected tooling checkout that executed the workflow, while `imageReleaseSha` must
+equal the source bound to the immutable images. When those values differ, image
+authorization must include the independently derived canonical reuse report for the
+exact `imageReleaseSha -> toolingSha` pair; a valid-looking SHA or an arbitrary older
+image cannot cross this boundary.
+
 Image provenance uses a reviewed 24-hour validity window. Permission preflight remains
 independently plan-bound with a 60-minute validity window; the reference audit has its
 own 60-minute live-observation window. A longer image window cannot authorize a different

@@ -28,12 +28,19 @@ and requires a new exact-SHA image publication.
 
 The four-image Stage B publisher is the only producer of the canonical `<release-sha>`
 tag. Before ECR or Docker access, Stage B requires `IMAGE_TAG`, `SOURCE_RELEASE_SHA`,
-and the checked-out Git SHA to be the same lowercase 40-character commit. The
-backend-only publisher uses the separate `<release-sha>-backend-only` namespace while
-retaining `<release-sha>` as its source and checkout identity.
+and the image checkout SHA to be the same lowercase 40-character commit. The workflow
+definition/tooling SHA is a separate identity: it authenticates the protected workflow
+source and may differ from the image release SHA only when the exact reviewed reuse
+report proves the pair is image-compatible. The backend-only publisher uses the
+separate `<release-sha>-backend-only` namespace while retaining `<release-sha>` as its
+source and checkout identity.
 
 After a Stage B workflow completes, the dispatcher records GitHub-observed run and
-artifact metadata in a private, atomic publication-identity report. Image evidence
+artifact metadata in a private, atomic schema-2 publication-identity report. That
+report binds `workflowDefinitionSha` to the actual workflow run head and
+`imageReleaseSha` to the immutable image content. Image evidence
 requires that report and its hash, the exact four-service canonical JSONL, and the
 canonical artifact-byte hash. A filename, numeric run ID, or caller-supplied workflow
-metadata cannot satisfy the evidence boundary.
+metadata cannot satisfy the evidence boundary. Different tooling and image-release
+SHAs therefore require explicit canonical reuse authorization; same-SHA publications
+retain the direct binding path.

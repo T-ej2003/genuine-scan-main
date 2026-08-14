@@ -190,6 +190,7 @@ export function assertImageAuthorization(value, sourceSha, { now, verifyImageEvi
   if (value.evidenceSha256 !== imageAuthorizationSha256(value) || value.authorizationSha256 !== value.evidenceSha256) throw new Error("Image authorization envelope hash is wrong.");
   assertImageEvidence(value.imageEvidence, {
     signatureArtifact: value.imageEvidenceSignature,
+    toolingSha: sourceSha,
     imageReleaseSha: value.imageEvidence.imageReleaseSha,
     workflowRunId: value.imageEvidence.workflowRunId,
     artifactSha256: value.imageEvidence.canonicalArtifactSha256,

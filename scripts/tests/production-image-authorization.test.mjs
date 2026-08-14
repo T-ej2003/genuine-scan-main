@@ -29,6 +29,7 @@ import { readFreshProtectedMainIdentity } from "../aws/stage-b-deployment-identi
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
+const toolingSha = sourceSha;
 const imageReleaseSha = "594bab55f23ff8b2438c12b85b149ba0aebeed1e";
 const workflowRunId = "31582010244";
 const observedAt = "2026-08-12T10:00:00.000Z";
@@ -55,6 +56,7 @@ const records = [
 const artifactBytes = Buffer.from(`${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
 const artifactSha256 = crypto.createHash("sha256").update(artifactBytes).digest("hex");
 const publicationIdentity = buildStageBImagePublicationIdentity({
+  expectedToolingSha: sourceSha,
   expectedReleaseSha: imageReleaseSha,
   artifactBytes,
   observed: {
@@ -63,7 +65,8 @@ const publicationIdentity = buildStageBImagePublicationIdentity({
     workflowFile: ".github/workflows/production-green-stage-b-images.yml",
     workflowName: "Production Green Stage B Images",
     event: "workflow_dispatch",
-    headSha: imageReleaseSha,
+    workflowDefinitionSha: sourceSha,
+    imageReleaseSha,
     headBranch: "main",
     conclusion: "success",
     artifactId: "501",
@@ -88,7 +91,7 @@ const describe = (repository, tag) => {
   return { digest: record.image_digest, imagePushedAt: observedAt };
 };
 const imageEvidence = generateImageEvidence({
-  artifactBytes,
+  artifactBytes, toolingSha,
   imageReleaseSha,
   workflowRunId,
   artifactSha256,
@@ -123,6 +126,13 @@ test("canonical 594-to-96 reuse evidence produces downstream-accepted authorizat
   assert.equal(authorization.images.length, 4);
   assert.equal(authorization.evidenceSha256, imageAuthorizationSha256(authorization));
   assert.doesNotThrow(() => assertImageAuthorization(authorization, sourceSha, { now: observedAt, verifyImageEvidence }));
+});
+
+test("two-SHA reuse requires the exact source-to-destination authorization", () => {
+  assert.notEqual(sourceSha, imageReleaseSha);
+  assert.doesNotThrow(() => produce());
+  assert.throws(() => createImageAuthorization({ sourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: sourceSha, freshRemoteMainSha: sourceSha }, imageEvidence, imageEvidenceSignature, imageReuseEvidence: undefined, now: observedAt, verifyImageEvidence }), /image-reuse evidence|required|incomplete/);
+  assert.throws(() => produce({ imageReuseEvidence: { ...imageReuseEvidence, toolingSha: "b".repeat(40) } }), /different|comparison|bound|independently derived/);
 });
 
 test("producer rejects rebinding, image-affecting reuse, and changed image evidence", () => {
@@ -161,7 +171,7 @@ test("downstream rejects stale, tampered, and partial authorization envelopes", 
 
 test("canonical image evidence and reuse validators are the only producer gates", () => {
   assert.equal(imageEvidenceSha256(imageEvidence), produce().imageEvidenceSha256);
-  assert.doesNotThrow(() => assertImageEvidence(imageEvidence, { signatureArtifact: imageEvidenceSignature, imageReleaseSha, workflowRunId, artifactSha256, now: observedAt, verifySignature: verifyImageEvidence }));
+  assert.doesNotThrow(() => assertImageEvidence(imageEvidence, { signatureArtifact: imageEvidenceSignature, toolingSha, imageReleaseSha, workflowRunId, artifactSha256, now: observedAt, verifySignature: verifyImageEvidence }));
   assert.doesNotThrow(() => assertImageImpactReport({ report: imageReuseEvidence, imageReleaseSha, toolingSha: sourceSha, toolingInputTreeSha256: imageReuseEvidence.toolingInputTreeSha256, changedFiles: imageReuseEvidence.classifiedChangedFiles }));
   assert.equal(imageReuseEvidence.classificationRulesVersion, STAGE_B_IMAGE_REUSE_RULES_VERSION);
 });

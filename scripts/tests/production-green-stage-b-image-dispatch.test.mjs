@@ -27,20 +27,29 @@ test("dispatcher uses protected main as workflow source and passes release SHA s
 });
 
 test("Stage B selection validates observed workflow and artifact identity", () => {
-  const observed = { workflowRunId: "7", workflowDatabaseId: "8", workflowFile: ".github/workflows/production-green-stage-b-images.yml", workflowName: STAGE_B_IMAGE_WORKFLOW_NAME, event: "workflow_dispatch", headSha: sha, headBranch: "main", conclusion: "success", artifactId: "9", artifactName: STAGE_B_IMAGE_ARTIFACT_NAME, artifactExpired: false, artifactArchiveFilename: null };
-  assert.doesNotThrow(() => assertObservedStageBImagePublicationMetadata(observed, { expectedReleaseSha: sha }));
-  for (const change of [{ workflowFile: ".github/workflows/production-green-backend-image-publish.yml" }, { workflowName: "Production Green Backend Image Publish" }, { event: "push" }, { headSha: "b".repeat(40) }, { conclusion: "failure" }, { artifactName: "production-green-backend-image-evidence" }, { artifactExpired: true }]) assert.throws(() => assertObservedStageBImagePublicationMetadata({ ...observed, ...change }, { expectedReleaseSha: sha }));
-  assert.throws(() => assertObservedStageBImagePublicationMetadata(undefined, { expectedReleaseSha: sha }), /required/);
+  const observed = { workflowRunId: "7", workflowDatabaseId: "8", workflowFile: ".github/workflows/production-green-stage-b-images.yml", workflowName: STAGE_B_IMAGE_WORKFLOW_NAME, event: "workflow_dispatch", workflowDefinitionSha: sha, imageReleaseSha: sha, headBranch: "main", conclusion: "success", artifactId: "9", artifactName: STAGE_B_IMAGE_ARTIFACT_NAME, artifactExpired: false, artifactArchiveFilename: null };
+  assert.doesNotThrow(() => assertObservedStageBImagePublicationMetadata(observed, { expectedToolingSha: sha, expectedReleaseSha: sha }));
+  for (const change of [{ workflowFile: ".github/workflows/production-green-backend-image-publish.yml" }, { workflowName: "Production Green Backend Image Publish" }, { event: "push" }, { workflowDefinitionSha: "b".repeat(40) }, { imageReleaseSha: "b".repeat(40) }, { conclusion: "failure" }, { artifactName: "production-green-backend-image-evidence" }, { artifactExpired: true }]) assert.throws(() => assertObservedStageBImagePublicationMetadata({ ...observed, ...change }, { expectedToolingSha: sha, expectedReleaseSha: sha }));
+  assert.throws(() => assertObservedStageBImagePublicationMetadata(undefined, { expectedToolingSha: sha, expectedReleaseSha: sha }), /required/);
+  assert.throws(() => assertObservedStageBImagePublicationMetadata({ ...observed, workflowDefinitionSha: "b".repeat(40) }, { expectedToolingSha: sha, expectedReleaseSha: sha }), /tooling/);
+});
+
+test("two-SHA publication binds workflow definition to tooling and image artifact to release", () => {
+  const releaseSha = "b".repeat(40);
+  const observed = { workflowRunId: "7", workflowDatabaseId: "8", workflowFile: ".github/workflows/production-green-stage-b-images.yml", workflowName: STAGE_B_IMAGE_WORKFLOW_NAME, event: "workflow_dispatch", workflowDefinitionSha: sha, imageReleaseSha: releaseSha, headBranch: "main", conclusion: "success", artifactId: "9", artifactName: STAGE_B_IMAGE_ARTIFACT_NAME, artifactExpired: false, artifactArchiveFilename: null };
+  assert.doesNotThrow(() => assertObservedStageBImagePublicationMetadata(observed, { expectedToolingSha: sha, expectedReleaseSha: releaseSha }));
+  assert.throws(() => assertObservedStageBImagePublicationMetadata(observed, { expectedToolingSha: "c".repeat(40), expectedReleaseSha: releaseSha }), /tooling/);
+  assert.throws(() => assertObservedStageBImagePublicationMetadata(observed, { expectedToolingSha: sha, expectedReleaseSha: "c".repeat(40) }), /release/);
 });
 
 test("dispatcher observes the exact successful run and single artifact from GitHub metadata", () => {
   const artifact = { id: 9, name: STAGE_B_IMAGE_ARTIFACT_NAME, expired: false };
   const calls = [];
   const run = (file, args) => { calls.push(args); return args[1].endsWith("/artifacts") ? JSON.stringify({ artifacts: [artifact] }) : JSON.stringify({ id: 7, workflow_id: 8, path: ".github/workflows/production-green-stage-b-images.yml", name: STAGE_B_IMAGE_WORKFLOW_NAME, event: "workflow_dispatch", head_sha: sha, head_branch: "main", conclusion: "success" }); };
-  const observed = observeStageBImagePublication({ repository: "T-ej2003/genuine-scan-main", workflowRunId: "7", releaseSha: sha, run });
+  const observed = observeStageBImagePublication({ repository: "T-ej2003/genuine-scan-main", workflowRunId: "7", toolingSha: sha, releaseSha: sha, run });
   assert.equal(observed.artifactId, "9");
   assert.deepEqual(calls, [["api", "repos/T-ej2003/genuine-scan-main/actions/runs/7"], ["api", "repos/T-ej2003/genuine-scan-main/actions/runs/7/artifacts"]]);
-  assert.throws(() => observeStageBImagePublication({ repository: "repo", workflowRunId: "7", releaseSha: sha, run: () => JSON.stringify({ id: 7, workflow_id: 8, path: ".github/workflows/production-green-stage-b-images.yml", name: STAGE_B_IMAGE_WORKFLOW_NAME, event: "workflow_dispatch", head_sha: sha, head_branch: "main", conclusion: "success" }) }), /exactly one matching/);
+  assert.throws(() => observeStageBImagePublication({ repository: "repo", workflowRunId: "7", toolingSha: sha, releaseSha: sha, run: () => JSON.stringify({ id: 7, workflow_id: 8, path: ".github/workflows/production-green-stage-b-images.yml", name: STAGE_B_IMAGE_WORKFLOW_NAME, event: "workflow_dispatch", head_sha: sha, head_branch: "main", conclusion: "success" }) }), /exactly one matching/);
 });
 
 test("dispatcher writes private identity bound to the observed artifact bytes", () => {
@@ -50,7 +59,7 @@ test("dispatcher writes private identity bound to the observed artifact bytes", 
   const records = ["backend", "worker", "rls-executor", "rls-canary"].map((service) => JSON.stringify({ service }));
   fs.writeFileSync(artifactPath, `${records.join("\n")}\n`, { mode: 0o600 });
   const run = (file, args) => args[1].endsWith("/artifacts") ? JSON.stringify({ artifacts: [{ id: 9, name: STAGE_B_IMAGE_ARTIFACT_NAME, expired: false }] }) : JSON.stringify({ id: 7, workflow_id: 8, path: ".github/workflows/production-green-stage-b-images.yml", name: STAGE_B_IMAGE_WORKFLOW_NAME, event: "workflow_dispatch", head_sha: sha, head_branch: "main", conclusion: "success" });
-  const result = writeObservedStageBImagePublicationIdentity({ repository: "T-ej2003/genuine-scan-main", workflowRunId: "7", releaseSha: sha, canonicalArtifactPath: artifactPath, outputPath: identityPath, repositoryRoot: process.cwd(), run });
+  const result = writeObservedStageBImagePublicationIdentity({ repository: "T-ej2003/genuine-scan-main", workflowRunId: "7", toolingSha: sha, releaseSha: sha, canonicalArtifactPath: artifactPath, outputPath: identityPath, repositoryRoot: process.cwd(), run });
   assert.equal(result.identity.recordCount, 4);
   assert.equal(fs.statSync(identityPath).mode & 0o777, 0o600);
   fs.rmSync(root, { recursive: true, force: true });
