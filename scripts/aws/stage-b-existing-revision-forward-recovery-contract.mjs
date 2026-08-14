@@ -1,4 +1,5 @@
 import { assertImageAuthorizationEnvelope, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
+import { imageAuthorizationSha256 } from "./production-image-authorization.mjs";
 import { assertProductionImageReuseResult } from "./validate-stage-b-image-reuse.mjs";
 import {
   STAGE_B_BACKEND_RECOVERY,
@@ -115,7 +116,7 @@ export function assertForwardSourceBinding({ sourceSha, bindings, protectedCheck
   return Object.freeze({ authorization, authorizedBackendDigest: digest, derived, authorizationSourceReuse, reuse });
 }
 
-export function assertForwardConsumedImportResume({ sourceSha, bindings, protectedCheckout, journalState, proveDescendant } = {}) {
+export function assertForwardConsumedImportResume({ sourceSha, bindings, protectedCheckout, journalState, deriveProvenance, deriveImageReuse, proveDescendant } = {}) {
   if (!journalState || journalState.phase !== "IMPORTING" || journalState.schemaVersion !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.schemaVersion
     || journalState.kind !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind || journalState.mode !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode) throw new Error("Forward consumed-import replay requires an importing zero-registration incident journal.");
   const expectedIncidentIdentity = canonicalForwardRecoveryIncidentIdentity(journalState);
@@ -130,7 +131,19 @@ export function assertForwardConsumedImportResume({ sourceSha, bindings, protect
     || bindings.sourceContractSha256 !== journalState.sourceContractSha256 || bindings.imageReleaseSha !== journalState.imageReleaseSha
     || bindings.imageAuthorizationSha256 !== undefined && bindings.imageAuthorizationSha256 !== journalState.imageAuthorizationSha256
     || bindings.backendImage !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${journalState.authorizedBackendDigest}`) throw new Error("Forward consumed-import replay bindings do not preserve the original incident.");
-  return Object.freeze({ incidentSourceSha: journalState.sourceSha, authorizedBackendDigest: journalState.authorizedBackendDigest, fingerprint: journalState.fingerprint });
+  const authorization = bindings.imageAuthorization;
+  if (!authorization || authorization.sourceSha !== journalState.sourceSha || authorization.imageReleaseSha !== journalState.imageReleaseSha
+    || authorization.evidenceSha256 !== journalState.imageAuthorizationSha256 || authorization.authorizationSha256 !== authorization.evidenceSha256
+    || imageAuthorizationSha256(authorization) !== authorization.evidenceSha256) throw new Error("Forward consumed-import replay authorization does not preserve the original incident identity.");
+  if (authorizedBackendDigest(authorization) !== journalState.authorizedBackendDigest) throw new Error("Forward consumed-import replay image digest does not preserve the original incident.");
+  const incidentProvenance = deriveProvenance?.({ sourceSha: journalState.sourceSha, protectedCheckout });
+  const executorProvenance = deriveProvenance?.({ sourceSha, protectedCheckout });
+  if (!incidentProvenance || incidentProvenance.toolingTreeSha256 !== journalState.toolingTreeSha256 || incidentProvenance.sourceContractSha256 !== journalState.sourceContractSha256
+    || !executorProvenance || !SHA256.test(executorProvenance.toolingTreeSha256 || "") || executorProvenance.sourceContractSha256 !== journalState.sourceContractSha256) throw new Error("Forward consumed-import replay provenance is not bound to the original incident and protected executor.");
+  const reuse = deriveImageReuse?.({ imageReleaseSha: journalState.imageReleaseSha, toolingSha: sourceSha });
+  assertProductionImageReuseResult(reuse);
+  if (reuse.toolingSha !== sourceSha || reuse.imageReleaseSha !== journalState.imageReleaseSha || reuse.imageAffectingFiles.length !== 0 || reuse.imageBuildInputsChanged === true) throw new Error("Forward consumed-import replay image reuse is not explicitly compatible with the protected executor.");
+  return Object.freeze({ incidentSourceSha: journalState.sourceSha, authorizedBackendDigest: journalState.authorizedBackendDigest, fingerprint: journalState.fingerprint, incidentProvenance, executorProvenance, reuse });
 }
 
 export function assertForwardCompletedResume({ sourceSha, protectedCheckout, journalState, proveDescendant } = {}) {
@@ -204,7 +217,7 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
     ? assertForwardCompletedResume({ sourceSha, protectedCheckout, journalState: existing, proveDescendant })
     : null;
   const consumedImportResume = existing?.phase === "IMPORTING"
-    ? assertForwardConsumedImportResume({ sourceSha, bindings, protectedCheckout, journalState: existing, proveDescendant })
+    ? assertForwardConsumedImportResume({ sourceSha, bindings, protectedCheckout, journalState: existing, deriveProvenance, deriveImageReuse, proveDescendant })
     : null;
   const authorization = completedResume || consumedImportResume ? null : assertForwardSourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse });
   const payload = completedResume || consumedImportResume ? null : buildCanonicalBackendRecoveryTaskDefinition(bindings);

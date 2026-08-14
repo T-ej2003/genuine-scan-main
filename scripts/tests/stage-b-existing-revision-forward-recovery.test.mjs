@@ -243,12 +243,26 @@ test("descendant importing replay does not require fresh image authorization", a
     evidence: first.evidence,
     readState: async () => importedState(),
     imageAuthorizationValidation: { now: new Date(Date.parse(imageFixture.now) + 2 * 24 * 60 * 60 * 1000).toISOString(), verifyImageEvidence: () => { throw new Error("expired authorization must not be revalidated"); } },
-    deriveProvenance: () => { throw new Error("consumed replay must not derive current provenance"); },
-    deriveImageReuse: () => { throw new Error("consumed replay must not re-prove image reuse"); },
     proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === executorSha,
   });
   const result = await runExistingRevisionForwardRecovery(replay);
   assert.equal(result.imported, false);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
+test("consumed descendant replay still rejects image-affecting executor drift", async () => {
+  const first = await importingRun();
+  const executorSha = "e".repeat(40);
+  const replay = common({
+    sourceSha: executorSha,
+    protectedCheckout: { currentHead: executorSha, originMainHead: executorSha, toolingSha: executorSha, porcelainStatus: "" },
+    journal: first.journal,
+    evidence: first.evidence,
+    readState: async () => importedState(),
+    deriveImageReuse: ({ imageReleaseSha: release, toolingSha }) => ({ ...deriveImageReuse({ imageReleaseSha: release, toolingSha }), toolingSha, imageReleaseSha: release, imageAffectingFiles: ["backend/src/app.ts"], imageBuildInputsChanged: true }),
+    proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === executorSha,
+  });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(replay), /image|closure/);
   assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
 });
 
