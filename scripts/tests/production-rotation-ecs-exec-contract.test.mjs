@@ -73,14 +73,23 @@ test("only backend task-definition registration may set the execution marker", (
   assert(!nonBackend.Condition["ForAllValues:StringEquals"]["aws:TagKeys"].includes("MSCQRExecTarget"));
 });
 
-test("deployer and verifier cannot add the execution marker through TagResource", () => {
+test("only the exact backend recovery path may add the execution marker through TagResource", () => {
   const verifierActions = policy.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
   assert(!verifierActions.includes("ecs:TagResource"));
   for (const { sourcePath } of RELEASE_POLICY_SOURCES) {
     const source = JSON.parse(readFileSync(sourcePath, "utf8"));
     for (const statement of source.Statement.filter(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("ecs:TagResource"))) {
-      assert.equal(statement.Condition?.StringEquals?.["aws:RequestTag/MSCQRExecTarget"], undefined);
-      assert(!statement.Condition?.["ForAllValues:StringEquals"]?.["aws:TagKeys"]?.includes("MSCQRExecTarget"), `${sourcePath}/${statement.Sid} can add the execution marker`);
+      const marker = statement.Condition?.StringEquals?.["aws:RequestTag/MSCQRExecTarget"];
+      const tagKeys = statement.Condition?.["ForAllValues:StringEquals"]?.["aws:TagKeys"] || [];
+      if (marker === "production-backend") {
+        assert.equal(sourcePath, "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json");
+        assert.equal(statement.Sid, "TagExactStageBBackendRecoveryTaskDefinition");
+        assert.deepEqual(statement.Resource, "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*");
+        assert.deepEqual(tagKeys, ["Component", "Environment", "ManagedBy", "MSCQRExecTarget"]);
+      } else {
+        assert.equal(marker, undefined);
+        assert(!tagKeys.includes("MSCQRExecTarget"), `${sourcePath}/${statement.Sid} can add the execution marker`);
+      }
     }
   }
 });
