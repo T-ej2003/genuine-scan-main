@@ -17,7 +17,7 @@ import {
 } from "../aws/stage-b-existing-revision-forward-recovery-contract.mjs";
 import { assertForwardRecoveryTerraformBackend, buildForwardRecoveryTerraformEnvironment } from "../aws/forward-recover-stage-b-existing-revision.mjs";
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
-import { buildCanonicalBackendRecoveryTaskDefinition, canonicalSha256, taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
+import { buildCanonicalBackendRecoveryTaskDefinition, canonicalSha256, stateSnapshotSha256, taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
 const sourceSha = "45c5a38c7e3594793fafe1f051f1f381937ba0d4";
 const imageReleaseSha = "25394d30c189583384c9bba62604bf968dc9e0b2";
@@ -62,7 +62,7 @@ const journalAdapter = (initial) => { let value = initial && structuredClone(ini
 const expectedIdentity = () => canonicalForwardRecoveryIncidentIdentity({
   sourceSha, toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256,
   imageReleaseSha, authorizedBackendDigest: imageAuthorization.backendDigest, imageAuthorizationSha256: imageAuthorization.evidenceSha256,
-  stateLineage: CONTRACT.lineage, stateSerial: CONTRACT.startSerial, stateBeforeSha256: canonicalSha256(emptyState()), existingRevisionArn: arn,
+  stateLineage: CONTRACT.lineage, stateSerial: CONTRACT.startSerial, stateBeforeSha256: stateSnapshotSha256(emptyState()), existingRevisionArn: arn,
   censusSha256: canonicalSha256([{ arn, revision: 9, readback }]), fingerprint,
 });
 
@@ -77,10 +77,12 @@ function common(overrides = {}) {
   let imports = 0;
   let registrations = 0;
   const journal = journalAdapter();
+  const evidenceStore = { value: null };
+  const evidence = { read: () => evidenceStore.value && structuredClone(evidenceStore.value), write: (value) => { evidenceStore.value = structuredClone(value); } };
   return {
     bindings, sourceSha, protectedCheckout, imageAuthorization,
     imageAuthorizationValidation: { now: imageFixture.now, verifyImageEvidence: imageFixture.verifyImageEvidence },
-    deriveProvenance, deriveImageReuse, journal,
+    deriveProvenance, deriveImageReuse, journal, evidence,
     readState: async () => structuredClone(current),
     census: async () => structuredClone(census),
     describe: async () => structuredClone(readback),
@@ -103,7 +105,7 @@ test("completed forward incident replays idempotently without import or registra
   const run = common();
   const first = await runExistingRevisionForwardRecovery(run);
   const journalBytes = JSON.stringify(run.journal.read());
-  const replay = common({ journal: run.journal, readState: async () => importedState(), completedEvidence: first.evidence });
+  const replay = common({ journal: run.journal, evidence: run.evidence, readState: async () => importedState() });
   const result = await runExistingRevisionForwardRecovery(replay);
   assert.equal(result.imported, false);
   assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
@@ -115,7 +117,8 @@ test("completed replay rejects corrupted or replaced evidence without mutation",
   const first = await runExistingRevisionForwardRecovery(run);
   const journalBytes = JSON.stringify(run.journal.read());
   for (const completedEvidence of [{ ...first.evidence, evidenceSha256: "f".repeat(64) }, { foreign: true }]) {
-    const replay = common({ journal: run.journal, readState: async () => importedState(), completedEvidence });
+    const evidence = { read: () => structuredClone(completedEvidence), write: () => { throw new Error("evidence rewrite"); } };
+    const replay = common({ journal: run.journal, evidence, readState: async () => importedState() });
     await assert.rejects(() => runExistingRevisionForwardRecovery(replay), /evidence/);
     assert.equal(JSON.stringify(run.journal.read()), journalBytes);
     assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
@@ -148,6 +151,46 @@ test("state guard rejects lineage, serial, candidate, and unrelated drift", () =
   assert.throws(() => assertForwardStateAfterImport(before, { ...after, lineage: "00000000-0000-0000-0000-000000000000" }), /lineage/);
 });
 
+test("post-import comparison reuses the reviewed Terraform checkpoint normalizer", () => {
+  const before = emptyState();
+  before.terraform_version = "1.15.7";
+  before.check_results = [{ object: "z" }, { object: "a" }];
+  const after = importedState();
+  after.check_results = [{ object: "a" }, { object: "z" }];
+  assert.doesNotThrow(() => assertForwardStateAfterImport(before, after));
+  const changed = structuredClone(after);
+  changed.resources.push({ mode: "managed", type: "aws_s3_bucket", name: "drift", instances: [] });
+  assert.throws(() => assertForwardStateAfterImport(before, changed), /outside/);
+  const providerChanged = structuredClone(after);
+  providerChanged.provider = [{ name: "changed" }];
+  assert.throws(() => assertForwardStateAfterImport(before, providerChanged), /outside/);
+  const allowlistChanged = structuredClone(after);
+  allowlistChanged.format_version = 5;
+  assert.throws(() => assertForwardStateAfterImport(before, allowlistChanged), /outside/);
+});
+
+test("importing replay finalizes an already successful import without a second import", async () => {
+  for (const boundary of ["AFTER_IMPORT", "AFTER_POST_IMPORT_VERIFICATION", "AFTER_EVIDENCE_PERSISTED"]) {
+    const run = common({ interruptAt: (phase) => { if (phase === boundary) throw new Error(`interrupted at ${boundary}`); } });
+    await assert.rejects(() => runExistingRevisionForwardRecovery(run), /interrupted/);
+    assert.equal(run.journal.read().phase, "IMPORTING");
+    const replay = common({ journal: run.journal, evidence: run.evidence, readState: async () => importedState() });
+    const result = await runExistingRevisionForwardRecovery(replay);
+    assert.equal(result.imported, false);
+    assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+    assert.equal(run.journal.read().phase, "COMPLETED");
+  }
+  const completed = common();
+  await runExistingRevisionForwardRecovery(completed);
+  const journalBytes = JSON.stringify(completed.journal.read());
+  const evidenceBytes = JSON.stringify(completed.evidence.read());
+  const replay = common({ journal: completed.journal, evidence: completed.evidence, readState: async () => importedState() });
+  await runExistingRevisionForwardRecovery(replay);
+  assert.equal(JSON.stringify(completed.journal.read()), journalBytes);
+  assert.equal(JSON.stringify(completed.evidence.read()), evidenceBytes);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
 test("forged or legacy evidence cannot authorize the forward mode", async () => {
   const run = common({ journal: journalAdapter({ schemaVersion: 4, kind: "STAGE_B_CANONICAL_BACKEND_TASK_DEFINITION_RECOVERY", phase: "COMPLETED", registrationCalls: 1 }) });
   await assert.rejects(() => runExistingRevisionForwardRecovery(run), /zero-registration incident/);
@@ -163,7 +206,7 @@ test("ambiguous import journal blocks retry and cannot reach registration", asyn
   journal.stateAfterImportSha256 = undefined;
   run.journal.write(journal);
   const retry = common({ journal: run.journal, readState: async () => emptyState() });
-  await assert.rejects(() => runExistingRevisionForwardRecovery(retry), /ambiguous|missing/);
+  await assert.rejects(() => runExistingRevisionForwardRecovery(retry), /ambiguous|missing|lineage|serial/);
   assert.equal(retry.counts.registrations, 0);
   assert.ok(first.evidence);
 });

@@ -6,6 +6,7 @@ import {
   buildCanonicalBackendRecoveryTaskDefinition,
   canonicalJson,
   canonicalSha256,
+  stateSnapshotSha256,
   taskDefinitionFingerprint,
 } from "./stage-b-task-definition-recovery-contract.mjs";
 
@@ -35,26 +36,43 @@ function stateWithoutBackend(state) {
   value.resources = value.resources.flatMap((resource) => {
     if (resource.type !== "aws_ecs_task_definition" || resource.name !== "candidate") return [resource];
     const instances = resource.instances.filter(({ index_key: key }) => key !== "backend");
-    return instances.length ? [{ ...resource, instances }] : [];
+    return [{ ...resource, instances }];
   });
   return value;
 }
 
-export function assertForwardStateBeforeImport(state) {
-  if (state?.lineage !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage || state?.serial !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial) throw new Error("Forward recovery requires the exact current Terraform lineage and serial.");
-  if (backendInstance(state)) throw new Error("Forward recovery requires the backend candidate to be absent before import.");
-  return { lineage: state.lineage, serial: state.serial, stateSha256: canonicalSha256(state) };
+function backendInstances(state) {
+  const resources = (state?.resources || []).filter(({ type, name }) => type === "aws_ecs_task_definition" && name === "candidate");
+  if (resources.length !== 1 || !Array.isArray(resources[0].instances)) throw new Error("Forward recovery requires the canonical candidate resource collection.");
+  return resources[0].instances.filter(({ index_key: key }) => key === "backend");
 }
 
-export function assertForwardStateAfterImport(before, after) {
-  if (after?.lineage !== before.lineage || after?.serial !== before.serial + 1) throw new Error("Forward recovery import changed Terraform lineage or serial unexpectedly.");
-  const imported = backendInstance(after);
+export function assertForwardStateBeforeImport(state) {
+  if (state?.lineage !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage || state?.serial !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial) throw new Error("Forward recovery requires the exact current Terraform lineage and serial.");
+  if (backendInstances(state).length !== 0) throw new Error("Forward recovery requires the backend candidate to be absent before import.");
+  return { lineage: state.lineage, serial: state.serial, stateSha256: stateSnapshotSha256(state) };
+}
+
+export function assertForwardImportedState({ beforeStateSha256, after } = {}) {
+  if (after?.lineage !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage || after?.serial !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial + 1) throw new Error("Forward recovery import changed Terraform lineage or serial unexpectedly.");
+  if (backendInstances(after).length !== 1) throw new Error("Forward recovery import must add exactly one backend candidate instance.");
+  const imported = backendInstances(after)[0];
   const importedArn = imported?.attributes?.arn || imported?.attributes?.id;
   if (importedArn !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn) throw new Error("Forward recovery import did not bind the exact canonical :9 ARN.");
   const comparableAfter = stateWithoutBackend(after);
-  comparableAfter.serial = before.serial;
-  if (canonicalJson(stateWithoutBackend(before)) !== canonicalJson(comparableAfter)) throw new Error("Forward recovery import changed Terraform state outside the exact backend candidate address.");
-  return { lineage: after.lineage, serial: after.serial, stateSha256: canonicalSha256(after), backendArn: importedArn };
+  comparableAfter.serial = STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial;
+  if (stateSnapshotSha256(comparableAfter) !== beforeStateSha256) throw new Error("Forward recovery import changed Terraform state outside the exact backend candidate address.");
+  return { lineage: after.lineage, serial: after.serial, stateSha256: stateSnapshotSha256(after), backendArn: importedArn };
+}
+
+export function assertForwardStateAfterImport(before, after) {
+  const beforeBinding = assertForwardStateBeforeImport(before);
+  const result = assertForwardImportedState({ beforeStateSha256: beforeBinding.stateSha256, after });
+  const comparableBefore = stateWithoutBackend(before);
+  const comparableAfter = stateWithoutBackend(after);
+  comparableAfter.serial = comparableBefore.serial;
+  if (stateSnapshotSha256(comparableBefore) !== stateSnapshotSha256(comparableAfter)) throw new Error("Forward recovery import changed Terraform state outside the exact backend candidate address.");
+  return result;
 }
 
 export function assertForwardCensus({ census } = {}) {
@@ -106,25 +124,42 @@ export function canonicalForwardRecoveryIncidentIdentity({ sourceSha, toolingTre
 
 export function validateExistingRevisionForwardJournal(journal, expected) {
   if (!journal || journal.schemaVersion !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.schemaVersion || journal.kind !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind || journal.mode !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode || journal.incidentIdentity !== expected.incidentIdentity || journal.registrationCalls !== 0 || journal.registrationCapability !== "NONE" || journal.sourceSha !== expected.sourceSha || journal.toolingTreeSha256 !== expected.toolingTreeSha256 || journal.sourceContractSha256 !== expected.sourceContractSha256 || journal.imageReleaseSha !== expected.imageReleaseSha || journal.authorizedBackendDigest !== expected.authorizedBackendDigest || journal.imageAuthorizationSha256 !== expected.imageAuthorizationSha256 || journal.stateLineage !== expected.stateLineage || journal.stateSerial !== expected.stateSerial || journal.stateBeforeSha256 !== expected.stateBeforeSha256 || journal.existingRevisionArn !== expected.existingRevisionArn || journal.censusSha256 !== expected.censusSha256 || journal.fingerprint !== expected.fingerprint || !["PREPARED", "IMPORTING", "RECONCILED", "COMPLETED"].includes(journal.phase)) throw new Error("Forward recovery journal is not the exact zero-registration incident.");
-  if (["IMPORTING", "RECONCILED", "COMPLETED"].includes(journal.phase) && (!SHA256.test(journal.stateBeforeSha256 || "") || !SHA256.test(journal.stateAfterImportSha256 || ""))) throw new Error("Forward recovery journal is missing its authenticated state transition hashes.");
+  if (["IMPORTING", "RECONCILED", "COMPLETED"].includes(journal.phase) && !SHA256.test(journal.stateBeforeSha256 || "")) throw new Error("Forward recovery journal is missing its authenticated pre-import state hash.");
+  if (journal.phase === "IMPORTING" && journal.stateAfterImportSha256 !== undefined && !SHA256.test(journal.stateAfterImportSha256 || "")) throw new Error("Forward recovery importing checkpoint hash is malformed.");
+  if (["RECONCILED", "COMPLETED"].includes(journal.phase) && !SHA256.test(journal.stateAfterImportSha256 || "")) throw new Error("Forward recovery journal is missing its authenticated post-import state hash.");
   if (journal.phase === "IMPORTING" && journal.importMayHaveOccurred !== true) throw new Error("Forward recovery importing phase must fail closed as potentially ambiguous.");
+  if (journal.phase === "IMPORTING" && journal.importCalls !== 1) throw new Error("Forward recovery importing phase must have exactly one reserved import call.");
   if (["RECONCILED", "COMPLETED"].includes(journal.phase) && (!SHA256.test(journal.evidenceSha256 || "") || journal.registrationCalls !== 0 || journal.importCalls !== 1 || !SHA256.test(journal.stateAfterImportSha256 || ""))) throw new Error("Forward recovery completed evidence bindings are incomplete.");
   return journal;
 }
 
+export function buildForwardRecoveryEvidence(expected, stateAfterImportSha256) {
+  const body = { schemaVersion: 1, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, ...expected, stateAfterImportSha256, registrationCalls: 0, importCalls: 1 };
+  return { ...body, evidenceSha256: canonicalSha256(body) };
+}
+
 export function validateForwardRecoveryEvidence(evidence, journal, expected) {
-  const body = { schemaVersion: 1, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, ...expected, stateAfterImportSha256: journal.stateAfterImportSha256, registrationCalls: 0, importCalls: 1 };
-  const expectedEvidence = { ...body, evidenceSha256: canonicalSha256(body) };
+  const expectedEvidence = buildForwardRecoveryEvidence(expected, journal.stateAfterImportSha256);
   if (!evidence || canonicalJson(evidence) !== canonicalJson(expectedEvidence) || journal.evidenceSha256 !== expectedEvidence.evidenceSha256) throw new Error("Forward recovery evidence is not the exact authenticated completed incident result.");
   return evidence;
+}
+
+function persistForwardRecoveryEvidence(evidence, evidenceAdapter) {
+  if (!evidenceAdapter?.read || !evidenceAdapter?.write) throw new Error("Forward recovery requires a durable evidence adapter before completion.");
+  const existing = evidenceAdapter.read();
+  if (existing !== null && canonicalJson(existing) !== canonicalJson(evidence)) throw new Error("Forward recovery evidence already exists with contradictory contents.");
+  if (existing === null) evidenceAdapter.write(evidence);
+  const persisted = evidenceAdapter.read();
+  if (canonicalJson(persisted) !== canonicalJson(evidence)) throw new Error("Forward recovery evidence was not durably verified before completion.");
+  return persisted;
 }
 
 function expectedFields({ sourceSha, authorization, bindings, censusEvidence, fingerprint, incidentIdentity, stateBeforeSha256 }) {
   return { incidentIdentity, sourceSha, toolingTreeSha256: authorization.derived.toolingTreeSha256, sourceContractSha256: authorization.derived.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, authorizedBackendDigest: authorization.authorizedBackendDigest, imageAuthorizationSha256: authorization.authorization.evidenceSha256, stateLineage: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage, stateSerial: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial, stateBeforeSha256, existingRevisionArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn, censusSha256: censusEvidence.censusSha256, fingerprint };
 }
 
-export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, readState, census, describe, importState, completedEvidence, journal } = {}) {
-  if (typeof readState !== "function" || typeof census !== "function" || typeof describe !== "function" || typeof importState !== "function" || !journal?.read || !journal?.write) throw new Error("Forward recovery requires read, census, describe, import, and journal adapters.");
+export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, readState, census, describe, importState, evidence, journal, interruptAt } = {}) {
+  if (typeof readState !== "function" || typeof census !== "function" || typeof describe !== "function" || typeof importState !== "function" || !journal?.read || !journal?.write || !evidence?.read || !evidence?.write) throw new Error("Forward recovery requires read, census, describe, import, journal, and durable evidence adapters.");
   const existing = journal.read();
   const observedState = await readState();
   const authorization = assertForwardSourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse });
@@ -134,17 +169,23 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   const readback = assertForwardRevisionReadback({ readback: await describe(STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn), expectedFingerprint: fingerprint, imageReleaseSha: bindings.imageReleaseSha, backendImage: bindings.backendImage });
   const stateLineage = existing?.stateLineage || observedState.lineage;
   const stateSerial = existing?.stateSerial ?? observedState.serial;
-  const stateBeforeSha256 = existing?.stateBeforeSha256 || canonicalSha256(observedState);
+  const stateBeforeSha256 = existing?.stateBeforeSha256 || stateSnapshotSha256(observedState);
   const incidentIdentity = canonicalForwardRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256: authorization.derived.toolingTreeSha256, sourceContractSha256: authorization.derived.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, authorizedBackendDigest: authorization.authorizedBackendDigest, imageAuthorizationSha256: authorization.authorization.evidenceSha256, stateLineage, stateSerial, stateBeforeSha256, existingRevisionArn: readback.arn, censusSha256: censusEvidence.censusSha256, fingerprint });
   const expected = expectedFields({ sourceSha, authorization, bindings, censusEvidence, fingerprint, incidentIdentity, stateBeforeSha256 });
   if (existing) {
     validateExistingRevisionForwardJournal(existing, expected);
     if (["COMPLETED", "RECONCILED"].includes(existing.phase)) {
-      validateForwardRecoveryEvidence(completedEvidence, existing, expected);
-      if (canonicalSha256(observedState) !== existing.stateAfterImportSha256 || observedState.lineage !== existing.stateLineage || observedState.serial !== existing.stateSerial + 1 || (backendInstance(observedState)?.attributes?.arn || backendInstance(observedState)?.attributes?.id) !== existing.existingRevisionArn) throw new Error("Forward recovery replay observed state drift after reconciliation.");
+      validateForwardRecoveryEvidence(evidence.read(), existing, expected);
+      if (stateSnapshotSha256(observedState) !== existing.stateAfterImportSha256 || observedState.lineage !== existing.stateLineage || observedState.serial !== existing.stateSerial + 1 || (backendInstance(observedState)?.attributes?.arn || backendInstance(observedState)?.attributes?.id) !== existing.existingRevisionArn) throw new Error("Forward recovery replay observed state drift after reconciliation.");
       return { incidentIdentity, imported: false, registrationCalls: 0, importCalls: 0, state: observedState, readback, census: censusEvidence };
     }
-    if (existing.phase === "IMPORTING") throw new Error("Forward recovery import outcome is ambiguous; current state must be reviewed before any retry.");
+    if (existing.phase === "IMPORTING") {
+      const afterBinding = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, after: observedState });
+      if (existing.stateAfterImportSha256 !== undefined && existing.stateAfterImportSha256 !== afterBinding.stateSha256) throw new Error("Forward recovery importing checkpoint hash does not match the authenticated imported state.");
+      const recoveredEvidence = persistForwardRecoveryEvidence(buildForwardRecoveryEvidence(expected, afterBinding.stateSha256), evidence);
+      journal.write({ ...existing, ...recoveredEvidence, stateAfterImportSha256: afterBinding.stateSha256, phase: "COMPLETED" });
+      return { incidentIdentity, imported: false, registrationCalls: 0, importCalls: 0, state: observedState, readback, census: censusEvidence, evidence: recoveredEvidence };
+    }
   }
   const beforeState = observedState;
   const before = assertForwardStateBeforeImport(beforeState);
@@ -156,10 +197,13 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   const prepared = journal.read();
   journal.write({ ...prepared, ...expected, phase: "IMPORTING", importCalls: 1, importMayHaveOccurred: true });
   await importState({ address: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.address, arn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn });
+  interruptAt?.("AFTER_IMPORT");
   const after = await readState();
   const afterBinding = assertForwardStateAfterImport(beforeState, after);
-  const evidenceBody = { schemaVersion: 1, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, ...expected, stateAfterImportSha256: afterBinding.stateSha256, registrationCalls: 0, importCalls: 1 };
-  const evidence = { ...evidenceBody, evidenceSha256: canonicalSha256(evidenceBody) };
-  journal.write({ ...journal.read(), ...evidence, phase: "COMPLETED" });
-  return { incidentIdentity, imported: true, registrationCalls: 0, importCalls: 1, state: after, readback, census: censusEvidence, evidence };
+  interruptAt?.("AFTER_POST_IMPORT_VERIFICATION");
+  const completedEvidence = persistForwardRecoveryEvidence(buildForwardRecoveryEvidence(expected, afterBinding.stateSha256), evidence);
+  interruptAt?.("AFTER_EVIDENCE_PERSISTED");
+  journal.write({ ...journal.read(), ...completedEvidence, phase: "COMPLETED" });
+  interruptAt?.("AFTER_COMPLETED");
+  return { incidentIdentity, imported: true, registrationCalls: 0, importCalls: 1, state: after, readback, census: censusEvidence, evidence: completedEvidence };
 }

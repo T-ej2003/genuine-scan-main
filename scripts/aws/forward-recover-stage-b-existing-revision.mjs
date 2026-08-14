@@ -11,7 +11,6 @@ import { deriveStageBImageImpactReport } from "./validate-stage-b-image-reuse.mj
 import { deriveCanonicalRecoveryProvenance, collectCanonicalBackendRecoveryCensus } from "./recover-stage-b-backend-task-definition.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { runExistingRevisionForwardRecovery, STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY } from "./stage-b-existing-revision-forward-recovery-contract.mjs";
-import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -50,16 +49,15 @@ function journalAdapter(filePath, repositoryRoot) {
   };
 }
 
-function writeEvidence(filePath, evidence) {
-  const bytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`);
-  if (fs.existsSync(filePath)) {
-    assertStageBPrivateFile({ filePath, repositoryRoot: root, label: "Forward recovery evidence" });
-    const existing = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    const { evidenceSha256, ...body } = existing;
-    if (evidenceSha256 !== canonicalSha256(body) || !fs.readFileSync(filePath).equals(bytes)) throw new Error("Existing forward recovery evidence is not the deterministic result.");
-    return;
-  }
-  writeStageBPrivateFilesAtomic({ repositoryRoot: root, overwrite: false, files: [{ filePath, bytes, label: "Forward recovery evidence" }] });
+function evidenceAdapter(filePath) {
+  return {
+    read: () => fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath, repositoryRoot: root, label: "Forward recovery evidence" }).path, "utf8")) : null,
+    write: (value) => {
+      const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+      if (fs.existsSync(filePath)) throw new Error("Forward recovery evidence already exists and cannot be rewritten.");
+      writeStageBPrivateFilesAtomic({ repositoryRoot: root, overwrite: false, files: [{ filePath, bytes, label: "Forward recovery evidence" }] });
+    },
+  };
 }
 
 export async function runForwardRecoveryCli(argv = process.argv.slice(2), { execFile = execFileSync, readProtectedCheckout = () => readStageBProtectedMainCheckout({ cwd: root }), verifyImageEvidence = verifyImageEvidenceSignature, baseEnv = process.env } = {}) {
@@ -92,10 +90,6 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
     validateBackend();
     run("terraform", [`-chdir=${terraformRoot}`, "import", "-lock-timeout=60s", address, arn]);
   };
-  const existingJournal = journalAdapter(journalPath, root).read();
-  const completedEvidence = existingJournal && ["COMPLETED", "RECONCILED"].includes(existingJournal.phase)
-    ? JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: evidencePath, repositoryRoot: root, label: "Forward recovery evidence" }).path, "utf8"))
-    : undefined;
   const proveDescendant = ({ ancestorSha, descendantSha }) => {
     if (ancestorSha === descendantSha) return true;
     try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
@@ -113,11 +107,9 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
     census,
     describe,
     importState,
-    completedEvidence,
+    evidence: evidenceAdapter(evidencePath),
     journal: journalAdapter(journalPath, root),
   });
-  if (result.evidence) writeEvidence(evidencePath, result.evidence);
-  else if (!completedEvidence) throw new Error("Completed forward recovery is missing its immutable evidence artifact.");
   process.stdout.write(`${JSON.stringify({ status: result.imported ? "imported" : "already-reconciled", mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, replacementArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn, registrationCalls: 0, importCalls: result.importCalls })}\n`);
   return result;
 }
