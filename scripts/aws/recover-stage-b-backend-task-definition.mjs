@@ -92,10 +92,22 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const terraform = (args) => JSON.parse(exec("terraform", [`-chdir=${terraformRoot}`, ...args], env));
   const aws = (args) => JSON.parse(exec("aws", [...args, "--region", "eu-west-2", "--profile", profile, "--output", "json"], env));
   const readState = async () => terraform(["state", "pull"]);
-  const newest = async () => {
-    const result = aws(["ecs", "list-task-definitions", "--family-prefix", STAGE_B_BACKEND_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC"]);
-    if (!Array.isArray(result.taskDefinitionArns) || result.taskDefinitionArns.length === 0) throw new Error("No ACTIVE backend candidate revisions were returned.");
-    return result.taskDefinitionArns[0];
+  const census = async () => {
+    const arns = [];
+    const seenTokens = new Set();
+    let nextToken;
+    do {
+      const args = ["ecs", "list-task-definitions", "--family-prefix", STAGE_B_BACKEND_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC"];
+      if (nextToken) args.push("--next-token", nextToken);
+      const result = aws(args);
+      if (!Array.isArray(result.taskDefinitionArns)) throw new Error("ACTIVE backend candidate revision census was incomplete.");
+      arns.push(...result.taskDefinitionArns);
+      nextToken = result.nextToken;
+      if (nextToken && seenTokens.has(nextToken)) throw new Error("ACTIVE backend candidate revision census pagination repeated a token.");
+      if (nextToken) seenTokens.add(nextToken);
+    } while (nextToken);
+    if (!arns.length) throw new Error("No ACTIVE backend candidate revisions were returned.");
+    return { complete: true, revisions: arns.map((arn) => ({ arn, readback: aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]) })) };
   };
   const register = async ({ taskDefinition, tags }) => aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify({ ...taskDefinition, tags })]);
   const describe = async (arn) => aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
@@ -107,7 +119,7 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
     if (address !== STAGE_B_BACKEND_RECOVERY.address || !/^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:[1-9][0-9]*$/.test(arn || "")) throw new Error("Recovery attempted an unreviewed Terraform state import.");
     exec("terraform", [`-chdir=${terraformRoot}`, "import", "-lock-timeout=60s", address, arn], env);
   };
-  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, readState, register, describe, newest, removeState, importState, journal: createFileJournal({ filePath: outputs.journal }) });
+  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, readState, register, describe, census, removeState, importState, journal: createFileJournal({ filePath: outputs.journal }) });
   finalizeEvidence({ evidencePath: outputs.evidence, evidence: result.evidence });
   process.stdout.write(`${JSON.stringify({ status: "reconciled", replacementArn: result.registration.arn, evidenceSha256: result.evidence.evidenceSha256, stateSerialAfter: result.reconciliation.stateSerialAfter })}\n`);
   return result;
