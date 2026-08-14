@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertCanonicalRecoverySourceBinding, canonicalSha256, runCanonicalBackendRecovery, STAGE_B_BACKEND_RECOVERY } from "./stage-b-task-definition-recovery-contract.mjs";
-import { deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
+import { deriveStageBImageImpactReport, deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
 import { calculateCleanRoomSourceContract } from "../rls/lib/clean-room-source-contract.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./stage-b-terraform-backend-contract.mjs";
@@ -113,7 +113,7 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const protectedCheckout = readProtectedCheckout();
   const env = buildRecoveryAwsEnvironment(profile, baseEnv);
   const imageAuthorizationValidation = { verifyImageEvidence: (input) => verifyImageEvidence({ ...input, env }) };
-  const deriveProvenance = () => deriveCanonicalRecoveryProvenance({ sourceSha, repositoryRoot: root });
+  const deriveProvenance = ({ sourceSha: provenanceSha = sourceSha } = {}) => deriveCanonicalRecoveryProvenance({ sourceSha: provenanceSha, repositoryRoot: root });
   assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance });
   const terraformData = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: env.TF_DATA_DIR, repositoryRoot: root });
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(terraformData.backendMetadataPath, "utf8")).backend);
@@ -137,7 +137,11 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
     if (address !== STAGE_B_BACKEND_RECOVERY.address || !/^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:[1-9][0-9]*$/.test(arn || "")) throw new Error("Recovery attempted an unreviewed Terraform state import.");
     exec("terraform", [`-chdir=${terraformRoot}`, "import", "-lock-timeout=60s", address, arn], env);
   };
-  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, readState, register, describe, census, removeState, importState, stateBefore, journal: createFileJournal({ filePath: outputs.journal }) });
+  const proveDescendant = ({ ancestorSha, descendantSha }) => {
+    if (!/^[a-f0-9]{40}$/.test(ancestorSha || "") || !/^[a-f0-9]{40}$/.test(descendantSha || "") || ancestorSha === descendantSha) return false;
+    try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
+  };
+  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse: ({ imageReleaseSha, toolingSha }) => deriveStageBImageImpactReport({ imageReleaseSha, toolingSha }), readState, register, describe, census, removeState, importState, stateBefore, journal: createFileJournal({ filePath: outputs.journal }) });
   finalizeEvidence({ evidencePath: outputs.evidence, evidence: result.evidence });
   process.stdout.write(`${JSON.stringify({ status: "reconciled", replacementArn: result.registration.arn, evidenceSha256: result.evidence.evidenceSha256, stateSerialAfter: result.reconciliation.stateSerialAfter })}\n`);
   return result;

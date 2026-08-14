@@ -60,6 +60,16 @@ duplicate match, ambiguous prior call, or semantic mismatch fails closed and no
 second registration is attempted. Schema-1 and schema-3 journals are immutable
 failed evidence and cannot authorize the schema-v4 incident. The journal also resumes an interruption after
 `state rm` or `import` without repeating either completed operation.
+
+An already-registered schema-v4 incident may be resumed by a newer protected-main descendant only in its
+registered/reconciliation phases. This exception keeps the journal source SHA, incident identity, original
+image authorization, image release, replacement ARN, and consumed one-registration budget immutable. The
+current clean `origin/main` checkout must prove that it is a strict descendant, derive its own executor
+tooling identity, and independently recompute image reuse from the original image release. Reuse is accepted
+only for the reviewed non-runtime recovery/tooling, test, documentation, and workflow categories; runtime,
+image-affecting, unknown, unrelated, dirty, or non-origin changes fail closed. Exact-source resumes retain
+the ordinary source-bound path.
+
 For a schema-v4 journal created before checkpoint normalization, resume must
 also provide `--state-before` pointing to the preserved exact pre-removal state
 backup; the command validates its legacy hash and uses it only to prove that
