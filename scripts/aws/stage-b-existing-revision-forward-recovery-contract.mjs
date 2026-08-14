@@ -1,0 +1,149 @@
+import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
+import { assertProductionImageReuseResult } from "./validate-stage-b-image-reuse.mjs";
+import {
+  STAGE_B_BACKEND_RECOVERY,
+  assertCanonicalBackendRecoveryCensus,
+  buildCanonicalBackendRecoveryTaskDefinition,
+  canonicalJson,
+  canonicalSha256,
+  taskDefinitionFingerprint,
+} from "./stage-b-task-definition-recovery-contract.mjs";
+
+export const STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY = Object.freeze({
+  schemaVersion: 1,
+  kind: "STAGE_B_EXISTING_REVISION_ZERO_REGISTRATION_ADOPTION",
+  mode: "EXISTING_REVISION_ZERO_REGISTRATION_ADOPTION",
+  address: STAGE_B_BACKEND_RECOVERY.address,
+  family: STAGE_B_BACKEND_RECOVERY.family,
+  existingRevisionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9",
+  lineage: STAGE_B_BACKEND_RECOVERY.lineage,
+  startSerial: 94,
+});
+
+const SHA = /^[a-f0-9]{40}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
+const IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/;
+
+function backendInstance(state) {
+  const resources = (state?.resources || []).filter(({ type, name }) => type === "aws_ecs_task_definition" && name === "candidate");
+  if (resources.length !== 1 || !Array.isArray(resources[0].instances)) throw new Error("Forward recovery requires the canonical candidate resource collection.");
+  return resources[0].instances.find(({ index_key: key }) => key === "backend") || null;
+}
+
+function stateWithoutBackend(state) {
+  const value = structuredClone(state);
+  value.resources = value.resources.flatMap((resource) => {
+    if (resource.type !== "aws_ecs_task_definition" || resource.name !== "candidate") return [resource];
+    const instances = resource.instances.filter(({ index_key: key }) => key !== "backend");
+    return instances.length ? [{ ...resource, instances }] : [];
+  });
+  return value;
+}
+
+export function assertForwardStateBeforeImport(state) {
+  if (state?.lineage !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage || state?.serial !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial) throw new Error("Forward recovery requires the exact current Terraform lineage and serial.");
+  if (backendInstance(state)) throw new Error("Forward recovery requires the backend candidate to be absent before import.");
+  return { lineage: state.lineage, serial: state.serial, stateSha256: canonicalSha256(state) };
+}
+
+export function assertForwardStateAfterImport(before, after) {
+  if (after?.lineage !== before.lineage || after?.serial !== before.serial + 1) throw new Error("Forward recovery import changed Terraform lineage or serial unexpectedly.");
+  const imported = backendInstance(after);
+  const importedArn = imported?.attributes?.arn || imported?.attributes?.id;
+  if (importedArn !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn) throw new Error("Forward recovery import did not bind the exact canonical :9 ARN.");
+  const comparableAfter = stateWithoutBackend(after);
+  comparableAfter.serial = before.serial;
+  if (canonicalJson(stateWithoutBackend(before)) !== canonicalJson(comparableAfter)) throw new Error("Forward recovery import changed Terraform state outside the exact backend candidate address.");
+  return { lineage: after.lineage, serial: after.serial, stateSha256: canonicalSha256(after), backendArn: importedArn };
+}
+
+export function assertForwardCensus({ census } = {}) {
+  const entries = assertCanonicalBackendRecoveryCensus({ census });
+  const target = entries.find(({ arn }) => arn === STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn);
+  if (!target || entries[0].arn !== target.arn) throw new Error("Forward recovery requires the exact canonical :9 revision to be newest.");
+  if (entries.some(({ revision }) => revision > 9)) throw new Error("Forward recovery refuses an unexpected newer backend revision.");
+  return Object.freeze({ entries, newestArn: target.arn, censusSha256: canonicalSha256(entries) });
+}
+
+export function assertForwardRevisionReadback({ readback, expectedFingerprint, imageReleaseSha, backendImage } = {}) {
+  const taskDefinition = readback?.taskDefinition || readback;
+  if (taskDefinition?.taskDefinitionArn !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn
+    || taskDefinition.family !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.family || taskDefinition.status !== "ACTIVE"
+    || Number(taskDefinition.revision) !== 9 || taskDefinitionFingerprint(taskDefinition, readback?.tags) !== expectedFingerprint) throw new Error("Canonical :9 readback does not match the protected task-definition fingerprint.");
+  const container = taskDefinition.containerDefinitions?.find(({ name }) => name === "backend");
+  const release = container?.environment?.find(({ name }) => name === "RELEASE_GIT_SHA")?.value;
+  if (container?.image !== backendImage || release !== imageReleaseSha) throw new Error("Canonical :9 image or RELEASE_GIT_SHA binding does not match the authorized image release.");
+  return { arn: taskDefinition.taskDefinitionArn, fingerprint: expectedFingerprint, image: container.image, imageReleaseSha: release };
+}
+
+export function assertForwardSourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, deriveImageReuse } = {}) {
+  if (!SHA.test(sourceSha || "") || !protectedCheckout || protectedCheckout.currentHead !== sourceSha || protectedCheckout.originMainHead !== sourceSha || protectedCheckout.toolingSha !== sourceSha || protectedCheckout.porcelainStatus) throw new Error("Forward recovery requires the exact clean protected-main executor checkout.");
+  if (!bindings || bindings.toolingSha !== sourceSha || bindings.sourceSha !== sourceSha || !SHA256.test(bindings.toolingTreeSha256 || "") || !SHA256.test(bindings.sourceContractSha256 || "") || !SHA.test(bindings.imageReleaseSha || "") || !IMAGE.test(bindings.backendImage || "")) throw new Error("Forward recovery source and image bindings are incomplete.");
+  const authorization = imageAuthorization || bindings.imageAuthorization;
+  if (!authorization || authorization.imageReleaseSha !== bindings.imageReleaseSha || !SHA.test(authorization.sourceSha || "") || !SHA256.test(authorization.evidenceSha256 || "")) throw new Error("Forward recovery image authorization does not bind the requested image release.");
+  if (!imageAuthorizationValidation?.verifyImageEvidence) throw new Error("Forward recovery image authorization verifier is required.");
+  assertImageAuthorization(authorization, authorization.sourceSha, imageAuthorizationValidation);
+  const digest = authorizedBackendDigest(authorization);
+  if (bindings.backendImage !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`) throw new Error("Forward recovery backend image does not match authorization.");
+  const derived = deriveProvenance?.({ sourceSha, protectedCheckout });
+  if (!derived || derived.toolingTreeSha256 !== bindings.toolingTreeSha256 || derived.sourceContractSha256 !== bindings.sourceContractSha256) throw new Error("Forward recovery current source provenance is not derived from protected main.");
+  const reuse = deriveImageReuse?.({ imageReleaseSha: bindings.imageReleaseSha, toolingSha: sourceSha });
+  assertProductionImageReuseResult(reuse);
+  if (reuse.toolingSha !== sourceSha || reuse.imageReleaseSha !== bindings.imageReleaseSha || reuse.imageAffectingFiles.length !== 0) throw new Error("Forward recovery image reuse is not explicitly compatible with current protected main.");
+  return Object.freeze({ authorization, authorizedBackendDigest: digest, derived, reuse });
+}
+
+export function canonicalForwardRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, authorizedBackendDigest, imageAuthorizationSha256, stateLineage, stateSerial, stateBeforeSha256, existingRevisionArn, censusSha256, fingerprint } = {}) {
+  if (!SHA.test(sourceSha || "") || !SHA256.test(toolingTreeSha256 || "") || !SHA256.test(sourceContractSha256 || "") || !SHA.test(imageReleaseSha || "")
+    || !/^sha256:[a-f0-9]{64}$/.test(authorizedBackendDigest || "") || !SHA256.test(imageAuthorizationSha256 || "") || stateLineage !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage
+    || stateSerial !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial || !SHA256.test(stateBeforeSha256 || "") || existingRevisionArn !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn || !SHA256.test(censusSha256 || "") || !SHA256.test(fingerprint || "")) throw new Error("Forward recovery incident identity is incomplete.");
+  return canonicalSha256({ schemaVersion: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.schemaVersion, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, sourceSha, toolingTreeSha256, sourceContractSha256, imageReleaseSha, authorizedBackendDigest, imageAuthorizationSha256, stateLineage, stateSerial, stateBeforeSha256, existingRevisionArn, censusSha256, fingerprint });
+}
+
+export function validateExistingRevisionForwardJournal(journal, expected) {
+  if (!journal || journal.schemaVersion !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.schemaVersion || journal.kind !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind || journal.mode !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode || journal.incidentIdentity !== expected.incidentIdentity || journal.registrationCalls !== 0 || journal.registrationCapability !== "NONE" || journal.sourceSha !== expected.sourceSha || journal.toolingTreeSha256 !== expected.toolingTreeSha256 || journal.sourceContractSha256 !== expected.sourceContractSha256 || journal.imageReleaseSha !== expected.imageReleaseSha || journal.authorizedBackendDigest !== expected.authorizedBackendDigest || journal.imageAuthorizationSha256 !== expected.imageAuthorizationSha256 || journal.stateLineage !== expected.stateLineage || journal.stateSerial !== expected.stateSerial || journal.stateBeforeSha256 !== expected.stateBeforeSha256 || journal.existingRevisionArn !== expected.existingRevisionArn || journal.censusSha256 !== expected.censusSha256 || journal.fingerprint !== expected.fingerprint || !["PREPARED", "IMPORTING", "RECONCILED", "COMPLETED"].includes(journal.phase)) throw new Error("Forward recovery journal is not the exact zero-registration incident.");
+  if (["IMPORTING", "RECONCILED", "COMPLETED"].includes(journal.phase) && (!SHA256.test(journal.stateBeforeSha256 || "") || !SHA256.test(journal.stateAfterImportSha256 || ""))) throw new Error("Forward recovery journal is missing its authenticated state transition hashes.");
+  if (journal.phase === "IMPORTING" && journal.importMayHaveOccurred !== true) throw new Error("Forward recovery importing phase must fail closed as potentially ambiguous.");
+  return journal;
+}
+
+function expectedFields({ sourceSha, authorization, bindings, censusEvidence, fingerprint, incidentIdentity, stateBeforeSha256 }) {
+  return { incidentIdentity, sourceSha, toolingTreeSha256: authorization.derived.toolingTreeSha256, sourceContractSha256: authorization.derived.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, authorizedBackendDigest: authorization.authorizedBackendDigest, imageAuthorizationSha256: authorization.authorization.evidenceSha256, stateLineage: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage, stateSerial: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial, stateBeforeSha256, existingRevisionArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn, censusSha256: censusEvidence.censusSha256, fingerprint };
+}
+
+export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, deriveImageReuse, readState, census, describe, importState, journal } = {}) {
+  if (typeof readState !== "function" || typeof census !== "function" || typeof describe !== "function" || typeof importState !== "function" || !journal?.read || !journal?.write) throw new Error("Forward recovery requires read, census, describe, import, and journal adapters.");
+  const existing = journal.read();
+  const observedState = await readState();
+  const authorization = assertForwardSourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, deriveImageReuse });
+  const payload = buildCanonicalBackendRecoveryTaskDefinition(bindings);
+  const fingerprint = taskDefinitionFingerprint(payload.taskDefinition, payload.tags);
+  const censusEvidence = assertForwardCensus({ census: await census() });
+  const readback = assertForwardRevisionReadback({ readback: await describe(STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn), expectedFingerprint: fingerprint, imageReleaseSha: bindings.imageReleaseSha, backendImage: bindings.backendImage });
+  const stateLineage = existing?.stateLineage || observedState.lineage;
+  const stateSerial = existing?.stateSerial ?? observedState.serial;
+  const stateBeforeSha256 = existing?.stateBeforeSha256 || canonicalSha256(observedState);
+  const incidentIdentity = canonicalForwardRecoveryIncidentIdentity({ sourceSha, toolingTreeSha256: authorization.derived.toolingTreeSha256, sourceContractSha256: authorization.derived.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, authorizedBackendDigest: authorization.authorizedBackendDigest, imageAuthorizationSha256: authorization.authorization.evidenceSha256, stateLineage, stateSerial, stateBeforeSha256, existingRevisionArn: readback.arn, censusSha256: censusEvidence.censusSha256, fingerprint });
+  const expected = expectedFields({ sourceSha, authorization, bindings, censusEvidence, fingerprint, incidentIdentity, stateBeforeSha256 });
+  if (existing) {
+    validateExistingRevisionForwardJournal(existing, expected);
+    if (["COMPLETED", "RECONCILED"].includes(existing.phase)) {
+      if (canonicalSha256(observedState) !== existing.stateAfterImportSha256 || observedState.lineage !== existing.stateLineage || observedState.serial !== existing.stateSerial + 1 || (backendInstance(observedState)?.attributes?.arn || backendInstance(observedState)?.attributes?.id) !== existing.existingRevisionArn) throw new Error("Forward recovery replay observed state drift after reconciliation.");
+      return { incidentIdentity, imported: false, registrationCalls: 0, importCalls: 0, state: observedState, readback, census: censusEvidence };
+    }
+    if (existing.phase === "IMPORTING") throw new Error("Forward recovery import outcome is ambiguous; current state must be reviewed before any retry.");
+  }
+  const beforeState = observedState;
+  const before = assertForwardStateBeforeImport(beforeState);
+  if (existing?.stateBeforeSha256 !== undefined && existing.stateBeforeSha256 !== before.stateSha256) throw new Error("Forward recovery current state no longer matches the prepared incident.");
+  if (!existing) journal.write({ schemaVersion: 1, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, phase: "PREPARED", ...expected, stateBeforeSha256: before.stateSha256, registrationCalls: 0, registrationCapability: "NONE", importCalls: 0 });
+  const prepared = journal.read();
+  journal.write({ ...prepared, ...expected, phase: "IMPORTING", importCalls: 1, importMayHaveOccurred: true });
+  await importState({ address: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.address, arn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn });
+  const after = await readState();
+  const afterBinding = assertForwardStateAfterImport(beforeState, after);
+  const evidenceBody = { schemaVersion: 1, kind: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind, mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode, ...expected, stateAfterImportSha256: afterBinding.stateSha256, registrationCalls: 0, importCalls: 1 };
+  const evidence = { ...evidenceBody, evidenceSha256: canonicalSha256(evidenceBody) };
+  journal.write({ ...journal.read(), ...evidence, phase: "COMPLETED" });
+  return { incidentIdentity, imported: true, registrationCalls: 0, importCalls: 1, state: after, readback, census: censusEvidence, evidence };
+}

@@ -52,7 +52,7 @@ export const RELEASE_READ_PROBES = Object.freeze([
 
 export function readIdentityCapabilityMatrix() {
   const matrix = JSON.parse(fs.readFileSync(path.join(root, IDENTITY_CAPABILITY_MATRIX_PATH), "utf8"));
-  if (matrix.schemaVersion !== 1 || matrix.account !== STAGE_B.account || matrix.region !== STAGE_B.region || matrix.phases?.length !== 32) throw new Error("Stage B identity capability matrix identity is wrong.");
+  if (matrix.schemaVersion !== 1 || matrix.account !== STAGE_B.account || matrix.region !== STAGE_B.region || matrix.phases?.length !== 33) throw new Error("Stage B identity capability matrix identity is wrong.");
   const releaseActions = new Set(matrix.capabilities.filter(({ identity }) => identity === "RELEASE_DEPLOYER").map(({ action }) => action));
   for (const probe of RELEASE_READ_PROBES) if (!releaseActions.has(probe.action)) throw new Error(`Stage B identity capability matrix omits release action ${probe.action}.`);
   if (matrix.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && ["iam:SimulatePrincipalPolicy", "cloudtrail:LookupEvents"].includes(action))) throw new Error("Stage B release identity must not own administrator audit actions.");

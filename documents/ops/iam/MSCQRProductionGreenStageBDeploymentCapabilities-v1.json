@@ -91,76 +91,81 @@
     },
     {
       "order": 18,
+      "id": "existing-revision-forward-recovery",
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs"
+    },
+    {
+      "order": 19,
       "id": "stage-b-state-pull",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 19,
+      "order": 20,
       "id": "stage-a-state-read",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 20,
+      "order": 21,
       "id": "stage-a-handoff-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"
     },
     {
-      "order": 21,
+      "order": 22,
       "id": "tfvars-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-tfvars.mjs"
     },
     {
-      "order": 22,
+      "order": 23,
       "id": "refresh-only",
       "sourceFile": "scripts/refresh-production-green-stage-b.mjs"
     },
     {
-      "order": 23,
+      "order": 24,
       "id": "saved-plan-generation",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 24,
+      "order": 25,
       "id": "plan-json-canonicalization",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 25,
+      "order": 26,
       "id": "reference-audit",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs"
     },
     {
-      "order": 26,
+      "order": 27,
       "id": "plan-bound-permission-report",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 27,
+      "order": 28,
       "id": "production-closure",
       "sourceFile": "scripts/aws/validate-stage-b-deployment-closure.mjs"
     },
     {
-      "order": 28,
+      "order": 29,
       "id": "validator",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 29,
+      "order": 30,
       "id": "wrapper-verify-only",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 30,
+      "order": 31,
       "id": "wrapper-apply",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 31,
+      "order": 32,
       "id": "post-apply-verification",
       "sourceFile": "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"
     },
     {
-      "order": 32,
+      "order": 33,
       "id": "runtime-activation-boundary",
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs"
     }
@@ -7025,6 +7030,14 @@
     {
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs",
       "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "action": "ecs:DescribeTaskDefinition"
+    },
+    {
+      "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "action": "ecs:ListTaskDefinitions"
     },
     {
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",

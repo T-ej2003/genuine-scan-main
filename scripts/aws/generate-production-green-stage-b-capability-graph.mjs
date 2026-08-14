@@ -24,7 +24,7 @@ const awsCliSourceFiles = [
   "scripts/aws/production-green-stage-b-identity-capabilities.mjs", "scripts/aws/run-production-green-stage-b-preflight.mjs",
   "scripts/aws/validate-production-green-stage-b-permissions.mjs", "scripts/aws/production-checker-chain-contract.mjs",
   "scripts/aws/publish-production-green-stage-b-approval.mjs", "scripts/aws/check-production-green-stage-b-approval-publication.mjs",
-  "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+  "scripts/aws/recover-stage-b-backend-task-definition.mjs", "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
 ];
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const readJson = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
@@ -49,6 +49,7 @@ const PHASES = Object.freeze([
   ["backend-metadata-validation", "scripts/aws/stage-b-terraform-backend-contract.mjs"],
   ["workspace-validation", "scripts/aws/stage-b-terraform-workspace.mjs"],
   ["canonical-backend-recovery", "scripts/aws/recover-stage-b-backend-task-definition.mjs"],
+  ["existing-revision-forward-recovery", "scripts/aws/forward-recover-stage-b-existing-revision.mjs"],
   ["stage-b-state-pull", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["stage-a-state-read", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["stage-a-handoff-generation", "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"],
@@ -216,7 +217,7 @@ export function buildStageBDeploymentCapabilityGraph() {
 export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILITY_GRAPH_PATH)) {
   const expected = buildStageBDeploymentCapabilityGraph();
   if (canonicalizeJson(graph) !== canonicalizeJson(expected)) throw new Error("Stage B deployment capability graph is stale or incomplete.");
-  if (graph.phases.length !== 32 || new Set(graph.phases.map(({ id }) => id)).size !== 32) throw new Error("Stage B capability graph phase coverage is incomplete.");
+  if (graph.phases.length !== 33 || new Set(graph.phases.map(({ id }) => id)).size !== 33) throw new Error("Stage B capability graph phase coverage is incomplete.");
   if (new Set(graph.capabilities.map(({ id }) => id)).size !== graph.capabilities.length) throw new Error("Stage B capability IDs are not unique.");
   if (graph.capabilities.some(({ identity, action }) => !identity || !action)) throw new Error("Stage B capability identity is ambiguous.");
   if (graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy")) throw new Error("Release-deployer cannot own IAM simulation.");
@@ -238,7 +239,7 @@ export function assertStageBAwsCallCoverage(graph, calls) {
   return true;
 }
 
-const markdown = (graph) => `# Stage B production deployment capability graph\n\nGenerated from the permission manifest, reviewed source policies, release probes, canonical recovery, publisher policy, Terraform runtime policy actions, and the 32-phase production path. Do not edit generated capability rows manually.\n\n- Phases: ${graph.phases.length}\n- Capability nodes: ${graph.capabilities.length}\n- Unique AWS actions: ${new Set(graph.capabilities.map(({ action }) => action)).size}\n- Identities: ${graph.identities.join(", ")}\n\n| Order | Phase | Source |\n|---:|---|---|\n${graph.phases.map(({ order, id, sourceFile }) => `| ${order} | ${id} | \`${sourceFile}\` |`).join("\n")}\n`;
+const markdown = (graph) => `# Stage B production deployment capability graph\n\nGenerated from the permission manifest, reviewed source policies, release probes, canonical recovery, zero-registration forward recovery, publisher policy, Terraform runtime policy actions, and the production path. Do not edit generated capability rows manually.\n\n- Phases: ${graph.phases.length}\n- Capability nodes: ${graph.capabilities.length}\n- Unique AWS actions: ${new Set(graph.capabilities.map(({ action }) => action)).size}\n- Identities: ${graph.identities.join(", ")}\n\n| Order | Phase | Source |\n|---:|---|---|\n${graph.phases.map(({ order, id, sourceFile }) => `| ${order} | ${id} | \`${sourceFile}\` |`).join("\n")}\n`;
 
 export function writeStageBDeploymentCapabilityGraph() {
   const graph = buildStageBDeploymentCapabilityGraph();
