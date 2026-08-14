@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { buildRecoveryAwsEnvironment, collectCanonicalBackendRecoveryCensus, deriveCanonicalRecoveryProvenance, runCanonicalRecoveryCli } from "../aws/recover-stage-b-backend-task-definition.mjs";
+import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
 import {
   STAGE_B_BACKEND_RECOVERY,
   assertBackendRecoveryPreconditions,
+  assertCanonicalRecoveryDescendantResume,
   assertCanonicalRecoverySourceBinding,
   assertCanonicalBackendRecoveryCensus,
   assertCanonicalBackendRecoveryReadback,
@@ -47,6 +49,20 @@ const bindings = {
 };
 const protectedCheckout = { mode: "production", toolingSha: sourceSha, currentHead: sourceSha, originMainHead: sourceSha, isAncestor: true, porcelainStatus: "", derivedProvenance: { toolingTreeSha256: "a".repeat(64), sourceContractSha256: "b".repeat(64) }, repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false } };
 const deriveProvenance = ({ protectedCheckout: checkout }) => checkout.derivedProvenance;
+
+const originalIncidentSha = "3d5eeefc34d69820e00bef072da3c4396689491f";
+const executorSha = "eec7724ea16cd5051cd709fbd729fa7bc1c3786b";
+const originalIncidentTree = "0df4855040c73f840af70c7c77aa57d62e8af6e11d580a620561e215a973a81e";
+const executorTree = "e4a27b104d38173b000861b6ab79eee97cc69362e83f22a458b94bc58ba08660";
+const crossImageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha: originalIncidentSha, imageReleaseSha: "29bf92a14d5e832575009bd76b16886feff62cbd" });
+const crossImageAuthorization = crossImageAuthorizationFixture.authorization;
+const crossImage = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${crossImageAuthorization.backendDigest}`;
+const crossBindings = { ...bindings, sourceSha: originalIncidentSha, toolingSha: originalIncidentSha, toolingTreeSha256: originalIncidentTree, imageReleaseSha: crossImageAuthorization.imageReleaseSha, backendImage: crossImage, imageAuthorization: crossImageAuthorization };
+const crossProtectedCheckout = { ...protectedCheckout, toolingSha: executorSha, currentHead: executorSha, originMainHead: executorSha, derivedProvenance: { toolingTreeSha256: executorTree, sourceContractSha256: bindings.sourceContractSha256 } };
+const crossProvenance = ({ sourceSha: value }) => value === originalIncidentSha
+  ? { toolingTreeSha256: originalIncidentTree, sourceContractSha256: bindings.sourceContractSha256 }
+  : { toolingTreeSha256: executorTree, sourceContractSha256: bindings.sourceContractSha256 };
+const crossReuse = ({ imageReleaseSha: release, toolingSha: tooling }) => ({ schemaVersion: 1, imageReleaseSha: release, toolingSha: tooling, toolingInputTreeSha256: executorTree, comparisonBaseSha: release, comparisonHeadIdentity: "tooling-input-tree-sha256", comparisonHeadSha256: executorTree, classificationRulesVersion: "stage-b-image-reuse-v2", imageReuseCompatible: true, imageBuildInputsChanged: false, imageAffectingFiles: [], classifiedChangedFiles: [{ file: "scripts/aws/stage-b-task-definition-recovery-contract.mjs", category: "toolingOnly", imageAffecting: false }] });
 const journalIdentity = { imageReleaseSha, imageAuthorizationSha256: imageAuthorization.evidenceSha256 };
 const journalAdapter = (initial) => { let value = initial ? structuredClone(initial) : null; return { read: () => value && structuredClone(value), write: (next) => { value = structuredClone(next); } }; };
 const state = (arn = STAGE_B_BACKEND_RECOVERY.predecessorArn, serial = STAGE_B_BACKEND_RECOVERY.serial) => ({
@@ -101,6 +117,112 @@ function replacementPayload(arn = "arn:aws:ecs:eu-west-2:368992683803:task-defin
   return { taskDefinition, tags: options.tags || structuredClone(payload.tags), fingerprint: taskDefinitionFingerprint(payload.taskDefinition, payload.tags) };
 }
 
+function crossReplacementPayload(arn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9") {
+  const payload = buildCanonicalBackendRecoveryTaskDefinition(crossBindings);
+  const taskDefinition = { ...structuredClone(payload.taskDefinition), taskDefinitionArn: arn, family: payload.taskDefinition.family, status: "ACTIVE", revision: Number(arn.split(":").at(-1)) };
+  return { taskDefinition, tags: structuredClone(payload.tags), fingerprint: taskDefinitionFingerprint(payload.taskDefinition, payload.tags) };
+}
+
+function crossResumeJournal() {
+  const current = state();
+  const payload = crossReplacementPayload();
+  const journal = buildCanonicalRecoveryJournal(current, {
+    sourceSha: originalIncidentSha,
+    toolingTreeSha256: originalIncidentTree,
+    sourceContractSha256: crossBindings.sourceContractSha256,
+    imageReleaseSha: crossBindings.imageReleaseSha,
+    imageAuthorizationSha256: crossImageAuthorization.evidenceSha256,
+    fingerprint: payload.fingerprint,
+    imageDigest: crossBindings.backendImage,
+    newestHistoricalArn: STAGE_B_BACKEND_RECOVERY.newestHistoricalArn,
+    incidentIdentity: canonicalRecoveryIncidentIdentity({ sourceSha: originalIncidentSha, toolingTreeSha256: originalIncidentTree, sourceContractSha256: crossBindings.sourceContractSha256, imageReleaseSha: crossBindings.imageReleaseSha, imageDigest: crossImageAuthorization.backendDigest, imageAuthorizationSha256: crossImageAuthorization.evidenceSha256, stateLineage: current.lineage, stateSerial: current.serial, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, newestHistoricalArn: STAGE_B_BACKEND_RECOVERY.newestHistoricalArn, fingerprint: payload.fingerprint }),
+  });
+  return { ...journal, phase: "STATE_RECONCILING_PRE_REMOVE", replacementArn: payload.taskDefinition.taskDefinitionArn, replacementFingerprint: payload.fingerprint, registrationCalls: 1, registrationMayHaveOccurred: true };
+}
+
+function cliPostRemoveState() {
+  const value = structuredClone(state());
+  value.serial = 94;
+  value.resources = [];
+  return value;
+}
+
+function createCliCrossDescendantFixture({ journalMutate, bindingsMutate, authorizationMutate, protectedCheckout = crossProtectedCheckout, deriveImageReuse } = {}) {
+  const originalProvenance = deriveCanonicalRecoveryProvenance({ sourceSha: originalIncidentSha });
+  const incidentBindings = { ...crossBindings, toolingTreeSha256: originalProvenance.toolingTreeSha256, sourceContractSha256: originalProvenance.sourceContractSha256 };
+  bindingsMutate?.(incidentBindings);
+  const authorization = structuredClone(crossImageAuthorization);
+  authorizationMutate?.(authorization);
+  incidentBindings.imageAuthorization = authorization;
+  const predecessor = state();
+  const payload = buildCanonicalBackendRecoveryTaskDefinition(incidentBindings);
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
+  const replacement = { taskDefinition: { ...structuredClone(payload.taskDefinition), taskDefinitionArn: replacementArn, family: payload.taskDefinition.family, status: "ACTIVE", revision: 9 }, tags: structuredClone(payload.tags), fingerprint: taskDefinitionFingerprint(payload.taskDefinition, payload.tags) };
+  const journal = buildCanonicalRecoveryJournal(predecessor, {
+    sourceSha: originalIncidentSha,
+    toolingTreeSha256: incidentBindings.toolingTreeSha256,
+    sourceContractSha256: incidentBindings.sourceContractSha256,
+    imageReleaseSha: incidentBindings.imageReleaseSha,
+    imageAuthorizationSha256: authorization.evidenceSha256,
+    fingerprint: replacement.fingerprint,
+    imageDigest: incidentBindings.backendImage,
+    newestHistoricalArn: STAGE_B_BACKEND_RECOVERY.newestHistoricalArn,
+    incidentIdentity: canonicalRecoveryIncidentIdentity({ sourceSha: originalIncidentSha, toolingTreeSha256: incidentBindings.toolingTreeSha256, sourceContractSha256: incidentBindings.sourceContractSha256, imageReleaseSha: incidentBindings.imageReleaseSha, imageDigest: crossImageAuthorization.backendDigest, imageAuthorizationSha256: authorization.evidenceSha256, stateLineage: predecessor.lineage, stateSerial: predecessor.serial, predecessorArn: STAGE_B_BACKEND_RECOVERY.predecessorArn, newestHistoricalArn: STAGE_B_BACKEND_RECOVERY.newestHistoricalArn, fingerprint: replacement.fingerprint }),
+  });
+  journal.phase = "STATE_RECONCILING_PRE_REMOVE";
+  journal.replacementArn = replacementArn;
+  journal.replacementFingerprint = replacement.fingerprint;
+  journal.registrationCalls = 1;
+  journal.registrationMayHaveOccurred = true;
+  journal.stateBeforeSha256 = canonicalSha256(predecessor);
+  journal.stateAfterRemoveSha256 = canonicalSha256(cliPostRemoveState());
+  delete journal.checkpointHashDomain;
+  journalMutate?.(journal);
+  const directory = mkdtempSync(path.join("/tmp", "mscqr-recovery-cli-cross-"));
+  const terraformDataDir = path.join(directory, "terraform-data");
+  mkdirSync(terraformDataDir, { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(terraformDataDir, "terraform.tfstate"), JSON.stringify({ backend: { type: "s3", hash: 1, config: STAGE_B_TERRAFORM_BACKEND_CONFIG } }), { mode: 0o600 });
+  const bindingsPath = path.join(directory, "bindings.json");
+  const imageAuthorizationPath = path.join(directory, "image-authorization.json");
+  const evidencePath = path.join(directory, "evidence.json");
+  const journalPath = path.join(directory, "recovery.json");
+  const stateBeforePath = path.join(directory, "state-before.json");
+  writeFileSync(bindingsPath, JSON.stringify(incidentBindings), { mode: 0o600 });
+  writeFileSync(imageAuthorizationPath, JSON.stringify(authorization), { mode: 0o600 });
+  writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(stateBeforePath, JSON.stringify(predecessor), { mode: 0o600 });
+  let current = cliPostRemoveState();
+  const calls = [];
+  const exec = (command, args) => {
+    calls.push({ command, args: [...args] });
+    if (command === "terraform" && args.includes("workspace") && args.includes("show")) return "default\n";
+    if (command === "terraform" && args.includes("state") && args.includes("pull")) return JSON.stringify(current);
+    if (command === "terraform" && args.includes("import")) { current = state(replacementArn, 95); return ""; }
+    if (command === "aws" && args.includes("register-task-definition")) throw new Error("unexpected ECS registration");
+    if (command === "aws" && args.includes("list-task-definitions")) return JSON.stringify({ taskDefinitionArns: [replacementArn, STAGE_B_BACKEND_RECOVERY.newestHistoricalArn] });
+    if (command === "aws" && args.includes("describe-task-definition")) {
+      const arn = args[args.indexOf("--task-definition") + 1];
+      return JSON.stringify(arn === replacementArn ? replacement : historicalPayload(STAGE_B_BACKEND_RECOVERY.newestHistoricalArn));
+    }
+    throw new Error(`unexpected CLI adapter call: ${command} ${args.join(" ")}`);
+  };
+  const argv = ["--execute", "--source-sha", executorSha, "--bindings", bindingsPath, "--image-authorization", imageAuthorizationPath,
+    "--terraform-root", path.resolve("infra/aws/terraform/production-green-stage-b"), "--evidence-out", evidencePath, "--recovery-state", journalPath,
+    "--state-before", stateBeforePath, "--aws-profile", "test"];
+  return {
+    argv,
+    baseEnv: { ...process.env, TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: "default" },
+    protectedCheckout,
+    authorizationFixture: crossImageAuthorizationFixture,
+    exec,
+    deriveImageReuse,
+    calls,
+    journalPath,
+    evidencePath,
+    cleanup: () => rmSync(directory, { recursive: true, force: true }),
+  };
+}
+
 const historicalPayload = (arn = STAGE_B_BACKEND_RECOVERY.historicalRevisionArns.at(-1)) => replacementPayload(arn, { mutate: (value) => { value.containerDefinitions[0].image = `${image.slice(0, -64)}${"e".repeat(64)}`; } });
 const censusFor = (payload) => ({ complete: true, revisions: [{ arn: payload.taskDefinition.taskDefinitionArn, readback: payload }, { arn: STAGE_B_BACKEND_RECOVERY.historicalRevisionArns.at(-1), readback: historicalPayload() }] });
 
@@ -149,6 +271,188 @@ test("recovery separates tooling provenance from image/task-definition provenanc
   assert.notEqual(bindings.toolingSha, bindings.imageReleaseSha);
   assert.throws(() => assertCanonicalRecoverySourceBinding({ sourceSha, bindings: { ...bindings, imageReleaseSha: sourceSha }, protectedCheckout }), /image-release identity/);
   assert.throws(() => assertCanonicalRecoverySourceBinding({ sourceSha, bindings: { ...bindings, backendImage: `${image.slice(0, -64)}${"e".repeat(64)}` }, protectedCheckout }), /backend image/);
+});
+
+test("protected eec7724 resumes the original 3d5eeef incident without rebinding or registering", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
+  const replacement = crossReplacementPayload(replacementArn);
+  const historical = historicalPayload();
+  let current = { ...state(), serial: 94, resources: [] };
+  let registrations = 0;
+  let imports = 0;
+  const journal = journalAdapter(crossResumeJournal());
+  const result = await runCanonicalBackendRecovery({
+    bindings: crossBindings,
+    sourceSha: executorSha,
+    protectedCheckout: crossProtectedCheckout,
+    imageAuthorization: crossImageAuthorization,
+    imageAuthorizationValidation: { now: crossImageAuthorizationFixture.now, verifyImageEvidence: crossImageAuthorizationFixture.verifyImageEvidence },
+    deriveProvenance: crossProvenance,
+    proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === originalIncidentSha && descendantSha === executorSha,
+    deriveImageReuse: crossReuse,
+    journal,
+    readState: async () => structuredClone(current),
+    census: async () => ({ complete: true, revisions: [{ arn: replacementArn, readback: replacement }, { arn: STAGE_B_BACKEND_RECOVERY.newestHistoricalArn, readback: historical }] }),
+    describe: async () => replacement,
+    register: async () => { registrations += 1; throw new Error("cross-descendant resume must not register"); },
+    removeState: async () => { throw new Error("cross-descendant resume must not repeat state rm"); },
+    importState: async ({ arn }) => { imports += 1; current = state(arn, 95); },
+  });
+  assert.equal(registrations, 0);
+  assert.equal(imports, 1);
+  assert.equal(result.registration.arn, replacementArn);
+  assert.equal(result.reconciliation.importCalls, 1);
+  assert.equal(result.reconciliation.removeCalls, 0);
+  assert.equal(result.evidence.sourceSha, originalIncidentSha);
+  assert.equal(result.evidence.incidentIdentity, journal.read().incidentIdentity);
+  assert.equal(result.evidence.resumeExecutorToolingSha, executorSha);
+  assert.equal(journal.read().sourceSha, originalIncidentSha);
+  assert.equal(journal.read().registrationCalls, 1);
+});
+
+test("cross-descendant resume rejects identity, ancestry, checkout, authorization, and image-reuse drift", () => {
+  const base = { sourceSha: executorSha, bindings: crossBindings, protectedCheckout: crossProtectedCheckout, journalState: crossResumeJournal(), imageAuthorization: crossImageAuthorization, imageAuthorizationValidation: { now: crossImageAuthorizationFixture.now, verifyImageEvidence: crossImageAuthorizationFixture.verifyImageEvidence }, deriveProvenance: crossProvenance, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === originalIncidentSha && descendantSha === executorSha, deriveImageReuse: crossReuse };
+  const cases = [
+    ["unrelated commit", { proveDescendant: () => false }],
+    ["source ancestor rather than descendant", { proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === executorSha && descendantSha === originalIncidentSha }],
+    ["dirty checkout", { protectedCheckout: { ...crossProtectedCheckout, porcelainStatus: " M scripts/aws/example.mjs" } }],
+    ["non-origin checkout", { protectedCheckout: { ...crossProtectedCheckout, originMainHead: "f".repeat(40) } }],
+    ["image-affecting descendant", { deriveImageReuse: () => ({ ...crossReuse({ imageReleaseSha: crossBindings.imageReleaseSha, toolingSha: executorSha }), imageAffectingFiles: ["backend/src/runtime.mjs"], classifiedChangedFiles: [{ file: "backend/src/runtime.mjs", category: "runtimeApplicationSource", imageAffecting: true }] }) }],
+    ["changed image digest", { journalState: { ...crossResumeJournal(), authorizedBackendImageDigest: `sha256:${"e".repeat(64)}` } }],
+    ["changed image authorization", { journalState: { ...crossResumeJournal(), imageAuthorizationSha256: "f".repeat(64) } }],
+    ["changed incident identity", { journalState: { ...crossResumeJournal(), incidentIdentity: "f".repeat(64) } }],
+    ["unknown checkpoint domain", { journalState: { ...crossResumeJournal(), checkpointHashDomain: "unreviewed" } }],
+  ];
+  for (const [label, overrides] of cases) assert.throws(() => assertCanonicalRecoveryDescendantResume({ ...base, ...overrides }), label);
+});
+
+test("cross-descendant resume rejects canonical revision, census, budget, and Terraform drift before import", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
+  const replacement = crossReplacementPayload(replacementArn);
+  const historical = historicalPayload();
+  const cases = [
+    ["missing :9", { census: [{ arn: STAGE_B_BACKEND_RECOVERY.newestHistoricalArn, readback: historical }] }],
+    [":8 anchor mismatch", { census: [{ arn: replacementArn, readback: replacement }, { arn: STAGE_B_BACKEND_RECOVERY.historicalRevisionArns[1], readback: historical }] }],
+    ["unexpected :10", { census: [{ arn: `${replacementArn.slice(0, -1)}10`, readback: crossReplacementPayload(`${replacementArn.slice(0, -1)}10`) }, { arn: replacementArn, readback: replacement }, { arn: STAGE_B_BACKEND_RECOVERY.newestHistoricalArn, readback: historical }] }],
+    [":9 fingerprint drift", { census: [{ arn: replacementArn, readback: crossReplacementPayload(replacementArn), mutate: (value) => { value.taskDefinition.containerDefinitions[0].image = `${crossImage.slice(0, -64)}${"e".repeat(64)}`; } }, { arn: STAGE_B_BACKEND_RECOVERY.newestHistoricalArn, readback: historical }] }],
+    ["registration budget", { journal: { registrationCalls: 0, registrationMayHaveOccurred: false } }],
+    ["lineage drift", { state: { ...state(), serial: 94, lineage: "0".repeat(36), resources: [] } }],
+    ["candidate present", { state: state(STAGE_B_BACKEND_RECOVERY.predecessorArn, 94) }],
+  ];
+  for (const [label, options] of cases) {
+    let current = options.state || { ...state(), serial: 94, resources: [] };
+    let registrations = 0;
+    let imports = 0;
+    const journal = crossResumeJournal();
+    if (options.journal) Object.assign(journal, options.journal);
+    const revisions = options.census || [{ arn: replacementArn, readback: replacement }, { arn: STAGE_B_BACKEND_RECOVERY.newestHistoricalArn, readback: historical }];
+    await assert.rejects(() => runCanonicalBackendRecovery({ bindings: crossBindings, sourceSha: executorSha, protectedCheckout: crossProtectedCheckout, imageAuthorization: crossImageAuthorization, imageAuthorizationValidation: { now: crossImageAuthorizationFixture.now, verifyImageEvidence: crossImageAuthorizationFixture.verifyImageEvidence }, deriveProvenance: crossProvenance, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === originalIncidentSha && descendantSha === executorSha, deriveImageReuse: crossReuse, journal: journalAdapter(journal), readState: async () => structuredClone(current), census: async () => ({ complete: true, revisions: revisions.map(({ mutate, ...entry }) => { const value = structuredClone(entry); mutate?.(value.readback); return value; }) }), describe: async () => replacement, register: async () => { registrations += 1; }, removeState: async () => {}, importState: async ({ arn }) => { imports += 1; current = state(arn, 95); } }), label);
+    assert.equal(registrations, 0, label);
+    assert.equal(imports, 0, label);
+  }
+});
+
+test("production CLI reaches cross-descendant reconciliation without exact-source preflight or registration", async () => {
+  const fixture = createCliCrossDescendantFixture();
+  try {
+    const result = await runCanonicalRecoveryCli(fixture.argv, {
+      baseEnv: fixture.baseEnv,
+      exec: fixture.exec,
+      readProtectedCheckout: () => fixture.protectedCheckout,
+      verifyImageEvidence: fixture.authorizationFixture.verifyImageEvidence,
+      deriveImageReuse: fixture.deriveImageReuse,
+    });
+    assert.equal(result.registration.registrationCalls, 0);
+    assert.equal(result.reconciliation.importCalls, 1);
+    assert.equal(result.reconciliation.removeCalls, 0);
+    assert.equal(fixture.calls.filter(({ command, args }) => command === "aws" && args.includes("register-task-definition")).length, 0);
+    assert.equal(fixture.calls.filter(({ command, args }) => command === "terraform" && args.includes("import")).length, 1);
+    assert.equal(result.evidence.sourceSha, originalIncidentSha);
+    assert.equal(result.evidence.resumeExecutorToolingSha, executorSha);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("production CLI rejects forged descendant resume inputs before any adapter mutation", async () => {
+  const cases = [
+    ["forged journal source", { journalMutate: (journal) => { journal.sourceSha = "f".repeat(40); } }],
+    ["dirty executor", { protectedCheckout: { ...crossProtectedCheckout, porcelainStatus: " M scripts/aws/example.mjs" } }],
+    ["invalid image authorization", { authorizationMutate: (authorization) => { authorization.valid = false; } }],
+    ["bindings not matching original incident", { bindingsMutate: (value) => { value.sourceSha = executorSha; } }],
+    ["image-affecting descendant delta", { deriveImageReuse: () => ({ ...crossReuse({ imageReleaseSha: crossBindings.imageReleaseSha, toolingSha: executorSha }), imageAffectingFiles: ["backend/src/runtime.mjs"], classifiedChangedFiles: [{ file: "backend/src/runtime.mjs", category: "runtimeApplicationSource", imageAffecting: true }] }) }],
+    ["unregistered early phase", { journalMutate: (journal) => { journal.phase = "DISCOVERY"; } }],
+  ];
+  for (const [label, options] of cases) {
+    const fixture = createCliCrossDescendantFixture(options);
+    try {
+      await assert.rejects(() => runCanonicalRecoveryCli(fixture.argv, {
+        baseEnv: fixture.baseEnv,
+        exec: fixture.exec,
+        readProtectedCheckout: () => fixture.protectedCheckout,
+        verifyImageEvidence: fixture.authorizationFixture.verifyImageEvidence,
+        deriveImageReuse: fixture.deriveImageReuse,
+      }), label);
+      assert.equal(fixture.calls.some(({ command, args }) => (command === "aws" && args.includes("register-task-definition")) || (command === "terraform" && args.includes("state") && (args.includes("rm") || args.includes("import")))), false, label);
+    } finally {
+      fixture.cleanup();
+    }
+  }
+});
+
+test("completed cross-descendant recovery is terminal and leaves journal/evidence bytes unchanged", async () => {
+  const fixture = createCliCrossDescendantFixture({ journalMutate: (journal) => { journal.phase = "COMPLETED"; } });
+  try {
+    const journal = JSON.parse(readFileSync(fixture.journalPath, "utf8"));
+    const evidence = recoveryEvidence({
+      sourceSha: journal.sourceSha,
+      toolingTreeSha256: journal.toolingTreeSha256,
+      sourceContractSha256: journal.sourceContractSha256,
+      imageReleaseSha: journal.imageReleaseSha,
+      imageAuthorizationSha256: journal.imageAuthorizationSha256,
+      state: state(),
+      stateBinding: journal,
+      replacement: { arn: journal.replacementArn, fingerprint: journal.replacementFingerprint, protectedSourceFingerprint: journal.protectedSourceFingerprint },
+      imageDigest: journal.imageDigest,
+      newestHistoricalArn: journal.newestHistoricalArn,
+      incidentIdentity: journal.incidentIdentity,
+    });
+    journal.evidenceSha256 = evidence.evidenceSha256;
+    writeFileSync(fixture.journalPath, `${JSON.stringify(journal, null, 2)}\n`, { mode: 0o600 });
+    writeFileSync(fixture.evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+    const journalBefore = readFileSync(fixture.journalPath);
+    const evidenceBefore = readFileSync(fixture.evidencePath);
+    await assert.rejects(() => runCanonicalRecoveryCli(fixture.argv, {
+      baseEnv: fixture.baseEnv,
+      exec: fixture.exec,
+      readProtectedCheckout: () => fixture.protectedCheckout,
+      verifyImageEvidence: fixture.authorizationFixture.verifyImageEvidence,
+      deriveImageReuse: fixture.deriveImageReuse,
+    }), /terminal/);
+    assert.deepEqual(readFileSync(fixture.journalPath), journalBefore);
+    assert.deepEqual(readFileSync(fixture.evidencePath), evidenceBefore);
+    assert.equal(fixture.calls.some(({ command, args }) => (command === "aws" && args.includes("register-task-definition")) || (command === "terraform" && args.includes("state") && (args.includes("rm") || args.includes("import")))), false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("cross-descendant reconciliation phases remain resumable while completion stays terminal", () => {
+  for (const phase of ["STATE_RECONCILING_PRE_REMOVE", "STATE_RECONCILING_POST_REMOVE", "STATE_RECONCILED"]) {
+    assert.doesNotThrow(() => assertCanonicalRecoveryDescendantResume({ sourceSha: executorSha, bindings: crossBindings, protectedCheckout: crossProtectedCheckout, journalState: { ...crossResumeJournal(), phase }, imageAuthorization: crossImageAuthorization, imageAuthorizationValidation: { now: crossImageAuthorizationFixture.now, verifyImageEvidence: crossImageAuthorizationFixture.verifyImageEvidence }, deriveProvenance: crossProvenance, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === originalIncidentSha && descendantSha === executorSha, deriveImageReuse: crossReuse }));
+  }
+});
+
+test("exact-source completed recovery preserves the existing terminal path without registration", async () => {
+  const replacementArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
+  const payload = replacementPayload(replacementArn);
+  const journal = buildCanonicalRecoveryJournal(state(), journalArgs(state(), payload));
+  Object.assign(journal, { phase: "COMPLETED", replacementArn, replacementFingerprint: payload.fingerprint, registrationCalls: 1, registrationMayHaveOccurred: true });
+  let registrations = 0;
+  const result = await runCanonicalBackendRecovery({ bindings, sourceSha, protectedCheckout, journal: journalAdapter(journal), readState: async () => state(replacementArn, 95), census: async () => censusFor(payload), describe: async () => payload, register: async () => { registrations += 1; }, removeState: async () => { throw new Error("completed recovery must not remove state"); }, importState: async () => { throw new Error("completed recovery must not import state"); } });
+  assert.equal(registrations, 0);
+  assert.equal(result.registration.registrationCalls, 0);
+  assert.equal(result.reconciliation.importCalls, 0);
 });
 
 test("recovery derives the two source identities through the authoritative implementations", () => {
