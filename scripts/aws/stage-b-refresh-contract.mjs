@@ -446,6 +446,7 @@ export function classifyStageBRefreshResult({ plan, terraformExitCode = 0, terra
   try {
     if (terraformExitCode !== 0 && terraformExitCode !== 2) return { status: terraformExitCode === 1 ? "FAILED_CHECK" : "PROVIDER_OR_BACKEND_FAILURE", reason: "Terraform refresh-only exited unsuccessfully.", checkCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 0, failedChecks: [], checks: [], resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
     plan = normalizeStageBRefreshPlan(plan);
+    if (terraformExitCode === 2 && (plan.complete === false || plan.errored === true)) return { status: "MALFORMED_RESULT", reason: "Terraform detailed exit code returned an incomplete or errored refresh plan.", checkCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 0, failedChecks: [], checks: [], resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
     const checkResult = inspectStageBRefreshChecks({ checks: plan.checks });
     if (!checkResult.valid) return { status: "FAILED_CHECK", reason: "Terraform refresh-only contains failed or malformed production checks.", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
     const resourceChanges = [...plan.resource_changes, ...plan.resource_drift].filter((change) => !Array.isArray(change.change?.actions) || change.change.actions.some((action) => action !== "no-op"));
@@ -476,7 +477,7 @@ export function classifyStageBRefreshResult({ plan, terraformExitCode = 0, terra
       if (result.classification !== "reviewed") return { status: result.classification, reason: result.reason, taskDefinitionOutputClassification: name === "task_definition_arns" ? "OUTPUT_RECONCILIATION_INVALID" : undefined, ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [...classifiedOutputs, { name, ...result }] };
       classifiedOutputs.push({ name, ...result });
     }
-    if (terraformExitCode === 2 && !outputChanges.length) return { status: "OUTPUT_DRIFT", reason: "Terraform reported changes without a reviewed output change.", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
+    if (terraformExitCode === 2 && !outputChanges.length) return { status: "NO_CHANGES", reason: "Terraform detailed exit code contained no actionable resource, drift, or output changes.", taskDefinitionOutputClassification: "STATE_OUTPUT_ALREADY_CONVERGED", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [], taskDefinitionArns };
     return { status: outputChanges.length ? "REVIEWED_OUTPUT_RECONCILIATION" : "NO_CHANGES", reason: outputChanges.length ? "Only reviewed output reconciliation was detected." : "No resource or output changes were detected.", taskDefinitionOutputClassification: taskDefinitionOutputChange ? "REVIEWED_OUTPUT_RECONCILIATION" : "STATE_OUTPUT_ALREADY_CONVERGED", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: classifiedOutputs, taskDefinitionArns };
   } catch (error) {
     return { status: "MALFORMED_RESULT", reason: error.message, checkCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 0, failedChecks: [], checks: [], resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
