@@ -84,6 +84,9 @@ Image authorization verifies its own signed source identity, then the forward co
 proves the authenticated authorization-source-to-current-tooling transition and the
 image-release-to-current-tooling transition through the reviewed image-reuse report. A valid
 two-SHA reuse is explicit; an unrelated or image-affecting transition fails closed.
+Consumed supersession replay first authenticates the supplied authorization against the immutable
+journal authorization hash, source, release, and digest bindings before deriving any `bound_images`
+compatibility values; an authorization that merely matches remote outputs cannot authorize replay.
 
 Use the existing Stage-B preflight and artifact contracts to create fresh bindings and image
 authorization inputs. Before the import boundary, the evidence, journal, bindings, and image

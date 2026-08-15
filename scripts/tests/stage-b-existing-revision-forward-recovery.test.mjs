@@ -164,6 +164,25 @@ test("ambiguous supersession crash after import finalizes the existing :9 withou
   assert.equal(replay.journal.read().phase, "COMPLETED");
 });
 
+test("ambiguous supersession replay authenticates the recorded authorization before deriving images", async () => {
+  const first = ambiguousCommon({ proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await runAmbiguousImportSupersession(first);
+  const replaced = { ...imageAuthorization, evidenceSha256: "f".repeat(64), authorizationSha256: "f".repeat(64) };
+  const replay = ambiguousCommon({ journal: first.journal, evidence: first.evidence, imageAuthorization: replaced, readState: async () => importedState(), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await assert.rejects(() => runAmbiguousImportSupersession(replay), /original incident identity/);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
+test("ambiguous supersession rejects drifted output authorization even when it would supply matching values", async () => {
+  const first = ambiguousCommon({ proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await runAmbiguousImportSupersession(first);
+  const malicious = structuredClone(imageAuthorization);
+  malicious.imageEvidence.images[0].digest = "sha256:" + "f".repeat(64);
+  const replay = ambiguousCommon({ journal: first.journal, evidence: first.evidence, imageAuthorization: malicious, readState: async () => importedState(), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await assert.rejects(() => runAmbiguousImportSupersession(replay), /original incident identity/);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
 test("ambiguous supersession rejects altered historical journal, current drift, and newer revisions", () => {
   const old = ambiguousOldJournal();
   const oldBytes = Buffer.from(JSON.stringify(old));

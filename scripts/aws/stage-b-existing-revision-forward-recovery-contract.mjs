@@ -264,15 +264,8 @@ export function assertForwardConsumedImportResume({ sourceSha, bindings, protect
     || bindings.imageAuthorizationSha256 !== undefined && bindings.imageAuthorizationSha256 !== journalState.imageAuthorizationSha256
     || bindings.backendImage !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${journalState.authorizedBackendDigest}`) throw new Error("Forward consumed-import replay bindings do not preserve the original incident.");
   const authorization = imageAuthorization || bindings.imageAuthorization;
-  if (!SHA.test(journalState.imageAuthorizationSourceSha || "") || !authorization || authorization.sourceSha !== journalState.imageAuthorizationSourceSha || authorization.imageReleaseSha !== journalState.imageReleaseSha
-    || authorization.evidenceSha256 !== journalState.imageAuthorizationSha256 || authorization.authorizationSha256 !== authorization.evidenceSha256
-    || imageAuthorizationSha256(authorization) !== authorization.evidenceSha256) throw new Error("Forward consumed-import replay authorization does not preserve the original incident identity.");
-  if (authorizedBackendDigest(authorization) !== journalState.authorizedBackendDigest) throw new Error("Forward consumed-import replay image digest does not preserve the original incident.");
-  if (authorization.sourceSha !== journalState.sourceSha
-    && (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: authorization.sourceSha, descendantSha: journalState.sourceSha }) !== true)) throw new Error("Forward consumed-import replay authorization source is not the authenticated original incident ancestor.");
-  const authorizationSourceReuse = deriveImageReuse?.({ imageReleaseSha: authorization.sourceSha, toolingSha: journalState.sourceSha });
-  assertProductionImageReuseResult(authorizationSourceReuse);
-  if (authorizationSourceReuse.toolingSha !== journalState.sourceSha || authorizationSourceReuse.imageReleaseSha !== authorization.sourceSha || authorizationSourceReuse.imageAffectingFiles.length !== 0 || authorizationSourceReuse.imageBuildInputsChanged === true) throw new Error("Forward consumed-import replay original authorization-source reuse is not explicitly compatible with the incident source.");
+  const consumedAuthorization = assertConsumedImportAuthorization({ journalState, authorization, deriveImageReuse, proveDescendant });
+  const authorizationSourceReuse = consumedAuthorization.authorizationSourceReuse;
   const incidentProvenance = deriveProvenance?.({ sourceSha: journalState.sourceSha, protectedCheckout });
   const executorProvenance = deriveProvenance?.({ sourceSha, protectedCheckout });
   if (!incidentProvenance || incidentProvenance.toolingTreeSha256 !== journalState.toolingTreeSha256 || incidentProvenance.sourceContractSha256 !== journalState.sourceContractSha256
@@ -281,6 +274,19 @@ export function assertForwardConsumedImportResume({ sourceSha, bindings, protect
   assertProductionImageReuseResult(reuse);
   if (reuse.toolingSha !== sourceSha || reuse.imageReleaseSha !== journalState.imageReleaseSha || reuse.imageAffectingFiles.length !== 0 || reuse.imageBuildInputsChanged === true) throw new Error("Forward consumed-import replay image reuse is not explicitly compatible with the protected executor.");
   return Object.freeze({ incidentSourceSha: journalState.sourceSha, authorizationSourceSha: authorization.sourceSha, authorizedBackendDigest: journalState.authorizedBackendDigest, fingerprint: journalState.fingerprint, incidentProvenance, executorProvenance, authorizationSourceReuse, reuse });
+}
+
+function assertConsumedImportAuthorization({ journalState, authorization, deriveImageReuse, proveDescendant } = {}) {
+  if (!SHA.test(journalState?.imageAuthorizationSourceSha || "") || !authorization || authorization.sourceSha !== journalState.imageAuthorizationSourceSha || authorization.imageReleaseSha !== journalState.imageReleaseSha
+    || authorization.evidenceSha256 !== journalState.imageAuthorizationSha256 || authorization.authorizationSha256 !== authorization.evidenceSha256
+    || imageAuthorizationSha256(authorization) !== authorization.evidenceSha256) throw new Error("Forward consumed-import replay authorization does not preserve the original incident identity.");
+  if (authorizedBackendDigest(authorization) !== journalState.authorizedBackendDigest) throw new Error("Forward consumed-import replay image digest does not preserve the original incident.");
+  if (authorization.sourceSha !== journalState.sourceSha
+    && (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: authorization.sourceSha, descendantSha: journalState.sourceSha }) !== true)) throw new Error("Forward consumed-import replay authorization source is not the authenticated original incident ancestor.");
+  const authorizationSourceReuse = deriveImageReuse?.({ imageReleaseSha: authorization.sourceSha, toolingSha: journalState.sourceSha });
+  assertProductionImageReuseResult(authorizationSourceReuse);
+  if (authorizationSourceReuse.toolingSha !== journalState.sourceSha || authorizationSourceReuse.imageReleaseSha !== authorization.sourceSha || authorizationSourceReuse.imageAffectingFiles.length !== 0 || authorizationSourceReuse.imageBuildInputsChanged === true) throw new Error("Forward consumed-import replay original authorization-source reuse is not explicitly compatible with the incident source.");
+  return Object.freeze({ authorization, authorizationSourceReuse });
 }
 
 export function assertForwardCompletedResume({ sourceSha, protectedCheckout, journalState, proveDescendant } = {}) {
@@ -474,10 +480,11 @@ export async function runAmbiguousImportSupersession({ oldJournal, oldJournalSha
     const expected = supersessionFields(existing);
     validateAmbiguousImportSupersessionJournal(existing, expected);
     if (existing.supersedesJournalSha256 !== oldJournalSha256 || journalSha256(oldJournalBytes || Buffer.alloc(0)) !== oldJournalSha256 || existing.supersedesIncidentIdentity !== oldJournal.incidentIdentity) throw new Error("Ambiguous import supersession historical journal link changed during consumed-mutation replay.");
+    const authenticatedAuthorization = assertConsumedImportAuthorization({ journalState: existing, authorization: imageAuthorization || bindings?.imageAuthorization, deriveImageReuse, proveDescendant }).authorization;
     const censusEvidence = assertForwardCensus({ census: await census() });
     const readback = await describe(STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn);
     assertForwardRevisionReadback({ readback, expectedFingerprint: existing.fingerprint, imageReleaseSha: existing.imageReleaseSha, backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${existing.authorizedBackendDigest}` });
-    const afterBinding = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, before: stateBefore, after: state, expectedBoundImages: expectedImages() });
+    const afterBinding = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, before: stateBefore, after: state, expectedBoundImages: expectedBoundImages({ authorization: authenticatedAuthorization }) });
     if (censusEvidence.censusSha256 !== existing.censusSha256) throw new Error("Ambiguous import supersession consumed replay census drifted.");
     const completedEvidence = persistForwardRecoveryEvidence(buildAmbiguousImportSupersessionEvidence(expected, afterBinding.stateSha256), evidence);
     journal.write({ ...existing, ...completedEvidence, phase: "COMPLETED", stateAfterImportSha256: afterBinding.stateSha256 });
@@ -486,11 +493,12 @@ export async function runAmbiguousImportSupersession({ oldJournal, oldJournalSha
   if (existing?.phase === "COMPLETED") {
     const expected = supersessionFields(existing);
     validateAmbiguousImportSupersessionJournal(existing, expected);
+    const authenticatedAuthorization = assertConsumedImportAuthorization({ journalState: existing, authorization: imageAuthorization || bindings?.imageAuthorization, deriveImageReuse, proveDescendant }).authorization;
     const censusEvidence = assertForwardCensus({ census: await census() });
     const readback = await describe(STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn);
     assertForwardRevisionReadback({ readback, expectedFingerprint: existing.fingerprint, imageReleaseSha: existing.imageReleaseSha, backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${existing.authorizedBackendDigest}` });
     validateAmbiguousImportSupersessionEvidence(evidence.read(), existing, expected);
-    assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, before: stateBefore, after: state, expectedBoundImages: expectedImages() });
+    assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, before: stateBefore, after: state, expectedBoundImages: expectedBoundImages({ authorization: authenticatedAuthorization }) });
     if (censusEvidence.censusSha256 !== existing.censusSha256) throw new Error("Ambiguous import supersession completed replay census drifted.");
     return { incidentIdentity: existing.incidentIdentity, imported: false, phase: "COMPLETED", registrationCalls: 0, importCalls: 0, state, readback, census: censusEvidence };
   }
