@@ -32,6 +32,7 @@ jobs:
       IMAGE_TAG: ${{ inputs.release_sha }}
       WORKFLOW_DEFINITION_REF: refs/heads/main
       WORKFLOW_DEFINITION_SHA: ${{ github.sha }}
+      TRUSTED_TOOLING_SHA: ${{ github.sha }}
       PLATFORMS: linux/amd64
       BACKEND_ECR_REPO: mscqr-backend
       WORKER_ECR_REPO: mscqr-worker
@@ -40,22 +41,40 @@ jobs:
         env:
           EXPECTED_WORKFLOW_REF: refs/heads/main
         run: test "$GITHUB_REF" = "$EXPECTED_WORKFLOW_REF"
+      - name: Checkout trusted workflow tooling
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Bind the trusted workflow tooling revision
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$TRUSTED_TOOLING_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$TRUSTED_TOOLING_SHA"
+          test "$(git rev-parse --is-shallow-repository)" = false
+          test -x "$GITHUB_WORKSPACE/scripts/aws/cosign-idempotent-sign-and-attest.sh"
+          test -x "$GITHUB_WORKSPACE/scripts/aws/verify-release-artifacts.sh"
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.release_sha }}
+          path: release-source
           fetch-depth: 0
       - name: Require the approved release to be merged into protected main
-        run: node scripts/aws/stage-b-release-gate.mjs "${{ inputs.release_sha }}"
+        working-directory: release-source
+        run: node "$GITHUB_WORKSPACE/scripts/aws/stage-b-release-gate.mjs" "${{ inputs.release_sha }}"
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: |
-            package-lock.json
-            backend/package-lock.json
+            release-source/package-lock.json
+            release-source/backend/package-lock.json
       - run: npm ci && npm --prefix backend ci
+        working-directory: release-source
       - name: Bind the exact release and verified RLS package
         id: package
+        working-directory: release-source
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$IMAGE_TAG"
@@ -75,6 +94,7 @@ jobs:
           SOURCE_CONTRACT_SHA256: ${{ steps.package.outputs.source_contract }}
           MIGRATION_SET_DIGEST: ${{ steps.package.outputs.migration_digest }}
           OUTPUT_FILE: ${{ runner.temp }}/stage-b-images.jsonl
+        working-directory: release-source
         run: ./scripts/aws/publish-ecs-images.sh production-green-stage-b
       - name: Bind image digest outputs
         env:
@@ -116,6 +136,7 @@ jobs:
           COSIGN_EXPERIMENTAL: "1"
           COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/production-green-stage-b-image-build.yml@.*$"
           COSIGN_CERT_OIDC_ISSUER: https://token.actions.githubusercontent.com
+        working-directory: release-source
         run: |
           set -euo pipefail
           while IFS= read -r record; do
@@ -124,19 +145,20 @@ jobs:
             docker save "$image_ref" -o "$RUNNER_TEMP/$id.tar"
             docker run --rm -v "$RUNNER_TEMP:/workspace:ro" anchore/syft:v1.38.0 "/workspace/$id.tar" -o spdx-json > "$RUNNER_TEMP/$id.spdx.json"
             node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({releaseSha:process.env.IMAGE_TAG,checkoutSha:require("child_process").execFileSync("git",["rev-parse","HEAD"],{encoding:"utf8"}).trim(),workflowDefinitionRef:process.env.WORKFLOW_DEFINITION_REF,workflowDefinitionSha:process.env.WORKFLOW_DEFINITION_SHA,workflowRunId:process.env.GITHUB_RUN_ID,sourceContractSha256:process.env.SOURCE_CONTRACT_SHA256,migrationSetDigest:process.env.MIGRATION_SET_DIGEST,builtAt:new Date().toISOString()}))' "$RUNNER_TEMP/$id.provenance.json"
-            ./scripts/aws/cosign-idempotent-sign-and-attest.sh sign "$image_ref"
-            ./scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$image_ref" spdxjson "$RUNNER_TEMP/$id.spdx.json"
-            ./scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$image_ref" https://mscqr.com/attestations/stage-b-provenance/v1 "$RUNNER_TEMP/$id.provenance.json"
+            "$GITHUB_WORKSPACE/scripts/aws/cosign-idempotent-sign-and-attest.sh" sign "$image_ref"
+            "$GITHUB_WORKSPACE/scripts/aws/cosign-idempotent-sign-and-attest.sh" attest "$image_ref" spdxjson "$RUNNER_TEMP/$id.spdx.json"
+            "$GITHUB_WORKSPACE/scripts/aws/cosign-idempotent-sign-and-attest.sh" attest "$image_ref" https://mscqr.com/attestations/stage-b-provenance/v1 "$RUNNER_TEMP/$id.provenance.json"
           done < "$IMAGES_FILE"
       - name: Verify signed immutable artifacts
         env:
           IMAGES_FILE: ${{ runner.temp }}/stage-b-images.jsonl
           COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/production-green-stage-b-image-build.yml@.*$"
           PROVENANCE_ATTESTATION_TYPE: https://mscqr.com/attestations/stage-b-provenance/v1
+        working-directory: release-source
         run: |
           set -euo pipefail
           while IFS= read -r record; do
-            ./scripts/aws/verify-release-artifacts.sh "$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).image_ref)' "$record")"
+            "$GITHUB_WORKSPACE/scripts/aws/verify-release-artifacts.sh" "$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).image_ref)' "$record")"
           done < "$IMAGES_FILE"
       - uses: actions/upload-artifact@v7
         with:

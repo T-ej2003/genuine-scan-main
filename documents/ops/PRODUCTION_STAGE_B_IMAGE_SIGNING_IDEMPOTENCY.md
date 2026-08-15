@@ -10,6 +10,18 @@ The workflow signs and attests each immutable digest, then verifies the signatur
 SPDX SBOM attestation, and Stage-B provenance attestation with
 `scripts/aws/verify-release-artifacts.sh`.
 
+## Release/source and workflow/tooling revisions
+
+The workflow definition is dispatched only from protected `main`. The job checks
+out that workflow revision into the default workspace and authenticates it against
+the fetched `origin/main` commit before using its signing and verification tools.
+The requested merged `release_sha` is checked out separately under
+`release-source`; package verification and Docker build context come only from
+that directory. This preserves the two-SHA contract: `release_sha` remains the
+image source and image-release binding, while the protected workflow revision
+supplies trusted signing/recovery tooling. An older merged release may therefore
+predate the helper without changing image contents or release identity.
+
 ## Equivalent Rekor entry handling
 
 Cosign normally returns success after signing or attesting. If the operation

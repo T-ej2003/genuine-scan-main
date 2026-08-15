@@ -221,11 +221,38 @@ test("backend-only and Stage B publishers use disjoint immutable tag namespaces"
 
 test("Stage B signing recovers only through constrained existing-entry verification", () => {
   const attestationStep = reusable.jobs["build-and-attest"].steps.find((step) => step.name === "Generate SBOMs, sign, and attest provenance");
-  assert.match(attestationStep.run, /cosign-idempotent-sign-and-attest\.sh sign/);
-  assert.match(attestationStep.run, /cosign-idempotent-sign-and-attest\.sh attest/);
+  assert.match(attestationStep.run, /cosign-idempotent-sign-and-attest\.sh"? sign/);
+  assert.match(attestationStep.run, /cosign-idempotent-sign-and-attest\.sh"? attest/);
   assert.match(JSON.stringify(attestationStep.env), /COSIGN_CERT_IDENTITY_REGEXP/);
   assert.match(JSON.stringify(attestationStep.env), /COSIGN_CERT_OIDC_ISSUER/);
   assert.doesNotMatch(attestationStep.run, /insecure-ignore-tlog|COSIGN_TLOG_UPLOAD=false|--upload=false/);
+});
+
+test("Stage B keeps trusted workflow tooling separate from the older release source checkout", () => {
+  const job = reusable.jobs["build-and-attest"];
+  const steps = job.steps;
+  const toolingCheckout = steps.find((step) => step.name === "Checkout trusted workflow tooling");
+  const releaseCheckout = steps.find((step) => step.uses === "actions/checkout@v6" && step.with?.path === "release-source");
+  const toolingBinding = steps.find((step) => step.name === "Bind the trusted workflow tooling revision");
+  const packageStep = steps.find((step) => step.name === "Bind the exact release and verified RLS package");
+  const publishStep = steps.find((step) => /Publish immutable backend/.test(step.name));
+  const signingStep = steps.find((step) => step.name === "Generate SBOMs, sign, and attest provenance");
+  const verifyStep = steps.find((step) => step.name === "Verify signed immutable artifacts");
+  assert.equal(toolingCheckout.with.ref, "${{ github.sha }}");
+  assert.equal(toolingCheckout.with.path, undefined);
+  assert.equal(releaseCheckout.with.ref, "${{ inputs.release_sha }}");
+  assert.equal(releaseCheckout.with.path, "release-source");
+  assert.match(toolingBinding.run, /git fetch --no-tags origin main/);
+  assert.match(toolingBinding.run, /rev-parse FETCH_HEAD/);
+  assert.match(toolingBinding.run, /cosign-idempotent-sign-and-attest\.sh/);
+  assert.equal(packageStep["working-directory"], "release-source");
+  assert.equal(publishStep["working-directory"], "release-source");
+  assert.equal(signingStep["working-directory"], "release-source");
+  assert.equal(verifyStep["working-directory"], "release-source");
+  assert.match(signingStep.run, /\$GITHUB_WORKSPACE\/scripts\/aws\/cosign-idempotent-sign-and-attest\.sh/);
+  assert.match(verifyStep.run, /\$GITHUB_WORKSPACE\/scripts\/aws\/verify-release-artifacts\.sh/);
+  assert.doesNotMatch(signingStep.run, /(^|\s)\.\/scripts\/aws\/cosign-idempotent-sign-and-attest\.sh/);
+  assert.match(signingStep.run, /git.*rev-parse.*HEAD/);
 });
 
 test("Stage B source identity is checked before ECR or Docker access", () => {
