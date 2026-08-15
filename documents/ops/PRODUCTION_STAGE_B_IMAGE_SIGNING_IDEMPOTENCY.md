@@ -32,9 +32,16 @@ returns a failure containing both:
 
 the wrapper does not treat that response as success. It runs the corresponding
 constrained `cosign verify` or `cosign verify-attestation` against the exact
-immutable digest. That verification must validate the certificate identity,
-GitHub OIDC issuer, signature/attestation, and transparency-log inclusion. Any
-other error, malformed response, or verification failure remains fatal.
+immutable digest. Attestation recovery requests the verified in-toto DSSE
+payload, then compares its predicate to the requested predicate using sorted-key
+canonical JSON. The selected attestation must therefore pass Cosign's
+certificate identity, GitHub OIDC issuer, signature, attestation type, and
+transparency-log checks before its predicate can be compared. The exact SPDX
+predicate type maps to `https://spdx.dev/Document`; the Stage-B provenance URI is
+compared directly. All verified same-type attestations are considered, and at
+least one must match; an older valid attestation of the same type is not enough.
+Any other error, malformed DSSE/in-toto payload, digest/type mismatch, or
+predicate mismatch remains fatal.
 
 No `--insecure-ignore-tlog`, certificate bypass, OIDC bypass, or generic exit-code
 fallback is permitted. The downstream release-artifact verifier remains mandatory,
