@@ -183,6 +183,15 @@ test("ambiguous supersession rejects drifted output authorization even when it w
   assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
 });
 
+test("ambiguous supersession rejects a journal authorization hash mismatch", async () => {
+  const first = ambiguousCommon({ proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await runAmbiguousImportSupersession(first);
+  const alteredJournal = { ...first.journal.read(), imageAuthorizationSha256: "a".repeat(64) };
+  const replay = ambiguousCommon({ journal: journalAdapter(alteredJournal), evidence: first.evidence, readState: async () => importedState(), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await assert.rejects(() => runAmbiguousImportSupersession(replay), /identity|journal/);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
 test("ambiguous supersession rejects altered historical journal, current drift, and newer revisions", () => {
   const old = ambiguousOldJournal();
   const oldBytes = Buffer.from(JSON.stringify(old));
