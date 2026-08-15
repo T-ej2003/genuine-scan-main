@@ -237,6 +237,35 @@ function makeCurrentRetainedPredecessorFixture({ currentRevision = 5, retainedRe
   });
 }
 
+function makeAppendOnlyCurrentPredecessorFixture() {
+  const currentArn = oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5");
+  return makeAtomicBrokerFixture({
+    appendOnly: true,
+    mutatePlan: (plan) => {
+      const current = plan.resource_changes.find((item) => item.address === canaryAddress);
+      const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(canaryAddress));
+      current.change = {
+        ...current.change,
+        actions: ["delete", "create"],
+        before: { ...retained.change.before, arn: oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5") },
+        after: { ...current.change.after, arn: newArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":2", ":6") },
+        replace_paths: [["container_definitions"]],
+      };
+      retained.change.before.arn = oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":4");
+    },
+    mutateReader: (reader) => {
+      const original = reader.getFunctionConfiguration;
+      reader.getFunctionConfiguration = () => {
+        const configuration = original();
+        const taskDefinitions = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+        taskDefinitions["full-rls-application-canary"] = currentArn;
+        configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+        return configuration;
+      };
+    },
+  });
+}
+
 function generate(fixture, overrides = {}) {
   return generateReferenceAudit({
     plan: fixture.plan,
@@ -845,6 +874,39 @@ test("retained-history family corruption remains rejected", () => {
     retained.change.before.arn = oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]).replace(":1", ":4");
   } })), /retained task definition|family/);
 });
+
+test("current managed :5 and newest retained :4 pass full reference binding", () => {
+  const fixture = makeAppendOnlyCurrentPredecessorFixture();
+  validateBrokerPlan(fixture, generate(fixture));
+});
+
+for (const status of ["ACTIVATING", "DEACTIVATING", "STOPPING"]) {
+  test(`transitional ${status} task cannot reference current rollover predecessor`, () => {
+    const fixture = makeAppendOnlyCurrentPredecessorFixture();
+    const audit = generate(fixture);
+    const task = taskRecord(
+      taskArnFor(status, 0),
+      status,
+      oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5"),
+    );
+    task.stageBScoped = true;
+    audit.transitionalTasks.push(task);
+    assert.throws(() => validateBrokerPlan(fixture, audit), /transitional task contains an unrecorded task-definition ARN/);
+  });
+}
+
+for (const [name, observation] of [
+  ["service", { serviceName: "stage-b-current", taskDefinition: oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5"), stageBScoped: true }],
+  ["RUNNING task", { taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/running-1", taskDefinitionArn: oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5"), lastStatus: "RUNNING", desiredStatus: "RUNNING", group: "service:stage-b", stageBScoped: true }],
+  ["PENDING task", { taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/pending-1", taskDefinitionArn: oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5"), lastStatus: "PENDING", desiredStatus: "RUNNING", group: "service:stage-b", stageBScoped: true }],
+]) {
+  test(`${name} cannot reference current rollover predecessor`, () => {
+    const fixture = makeAppendOnlyCurrentPredecessorFixture();
+    const audit = generate(fixture);
+    audit[`${name === "service" ? "services" : name === "RUNNING task" ? "runningTasks" : "pendingTasks"}`].push(observation);
+    assert.throws(() => validateBrokerPlan(fixture, audit), new RegExp(`${name} contains an unrecorded task-definition ARN`));
+  });
+}
 
 test("no-op with a valid prior ARN passes", () => {
   assert.doesNotThrow(() => generate(makeMixedFixture()));
