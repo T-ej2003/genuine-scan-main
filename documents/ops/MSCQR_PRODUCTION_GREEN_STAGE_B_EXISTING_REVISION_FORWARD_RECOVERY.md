@@ -9,6 +9,17 @@ Terraform state (lineage and reviewed serial), a complete ACTIVE ECS census, the
 fresh task-definition readback, and current protected-main/image-reuse provenance. It is a new
 incident and does not claim continuity of the legacy recovery journal.
 
+If that schema-2 journal is `IMPORTING` but the original import outcome cannot be durably
+authenticated, it is permanently non-retryable. The reviewed `AMBIGUOUS_IMPORT_SUPERSESSION`
+(schema 1) path may create a deterministic new sibling journal only from the exact unchanged
+historical journal bytes and current authoritative state. It binds the old journal hash and
+incident identity, current lineage/serial/state hash, complete ECS census, canonical `:9`
+readback/fingerprint, protected source/image authorization, and the explicit reason
+`AMBIGUOUS_IMPORT_OUTCOME_CURRENT_STATE_UNRECONCILED`. The old journal is never rewritten and
+authorizes no mutation. The new path has no ECS registration, deregistration, service-update,
+Terraform apply, or state-push capability; it has one governed import budget for the existing
+`:9` only. A completed supersession is immutable and replay performs zero imports.
+
 The forward adapter has no ECS registration, deregistration, service-update, Terraform state-push,
 or Terraform apply capability. Its only mutation seam is one canonical Terraform import of the
 exact `:9` ARN. Before import it binds the current state, census, image authorization, source

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { assertImageAuthorizationEnvelope, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
 import { imageAuthorizationSha256 } from "./production-image-authorization.mjs";
 import { assertProductionImageReuseResult } from "./validate-stage-b-image-reuse.mjs";
@@ -22,9 +23,25 @@ export const STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY = Object.freeze({
   startSerial: 94,
 });
 
+export const STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION = Object.freeze({
+  schemaVersion: 1,
+  kind: "STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION",
+  mode: "AMBIGUOUS_IMPORT_SUPERSESSION",
+  supersessionReason: "AMBIGUOUS_IMPORT_OUTCOME_CURRENT_STATE_UNRECONCILED",
+  address: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.address,
+  family: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.family,
+  existingRevisionArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn,
+  lineage: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage,
+  startSerial: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial,
+});
+
 const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/;
+
+export function journalSha256(bytes) {
+  return crypto.createHash("sha256").update(bytes).digest("hex");
+}
 
 function backendInstance(state) {
   const resources = (state?.resources || []).filter(({ type, name }) => type === "aws_ecs_task_definition" && name === "candidate");
@@ -61,6 +78,13 @@ export function assertForwardImportRetryState({ journalState, state } = {}) {
   const before = assertForwardStateBeforeImport(state);
   if (before.stateSha256 !== journalState.stateBeforeSha256) throw new Error("Forward import outcome is ambiguous; authoritative state is not the authenticated pre-import state.");
   return Object.freeze({ stateSha256: before.stateSha256, retryAuthorized: true });
+}
+
+export function assertLegacyAmbiguousImportJournalIsImmutable(journalState) {
+  if (journalState?.schemaVersion === STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.schemaVersion
+    && journalState.phase === "IMPORTING" && journalState.importAttemptCount === undefined
+    && journalState.importAttemptOutcome === undefined && journalState.importFailureStateSha256 === undefined) throw new Error("Legacy ambiguous IMPORTING recovery is permanently non-resumable; use the current-state supersession contract.");
+  return journalState;
 }
 
 export function assertForwardImportedState({ beforeStateSha256, after } = {}) {
@@ -228,6 +252,173 @@ export function validateForwardRecoveryEvidence(evidence, journal, expected) {
   return evidence;
 }
 
+function supersessionFields(journal) {
+  return {
+    incidentIdentity: journal.incidentIdentity,
+    supersedesJournalSha256: journal.supersedesJournalSha256,
+    supersedesIncidentIdentity: journal.supersedesIncidentIdentity,
+    supersededSourceSha: journal.supersededSourceSha,
+    supersessionReason: journal.supersessionReason,
+    sourceSha: journal.sourceSha,
+    toolingTreeSha256: journal.toolingTreeSha256,
+    sourceContractSha256: journal.sourceContractSha256,
+    imageReleaseSha: journal.imageReleaseSha,
+    authorizedBackendDigest: journal.authorizedBackendDigest,
+    imageAuthorizationSha256: journal.imageAuthorizationSha256,
+    imageAuthorizationSourceSha: journal.imageAuthorizationSourceSha,
+    stateLineage: journal.stateLineage,
+    stateSerial: journal.stateSerial,
+    stateBeforeSha256: journal.stateBeforeSha256,
+    existingRevisionArn: journal.existingRevisionArn,
+    censusSha256: journal.censusSha256,
+    fingerprint: journal.fingerprint,
+  };
+}
+
+export function canonicalAmbiguousImportSupersessionIdentity(fields = {}) {
+  const required = [fields.sourceSha, fields.toolingTreeSha256, fields.sourceContractSha256, fields.imageReleaseSha,
+    fields.imageAuthorizationSha256, fields.stateBeforeSha256, fields.censusSha256, fields.fingerprint,
+    fields.supersedesJournalSha256, fields.supersedesIncidentIdentity];
+  if (required.some((value) => typeof value !== "string" || !value)
+    || !SHA.test(fields.sourceSha) || !SHA256.test(fields.toolingTreeSha256) || !SHA256.test(fields.sourceContractSha256)
+    || !SHA.test(fields.imageReleaseSha) || !/^sha256:[a-f0-9]{64}$/.test(fields.authorizedBackendDigest || "")
+    || !SHA256.test(fields.imageAuthorizationSha256) || !SHA.test(fields.imageAuthorizationSourceSha)
+    || fields.stateLineage !== STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.lineage
+    || fields.stateSerial !== STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.startSerial || !SHA256.test(fields.stateBeforeSha256)
+    || fields.existingRevisionArn !== STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn || !SHA256.test(fields.censusSha256)
+    || !SHA256.test(fields.fingerprint) || !SHA256.test(fields.supersedesJournalSha256)
+    || !SHA256.test(fields.supersedesIncidentIdentity) || !SHA.test(fields.supersededSourceSha)
+    || fields.supersessionReason !== STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.supersessionReason) throw new Error("Ambiguous import supersession identity is incomplete.");
+  return canonicalSha256({ schemaVersion: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.schemaVersion, kind: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.kind, mode: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.mode,
+    supersedesJournalSha256: fields.supersedesJournalSha256, supersedesIncidentIdentity: fields.supersedesIncidentIdentity, supersededSourceSha: fields.supersededSourceSha,
+    supersessionReason: fields.supersessionReason, sourceSha: fields.sourceSha, toolingTreeSha256: fields.toolingTreeSha256, sourceContractSha256: fields.sourceContractSha256,
+    imageReleaseSha: fields.imageReleaseSha, authorizedBackendDigest: fields.authorizedBackendDigest, imageAuthorizationSha256: fields.imageAuthorizationSha256,
+    imageAuthorizationSourceSha: fields.imageAuthorizationSourceSha, stateLineage: fields.stateLineage, stateSerial: fields.stateSerial, stateBeforeSha256: fields.stateBeforeSha256,
+    existingRevisionArn: fields.existingRevisionArn, censusSha256: fields.censusSha256, fingerprint: fields.fingerprint });
+}
+
+export function validateAmbiguousImportSupersededJournal(journal, { journalSha256: expectedJournalSha256, journalBytes, state, censusEvidence, fingerprint, sourceSha, proveDescendant } = {}) {
+  if (!journal || journal.schemaVersion !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.schemaVersion
+    || journal.kind !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.kind || journal.mode !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode
+    || journal.phase !== "IMPORTING" || journal.importCalls !== 1 || journal.importMayHaveOccurred !== true
+    || journal.registrationCalls !== 0 || journal.registrationCapability !== "NONE"
+    || journal.existingRevisionArn !== STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn
+    || journal.stateLineage !== STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.lineage
+    || journal.stateSerial !== STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.startSerial
+    || journal.stateAfterImportSha256 !== undefined || journal.evidenceSha256 !== undefined) throw new Error("Ambiguous import supersession requires the unchanged, incomplete historical IMPORTING journal.");
+  if (!SHA256.test(expectedJournalSha256 || "") || !journalBytes || journalSha256(journalBytes) !== expectedJournalSha256 || !SHA.test(journal.sourceSha || "") || journal.incidentIdentity !== canonicalForwardRecoveryIncidentIdentity(journal)) throw new Error("Ambiguous import supersession historical journal identity is invalid.");
+  if (journal.sourceSha !== sourceSha && (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: journal.sourceSha, descendantSha: sourceSha }) !== true)) throw new Error("Ambiguous import supersession executor is not a protected descendant of the historical incident.");
+  const current = assertForwardStateBeforeImport(state);
+  if (current.stateSha256 !== journal.stateBeforeSha256) throw new Error("Ambiguous import supersession current state does not match the historical incident checkpoint.");
+  if (!censusEvidence || censusEvidence.censusSha256 !== journal.censusSha256 || fingerprint !== journal.fingerprint) throw new Error("Ambiguous import supersession historical ECS evidence does not match current canonical :9.");
+  return Object.freeze({ journalSha256: expectedJournalSha256, supersededSourceSha: journal.sourceSha, supersedesIncidentIdentity: journal.incidentIdentity });
+}
+
+export function validateAmbiguousImportSupersessionJournal(journal, expected) {
+  if (!journal || journal.schemaVersion !== STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.schemaVersion
+    || journal.kind !== STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.kind || journal.mode !== STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.mode
+    || !["PREPARED", "IMPORTING", "COMPLETED"].includes(journal.phase)) throw new Error("Ambiguous import supersession journal is invalid.");
+  const expectedIdentity = canonicalAmbiguousImportSupersessionIdentity(expected);
+  if (journal.incidentIdentity !== expectedIdentity || canonicalJson(supersessionFields(journal)) !== canonicalJson(supersessionFields(expected))
+    || journal.registrationCalls !== 0 || journal.registrationCapability !== "NONE" || ![0, 1].includes(journal.importCalls)
+    || journal.existingRevisionArn !== STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn) throw new Error("Ambiguous import supersession journal identity or capability budget is invalid.");
+  if (journal.phase === "PREPARED" && journal.importCalls !== 0) throw new Error("Ambiguous import supersession PREPARED phase cannot consume import budget.");
+  if (journal.phase !== "PREPARED" && (journal.importCalls !== 1 || journal.importMayHaveOccurred !== true)) throw new Error("Ambiguous import supersession consumed phase has an invalid import budget.");
+  if (journal.phase === "COMPLETED" && !SHA256.test(journal.stateAfterImportSha256 || "") || journal.phase === "IMPORTING" && journal.stateAfterImportSha256 !== undefined) throw new Error("Ambiguous import supersession checkpoint is invalid.");
+  return journal;
+}
+
+function buildAmbiguousImportSupersessionEvidence(expected, stateAfterImportSha256) {
+  const body = { schemaVersion: 1, kind: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.kind, mode: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.mode, ...expected, stateAfterImportSha256, registrationCalls: 0, importCalls: 1 };
+  return { ...body, evidenceSha256: canonicalSha256(body) };
+}
+
+function validateAmbiguousImportSupersessionEvidence(evidence, journal, expected) {
+  const expectedEvidence = buildAmbiguousImportSupersessionEvidence(expected, journal.stateAfterImportSha256);
+  if (!evidence || canonicalJson(evidence) !== canonicalJson(expectedEvidence) || journal.evidenceSha256 !== expectedEvidence.evidenceSha256) throw new Error("Ambiguous import supersession evidence is not the exact immutable completed result.");
+  return evidence;
+}
+
+export function assertAmbiguousImportSupersessionAuthority({ oldJournal, oldJournalSha256, oldJournalBytes, state, census, readback, sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, deriveImageReuse, proveDescendant } = {}) {
+  const payload = buildCanonicalBackendRecoveryTaskDefinition(bindings);
+  const fingerprint = taskDefinitionFingerprint(payload.taskDefinition, payload.tags);
+  const censusEvidence = assertForwardCensus({ census });
+  const authorization = assertForwardSourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, deriveImageReuse, proveDescendant });
+  const backendImage = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${authorization.authorizedBackendDigest}`;
+  assertForwardRevisionReadback({ readback, expectedFingerprint: fingerprint, imageReleaseSha: bindings.imageReleaseSha, backendImage });
+  const superseded = validateAmbiguousImportSupersededJournal(oldJournal, { journalSha256: oldJournalSha256, journalBytes: oldJournalBytes, state, censusEvidence, fingerprint, sourceSha, proveDescendant });
+  const stateBefore = assertForwardStateBeforeImport(state);
+  const fields = {
+    supersedesJournalSha256: superseded.journalSha256,
+    supersedesIncidentIdentity: superseded.supersedesIncidentIdentity,
+    supersededSourceSha: superseded.supersededSourceSha,
+    supersessionReason: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.supersessionReason,
+    sourceSha, toolingTreeSha256: authorization.derived.toolingTreeSha256, sourceContractSha256: authorization.derived.sourceContractSha256,
+    imageReleaseSha: bindings.imageReleaseSha, authorizedBackendDigest: authorization.authorizedBackendDigest,
+    imageAuthorizationSha256: authorization.authorization.evidenceSha256, imageAuthorizationSourceSha: authorization.authorization.sourceSha,
+    stateLineage: stateBefore.lineage, stateSerial: stateBefore.serial, stateBeforeSha256: stateBefore.stateSha256,
+    existingRevisionArn: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn, censusSha256: censusEvidence.censusSha256, fingerprint,
+  };
+  return Object.freeze({ ...fields, incidentIdentity: canonicalAmbiguousImportSupersessionIdentity(fields), authorization, censusEvidence, fingerprint, stateBeforeSha256: stateBefore.stateSha256 });
+}
+
+export async function runAmbiguousImportSupersession({ oldJournal, oldJournalSha256, oldJournalBytes, bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, validateImportBindings, readState, census, describe, importState, evidence, journal, interruptAt } = {}) {
+  if (!oldJournal || typeof readState !== "function" || typeof census !== "function" || typeof describe !== "function" || typeof importState !== "function" || !journal?.read || !journal?.write || !evidence?.read || !evidence?.write) throw new Error("Ambiguous import supersession requires the immutable historical journal and durable adapters.");
+  const existing = journal.read();
+  const state = await readState();
+  if (existing?.phase === "IMPORTING") {
+    const expected = supersessionFields(existing);
+    validateAmbiguousImportSupersessionJournal(existing, expected);
+    if (existing.supersedesJournalSha256 !== oldJournalSha256 || journalSha256(oldJournalBytes || Buffer.alloc(0)) !== oldJournalSha256 || existing.supersedesIncidentIdentity !== oldJournal.incidentIdentity) throw new Error("Ambiguous import supersession historical journal link changed during consumed-mutation replay.");
+    const censusEvidence = assertForwardCensus({ census: await census() });
+    const readback = await describe(STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn);
+    assertForwardRevisionReadback({ readback, expectedFingerprint: existing.fingerprint, imageReleaseSha: existing.imageReleaseSha, backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${existing.authorizedBackendDigest}` });
+    const afterBinding = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, after: state });
+    if (censusEvidence.censusSha256 !== existing.censusSha256) throw new Error("Ambiguous import supersession consumed replay census drifted.");
+    const completedEvidence = persistForwardRecoveryEvidence(buildAmbiguousImportSupersessionEvidence(expected, afterBinding.stateSha256), evidence);
+    journal.write({ ...existing, ...completedEvidence, phase: "COMPLETED", stateAfterImportSha256: afterBinding.stateSha256 });
+    return { incidentIdentity: existing.incidentIdentity, imported: false, phase: "COMPLETED", recoveredFromPhase: "IMPORTING", registrationCalls: 0, importCalls: 0, state, readback, census: censusEvidence, evidence: completedEvidence };
+  }
+  if (existing?.phase === "COMPLETED") {
+    const expected = supersessionFields(existing);
+    validateAmbiguousImportSupersessionJournal(existing, expected);
+    const censusEvidence = assertForwardCensus({ census: await census() });
+    const readback = await describe(STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn);
+    assertForwardRevisionReadback({ readback, expectedFingerprint: existing.fingerprint, imageReleaseSha: existing.imageReleaseSha, backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${existing.authorizedBackendDigest}` });
+    validateAmbiguousImportSupersessionEvidence(evidence.read(), existing, expected);
+    assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, after: state });
+    if (censusEvidence.censusSha256 !== existing.censusSha256) throw new Error("Ambiguous import supersession completed replay census drifted.");
+    return { incidentIdentity: existing.incidentIdentity, imported: false, phase: "COMPLETED", registrationCalls: 0, importCalls: 0, state, readback, census: censusEvidence };
+  }
+  const authority = assertAmbiguousImportSupersessionAuthority({ oldJournal, oldJournalSha256, oldJournalBytes, state, census: await census(), readback: await describe(STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn), sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, deriveImageReuse, proveDescendant });
+  const expected = { ...authority };
+  delete expected.authorization; delete expected.censusEvidence;
+  if (existing) {
+    validateAmbiguousImportSupersessionJournal(existing, expected);
+    if (existing.phase === "IMPORTING") throw new Error("Ambiguous import supersession import outcome is still ambiguous; no second import is authorized.");
+  } else {
+    if (typeof validateImportBindings === "function") validateImportBindings();
+    journal.write({ schemaVersion: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.schemaVersion, kind: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.kind, mode: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.mode, phase: "PREPARED", ...expected, registrationCalls: 0, registrationCapability: "NONE", importCalls: 0 });
+  }
+  const latestState = await readState();
+  if (stateSnapshotSha256(latestState) !== authority.stateBeforeSha256) throw new Error("Ambiguous import supersession state changed before the governed import boundary.");
+  const latestCensus = assertForwardCensus({ census: await census() });
+  if (latestCensus.censusSha256 !== authority.censusEvidence.censusSha256) throw new Error("Ambiguous import supersession ECS census changed before the governed import boundary.");
+  const latestReadback = assertForwardRevisionReadback({ readback: await describe(STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn), expectedFingerprint: authority.fingerprint, imageReleaseSha: bindings.imageReleaseSha, backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${authority.authorization.authorizedBackendDigest}` });
+  if (latestReadback.fingerprint !== authority.fingerprint) throw new Error("Ambiguous import supersession canonical :9 changed before the governed import boundary.");
+  if (typeof validateImportBindings === "function") validateImportBindings();
+  journal.write({ ...journal.read(), ...expected, phase: "IMPORTING", importCalls: 1, importMayHaveOccurred: true });
+  await importState({ address: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.address, arn: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn });
+  interruptAt?.("AFTER_IMPORT");
+  const after = await readState();
+  const afterBinding = assertForwardStateAfterImport(state, after);
+  interruptAt?.("AFTER_POST_IMPORT_VERIFICATION");
+  const completedEvidence = persistForwardRecoveryEvidence(buildAmbiguousImportSupersessionEvidence(expected, afterBinding.stateSha256), evidence);
+  interruptAt?.("AFTER_EVIDENCE_PERSISTED");
+  journal.write({ ...journal.read(), ...completedEvidence, phase: "COMPLETED", stateAfterImportSha256: afterBinding.stateSha256 });
+  return { incidentIdentity: authority.incidentIdentity, imported: true, phase: "COMPLETED", registrationCalls: 0, importCalls: 1, state: after, readback: latestReadback, census: latestCensus, evidence: completedEvidence };
+}
+
 function persistForwardRecoveryEvidence(evidence, evidenceAdapter) {
   if (!evidenceAdapter?.read || !evidenceAdapter?.write) throw new Error("Forward recovery requires a durable evidence adapter before completion.");
   const existing = evidenceAdapter.read();
@@ -245,6 +436,7 @@ function expectedFields({ sourceSha, authorization, bindings, censusEvidence, fi
 export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, validateImportBindings, readState, census, describe, importState, evidence, journal, interruptAt } = {}) {
   if (typeof readState !== "function" || typeof census !== "function" || typeof describe !== "function" || typeof importState !== "function" || !journal?.read || !journal?.write || !evidence?.read || !evidence?.write) throw new Error("Forward recovery requires read, census, describe, import, journal, and durable evidence adapters.");
   const existing = journal.read();
+  assertLegacyAmbiguousImportJournalIsImmutable(existing);
   const observedState = await readState();
   const completedResume = existing && ["COMPLETED", "RECONCILED"].includes(existing.phase)
     ? assertForwardCompletedResume({ sourceSha, protectedCheckout, journalState: existing, proveDescendant })
