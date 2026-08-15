@@ -522,7 +522,11 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
   for (const change of (plan.resource_changes || []).filter((item) => item.type === "aws_ecs_task_definition")) {
     const entry = current.find((item) => item.address === change.address);
     if (!entry) continue;
-    const arn = entry.classification === "no-op" ? entry.priorTaskDefinitionArn : change.change?.after?.arn;
+    const arn = entry.classification === "no-op"
+      ? entry.priorTaskDefinitionArn
+      : entry.classification === "rollover"
+        ? change.change?.before?.arn
+        : change.change?.after?.arn;
     if (arn) {
       const identity = taskDefinitionArnPattern.exec(arn);
       if (!identity || identity[1] !== entry.family) throw new Error(`Stage B append-only current task-definition ARN is malformed: ${entry.address}`);
@@ -533,7 +537,11 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
   for (const entry of retained) retainedArnsByFamily.set(entry.family, new Set([...(retainedArnsByFamily.get(entry.family) || []), entry.oldTaskDefinitionArn]));
   const rolloverArnsByFamily = new Map();
   for (const entry of rotations) rolloverArnsByFamily.set(entry.family, new Set([...(rolloverArnsByFamily.get(entry.family) || []), entry.oldArn]));
-  const allowedArnsByFamily = new Map(STAGE_B_TASK_DEFINITION_FAMILY_NAMES.map((family) => [family, new Set([...(currentArnsByFamily.get(family) || []), ...(retainedArnsByFamily.get(family) || [])])]));
+  const ownershipArnsByFamily = new Map(STAGE_B_TASK_DEFINITION_FAMILY_NAMES.map((family) => [family, new Set([...(currentArnsByFamily.get(family) || []), ...(retainedArnsByFamily.get(family) || [])])]));
+  const executionArnsByFamily = new Map(STAGE_B_TASK_DEFINITION_FAMILY_NAMES.map((family) => [family, new Set([
+    ...(currentArnsByFamily.get(family) || []),
+    ...(retainedArnsByFamily.get(family) || []),
+  ].filter((arn) => !rolloverArnsByFamily.get(family)?.has(arn)))]));
   if (!Array.isArray(referenceAudit.services) || !Array.isArray(referenceAudit.runningTasks) || !Array.isArray(referenceAudit.pendingTasks) || !Array.isArray(referenceAudit.transitionalTasks) || !Array.isArray(referenceAudit.taskDefinitions)) throw new Error("Stage B append-only reference audit service/task evidence is missing.");
   const checkReferences = (items, arnKey, name) => {
     const seen = new Set();
@@ -545,7 +553,7 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
       const expectedStageBScoped = identity[1].startsWith("mscqr-production-");
       if (item.stageBScoped !== expectedStageBScoped) throw new Error(`Stage B append-only reference audit ${name} classification is invalid.`);
       seen.add(observationKey);
-      if (expectedStageBScoped && !allowedArnsByFamily.get(identity[1])?.has(identity[0])) {
+      if (expectedStageBScoped && !executionArnsByFamily.get(identity[1])?.has(identity[0])) {
         throw new Error(`Stage B append-only reference audit ${name} contains an unrecorded task-definition ARN.`);
       }
     }
@@ -569,7 +577,7 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
     const mappingByMode = new Map();
     for (const mapping of broker.liveTaskDefinitionMappings) {
       const identity = taskDefinitionArnPattern.exec(mapping?.taskDefinitionArn || "");
-      if (!identity || identity[1] !== expectedBrokerFamily(mapping.mode) || !allowedArnsByFamily.get(identity[1])?.has(identity[0])) throw new Error("Stage B append-only reference audit broker mapping is outside the exact per-mode current/retained ARN sets.");
+      if (!identity || identity[1] !== expectedBrokerFamily(mapping.mode) || !ownershipArnsByFamily.get(identity[1])?.has(identity[0])) throw new Error("Stage B append-only reference audit broker mapping is outside the exact per-mode current/retained ARN sets.");
       mappingByMode.set(mapping.mode, { ...mapping, arn: identity[0], family: identity[1] });
     }
     if (!Array.isArray(referenceAudit.plannedAtomicBrokerRollovers)) throw new Error("Stage B append-only reference audit broker rollover evidence is missing.");

@@ -142,6 +142,7 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
   if (!plan.planned_values) {
     plan.planned_values = { root_module: { resources: plan.resource_changes.filter((item) => item.type === "aws_ecs_task_definition").map((item) => ({ address: item.address, type: item.type, index: item.address.match(/\["([^\"]+)"\]$/)?.[1], values: item.change.after })) } };
   }
+  plan.prior_state = { format_version: "1.0", terraform_version: "1.15.8", values: { root_module: { resources: plan.resource_changes.filter((item) => item.type === "aws_ecs_task_definition" && item.change.before).map((item) => ({ address: item.address, mode: "managed", type: item.type, name: item.address, values: item.change.before })) } } };
   const planBytes = Buffer.from(JSON.stringify(plan));
   const actualPlanSha = sha256(planBytes);
   const brokerTaskDefinitions = Object.fromEntries(STAGE_B_MODES.map((mode) => {
@@ -194,6 +195,75 @@ function makeFixture({ mutatePlan, mutateReader, packageValue = packageChecksum,
       now,
     },
   };
+}
+
+function makeCurrentRetainedPredecessorFixture({ currentRevision = 5, retainedRevision = 4, mutatePlan } = {}) {
+  return makeAtomicBrokerFixture({
+    appendOnly: false,
+    mutatePlan: (plan) => {
+      const currentChanges = plan.resource_changes.filter((item) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, item.address));
+      for (const change of currentChanges) {
+        if (change.address !== canaryAddress) continue;
+        const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+        change.change.before.arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${currentRevision}`;
+        change.change.after.arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${currentRevision + 1}`;
+        plan.resource_changes.push({
+          address: retainedAddressFor(change.address, "bbbbbbbb"),
+          mode: "managed",
+          type: "aws_ecs_task_definition",
+          change: { actions: ["no-op"], before: { family, arn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${retainedRevision}` }, after: { family } },
+        });
+      }
+      mutatePlan?.(plan);
+    },
+    mutateReader: (reader) => {
+      const originalDescribe = reader.describeTaskDefinition;
+      reader.describeTaskDefinition = (reference) => {
+        const response = originalDescribe(reference);
+        const match = /:([1-9][0-9]*)$/.exec(reference);
+        if (match) response.taskDefinition.revision = Number(match[1]);
+        response.taskDefinition.taskDefinitionArn = reference;
+        return response;
+      };
+      const originalConfiguration = reader.getFunctionConfiguration;
+      reader.getFunctionConfiguration = () => {
+        const configuration = originalConfiguration();
+        const taskDefinitions = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+        taskDefinitions["full-rls-application-canary"] = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${familyForMode("full-rls-application-canary")}:${currentRevision}`;
+        configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+        return configuration;
+      };
+    },
+  });
+}
+
+function makeAppendOnlyCurrentPredecessorFixture() {
+  const currentArn = oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5");
+  return makeAtomicBrokerFixture({
+    appendOnly: true,
+    mutatePlan: (plan) => {
+      const current = plan.resource_changes.find((item) => item.address === canaryAddress);
+      const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(canaryAddress));
+      current.change = {
+        ...current.change,
+        actions: ["delete", "create"],
+        before: { ...retained.change.before, arn: oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5") },
+        after: { ...current.change.after, arn: newArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":2", ":6") },
+        replace_paths: [["container_definitions"]],
+      };
+      retained.change.before.arn = oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":4");
+    },
+    mutateReader: (reader) => {
+      const original = reader.getFunctionConfiguration;
+      reader.getFunctionConfiguration = () => {
+        const configuration = original();
+        const taskDefinitions = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+        taskDefinitions["full-rls-application-canary"] = currentArn;
+        configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+        return configuration;
+      };
+    },
+  });
 }
 
 function generate(fixture, overrides = {}) {
@@ -773,20 +843,70 @@ test("duplicate retained family revisions fail closed", () => {
   assert.throws(() => generate(fixture), /duplicate retained task-definition ARN|duplicate retained family and revision/);
 });
 
-test("current rollover before ARN must equal the newest retained revision", () => {
-  const fixture = makeAtomicBrokerFixture({
-    appendOnly: false,
-    mutatePlan: (plan) => {
-      const backendFamily = STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress];
-      plan.resource_changes.push({
-        address: retainedAddressFor(backendAddress, "0000001"),
-        type: "aws_ecs_task_definition",
-        change: { actions: ["no-op"], before: { family: backendFamily, arn: oldArnFor(backendFamily).replace(":1", ":2") }, after: { family: backendFamily } },
-      });
-    },
-  });
-  assert.throws(() => generate(fixture), /newest retained revision/);
+test("current managed :5 and newest retained :4 are distinct valid identities", () => {
+  assert.doesNotThrow(() => generate(makeCurrentRetainedPredecessorFixture()));
 });
+
+test("retained :4 cannot stand in for current managed :5", () => {
+  const fixture = makeCurrentRetainedPredecessorFixture();
+  const change = fixture.plan.resource_changes.find((item) => item.address === canaryAddress);
+  change.change.before = { ...change.change.before, arn: oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":4") };
+  assert.throws(() => generate(fixture), /exact current managed task definition|also present in retained history/);
+});
+
+test("arbitrary :3 predecessor fails closed", () => {
+  const fixture = makeCurrentRetainedPredecessorFixture();
+  const change = fixture.plan.resource_changes.find((item) => item.address === canaryAddress);
+  change.change.before = { ...change.change.before, arn: oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":3") };
+  assert.throws(() => generate(fixture), /exact current managed task definition/);
+});
+
+test("cross-family current predecessor fails closed", () => {
+  assert.throws(() => generate(makeCurrentRetainedPredecessorFixture({ mutatePlan: (plan) => {
+    const canary = plan.resource_changes.find((item) => item.address === canaryAddress);
+    canary.change.before.arn = oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]);
+  } })), /exact current managed task definition|family/);
+});
+
+test("retained-history family corruption remains rejected", () => {
+  assert.throws(() => generate(makeCurrentRetainedPredecessorFixture({ mutatePlan: (plan) => {
+    const retained = plan.resource_changes.find((item) => item.address === retainedAddressFor(canaryAddress, "bbbbbbbb"));
+    retained.change.before.arn = oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress]).replace(":1", ":4");
+  } })), /retained task definition|family/);
+});
+
+test("current managed :5 and newest retained :4 pass full reference binding", () => {
+  const fixture = makeAppendOnlyCurrentPredecessorFixture();
+  validateBrokerPlan(fixture, generate(fixture));
+});
+
+for (const status of ["ACTIVATING", "DEACTIVATING", "STOPPING"]) {
+  test(`transitional ${status} task cannot reference current rollover predecessor`, () => {
+    const fixture = makeAppendOnlyCurrentPredecessorFixture();
+    const audit = generate(fixture);
+    const task = taskRecord(
+      taskArnFor(status, 0),
+      status,
+      oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5"),
+    );
+    task.stageBScoped = true;
+    audit.transitionalTasks.push(task);
+    assert.throws(() => validateBrokerPlan(fixture, audit), /transitional task contains an unrecorded task-definition ARN/);
+  });
+}
+
+for (const [name, observation] of [
+  ["service", { serviceName: "stage-b-current", taskDefinition: oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5"), stageBScoped: true }],
+  ["RUNNING task", { taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/running-1", taskDefinitionArn: oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5"), lastStatus: "RUNNING", desiredStatus: "RUNNING", group: "service:stage-b", stageBScoped: true }],
+  ["PENDING task", { taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/pending-1", taskDefinitionArn: oldArnFor(STAGE_B_TASK_DEFINITION_FAMILIES[canaryAddress]).replace(":1", ":5"), lastStatus: "PENDING", desiredStatus: "RUNNING", group: "service:stage-b", stageBScoped: true }],
+]) {
+  test(`${name} cannot reference current rollover predecessor`, () => {
+    const fixture = makeAppendOnlyCurrentPredecessorFixture();
+    const audit = generate(fixture);
+    audit[`${name === "service" ? "services" : name === "RUNNING task" ? "runningTasks" : "pendingTasks"}`].push(observation);
+    assert.throws(() => validateBrokerPlan(fixture, audit), new RegExp(`${name} contains an unrecorded task-definition ARN`));
+  });
+}
 
 test("no-op with a valid prior ARN passes", () => {
   assert.doesNotThrow(() => generate(makeMixedFixture()));
@@ -1511,8 +1631,18 @@ test("current rollover broker mapping preserves rollover classification through 
       current.change = {
         ...current.change,
         actions: ["delete", "create"],
-        before: structuredClone(retained.change.before),
+        before: { ...structuredClone(retained.change.before), arn: retained.change.before.arn.replace(":1", ":5") },
         replace_paths: [["container_definitions"]],
+      };
+    },
+    mutateReader: (reader) => {
+      const original = reader.getFunctionConfiguration;
+      reader.getFunctionConfiguration = () => {
+        const configuration = original();
+        const taskDefinitions = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+        taskDefinitions["full-rls-application-canary"] = oldArnFor(familyForMode("full-rls-application-canary")).replace(":1", ":5");
+        configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+        return configuration;
       };
     },
   });
